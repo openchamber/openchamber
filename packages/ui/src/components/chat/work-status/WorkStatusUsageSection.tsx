@@ -9,6 +9,7 @@ import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
+import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { pickUsageHeadline } from './usageHeadline';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -43,9 +44,10 @@ export const WorkStatusUsageSection: React.FC = () => {
   const groups = useUsageProviderGroups();
   const displayMode = useQuotaStore((state) => state.displayMode);
   const isLoading = useQuotaStore((state) => state.isLoading);
-  const quotaResults = useQuotaStore((state) => state.results);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const fetchQuotas = useQuotaStore((state) => state.fetchQuotas);
+  const ensureQuotasLoadedForRuntime = useQuotaStore((state) => state.ensureLoadedForRuntime);
+  const isInitialized = useConfigStore((state) => state.isInitialized);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
 
@@ -54,17 +56,13 @@ export const WorkStatusUsageSection: React.FC = () => {
 
   // `useQuotaAutoRefresh` only schedules an interval — it never performs the
   // first fetch. That was owned by the header dropdown's open handler, so the
-  // panel stayed empty until the user opened it. Kick off the initial load for
-  // any enabled provider that has not reported yet, background-gated so it
-  // cannot compete with chat bootstrap traffic.
+  // panel stayed empty until the user opened it. `ensureLoadedForRuntime` owns
+  // the once-per-instance load and its readiness rule; asking again is a no-op,
+  // so this is safe to run on every connection change.
   React.useEffect(() => {
-    if (isLoading || dropdownProviderIds.length === 0) return;
-    const missingProvider = dropdownProviderIds.some(
-      (providerId) => !quotaResults.some((result) => result.providerId === providerId),
-    );
-    if (!missingProvider) return;
-    void runBackgroundNetworkTask(() => fetchQuotas(dropdownProviderIds));
-  }, [dropdownProviderIds, fetchQuotas, isLoading, quotaResults]);
+    if (!isInitialized) return;
+    void runBackgroundNetworkTask(() => ensureQuotasLoadedForRuntime());
+  }, [ensureQuotasLoadedForRuntime, isInitialized]);
 
   React.useEffect(() => {
     if (groups.length === 0) return;
@@ -153,7 +151,10 @@ export const WorkStatusUsageSection: React.FC = () => {
                   </span>
                 )}
                 value={metricLabel === '-' ? undefined : (
-                  <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                  <span className="inline-flex items-center gap-1">
+                    <UsageGiftResetButton window={row.window} providerId={group.providerId} />
+                    <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
+                  </span>
                 )}
               />
             );

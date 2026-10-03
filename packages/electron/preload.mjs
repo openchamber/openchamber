@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const eventListeners = new Map();
 
@@ -158,14 +158,45 @@ ipcRenderer.on('openchamber:emit', (_evt, payload) => {
   dispatchNativeEvent(event, payload.detail);
 });
 
+const relayDevTunnelPorts = new Map();
+let relayDevTunnelHandler = null;
+ipcRenderer.on('openchamber:relay-dev-tunnel-connect', (event, payload) => {
+  if (!isLocalPage || !payload || typeof payload.connectionId !== 'string' || !event.ports?.[0]) return;
+  const port = event.ports[0];
+  relayDevTunnelPorts.set(payload.connectionId, port);
+  port.onmessage = (messageEvent) => relayDevTunnelHandler?.({
+    connectionId: payload.connectionId,
+    remotePort: payload.remotePort,
+    message: messageEvent.data,
+  });
+  port.start();
+  relayDevTunnelHandler?.({ connectionId: payload.connectionId, remotePort: payload.remotePort, message: { type: 'connect' } });
+});
+
 // The desktop bridge is exposed on all pages; the main-process gate in
 // ipcMain.handle('openchamber:invoke') decides per-command what is safe
 // for non-local callers (window/host-switcher ops yes, file/shell ops
 // no). See COMMANDS_SAFE_FOR_REMOTE in main.mjs.
-contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
+const desktopBridge = {
   invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
   openDialog: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
   grantFileAccess: (filePath) => ipcRenderer.invoke('openchamber:file:grant-existing', filePath),
   openExternal: (url) => ipcRenderer.invoke('openchamber:invoke', 'desktop_open_external_url', { url }),
   listen: async (event, handler) => addListener(event, handler),
-});
+  // Resolves the on-disk path of a File dropped from Finder/Explorer. Only
+  // the path string crosses the bridge; shared UI gates use on the local page.
+  pathForFile: (file) => webUtils.getPathForFile(file),
+};
+
+if (isLocalPage) {
+  desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
+  desktopBridge.relayDevTunnelListen = (handler) => {
+    relayDevTunnelHandler = typeof handler === 'function' ? handler : null;
+  };
+  desktopBridge.relayDevTunnelPost = (connectionId, message) => {
+    relayDevTunnelPorts.get(connectionId)?.postMessage(message);
+    if (message?.type === 'close') relayDevTunnelPorts.delete(connectionId);
+  };
+}
+
+contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', desktopBridge);

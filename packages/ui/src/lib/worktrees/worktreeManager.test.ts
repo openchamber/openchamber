@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import type { GitWorktreeCreateResult } from '@/lib/api/types';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type WorktreeListEntry = {
@@ -13,6 +15,7 @@ const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const listRejecters: Array<(reason: Error) => void> = [];
 let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
+let removeImplementation: (() => Promise<{ success: boolean }>) | undefined;
 const createPayloads: unknown[] = [];
 const validatePayloads: unknown[] = [];
 const createdWorktree = {
@@ -26,6 +29,7 @@ const createdWorktree = {
 let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
+const warningToasts: string[] = [];
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -38,6 +42,17 @@ const attachmentState = {
 
 mock.module('@/lib/openchamberConfig', () => ({
   substituteCommandVariables: (command: string) => command,
+}));
+
+mock.module('@/components/ui', () => ({
+  toast: {
+    warning: (message: string) => warningToasts.push(message),
+  },
+}));
+
+mock.module('@/lib/i18n', () => ({
+  formatMessage: () => 'session.newWorktree.toast.fetchSourceFailed',
+  useI18nStore: { getState: () => ({ dictionary: {} }) },
 }));
 
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({
@@ -96,19 +111,29 @@ mock.module('@/lib/gitApi', () => ({
         validatePayloads.push(payload);
         return Promise.resolve({ ok: true, errors: [] });
       }),
-      remove: mock(() => Promise.resolve({ success: true })),
+      remove: mock(() => removeImplementation?.() ?? Promise.resolve({ success: true })),
     },
   },
 }));
+
+// The manager subscribes to runtime switches at import, which needs a window.
+const dom = new Window({ url: 'http://instance-a.test' });
+for (const [name, value] of Object.entries({ window: dom, CustomEvent: dom.CustomEvent })) {
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+}
 
 const {
   createWorktree,
   getLatestWorktreeMetadata,
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
+  preserveClientTrackedWorktreeStatus,
+  replaceRepositoryWorktrees,
+  removeProjectWorktree,
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
+const { isWorktreeRemoving } = await import('./worktreeRemovalState');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -130,11 +155,23 @@ describe('worktreeManager list invalidation', () => {
     validatePayloads.length = 0;
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
+    warningToasts.length = 0;
     createdWorktreeResult = createdWorktree;
     sessionState.availableWorktreesByProject = new Map();
     sessionState.availableWorktrees = [];
     sessionState.worktreeMetadata = new Map();
     attachmentState.attachments = new Map();
+  });
+
+  test('warns when worktree creation falls back after a source fetch failure', async () => {
+    createdWorktreeResult = { ...createdWorktree, sourceFetchFailed: true };
+
+    await createWorktree({ id: 'project-fetch-fallback', path: '/repo' }, {
+      branchName: 'feature',
+      worktreeName: 'feature',
+    });
+
+    expect(warningToasts).toEqual(['session.newWorktree.toast.fetchSourceFailed']);
   });
 
   test('retries an in-flight list when a worktree is created before it resolves', async () => {
@@ -208,6 +245,45 @@ describe('worktreeManager list invalidation', () => {
       '/repo-force-inflight',
       '/repo-force-inflight',
     ]);
+  });
+
+  test('an instance switch drops worktrees cached for the same path on the previous instance', async () => {
+    const project = { id: 'project-switch', path: '/repo-switch' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const firstListing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+      listResolvers[0]([{ path: '/repo-switch-a', branch: 'a', name: 'a' }]);
+      await firstListing;
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-b.test', runtimeKey: 'instance-b' });
+
+      const secondListing = listProjectWorktrees(project);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-b', branch: 'b', name: 'b' }]);
+      expect((await secondListing).map((entry) => entry.path)).toEqual(['/repo-switch-b']);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  test('a list still in flight across an instance switch is read again from the new instance', async () => {
+    const project = { id: 'project-switch-inflight', path: '/repo-switch-inflight' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const listing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
+
+      listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-new', branch: 'new', name: 'new' }]);
+      expect((await listing).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+      expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   test('older completions do not replace a forced refresh result with stale topology', async () => {
@@ -311,6 +387,30 @@ describe('worktreeManager list invalidation', () => {
     expect(bootstrapWatcherCalls).toEqual(['/repo-feature']);
   });
 
+  test('does not duplicate a worktree already published by discovery', async () => {
+    const discovered: WorktreeMetadata = {
+      path: '/repo-feature',
+      projectDirectory: '/repo',
+      branch: 'feature',
+      label: 'feature',
+      worktreeStatus: 'ready',
+    };
+    sessionState.availableWorktrees = [discovered];
+    sessionState.availableWorktreesByProject = new Map([['/repo', [discovered]]]);
+
+    await createWorktree({ id: 'project-linked', path: '/repo-linked' }, {
+      preferredName: 'feature',
+      mode: 'new',
+      branchName: 'feature',
+      worktreeName: 'feature',
+      returnAfterDirectoryCreated: true,
+    });
+
+    expect(sessionState.availableWorktrees.map((worktree) => worktree.path)).toEqual(['/repo-feature']);
+    expect(sessionState.availableWorktreesByProject.get('/repo')?.map((worktree) => worktree.path)).toEqual(['/repo-feature']);
+    expect(sessionState.availableWorktreesByProject.has('/repo-linked')).toBe(false);
+  });
+
   test('treats legacy create responses without bootstrap state as fully ready', async () => {
     createdWorktreeResult = {
       head: '',
@@ -364,6 +464,86 @@ describe('worktreeManager list invalidation', () => {
 
     expect(metadata.worktreeStatus).toBe('pending');
     expect(getLatestWorktreeMetadata(metadata).worktreeStatus).toBe('ready');
+  });
+
+  test('removes a worktree from sidebar topology owned by another registered checkout', async () => {
+    const removed: WorktreeMetadata = {
+      path: '/worktrees/removed',
+      projectDirectory: '/repo',
+      branch: 'removed',
+      label: 'removed',
+    };
+    const sibling: WorktreeMetadata = {
+      path: '/worktrees/sibling',
+      projectDirectory: '/repo',
+      branch: 'sibling',
+      label: 'sibling',
+    };
+    const unrelatedEntries: WorktreeMetadata[] = [{
+      path: '/other/worktree',
+      projectDirectory: '/other',
+      branch: 'other',
+      label: 'other',
+    }];
+    sessionState.availableWorktreesByProject = new Map([
+      ['/worktrees/configured', [removed, sibling]],
+      ['/other', unrelatedEntries],
+    ]);
+    sessionState.availableWorktrees = [removed, sibling, ...unrelatedEntries];
+    sessionState.worktreeMetadata = new Map([
+      ['removed-session', removed],
+      ['sibling-session', sibling],
+    ]);
+
+    await removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, removed);
+
+    expect(sessionState.availableWorktreesByProject.get('/worktrees/configured')).toEqual([sibling]);
+    expect(sessionState.availableWorktreesByProject.get('/other')).toBe(unrelatedEntries);
+    expect(sessionState.availableWorktrees).toEqual([sibling, ...unrelatedEntries]);
+    expect(sessionState.worktreeMetadata.has('removed-session')).toBe(false);
+    expect(sessionState.worktreeMetadata.get('sibling-session')).toBe(sibling);
+  });
+
+  describe('removal shown on the row', () => {
+    const target: WorktreeMetadata = {
+      path: '/worktrees/target',
+      projectDirectory: '/repo',
+      branch: 'target',
+      label: 'target',
+    };
+
+    beforeEach(() => {
+      sessionState.availableWorktreesByProject = new Map([['/repo', [target]]]);
+      sessionState.availableWorktrees = [target];
+    });
+
+    test('the row shows the removal until git answers, then leaves with it', async () => {
+      let answerGit: (value: { success: boolean }) => void = () => undefined;
+      removeImplementation = () => new Promise((resolve) => { answerGit = resolve; });
+      try {
+        const removal = removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(isWorktreeRemoving(target.path)).toBe(true);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+
+        answerGit({ success: true });
+        await removal;
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
+
+    test('a failed removal clears the state and keeps the row', async () => {
+      removeImplementation = () => Promise.reject(new Error('folder in use'));
+      try {
+        await expect(removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target)).rejects.toThrow('folder in use');
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
   });
 });
 
@@ -530,6 +710,71 @@ describe('partitionWorktreesByRegisteredProject', () => {
   });
 });
 
+describe('replaceRepositoryWorktrees', () => {
+  test('replaces every bucket that belongs to the refreshed repository', () => {
+    const metadata = (path: string, projectDirectory: string): WorktreeMetadata => ({
+      path,
+      projectDirectory,
+      branch: 'feature',
+      label: 'feature',
+    });
+    const staleRoot = metadata('/repo-stale', '/repo');
+    const staleLinked = metadata('/repo-linked-stale', '/repo');
+    const refreshed = metadata('/repo-fresh', '/repo');
+    const topology = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [staleRoot]],
+      ['/repo-linked', [staleLinked]],
+      ['/other', [metadata('/other-worktree', '/other')]],
+    ]);
+
+    const result = replaceRepositoryWorktrees(topology, '/repo-linked', [refreshed]);
+
+    expect(result.get('/repo')?.map((worktree) => worktree.path)).toEqual(['/repo-fresh']);
+    expect(result.get('/repo-linked')?.map((worktree) => worktree.path)).toEqual(['/repo-fresh']);
+    expect(result.get('/other')?.map((worktree) => worktree.path)).toEqual(['/other-worktree']);
+  });
+});
+
+describe('preserveClientTrackedWorktreeStatus', () => {
+  const metadata = (path: string, status: WorktreeMetadata['worktreeStatus'], source?: WorktreeMetadata['worktreeSource']): WorktreeMetadata => ({
+    path,
+    projectDirectory: '/repo',
+    branch: 'feature',
+    label: 'feature',
+    worktreeStatus: status,
+    ...(source ? { worktreeSource: source } : {}),
+  });
+
+  test('keeps pending and invalid statuses this client tracks over a ready listing', () => {
+    const published = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [metadata('/repo-pending', 'pending', 'created-for-session'), metadata('/repo-invalid', 'invalid'), metadata('/repo-done', 'ready')]],
+    ]);
+    const refreshed = new Map<string, WorktreeMetadata[]>([
+      ['/repo', [metadata('/repo-pending', 'ready'), metadata('/repo-invalid', 'ready'), metadata('/repo-done', 'ready')]],
+      ['/other', [metadata('/other-feature', 'ready')]],
+    ]);
+
+    const result = preserveClientTrackedWorktreeStatus(refreshed, published);
+
+    expect(result.get('/repo')?.map((worktree) => [worktree.path, worktree.worktreeStatus, worktree.worktreeSource])).toEqual([
+      ['/repo-pending', 'pending', 'created-for-session'],
+      ['/repo-invalid', 'invalid', undefined],
+      ['/repo-done', 'ready', undefined],
+    ]);
+    expect(result.get('/other')).toBe(refreshed.get('/other'));
+  });
+
+  test('lets git win when the directory is gone and returns the same map when nothing is tracked', () => {
+    const published = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-pending', 'pending')]]]);
+    const missing = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-pending', 'missing')]]]);
+    expect(preserveClientTrackedWorktreeStatus(missing, published).get('/repo')?.[0]?.worktreeStatus).toBe('missing');
+
+    const untracked = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-done', 'ready')]]]);
+    const refreshed = new Map<string, WorktreeMetadata[]>([['/repo', [metadata('/repo-done', 'ready')]]]);
+    expect(preserveClientTrackedWorktreeStatus(refreshed, untracked)).toBe(refreshed);
+  });
+});
+
 describe('worktreeManager fork remote payload wiring', () => {
   beforeEach(() => {
     listCalls.length = 0;
@@ -582,4 +827,36 @@ describe('worktreeManager fork remote payload wiring', () => {
     expect(created.setUpstream).toBe(true);
     expect('pullRequest' in created).toBe(false);
   });
+});
+
+describe('worktreeManager missing worktrees', () => {
+  beforeEach(() => {
+    listCalls.length = 0;
+    listResolvers.length = 0;
+    listRejecters.length = 0;
+    listImplementation = undefined;
+  });
+
+  test('keeps a prunable worktree in the topology as missing instead of dropping it', async () => {
+    listImplementation = async () => [
+      { path: '/repo-missing/.worktrees/alive', branch: 'alive', head: 'abc', name: 'alive' },
+      { path: '/repo-missing/.worktrees/gone', branch: 'gone', head: 'def', name: 'gone', prunable: true },
+    ];
+
+    const result = await listProjectWorktrees({ id: 'project-missing', path: '/repo-missing' }, { force: true });
+
+    expect(result.map((entry) => [entry.path, entry.worktreeStatus])).toEqual([
+      ['/repo-missing/.worktrees/alive', 'ready'],
+      ['/repo-missing/.worktrees/gone', 'missing'],
+    ]);
+  });
+
+  test('a worktree that changes only its status still counts as a topology change', () => {
+    const ready: WorktreeMetadata = { path: '/repo/.worktrees/a', projectDirectory: '/repo', branch: 'a', label: 'a', worktreeStatus: 'ready' };
+    const missing: WorktreeMetadata = { ...ready, worktreeStatus: 'missing' };
+
+    expect(worktreeMapsEqual(new Map([['/repo', [ready]]]), new Map([['/repo', [ready]]]))).toBe(true);
+    expect(worktreeMapsEqual(new Map([['/repo', [ready]]]), new Map([['/repo', [missing]]]))).toBe(false);
+  });
+
 });

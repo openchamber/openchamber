@@ -9,24 +9,28 @@ Połącz swoje konto GitHub, a OpenChamber może pobierać issues i pull request
 
 ## Połącz GitHub
 
-1. Otwórz **Settings → Git**.
-2. W sekcji GitHub wybierz **Connect**. OpenChamber pokazuje link i krótki kod.
+1. Otwórz **Settings → Integrations** i rozwiń kartę **GitHub**.
+2. Wybierz **Connect GitHub**. OpenChamber pokazuje link i krótki kod.
 3. Otwórz link, wpisz kod i zatwierdź.
 
-Po połączeniu Twoje konto pojawia się w sekcji GitHub. Możesz połączyć więcej niż jedno konto i przełączać się między nimi albo rozłączyć w dowolnym momencie.
+Po połączeniu Twoje konto pojawia się na karcie. Możesz połączyć więcej niż jedno konto i przełączać się między nimi albo rozłączyć w dowolnym momencie. Jeśli CLI `gh` jest zalogowane na tej samej maszynie, OpenChamber może użyć go jako zapasowego źródła.
 
 ## Rozpocznij pracę od issue lub PR
 
-Gdy tworzysz [sesję worktree](/pl/worktrees/) z połączonym GitHub, możesz wybrać **Start from GitHub issue/PR**:
+Gdy tworzysz [sesję worktree](/pl/worktrees/) z połączonym GitHub, możesz ją zacząć od issue albo pull requesta:
 
-- wybierz **issue**, a OpenChamber nazwie gałąź jego nazwą i otworzy sesję z issue oraz jego komentarzami jako pierwszą wiadomością
+- wybierz **issue**, a OpenChamber nazwie gałąź jego nazwą
 - wybierz **pull request**, a wyewidencjonuje on gałąź PR; możesz dołączyć diff PR, aby agent miał całą zmianę
 
-To wprowadza Cię prosto do sesji z już wczytanym kontekstem.
+Nowa sesja otwiera się z issue albo PR już dołączonym do pola wiadomości. Nic nie jest wysyłane za Ciebie: wybierz model i agenta, napisz, co ma zostać zrobione, i wyślij.
 
 ## Otwieraj pull requesty i nimi zarządzaj
 
 Z zakładki **PR** w [widoku git](/pl/git/) możesz utworzyć pull request, zaktualizować go, oznaczyć szkic jako gotowy lub scalić go. OpenChamber może wygenerować tytuł i opis PR na podstawie Twoich zmian.
+
+## Dołącz issue lub PR do wiadomości
+
+W polu czatu otwórz menu **+** i wybierz **GitHub**. Wybierz jedno lub więcej issue albo pull requestów: każde trafia jako kontekst do Twojej następnej wiadomości (PR może przynieść swój diff), a panel statusu pracy sesji zachowuje do niego link. Dołączenie dodaje tylko kontekst; to Twoja wiadomość mówi, co z nim zrobić.
 
 ## Powiązane
 

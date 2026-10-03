@@ -56,6 +56,36 @@ describe('relay service passive hosting', () => {
     }
   });
 
+  it('in enterprise mode runs only on a relay pinned by OPENCHAMBER_RELAY_URL', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    delete process.env.OPENCHAMBER_RELAY_URL;
+    const blocked = makeService();
+    try {
+      await blocked.service.startIfEnabled();
+      await blocked.service.reconcile();
+      const status = await blocked.service.getStatus();
+      expect(status).toMatchObject({ state: 'disabled', blockedByEnterprise: true });
+      expect(blocked.hostLock.tryClaim).not.toHaveBeenCalled();
+      expect(await blocked.service.getPairingCandidate()).toBeNull();
+      await expect(blocked.service.ensureEnabledForPairing()).rejects.toMatchObject({ statusCode: 403 });
+      expect(blocked.hostLock.forceClaim).not.toHaveBeenCalled();
+
+      process.env.OPENCHAMBER_RELAY_URL = 'wss://relay.company.test/ws';
+      const own = makeService();
+      try {
+        const candidate = await own.service.ensureEnabledForPairing();
+        expect(candidate).toMatchObject({ type: 'relay', relayUrl: 'wss://relay.company.test/ws' });
+        expect((await own.service.getStatus()).blockedByEnterprise).toBe(false);
+      } finally {
+        own.service.stop();
+      }
+    } finally {
+      blocked.service.stop();
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+      delete process.env.OPENCHAMBER_RELAY_URL;
+    }
+  });
+
   it('force-claims for an explicit pairing even when passive hosting is disabled', async () => {
     const { service, hostLock } = makeService({ allowPassiveHost: false });
     try {

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useSession } from '@/sync/sync-context';
 import { getBtwBoundaryMessageID, getBtwSessionID } from '@/lib/sessionBtwMetadata';
 import { useBtwStore } from '@/stores/useBtwStore';
@@ -16,6 +16,7 @@ export type BtwPanelState = {
   boundaryMessageID: string | null;
   collapsed: boolean;
   creating: boolean;
+  pending: boolean;
 };
 
 /**
@@ -53,5 +54,6 @@ export function useBtwPanelState(
     boundaryMessageID: btwSessionId ? getBtwBoundaryMessageID(btwSession) : null,
     collapsed: Boolean(uiState?.collapsed),
     creating: Boolean(uiState?.creating),
+    pending: Boolean(uiState?.pending),
   };
 }

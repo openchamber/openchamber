@@ -61,6 +61,14 @@ Use `Button` from `packages/ui/src/components/ui/button.tsx`.
 
 Do not hardcode button height/padding when a size variant exists. Do not recreate selection/destructive styling with ad-hoc classes.
 
+## Keyboard Navigation Contract
+
+- Menus, selects, and autocomplete pickers with ArrowDown/ArrowUp navigation must also support Ctrl+N/Ctrl+P, including submenus and searchable lists.
+- Keep this behavior in shared components so callers inherit it. Use the keyboard mapping in `packages/ui/src/components/ui/dropdown-navigation.ts`; feature code must not duplicate key detection.
+- Lists that own their active option or stop keyboard propagation must call the shared navigation helper at their own event boundary. Wrapping a custom list in a dropdown does not guarantee that its navigation events reach the wrapper.
+- Route both key pairs through the same selection logic, preserving disabled-item skipping, boundary or wrap behavior, highlight, and scroll visibility. Consume each navigation event once, only while the menu or picker is active; preserve IME text entry and other modifier chords.
+- Verify Ctrl+N/P alongside arrow keys in the real component, including search-input focus, submenus, and closed state. A key-mapping unit test alone does not verify event propagation or focus behavior.
+
 ## Icon Contract
 
 ```tsx
@@ -82,6 +90,7 @@ For any other technique, load `performance-engineering` and `scripts/perf/DOCUME
 - Animations are limited to `transform` and `opacity`, or their cost was measured and accepted.
 - No hardcoded/palette colors were introduced.
 - Buttons use shared variants and sizes.
+- Menus and pickers satisfy the keyboard navigation contract without caller-specific key handling for standard shared components.
 - Icons use `Icon`/`IconName`, and generated sprite changes are intentional.
 - Hover, selection, primary, and status semantics are distinct.
 - Light/dark/high-contrast and long-text states remain legible.

@@ -1,5 +1,4 @@
 import React from 'react';
-import { AgentManagerView } from '@/components/views/agent-manager';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -9,7 +8,9 @@ import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
+import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
+import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useGlobalSessionsPolling } from '@/hooks/useGlobalSessionsPolling';
 import { useRouter } from '@/hooks/useRouter';
@@ -22,18 +23,12 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { onHostSurfaceSeen } from '@/lib/surfaceAttention';
+import { markSessionViewed } from '@/sync/notification-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 import { SyncAppEffects } from './AppEffects';
 import { useAppFontEffects } from './useAppFontEffects';
-
-type VSCodePanelType = 'chat' | 'agentManager';
-
-declare global {
-  interface Window {
-    __OPENCHAMBER_PANEL_TYPE__?: VSCodePanelType;
-  }
-}
 
 type VSCodeAppProps = {
   apis: RuntimeAPIs;
@@ -46,9 +41,6 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
-  const panelType = typeof window !== 'undefined'
-    ? window.__OPENCHAMBER_PANEL_TYPE__
-    : 'chat';
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
@@ -60,7 +52,16 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   useWindowTitle();
   useRootScrollLock();
   useRouter();
-  useGlobalSessionsPolling(panelType !== 'agentManager');
+  useGlobalSessionsPolling(true);
+  useEnterprisePolicySync();
+
+  // Same as the window-focus effect in App.tsx: when the user can see this
+  // webview again, the selected session counts as seen. VS Code learns that from
+  // the extension host, not from a DOM focus event.
+  React.useEffect(() => onHostSurfaceSeen(() => {
+    const sessionId = useSessionUIStore.getState().currentSessionId;
+    if (sessionId) markSessionViewed(sessionId);
+  }), []);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -104,26 +105,6 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
     return () => window.clearTimeout(timeout);
   }, [clearError, error]);
 
-  if (panelType === 'agentManager') {
-    return (
-      <ErrorBoundary>
-        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
-          <RuntimeAPIProvider apis={apis}>
-            <TooltipProvider delayDuration={300} skipDelayDuration={150}>
-              <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
-                <AgentManagerView />
-                <AppLinkConfirmDialog />
-                <OpenCodeUpdateToast />
-                <Toaster position="top-center" />
-              </div>
-            </TooltipProvider>
-          </RuntimeAPIProvider>
-        </SyncProvider>
-      </ErrorBoundary>
-    );
-  }
-
   return (
     <ErrorBoundary>
       <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
@@ -134,6 +115,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
                 <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
                 <VSCodeLayout />
                 <AppLinkConfirmDialog />
+                <SharedTrustConfirmDialog />
                 <OpenCodeUpdateToast />
                 <Toaster position="top-center" />
                 <ConfigUpdateOverlay />

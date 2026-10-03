@@ -1,5 +1,10 @@
 import { getRuntimeUrlResolver } from './runtime-url';
+import { runtimeFetch } from './runtime-fetch';
+import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import { isVSCodeRuntime } from './desktop';
+import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
+import { z } from 'zod';
 
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
@@ -21,6 +26,18 @@ type SessionCreatedEvent = {
 };
 
 /**
+ * The set of linked worktrees of one repository changed: created or removed by
+ * this server, by an agent, or from a terminal. `directories` are the
+ * directories inside that repository the server has seen requests for, so a
+ * listener can map them onto its registered projects and refresh only those.
+ */
+type WorktreeChangedEvent = {
+  type: 'worktree-changed';
+  directories: string[];
+  changedAt: number;
+};
+
+/**
  * One in-app browser action requested by the agent tool. Broadcast to every
  * connected client; only the one owning a browser view answers.
  */
@@ -30,6 +47,17 @@ type BrowserControlRequestEvent = {
   action: string;
   parameters: Record<string, unknown>;
 };
+
+/**
+ * The agent asked for a file to be shown in the user's file panel. Every
+ * client receives it; one showing that project opens the file.
+ */
+const fileOpenRequestSchema = z.object({
+  path: z.string().min(1),
+  directory: z.string().min(1).nullable(),
+  sessionId: z.string().min(1).nullable(),
+});
+type FileOpenRequestEvent = { type: 'file-open-request' } & z.infer<typeof fileOpenRequestSchema>;
 
 /**
  * The agent changed what it remembers. Carries only which store moved, not the
@@ -42,14 +70,95 @@ type AgentMemoryChangedEvent = {
   projectId?: string;
 };
 
+/**
+ * The extension chosen as browser provider can no longer serve (paused,
+ * removed, or approval withdrawn), so the server put the in-app browser back.
+ * The setting is already written; listeners update the store and tell the user.
+ */
+const browserProviderResetSchema = z.object({
+  guestId: z.string().min(1),
+  guestName: z.string().min(1),
+});
+type BrowserProviderResetEvent = { type: 'browser-provider-reset' } & z.infer<typeof browserProviderResetSchema>;
+
+/** Jev routing events; each carries what the routing store needs and nothing the UI must re-derive. */
+const routingUpdatedSchema = z.object({
+  available: z.boolean(),
+  autoReady: z.boolean(),
+  // Absent from servers before the classifier pick, where Jev always answered.
+  jevAvailable: z.boolean().default(true),
+  tokenPresent: z.boolean(),
+  jevSource: z.enum(['typesafe', 'zen-free']),
+});
+
+const routingDecisionSchema = z.object({
+  sessionId: z.string().min(1),
+  at: z.number(),
+  category: z.string().nullable(),
+  confidence: z.number(),
+  reason: z.enum(['routed', 'low-confidence', 'unknown-category', 'error', 'not-ready']),
+  providerID: z.string().optional(),
+  modelID: z.string().optional(),
+  variant: z.string().nullable().optional(),
+  agent: z.string().nullable().optional(),
+  error: z.string().optional(),
+});
+
+const routingPermissionHeldSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  // Where the request lives, so the held request can be announced from its directory's store.
+  directory: z.string().nullable().default(null),
+  score: z.number(),
+  kind: z.string().nullable(),
+});
+
+const routingSafetySkippedSchema = z.object({
+  permissionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  directory: z.string().nullable().default(null),
+  error: z.string(),
+});
+
+type RoutingUpdatedEvent = { type: 'routing-updated' } & z.infer<typeof routingUpdatedSchema>;
+type RoutingDecisionEvent = { type: 'routing-decision'; decision: z.infer<typeof routingDecisionSchema> };
+type RoutingPermissionHeldEvent = { type: 'routing-permission-held' } & z.infer<typeof routingPermissionHeldSchema>;
+type RoutingSafetySkippedEvent = { type: 'routing-safety-skipped' } & z.infer<typeof routingSafetySkippedSchema>;
+
+const notificationPropertiesSchema = z.object({
+  title: z.string().optional(),
+  body: z.string().optional(),
+  tag: z.string().optional(),
+  kind: z.string().optional(),
+  sessionId: z.string().optional(),
+  directory: z.string().optional(),
+  requireHidden: z.boolean().optional(),
+});
+
 type OpenChamberEvent =
+  | { type: 'notification'; payload: z.infer<typeof notificationPropertiesSchema> }
+  | { type: 'event-stream-ready' }
+  | RoutingUpdatedEvent
+  | RoutingDecisionEvent
+  | RoutingPermissionHeldEvent
+  | RoutingSafetySkippedEvent
+  | MessageQueueUpdatedEvent
   | ScheduledTaskRanEvent
   | SessionCreatedEvent
+  | WorktreeChangedEvent
   | BrowserControlRequestEvent
+  | FileOpenRequestEvent
+  | BrowserProviderResetEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
+const worktreeChangedPropertiesSchema = z.object({
+  directories: z.array(z.string().min(1)).min(1),
+  at: z.number().optional(),
+});
+
 let eventSource: EventSource | null = null;
+let relayAbortController: AbortController | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -81,10 +190,70 @@ const scheduleReconnect = () => {
 
 const cleanupSource = () => {
   clearHeartbeatTimer();
+  relayAbortController?.abort();
+  relayAbortController = null;
   if (eventSource) {
     eventSource.close();
   }
   eventSource = null;
+};
+
+const connectRelay = (canControlBrowser: boolean) => {
+  const controller = new AbortController();
+  relayAbortController = controller;
+  void (async () => {
+    try {
+      const response = await runtimeFetch('/api/openchamber/events', {
+        query: canControlBrowser ? { browser: '1' } : undefined,
+        headers: { Accept: 'text/event-stream' },
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        await response.body?.cancel();
+        return;
+      }
+      if (!response.ok || !response.body) {
+        await response.body?.cancel();
+        throw new Error(`OpenChamber events returned ${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      let data: string[] = [];
+      resetHeartbeatTimer();
+      try {
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          let newline = pending.indexOf('\n');
+          while (newline !== -1) {
+            const line = pending.slice(0, newline).replace(/\r$/, '');
+            pending = pending.slice(newline + 1);
+            if (line === '') {
+              if (data.length && !controller.signal.aborted) {
+                resetHeartbeatTimer();
+                const envelope = parseEnvelope(data.join('\n'));
+                if (envelope) dispatchFromEnvelope(envelope);
+              }
+              data = [];
+            } else if (line === 'data' || line.startsWith('data:')) {
+              data.push(line === 'data' ? '' : line.slice(5).replace(/^ /, ''));
+            }
+            newline = pending.indexOf('\n');
+          }
+        }
+      } finally {
+        if (!controller.signal.aborted) await reader.cancel();
+        reader.releaseLock();
+      }
+    } catch {
+      // A failed or ended stream follows the same reconnect path as EventSource.
+    }
+    if (relayAbortController !== controller) return;
+    cleanupSource();
+    scheduleReconnect();
+  })();
 };
 
 const resetHeartbeatTimer = () => {
@@ -124,12 +293,65 @@ const getEventProperties = (properties: unknown): Record<string, unknown> | null
 };
 
 const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) => {
+  if (envelope.type === 'openchamber:notification') {
+    const parsed = notificationPropertiesSchema.safeParse(envelope.properties);
+    if (parsed.success) {
+      for (const listener of listeners) listener({ type: 'notification', payload: parsed.data });
+    }
+    return;
+  }
+
   if (envelope.type === 'openchamber:event-stream-ready') {
     reconnectAttempt = 0;
+    for (const listener of listeners) listener({ type: 'event-stream-ready' });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:message-queue.updated') {
+    const parsed = messageQueueUpdatedEventSchema.safeParse(envelope);
+    if (parsed.success) {
+      for (const listener of listeners) listener(parsed.data);
+    }
     return;
   }
 
   if (envelope.type === 'openchamber:heartbeat') {
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.updated') {
+    const parsed = routingUpdatedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-updated', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.decision') {
+    const parsed = routingDecisionSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-decision', decision: parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.permission-held') {
+    const parsed = routingPermissionHeldSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-permission-held', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:routing.safety-skipped') {
+    const parsed = routingSafetySkippedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'routing-safety-skipped', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:file-open-request') {
+    const parsed = fileOpenRequestSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'file-open-request', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:browser-provider-reset') {
+    const parsed = browserProviderResetSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
     return;
   }
 
@@ -171,6 +393,18 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     for (const listener of listeners) {
       listener(nextEvent);
     }
+    return;
+  }
+
+  if (envelope.type === 'openchamber:worktree-changed') {
+    const parsed = worktreeChangedPropertiesSchema.safeParse(envelope.properties);
+    if (!parsed.success) return;
+    const nextEvent: WorktreeChangedEvent = {
+      type: 'worktree-changed',
+      directories: parsed.data.directories,
+      changedAt: parsed.data.at ?? Date.now(),
+    };
+    for (const listener of listeners) listener(nextEvent);
     return;
   }
 
@@ -230,11 +464,7 @@ const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
     return;
   }
-  if (typeof EventSource !== 'function') {
-    return;
-  }
-
-  if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
+  if (relayAbortController || (eventSource && eventSource.readyState !== EventSource.CLOSED)) {
     return;
   }
 
@@ -244,15 +474,22 @@ const connect = () => {
   // Chromium host can drive a page; a browser tab can display one but not be
   // driven, and the agent tool needs to know which it is talking to without a
   // setting anyone has to remember to change.
-  const canControlBrowser = typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__);
+  const canControlBrowser = Boolean(window.__OPENCHAMBER_ELECTRON__);
+  if (isRelayModeActive()) {
+    connectRelay(canControlBrowser);
+    return;
+  }
+  if (typeof EventSource !== 'function') return;
   const source = new EventSource(getRuntimeUrlResolver().sse(
     '/api/openchamber/events',
     canControlBrowser ? { browser: '1' } : undefined,
   ));
   source.onopen = () => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
   };
   source.onmessage = (event) => {
+    if (eventSource !== source) return;
     resetHeartbeatTimer();
     const envelope = parseEnvelope(event.data);
     if (!envelope) {
@@ -262,6 +499,7 @@ const connect = () => {
   };
 
   source.onerror = () => {
+    if (eventSource !== source) return;
     cleanupSource();
     scheduleReconnect();
   };
@@ -284,6 +522,10 @@ const cleanupRuntimeChangeSubscription = () => {
 };
 
 export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => {
+  // VS Code runs OpenCode through its bridge, not the OpenChamber server that
+  // owns this stream. Opening it here retries against vscode-webview:// forever.
+  if (isVSCodeRuntime()) return () => undefined;
+
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
   connect();

@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { McpStatus } from '@opencode-ai/sdk/v2';
+import type { McpServerStatus } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
-export type McpStatusMap = Record<string, McpStatus>;
+export type McpStatusMap = Record<string, McpServerStatus>;
 type McpRuntimeDiagnostic = {
   status: 'failed';
   error: string;
@@ -31,20 +31,12 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
-const getMcpApiClient = (directory: string | null | undefined) => {
-  const normalized = normalizeDirectory(directory);
-  if (!normalized) {
-    return opencodeClient.getApiClient();
-  }
-  return opencodeClient.getScopedApiClient(normalized);
-};
-
 export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
   const entries = Object.entries(status ?? {});
-  const connected = entries.filter(([, s]) => s?.status === 'connected').length;
+  const connected = entries.filter(([, s]) => s?.status.status === 'connected').length;
   const total = entries.length;
-  const hasFailed = entries.some(([, s]) => s?.status === 'failed');
-  const hasAuthRequired = entries.some(([, s]) => s?.status === 'needs_auth' || s?.status === 'needs_client_registration');
+  const hasFailed = entries.some(([, s]) => s?.status.status === 'failed');
+  const hasAuthRequired = entries.some(([, s]) => s?.status.status === 'needs_auth');
   return { connected, total, hasFailed, hasAuthRequired };
 };
 
@@ -54,9 +46,13 @@ type RefreshOptions = {
 };
 
 const ensureFreshInFlight = new Map<string, Promise<void>>();
+// Bumped on every runtime switch. Status is keyed by directory alone and two
+// instances can hold the same project path, so a request already in flight for
+// the previous instance would otherwise write its servers over the new one's.
+let mcpGeneration = 0;
 
 type TestConnectionResult = {
-  status?: McpStatus;
+  status?: McpServerStatus;
   error?: string;
   warning?: string;
 };
@@ -79,18 +75,21 @@ interface McpStore {
    * that remounts on every session switch does not refetch on every switch.
    */
   ensureFresh: (options: RefreshOptions & { maxAgeMs: number }) => Promise<void>;
+  /**
+   * Re-read a directory whose status is already held, after OpenCode announced
+   * a change there. A directory nobody asked about is left alone: reading it
+   * would make OpenCode start it, MCP servers included.
+   */
+  refreshIfHeld: (directory: string) => Promise<void>;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
-  startAuth: (name: string, directory?: string | null) => Promise<string>;
-  /**
-   * OpenCode's native full OAuth flow: OpenCode opens the browser, receives
-   * the callback on its own fixed loopback listener, and exchanges the code
-   * itself. Resolves only when the whole flow finishes (minutes, not ms).
-   */
-  authenticate: (name: string, directory?: string | null) => Promise<void>;
-  completeAuth: (name: string, code: string, directory?: string | null) => Promise<void>;
-  clearAuth: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
+  /**
+   * MCP status is keyed by directory alone, and two instances can hold the same
+   * project path — so on a switch the previous instance's servers would be
+   * reported for the new one. Drop everything and let consumers re-ask.
+   */
+  resetForRuntimeSwitch: () => void;
 }
 
 export const useMcpStore = create<McpStore>()(
@@ -100,6 +99,18 @@ export const useMcpStore = create<McpStore>()(
     loadingKeys: {},
     lastErrorKeys: {},
     refreshedAtKeys: {},
+
+    resetForRuntimeSwitch: () => {
+      mcpGeneration += 1;
+      ensureFreshInFlight.clear();
+      set({
+        byDirectory: {},
+        diagnosticsByDirectory: {},
+        loadingKeys: {},
+        lastErrorKeys: {},
+        refreshedAtKeys: {},
+      });
+    },
 
     getStatusForDirectory: (directory) => {
       const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
@@ -127,10 +138,11 @@ export const useMcpStore = create<McpStore>()(
         }));
       }
 
+      const generation = mcpGeneration;
       try {
-        const api = getMcpApiClient(directory);
-        const result = await api.mcp.status();
-        const data = (result.data ?? {}) as McpStatusMap;
+        const servers = await opencodeClient.listMcpServers(directory);
+        if (generation !== mcpGeneration) return;
+        const data: McpStatusMap = Object.fromEntries(servers.map((server) => [server.name, server]));
 
         set((state) => ({
           byDirectory: { ...state.byDirectory, [key]: data },
@@ -145,6 +157,7 @@ export const useMcpStore = create<McpStore>()(
           refreshedAtKeys: { ...state.refreshedAtKeys, [key]: Date.now() },
         }));
       } catch (error) {
+        if (generation !== mcpGeneration) return;
         const message = error instanceof Error ? error.message : 'Failed to load MCP status';
         set((state) => ({
           loadingKeys: { ...state.loadingKeys, [key]: false },
@@ -166,12 +179,17 @@ export const useMcpStore = create<McpStore>()(
       return request;
     },
 
+    refreshIfHeld: async (directory) => {
+      const normalized = normalizeDirectory(directory);
+      if (!normalized || !get().byDirectory[toKey(normalized)]) return;
+      await get().refresh({ directory: normalized, silent: true });
+    },
+
     connect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const key = toKey(normalized);
-      const api = getMcpApiClient(normalized);
       try {
-        await api.mcp.connect({ name }, { throwOnError: true });
+        await opencodeClient.connectMcpServer(name, normalized);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -190,80 +208,20 @@ export const useMcpStore = create<McpStore>()(
 
     disconnect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = getMcpApiClient(normalized);
-      await api.mcp.disconnect({ name }, { throwOnError: true });
-      await get().refresh({ directory: normalized, silent: true });
-    },
-
-    startAuth: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = getMcpApiClient(normalized);
-      const result = await api.mcp.auth.start({ name }, { throwOnError: true });
-      const authorizationUrl = result.data?.authorizationUrl;
-
-      if (!authorizationUrl) {
-        throw new Error('Authorization URL was not returned');
-      }
-
-      return authorizationUrl;
-    },
-
-
-    authenticate: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const key = toKey(normalized);
-      const api = getMcpApiClient(normalized);
-      try {
-        await api.mcp.auth.authenticate({ name }, { throwOnError: true });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Authorization failed';
-        set((state) => ({
-          diagnosticsByDirectory: {
-            ...state.diagnosticsByDirectory,
-            [key]: {
-              ...(state.diagnosticsByDirectory[key] ?? {}),
-              [name]: { status: 'failed', error: message },
-            },
-          },
-        }));
-        throw error;
-      }
-      await get().refresh({ directory: normalized, silent: true });
-    },
-
-    completeAuth: async (name, code, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = getMcpApiClient(normalized);
-      await api.mcp.auth.callback({ name, code }, { throwOnError: true });
-      await get().refresh({ directory: normalized, silent: true });
-    },
-
-    clearAuth: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = getMcpApiClient(normalized);
-      await api.mcp.auth.remove({ name }, { throwOnError: true });
-
-      // Removing the stored tokens does not touch the live session, so the
-      // server kept reporting `connected` until something forced a reconnect —
-      // the user had to run a connection test to see that authorization was
-      // gone. Dropping the connection makes the reported state match the
-      // credentials that remain.
-      await api.mcp.disconnect({ name }).catch(() => undefined);
-
+      await opencodeClient.disconnectMcpServer(name, normalized);
       await get().refresh({ directory: normalized, silent: true });
     },
 
     testConnection: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
       const key = toKey(normalized);
-      const api = getMcpApiClient(normalized);
       const previousStatus = get().getStatusForDirectory(normalized)[name];
-      const wasConnected = previousStatus?.status === 'connected';
+      const wasConnected = previousStatus?.status.status === 'connected';
       let errorMessage: string | undefined;
       let warningMessage: string | undefined;
 
       try {
-        await api.mcp.connect({ name }, { throwOnError: true });
+        await opencodeClient.connectMcpServer(name, normalized);
       } catch (error) {
         errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -281,9 +239,9 @@ export const useMcpStore = create<McpStore>()(
       const currentStatus = get().getStatusForDirectory(normalized)[name];
       const observedStatus = currentStatus;
 
-      if (!wasConnected && currentStatus?.status === 'connected') {
+      if (!wasConnected && currentStatus?.status.status === 'connected') {
         try {
-          await api.mcp.disconnect({ name }, { throwOnError: true });
+          await opencodeClient.disconnectMcpServer(name, normalized);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Disconnect failed';
           warningMessage = `Connection test succeeded, but cleanup disconnect failed: ${message}`;

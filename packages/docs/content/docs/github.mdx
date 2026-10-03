@@ -9,24 +9,28 @@ Connect your GitHub account and OpenChamber can pull in issues and pull requests
 
 ## Connect GitHub
 
-1. Open **Settings → Git**.
-2. Under GitHub, choose **Connect**. OpenChamber shows a link and a short code.
+1. Open **Settings → Integrations** and expand the **GitHub** card.
+2. Choose **Connect GitHub**. OpenChamber shows a link and a short code.
 3. Open the link, enter the code, and approve.
 
-When it's connected, your account shows under the GitHub section. You can connect more than one account and switch between them, or disconnect at any time.
+When it's connected, your account shows on the card. You can connect more than one account and switch between them, or disconnect at any time. If the `gh` CLI is signed in on the same machine, OpenChamber can use it as a fallback.
 
 ## Start work from an issue or PR
 
-When you create a [worktree session](/worktrees/) with GitHub connected, you can choose **Start from GitHub issue/PR**:
+When you create a [worktree session](/worktrees/) with GitHub connected, you can start it from an issue or a pull request:
 
-- pick an **issue** and OpenChamber names the branch after it and opens the session with the issue and its comments as the first message
+- pick an **issue** and OpenChamber names the branch after it
 - pick a **pull request** and it checks out the PR's branch; you can include the PR's diff so the agent has the full change
 
-This drops you straight into a session with the context already loaded.
+The new session opens with the issue or PR already attached to the message box. Nothing is sent for you: choose the model and agent, say what you want done, and send.
 
 ## Open and manage pull requests
 
 From the **PR** tab in the [git view](/git/), you can create a pull request, update it, mark a draft as ready, or merge it. OpenChamber can generate the PR title and description from your changes.
+
+## Link an issue or PR to a message
+
+In the chat composer, open the **+** menu and choose **GitHub**. Pick one or more issues or pull requests: each rides along with your next message as context (a PR can bring its diff), and the session's work status panel keeps a link to it. Attaching only adds context; your message says what to do with it.
 
 ## Related
 

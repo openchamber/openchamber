@@ -2,14 +2,15 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
-import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { opencodeClient } from '@/lib/opencode/client';
+import { selectMcpServersForDirectory, useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import { useMcpStore } from '@/stores/useMcpStore';
 import {
   useAgentsStore,
+  type PermissionEffect,
+  type PermissionRule,
   type AgentWithExtras,
 } from '@/stores/useAgentsStore';
 import {
@@ -20,64 +21,43 @@ import {
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import {
-  ACTIONS,
+  AUTOSAVE_SAVED,
+  AUTOSAVE_UNCHANGED,
+  autosaveFailed,
+  type AutosaveResult,
+} from '@/components/sections/shared/SettingsAutosave';
+import {
+  BUILTIN_ACTIONS,
+  EFFECTS,
+  OPENCHAMBER_ACTIONS,
   cloneModel,
+  effectiveEffect,
   emptyModel,
-  isAction,
   modelsEqual,
-  parsePermissionConfig,
-  serializePermissionModel,
-  type Action,
-  type EffectiveRule,
+  parseRules,
+  serializeRules,
+  type KeyState,
   type PermissionModel,
 } from './agentPermissionModel';
 
 /**
- * Source-of-truth permissions editor.
+ * Tool permissions for one agent.
  *
- * This component edits EXACTLY the agent's own `permission` map as stored in
- * its markdown frontmatter / opencode.json entry — never the resolved rules
- * that `/agent` returns (those already include global config and one-off
- * session grants, and writing them back is what used to corrupt configs).
+ * One row per tool: the tool's name, an arrow with what OpenCode will actually
+ * do for it right now, and inherit / allow / ask / deny. "Inherit" means the
+ * agent says nothing about the tool, so OpenCode's defaults and the global
+ * config decide (that is what the arrow shows). A row expands to resource
+ * patterns for that tool (`git push *` → deny).
  *
- * - "Inherit" means the key is absent from the agent's config; the effective
- *   action (from the resolved view) is shown as a hint.
- * - Saving PATCHes only `{ permission }`, and the server writes it verbatim.
+ * Under the hood v2 keeps an ordered rule list where the last match wins;
+ * `agentPermissionModel.ts` translates this view to and from that list and
+ * applies edits to the stored list in place, so what the user did not touch
+ * keeps deciding exactly as before. Saving PATCHes only
+ * `{ permissions }`. There is no Save button: a chip writes straight away, a
+ * pattern writes when it loses focus. The write is its own request but the
+ * page owns the autosave: `AgentsPage` registers this section's save routine
+ * through `registerSave` and runs it as part of its own.
  */
-
-
-/**
- * Permission keys that exist beyond plain tool ids (virtual capabilities).
- * Shown so they are discoverable; nothing is written unless set explicitly.
- */
-const VIRTUAL_PERMISSION_KEYS = [
-  'edit',
-  'external_directory',
-  'doom_loop',
-  'plan_enter',
-  'plan_exit',
-] as const;
-
-/**
- * Keys where opencode matches pattern rules (per docs: these accept either a
- * bare action or a pattern map). Everything else is action-only — the pattern
- * UI is hidden unless the config already contains patterns for the key.
- */
-const PATTERN_CAPABLE_KEYS = new Set([
-  'read',
-  'edit',
-  'glob',
-  'grep',
-  'list',
-  'bash',
-  'task',
-  'external_directory',
-  'lsp',
-  'skill',
-]);
-
-/** Tool ids folded into broader permission keys — never shown standalone. */
-const FOLDED_TOOL_IDS = new Set(['write', 'patch', 'apply_patch', 'multiedit', 'invalid']);
 
 const formatKeyLabel = (key: string): string =>
   key
@@ -86,21 +66,48 @@ const formatKeyLabel = (key: string): string =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
+/** Tools whose rules commonly need resource patterns; others can still add them. */
+const PATTERN_HINT_ACTIONS: ReadonlySet<string> = new Set([
+  'shell',
+  'edit',
+  'read',
+  'glob',
+  'grep',
+  'patch',
+  'webfetch',
+  'skill',
+  'subagent',
+  'external_directory',
+]);
+
+const EMPTY_KEY: KeyState = { effect: null, patterns: [] };
+
 interface AgentPermissionsEditorProps {
   agent: AgentWithExtras;
+  /**
+   * Hand the page this section's save routine. It is called on mount and
+   * whenever the routine changes, and with `null` on unmount.
+   */
+  registerSave: (save: (() => Promise<AutosaveResult>) | null) => void;
+  /** The page's autosave request; this section never runs its own. */
+  requestSave: () => void;
 }
 
-export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ agent }) => {
+export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({
+  agent,
+  registerSave,
+  requestSave,
+}) => {
   const { t } = useI18n();
   const updateAgent = useAgentsStore((state) => state.updateAgent);
+  const fetchAgentPermissions = useAgentsStore((state) => state.fetchAgentPermissions);
 
+  const [globalRules, setGlobalRules] = React.useState<PermissionRule[]>([]);
   const [baseline, setBaseline] = React.useState<PermissionModel>(emptyModel);
   const [model, setModel] = React.useState<PermissionModel>(emptyModel);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadFailed, setLoadFailed] = React.useState(false);
-  const [isSaving, setIsSaving] = React.useState(false);
   const [expandedKeys, setExpandedKeys] = React.useState<Record<string, boolean>>({});
-  const [toolIds, setToolIds] = React.useState<string[]>([]);
   const [customKeyDraft, setCustomKeyDraft] = React.useState('');
   const [reloadToken, setReloadToken] = React.useState(0);
 
@@ -109,134 +116,130 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
   // stays where it is.
   const settingsDirectory = useSettingsDirectory();
 
-  // --- Load the SOURCE permission map (the agent's own config file). ---
+  // MCP servers from the config (not only the connected ones): a permission on
+  // a server is worth setting even while it is disabled or failing. Each server
+  // gets one row keyed `<server>_*`, which OpenCode matches against every tool
+  // the server exposes (`<server>_<tool>`).
+  const loadMcpConfigs = useMcpConfigStore((state) => state.loadMcpConfigs);
+  const mcpServers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
+  const mcpStatus = useMcpStore(
+    React.useCallback((state) => state.getStatusForDirectory(settingsDirectory), [settingsDirectory]),
+  );
+  React.useEffect(() => {
+    void loadMcpConfigs({ directory: settingsDirectory });
+  }, [loadMcpConfigs, settingsDirectory]);
+
   React.useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     setLoadFailed(false);
     void (async () => {
-      try {
-        const directory = settingsDirectory;
-        const query = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-        const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(agentName)}/config${query}`, {
-          headers: {
-            'Cache-Control': 'no-cache',
-            ...(directory ? { 'x-opencode-directory': directory } : {}),
-          },
-        });
-        if (!response.ok) throw new Error(String(response.status));
-        const data = (await response.json().catch(() => null)) as { config?: { permission?: unknown } } | null;
-        if (cancelled) return;
-        const parsed = parsePermissionConfig(data?.config?.permission);
-        setBaseline(cloneModel(parsed));
-        setModel(parsed);
-      } catch {
-        if (!cancelled) setLoadFailed(true);
-      } finally {
-        if (!cancelled) setIsLoading(false);
+      const envelope = await fetchAgentPermissions(agentName, settingsDirectory);
+      if (cancelled) return;
+      if (!envelope) {
+        setLoadFailed(true);
+        setIsLoading(false);
+        return;
       }
+      const parsed = parseRules(envelope.agent);
+      setGlobalRules(envelope.global);
+      setBaseline(cloneModel(parsed));
+      setModel(parsed);
+      setExpandedKeys({});
+      setIsLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [agentName, reloadToken, settingsDirectory]);
+  }, [agentName, fetchAgentPermissions, reloadToken, settingsDirectory]);
 
-  // --- Known tool ids for the key list (display only). ---
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const ids = await opencodeClient.listToolIds({ directory: settingsDirectory });
-        if (!cancelled && Array.isArray(ids)) {
-          setToolIds(ids.filter((id) => typeof id === 'string' && !FOLDED_TOOL_IDS.has(id)));
-        }
-      } catch {
-        // tool ids are additive display data — the editor works without them
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [agentName, settingsDirectory]);
-
-  // --- Effective rules from the resolved view (read-only hints). ---
-  const effectiveRules = React.useMemo<EffectiveRule[]>(() => {
-    const raw = (agent as { permission?: unknown }).permission;
-    if (!Array.isArray(raw)) return [];
-    const rules: EffectiveRule[] = [];
-    for (const entry of raw) {
-      if (!entry || typeof entry !== 'object') continue;
-      const { permission, pattern, action } = entry as Record<string, unknown>;
-      if (typeof permission === 'string' && typeof pattern === 'string' && isAction(action)) {
-        rules.push({ permission, pattern, action });
-      }
+  const save = React.useCallback(async (): Promise<AutosaveResult> => {
+    if (modelsEqual(model, baseline)) return AUTOSAVE_UNCHANGED;
+    const result = await updateAgent(agentName, { permissions: serializeRules(model) }, settingsDirectory);
+    if (!result.ok) {
+      return autosaveFailed(t('settings.agents.page.permissionsEditor.toast.saveFailed'));
     }
-    return rules;
-  }, [agent]);
+    setBaseline(cloneModel(model));
+    return AUTOSAVE_SAVED;
+  }, [agentName, baseline, model, settingsDirectory, t, updateAgent]);
 
-  const effectiveFor = React.useCallback((key: string): Action | null => {
-    const exact = effectiveRules.find((rule) => rule.permission === key && rule.pattern === '*');
-    if (exact) return exact.action;
-    const wildcard = effectiveRules.find((rule) => rule.permission === '*' && rule.pattern === '*');
-    return wildcard ? wildcard.action : null;
-  }, [effectiveRules]);
+  React.useEffect(() => {
+    registerSave(save);
+    return () => registerSave(null);
+  }, [registerSave, save]);
 
-  /** Session/runtime-granted rules that are NOT part of the saved config. */
-  const runtimeRulesFor = React.useCallback((key: string): EffectiveRule[] => {
-    const saved = model.keys[key]?.patterns ?? [];
-    const savedPatterns = new Set(saved.map((rule) => rule.pattern));
-    return effectiveRules.filter(
-      (rule) => rule.permission === key && rule.pattern !== '*' && !savedPatterns.has(rule.pattern),
-    );
-  }, [effectiveRules, model.keys]);
+  // --- Rows: built-in and OpenChamber tools, then one row per MCP server, then
+  // whatever else the agent already names (custom keys, single MCP tools). ---
+  const mcpKeys = React.useMemo(
+    () => mcpServers.map((server) => ({ key: `${server.name}_*`, server: server.name })),
+    [mcpServers],
+  );
+  const toolKeys = React.useMemo(() => {
+    const keys: string[] = [...BUILTIN_ACTIONS, ...OPENCHAMBER_ACTIONS];
+    const mcp = new Set(mcpKeys.map((entry) => entry.key));
+    for (const key of Object.keys(model.keys)) {
+      if (!keys.includes(key) && !mcp.has(key)) keys.push(key);
+    }
+    return keys;
+  }, [mcpKeys, model.keys]);
 
-  // --- Displayed key list: tools + virtual keys + anything set in the config. ---
-  const displayKeys = React.useMemo(() => {
-    const keys = new Set<string>();
-    for (const id of toolIds) keys.add(id);
-    for (const key of VIRTUAL_PERMISSION_KEYS) keys.add(key);
-    for (const key of Object.keys(model.keys)) keys.add(key);
-    // `edit` covers write/edit/apply_patch — the folded ids never show.
-    for (const folded of FOLDED_TOOL_IDS) keys.delete(folded);
-    return Array.from(keys).sort((a, b) => a.localeCompare(b));
-  }, [toolIds, model.keys]);
-
-  const isDirty = React.useMemo(() => !modelsEqual(model, baseline), [model, baseline]);
-
-  // --- Mutators ---
-  const setGlobal = (action: Action | null) => {
-    setModel((current) => ({ ...current, global: action }));
+  const mcpStatusLabel = (server: string): string | null => {
+    const status = mcpStatus?.[server]?.status.status;
+    switch (status) {
+      case 'connected':
+        return t('settings.mcp.page.status.label.connected');
+      case 'failed':
+        return t('settings.mcp.page.status.label.failed');
+      case 'needs_auth':
+        return t('settings.mcp.page.status.label.needsAuth');
+      case 'disabled':
+        return t('settings.agents.page.permissionsEditor.mcpStatus.disabled');
+      case 'pending':
+        return t('settings.agents.page.permissionsEditor.mcpStatus.pending');
+      default:
+        return null;
+    }
   };
 
-  const setKeyAction = (key: string, action: Action | null) => {
+  const effectiveFor = React.useCallback(
+    (key: string): PermissionEffect => effectiveEffect(key, { global: globalRules, agentGlobal: model.global }),
+    [globalRules, model.global],
+  );
+
+  // --- Mutators. Chips save at once; patterns save on blur through the page. ---
+  const setGlobal = (effect: PermissionEffect | null) => {
+    setModel((current) => ({ ...current, global: effect }));
+    requestSave();
+  };
+
+  const setKeyEffect = (key: string, effect: PermissionEffect | null) => {
     setModel((current) => {
       const next = cloneModel(current);
-      const state = next.keys[key] ?? { action: null, patterns: [] };
-      state.action = action;
-      if (state.action === null && state.patterns.length === 0) {
-        delete next.keys[key];
-      } else {
-        next.keys[key] = state;
-      }
+      const state = next.keys[key] ?? { effect: null, patterns: [] };
+      state.effect = effect;
+      if (state.effect === null && state.patterns.length === 0) delete next.keys[key];
+      else next.keys[key] = state;
       return next;
     });
+    requestSave();
   };
 
-  const setPattern = (key: string, index: number, pattern: string, action: Action) => {
+  const setPattern = (key: string, index: number, pattern: string, effect: PermissionEffect, saveNow: boolean) => {
     setModel((current) => {
       const next = cloneModel(current);
-      const state = next.keys[key] ?? { action: null, patterns: [] };
-      state.patterns[index] = { pattern, action };
+      const state = next.keys[key] ?? { effect: null, patterns: [] };
+      state.patterns[index] = { pattern, effect };
       next.keys[key] = state;
       return next;
     });
+    if (saveNow) requestSave();
   };
 
   const addPattern = (key: string) => {
     setModel((current) => {
       const next = cloneModel(current);
-      const state = next.keys[key] ?? { action: null, patterns: [] };
-      state.patterns.push({ pattern: '', action: 'allow' });
+      const state = next.keys[key] ?? { effect: null, patterns: [] };
+      state.patterns.push({ pattern: '', effect: 'allow' });
       next.keys[key] = state;
       return next;
     });
@@ -249,11 +252,10 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
       const state = next.keys[key];
       if (!state) return current;
       state.patterns.splice(index, 1);
-      if (state.action === null && state.patterns.length === 0) {
-        delete next.keys[key];
-      }
+      if (state.effect === null && state.patterns.length === 0) delete next.keys[key];
       return next;
     });
+    requestSave();
   };
 
   const addCustomKey = () => {
@@ -262,41 +264,17 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
     setModel((current) => {
       if (current.keys[key]) return current;
       const next = cloneModel(current);
-      next.keys[key] = { action: 'ask', patterns: [] };
+      next.keys[key] = { effect: 'ask', patterns: [] };
       return next;
     });
-    setExpandedKeys((current) => ({ ...current, [key]: true }));
     setCustomKeyDraft('');
+    requestSave();
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    try {
-      const permission = serializePermissionModel(model);
-      const result = await updateAgent(agentName, { permission });
-      if (result.ok) {
-        setBaseline(cloneModel(model));
-        toast.success(
-          result.requiresManualRestart
-            ? t('settings.agents.page.permissionsEditor.toast.savedRestartRequired')
-            : t('settings.agents.page.permissionsEditor.toast.saved'),
-        );
-      } else {
-        toast.error(t('settings.agents.page.permissionsEditor.toast.saveFailed'));
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleDiscard = () => {
-    setModel(cloneModel(baseline));
-  };
-
-  const actionLabel = (action: Action): string => t(
-    action === 'allow'
+  const effectLabel = (effect: PermissionEffect): string => t(
+    effect === 'allow'
       ? 'settings.agents.page.permissionsEditor.action.allow'
-      : action === 'ask'
+      : effect === 'ask'
         ? 'settings.agents.page.permissionsEditor.action.ask'
         : 'settings.agents.page.permissionsEditor.action.deny',
   );
@@ -306,19 +284,21 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
 
   const chipOptions = (unsetLabel?: string) => [
     ...(unsetLabel ? [{ value: 'inherit', label: unsetLabel }] : []),
-    ...ACTIONS.map((action) => ({ value: action, label: actionLabel(action) })),
+    ...EFFECTS.map((effect) => ({ value: effect, label: effectLabel(effect) })),
   ];
 
-  const renderActionChips = (
-    value: Action | null,
-    onChange: (action: Action | null) => void,
+  const renderEffectChips = (
+    value: PermissionEffect | null,
+    onChange: (effect: PermissionEffect | null) => void,
     ariaLabel: string,
     unsetLabel: string = inheritLabel,
   ) => (
     <SettingsChipGroup
       value={value ?? 'inherit'}
       options={chipOptions(unsetLabel)}
-      onChange={(next) => onChange(next === 'inherit' ? null : (next as Action))}
+      // SAFETY: the chip group only emits the values it was given: `inherit`
+      // or one of the three permission effects.
+      onChange={(next) => onChange(next === 'inherit' ? null : (next as PermissionEffect))}
       aria-label={ariaLabel}
     />
   );
@@ -346,24 +326,95 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
     );
   }
 
+  const renderRow = (key: string, label: string, statusLabel: string | null): React.ReactNode => {
+    const state = model.keys[key] ?? EMPTY_KEY;
+    const supportsPatterns = PATTERN_HINT_ACTIONS.has(key) || state.patterns.length > 0;
+    const isExpanded = expandedKeys[key] === true;
+
+    return (
+      <div key={key} className="border-t border-border/40 py-2">
+        <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:justify-between">
+          <button
+            type="button"
+            onClick={supportsPatterns ? () => setExpandedKeys((current) => ({ ...current, [key]: !isExpanded })) : undefined}
+            className={cn('flex min-w-0 items-center gap-1.5 text-left', !supportsPatterns && 'cursor-default')}
+            aria-expanded={supportsPatterns ? isExpanded : undefined}
+          >
+            <Icon
+              name={isExpanded && supportsPatterns ? 'arrow-down-s' : 'arrow-right-s'}
+              className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', !supportsPatterns && 'opacity-0')}
+            />
+            <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
+            <span className="typography-micro font-mono text-muted-foreground/70">{key}</span>
+            {statusLabel && (
+              <span className="typography-micro rounded bg-muted px-1 text-muted-foreground">{statusLabel}</span>
+            )}
+            {state.effect === null && (
+              <span className="typography-micro text-muted-foreground">
+                {t('settings.agents.page.permissionsEditor.effectiveHint', { action: effectLabel(effectiveFor(key)) })}
+              </span>
+            )}
+            {state.patterns.length > 0 && (
+              <span className="typography-micro rounded bg-muted px-1 text-muted-foreground">
+                {t('settings.agents.page.permissionsEditor.ruleCount', { count: String(state.patterns.length) })}
+              </span>
+            )}
+          </button>
+          {renderEffectChips(
+            state.effect,
+            (effect) => setKeyEffect(key, effect),
+            t('settings.agents.page.permissionsEditor.keyAria', { key }),
+          )}
+        </div>
+
+        {isExpanded && supportsPatterns && (
+          <div className="mt-2 space-y-2 pl-5">
+            {state.patterns.map((rule, index) => (
+              <div key={index} className="flex flex-wrap items-center gap-2">
+                <Input
+                  value={rule.pattern}
+                  onChange={(event) => setPattern(key, index, event.target.value, rule.effect, false)}
+                  placeholder={t('settings.agents.page.permissionsEditor.patternPlaceholder')}
+                  aria-label={t('settings.agents.page.permissionsEditor.patternActionAria', { key })}
+                  className="h-8 w-full max-w-[24rem] min-w-0 flex-1 font-mono text-xs"
+                />
+                <SettingsChipGroup
+                  value={rule.effect}
+                  options={chipOptions()}
+                  // SAFETY: the chip group only emits the values it was
+                  // given, and those are exactly the three effects.
+                  onChange={(next) => setPattern(key, index, rule.pattern, next as PermissionEffect, true)}
+                  aria-label={t('settings.agents.page.permissionsEditor.patternActionAria', { key })}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => removePattern(key, index)}
+                  aria-label={t('settings.agents.page.permissionsEditor.actions.removeRuleAria')}
+                >
+                  <Icon name="close" className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="xs" className="!font-normal" onClick={() => addPattern(key)}>
+              <Icon name="add" className="mr-1 h-3.5 w-3.5" />
+              {t('settings.agents.page.permissionsEditor.actions.addRule')}
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <SettingsSection
       title={t('settings.agents.page.section.toolPermissions')}
       settingsItem="agents.permissions"
       info={t('settings.agents.page.permissionsEditor.sectionInfo')}
-      headerAction={isDirty ? (
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="xs" className="!font-normal" onClick={handleDiscard} disabled={isSaving}>
-            {t('settings.agents.page.permissionsEditor.actions.discard')}
-          </Button>
-          <Button size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={isSaving}>
-            {isSaving ? t('settings.common.actions.saving') : t('settings.agents.page.permissionsEditor.actions.save')}
-          </Button>
-        </div>
-      ) : undefined}
       contentClassName="space-y-4"
     >
-      {/* Agent default (the `*` key) */}
+      {/* The agent's own fallback for every tool (its `*` rule). */}
       <div className="flex flex-col gap-2 pb-2 @xl:flex-row @xl:items-center @xl:justify-between">
         <div className="flex items-center gap-1.5">
           <span className={SETTINGS_FIELD_LABEL_CLASS}>
@@ -372,118 +423,27 @@ export const AgentPermissionsEditor: React.FC<AgentPermissionsEditorProps> = ({ 
           <SettingsInfoHint>{t('settings.agents.page.permissionsEditor.defaultInfo')}</SettingsInfoHint>
           {model.global === null && (
             <span className="typography-micro text-muted-foreground">
-              {t('settings.agents.page.permissionsEditor.effectiveHint', { action: actionLabel(effectiveFor('*') ?? 'allow') })}
+              {t('settings.agents.page.permissionsEditor.effectiveHint', { action: effectLabel(effectiveFor('*')) })}
             </span>
           )}
         </div>
-        {renderActionChips(model.global, setGlobal, t('settings.agents.page.permissionsEditor.defaultAria'), defaultChipLabel)}
+        {renderEffectChips(model.global, setGlobal, t('settings.agents.page.permissionsEditor.defaultAria'), defaultChipLabel)}
       </div>
 
       <div>
-        {displayKeys.map((key) => {
-          const state = model.keys[key] ?? { action: null, patterns: [] };
-          const runtimeRules = runtimeRulesFor(key);
-          const supportsPatterns = PATTERN_CAPABLE_KEYS.has(key) || state.patterns.length > 0;
-          const hasDetails = supportsPatterns || runtimeRules.length > 0;
-          const isExpanded = expandedKeys[key] === true;
-          const effective = effectiveFor(key);
-
-          return (
-            <div key={key} className="border-t border-border/40 py-2">
-              <div className="flex flex-col gap-2 @xl:flex-row @xl:items-center @xl:justify-between">
-                <button
-                  type="button"
-                  onClick={hasDetails ? () => setExpandedKeys((current) => ({ ...current, [key]: !isExpanded })) : undefined}
-                  className={cn('flex min-w-0 items-center gap-1.5 text-left', !hasDetails && 'cursor-default')}
-                  aria-expanded={hasDetails ? isExpanded : undefined}
-                >
-                  <Icon
-                    name={isExpanded && hasDetails ? 'arrow-down-s' : 'arrow-right-s'}
-                    className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', !hasDetails && 'opacity-0')}
-                  />
-                  <span className={SETTINGS_FIELD_LABEL_CLASS}>{formatKeyLabel(key)}</span>
-                  <span className="typography-micro font-mono text-muted-foreground/70">{key}</span>
-                  {state.action === null && effective !== null && (
-                    <span className="typography-micro text-muted-foreground">
-                      {t('settings.agents.page.permissionsEditor.effectiveHint', { action: actionLabel(effective) })}
-                    </span>
-                  )}
-                  {state.patterns.length > 0 && (
-                    <span className="typography-micro rounded bg-muted px-1 text-muted-foreground">
-                      {t('settings.agents.page.permissionsEditor.ruleCount', { count: String(state.patterns.length) })}
-                    </span>
-                  )}
-                </button>
-                {renderActionChips(
-                  state.action,
-                  (action) => setKeyAction(key, action),
-                  t('settings.agents.page.permissionsEditor.keyAria', { key }),
-                )}
-              </div>
-
-              {isExpanded && hasDetails && (
-                <div className="mt-2 space-y-2 pl-5">
-                  {state.patterns.map((rule, index) => (
-                    <div key={index} className="flex flex-wrap items-center gap-2">
-                      <Input
-                        value={rule.pattern}
-                        onChange={(event) => setPattern(key, index, event.target.value, rule.action)}
-                        placeholder={t('settings.agents.page.permissionsEditor.patternPlaceholder')}
-                        className="h-8 w-full max-w-[24rem] min-w-0 flex-1 font-mono text-xs"
-                      />
-                      <SettingsChipGroup
-                        value={rule.action}
-                        options={chipOptions()}
-                        onChange={(next) => setPattern(key, index, rule.pattern, next as Action)}
-                        aria-label={t('settings.agents.page.permissionsEditor.patternActionAria', { key })}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        onClick={() => removePattern(key, index)}
-                        aria-label={t('settings.agents.page.permissionsEditor.actions.removeRuleAria')}
-                      >
-                        <Icon name="close" className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {supportsPatterns && (
-                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => addPattern(key)}>
-                      <Icon name="add" className="mr-1 h-3.5 w-3.5" />
-                      {t('settings.agents.page.permissionsEditor.actions.addRule')}
-                    </Button>
-                  )}
-
-                  {runtimeRules.length > 0 && (
-                    <div className="space-y-1 pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="typography-micro font-medium text-muted-foreground">
-                          {t('settings.agents.page.permissionsEditor.sessionRulesTitle')}
-                        </span>
-                        <SettingsInfoHint>
-                          {t('settings.agents.page.permissionsEditor.sessionRulesInfo')}
-                        </SettingsInfoHint>
-                      </div>
-                      {runtimeRules.map((rule) => (
-                        <div key={`${rule.pattern}-${rule.action}`} className="flex items-center gap-2">
-                          <span className="typography-micro min-w-0 flex-1 truncate font-mono text-muted-foreground/70">
-                            {rule.pattern}
-                          </span>
-                          <span className="typography-micro text-muted-foreground">{actionLabel(rule.action)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {toolKeys.map((key) => renderRow(key, formatKeyLabel(key), null))}
       </div>
 
-      {/* Custom permission key */}
+      {mcpKeys.length > 0 && (
+        <div>
+          <div className="flex items-center gap-1.5 border-t border-border/40 pt-3 pb-1">
+            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.agents.page.permissionsEditor.mcpTitle')}</span>
+            <SettingsInfoHint>{t('settings.agents.page.permissionsEditor.mcpInfo')}</SettingsInfoHint>
+          </div>
+          {mcpKeys.map((entry) => renderRow(entry.key, entry.server, mcpStatusLabel(entry.server)))}
+        </div>
+      )}
+      {/* A tool the list does not know yet (an MCP or plugin tool). */}
       <div className="flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
         <Input
           value={customKeyDraft}

@@ -1,0 +1,245 @@
+import { describe, expect, test } from 'bun:test';
+import type { AssistantMessage, Part, SyntheticMessage, TextPart, TokenUsageInfo, UserMessage } from '@/lib/opencode/model';
+import { formatTelemetryDuration, formatTelemetryTokens, formatThroughputRate, getLatestCompletedTurnStats, mergeTimeIntervals, sumIntervalsDuration } from './telemetry';
+
+const user: UserMessage = { id: 'u1', sessionID: 'session-1', role: 'user', time: { created: 0 } };
+const baseTokens = (): TokenUsageInfo => ({ input: 100, output: 100, reasoning: 0, cache: { read: 0, write: 0 } });
+const assistant = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
+  id: 'a1', sessionID: 'session-1', role: 'assistant',
+  agent: 'build', providerID: 'test', modelID: 'test',
+  time: { created: 1000, completed: 5000 }, cost: 0,
+  tokens: baseTokens(),
+  ...overrides,
+});
+const tool = (start: number, end: number): Part => ({
+  id: `tool-${start}`, sessionID: user.sessionID, messageID: 'a1', type: 'tool', tool: 'bash', callID: 'call',
+  state: { status: 'completed', input: {}, output: '', metadata: {}, time: { start, end } },
+});
+const text = (start: number): TextPart => ({ id: `text-${start}`, sessionID: user.sessionID, messageID: 'a1', type: 'text', text: '', time: { start } });
+const turn = (info = assistant(), parts: Part[] = []) => [{ info: user, parts: [] }, { info, parts }];
+
+describe('turn telemetry', () => {
+  test('merges unsorted parallel, nested, adjoining and invalid tool intervals', () => {
+    expect(mergeTimeIntervals([])).toEqual([]);
+    const merged = mergeTimeIntervals([[3000, 4000], [1000, 3000], [1500, 2500], [6000, 7000], [NaN, 1], [9, 8]]);
+    expect(merged).toEqual([[1000, 4000], [6000, 7000]]);
+    expect(sumIntervalsDuration(merged)).toBe(4000);
+  });
+
+  test('formats durations, counts and approximate throughput', () => {
+    expect(formatTelemetryDuration(0)).toBe('0.0s');
+    expect(formatTelemetryDuration(1234)).toBe('1.2s');
+    expect(formatTelemetryDuration(84000)).toBe('1m 24s');
+    expect(formatTelemetryDuration(2796044)).toBe('46m 36s');
+    expect(formatTelemetryDuration(119_600)).toBe('2m 0s');
+    expect(formatTelemetryDuration(84600)).toBe('1m 25s');
+    expect(formatTelemetryTokens(0)).toBe('0');
+    expect(formatTelemetryTokens(500)).toBe('500');
+    expect(formatTelemetryTokens(1234)).toBe('1.2K');
+    expect(formatTelemetryTokens(1500000)).toBe('1.5M');
+    expect(formatThroughputRate(52.3)).toBe('~52 tok/s');
+  });
+
+  test('aggregates a multi-step turn, subtracting the tool union and including reasoning tokens', () => {
+    const records = turn(assistant({
+      time: { created: 10000, completed: 20000 }, cost: 0.01,
+      tokens: { input: 1000, output: 200, reasoning: 300, cache: { read: 2000, write: 0 } },
+    }), [text(11500), tool(13000, 15000), tool(14000, 16000)]);
+    records.push({ info: assistant({ id: 'a2', time: { created: 21000, completed: 24000 }, cost: 0.005,
+      tokens: { input: 1500, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+    }), parts: [text(21500)] });
+    const stats = getLatestCompletedTurnStats(records);
+    expect(stats).toEqual({ stepsCount: 2, lastAssistantMessageId: 'a2', elapsedDurationMs: 24000, totalToolDurationMs: 3000,
+      totalLlmDurationMs: 10000, outputTokens: 300, reasoningTokens: 300, totalGeneratedTokens: 600,
+      inputTokens: 2500, cost: 0.015, tokensPerSecond: 60, responseTokensPerSecond: null, avgTtftMs: 1000, cacheHitPercent: 44 });
+  });
+
+  test('omits elapsed time when turn boundary timestamps are invalid', () => {
+    const invalidStartStats = getLatestCompletedTurnStats([
+      { info: { ...user, time: { created: Number.NaN } }, parts: [] },
+      { info: assistant(), parts: [] },
+    ]);
+    const invalidEndStats = getLatestCompletedTurnStats([
+      { info: { ...user, time: { created: 6000 } }, parts: [] },
+      { info: assistant(), parts: [] },
+    ]);
+
+    expect(invalidStartStats?.elapsedDurationMs).toBeNull();
+    expect(invalidEndStats?.elapsedDurationMs).toBeNull();
+  });
+
+  test('uses only the latest user-bounded turn', () => {
+    const records = [...turn(), ...turn(assistant({ id: 'new' }))];
+    expect(getLatestCompletedTurnStats(records)?.stepsCount).toBe(1);
+    expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('new');
+  });
+
+  test('a plumbing message after the final step does not hide the finished turn', () => {
+    const synthetic: SyntheticMessage = { id: 's1', sessionID: user.sessionID, role: 'synthetic', time: { created: 6000 }, text: 'plugin prompt' };
+    const records = [...turn(assistant(), [text(1500)]), { info: synthetic, parts: [] }];
+    expect(getLatestCompletedTurnStats(records)?.lastAssistantMessageId).toBe('a1');
+  });
+
+  test('does not publish unfinished or truncated turns, or substitute older results', () => {
+    expect(getLatestCompletedTurnStats(null)).toBeNull();
+    expect(getLatestCompletedTurnStats([])).toBeNull();
+    expect(getLatestCompletedTurnStats([{ info: assistant(), parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([...turn(), { info: user, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats([...turn(), ...turn(assistant({ time: { created: 1000 } }))])).toBeNull();
+    expect(getLatestCompletedTurnStats([
+      ...turn(assistant({ time: { created: 1000 } })), { info: assistant({ id: 'a2' }), parts: [] },
+    ])).toBeNull();
+  });
+
+  test('recomputes after history materializes and after same-ID message or part corrections', () => {
+    const info = assistant();
+    expect(getLatestCompletedTurnStats([{ info, parts: [] }])).toBeNull();
+    expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBe(25);
+    expect(getLatestCompletedTurnStats(turn({ ...info, tokens: { ...baseTokens(), output: 200 } }))?.tokensPerSecond).toBe(50);
+    expect(getLatestCompletedTurnStats(turn(info, [tool(2000, 4000)]))?.tokensPerSecond).toBe(50);
+    // A second directory/runtime may reuse IDs but must never reuse the result.
+    expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBe(25);
+  });
+
+  test('missing usage in one step invalidates whole-turn usage, not valid durations', () => {
+    const missing = assistant({ id: 'a2', time: { created: 5000, completed: 6000 } });
+    Reflect.deleteProperty(missing, 'tokens');
+    Reflect.deleteProperty(missing, 'cost');
+    const stats = getLatestCompletedTurnStats([...turn(), { info: missing, parts: [] }]);
+    expect(stats?.stepsCount).toBe(2);
+    expect(stats?.totalLlmDurationMs).toBe(5000);
+    expect(stats?.tokensPerSecond).toBeNull();
+    expect(stats?.inputTokens).toBeNull();
+    expect(stats?.cost).toBeNull();
+  });
+
+  test('missing reasoning is not treated as zero and invalid token counts are not summed', () => {
+    const tokens = baseTokens();
+    Reflect.deleteProperty(tokens, 'reasoning');
+    const info = assistant({ tokens });
+    expect(getLatestCompletedTurnStats(turn(info))?.tokensPerSecond).toBeNull();
+    for (const output of [-1, NaN, Infinity]) {
+      expect(getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output } })))?.totalGeneratedTokens).toBeNull();
+    }
+  });
+
+  test('preserves genuine zero usage, cache hits and cost', () => {
+    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output: 0 } })));
+    expect(stats?.tokensPerSecond).toBe(0);
+    expect(stats?.cost).toBe(0);
+    expect(stats?.cacheHitPercent).toBe(0);
+  });
+
+  test('includes failed tools and chooses the earliest text or reasoning timestamp', () => {
+    const failed: Part = { id: 'failed', sessionID: user.sessionID, messageID: 'a1', type: 'tool', tool: 'bash', callID: 'failed',
+      state: { status: 'error', input: {}, error: 'failed', time: { start: 2500, end: 4000 } } };
+    const reasoning: Part = { id: 'reasoning', sessionID: user.sessionID, messageID: 'a1', type: 'reasoning', text: '', time: { start: 1200 } };
+    const stats = getLatestCompletedTurnStats(turn(assistant(), [text(1600), reasoning, tool(2000, 3000), failed]));
+    expect(stats?.totalToolDurationMs).toBe(2000);
+    expect(stats?.totalLlmDurationMs).toBe(2000);
+    expect(stats?.avgTtftMs).toBe(200);
+  });
+
+  for (const [start, end] of [[0, 2000], [2000, 6000], [3000, 2000], [NaN, 3000]]) {
+    test(`invalid tool interval ${start}..${end} omits duration-dependent metrics`, () => {
+    const stats = getLatestCompletedTurnStats(turn(assistant(), [tool(start, end)]));
+    expect(stats?.totalToolDurationMs).toBeNull();
+    expect(stats?.totalLlmDurationMs).toBeNull();
+    expect(stats?.tokensPerSecond).toBeNull();
+    expect(stats?.outputTokens).toBe(100);
+    });
+  }
+
+  test('unfinished tools and missing tool timing cannot produce a rate', () => {
+    const unfinished: Part = { id: 'pending', sessionID: user.sessionID, messageID: 'a1', type: 'tool', tool: 'bash', callID: 'pending',
+      state: { status: 'pending', input: {}, raw: '' } };
+    const missing = tool(2000, 3000);
+    if (missing.type !== 'tool') throw new Error('Expected tool fixture');
+    Reflect.deleteProperty(missing.state, 'time');
+    expect(getLatestCompletedTurnStats(turn(assistant(), [unfinished]))?.tokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(turn(assistant(), [missing]))?.tokensPerSecond).toBeNull();
+  });
+
+  test('invalid step time does not silently remove that step from totals', () => {
+    const stats = getLatestCompletedTurnStats([...turn(), { info: assistant({ id: 'a2', time: { created: 6000, completed: 5000 } }), parts: [] }]);
+    expect(stats?.stepsCount).toBe(2);
+    expect(stats?.totalGeneratedTokens).toBe(200);
+    expect(stats?.totalLlmDurationMs).toBeNull();
+    expect(stats?.tokensPerSecond).toBeNull();
+  });
+
+  test('hides a throughput the measured window cannot have produced', () => {
+    // A tool that runs for all but 1 ms of its step (seen in real data) leaves
+    // a residual LLM window that turns 100 tokens into 100,000 tok/s.
+    const residual = turn(assistant({ time: { created: 1000, completed: 1560 } }), [tool(1000, 1559)]);
+    expect(getLatestCompletedTurnStats(residual)?.tokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(residual)?.totalLlmDurationMs).toBe(1);
+
+    const finalText = turn(assistant({ tokens: { ...baseTokens(), output: 400 } }),
+      [{ ...text(1000), text: 'Final answer', time: { start: 1000, end: 1002 } }]);
+    expect(getLatestCompletedTurnStats(finalText)?.responseTokensPerSecond).toBeNull();
+
+    // A fast but possible rate still shows.
+    const quick = turn(assistant({ time: { created: 1000, completed: 1100 }, tokens: { ...baseTokens(), output: 200 } }));
+    expect(getLatestCompletedTurnStats(quick)?.tokensPerSecond).toBe(2000);
+  });
+
+  test('separates final text delivery from whole-turn throughput on the measured tool-heavy shape', () => {
+    const records = turn(assistant({
+      time: { created: 1000, completed: 38438 },
+      tokens: { ...baseTokens(), output: 223 },
+    }), [tool(19950, 38438)]);
+    records.push({ info: assistant({ id: 'final', time: { created: 40000, completed: 45598 },
+      tokens: { ...baseTokens(), output: 338 },
+    }), parts: [{ ...text(42661), text: 'Final answer', time: { start: 42661, end: 45442 } }] });
+    const stats = getLatestCompletedTurnStats(records);
+    expect(Math.round(stats?.tokensPerSecond ?? 0)).toBe(23);
+    expect(Math.round(stats?.responseTokensPerSecond ?? 0)).toBe(122);
+  });
+
+  test('measures the final text only, excluding reasoning tokens and their time', () => {
+    const stats = getLatestCompletedTurnStats(turn(assistant({ tokens: { ...baseTokens(), output: 260, reasoning: 100 } }), [
+      { id: 'reasoning', sessionID: user.sessionID, messageID: 'a1', type: 'reasoning', text: 'Thinking', time: { start: 1200, end: 2000 } },
+      { ...text(2500), text: 'Final answer', time: { start: 2500, end: 4500 } },
+    ]));
+    expect(stats?.responseTokensPerSecond).toBe(130);
+    expect(stats?.tokensPerSecond).toBe(90);
+  });
+
+  test('unions overlapping text intervals without mutating the authoritative parts', () => {
+    const parts = [
+      { ...text(2000), text: 'First', time: { start: 2000, end: 3500 } },
+      { ...text(3000), text: 'Second', time: { start: 3000, end: 4000 } },
+    ];
+    const stats = getLatestCompletedTurnStats(turn(assistant(), parts));
+    expect(stats?.responseTokensPerSecond).toBe(50);
+    expect(parts[0].time.end).toBe(3500);
+  });
+
+  test('missing, partial or invalid response timing never falls back to whole-turn speed', () => {
+    const invalidParts: Part[][] = [
+      [], [{ ...text(2000), text: 'No end' }],
+      [{ ...text(2000), text: 'Bad end', time: { start: 2000, end: 1000 } }],
+      [{ ...text(2000), text: 'Late end', time: { start: 2000, end: 6000 } }],
+      [{ ...text(2000), text: 'Zero span', time: { start: 2000, end: 2000 } }],
+      [{ ...text(2000), text: 'Bad time', time: { start: NaN, end: 4000 } }],
+      [{ ...text(2000), text: 'Tool preface', time: { start: 2000, end: 3000 } }, tool(3000, 4000)],
+      [{ ...text(2000), text: 'Timed', time: { start: 2000, end: 3000 } }, { ...text(3000), text: 'Untimed' }],
+    ];
+    for (const parts of invalidParts) {
+      const stats = getLatestCompletedTurnStats(turn(assistant(), parts));
+      expect(stats?.responseTokensPerSecond).toBeNull();
+      expect(stats?.tokensPerSecond !== null).toBe(true);
+    }
+  });
+
+  test('response speed needs valid output usage and a successful final reply', () => {
+    const parts = [{ ...text(2000), text: 'Final reply', time: { start: 2000, end: 4000 } }];
+    const missingOutput = baseTokens();
+    Reflect.deleteProperty(missingOutput, 'output');
+    const missingUsage = assistant({ tokens: missingOutput });
+    expect(getLatestCompletedTurnStats(turn(missingUsage, parts))?.responseTokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(turn(assistant({ error: { type: 'MessageAbortedError', message: 'Stopped' } }), parts))?.responseTokensPerSecond).toBeNull();
+    expect(getLatestCompletedTurnStats(turn(assistant({ time: { created: NaN, completed: 5000 } }), parts))?.responseTokensPerSecond).toBeNull();
+  });
+});

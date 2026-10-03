@@ -135,19 +135,7 @@ export function normalizeDroppedPath(rawPath: string): string {
     }
 }
 
-/**
- * Normalize a directory or file path for comparison: forward slashes, no
- * trailing separator. Returns null for anything blank, so callers can treat
- * "no path" and "unusable path" the same way.
- */
-export function normalizePath(value?: string | null): string | null {
-    if (typeof value !== 'string') return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const normalized = trimmed.replace(/\\/g, '/');
-    if (normalized === '/') return '/';
-    return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-}
+export { normalizePath } from '@/lib/pathNormalization';
 
 /**
  * Express an absolute path relative to the project root, so the prompt carries

@@ -1,0 +1,49 @@
+---
+title: Conversas
+description: Conversas simples com o agente, fora de qualquer projeto.
+---
+
+# Conversas
+
+Uma conversa é um bate-papo simples com o agente, fora de qualquer projeto. Use para coisas que não têm nada a ver com as suas bases de código: como aplicar um patch no KDE para FreeBSD, o que faz uma expressão regular, o rascunho de um e-mail. O agente trabalha em uma pasta descartável, sem repositório, sem branch e sem o contexto dos seus projetos pesando na conversa.
+
+## Começar uma conversa
+
+O jeito mais direto é o **+** da seção **Conversas** na barra lateral. No celular, toque em **Novo chat** no topo da lista de sessões ou no **+** das conversas.
+
+**Mod+N** (Cmd+N no macOS, Ctrl+N nos outros sistemas) e **Nova sessão** na paleta de comandos abrem uma nova sessão do lado que você usou por último: uma conversa, se a sua última sessão nova foi uma conversa, e senão o seu projeto. Dá para trocar para Conversas antes de enviar a primeira mensagem.
+
+## Onde ficam as conversas
+
+As conversas têm a própria seção no topo da barra lateral, acima de [Em andamento](/pt-br/sessions-in-work/) e dos seus projetos. Elas são ordenadas como as outras sessões, atividade mais recente primeiro, e as conversas fixadas ficam no topo. No modo Timeline a seção mostra as três conversas mais recentes; **Mostrar mais sessões** carrega o resto. A seção recolhe como qualquer outra.
+
+No celular, as conversas ficam acima da lista de projetos no painel de sessões.
+
+## O que uma conversa pode e não pode fazer
+
+Cada conversa ganha a própria pasta vazia, então o agente ainda pode criar e editar arquivos lá: um script, um protótipo rápido, um documento convertido. O que uma conversa não tem:
+
+- status do git, branches ou worktrees
+- ir para em andamento: conversas nunca aparecem em [Em andamento](/pt-br/sessions-in-work/)
+- implementar um plano em uma nova sessão
+- começar a partir de uma issue do Linear
+
+Notas, tarefas e planos funcionam. Todas as conversas compartilham um mesmo conjunto, separado dos seus projetos.
+
+Uma conversa continua sendo uma conversa. Não há como mover uma conversa pronta para um projeto; se ela virar trabalho de verdade, comece uma sessão no projeto e leve o que for útil.
+
+## Arquivar e excluir
+
+Arquive uma conversa para escondê-la da lista. Exclua para removê-la de vez, junto com a pasta, assim que nenhuma outra sessão (um fork ou um subagente) usar mais essa pasta.
+
+## Onde ficam as pastas
+
+As pastas das conversas ficam em `~/.config/openchamber/chats`, uma pasta com data por dia. Se você moveu os dados do OpenChamber com `OPENCHAMBER_DATA_DIR`, elas ficam nessa pasta. Para guardar as conversas em outro lugar, defina `OPENCHAMBER_CHATS_DIR`; veja [Variáveis de ambiente](/pt-br/environment/). Isso importa quando o OpenCode roda como outro usuário e não consegue ler a sua pasta pessoal.
+
+> O VS Code não tem conversas. A extensão sempre trabalha na pasta que você abriu.
+
+## Relacionado
+
+- [Projetos](/pt-br/projects/): sessões ligadas a uma base de código
+- [Sessões em andamento](/pt-br/sessions-in-work/): mantenha o trabalho real à vista
+- [Notas, tarefas e planos](/pt-br/notes-todos-plans/): notas que também funcionam nas conversas

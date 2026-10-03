@@ -9,24 +9,28 @@ Conecta tu cuenta de GitHub y OpenChamber podrá traer issues y pull requests, i
 
 ## Conecta GitHub
 
-1. Abre **Settings → Git**.
-2. En GitHub, elige **Connect**. OpenChamber muestra un enlace y un código corto.
+1. Abre **Settings → Integrations** y despliega la tarjeta **GitHub**.
+2. Elige **Connect GitHub**. OpenChamber muestra un enlace y un código corto.
 3. Abre el enlace, introduce el código y aprueba.
 
-Cuando esté conectado, tu cuenta aparece en la sección de GitHub. Puedes conectar más de una cuenta y cambiar entre ellas, o desconectar en cualquier momento.
+Cuando esté conectado, tu cuenta aparece en la tarjeta. Puedes conectar más de una cuenta y cambiar entre ellas, o desconectar en cualquier momento. Si la CLI `gh` tiene sesión iniciada en la misma máquina, OpenChamber puede usarla como respaldo.
 
 ## Empieza a trabajar desde una issue o PR
 
-Cuando creas una [sesión de worktree](/es/worktrees/) con GitHub conectado, puedes elegir **Start from GitHub issue/PR**:
+Cuando creas una [sesión de worktree](/es/worktrees/) con GitHub conectado, puedes empezarla desde una issue o un pull request:
 
-- elige una **issue** y OpenChamber nombra la rama según ella y abre la sesión con la issue y sus comentarios como primer mensaje
+- elige una **issue** y OpenChamber nombra la rama según ella
 - elige un **pull request** y hace checkout de la rama del PR; puedes incluir el diff del PR para que el agente tenga el cambio completo
 
-Esto te deja directamente en una sesión con el contexto ya cargado.
+La nueva sesión se abre con la issue o el PR ya adjunto en el cuadro de mensaje. No se envía nada por ti: elige el modelo y el agente, di qué quieres que se haga y envía.
 
 ## Abre y gestiona pull requests
 
 Desde la pestaña **PR** en la [vista de git](/es/git/), puedes crear un pull request, actualizarlo, marcar un borrador como listo o fusionarlo. OpenChamber puede generar el título y la descripción del PR a partir de tus cambios.
+
+## Vincula una issue o PR a un mensaje
+
+En el compositor del chat, abre el menú **+** y elige **GitHub**. Elige una o varias issues o pull requests: cada uno acompaña tu siguiente mensaje como contexto (un PR puede traer su diff), y el panel de estado de trabajo de la sesión conserva un enlace. Adjuntar solo añade contexto; tu mensaje dice qué hacer con él.
 
 ## Relacionado
 

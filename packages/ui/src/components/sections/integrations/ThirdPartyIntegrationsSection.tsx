@@ -11,16 +11,17 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
+import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { SettingsSection } from '@/components/sections/shared/SettingsSection';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
-import { cn } from '@/lib/utils';
 import {
   usePluginsStore,
   type PluginMutationResult,
 } from '@/stores/usePluginsStore';
-import { usePendingOpenCodeRestartStore } from '@/stores/usePendingOpenCodeRestartStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import {
   getCatalogPluginPrimaryAction,
   getCatalogPluginPresentation,
@@ -29,6 +30,7 @@ import {
   THIRD_PARTY_PLUGINS,
   type ThirdPartyPluginDefinition,
 } from './thirdPartyPlugins';
+import { IntegrationCatalogCard, type IntegrationCatalogStatusTone } from './IntegrationCatalogCard';
 
 type PendingAction = 'install' | 'update' | 'setup' | 'remove';
 
@@ -36,21 +38,39 @@ type RemoveTarget = ThirdPartyPluginDefinition | null;
 
 interface ThirdPartyIntegrationsSectionProps {
   divider?: boolean;
-  onOpenProviderSetup: (providerId: string) => Promise<boolean>;
-  onOpenPluginManager: () => void;
 }
 
+// OpenCode normally restarts itself after a plugin change; these results mean
+// the new provider will not load until someone restarts it by hand.
 const requiresRestart = (result: PluginMutationResult): boolean =>
-  result.restartDeferred === true
-  || result.requiresManualRestart === true
-  || result.reloadFailed === true;
+  result.requiresManualRestart === true || result.reloadFailed === true;
 
 export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSectionProps> = ({
   divider = true,
-  onOpenProviderSetup,
-  onOpenPluginManager,
 }) => {
   const { t } = useI18n();
+  const settingsDirectory = useSettingsDirectory();
+
+  const onOpenPluginManager = React.useCallback(() => {
+    useUIStore.getState().requestSettingsJump('plugins');
+  }, []);
+
+  // Set up happens on the provider's own page. It only exists once OpenCode
+  // has loaded the plugin, so a missing provider is reported, not opened.
+  const onOpenProviderSetup = React.useCallback(async (providerId: string): Promise<boolean> => {
+    await useConfigStore.getState().loadProviders({
+      directory: settingsDirectory,
+      source: 'settings:third-party-provider-setup',
+    });
+    const providers = selectProvidersForDirectory(useConfigStore.getState(), settingsDirectory);
+    if (!providers.some((provider) => provider.id === providerId)) {
+      return false;
+    }
+    const ui = useUIStore.getState();
+    ui.setSettingsProvidersOpenRequested(providerId);
+    ui.requestSettingsJump('providers');
+    return true;
+  }, [settingsDirectory]);
   const {
     entries,
     registryInfo,
@@ -106,30 +126,6 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  const pendingPluginRestartCount = usePendingOpenCodeRestartStore(
-    (state) => state.changes.filter((change) => change.scope === 'plugins').length,
-  );
-  const isApplyingRestart = usePendingOpenCodeRestartStore((state) => state.isApplying);
-  const previousPluginRestartCountRef = React.useRef(pendingPluginRestartCount);
-
-  // When deferred plugin restarts are applied (pending plugins scope clears), drop
-  // local restart/unavailable flags and reload so statuses update immediately.
-  React.useEffect(() => {
-    const previousCount = previousPluginRestartCountRef.current;
-    previousPluginRestartCountRef.current = pendingPluginRestartCount;
-
-    if (isApplyingRestart) {
-      return;
-    }
-    if (previousCount <= 0 || pendingPluginRestartCount > 0) {
-      return;
-    }
-
-    setRestartRequiredIds(new Set());
-    setProviderUnavailableIds(new Set());
-    void refresh();
-  }, [isApplyingRestart, pendingPluginRestartCount, refresh]);
 
   const setRestartRequired = React.useCallback((pluginId: string, required: boolean) => {
     setRestartRequiredIds((current) => {
@@ -195,7 +191,10 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
       try {
         const opened = await onOpenProviderSetup(plugin.providerId);
         setProviderUnavailable(plugin.id, !opened);
-        if (!opened) {
+        if (opened) {
+          // The provider loaded, so the restart it was waiting for has happened.
+          setRestartRequired(plugin.id, false);
+        } else {
           toast.error(t('settings.integrations.thirdParty.toast.providerUnavailable'));
         }
       } finally {
@@ -218,7 +217,7 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
     if (state.userEntry) {
       await runMutation(plugin, 'update', () => updateEntry(state.userEntry!.id, { spec: latestSpec }));
     }
-  }, [createEntry, entries, onOpenPluginManager, onOpenProviderSetup, registryInfo, runMutation, setProviderUnavailable, t, updateEntry]);
+  }, [createEntry, entries, onOpenPluginManager, onOpenProviderSetup, registryInfo, runMutation, setProviderUnavailable, setRestartRequired, t, updateEntry]);
 
   const handleRemove = React.useCallback(async () => {
     const plugin = removeTarget;
@@ -250,8 +249,10 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
     const isRestartRequired = restartRequiredIds.has(plugin.id);
     const isProviderUnavailable = providerUnavailableIds.has(plugin.id);
     const registryUnavailable = registryLoadFailed || state.registry?.kind === 'npm-network';
+    // Set up stays available while a restart is pending: it is how the card
+    // learns the provider loaded once the person restarted OpenCode.
     const actionDisabled = isPending
-      || isRestartRequired
+      || (isRestartRequired && primaryAction !== 'setup')
       || ((primaryAction === 'install' || primaryAction === 'update') && (registryUnavailable || !latestSpec));
     const presentation = getCatalogPluginPresentation(state, {
       registryUnavailable,
@@ -296,15 +297,15 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
         status = t('settings.integrations.thirdParty.status.providerUnavailable');
         break;
     }
-    const statusClassName = presentation.status === 'installed-version'
-      ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
+    const statusTone: IntegrationCatalogStatusTone = presentation.status === 'installed-version'
+      ? 'success'
       : presentation.status === 'update-available'
         || presentation.status === 'ambiguous'
         || presentation.status === 'restart-required'
         || presentation.status === 'registry-unavailable'
         || presentation.status === 'provider-unavailable'
-        ? 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]'
-        : 'bg-[var(--surface-muted)] text-muted-foreground';
+        ? 'warning'
+        : 'neutral';
 
     const primaryLabel = {
       install: t('settings.integrations.thirdParty.actions.install'),
@@ -316,92 +317,62 @@ export const ThirdPartyIntegrationsSection: React.FC<ThirdPartyIntegrationsSecti
     const open = openPluginIds.has(plugin.id);
 
     return (
-      <Collapsible
+      <IntegrationCatalogCard
         key={plugin.id}
+        settingsItem={`integrations.third-party.${plugin.id}`}
+        logo={<ProviderLogo providerId={plugin.providerId} alt="" className="size-5" />}
+        name={t(plugin.nameKey)}
+        description={t(plugin.descriptionKey)}
+        status={status}
+        statusTone={statusTone}
         open={open}
         onOpenChange={(nextOpen) => setPluginOpen(plugin.id, nextOpen)}
       >
-        <div
-          data-settings-item={`integrations.third-party.${plugin.id}`}
-          className="overflow-hidden rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
-        >
-          <CollapsibleTrigger
-            className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
-          >
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-              <Icon name={plugin.icon} className={cn('size-5', plugin.brandClassName)} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-semibold text-foreground">{t(plugin.nameKey)}</div>
-              <p className="mt-0.5 line-clamp-1 text-xs leading-snug text-muted-foreground">
-                {t(plugin.descriptionKey)}
-              </p>
-            </div>
-            <span
-              aria-live="polite"
-              className={cn(
-                'max-w-36 shrink-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium',
-                statusClassName,
-              )}
+        <div className="space-y-3">
+          {state.projectEntries.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t('settings.integrations.thirdParty.status.projectInstalled')}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={primaryAction === 'manage' ? 'outline' : 'default'}
+              onClick={() => void handlePrimaryAction(plugin)}
+              disabled={actionDisabled}
             >
-              {status}
-            </span>
-            <Icon
-              name="arrow-down-s"
-              className={cn(
-                'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
-                open && 'rotate-180',
-              )}
-            />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-t border-[var(--interactive-border)] px-4 py-4">
-            <div className="space-y-3">
-              {state.projectEntries.length > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {t('settings.integrations.thirdParty.status.projectInstalled')}
-                </p>
+              {isPending ? (
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+              ) : primaryAction === 'setup' ? (
+                <Icon name="plug-2" className="size-3.5" />
               ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={primaryAction === 'manage' ? 'outline' : 'default'}
-                  onClick={() => void handlePrimaryAction(plugin)}
-                  disabled={actionDisabled}
-                >
-                  {isPending ? (
-                    <Icon name="loader-4" className="size-3.5 animate-spin" />
-                  ) : primaryAction === 'setup' ? (
-                    <Icon name="plug-2" className="size-3.5" />
-                  ) : null}
-                  {primaryLabel}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void openExternalUrl(plugin.homepage)}
-                >
-                  <Icon name="external-link" className="size-3.5" />
-                  {t('settings.integrations.thirdParty.actions.docs')}
-                </Button>
-                {state.userEntry && !state.userEntryIsAmbiguous ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setRemoveTarget(plugin)}
-                    disabled={isPending}
-                  >
-                    <Icon name="delete-bin" className="size-3.5" />
-                    {t('settings.integrations.thirdParty.actions.remove')}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </CollapsibleContent>
+              {primaryLabel}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => void openExternalUrl(plugin.homepage)}
+            >
+              <Icon name="external-link" className="size-3.5" />
+              {t('settings.integrations.thirdParty.actions.docs')}
+            </Button>
+            {state.userEntry && !state.userEntryIsAmbiguous ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                onClick={() => setRemoveTarget(plugin)}
+                disabled={isPending}
+              >
+                <Icon name="delete-bin" className="size-3.5" />
+                {t('settings.integrations.thirdParty.actions.remove')}
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </Collapsible>
+      </IntegrationCatalogCard>
     );
   };
 

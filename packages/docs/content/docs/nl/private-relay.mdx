@@ -1,0 +1,44 @@
+---
+title: Privérelay
+description: Bereik uw OpenChamber-server overal via een end-to-endversleutelde relay, zonder poorten of tunnels in te stellen.
+---
+
+# Privérelay
+
+Met de OpenChamber-privérelay bereiken gekoppelde apparaten uw server overal: via mobiel internet, vanuit een café of vanuit een andere stad. U hoeft geen poorten open te zetten, tunnel in te richten of computer openbaar bereikbaar te maken. Kies bij [Een apparaat verbinden](/nl/connect-devices/) gewoon **Overal**. De rest wordt automatisch geregeld.
+
+## Hoe werkt het?
+
+Uw server maakt een uitgaande verbinding met de relayinfrastructuur van OpenChamber en houdt die open. Wanneer een apparaat buiten uw netwerk is, verbindt het ook met de relay. Die stuurt versleuteld verkeer tussen beide door. Op uw computer hoeft niets te luisteren naar inkomende internetverbindingen.
+
+Als een directe verbinding beschikbaar is, bijvoorbeeld wanneer u weer op dezelfde wifi zit, gebruiken uw apparaten die bij voorkeur en wordt de relay helemaal overgeslagen.
+
+## Wat kan de relay wel en niet zien?
+
+De relay stuurt verkeer door zonder de inhoud te kunnen lezen:
+
+- **End-to-endversleuteling.** Uw apparaat en server spreken rechtstreeks encryptiesleutels af. De relay stuurt versleuteld verkeer door zonder de sleutels en kan uw code, prompts of wachtwoorden niet lezen.
+- **Alleen uw apparaten kunnen verbinden.** Een apparaat moet een token hebben dat *uw* server via [eenmalige koppeling](/nl/connect-devices/) heeft uitgegeven. Niemand kan uw server via de relay ontdekken of zonder een door u aangemaakt token verbinden. U kunt elk token op ieder moment intrekken.
+- **Koppelingslinks zijn eenmalig.** Een QR-code werkt precies één keer en verloopt als ze ongebruikt blijft. Een oude uitgelekte link is dus waardeloos.
+- **Pas na uw keuze wordt de relay gebruikt.** De relay blijft uit totdat u die inschakelt of er een apparaat mee koppelt. U kunt hem altijd uitschakelen; verbindingen via de relay worden dan direct verbroken.
+
+## Wanneer draait de relay?
+
+De relay start en stopt zelfstandig:
+
+- **Start wanneer nodig.** Een koppeling met **Overal** schakelt de relay in. Na een herstart komt die terug zolang er nog een gekoppeld apparaat van afhankelijk is.
+- **Stopt vanzelf.** Zodra geen apparaat of nog niet gebruikte koppeling de relay nodig heeft, bijvoorbeeld nadat u de laatste toegang via de relay intrekt, wordt die automatisch gestopt.
+
+Bij **Instellingen → Remote-instanties → OpenChamber Relay** ziet u de actuele status, zoals Verbonden of Opnieuw verbinden, en het aantal verbonden apparaten. Met **Uitschakelen** trekt u de relaytoegang direct in. Apparaten op uw lokale netwerk blijven verbonden.
+
+## Relay of tunnel?
+
+- Gebruik de **relay** voor toegang tot uw eigen server vanaf uw eigen gekoppelde apparaten. Er is niets in te richten en niets wordt openbaar bereikbaar.
+- Gebruik een [tunnel](/nl/tunnels/) als u een gewone **openbare URL** nodig hebt, bijvoorbeeld voor een browser op een computer die u niet kunt koppelen of om toegang te delen achter een [interfacewachtwoord](/nl/security/).
+
+## Zie ook
+
+- [Een apparaat verbinden](/nl/connect-devices/) met een eenmalige QR-code
+- [Mobiele apps](/nl/mobile/) voor iOS en Android
+- [Beveiliging](/nl/security/) voor wachtwoorden, passkeys en netwerktoegang
+- [Toegang op afstand](/nl/troubleshooting/remote-access/) als verbinden niet lukt

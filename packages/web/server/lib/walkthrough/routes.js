@@ -1,3 +1,9 @@
+import { z } from 'zod';
+import { parseSource } from './sources.js';
+
+// The composer's provider, which the model stays on; anything else is no provider.
+const providerIdSchema = z.string().trim().min(1).max(200).optional().catch(undefined);
+
 // `req.destroyed` is true for every healthy request once the body parser has
 // consumed the stream, so using it as a disconnect check silently swallows every
 // response. The response socket is the one that actually reflects whether the
@@ -41,6 +47,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
           directory,
           source: readSource(req.query.source),
           model: typeof req.query.model === 'string' ? req.query.model : undefined,
+          providerID: providerIdSchema.parse(req.query.providerID),
           language: typeof req.query.language === 'string' ? req.query.language : undefined,
         },
         { getPullRequestDiff },
@@ -51,6 +58,43 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
     }
   });
 
+  // The comparison view needs the complete published patch, without model
+  // readiness checks, generated-file filtering, or local working-tree reads.
+  app.get('/api/walkthrough/pr-diff', async (req, res) => {
+    try {
+      const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+      const directory = query.get('directory')?.trim() ?? '';
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      const source = parseSource(readSource(query.get('source')));
+      if (source.kind !== 'pr') return res.status(400).json({ error: 'A pull request source is required' });
+      const { getPullRequestDiff } = await getWalkthroughService();
+      const { patch } = await getPullRequestDiff(directory, source.number, source.sourceRepo, { allowEmpty: true });
+      res.type('text/plain').send(patch);
+    } catch (error) {
+      respondWithError(res, error, 'Failed to load pull request diff');
+    }
+  });
+
+  // One file, both sides, straight from GitHub: the comparison view expands
+  // collapsed context on demand without touching the working tree.
+  app.get('/api/walkthrough/pr-file', async (req, res) => {
+    try {
+      const query = new URL(req.originalUrl, 'http://localhost').searchParams;
+      const directory = query.get('directory')?.trim() ?? '';
+      if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
+      const source = parseSource(readSource(query.get('source')));
+      if (source.kind !== 'pr') return res.status(400).json({ error: 'A pull request source is required' });
+      const path = query.get('path')?.trim() ?? '';
+      if (!path) return res.status(400).json({ error: 'path parameter is required' });
+      const previousPath = query.get('previousPath')?.trim() || undefined;
+      const status = query.get('status') ?? 'M';
+      const { getPullRequestFileContents } = await getWalkthroughService();
+      res.json(await getPullRequestFileContents(directory, source.number, source.sourceRepo, { path, previousPath, status }));
+    } catch (error) {
+      respondWithError(res, error, 'Failed to load pull request file');
+    }
+  });
+
   // Deliberately not aborted when the client disconnects: generation runs for
   // minutes and a refresh must not throw the work away. Leaving detaches the
   // client; the job finishes and caches its result. Stopping is an explicit
@@ -58,7 +102,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
   app.post('/api/walkthrough/generate', async (req, res) => {
     try {
       const { generateWalkthrough, getPullRequestDiff } = await getWalkthroughService();
-      const { directory, source, force, model, language } = req.body || {};
+      const { directory, source, force, model, providerID, language } = req.body || {};
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory is required' });
       }
@@ -69,6 +113,7 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
           source,
           force: force === true,
           model: typeof model === 'string' ? model : undefined,
+          providerID: providerIdSchema.parse(providerID),
           language: typeof language === 'string' ? language : undefined,
         },
         { getPullRequestDiff },

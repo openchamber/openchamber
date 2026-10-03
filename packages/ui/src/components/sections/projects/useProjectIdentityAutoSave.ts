@@ -14,6 +14,7 @@ export const useProjectIdentityAutoSave = (
 ) => {
   const { t } = useI18n();
   const {
+    projectId,
     hasChanges,
     name,
     icon,
@@ -28,9 +29,20 @@ export const useProjectIdentityAutoSave = (
   } = form;
 
   const isSavingRef = React.useRef(false);
+  // What was last handed to `onSave` for this project. The store may keep a
+  // value the form cannot match (a variant a caller does not persist, a hex
+  // color the store normalizes away), so `hasChanges` alone would schedule
+  // the same save every 450 ms for as long as the form stays open.
+  const lastSavedRef = React.useRef<{ projectId: string | null; data: string } | null>(null);
 
   React.useEffect(() => {
-    if (!hasChanges || !name.trim() || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
+    if (!hasChanges) {
+      // The store matches the form again, so whatever is typed next is a
+      // new change even if it repeats an earlier value.
+      lastSavedRef.current = null;
+      return;
+    }
+    if (!name.trim() || isUploadingIcon || isRemovingCustomIcon || isSavingRef.current) {
       return;
     }
 
@@ -43,8 +55,14 @@ export const useProjectIdentityAutoSave = (
         try {
           const data = await prepareSaveData({ silent: true });
           if (data) {
+            const serialized = JSON.stringify(data);
+            const lastSaved = lastSavedRef.current;
+            if (lastSaved && lastSaved.projectId === projectId && lastSaved.data === serialized) {
+              return;
+            }
             try {
               await onSave(data);
+              lastSavedRef.current = { projectId, data: serialized };
             } catch {
               toast.error(t('settings.projects.page.toast.saveFailed'));
             }
@@ -71,6 +89,7 @@ export const useProjectIdentityAutoSave = (
     pendingRemoveImageIcon,
     pendingUploadIconFile,
     prepareSaveData,
+    projectId,
     t,
   ]);
 };

@@ -90,6 +90,21 @@ const createTestRuntime = ({ entries, files, stats }) => createThemeRuntime({
 
 describe('theme runtime', () => {
   describe('readCustomThemesFromDisk', () => {
+    it('loads compact authored roles without requiring derived colors', async () => {
+      const theme = validTheme('compact');
+      theme.colors.primary = { base: '#ffffff' };
+      theme.colors.interactive = { border: '#444444' };
+      theme.colors.status = { error: '#ff0000', warning: '#ffaa00', success: '#00ff00', info: '#0000ff' };
+      delete theme.colors.syntax.highlights;
+      delete theme.colors.syntax.base.background;
+      delete theme.colors.syntax.base.foreground;
+      const runtime = createTestRuntime({
+        entries: [fileEntry('compact.json'), fileEntry('bad.json')],
+        files: { '/themes/compact.json': JSON.stringify(theme), '/themes/bad.json': '{broken' },
+        stats: { '/themes/compact.json': { isFile: () => true, size: 1024 }, '/themes/bad.json': { isFile: () => true, size: 10 } },
+      });
+      expect((await runtime.readCustomThemesFromDisk()).map((item) => item.metadata.id)).toEqual(['compact']);
+    });
     it('loads valid theme files', async () => {
       const runtime = createTestRuntime({
         entries: [fileEntry('direct.json')],

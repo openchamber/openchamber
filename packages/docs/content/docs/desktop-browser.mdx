@@ -43,6 +43,10 @@ The browser actions are the **OpenChamber Web tool**, which can be turned on and
 
 This needs the desktop app: a page shown in a web browser tab cannot be driven.
 
+### Browser provider
+
+An extension can stand in for the desktop app here. One that declares a browser provider runs its own browser on the OpenChamber server and answers the same actions, so an agent can browse when no desktop app is open, for instance on a remote server. Pick it under **Settings → General → OpenChamber Tools → Browser provider**; with no such extension installed the dropdown shows only "OpenChamber Web" and is disabled. The choice applies to the next browser action. If that extension is paused or removed, OpenChamber Web is used again and a toast tells you. Extension authors: see `GUEST_SERVICES.md` in the SDK package.
+
 ## Size and appearance
 
 Press the phone button to open the device bar. Pick a preset or type a width and

@@ -4,7 +4,10 @@
  * What the agent has learned and chose to keep, in two scopes:
  *
  * - **project** — `<projectsDir>/<projectId>/memory.json`. How this codebase
- *   works, what was decided, where things live.
+ *   works, what was decided, where things live. `<projectId>` is the bounded
+ *   stem `projectConfigFileStemOf` gives the id (the id itself up to 200
+ *   characters, `path_sha256_<digest>` beyond), the same folder that holds
+ *   `project-context`'s `context.json` and sits beside the config file.
  * - **global** — `<userConfigRoot>/memory.json`. Who the user is and how they
  *   want to be worked with. It belongs to no project, so it cannot live under
  *   one.
@@ -51,6 +54,7 @@ const PROJECT_MEMORY_MAX_ITEMS = 200;
  */
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
+import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { findThreatPattern } from './threat-patterns.js';
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
@@ -211,7 +215,8 @@ export const createAgentMemoryRuntime = (deps) => {
       return {
         scope: 'project',
         key: `project:${projectId}`,
-        filePath: path.join(projectsDirPath, projectId, 'memory.json'),
+        // Same bounded folder name as `project-context` and the config file.
+        filePath: path.join(projectsDirPath, projectConfigFileStemOf(projectId), 'memory.json'),
       };
     }
     throw new Error('scope is required');

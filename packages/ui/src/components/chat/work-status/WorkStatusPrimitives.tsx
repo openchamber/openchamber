@@ -34,10 +34,10 @@ export const WorkStatusSection: React.FC<{
   children: React.ReactNode;
 }> = ({ title, summary, children }) => (
   <section className={SECTION_CLASS}>
-    <div className="mb-0.5 flex items-center gap-2 px-1">
+    <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
       <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{title}</h3>
       {summary !== undefined && summary !== null ? (
-        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
+        <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
       ) : null}
     </div>
     {children}
@@ -66,8 +66,10 @@ export const WorkStatusCollapsibleSection: React.FC<{
   /** An independent header action, such as refreshing this section's data. */
   action?: React.ReactNode;
   defaultExpanded?: boolean;
+  /** Optional preview that stays below the heading while the section is folded. */
+  collapsedContent?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, children }) => {
+}> = ({ id, title, icon, iconNode, iconColor, summary, action, defaultExpanded = false, collapsedContent, children }) => {
   const stored = useUIStore(
     React.useCallback((state) => state.workStatusExpandedSections[id], [id]),
   );
@@ -75,7 +77,7 @@ export const WorkStatusCollapsibleSection: React.FC<{
   const expanded = stored ?? defaultExpanded;
   return (
     <section className={SECTION_CLASS}>
-      <div className="mb-0.5 flex h-6 items-center gap-1">
+      <div data-work-status-heading className="mb-0.5 flex h-6 items-center gap-1">
         <button
           type="button"
           aria-expanded={expanded}
@@ -102,12 +104,12 @@ export const WorkStatusCollapsibleSection: React.FC<{
           />
           <span className="flex-1" />
           {summary !== undefined && summary !== null ? (
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{summary}</span>
+            <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
           ) : null}
         </button>
         {action}
       </div>
-      {expanded ? children : null}
+      {expanded ? children : collapsedContent}
     </section>
   );
 };
@@ -140,6 +142,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   ariaLabel,
   className,
 }) => {
+  const labelId = React.useId();
   const body = (
     <>
       {leading ?? (icon ? (
@@ -149,7 +152,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
           style={iconColor ? { color: iconColor } : undefined}
         />
       ) : null)}
-      <span className={cn('min-w-0 flex-1 truncate text-[13px]', muted && 'text-muted-foreground')}>
+      <span id={labelId} className={cn('min-w-0 flex-1 truncate text-[13px]', muted && 'text-muted-foreground')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (
@@ -165,15 +168,23 @@ export const WorkStatusRow: React.FC<RowProps> = ({
 
   if (!onClick) return <div className={shared}>{body}</div>;
 
+  // A button cannot hold another one, and rows often carry their own (unpin,
+  // a row action). The row's button is stretched under the content instead:
+  // the whole row still answers a press, and controls inside it sit above.
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      className={cn(shared, 'transition-colors hover:text-foreground')}
-    >
-      {body}
-    </button>
+    <div className={cn(shared, 'relative transition-colors hover:text-foreground')}>
+      <button
+        type="button"
+        onClick={onClick}
+        // The label no longer sits inside the button, so it names it here.
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : labelId}
+        className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]"
+      />
+      <div className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2 [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
+        {body}
+      </div>
+    </div>
   );
 };
 

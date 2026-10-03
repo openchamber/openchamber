@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { Message } from '@opencode-ai/sdk/v2/client';
 import { switchRuntimeEndpoint } from './runtime-switch';
 
 import {
@@ -8,7 +7,6 @@ import {
   releaseAutoReviewForward,
   hasFinalReviewMarker,
   isAutoReviewRuntimeCurrent,
-  isExpectedAutoReviewAssistantParent,
   stripFinalReviewMarker,
 } from './reviewFlow';
 import type { AutoReviewRun } from '@/stores/useAutoReviewStore';
@@ -37,15 +35,6 @@ describe('reviewFlow auto-review helpers', () => {
 
     expect(hasFinalReviewMarker(text)).toBe(false);
     expect(stripFinalReviewMarker(text)).toBe(text);
-  });
-
-  test('requires assistant parent to match the auto-sent user message when provided', () => {
-    const matching = { id: 'msg_assistant_1', parentID: 'msg_user_auto' } as Message;
-    const unrelated = { id: 'msg_assistant_2', parentID: 'msg_user_manual' } as Message;
-
-    expect(isExpectedAutoReviewAssistantParent(matching, 'msg_user_auto')).toBe(true);
-    expect(isExpectedAutoReviewAssistantParent(unrelated, 'msg_user_auto')).toBe(false);
-    expect(isExpectedAutoReviewAssistantParent(unrelated)).toBe(true);
   });
 
   test('runtime guard rejects runs from a stale runtime', () => {

@@ -1,0 +1,49 @@
+---
+title: Chats
+description: Conversaciones sin más con el agente, fuera de cualquier proyecto.
+---
+
+# Chats
+
+Un chat es una conversación sin más con el agente, fuera de cualquier proyecto. Úsalo para cosas que no tienen nada que ver con tus bases de código: cómo parchear KDE para FreeBSD, qué hace una expresión regular, el borrador de un correo. El agente trabaja en una carpeta desechable, sin repositorio, sin rama y sin que el contexto de tus proyectos cargue la conversación.
+
+## Empezar un chat
+
+Lo más directo es el **+** de la sección **Chats** en la barra lateral. En el teléfono, toca **Nuevo chat** arriba de la lista de sesiones o **+** en Chats.
+
+**Mod+N** (Cmd+N en macOS, Ctrl+N en otros sistemas) y **Nueva sesión** en la paleta de comandos abren una sesión nueva del lado que usaste por última vez: un chat si tu última sesión nueva fue un chat, y si no, tu proyecto. Puedes cambiarla a Chats antes de enviar el primer mensaje.
+
+## Dónde viven los chats
+
+Los chats tienen su propia sección arriba de la barra lateral, encima de [En curso](/es/sessions-in-work/) y de tus proyectos. Se ordenan como las demás sesiones, primero la actividad más reciente, y los chats fijados se quedan arriba. En el modo Timeline la sección muestra los tres chats más recientes; **Mostrar más sesiones** carga el resto. La sección se pliega como cualquier otra.
+
+En el teléfono, los chats están encima de la lista de proyectos en el panel de sesiones.
+
+## Qué puede hacer un chat y qué no
+
+Cada chat tiene su propia carpeta vacía, así que el agente igualmente puede crear y editar archivos ahí: un script, un prototipo rápido, un documento convertido. Lo que un chat no tiene:
+
+- estado de git, ramas ni worktrees
+- pasar a en curso: los chats nunca aparecen en [En curso](/es/sessions-in-work/)
+- implementar un plan en una sesión nueva
+- empezar desde una issue de Linear
+
+Las notas, tareas y planes funcionan. Todos los chats comparten un mismo conjunto, separado de tus proyectos.
+
+Un chat sigue siendo un chat. No hay forma de mover un chat terminado a un proyecto; si una conversación se convierte en trabajo de verdad, empieza una sesión en el proyecto y llévate lo útil.
+
+## Archivar y eliminar
+
+Archiva un chat para ocultarlo de la lista. Elimínalo para borrarlo para siempre, junto con su carpeta, en cuanto ninguna otra sesión (un fork o un subagente) use esa carpeta.
+
+## Dónde están las carpetas
+
+Las carpetas de los chats están en `~/.config/openchamber/chats`, una carpeta con fecha por día. Si moviste los datos de OpenChamber con `OPENCHAMBER_DATA_DIR`, están en esa carpeta. Para guardar los chats en otro sitio, define `OPENCHAMBER_CHATS_DIR`; consulta [Variables de entorno](/es/environment/). Importa cuando OpenCode se ejecuta como otro usuario y no puede leer tu carpeta personal.
+
+> VS Code no tiene chats. La extensión siempre trabaja en la carpeta que tienes abierta.
+
+## Relacionado
+
+- [Proyectos](/es/projects/): sesiones ligadas a una base de código
+- [Sesiones en curso](/es/sessions-in-work/): mantén el trabajo real a la vista
+- [Notas, tareas y planes](/es/notes-todos-plans/): notas que también funcionan en los chats

@@ -1,0 +1,115 @@
+---
+title: Classificatieproviders en Jev
+description: Stel Jev in, het kleine classificatiemodel dat beslissingen neemt voor verschillende functies in OpenChamber.
+---
+
+# Classificatieproviders en Jev
+
+Sommige functies in OpenChamber moeten eerst een korte afweging maken: is deze opdracht riskant, wat voor taak beschrijft deze prompt, is de gebruiker net met echt werk begonnen? Jev, een klein beslismodel van TypeSafe, beantwoordt die vragen. Op deze pagina stelt u toegang tot Jev in.
+
+Jev schrijft nooit code en antwoordt niet in uw chat. Het geeft alleen een oordeel terug, waarop OpenChamber handelt. OpenChamber wacht maximaal vier seconden op een antwoord.
+
+## Welke functies gebruiken Jev?
+
+| Functie | De vraag die Jev beantwoordt |
+| --- | --- |
+| [Toestemmingen en vangnet](/nl/permissions/) | Moet de agent u om toestemming vragen voordat deze actie wordt uitgevoerd? |
+| [Automatische modelkeuze](/nl/auto-model-routing/) | In welke van uw categorieën past deze prompt? |
+| [Sessies in uitvoering](/nl/sessions-in-work/) | Hebt u net om echt werk gevraagd? Lijkt deze beurt het einde daarvan? |
+| [Sessiesamenvatting en berichtsuggestie](/nl/sessions-in-work/#samenvatting-en-suggestie-voor-het-volgende-bericht) | Is het zinvol om na deze beurt een samenvatting of een volgend bericht voor te stellen? |
+
+Zonder provider zijn het vangnet en Auto verborgen. Sessies worden dan alleen naar In bewerking verplaatst als u dat zelf doet. Samenvattingen en suggesties blijven werken, maar zonder dit filter.
+
+## Instellen
+
+Jev staat uit totdat u het inschakelt. Er gaat niets uit uw gesprekken naar een classificatieprovider voordat u er een kiest. Open **Instellingen → Providers → Classificatieproviders** en kies waar Jev-verzoeken naartoe gaan. Naast **Uit** zijn er zes opties.
+
+### OpenCode Zen-actie
+
+Tijdelijk gratis, zonder sleutel. Tijdens de actie laat OpenCode OpenChamber kosteloos gebruikmaken van Jev via OpenCode Zen.
+
+Als de actie eindigt, verdwijnt deze optie en schakelt OpenChamber over op een van de onderstaande sleutels, als u die hebt.
+
+### OpenCode Zen-sleutel
+
+Deze optie gebruikt de Zen API-sleutel die in OpenCode is opgeslagen. De kosten worden van uw Zen-saldo afgeschreven.
+
+1. Open **Instellingen → Providers** en voeg een API-sleutel toe aan **OpenCode Zen**. Zie [Providers, modellen en agents](/nl/providers/).
+2. Ga terug naar **Classificatieproviders** en kies **OpenCode Zen-sleutel**.
+
+Aanmelden met een OpenCode-account is niet genoeg. Voor Jev accepteert Zen alleen een API-sleutel.
+
+### OpenRouter-sleutel
+
+Deze optie gebruikt de OpenRouter API-sleutel uit OpenCode. De kosten komen op uw OpenRouter-account. Als u al OpenRouter-modellen in OpenCode gebruikt, hoeft u niets extra in te stellen. Een sleutel in de omgevingsvariabele `OPENROUTER_API_KEY` werkt ook. Als beide aanwezig zijn, krijgt de opgeslagen sleutel in OpenCode voorrang.
+
+1. Open **Instellingen → Providers** en voeg een API-sleutel toe aan **OpenRouter**.
+2. Ga terug naar **Classificatieproviders** en kies **OpenRouter-sleutel**.
+
+### Vercel AI Gateway-sleutel
+
+Deze optie gebruikt de AI Gateway API-sleutel uit OpenCode. De kosten komen op uw Vercel-account. Een sleutel in de omgevingsvariabele `AI_GATEWAY_API_KEY` werkt ook. Als beide aanwezig zijn, krijgt de opgeslagen sleutel in OpenCode voorrang.
+
+1. Open **Instellingen → Providers** en voeg een API-sleutel toe aan **Vercel AI Gateway**.
+2. Ga terug naar **Classificatieproviders** en kies **Vercel AI Gateway-sleutel**.
+
+### TypeSafe API-sleutel
+
+Hiermee gebruikt u uw eigen TypeSafe-sleutel en gebruikslimiet.
+
+1. Vraag een API-sleutel aan bij [TypeSafe](https://docs.typesafe.ai).
+2. Plak die in het veld **TypeSafe API-sleutel** en klik op **Opslaan**.
+
+Door een sleutel op te slaan selecteert u deze meteen. De sleutel blijft in een eigen bestand op de OpenChamber-server en wordt nooit naar de browser gestuurd.
+
+### Aangepast adres
+
+Elke dienst die de System One API van TypeSafe ondersteunt, zoals een zelfgehoste gateway, een bedrijfsproxy of een provider die hier niet vermeld staat.
+
+1. Vul onder **Aangepast adres** de **Endpoint-URL** en het **Model** in, bijvoorbeeld `jev-latest`.
+2. Voeg een **API-sleutel** toe als de dienst die vereist. Deze wordt als `Bearer`-token verstuurd.
+3. Klik op **Opslaan**.
+
+U kunt de volledige URL met `/v1/systemone` aan het einde plakken, een OpenAI-achtige basis-URL met `/v1`, of de hoofd-URL van de API, zoals `https://api.typesafe.ai`. OpenChamber vult het ontbrekende deel aan en toont het exacte adres dat wordt aangeroepen. Alleen `http` en `https` worden ondersteund. De sleutel hoort in het eigen veld, nooit in de URL.
+
+Opslaan selecteert ook het adres. Net als de TypeSafe-sleutel blijven het adres en de bijbehorende sleutel in een eigen bestand op de OpenChamber-server. De sleutel wordt nooit naar de browser gestuurd.
+
+Een server kan het adres ook uit omgevingsvariabelen halen. Dat is handig als u OpenChamber voor een team inricht:
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # optional, this is the default
+OPENCHAMBER_JEV_API_KEY=...             # optional
+```
+
+Zet op beheerde laptops hetzelfde adres onder `jev` in het [beleidsbestand op de computer](/nl/security/#een-beleidsbestand-op-de-computer). Dat krijgt voorrang op de omgevingsvariabelen.
+
+In beide gevallen vervangt dit het adres uit Instellingen. Het verschijnt daar wel, maar kan niet worden bewerkt. In [enterprise-modus](/nl/security/#enterprise-modus) is dit naast **Uit** de enige toegestane Jev-bron en wordt deze standaard geselecteerd.
+
+De kaart bij **Instellingen → Providers** toont **Gereed** zodra een provider werkt.
+
+## Als uw keuze niet meer werkt
+
+Kan de gekozen provider niet worden gebruikt, bijvoorbeeld omdat de actie is afgelopen of een sleutel is verwijderd, dan kiest OpenChamber de eerste bruikbare eigen optie in deze volgorde: TypeSafe-sleutel, uw aangepaste adres, OpenRouter, Vercel AI Gateway en Zen-sleutel. Het valt nooit terug op de actie, en **Uit** blijft uit. De pagina laat zien welke provider momenteel wordt gebruikt.
+
+Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie heeft daarvoor een veilige terugval:
+
+- Het vangnet laat de actie op uw beslissing wachten.
+- Auto stuurt de prompt naar uw terugvalmodel.
+- Sessies in uitvoering blijven waar ze zijn.
+- De samenvatting en suggestie worden gegenereerd alsof Jev niet beschikbaar is.
+
+## Wat krijgt Jev te zien?
+
+Jev ontvangt korte fragmenten uit uw gesprek: uw laatste bericht en, ter context, maximaal drie eerdere beurten, elk ingekort tot de eerste paar honderd tekens. Voor het vangnet ontvangt het ook de te beoordelen actie zoals OpenCode die beschrijft: de opdracht die de agent wil uitvoeren, of het bestand en de wijziging bij een bewerking. Het krijgt nooit volledige bestanden of afbeeldingen.
+
+Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe of uw aangepaste adres, afhankelijk van uw keuze.
+
+## Waar werkt het?
+
+Jev draait op de OpenChamber-server. Het werkt dus in de desktopapp, de webapp en op een telefoon die daarmee verbonden is. De VS Code-extensie communiceert rechtstreeks met OpenCode en heeft geen Jev: er is geen vangnet of Auto, en sessies worden alleen handmatig naar In bewerking verplaatst.
+
+## Zie ook
+
+- [Providers, modellen en agents](/nl/providers/) voor de sleutels van OpenCode Zen, OpenRouter en Vercel AI Gateway
+- [Beveiliging](/nl/security/) voor de omgang met sleutels en toegang

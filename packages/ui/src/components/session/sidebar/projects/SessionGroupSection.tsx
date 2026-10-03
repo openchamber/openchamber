@@ -1,16 +1,14 @@
+import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
+import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
 import React from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useShallow } from 'zustand/react/shallow';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 // Archived buckets routinely grow into the hundreds/thousands; virtualize
 // when we cross this row count so the DOM stays bounded.
-const ARCHIVED_VIRTUALIZE_THRESHOLD = 50;
-// Compact rows in the archived bucket without nested subagents render
-// around 24-32px; virtua measures mounted rows and uses this as the initial hint.
-const ARCHIVED_ROW_ESTIMATE_PX = 28;
 const EMPTY_FOLDERS: readonly never[] = [];
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { getPrStatusLabel } from '../prStatusLabel';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -35,7 +33,11 @@ import {
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
-import { getGitHubPrStatusKey, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getGitHubPrStatusKey, useLinkedIssueStates, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
+import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
+import { openExternalUrl } from '@/lib/url';
+import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from '../sessions/SidebarRefLinks';
 import { useI18n } from '@/lib/i18n';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { canRequestNativeDirectoryAccess, requestDirectoryAccess } from '@/lib/desktop';
@@ -43,6 +45,13 @@ import { CollapsedSessionActivityIndicator } from '../sessions/collapsedActivity
 import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { SessionTreeItem, type SessionTreeItemProps } from '../sessions/SessionTreeItem';
 import { FolderDeleteConfirmDialog } from '../shell/ConfirmDialogs';
+import { getSessionFolderOwnerKey } from '../sessions/sessionFolderIdentity';
+import { SpaceActionsMenu } from '@/components/session/spaces/SpaceActions';
+import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
+import type { WorktreeMetadata } from '@/types/worktree';
+import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -57,6 +66,7 @@ export type SessionGroupSectionProps = {
   groupKey: string;
   projectId?: string | null;
   hideGroupLabel?: boolean;
+  renderBody?: boolean;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -71,14 +81,14 @@ export type SessionGroupSectionProps = {
   activeProjectId: string | null;
   setActiveProjectIdOnly: (id: string) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   pinnedSessionIds: Set<string>;
   sessionOrderIndex: Map<string, number>;
   notifyOnSubtasks: boolean;
   expandedParents: Set<string>;
   editingId: string | null;
+  editingRowKey: string | null;
   editTitle: string;
-  copiedSessionId: string | null;
   openSidebarMenuKey: string | null;
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
@@ -89,26 +99,23 @@ export type SessionGroupSectionProps = {
    * ancestor synchronously and skip the getComputedStyle walk on every
    * render of an expanded archived bucket.
    */
-  scrollContainerRef?: React.RefObject<HTMLElement | null>;
   folderRename: { scopeKey: string; folderId: string; draft: string } | null;
   setFolderRenameDraft: (draft: string) => void;
   clearFolderRename: () => void;
 } & Pick<SessionTreeItemProps,
   | 'setEditingId'
+  | 'setEditingRowKey'
   | 'setEditTitle'
   | 'toggleParent'
   | 'setOpenSidebarMenuKey'
   | 'allowReselect'
   | 'onSessionSelected'
-  | 'isSessionSearchOpen'
-  | 'sessionSearchQuery'
-  | 'setSessionSearchQuery'
-  | 'setIsSessionSearchOpen'
+  | 'resetSessionSearch'
   | 'deleteSessionConfirm'
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
-  | 'setCopiedSessionId'
   | 'startSessionWorktreeMenuLoad'
+  | 'onEditProject'
 >;
 
 const CollapsedFolderActivity: React.FC<{
@@ -203,11 +210,8 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && (groupContainsSessionId(next.group, prev.editingId) || groupContainsSessionId(next.group, next.editingId))) {
     return false;
   }
+  if (prev.editingRowKey !== next.editingRowKey) return false;
   if (prev.editTitle !== next.editTitle && groupContainsSessionId(next.group, next.editingId)) return false;
-  if (prev.copiedSessionId !== next.copiedSessionId
-    && (groupContainsSessionId(next.group, prev.copiedSessionId) || groupContainsSessionId(next.group, next.copiedSessionId))) {
-    return false;
-  }
   if (prev.openSidebarMenuKey !== next.openSidebarMenuKey) {
     const archived = next.group.isArchivedBucket === true;
     const previousMenuSessionId = resolveMenuOpenSessionId(next.group.sessions, prev.openSidebarMenuKey, 'project', archived);
@@ -238,27 +242,74 @@ const areGroupPropsEqual = (prev: SessionGroupSectionProps, next: SessionGroupSe
     && prev.openNewSessionDraft === next.openNewSessionDraft
     && prev.onToggleCollapsedGroup === next.onToggleCollapsedGroup
     && prev.dragHandleProps === next.dragHandleProps
-    && prev.scrollContainerRef === next.scrollContainerRef
+    && prev.renderBody === next.renderBody
     && prev.notifyOnSubtasks === next.notifyOnSubtasks
     && prev.setEditingId === next.setEditingId
+    && prev.setEditingRowKey === next.setEditingRowKey
     && prev.setEditTitle === next.setEditTitle
     && prev.toggleParent === next.toggleParent
     && prev.setOpenSidebarMenuKey === next.setOpenSidebarMenuKey
     && prev.allowReselect === next.allowReselect
     && prev.onSessionSelected === next.onSessionSelected
-    && prev.isSessionSearchOpen === next.isSessionSearchOpen
-    && prev.sessionSearchQuery === next.sessionSearchQuery
-    && prev.setSessionSearchQuery === next.setSessionSearchQuery
-    && prev.setIsSessionSearchOpen === next.setIsSessionSearchOpen
+    && prev.resetSessionSearch === next.resetSessionSearch
     && prev.deleteSessionConfirm === next.deleteSessionConfirm
     && prev.setDeleteSessionConfirm === next.setDeleteSessionConfirm
     && prev.startFolderRename === next.startFolderRename
-    && prev.setCopiedSessionId === next.setCopiedSessionId
     && prev.startSessionWorktreeMenuLoad === next.startSessionWorktreeMenuLoad
     && prev.setFolderRenameDraft === next.setFolderRenameDraft
     && prev.clearFolderRename === next.clearFolderRename
   );
 };
+
+type WorktreeDeleteActionProps = {
+  label: string;
+  sessions: Session[];
+  worktree: WorktreeMetadata;
+};
+
+// Extracted so only this button re-renders when Shift is pressed/released,
+// instead of every mounted group section.
+const WorktreeDeleteAction = React.memo(function WorktreeDeleteAction({
+  label,
+  sessions,
+  worktree,
+}: WorktreeDeleteActionProps): React.ReactNode {
+  const { t } = useI18n();
+  const shiftHeld = useShiftKeyHeld();
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            sessionEvents.requestDelete({
+              sessions,
+              mode: 'worktree',
+              worktree,
+              skipDialogIfSafe: shiftHeld || event.shiftKey,
+            });
+          }}
+          className={cn(
+            'inline-flex h-6 w-6 items-center justify-center rounded-md hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            shiftHeld ? 'text-destructive' : 'text-muted-foreground',
+          )}
+          aria-label={shiftHeld
+            ? t('sessions.sidebar.group.actions.deleteGroupAndBranchAria', { label })
+            : t('sessions.sidebar.group.actions.deleteGroupAria', { label })}
+        >
+          <Icon name="delete-bin" className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={4}>
+        <p>{shiftHeld ? t('sessions.sidebar.group.actions.deleteWorktreeAndBranch') : t('sessions.sidebar.group.actions.deleteWorktree')}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+});
+
+const EMPTY_GROUP_ISSUES: readonly LinkedSidebarIssue[] = [];
 
 function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNode {
   const { t } = useI18n();
@@ -267,6 +318,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     groupKey,
     projectId,
     hideGroupLabel,
+    renderBody = true,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
@@ -288,12 +340,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     onToggleCollapsedGroup,
     dragHandleProps,
     compactBodyPadding = false,
-    scrollContainerRef,
     expandedParents,
     editingId,
+    editingRowKey,
     openSidebarMenuKey,
     editTitle,
-    copiedSessionId,
     folderRename,
     setFolderRenameDraft,
     clearFolderRename,
@@ -317,6 +368,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
+  const worktreeRemoving = useWorktreeRemoving(!group.isMain && group.worktree ? group.worktree.path : null);
   // PR state for the worktree sub-header (grouped display mode).
   const groupPrKey = React.useMemo(() => {
     if (group.isMain || group.isArchivedBucket || hideGroupLabel) return null;
@@ -326,6 +378,10 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   }, [group.branch, group.directory, group.isArchivedBucket, group.isMain, hideGroupLabel]);
   const groupPrSummary = usePrVisualSummary(groupPrKey);
   const groupPrColor = groupPrSummary ? `var(--pr-${groupPrSummary.visualState})` : undefined;
+  const groupPrStatusLabel = getPrStatusLabel(groupPrSummary, t);
+  const groupPrLabel = groupPrSummary
+    ? (groupPrStatusLabel ? `#${groupPrSummary.number} · ${groupPrStatusLabel}` : `#${groupPrSummary.number}`)
+    : undefined;
   const childStores = useChildStoreManager();
   const bootstrapDirectories = React.useMemo(() => {
     const directories = group.folderScopes?.map((scope) => normalizePath(scope.directory))
@@ -339,7 +395,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     ),
     React.useCallback(
       () => bootstrapDirectories.map((directory) => (
-        `${directory}\u0000${childStores.getBootstrapState(directory) ?? ''}\u0000${childStores.getBootstrapFailure(directory) ?? ''}`
+        `${directory}\u0000${childStores.getBootstrapState(directory) ?? ''}\u0000${childStores.getBootstrapFailure(directory) ?? ''}\u0000${childStores.getInitializationState(directory) ?? ''}\u0000${childStores.getInitializationFailure(directory) ?? ''}`
       )).join('\u0001'),
       [bootstrapDirectories, childStores],
     ),
@@ -350,10 +406,13 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     return state === 'queued' || state === 'running';
   });
   const failedBootstrapDirectory = bootstrapDirectories.find(
-    (directory) => childStores.getBootstrapState(directory) === 'failed',
+    (directory) => childStores.getBootstrapState(directory) === 'failed' || childStores.getInitializationState(directory) === 'failed',
   ) ?? null;
+  const sessionListFailed = failedBootstrapDirectory !== null && childStores.getBootstrapState(failedBootstrapDirectory) === 'failed';
   const bootstrapFailure = failedBootstrapDirectory
-    ? childStores.getBootstrapFailure(failedBootstrapDirectory)
+    ? sessionListFailed
+      ? childStores.getBootstrapFailure(failedBootstrapDirectory)
+      : childStores.getInitializationFailure(failedBootstrapDirectory)
     : undefined;
   const canGrantBootstrapAccess = bootstrapFailure === 'os-permission' && canRequestNativeDirectoryAccess();
   const [isRequestingBootstrapAccess, setIsRequestingBootstrapAccess] = React.useState(false);
@@ -388,6 +447,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
   );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
+  const folderOwnerKey = getSessionFolderOwnerKey(projectId, group.directory);
   // Merged flat groups list every contributing scope; single-scope groups
   // (archived buckets, VS Code workspaces) fall back to folderScopeKey.
   const folderScopes = React.useMemo<FolderScope[]>(() => {
@@ -448,7 +508,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   const effectiveEditingId = editingId;
   const effectiveOpenMenuKey = openSidebarMenuKey;
-  const effectiveExpandedParents = expandedParents;
 
   const sessionIdsInFolders = React.useMemo(() => new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds)), [allFoldersForGroup]);
   const ungroupedSessions = React.useMemo(() => sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id)), [sourceGroupNodes, sessionIdsInFolders]);
@@ -565,121 +624,6 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   // the shared ancestor scroller cannot expose an unmounted virtual tail.
   // Hooks below MUST stay above the search-empty early-return so they fire in
   // the same order every render — rules-of-hooks.
-  const shouldVirtualize = group.isArchivedBucket === true
-    && !hasSessionSearchQuery
-    && visibleSessions.length >= ARCHIVED_VIRTUALIZE_THRESHOLD;
-
-  // Check if any parent node is expanded - expanded parents render their
-  // children inline, making them much taller than the fixed estimate.
-  // When expanded parents exist, increase bufferSize to cover the extra height.
-  const bucketTag = group.isArchivedBucket ? 'archived' : 'active';
-  const hasExpandedParent = shouldVirtualize && visibleSessions.some((node) => {
-    if (node.children.length === 0) return false;
-    const expansionKey = `project:${bucketTag}:${node.session.id}`;
-    return effectiveExpandedParents.has(expansionKey);
-  });
-
-  const archivedVirtualContainerRef = React.useRef<HTMLDivElement | null>(null);
-  const [archivedScrollEl, setArchivedScrollEl] = React.useState<HTMLElement | null>(null);
-  // Offset of the virtual container from the scroll element's content origin.
-  // virtua reads startMargin from Virtualizer options and uses it
-  // to translate scrollTop into container-relative coordinates. Without this,
-  // when the scroll element is an ancestor (the sidebar's ScrollableOverlay),
-  // the virtualizer assumes the container starts at the top of the scroll
-  // element and renders rows in the wrong subset / position.
-  const [archivedScrollMargin, setArchivedScrollMargin] = React.useState(0);
-
-  // Resolve the scrolling ancestor. When the parent has threaded a
-  // `scrollContainerRef` (Layer 1.4), use it directly to skip the
-  // `getComputedStyle` walk on every render of an expanded archived
-  // bucket — the walk is one of the more expensive operations in the
-  // hot path because it forces a style recalc on every parent up the
-  // tree. Fall back to the legacy walk only when the ref is missing.
-  //
-  // We also still re-run when the archive flips between expanded/collapsed,
-  // and on a ResizeObserver-driven layout change of the container, so a
-  // dep-gated effect that only fires when shouldVirtualizeArchived flips
-  // would miss the eventual mount and leave the scroll element null.
-  const [, setLayoutVersion] = React.useState(0);
-  React.useEffect(() => {
-    if (!shouldVirtualize) return;
-    const container = archivedVirtualContainerRef.current;
-    if (!container) return;
-    if (!globalThis.ResizeObserver) return;
-    const ro = new ResizeObserver(() => setLayoutVersion((v) => v + 1));
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, [shouldVirtualize]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  React.useLayoutEffect(() => {
-    if (!shouldVirtualize) {
-      if (archivedScrollEl !== null) setArchivedScrollEl(null);
-      if (archivedScrollMargin !== 0) setArchivedScrollMargin(0);
-      return;
-    }
-    const container = archivedVirtualContainerRef.current;
-    if (!container) {
-      // Bucket still collapsed — body not mounted. We'll re-run on the
-      // render that mounts it.
-      return;
-    }
-    let scrollEl: HTMLElement | null = archivedScrollEl;
-    const providedScrollEl = scrollContainerRef?.current ?? null;
-    if (providedScrollEl && providedScrollEl.contains(container)) {
-      scrollEl = providedScrollEl;
-      if (scrollEl !== archivedScrollEl) {
-        setArchivedScrollEl(scrollEl);
-        return;
-      }
-    } else if (!scrollEl || !scrollEl.contains(container)) {
-      // Walk up to find the nearest scrolling ancestor. Only happens on
-      // first mount or if the DOM tree restructured.
-      let el: HTMLElement | null = container.parentElement;
-      while (el) {
-        const style = window.getComputedStyle(el);
-        if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-          scrollEl = el;
-          break;
-        }
-        el = el.parentElement;
-      }
-      if (scrollEl !== archivedScrollEl) {
-        setArchivedScrollEl(scrollEl);
-        return;
-      }
-    }
-    if (!scrollEl) return;
-    const offset = container.getBoundingClientRect().top
-      - scrollEl.getBoundingClientRect().top
-      + scrollEl.scrollTop;
-    setArchivedScrollMargin((prev) => (Math.abs(prev - offset) < 1 ? prev : offset));
-  });
-
-  // The scroll element is an ANCESTOR of this section (the sidebar's
-  // ScrollableOverlay), so scrollMargin translates its scrollTop into
-  // container-relative coordinates — the tanstack equivalent of virtua's
-  // startMargin this replaces.
-  // Enable ONLY once the ancestor scroll element is resolved. While the
-  // virtualizer is disabled the core resets its cached scroll offset, so the
-  // first enabled read takes initialOffset() from the LIVE scrollTop below —
-  // making the core's attach-time scrollTo target the current position (a
-  // visual no-op) instead of a stale 0 that reset the sidebar to the top.
-  // The core only learns the offset from scroll events after that, so this
-  // initial seeding is what makes the first render window correct too.
-  const virtualizerReady = shouldVirtualize && archivedScrollEl !== null;
-  const sessionVirtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
-    count: visibleSessions.length,
-    enabled: virtualizerReady,
-    getScrollElement: () => archivedScrollEl,
-    initialOffset: () => archivedScrollEl?.scrollTop ?? 0,
-    estimateSize: () => ARCHIVED_ROW_ESTIMATE_PX,
-    // Expanded parents render children inline and dwarf the row estimate;
-    // widen the window so their extra height stays covered.
-    overscan: hasExpandedParent ? 20 : 8,
-    scrollMargin: archivedScrollMargin,
-    getItemKey: (index) => visibleSessions[index]?.session.id ?? index,
-  });
 
   // Hooks below MUST stay above the search-empty early-return so they
   // fire in the same order every render — rules-of-hooks.
@@ -703,6 +647,38 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     () => collectGroupSessions(sourceGroupNodes),
     [collectGroupSessions, sourceGroupNodes],
   );
+
+  // A worktree without a branch PR shows the issues its sessions work on: a
+  // worktree started from an issue links it to its session, not to itself.
+  // A branch PR, once there, is what the header follows.
+  const groupIssues = React.useMemo(() => {
+    if (groupPrSummary || group.isMain || group.isArchivedBucket || hideGroupLabel) return EMPTY_GROUP_ISSUES;
+    const byKey = new Map<string, LinkedSidebarIssue>();
+    for (const session of allGroupSessions) {
+      for (const issue of getLinkedSidebarIssues(session)) {
+        if (!byKey.has(issue.key)) byKey.set(issue.key, issue);
+      }
+    }
+    return byKey.size > 0 ? [...byKey.values()] : EMPTY_GROUP_ISSUES;
+  }, [allGroupSessions, group.isArchivedBucket, group.isMain, groupPrSummary, hideGroupLabel]);
+  const groupIssueRefs = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+    [groupIssues],
+  );
+  const groupIssueStates = useLinkedIssueStates(groupIssueRefs);
+  const groupLinearIdentifiers = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+    [groupIssues],
+  );
+  const groupLinearStates = useLinearIssueStates(groupLinearIdentifiers);
+  const groupIssueItems = React.useMemo(
+    () => buildSessionIssueItems(groupIssues, groupIssueStates, groupLinearStates).map((item) => ({
+      ...item,
+      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
+    })),
+    [groupIssueStates, groupIssues, groupLinearStates, t],
+  );
+  const primaryGroupIssue = groupIssueItems[0] ?? null;
 
   // Precompute the per-folder "delete all sessions in folder" list once
   // per render. The previous design ran a recursive `collectFolderSessions`
@@ -758,7 +734,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
     const isFolderCollapsed = hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id);
     const item = (collapsedActivityState: ReturnType<typeof useCollapsedSessionActivityState>) => (
-      <DroppableFolderWrapper key={folder.id} folderId={folder.id}>
+      <DroppableFolderWrapper key={folder.id} folderId={folder.id} scopeKey={scopeKey} ownerKey={folderOwnerKey}>
         {(droppableRef, isDropTarget) => (
           <SessionFolderItem
             folder={folder}
@@ -834,29 +810,28 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               normalizedSessionSearchQuery={normalizedSessionSearchQuery}
               notifyOnSubtasks={notifyOnSubtasks}
               editingId={editingId}
+              editingRowKey={editingRowKey}
                editTitle={editTitle}
-               copiedSessionId={copiedSessionId}
               openSidebarMenuKey={openSidebarMenuKey}
               mobileVariant={mobileVariant}
               alwaysShowActions={alwaysShowActions}
               groupDirectory={scopeDirectory ?? group.directory}
               projectId={projectId}
+              folderOwnerKey={folderOwnerKey}
+              selectionScopeKey={folderOwnerKey}
               archivedBucket={group.isArchivedBucket === true}
               renderExtras={{ subtreeContainsEditing, menuOpenSessionId, nodeStructureKey: resolveNodeStructureKey(node), childRenderExtrasFor }}
               setEditingId={props.setEditingId}
+              setEditingRowKey={props.setEditingRowKey}
               setEditTitle={props.setEditTitle}
                toggleParent={props.toggleParent}
                setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
                allowReselect={props.allowReselect}
                onSessionSelected={props.onSessionSelected}
-               isSessionSearchOpen={props.isSessionSearchOpen}
-               sessionSearchQuery={props.sessionSearchQuery}
-               setSessionSearchQuery={props.setSessionSearchQuery}
-               setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+               resetSessionSearch={props.resetSessionSearch}
                deleteSessionConfirm={props.deleteSessionConfirm}
               setDeleteSessionConfirm={props.setDeleteSessionConfirm}
               startFolderRename={props.startFolderRename}
-              setCopiedSessionId={props.setCopiedSessionId}
               startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
              />)}
           </SessionFolderItem>
@@ -899,18 +874,66 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   };
   // Reserve room for the hover-revealed header actions (new draft + delete
   // worktree) so they never overlap the label / PR badge.
-  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  // The delete action leaves the header while git removes the worktree.
+  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree && !worktreeRemoving);
+  // git still registers this worktree but its directory is gone. The group
+  // stays so its sessions remain reachable (opening one relocates it); the
+  // icon tells the user why the folder is not there.
+  const worktreeMissingIndicator = group.worktree?.worktreeStatus === 'missing' ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center text-status-warning"
+      title={t('sessions.sidebar.group.worktreeMissing')}
+      aria-label={t('sessions.sidebar.group.worktreeMissing')}
+    >
+      <Icon name="alert" className="h-3 w-3" />
+    </span>
+  ) : null;
+  // The space did not answer the host's last read: its last known sessions stand in, and the
+  // user should know they may be old.
+  const spaceStaleIndicator = group.space && group.space.state !== 'complete' ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center text-status-warning"
+      title={t('sessions.sidebar.group.spaceStale')}
+      aria-label={t('sessions.sidebar.group.spaceStale')}
+    >
+      <Icon name="alert" className="h-3 w-3" />
+    </span>
+  ) : null;
+  // A space's group carries the grant dialog's key and its actions menu beside its new-draft button.
+  const hasSecondHeaderAction = hasWorktreeDeleteAction || Boolean(group.space);
+  const hasThirdHeaderAction = Boolean(group.space);
+  // Permanent actions take room; hover-revealed ones cross-fade over the
+  // header's right end (`oc-actions-mask`), so nothing moves. The reserve is
+  // how far they reach in past the 8px right padding: one 24px button 2px
+  // from the edge, the next ones 26px apart.
   const groupHeaderRightPadding = alwaysShowActions
-    ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
-    : (hasWorktreeDeleteAction
-        ? 'pr-2 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
-        : 'pr-2 group-hover/gh:pr-7 group-focus-within/gh:pr-7');
+    ? (hasThirdHeaderAction ? 'pr-20' : hasSecondHeaderAction ? 'pr-14' : 'pr-7')
+    : cn('pr-2', hasThirdHeaderAction
+        ? '[--oc-actions-reserve:68px]'
+        : hasSecondHeaderAction
+        ? '[--oc-actions-reserve:44px]'
+        : '[--oc-actions-reserve:18px]');
+  const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-focus-within/gh:oc-actions-mask';
+  const headerCoveredFadeClass = alwaysShowActions ? undefined : 'transition-opacity group-hover/gh:opacity-0 group-focus-within/gh:opacity-0';
+  // The leading icon cross-fades into the collapse chevron on hover.
+  const headerIconFadeClass = alwaysShowActions ? 'hidden' : 'transition-opacity group-hover/gh:opacity-0';
+  const headerChevronFadeClass = alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 transition-opacity group-hover/gh:opacity-100';
+  const groupPrLinks: SidebarRefLink[] = groupPrSummary && groupPrStatusLabel ? [{
+    key: `pr:${groupPrSummary.number}`,
+    icon: 'git-pull-request',
+    text: `#${groupPrSummary.number} · ${groupPrStatusLabel}`,
+    title: groupPrSummary.title,
+    color: groupPrColor,
+    url: groupPrSummary.url,
+  }] : [];
 
   const bootstrapFailureNotice = failedBootstrapDirectory ? (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {bootstrapFailure === 'os-permission'
         ? t('sessions.sidebar.group.empty.permissionDenied')
-        : t('sessions.sidebar.group.empty.loadFailed')}
+        : sessionListFailed
+          ? t('sessions.sidebar.group.empty.loadFailed')
+          : t('sessions.sidebar.group.empty.initializationFailed')}
       {canGrantBootstrapAccess ? (
         <Button
           variant="link"
@@ -942,38 +965,38 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     normalizedSessionSearchQuery={normalizedSessionSearchQuery}
     notifyOnSubtasks={notifyOnSubtasks}
     editingId={editingId}
+    editingRowKey={editingRowKey}
      editTitle={editTitle}
-     copiedSessionId={copiedSessionId}
     openSidebarMenuKey={openSidebarMenuKey}
     mobileVariant={mobileVariant}
     alwaysShowActions={alwaysShowActions}
     groupDirectory={group.directory}
     projectId={projectId}
+    folderOwnerKey={folderOwnerKey}
+    selectionScopeKey={folderOwnerKey}
     archivedBucket={group.isArchivedBucket === true}
     renderExtras={{ subtreeContainsEditing, menuOpenSessionId, nodeStructureKey: resolveNodeStructureKey(node), childRenderExtrasFor }}
     setEditingId={props.setEditingId}
+    setEditingRowKey={props.setEditingRowKey}
     setEditTitle={props.setEditTitle}
      toggleParent={props.toggleParent}
      setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
      allowReselect={props.allowReselect}
      onSessionSelected={props.onSessionSelected}
-     isSessionSearchOpen={props.isSessionSearchOpen}
-     sessionSearchQuery={props.sessionSearchQuery}
-     setSessionSearchQuery={props.setSessionSearchQuery}
-     setIsSessionSearchOpen={props.setIsSessionSearchOpen}
+     resetSessionSearch={props.resetSessionSearch}
      deleteSessionConfirm={props.deleteSessionConfirm}
      setDeleteSessionConfirm={props.setDeleteSessionConfirm}
      startFolderRename={props.startFolderRename}
-     setCopiedSessionId={props.setCopiedSessionId}
      startSessionWorktreeMenuLoad={props.startSessionWorktreeMenuLoad}
    />;
 
   const body = (
     <SessionFolderDndScope
       scopeKey={folderScopes[0]?.scopeKey ?? folderScopeKey}
+      ownerKey={folderOwnerKey}
       hasFolders={allFoldersForGroup.length > 0}
-      onSessionDroppedOnFolder={(sessionId, folderId) => {
-        const targetEntry = allFoldersForGroup.find(({ folder }) => folder.id === folderId);
+      onSessionDroppedOnFolder={(sessionId, target) => {
+        const targetEntry = allFoldersForGroup.find(({ folder, scopeKey }) => folder.id === target.folderId && scopeKey === target.scopeKey);
         if (!targetEntry) return;
         // Clear membership in other scopes first — the store only dedupes
         // within one scope, and a session must live in a single folder.
@@ -984,65 +1007,21 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
             foldersStore.removeSessionFromFolder(scopeKey, sessionId);
           }
         }
-        addSessionToFolder(targetEntry.scopeKey, folderId, sessionId);
+        addSessionToFolder(targetEntry.scopeKey, target.folderId, sessionId);
       }}
     >
       {renderFolderItems()}
-      {shouldVirtualize ? (
-        <div ref={archivedVirtualContainerRef}>
-          {!virtualizerReady ? (
-            // At most one pre-paint frame: this wrapper must exist for the
-            // layout effect to resolve the ancestor scroll element, which
-            // re-renders synchronously before paint. Rendering the plain rows
-            // meanwhile keeps the container's height real so the scroller
-            // never collapses/clamps during the flip.
-            visibleSessions.map(renderSessionNode)
-          ) : (
-          <div style={{ height: sessionVirtualizer.getTotalSize(), position: 'relative' }}>
-            {/* Absolutely positioned rows (canonical tanstack layout): with
-                variable-height rows, flow-stacking can drift from the computed
-                total height until measurements settle and overlap the content
-                below the group. Per-item offsets cannot drift. item.start
-                includes scrollMargin (ancestor-scroll offset), so subtract it. */}
-            {sessionVirtualizer.getVirtualItems().map((item) => {
-              const node = visibleSessions[item.index];
-              if (!node) return null;
-              return (
-                <div
-                  key={node.session.id}
-                  data-index={item.index}
-                  ref={sessionVirtualizer.measureElement}
-                  // Rows carry my-0.5 (2px), which COLLAPSES to 2px between
-                  // neighbors in normal flow but cannot collapse across
-                  // isolated virtualized wrappers — spacing doubles to 4px the
-                  // moment virtualization kicks in. Replace the row margin
-                  // with 1px per side (no collapse, 1+1 = the same visual 2px
-                  // gap). The [data-session-row] selector reaches the row
-                  // through the dnd/context-menu wrappers at any depth and
-                  // keeps nested child rows consistent too.
-                  className="[&_[data-session-row]]:my-px"
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    transform: `translateY(${item.start - archivedScrollMargin}px)`,
-                  }}
-                >
-                  {renderSessionNode(node)}
-                </div>
-              );
-            })}
-          </div>
-          )}
-        </div>
-      ) : (
-        visibleSessions.map(renderSessionNode)
-      )}
+      {visibleSessions.map(renderSessionNode)}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         // pl-[26px] lines the text up with the worktree sub-header label
         // (gutter + icon + gap).
-        <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
+        !group.isArchivedBucket && !bootstrapLoading && !bootstrapFailureNotice && group.directory && !group.emptyMessage ? (
+          <Button variant="link" size="xs" className="w-full justify-start pl-[26px] text-left font-normal normal-case text-muted-foreground/70 underline-offset-auto hover:text-foreground hover:underline" onClick={() => {
+              if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
+              if (mobileVariant) setSessionSwitcherOpen(false);
+              openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, target: group.draftTarget });
+          }}>{t('sessions.sidebar.group.empty.startSession')}</Button>
+        ) : <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
           {group.isArchivedBucket
             ? t('sessions.sidebar.group.empty.noArchivedSessions')
             : bootstrapLoading
@@ -1101,13 +1080,16 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   />;
 
   if (hideGroupLabel) {
-    return <><div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>{folderDeleteDialog}</>;
+    return renderBody ? <><div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>{folderDeleteDialog}</> : null;
   }
 
   return (
-    <><div className="oc-group">
+    <><div className={cn('oc-group', worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
+      <div className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
+      <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
+      <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS}>
       <div
-        className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
+        className="min-w-0 flex-1"
         onClick={() => onToggleCollapsedGroup(groupKey)}
         role="button"
         tabIndex={0}
@@ -1127,54 +1109,96 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           className={cn(
             // pl-1.5 lines the branch icon up with the project-zone header
             // icon (container pl-2.5 + 6px = band pl-4 past its -ml-2.5).
-            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5 transition-[padding]',
+            '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-1.5',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
         >
-          <div className="min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden">
-            <p className="text-[14px] font-normal truncate text-foreground/92">
+          <div className={cn('min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden', headerActionsMaskClass)}>
+            <p className="typography-ui-label font-normal truncate text-foreground/92">
               {group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')} />
+                  <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', headerIconFadeClass)} />
                     <span className={cn(
                       'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                      headerChevronFadeClass,
                     )}>
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {worktreeMissingIndicator}
                   {groupActivityIndicator}
                 </span>
               ) : (!group.isMain || group.worktree) ? (
                 // Worktree sub-header in the flat visual language: slim
                 // folder-style row with a PR-tinted branch icon and PR badge.
                 <span className="flex w-full min-w-0 items-center gap-1.5">
-                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="git-branch"
-                      className={cn('h-3.5 w-3.5 shrink-0', !groupPrColor && 'text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
+                  {worktreeRemoving ? (
+                    <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" title={t('sessions.sidebar.group.worktreeRemoving')} role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
+                      <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
+                    </span>
+                  ) : <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <Icon name={group.space ? 'box-3' : 'git-branch'}
+                      className={cn('h-3.5 w-3.5 shrink-0', !groupPrColor && 'text-muted-foreground', headerIconFadeClass)}
                       style={groupPrColor ? { color: groupPrColor } : undefined}
+                      aria-label={group.space ? t('sessions.sidebar.group.space') : undefined}
                     />
                     <span className={cn(
                       'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      alwaysShowActions ? 'inline-flex' : 'hidden group-hover/gh:inline-flex',
+                      headerChevronFadeClass,
                     )}>
                       {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
                     </span>
-                  </span>
+                  </span>}
                   <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
+                  {worktreeMissingIndicator}
+                  {spaceStaleIndicator}
                   {groupActivityIndicator}
                   {groupPrSummary ? (
-                    <span
-                      className="ml-auto flex-shrink-0 text-[0.72rem] font-medium leading-none"
+                    // Opens the PR; it sits inside the collapse toggle and the
+                    // drag handle, so it keeps its pointer and keys to itself.
+                    <button
+                      type="button"
+                      className={cn('ml-auto flex-shrink-0 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline', headerCoveredFadeClass)}
                       style={groupPrColor ? { color: groupPrColor } : undefined}
+                      disabled={!groupPrSummary.url}
+                      aria-label={groupPrLabel}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (groupPrSummary.url) void openExternalUrl(groupPrSummary.url);
+                      }}
                     >
                       #{groupPrSummary.number}
-                    </span>
+                    </button>
+                  ) : primaryGroupIssue ? (
+                    // Same contract as the PR number: opens the issue, keeps
+                    // its pointer and keys from the toggle and drag handle.
+                    <button
+                      type="button"
+                      className={cn(
+                        'ml-auto inline-flex flex-shrink-0 items-center gap-1 rounded text-[0.72rem] font-medium leading-none hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        !primaryGroupIssue.color && 'text-muted-foreground',
+                        headerCoveredFadeClass,
+                      )}
+                      style={primaryGroupIssue.color ? { color: primaryGroupIssue.color } : undefined}
+                      aria-label={groupIssueItems.map((item) => item.text).join(', ')}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void openExternalUrl(primaryGroupIssue.url);
+                      }}
+                    >
+                      <Icon name={primaryGroupIssue.icon} className="h-3 w-3" />
+                      {primaryGroupIssue.label}
+                      {groupIssueItems.length > 1 ? <span className="text-muted-foreground">+{groupIssueItems.length - 1}</span> : null}
+                    </button>
                   ) : null}
                 </span>
               ) : (
@@ -1197,10 +1221,27 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
               </span>
             ) : null}
           </div>
+          {!group.isArchivedBucket && group.directory ? <DirectoryActionIndicator directory={group.directory} className={cn('self-center', headerCoveredFadeClass)} /> : null}
         </div>
+      </div>
+      </TooltipTrigger>
+      {groupPrLinks.length > 0 ? (
+        <TooltipContent side="right" sideOffset={8} className="max-w-xs">
+          <SidebarRefLinks items={groupPrLinks} />
+        </TooltipContent>
+      ) : !groupPrSummary && primaryGroupIssue ? (
+        <TooltipContent side="right" sideOffset={8} className="max-w-xs">
+          <SidebarRefLinks items={groupIssueItems} />
+        </TooltipContent>
+      ) : null}
+      </Tooltip>
+        {/* Their own tooltip group: the pointer crosses these buttons on its
+            way into the header's tooltip, which a tooltip of the same group
+            would replace on the spot. */}
+        <TooltipProvider delayDuration={400}>
         {group.isArchivedBucket && allGroupSessions.length > 0 ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1211,7 +1252,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                       mode: 'session',
                     });
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label: group.label })}
                 >
                   <Icon name="delete-bin" className="h-4 w-4" />
@@ -1221,33 +1262,39 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
             </Tooltip>
           </div>
         ) : null}
-        {group.directory && !group.isMain && group.worktree ? (
+        {group.directory && !group.isMain && group.worktree && !worktreeRemoving ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <WorktreeDeleteAction label={group.label} sessions={allGroupSessions} worktree={group.worktree} />
+          </div>
+        ) : null}
+        {group.space ? (
+          <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    sessionEvents.requestDelete({
-                      sessions: allGroupSessions,
-                      mode: 'worktree',
-                      worktree: group.worktree,
-                    });
+                    if (group.space) useSpacesStore.getState().openAccessDialog(group.space.id);
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={t('sessions.sidebar.group.actions.deleteGroupAria', { label: group.label })}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={t('spaces.group.access.giveAria', { label: group.label })}
                 >
-                  <Icon name="delete-bin" className="h-4 w-4" />
+                  <Icon name="key" className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.group.actions.deleteWorktree')}</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('spaces.group.access.give')}</p></TooltipContent>
             </Tooltip>
+          </div>
+        ) : null}
+        {group.space ? (
+          <div className={cn('absolute right-[3.25rem] top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100 has-[[data-popup-open]]:opacity-100')}>
+            <SpaceActionsMenu spaceId={group.space.id} label={group.label} />
           </div>
         ) : null}
         {group.directory ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
-            <Tooltip delayDuration={500}>
+            <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   type="button"
@@ -1255,9 +1302,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                     event.stopPropagation();
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     if (mobileVariant) setSessionSwitcherOpen(false);
-                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
+                    // A space's directory exists inside the space only; the host's directory
+                    // probe would call it missing and move the draft to the project.
+                    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory, preserveDirectoryOverride: Boolean(group.space) });
                   }}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
                  >
                    <Icon name="add" className="h-4 w-4" />
@@ -1267,8 +1316,11 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
              </Tooltip>
            </div>
          ) : null}
+        </TooltipProvider>
       </div>
-      {!isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
+      {/* Outside the header, which is a button of its own: the status line can hold one. */}
+      {group.space ? <SpaceGroupStatus spaceId={group.space.id} className="pb-1 pl-5" /> : null}
+      {!isCollapsed && renderBody ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>{folderDeleteDialog}</>
   );
 }

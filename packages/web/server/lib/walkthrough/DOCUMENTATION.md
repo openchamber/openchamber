@@ -20,7 +20,8 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs via the shared GitHub octokit helper.
+- `pull-request.js` — PR diffs and per-file contents via the shared GitHub
+  octokit helper.
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
@@ -52,26 +53,63 @@ written against staged code never silently re-anchors onto an unstaged edit.
 | Kind | Sections | Notes |
 |---|---|---|
 | `working-tree` (`all` \| `staged` \| `working`) | `staged`, `working` | Untracked files are fetched individually because `git diff` omits them |
-| `branch` | `branch` | `getRangeDiff` uses three-dot `base...head`, so work merged in from the base branch is excluded |
-| `pr` | `pr:<number>` | GitHub returns the merge-base diff, matching the branch semantics |
+| `branch` | `branch` | `getRangeDiff` with `includeWorkingTree: true` compares the selected merge base with current files, including committed and local work in one net diff |
+| `commit` | `commit` | `getCommitDiff` compares the full selected commit hash with its first parent; root commits compare with an empty tree |
+| `pr` | `pr:<number>` | GitHub's committed pull-request diff, without local working-tree changes |
 
-For the current-branch source, the UI takes the base from the default branch of
-the current branch's tracking remote (`defaultBranches` in the branches
-response), and only then falls back to the conventional names. It does not offer
-the source at all when the chosen base exists neither locally nor on a remote —
-a repository whose default is neither `main`, `master` nor `develop` used to be
-handed `main...<head>`, which git rejects outright.
+Changes and walkthrough resolve the current branch's base through
+`packages/ui/src/hooks/useBranchComparisonBase.ts`. An explicit choice in Changes
+outranks reflog detection. Both toolbars use
+`packages/ui/src/components/views/git/BranchComparisonSelector.tsx` to select or
+change the base directly. Walkthrough allows selecting Branch before a base is
+known and waits for a valid choice before loading or generating. Opening
+walkthrough from Changes carries the selected base and head; later selections
+in either toolbar update both comparisons.
 
-A base that exists only on a remote still works: `getRangeDiff` prefers
-`origin/<base>` when it exists, and otherwise resolves the base through whichever
-remote carries it, because a bare branch name git cannot find in `refs/heads`
-fails the same way.
+Commit mode uses the shared `CommitComparisonSelector` in both toolbars. It
+lists the latest 50 commits reachable from the checked-out branch, with subject,
+author, date, and short hash. Opening the picker refreshes that list; selecting a
+commit changes the comparison, not the checkout. Changes hands the selected full
+hash to walkthrough. The server accepts full object IDs for commit sources and
+keys their cache entries and generation jobs as `commit:<hash>`, so reviews of
+different commits cannot overwrite each other. Existing source keys keep their
+format. Commit reads have no working-tree freshness dependency, and selecting a
+commit never starts model generation.
 
-The panel offers the current branch's pull request on its own: it registers with
-the shared GitHub PR status store (`useGitHubPrStatusStore`) rather than waiting
-for the pull request panel to have been visited. That store already dedupes
-concurrent requests by signature and throttles by TTL, so several panels asking
-the same question produce one call to GitHub.
+The Git module owns exact-ref and working-tree comparison semantics. Local and
+remote bases remain distinct, and a checkout during a branch review requires
+the source to be resolved for the new branch rather than including another
+branch's local files.
+
+Successful status refreshes invalidate the visible branch comparison even when
+file names and insertion/deletion counts stay the same. Walkthrough refreshes
+its current hunk index while visible; regeneration remains user-initiated. The
+content-addressed cache continues to reuse an old review only when its hunks
+match, and otherwise reports stale anchors and uncovered current hunks.
+
+PR mode uses the same searchable, paginated selector as Changes. Its list loads
+only while PR mode is visible. Selection ownership and handoff rules are in
+`packages/ui/src/stores/DOCUMENTATION.md`.
+
+PR sources may include `sourceRepo: { owner, repo }`. This qualifies both the
+GitHub request and the cache/job key as `pr:<owner>/<repo>:<number>`. Existing
+number-only sources retain `pr:<number>` and resolve the directory's repository.
+The PR panel forwards its resolved repository when opening walkthrough.
+
+`GET /api/walkthrough/pr-diff` accepts `directory` and a JSON `source` restricted
+to PRs. It returns GitHub's complete published diff as text, with no model
+readiness checks or generation. Successful empty patches return 200; auth,
+GitHub and malformed-response failures remain errors. Walkthrough generation
+keeps its existing empty-diff refusal. UI comparison behavior is documented in
+`packages/ui/src/components/views/DOCUMENTATION.md`.
+
+`GET /api/walkthrough/pr-file` takes the same `directory` and PR `source` plus
+`path`, optional `previousPath`, and `status`, and returns `{ original, modified }`
+for that one file as GitHub has it: the base side at the PR's merge base, the
+head side at the PR head. This is how the comparison view expands collapsed
+context for a PR: its patch arrives at fixed context and its commits may not be
+on disk, so the working tree is never read. Files above 5 MB answer `413`
+(`code: 'file-too-large'`).
 
 ## No truncation
 

@@ -8,10 +8,21 @@ interface UseProviderLogoReturn {
     hasLogo: boolean;
 }
 
-const localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.svg', {
-    eager: true,
-    import: 'default',
-});
+// Vite rewrites `import.meta.glob` at build time into the matching modules. A runtime without
+// that transform (the bun test runner) throws on the call instead, so keep it failable and let
+// the hook fall back to the remote logo URL it already supports.
+const loadLocalLogoModules = (): Record<string, string> => {
+    try {
+        return import.meta.glob<string>('../assets/provider-logos/*.svg', {
+            eager: true,
+            import: 'default',
+        });
+    } catch {
+        return {};
+    }
+};
+
+const localLogoModules = loadLocalLogoModules();
 
 const LOCAL_PROVIDER_LOGO_MAP = new Map<string, string>();
 const PRELOADED_LOGO_SRCS = new Set<string>();
@@ -20,12 +31,14 @@ const LOGO_ALIAS = new Map<string, string>([
     ['codex', 'openai'],
     ['chatgpt', 'openai'],
     ['claude', 'anthropic'],
+    ['cline-pass', 'cline'],
     ['gemini', 'google'],
     ['evroc-ai', 'evroc'],
     ['evrocai', 'evroc'],
     ['ollama-cloud', 'ollama'],
     ['wafer-ai', 'wafer.ai'],
     ['wafer', 'wafer.ai'],
+    ['copilot', 'github-copilot'],
 ]);
 
 const normalizeProviderId = (providerId: string | null | undefined) => {
@@ -45,7 +58,8 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
 
     const compact = normalized.replace(/[^a-z0-9_\-./:]/g, '');
     const primary = compact.split(/[/:]/)[0] || compact;
-    const candidates = [LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary), compact, primary]
+    const prefixAlias = compact.startsWith('exe-') ? 'exe-dev' : undefined;
+    const candidates = [prefixAlias, LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary), compact, primary]
         .filter((value): value is string => Boolean(value && value.length > 0));
 
     return [...new Set(candidates)];

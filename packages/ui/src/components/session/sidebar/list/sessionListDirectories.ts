@@ -8,7 +8,7 @@ export const buildKnownSessionDirectories = (
 ): Set<string> => {
   const directories = new Set<string>();
   for (const project of projects) {
-    const normalized = normalizePath(project.path)?.toLowerCase();
+    const normalized = normalizePath(project.path);
     if (normalized) directories.add(normalized);
   }
   if (options?.includeWorktrees === false) {
@@ -16,7 +16,7 @@ export const buildKnownSessionDirectories = (
   }
   for (const worktrees of availableWorktreesByProject.values()) {
     for (const worktree of worktrees) {
-      const normalized = normalizePath(worktree.path)?.toLowerCase();
+      const normalized = normalizePath(worktree.path);
       if (normalized) directories.add(normalized);
     }
   }

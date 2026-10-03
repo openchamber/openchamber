@@ -24,17 +24,22 @@ Add to `packages/ui/src/lib/theme/themes/`:
 
 Use existing themes (e.g., `flexoki-dark.json`) as reference for the full structure.
 
+Read `packages/ui/src/lib/theme/DOCUMENTATION.md` before changing the format or
+its consumers. JSON stores authored colors and exceptions; `requireTheme`
+resolves the complete runtime palette. Keep syntax inheritance in `syntax.ts`.
+
 ### 2. Register in presets.ts
 
 ```typescript
+import { requireTheme } from '../definition';
 import mytheme_light_Raw from './mytheme-light.json';
 import mytheme_dark_Raw from './mytheme-dark.json';
 
 export const presetThemes: Theme[] = [
   // ... existing themes
-  mytheme_light_Raw as Theme,
-  mytheme_dark_Raw as Theme,
-];
+  mytheme_light_Raw,
+  mytheme_dark_Raw,
+].map(requireTheme);
 ```
 
 ### 3. Validate
@@ -48,7 +53,8 @@ bun run type-check && bun run lint && bun run build
 Both do the mechanical work of steps 1–2 and are run by hand:
 
 - `node scripts/convert-vscode-theme.cjs <vscode-theme.json>` converts a VS Code
-  theme into this format and registers it in `presets.ts`.
+  theme with the same importer as Settings and registers its compact definition
+  in `presets.ts`. It also accepts Zed input, normalized through that importer.
 - `node scripts/harmonize-theme.mjs <theme.json> [--write]` aligns accent roles
   to one chroma/lightness target in OKLCH so borrowed colors read as one family.
 

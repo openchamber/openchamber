@@ -8,8 +8,8 @@
  * - Reorders inbound chunks by `seq` and acks the highest contiguous seq.
  * - Resamples client PCM (16 kHz by default) to the provider's required rate.
  * - Segments long dictations at natural pauses: past `segmentMinSeconds` of
- *   audio it commits on the first silent chunk, and `segmentMaxSeconds` is a
- *   hard cap for speech with no pause in it. Silence-only segments are
+ *   audio it cuts inside the first pause it finds, and `segmentMaxSeconds` is
+ *   a hard cap for speech with no pause in it. Silence-only segments are
  *   cleared instead of committed.
  * - Concatenates per-segment transcripts into live partials and emits the
  *   final text once every committed segment has a final transcript. The
@@ -19,40 +19,140 @@
  * - Applies an adaptive finalization timeout budget based on pending work.
  */
 
-import { Pcm16MonoResampler, parsePcmRateFromFormat, pcm16lePeakAbs } from './audio.js';
+import {
+  Pcm16MonoResampler,
+  parsePcmRateFromFormat,
+  pcm16leFrameRms,
+  pcm16lePeakAbs,
+} from './audio.js';
 
 const DEFAULT_FINAL_TIMEOUT_MS = 10000;
-// Parakeet is a full-attention conformer: decode cost and peak memory grow
-// quadratically with segment length (measured: 60s -> 2.1s/+90MB,
-// 300s -> 21.3s/+1.5GB). Segmenting keeps a long dictation off that curve and
-// lets committed segments decode while the user is still speaking, so only the
-// tail is left to transcribe on stop. Typical dictations are shorter than the
-// minimum and are decoded as a single segment.
-const DEFAULT_SEGMENT_MIN_SECONDS = 60;
-const DEFAULT_SEGMENT_MAX_SECONDS = 90;
+// Parakeet decode cost and peak memory grow quadratically with segment length,
+// and a long enough segment aborts the worker inside the native runtime, not
+// just slowly (the curve and the crash are in DOCUMENTATION.md#segmentation).
+// Segmenting keeps a long dictation off that curve, and committed segments
+// decode while the user is still speaking, so only the tail is left on stop.
+//
+// The minimum is low because a 15s segment decodes in well under a second.
+// The hard cap stays small (25s) so even pauseless speech never piles up a
+// segment that can hit the allocation abort.
+const DEFAULT_SEGMENT_MIN_SECONDS = 15;
+const DEFAULT_SEGMENT_MAX_SECONDS = 25;
 const FINAL_TIMEOUT_MAX_MS = 5 * 60 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_SEGMENT_MS = 15 * 1000;
 const FINAL_TIMEOUT_PER_PENDING_AUDIO_SECOND_MS = 1500;
 const FINAL_TIMEOUT_PER_MISSING_SEQ_MS = 250;
 const SILENCE_PEAK_THRESHOLD = 300;
+// Pause detection looks at ~50 ms frames. A frame is quiet when its RMS sits
+// within ~10 dB of the quietest frame in the last ~10 s of the stream (the
+// noise floor), so a laptop fan or a boosted mic does not hide every pause,
+// and at least ~15 dB below the loudest frame, so before the first real pause
+// the softest bit of speech does not pass for one. The floor is a sliding
+// window rather than an all-time minimum because a gated mic often opens with
+// a second of digital zeros, and a floor pinned there would call room noise
+// speech for the rest of the dictation. The absolute minimum keeps a
+// digitally silent stream from needing exact zeros. A pause is a quiet run of
+// at least 200 ms: longer than the closure inside a word, and a fast speaker's
+// pause between sentences is barely longer (a synthesized voice pauses
+// 200–350 ms at a period), so a cut lands between words.
+const PAUSE_FRAME_MS = 50;
+const PAUSE_MIN_FRAMES = 4;
+const NOISE_FLOOR_WINDOW_CHUNKS = 10;
+const QUIET_ABOVE_FLOOR_RATIO = 3;
+const QUIET_BELOW_SPEECH_RATIO = 6;
+const QUIET_RMS_MIN = 200;
 
 const secondsToPcm16Bytes = (seconds, sampleRate) =>
   seconds > 0 ? Math.max(1, Math.round(seconds * sampleRate * 2)) : 0;
 
 /**
- * Split the current segment once it is long enough to be worth decoding on its
- * own and the speaker has just gone quiet, or unconditionally at the hard cap.
- * Client chunks are ~1s, so a quiet chunk is roughly a second of silence — long
- * enough to be a sentence boundary rather than a gap between words.
+ * Byte offset inside `pcm16` where the current segment should end, or null to
+ * keep the whole chunk in it.
+ *
+ * Past `segmentMinBytes` the cut goes into the middle of the first pause; a
+ * pause may have started in the previous chunk, which `state.quietRunFrames`
+ * carries over (when its middle already went by, the cut is where this chunk
+ * starts, still inside the pause). At the hard cap the cut goes into the quietest frame of this
+ * chunk rather than at its boundary, so even pauseless speech is cut between
+ * words when it can be. Bytes before the cut belong to the segment being
+ * committed, bytes after it start the next one.
  */
-function shouldSplitSegment(state) {
-  if (state.segmentMaxBytes > 0 && state.bytesSinceCommit >= state.segmentMaxBytes) {
-    return true;
+function findSegmentCut(state, pcm16) {
+  if (state.finishRequested) {
+    return null;
   }
-  if (state.segmentMinBytes <= 0 || state.bytesSinceCommit < state.segmentMinBytes) {
-    return false;
+  const capReached =
+    state.segmentMaxBytes > 0 && state.bytesSinceCommit + pcm16.length >= state.segmentMaxBytes;
+  const frameSamples = state.pauseFrameSamples;
+  const frameBytes = frameSamples * 2;
+  const rms = pcm16leFrameRms(pcm16, frameSamples);
+  if (rms.length === 0) {
+    return capReached ? pcm16.length : null;
   }
-  return state.lastChunkPeak < SILENCE_PEAK_THRESHOLD;
+
+  let chunkFloor = Infinity;
+  for (const value of rms) {
+    if (value < chunkFloor) {
+      chunkFloor = value;
+    }
+    if (value > state.loudestRms) {
+      state.loudestRms = value;
+    }
+  }
+  state.recentChunkFloors.push(chunkFloor);
+  if (state.recentChunkFloors.length > NOISE_FLOOR_WINDOW_CHUNKS) {
+    state.recentChunkFloors.shift();
+  }
+  const noiseFloor = Math.min(...state.recentChunkFloors);
+  const quietBelow = Math.min(
+    Math.max(noiseFloor * QUIET_ABOVE_FLOOR_RATIO, QUIET_RMS_MIN),
+    state.loudestRms / QUIET_BELOW_SPEECH_RATIO,
+  );
+  const quiet = rms.map((value) => value <= quietBelow);
+
+  let cut = null;
+  if (state.segmentMinBytes > 0) {
+    let runStart = -state.quietRunFrames;
+    let inRun = state.quietRunFrames > 0;
+    for (let i = 0; i <= quiet.length; i += 1) {
+      if (i < quiet.length && quiet[i]) {
+        if (!inRun) {
+          inRun = true;
+          runStart = i;
+        }
+        continue;
+      }
+      if (!inRun) {
+        continue;
+      }
+      inRun = false;
+      if (i - runStart < PAUSE_MIN_FRAMES) {
+        continue;
+      }
+      const bytes = Math.max(0, Math.floor((runStart + i) / 2)) * frameBytes;
+      if (state.bytesSinceCommit + bytes >= state.segmentMinBytes) {
+        cut = bytes;
+        break;
+      }
+    }
+  }
+
+  if (cut === null && capReached) {
+    let quietest = 0;
+    for (let i = 1; i < rms.length; i += 1) {
+      if (rms[i] < rms[quietest]) {
+        quietest = i;
+      }
+    }
+    cut = (quietest * frameSamples + (frameSamples >> 1)) * 2;
+  }
+
+  let trailing = 0;
+  while (trailing < quiet.length && quiet[quiet.length - 1 - trailing]) {
+    trailing += 1;
+  }
+  state.quietRunFrames = trailing;
+  return cut;
 }
 
 export class DictationStreamManager {
@@ -173,9 +273,12 @@ export class DictationStreamManager {
       ackSeq: -1,
       segmentMinBytes: secondsToPcm16Bytes(this.segmentMinSeconds, stt.requiredSampleRate),
       segmentMaxBytes: secondsToPcm16Bytes(this.segmentMaxSeconds, stt.requiredSampleRate),
+      pauseFrameSamples: Math.max(1, Math.round((stt.requiredSampleRate * PAUSE_FRAME_MS) / 1000)),
+      recentChunkFloors: [],
+      loudestRms: 0,
+      quietRunFrames: 0,
       bytesSinceCommit: 0,
       peakSinceCommit: 0,
-      lastChunkPeak: 0,
       committedSegmentIds: [],
       transcriptsBySegmentId: new Map(),
       finalTranscriptSegmentIds: new Set(),
@@ -228,12 +331,8 @@ export class DictationStreamManager {
 
       const resampled = state.resampler ? state.resampler.processChunk(pcm16) : pcm16;
       if (resampled.length > 0) {
-        state.stt.appendPcm16(resampled);
-        state.bytesSinceCommit += resampled.length;
-        state.lastChunkPeak = pcm16lePeakAbs(resampled);
-        state.peakSinceCommit = Math.max(state.peakSinceCommit, state.lastChunkPeak);
         try {
-          this.maybeAutoCommitSegment(state);
+          this.forwardAudio(state, resampled);
         } catch (error) {
           this.failAndCleanupStream(dictationId, error?.message || String(error), true);
           return;
@@ -369,24 +468,39 @@ export class DictationStreamManager {
     );
   }
 
-  maybeAutoCommitSegment(state) {
-    if (state.finishRequested) {
+  /**
+   * Append one chunk of provider-rate audio, ending the current segment inside
+   * the chunk when it holds a good place to cut.
+   */
+  forwardAudio(state, pcm16) {
+    const cutAt = findSegmentCut(state, pcm16);
+    if (cutAt === null) {
+      this.appendToSegment(state, pcm16);
       return;
     }
-    if (!shouldSplitSegment(state)) {
-      return;
-    }
-    if (state.peakSinceCommit < SILENCE_PEAK_THRESHOLD) {
-      state.stt.clear();
-      state.bytesSinceCommit = 0;
-      state.peakSinceCommit = 0;
-      state.lastChunkPeak = 0;
-      return;
-    }
+    this.appendToSegment(state, pcm16.subarray(0, cutAt));
+    this.endSegment(state);
+    this.appendToSegment(state, pcm16.subarray(cutAt));
+  }
 
+  appendToSegment(state, pcm16) {
+    if (pcm16.length === 0) {
+      return;
+    }
+    state.stt.appendPcm16(pcm16);
+    state.bytesSinceCommit += pcm16.length;
+    state.peakSinceCommit = Math.max(state.peakSinceCommit, pcm16lePeakAbs(pcm16));
+  }
+
+  /** Commit the current segment, or drop it when it holds only silence. */
+  endSegment(state) {
+    const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
     state.bytesSinceCommit = 0;
     state.peakSinceCommit = 0;
-    state.lastChunkPeak = 0;
+    if (silent) {
+      state.stt.clear();
+      return;
+    }
     this.commitSegment(state);
   }
 
@@ -421,22 +535,15 @@ export class DictationStreamManager {
     }
 
     if (state.bytesSinceCommit > 0) {
-      if (state.peakSinceCommit < SILENCE_PEAK_THRESHOLD) {
-        state.stt.clear();
-        state.bytesSinceCommit = 0;
-        state.peakSinceCommit = 0;
-        state.lastChunkPeak = 0;
+      const silent = state.peakSinceCommit < SILENCE_PEAK_THRESHOLD;
+      try {
+        this.endSegment(state);
+      } catch (error) {
+        this.failAndCleanupStream(dictationId, error?.message || String(error), true);
+        return;
+      }
+      if (silent) {
         this.dropUncommittedNonFinalTranscripts(state);
-      } else {
-        state.bytesSinceCommit = 0;
-        state.peakSinceCommit = 0;
-        state.lastChunkPeak = 0;
-        try {
-          this.commitSegment(state);
-        } catch (error) {
-          this.failAndCleanupStream(dictationId, error?.message || String(error), true);
-          return;
-        }
       }
     }
 

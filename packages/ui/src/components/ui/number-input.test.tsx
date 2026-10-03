@@ -249,6 +249,7 @@ interface ControlledProps {
   min?: number;
   max?: number;
   step?: number;
+  deferExternalValueWhileFocused?: boolean;
 }
 
 interface ControlledHandle {
@@ -258,6 +259,9 @@ interface ControlledHandle {
   rerenderWith(value: number): void;
   getButton(label: string): FakeNode | null;
   getButtonDisabled(label: string): boolean;
+  getInputValue(): string;
+  focusInput(): void;
+  pressEnter(): void;
   typeInput(value: string): void;
   blurInput(): void;
   unmount(): void;
@@ -285,6 +289,7 @@ function mountControlled(props: ControlledProps): ControlledHandle {
         min: props.min,
         max: props.max,
         step: props.step,
+        deferExternalValueWhileFocused: props.deferExternalValueWhileFocused,
         onValueChange: (v: number) => recorded.push(v),
       }),
     );
@@ -339,15 +344,21 @@ function mountControlled(props: ControlledProps): ControlledHandle {
   }
 
   function readInputProps(): {
-    onChange: (e: unknown) => void;
-    onBlur: (e: unknown) => void;
+    value: string;
+    onChange: (event: { target: { value: string } }) => void;
+    onFocus?: () => void;
+    onBlur: () => void;
+    onKeyDown: (event: { key: string; defaultPrevented: boolean }) => void;
   } {
     const input = findInputNode();
     const propsKey = Object.keys(input).find((k) => k.startsWith("__reactProps"));
     if (!propsKey) throw new Error("Input has no __reactProps");
     return (input as unknown as Record<string, {
-      onChange: (e: unknown) => void;
-      onBlur: (e: unknown) => void;
+      value: string;
+      onChange: (event: { target: { value: string } }) => void;
+      onFocus?: () => void;
+      onBlur: () => void;
+      onKeyDown: (event: { key: string; defaultPrevented: boolean }) => void;
     }>)[propsKey];
   }
 
@@ -372,6 +383,23 @@ function mountControlled(props: ControlledProps): ControlledHandle {
       const props = (btn as unknown as Record<string, { disabled?: boolean }>)[propsKey];
       return Boolean(props.disabled);
     },
+    getInputValue() {
+      return readInputProps().value;
+    },
+    focusInput() {
+      const input = findInputNode();
+      const props = readInputProps();
+      doc.activeElement = input;
+      act(() => {
+        props.onFocus?.();
+      });
+    },
+    pressEnter() {
+      const props = readInputProps();
+      act(() => {
+        props.onKeyDown({ key: "Enter", defaultPrevented: false });
+      });
+    },
     typeInput(value: string) {
       // Look the input up fresh each time so we always invoke the handler
       // currently bound by the most recent render.
@@ -385,7 +413,7 @@ function mountControlled(props: ControlledProps): ControlledHandle {
       // the props object, and we want the handler bound to the latest draft.
       const props = readInputProps();
       act(() => {
-        props.onBlur({});
+        props.onBlur();
       });
     },
     unmount() {
@@ -533,6 +561,52 @@ describe("NumberInput rapid-click stepper", () => {
       // the `normalized !== value` gate), and one from the stepper.
       expect(handle.recorded).toEqual([110, 115]);
     });
+  });
+
+  test("focused draft survives a parent rerender with the previous value until blur", () => {
+    withHandle(
+      {
+        initialValue: 40,
+        min: 1,
+        max: 100,
+        step: 1,
+        deferExternalValueWhileFocused: true,
+      },
+      (handle) => {
+        handle.focusInput();
+        handle.typeInput("100");
+
+        expect(handle.recorded).toEqual([]);
+
+        handle.rerenderWith(40);
+
+        expect(handle.getInputValue()).toBe("100");
+
+        handle.blurInput();
+
+        expect(handle.recorded).toEqual([100]);
+      }
+    );
+  });
+
+  test("focused draft commits once when Enter settles it", () => {
+    withHandle(
+      {
+        initialValue: 40,
+        min: 1,
+        max: 100,
+        step: 1,
+        deferExternalValueWhileFocused: true,
+      },
+      (handle) => {
+        handle.focusInput();
+        handle.typeInput("100");
+
+        handle.pressEnter();
+
+        expect(handle.recorded).toEqual([100]);
+      }
+    );
   });
 
   test("typed value below min is clamped on blur and the stepper respects the clamped base", () => {

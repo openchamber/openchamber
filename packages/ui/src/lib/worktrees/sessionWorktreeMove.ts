@@ -1,4 +1,4 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import type { I18nKey } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import { checkIsGitRepository, getGitStatus } from '@/lib/gitApi';
@@ -16,23 +16,26 @@ import { create } from 'zustand';
 export type SessionTreeMoveMessages = {
   success: string;
   failure: string;
-  sourceVerificationFailed: string;
-  applyChangesFailed: string;
-  changesMayBeInDestination: string;
+  /** Description under the failure toast when the answer was lost and the new worktree was kept. */
+  outcomeUnknown: string;
 };
 
-/** Every move surface differs only in the success/failure pair, so the shared
- *  failure copy is resolved once here instead of at each call site. */
 export const buildSessionTreeMoveMessages = (
   t: (key: I18nKey) => string,
   keys: { success: I18nKey; failure: I18nKey },
 ): SessionTreeMoveMessages => ({
   success: t(keys.success),
   failure: t(keys.failure),
-  sourceVerificationFailed: t('sessions.sidebar.session.moveToWorktree.sourceVerificationFailed'),
-  applyChangesFailed: t('sessions.sidebar.session.moveToWorktree.applyChangesFailed'),
-  changesMayBeInDestination: t('sessions.sidebar.session.moveToWorktree.changesMayBeInDestination'),
+  outcomeUnknown: t('sessions.sidebar.session.moveToWorktree.outcomeUnknown'),
 });
+
+/** The move request lost its answer after a new worktree was created; the worktree stays. */
+export class SessionMoveOutcomeUnknownError extends Error {
+  constructor(cause: Error) {
+    super(cause.message, { cause });
+    this.name = 'SessionMoveOutcomeUnknownError';
+  }
+}
 
 export type SessionTreeMoveIntent =
   | {
@@ -51,36 +54,20 @@ export type SessionTreeMoveIntent =
       messages: SessionTreeMoveMessages;
     };
 
-export type SessionTreeMoveConfirmation = {
-  intent: SessionTreeMoveIntent;
-  dirtyFileCount: number;
-  stagedFileCount: number;
-};
-
+// OpenCode 2.x `session.move` relocates the session only; uncommitted changes
+// stay in the source worktree. v1 could carry them along and asked the user
+// which to do, so this module once held a confirmation step. There is nothing
+// to choose now, and a move starts as soon as it is requested.
 type SessionMoveState = {
   pendingSessionIds: Set<string>;
-  requestingSessionIds: Set<string>;
-  confirmation: SessionTreeMoveConfirmation | null;
 };
 
 const useSessionMoveState = create<SessionMoveState>(() => ({
   pendingSessionIds: new Set(),
-  requestingSessionIds: new Set(),
-  confirmation: null,
 }));
 
 export const useIsSessionWorktreeMovePending = (sessionId: string): boolean =>
-  useSessionMoveState((state) => state.pendingSessionIds.has(sessionId) || state.requestingSessionIds.has(sessionId));
-
-export const useSessionTreeMoveConfirmation = (): SessionTreeMoveConfirmation | null =>
-  useSessionMoveState((state) => state.confirmation);
-
-export const getSessionTreeMoveConfirmation = (): SessionTreeMoveConfirmation | null =>
-  useSessionMoveState.getState().confirmation;
-
-const setSessionMoveConfirmation = (confirmation: SessionTreeMoveConfirmation | null): void => {
-  useSessionMoveState.setState((state) => (state.confirmation === confirmation ? state : { ...state, confirmation }));
-};
+  useSessionMoveState((state) => state.pendingSessionIds.has(sessionId));
 
 const setSessionMovePending = (sessionId: string, pending: boolean): void => {
   useSessionMoveState.setState((state) => {
@@ -90,32 +77,6 @@ const setSessionMovePending = (sessionId: string, pending: boolean): void => {
     else pendingSessionIds.delete(sessionId);
     return { ...state, pendingSessionIds };
   });
-};
-
-const setSessionMoveRequesting = (sessionId: string, requesting: boolean): void => {
-  useSessionMoveState.setState((state) => {
-    if (state.requestingSessionIds.has(sessionId) === requesting) return state;
-    const requestingSessionIds = new Set(state.requestingSessionIds);
-    if (requesting) requestingSessionIds.add(sessionId);
-    else requestingSessionIds.delete(sessionId);
-    return { ...state, requestingSessionIds };
-  });
-};
-
-// The control plane flattens every move failure into a single
-// `MoveSessionError` carrying only `data.message`, so there is no status or
-// error code to match on. This prefix is the exact text OpenCode's
-// `message(MoveSession.ApplyChangesError)` returns in
-// `packages/opencode/src/server/routes/instance/httpapi/handlers/control-plane.ts`.
-// If upstream reworks that wording the friendlier toast silently degrades to
-// the raw message, which is why the fallback stays readable.
-const APPLY_CHANGES_MESSAGE = 'Unable to apply your changes in the destination directory';
-
-const isApplyChangesError = (error: Error): boolean => {
-  // SAFETY: move failures originate from our own SDK/runtime layer, which may
-  // attach an optional numeric HTTP status to an Error instance.
-  const errorWithStatus = error as Error & { status?: number };
-  return errorWithStatus.status === 400 && error.message.includes(APPLY_CHANGES_MESSAGE);
 };
 
 const resolveSourceBranch = async (directory: string, projectDirectory: string): Promise<string> => {
@@ -155,31 +116,21 @@ type RollbackFailure = {
   error: Error;
 };
 
-/** Rollback left sessions in the destination. `changesMayBeInDestination` says
- *  the same failure also carried the working tree changes with an unknown
- *  outcome, so the toast must keep that guidance instead of dropping it. */
+/** Rollback left sessions in the destination; the toast names them. */
 class IncompleteRollbackError extends Error {
-  readonly changesMayBeInDestination: boolean;
-
-  constructor(message: string, cause: unknown, changesMayBeInDestination: boolean) {
+  constructor(message: string, cause: unknown) {
     super(message, { cause });
     this.name = 'IncompleteRollbackError';
-    this.changesMayBeInDestination = changesMayBeInDestination;
   }
 }
 
-const createIncompleteRollbackError = (
-  moveError: Error,
-  rollbackFailures: RollbackFailure[],
-  changesMayBeInDestination: boolean,
-): Error => {
+const createIncompleteRollbackError = (moveError: Error, rollbackFailures: RollbackFailure[]): Error => {
   const rollbackSummary = rollbackFailures
     .map(({ sessionId, error }) => `${sessionId}: ${error.message}`)
     .join(', ');
   return new IncompleteRollbackError(
     `Session move partially failed and could not be fully rolled back: ${moveError.message}. Rollback failures: ${rollbackSummary}`,
     { moveError, rollbackFailures },
-    changesMayBeInDestination,
   );
 };
 
@@ -196,12 +147,7 @@ const rollbackMovedSessions = async (
       continue;
     }
     try {
-      await moveSessionToDirectory(
-        session,
-        worktreeDirectory,
-        sourceDirectory,
-        false,
-      );
+      await moveSessionToDirectory(session, worktreeDirectory, sourceDirectory);
       useSessionUIStore.getState().setWorktreeMetadata(session.id, previousMetadata.get(session.id) ?? null);
     } catch (error) {
       failures.push({
@@ -212,16 +158,6 @@ const rollbackMovedSessions = async (
   }
   return failures;
 };
-
-/** The move failed after the change-carrying request was already dispatched, so
- *  the user's changes may already be in the destination. A freshly created
- *  worktree is kept rather than deleted, because it may hold the only copy. */
-class ChangesMayBeInDestinationError extends Error {
-  constructor(moveError: Error) {
-    super(moveError.message, { cause: moveError });
-    this.name = 'ChangesMayBeInDestinationError';
-  }
-}
 
 const removeFailedWorktree = async (
   project: ProjectRef,
@@ -252,7 +188,6 @@ const moveSessionTreeTransaction = async (
     root: Session;
     descendants: Session[];
     sourceDirectory: string;
-    moveChanges: boolean;
   },
   prepareDestination: () => Promise<{
     directory: string;
@@ -277,24 +212,21 @@ const moveSessionTreeTransaction = async (
 
     let destination: Awaited<ReturnType<typeof prepareDestination>> | null = null;
     const moved: Session[] = [];
-    let changesMoveOutcomeUnknown = false;
+    let moveOutcomeUnknown = false;
     try {
       destination = await prepareDestination();
       for (const [index, session] of sessions.entries()) {
         // Setup and earlier moves can take long enough for a not-yet-moved
         // session to start running, so re-check the remaining source tree
-        // immediately before each move. The root moves last so no later
-        // descendant failure can require replaying a transferred patch.
+        // immediately before each move. The root moves last.
         assertSessionsIdle(sessions.slice(index));
-        const movesChanges = session.id === input.root.id && input.moveChanges;
         try {
-          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory, movesChanges);
+          await moveSessionToDirectory(session, input.sourceDirectory, destination.directory);
         } catch (error) {
-          // A transport failure on the change-carrying request leaves the
-          // destination unknown: the server may have applied the patch before
-          // the response was lost. Definite rejections (the destination refused
-          // the patch) keep this false.
-          if (movesChanges && isAmbiguousSendFailure(error)) changesMoveOutcomeUnknown = true;
+          // A transport failure leaves the outcome unknown: the server may have
+          // moved the session before the response was lost. Definite rejections
+          // keep this false.
+          if (isAmbiguousSendFailure(error)) moveOutcomeUnknown = true;
           throw error;
         }
         moved.push(session);
@@ -309,21 +241,24 @@ const moveSessionTreeTransaction = async (
         destination?.directory ?? input.sourceDirectory,
         previousMetadata,
       );
-      if (changesMoveOutcomeUnknown) {
+      if (moveOutcomeUnknown) {
         // The move request may have completed server-side, so the session's
         // directory is unknown too. Reconcile both directories now instead of
         // letting the sidebar contradict the toast until the next poll.
         await refreshMovedDirectories(input.sourceDirectory, destination?.directory);
       }
       if (rollbackFailures.length > 0) {
-        throw createIncompleteRollbackError(moveError, rollbackFailures, changesMoveOutcomeUnknown);
+        throw createIncompleteRollbackError(moveError, rollbackFailures);
       }
-      // Checked before `onMoveFailure` so the quick path's worktree removal
-      // never runs while the user's changes may be sitting in it. Both intent
-      // kinds share the messaging.
-      if (changesMoveOutcomeUnknown) throw new ChangesMayBeInDestinationError(moveError);
-      if (destination?.onMoveFailure) {
+      // OpenCode admits a move durably before it answers, so a lost response
+      // does not cancel it: the session may already sit in the destination or
+      // land there once the inbox drains. Only a definite rejection proves the
+      // destination is unused and safe to delete.
+      if (destination?.onMoveFailure && !moveOutcomeUnknown) {
         return destination.onMoveFailure(moveError);
+      }
+      if (destination?.onMoveFailure && moveOutcomeUnknown) {
+        throw new SessionMoveOutcomeUnknownError(moveError);
       }
       throw moveError;
     }
@@ -341,7 +276,6 @@ export const moveSessionTreeToExistingWorktree = async (input: {
   descendants: Session[];
   sourceDirectory: string;
   destination: WorktreeMetadata;
-  moveChanges: boolean;
 }): Promise<string> => {
   const normalizedSourceDirectory = normalizePath(input.sourceDirectory) ?? input.sourceDirectory;
   const normalizedDestinationDirectory = normalizePath(input.destination.path) ?? input.destination.path;
@@ -362,7 +296,6 @@ const moveSessionTreeToQuickWorktree = async (input: {
   root: Session;
   descendants: Session[];
   sourceDirectory: string;
-  moveChanges: boolean;
 }): Promise<string> => {
   return moveSessionTreeTransaction(input, async () => {
     const project = resolveProjectRef(input.sourceDirectory);
@@ -381,41 +314,27 @@ const moveSessionTreeToQuickWorktree = async (input: {
     return {
       directory: worktree.path,
       metadata: worktree,
-      // removeFailedWorktree force-deletes the worktree and its branch. The
-      // transaction skips this callback when the change transfer's outcome is
-      // unknown, so the worktree survives whenever it may hold the only copy.
+      // removeFailedWorktree force-deletes the worktree and its branch; the
+      // session's files never move, so nothing of the user's is in it yet.
+      // Called only for a definite rejection; the transaction keeps the
+      // worktree when the move outcome is unknown.
       onMoveFailure: async (error) => removeFailedWorktree(project, worktree, error),
     };
   });
 };
 
-const describeMoveFailure = (
-  messages: SessionTreeMoveMessages,
-  failure: Error,
-  moveChanges: boolean,
-): string => {
-  if (failure instanceof ChangesMayBeInDestinationError) return messages.changesMayBeInDestination;
-  if (failure instanceof IncompleteRollbackError && failure.changesMayBeInDestination) {
-    return `${failure.message} ${messages.changesMayBeInDestination}`;
-  }
-  if (moveChanges && isApplyChangesError(failure)) return messages.applyChangesFailed;
-  return failure.message;
-};
-
-const executeSessionTreeMove = (intent: SessionTreeMoveIntent, moveChanges: boolean): void => {
+const executeSessionTreeMove = (intent: SessionTreeMoveIntent): void => {
   const movePromise = intent.kind === 'existing'
     ? moveSessionTreeToExistingWorktree({
         root: intent.root,
         descendants: intent.descendants,
         sourceDirectory: intent.sourceDirectory,
         destination: intent.destination,
-        moveChanges,
       })
     : moveSessionTreeToQuickWorktree({
         root: intent.root,
         descendants: intent.descendants,
         sourceDirectory: intent.sourceDirectory,
-        moveChanges,
       });
 
   void movePromise
@@ -423,64 +342,12 @@ const executeSessionTreeMove = (intent: SessionTreeMoveIntent, moveChanges: bool
     .catch((error) => {
       const failure = error instanceof Error ? error : new Error(String(error));
       toast.error(intent.messages.failure, {
-        description: describeMoveFailure(intent.messages, failure, moveChanges),
+        description: failure instanceof SessionMoveOutcomeUnknownError ? intent.messages.outcomeUnknown : failure.message,
       });
     });
 };
 
-export const cancelSessionTreeMove = (): void => {
-  const confirmation = getSessionTreeMoveConfirmation();
-  if (!confirmation) return;
-  setSessionMoveRequesting(confirmation.intent.root.id, false);
-  setSessionMoveConfirmation(null);
-};
-
-export const confirmSessionTreeMove = (moveChanges: boolean): void => {
-  const confirmation = getSessionTreeMoveConfirmation();
-  if (!confirmation) return;
-  const { intent } = confirmation;
-  setSessionMoveConfirmation(null);
-  setSessionMoveRequesting(intent.root.id, false);
-  executeSessionTreeMove(intent, moveChanges);
-};
-
 export const requestSessionTreeMove = (intent: SessionTreeMoveIntent): void => {
-  const state = useSessionMoveState.getState();
-  if (state.confirmation) return;
-  if (state.pendingSessionIds.has(intent.root.id) || state.requestingSessionIds.has(intent.root.id)) return;
-
-  setSessionMoveRequesting(intent.root.id, true);
-
-  void (async () => {
-    try {
-      const isGitRepository = await checkIsGitRepository(intent.sourceDirectory);
-      if (!isGitRepository) {
-        setSessionMoveRequesting(intent.root.id, false);
-        executeSessionTreeMove(intent, false);
-        return;
-      }
-
-      const status = await getGitStatus(intent.sourceDirectory);
-      if (status.isClean) {
-        setSessionMoveRequesting(intent.root.id, false);
-        executeSessionTreeMove(intent, false);
-        return;
-      }
-
-      const stagedFileCount = status.files.filter((file) => {
-        const indexStatus = file.index.trim();
-        return indexStatus !== '' && indexStatus !== '?';
-      }).length;
-      setSessionMoveConfirmation({
-        intent,
-        dirtyFileCount: status.files.length,
-        stagedFileCount,
-      });
-    } catch {
-      toast.error(intent.messages.failure, {
-        description: intent.messages.sourceVerificationFailed,
-      });
-      setSessionMoveRequesting(intent.root.id, false);
-    }
-  })();
+  if (useSessionMoveState.getState().pendingSessionIds.has(intent.root.id)) return;
+  executeSessionTreeMove(intent);
 };

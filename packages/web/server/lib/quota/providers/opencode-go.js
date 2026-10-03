@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { deleteLegacyOpenCodeGoCredential } from '../credentials/store.js';
 import { buildResult, getAuthEntry, normalizeAuthEntry, toUsageWindow } from '../utils/index.js';
 
@@ -25,7 +25,7 @@ export const parseOpenCodeGoUsage = (payload) => {
     if (typeof resetAt !== 'string' || !Number.isFinite(new Date(resetAt).getTime())) continue;
     windows[key] = toUsageWindow({
       usedPercent: Math.min(100, Math.max(0, usedPercent)),
-      resetAt,
+      resetAt: new Date(resetAt).getTime(),
       windowSeconds: null,
     });
   }
@@ -37,6 +37,7 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
     headers: {
       Accept: 'application/json',
       Authorization: `Bearer ${apiKey}`,
+      'x-opencode-session': 'openchamber-usage',
       'User-Agent': 'OpenChamber quota provider',
     },
     signal: AbortSignal.timeout(15_000),
@@ -50,17 +51,17 @@ export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-const getApiKey = () => {
-  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), aliases));
+const getApiKey = (auth) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return entry?.key ?? entry?.token ?? null;
 };
 
-export const isConfigured = () => Boolean(getApiKey());
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
 export const fetchQuota = async () => {
   try {
     deleteLegacyOpenCodeGoCredential();
-    const apiKey = getApiKey();
+    const apiKey = getApiKey(await readOpenCodeCredentials());
     if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
     const windows = await fetchOpenCodeGoUsage(apiKey);
     return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });

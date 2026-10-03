@@ -252,11 +252,12 @@ const parseHandshakeMessage = (raw) => {
   if (parsed.v !== RELAY_PROTOCOL_VERSION) return null;
   // Unknown/missing capability flag = false = legacy behavior.
   const batch = parsed.batch === true;
+  const flowControl = parsed.flowControl === true;
   if (parsed.t === 'ready') {
-    return { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch };
+    return { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch, flowControl };
   }
   if (parsed.t === 'hello' && typeof parsed.nonce === 'string' && typeof parsed.clientPubJwk === 'object' && parsed.clientPubJwk !== null) {
-    return { t: 'hello', v: RELAY_PROTOCOL_VERSION, clientPubJwk: parsed.clientPubJwk, nonce: parsed.nonce, batch };
+    return { t: 'hello', v: RELAY_PROTOCOL_VERSION, clientPubJwk: parsed.clientPubJwk, nonce: parsed.nonce, batch, flowControl };
   }
   return null;
 };
@@ -275,7 +276,7 @@ const failClosed = (reason) => ({
  *   { type: 'ignore' }                                — drop the frame
  *   { type: 'fail', closeCode, reason }               — close the socket with closeCode
  * @param {CryptoKey} hostEncPrivateKey long-lived ECDH private key
- * @param {{ batch?: boolean }} [options] `batch` defaults true; set false to force legacy behavior
+ * @param {{ batch?: boolean, flowControl?: boolean }} [options] Capabilities default true.
  */
 export const createHostHandshake = (hostEncPrivateKey, options = {}) => {
   const localBatch = options.batch !== false;
@@ -321,15 +322,16 @@ export const createHostHandshake = (hostEncPrivateKey, options = {}) => {
       acceptedClientKeyFingerprint = fingerprint;
       // Batching runs only if both peers advertised it.
       negotiatedBatch = localBatch && message.batch === true;
-      readyText = JSON.stringify(
-        negotiatedBatch
-          ? { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch: true }
-          : { t: 'ready', v: RELAY_PROTOCOL_VERSION },
-      );
+      const flowControl = options.flowControl !== false && message.flowControl === true;
+      const ready = { t: 'ready', v: RELAY_PROTOCOL_VERSION };
+      if (negotiatedBatch) ready.batch = true;
+      if (flowControl) ready.flowControl = true;
+      readyText = JSON.stringify(ready);
       established = true;
       return {
         type: 'established',
         batch: negotiatedBatch,
+        flowControl,
         replyText: readyText,
         channel: {
           encryptor: createFrameEncryptor(keys.hostToClient),

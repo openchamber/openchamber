@@ -3,16 +3,42 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { removeProviderConfig, getProviderSources, upsertProviderConfig } from './opencodeConfig';
-import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
-import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
+import { getProviderSources, getStoredProviderConfig, upsertProviderConfig } from './opencodeConfig';
+import { getProviderAuth } from './opencodeAuth';
+import { OpenCode } from '@opencode/client';
+import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
+import type { OpenCodeManager } from './opencode';
+import { activateQuotaGiftReset, fetchQuotaForProvider, listConfiguredQuotaProviders, type QuotaGiftResetType } from './quotaProviders';
 import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
-import { buildDeferredRestartResponse } from './config-mutation-response';
-import { normalizeWindowsDriveLetter } from './pathUtils';
+import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
+import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+
+const isSessionNotFound = (error: Error): boolean => error.name === 'SessionNotFoundError';
+
+/** Session metadata on the OpenCode instance this window manages. */
+const sessionMetadataOnOpenCode = (manager: OpenCodeManager | undefined): SessionMetadataOnOpenCode => {
+  const apiUrl = manager?.getApiUrl();
+  if (!manager || !apiUrl) throw new Error('OpenCode is not available');
+  const client = OpenCode.make({ baseUrl: apiUrl.replace(/\/+$/, ''), headers: manager.getOpenCodeAuthHeaders() });
+  return {
+    read: async (sessionID) => {
+      try {
+        const session = await client.session.get({ sessionID });
+        // Round-trip through JSON: the wire type is opaque JSON, the store's is `JsonValue`.
+        return asSessionMetadata(parseJson(JSON.stringify(session.metadata ?? {})) ?? undefined) ?? {};
+      } catch (error) {
+        if (error instanceof Error && isSessionNotFound(error)) return null;
+        throw error;
+      }
+    },
+    write: (sessionID, metadata) => client.session.update({ sessionID, metadata }),
+  };
+};
 
 type BridgeMessageInput = {
   id: string;
@@ -22,6 +48,7 @@ type BridgeMessageInput = {
 
 type SystemRuntimeDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
+  sessionState: SessionStateStore;
   fetchModelsMetadata: () => Promise<unknown>;
   updateCheckUrl: string;
   clientReloadDelayMs: number;
@@ -95,12 +122,6 @@ const mapNodeArchToApiArch = (value: string): 'arm64' | 'x64' | 'unknown' => {
   return 'unknown';
 };
 
-type ParsedDiffHunk = {
-  newStart: number;
-  oldLines: string[];
-  newLines: string[];
-};
-
 const VIRTUAL_DIFF_SCHEME = 'openchamber-diff';
 const virtualDiffContents = new Map<string, string>();
 let virtualDiffCounter = 0;
@@ -144,76 +165,6 @@ const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vs
   });
 };
 
-const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
-  const lines = patch.split(/\r?\n/);
-  const hunks: ParsedDiffHunk[] = [];
-
-  let current: ParsedDiffHunk | null = null;
-
-  for (const line of lines) {
-    const headerMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-    if (headerMatch) {
-      if (current) {
-        hunks.push(current);
-      }
-      current = {
-        newStart: Number(headerMatch[1] || 1),
-        oldLines: [],
-        newLines: [],
-      };
-      continue;
-    }
-
-    if (!current) continue;
-
-    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('\\ No newline')) {
-      continue;
-    }
-
-    if (line.startsWith('-')) {
-      current.oldLines.push(line.slice(1));
-      continue;
-    }
-
-    if (line.startsWith('+')) {
-      current.newLines.push(line.slice(1));
-      continue;
-    }
-
-    if (line.startsWith(' ')) {
-      const content = line.slice(1);
-      current.oldLines.push(content);
-      current.newLines.push(content);
-    }
-  }
-
-  if (current) {
-    hunks.push(current);
-  }
-
-  return hunks;
-};
-
-const reconstructOriginalContentFromPatch = (modifiedContent: string, patch: string): string | null => {
-  const hunks = parseUnifiedDiffHunks(patch);
-  if (hunks.length === 0) {
-    return null;
-  }
-
-  const lines = modifiedContent.split('\n');
-  for (let index = hunks.length - 1; index >= 0; index -= 1) {
-    const hunk = hunks[index];
-    if (!hunk) {
-      continue;
-    }
-    const startIndex = Math.max(0, hunk.newStart - 1);
-    const replaceCount = hunk.newLines.length;
-    lines.splice(startIndex, replaceCount, ...hunk.oldLines);
-  }
-
-  return lines.join('\n');
-};
-
 const fetchFreeZenModels = async (): Promise<Array<{ id: string; owned_by?: string }>> => [];
 
 export async function handleSystemBridgeMessage(
@@ -224,7 +175,7 @@ export async function handleSystemBridgeMessage(
   const { id, type, payload } = message;
 
   switch (type) {
-    case 'api:opencode/directory': {
+    case 'api:openchamber/directory': {
       const target = (payload as { path?: string })?.path;
       if (!target) {
         return { id, type, success: false, error: 'Path is required' };
@@ -256,7 +207,8 @@ export async function handleSystemBridgeMessage(
           return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
         }
         const base = `${apiUrl.replace(/\/+$/, '')}/`;
-        const response = await fetch(new URL('global/health', base).toString(), {
+        // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
+        const response = await fetch(new URL('api/info', base).toString(), {
           method: 'GET',
           headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
         });
@@ -275,13 +227,22 @@ export async function handleSystemBridgeMessage(
       }
     }
 
+    case 'api:opencode/compatibility': {
+      return { id, type, success: true, data: await ctx?.manager?.getCompatibility() };
+    }
+
+    case 'api:opencode/install-v2': {
+      if (!ctx?.manager) return { id, type, success: false, error: 'OpenCode manager is unavailable.' };
+      await ctx.manager.installV2();
+      return { id, type, success: true, data: { success: true } };
+    }
+
     case 'api:opencode/upgrade-status': {
       return { id, type, success: true, data: await getOpenCodeUpgradeStatus(ctx?.manager) };
     }
 
     case 'api:opencode/upgrade': {
-      const target = (payload as { target?: unknown } | undefined)?.target;
-      return { id, type, success: true, data: await upgradeManagedOpenCode(ctx?.manager, target) };
+      return { id, type, success: true, data: await upgradeManagedOpenCode(ctx?.manager) };
     }
 
     case 'api:session-activity:get': {
@@ -298,6 +259,12 @@ export async function handleSystemBridgeMessage(
     case 'api:zen:models': {
       const models = await fetchFreeZenModels();
       return { id, type, success: true, data: { models } };
+    }
+
+    // The same machine policy the web server enforces (policy file or
+    // OPENCHAMBER_ENTERPRISE_MODE in the editor's environment).
+    case 'api:openchamber:enterprise-policy': {
+      return { id, type, success: true, data: publicEnterprisePolicy() };
     }
 
     case 'api:openchamber:update-check': {
@@ -318,7 +285,9 @@ export async function handleSystemBridgeMessage(
         const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
           ? body.arch.trim()
           : os.arch();
-        const reportUsage = body.reportUsage !== false;
+        // Enterprise mode keeps the check (security fixes must reach the
+        // machine) but never reports usage.
+        const reportUsage = body.reportUsage !== false && !isEnterpriseMode();
 
         const requestBody = {
           appType: 'vscode',
@@ -417,51 +386,45 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:provider/auth:delete': {
-      const { providerId, scope, directory } = (payload || {}) as { providerId?: string; scope?: string; directory?: string };
-      if (!providerId) {
-        return { id, type, success: false, error: 'Provider ID is required' };
-      }
-      const normalizedScope = typeof scope === 'string' ? scope : 'auth';
-      const workingDirectory = typeof directory === 'string' && directory.trim().length > 0
-        ? directory.trim()
-        : ctx?.manager?.getWorkingDirectory();
-      try {
-        let removed = false;
-        if (normalizedScope === 'auth') {
-          removed = removeProviderAuth(providerId);
-        } else if (normalizedScope === 'user' || normalizedScope === 'project' || normalizedScope === 'custom') {
-          removed = removeProviderConfig(providerId, workingDirectory, normalizedScope);
-        } else if (normalizedScope === 'all') {
-          const authRemoved = removeProviderAuth(providerId);
-          const userRemoved = removeProviderConfig(providerId, workingDirectory, 'user');
-          const projectRemoved = workingDirectory
-            ? removeProviderConfig(providerId, workingDirectory, 'project')
-            : false;
-          const customRemoved = removeProviderConfig(providerId, workingDirectory, 'custom');
-          removed = authRemoved || userRemoved || projectRemoved || customRemoved;
-        } else {
-          return { id, type, success: false, error: 'Invalid scope' };
-        }
+    // OpenChamber-owned session state. OpenCode 2.x has no route that sets
+    // `time.archived` or rewrites metadata after creation; the web server keeps
+    // both in files, and the extension host keeps the same files (see
+    // openchamberSessionState.ts). The proxy runtime folds them back onto
+    // session reads.
+    case 'api:sessions/archive': {
+      const { ids, archivedAt } = (payload || {}) as { ids?: JsonValue; archivedAt?: JsonValue };
+      const targets = asSessionIdList(ids);
+      if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
+      return { id, type, success: true, data: await deps.sessionState.archive(targets, asTimestamp(archivedAt)) };
+    }
 
-        return {
-          id,
-          type,
-          success: true,
-          data: {
-            removed,
-            ...(removed
-              ? buildDeferredRestartResponse(`Provider ${providerId} disconnected successfully. Restart OpenCode to apply.`)
-              : {
-                success: true,
-                requiresReload: false,
-                message: `Provider ${providerId} was not configured.`,
-              }),
-          },
-        };
+    case 'api:sessions/unarchive': {
+      const { ids } = (payload || {}) as { ids?: JsonValue };
+      const targets = asSessionIdList(ids);
+      if (targets.length === 0) return { id, type, success: false, error: 'ids must be a non-empty array of session ids' };
+      return { id, type, success: true, data: await deps.sessionState.unarchive(targets) };
+    }
+
+    case 'api:sessions/metadata:get': {
+      const sessionId = asSessionId(((payload || {}) as { sessionId?: JsonValue }).sessionId);
+      if (!sessionId) return { id, type, success: false, error: 'a session id is required' };
+      try {
+        return { id, type, success: true, data: { metadata: await deps.sessionState.getMetadata(sessionId, sessionMetadataOnOpenCode(ctx?.manager)) } };
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return { id, type, success: false, error: errorMessage };
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
+    case 'api:sessions/metadata:set': {
+      const body = (payload || {}) as { sessionId?: JsonValue; patch?: JsonValue };
+      const sessionId = asSessionId(body.sessionId);
+      if (!sessionId) return { id, type, success: false, error: 'a session id is required' };
+      const patch = asSessionMetadata(body.patch);
+      if (!patch) return { id, type, success: false, error: 'patch must be an object' };
+      try {
+        return { id, type, success: true, data: { metadata: await deps.sessionState.setMetadata(sessionId, patch, sessionMetadataOnOpenCode(ctx?.manager)) } };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
 
@@ -475,9 +438,9 @@ export async function handleSystemBridgeMessage(
           ? directory.trim()
           : ctx?.manager?.getWorkingDirectory();
         const sources = getProviderSources(providerId, workingDirectory);
-        const auth = getProviderAuth(providerId);
-        sources.auth.exists = Boolean(auth);
-        return { id, type, success: true, data: { providerId, sources } };
+        sources.auth.exists = Boolean(await getProviderAuth(providerId));
+        const config = getStoredProviderConfig(providerId, workingDirectory);
+        return { id, type, success: true, data: { providerId, sources, config } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
@@ -491,18 +454,24 @@ export async function handleSystemBridgeMessage(
         config,
         scope,
         directory,
+        hasCredential,
       } = (payload || {}) as {
         providerID?: string;
         providerId?: string;
         config?: unknown;
         scope?: string;
         directory?: string;
+        hasCredential?: boolean;
       };
       const providerId = (typeof providerID === 'string' && providerID.trim())
         || (typeof providerIdAlias === 'string' && providerIdAlias.trim())
         || '';
       if (!providerId) {
         return { id, type, success: false, error: 'Provider ID is required' };
+      }
+      // Enterprise mode: providers come only from the OpenCode config.
+      if (isEnterpriseMode()) {
+        return { id, type, success: false, error: ENTERPRISE_MODE_ERROR };
       }
       if (!config || typeof config !== 'object' || Array.isArray(config)) {
         return { id, type, success: false, error: 'Provider config is required' };
@@ -520,7 +489,7 @@ export async function handleSystemBridgeMessage(
           config,
           workingDirectory,
           normalizedScope,
-          { hasStoredAuth: Boolean(getProviderAuth(providerId)) },
+          { hasStoredAuth: hasCredential === true || Boolean(await getProviderAuth(providerId)) },
         );
         await ctx?.manager?.restart();
         return {
@@ -544,7 +513,7 @@ export async function handleSystemBridgeMessage(
 
     case 'api:quota:providers': {
       try {
-        const providers = listConfiguredQuotaProviders();
+        const providers = await listConfiguredQuotaProviders();
         return { id, type, success: true, data: { providers } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -555,7 +524,7 @@ export async function handleSystemBridgeMessage(
     case 'api:quota:credentials': {
       const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
       try {
-        if (!providerId || !['ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
+        if (!providerId || !['exe-dev', 'ollama-cloud', 'cursor'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
         if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
         if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
         if (method === 'IMPORT') {
@@ -596,6 +565,27 @@ export async function handleSystemBridgeMessage(
       }
     }
 
+    case 'api:quota:giftReset:use': {
+      // SAFETY: bridge payloads are untrusted JSON from the webview; the cast
+      // only reads the expected fields, and activateQuotaGiftReset re-validates
+      // every value before any request leaves the extension host.
+      const { providerId, recordId, resetType } = (payload || {}) as {
+        providerId?: string;
+        recordId?: number;
+        resetType?: QuotaGiftResetType;
+      };
+      if (!providerId || recordId === undefined || !Number.isFinite(recordId) || !resetType) {
+        return { id, type, success: false, error: 'Invalid gift reset request' };
+      }
+      try {
+        await activateQuotaGiftReset(providerId, { recordId, resetType });
+        return { id, type, success: true, data: { success: true } };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { id, type, success: false, error: errorMessage };
+      }
+    }
+
     case 'api:workspace:addFolder': {
       try {
         // SAFETY: bridge payloads are untrusted JSON from the webview; the
@@ -608,10 +598,10 @@ export async function handleSystemBridgeMessage(
         }
         const folders = vscode.workspace.workspaceFolders ?? [];
         const uri = vscode.Uri.file(normalizeWindowsDriveLetter(targetPath.trim()));
-        // VS Code reports workspace folder paths with lowercase Windows drive
-        // letters (see pathUtils), so normalize both sides before comparing.
+        // `Uri.fsPath` lowercases the Windows drive letter again, so both sides
+        // have to go through the shared comparison (see pathUtils).
         const alreadyAdded = folders.some(
-          (folder) => normalizeWindowsDriveLetter(folder.uri.fsPath) === uri.fsPath,
+          (folder) => pathsEqualWithNormalizedDriveLetter(folder.uri.fsPath, uri.fsPath),
         );
         if (!alreadyAdded) {
           const updated = await vscode.workspace.updateWorkspaceFolders(folders.length, null, { uri });

@@ -8,6 +8,11 @@ import {
 describe('isPathWithinProject', () => {
   test('matches child directories for root projects', () => {
     expect(isPathWithinProject('/workspace/app', '/')).toBe(true);
+    expect(isPathWithinProject('c:\\Users\\Developer', 'C:/')).toBe(true);
+    expect(isPathWithinProject('D:/Users/Developer', 'C:/')).toBe(false);
+    expect(isPathWithinProject('//?/C:/Users/Developer', '//?/C:/')).toBe(true);
+    expect(isPathWithinProject('//Server/Share/Project', '//Server/Share')).toBe(true);
+    expect(isPathWithinProject('//Server/Share2/Project', '//Server/Share')).toBe(false);
   });
 
   test('matches exact project directories', () => {

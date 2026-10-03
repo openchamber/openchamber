@@ -1,8 +1,14 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
+import { takeSessionActionFailure } from '@/sync/session-action-failures';
+import { describeSessionActionError } from '../sessions/sessionActionError';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { deriveSessionRowBulkSelectAll, deriveSessionRowSelectionArchived, useSessionRowOrderRegistry } from '../sessions/sessionRowOrder';
+import type { BulkDeleteSessionsConfirmState } from '../shell/ConfirmDialogs';
+
+const EMPTY_SESSIONS_BY_ID = new Map<string, { time?: { archived?: number | null } }>();
 
 type Args = {
   isInlineEditing: boolean;
@@ -20,10 +26,8 @@ type Args = {
   archiveSessions: (ids: string[]) => Promise<{ archivedIds: string[]; failedIds: string[] }>;
   unarchiveSessions: (ids: string[]) => Promise<{ restoredIds: string[]; failedIds: string[] }>;
   deleteSessions: (ids: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
-  setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<{
-    sessionCount: number;
-    archivedBucket: boolean;
-  } | null>>;
+  bulkDeleteConfirm: BulkDeleteSessionsConfirmState;
+  setBulkDeleteConfirm: React.Dispatch<React.SetStateAction<BulkDeleteSessionsConfirmState>>;
 };
 
 export const resolveSelectionFolderScopes = (
@@ -37,6 +41,25 @@ export const resolveSelectionFolderScopes = (
     : [selectionScope];
 };
 
+export const resolveBulkDeleteConfirmation = (
+  value: NonNullable<BulkDeleteSessionsConfirmState>,
+  sessionsById: ReadonlyMap<string, { time?: { archived?: number | null } }>,
+): { ready: true; value: NonNullable<BulkDeleteSessionsConfirmState> }
+  | { ready: false; value: NonNullable<BulkDeleteSessionsConfirmState> | null } => {
+  const sessionIds = value.sessionIds.filter((id) => sessionsById.has(id));
+  if (sessionIds.length === 0) return { ready: false, value: null };
+  // `archivedBucket` names the action (true = permanent delete). A requested
+  // delete stays a delete; a requested archive turns into a delete only when
+  // every remaining session is already archived and cannot be archived again.
+  const archivedBucket = value.archivedBucket
+    || deriveSessionRowSelectionArchived(new Set(sessionIds), sessionsById);
+  const next = { sessionIds, sessionCount: sessionIds.length, archivedBucket };
+  return {
+    ready: sessionIds.length === value.sessionIds.length && archivedBucket === value.archivedBucket,
+    value: next,
+  };
+};
+
 /**
  * Bulk-action logic for the sidebar. The hot-path concern is that this
  * hook subscribes to `useSessionMultiSelectStore` — which can fire on
@@ -47,12 +70,16 @@ export const resolveSelectionFolderScopes = (
  *
  * To keep that subscription narrow, the heavy work (folders lookup,
  * DOM-attribute scanning for the active/archived scope, etc.) is
- * deferred behind a `selectedIds.size > 0` check inside the hook
- * itself, so toggling selection mode on/off does not force the
- * downstream useMemo chain to re-evaluate when no rows are selected.
+ * deferred behind a `selectedIds.size > 0` check inside the hook itself.
+ * Scope and archive state come from the selection store rather than mounted
+ * row DOM, so virtual eviction cannot change the available actions.
  */
 export const useSidebarBulkActions = (args: Args) => {
   const { t } = useI18n();
+  const failureDescription = React.useCallback((ids: readonly string[]): { description: string } | undefined => {
+    const error = takeSessionActionFailure(ids);
+    return error ? { description: describeSessionActionError(error, t) } : undefined;
+  }, [t]);
   const {
     isInlineEditing,
     showDeletionDialog,
@@ -64,6 +91,7 @@ export const useSidebarBulkActions = (args: Args) => {
     archiveSessions,
     unarchiveSessions,
     deleteSessions,
+    bulkDeleteConfirm,
     setBulkDeleteConfirm,
   } = args;
 
@@ -72,6 +100,7 @@ export const useSidebarBulkActions = (args: Args) => {
   const hasSelection = selectedIdsSize > 0;
   const selectedIds = useSessionMultiSelectStore((state) => state.selectedIds);
   const selectionScopeKey = useSessionMultiSelectStore((state) => state.scopeKey);
+  const rowOrderRegistry = useSessionRowOrderRegistry();
 
   const handleToggleSelectionMode = React.useCallback(() => {
     useSessionMultiSelectStore.getState().toggleMode();
@@ -80,34 +109,15 @@ export const useSidebarBulkActions = (args: Args) => {
     useSessionMultiSelectStore.getState().disable();
   }, []);
 
-  // All of the below short-circuit on `hasSelection` so the DOM-scanning
-  // and folder-lookup work only runs when there's something to act on.
-  const bulkScopeIsArchived = React.useMemo(() => {
-    if (!hasSelection) return false;
-    if (typeof document === 'undefined') return false;
-    let sawActive = false;
-    let sawArchived = false;
-    for (const id of selectedIds) {
-      const rows = document.querySelectorAll<HTMLElement>(`[data-session-row="${CSS.escape(id)}"]`);
-      for (const row of rows) {
-        if (row.getAttribute('data-session-archived') === '1') sawArchived = true;
-        else sawActive = true;
-      }
-    }
-    return sawArchived && !sawActive;
-  }, [hasSelection, selectedIds]);
+  const bulkScopeIsArchived = hasSelection && deriveSessionRowSelectionArchived(
+    selectedIds,
+    rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID,
+  );
 
   const derivedSelectionScope = React.useMemo(() => {
     if (selectionScopeKey) return selectionScopeKey;
-    if (!hasSelection) return null;
-    if (typeof document === 'undefined') return null;
-    for (const id of selectedIds) {
-      const row = document.querySelector<HTMLElement>(`[data-session-row="${CSS.escape(id)}"]`);
-      const scope = row?.getAttribute('data-session-scope');
-      if (scope && scope.length > 0) return scope;
-    }
     return null;
-  }, [hasSelection, selectedIds, selectionScopeKey]);
+  }, [selectionScopeKey]);
 
   // The selection scope is a project id; folders live per directory scope
   // (project root + each worktree). Resolve all of them, in project order.
@@ -172,10 +182,9 @@ export const useSidebarBulkActions = (args: Args) => {
     }
   }, [removeSessionsFromFolders, selectedIds, selectionFolderScopes, hasSelection]);
 
-  const executeBulkDelete = React.useCallback(async () => {
-    const ids = Array.from(selectedIds);
+  const executeBulkDelete = React.useCallback(async (ids: string[], archivedBucket: boolean) => {
     if (ids.length === 0) return;
-    if (bulkScopeIsArchived) {
+    if (archivedBucket) {
       const { deletedIds, failedIds } = await deleteSessions(ids);
       if (deletedIds.length > 0) {
         toast.success(deletedIds.length === 1
@@ -185,8 +194,9 @@ export const useSidebarBulkActions = (args: Args) => {
       if (failedIds.length > 0) {
         toast.error(failedIds.length === 1
           ? t('sessions.sidebar.bulkActions.failedDeleteSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }));
+          : t('sessions.sidebar.bulkActions.failedDeletePlural', { count: failedIds.length }), failureDescription(failedIds));
       }
+      useSessionMultiSelectStore.getState().removeMany(deletedIds);
     } else {
       const { archivedIds, failedIds } = await archiveSessions(ids);
       if (archivedIds.length > 0) {
@@ -197,21 +207,25 @@ export const useSidebarBulkActions = (args: Args) => {
       if (failedIds.length > 0) {
         toast.error(failedIds.length === 1
           ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
-          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+          : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }), failureDescription(failedIds));
       }
+      useSessionMultiSelectStore.getState().removeMany(archivedIds);
     }
-    useSessionMultiSelectStore.getState().clear();
-  }, [archiveSessions, bulkScopeIsArchived, deleteSessions, selectedIds, t]);
+  }, [archiveSessions, deleteSessions, failureDescription, t]);
 
-  const handleBulkDelete = React.useCallback(() => {
+  const requestBulkDestructive = React.useCallback((hardDelete: boolean) => {
     if (!hasSelection) return;
-    const count = selectedIds.size;
+    const sessionIds = Array.from(selectedIds);
     if (!showDeletionDialog) {
-      void executeBulkDelete();
+      void executeBulkDelete(sessionIds, hardDelete);
       return;
     }
-    setBulkDeleteConfirm({ sessionCount: count, archivedBucket: bulkScopeIsArchived });
-  }, [bulkScopeIsArchived, executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
+    setBulkDeleteConfirm({ sessionIds, sessionCount: sessionIds.length, archivedBucket: hardDelete });
+  }, [executeBulkDelete, selectedIds, showDeletionDialog, setBulkDeleteConfirm, hasSelection]);
+  /** Archive active sessions; already-archived ones can only be deleted. */
+  const handleBulkDelete = React.useCallback(() => requestBulkDestructive(bulkScopeIsArchived), [bulkScopeIsArchived, requestBulkDestructive]);
+  const handleBulkArchive = React.useCallback(() => requestBulkDestructive(false), [requestBulkDestructive]);
+  const handleBulkHardDelete = React.useCallback(() => requestBulkDestructive(true), [requestBulkDestructive]);
 
   const handleBulkRestore = React.useCallback(async () => {
     if (!hasSelection || !bulkScopeIsArchived) return;
@@ -225,26 +239,30 @@ export const useSidebarBulkActions = (args: Args) => {
     if (failedIds.length > 0) {
       toast.error(failedIds.length === 1
         ? t('sessions.sidebar.bulkActions.failedRestoreSingle', { count: failedIds.length })
-        : t('sessions.sidebar.bulkActions.failedRestorePlural', { count: failedIds.length }));
+        : t('sessions.sidebar.bulkActions.failedRestorePlural', { count: failedIds.length }), failureDescription(failedIds));
     }
-    useSessionMultiSelectStore.getState().clear();
-  }, [bulkScopeIsArchived, hasSelection, selectedIds, t, unarchiveSessions]);
+    useSessionMultiSelectStore.getState().removeMany(restoredIds);
+  }, [bulkScopeIsArchived, failureDescription, hasSelection, selectedIds, t, unarchiveSessions]);
 
   const confirmBulkDelete = React.useCallback(async () => {
+    if (!bulkDeleteConfirm) return;
+    const sessionsById = rowOrderRegistry?.getSessionsById() ?? EMPTY_SESSIONS_BY_ID;
+    const resolution = resolveBulkDeleteConfirmation(bulkDeleteConfirm, sessionsById);
+    if (!resolution.ready) {
+      setBulkDeleteConfirm(resolution.value);
+      return;
+    }
     setBulkDeleteConfirm(null);
-    await executeBulkDelete();
-    // setBulkDeleteConfirm is a stable React state setter; intentionally
-    // omitted from deps to avoid forcing the keyboard-listener effect
-    // below to re-subscribe on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executeBulkDelete]);
+    await executeBulkDelete(resolution.value.sessionIds, resolution.value.archivedBucket);
+  }, [bulkDeleteConfirm, executeBulkDelete, rowOrderRegistry, setBulkDeleteConfirm]);
 
   React.useEffect(() => {
     if (!selectionModeEnabled) return;
-    const isMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+    const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent || '');
     const listener = (event: KeyboardEvent) => {
+      if (bulkDeleteConfirm) return;
       if (isInlineEditing) return;
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof HTMLElement ? event.target : null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
       }
@@ -260,30 +278,19 @@ export const useSidebarBulkActions = (args: Args) => {
         return;
       }
       if (modifier && (event.key === 'a' || event.key === 'A')) {
-        const rows = typeof document !== 'undefined'
-          ? Array.from(document.querySelectorAll<HTMLElement>('[data-session-row]'))
-          : [];
-        if (rows.length === 0) return;
+        const selection = deriveSessionRowBulkSelectAll(
+          rowOrderRegistry?.getEntries() ?? [],
+          rowOrderRegistry?.getDescendantIds() ?? [],
+          useSessionMultiSelectStore.getState().scopeKey,
+        );
+        if (!selection) return;
         event.preventDefault();
-        const currentScope = useSessionMultiSelectStore.getState().scopeKey;
-        const targetScope = currentScope
-          ?? rows[0]?.getAttribute('data-session-scope')
-          ?? null;
-        const scopeFilter = (el: HTMLElement): boolean => {
-          if (!targetScope) return true;
-          return el.getAttribute('data-session-scope') === targetScope;
-        };
-        const ids = rows
-          .filter(scopeFilter)
-          .map((el) => el.getAttribute('data-session-row'))
-          .filter((id): id is string => typeof id === 'string' && id.length > 0);
-        if (ids.length === 0) return;
-        useSessionMultiSelectStore.getState().replaceAll(ids, targetScope || null);
+        useSessionMultiSelectStore.getState().replaceAll(selection.ids, selection.scopeKey);
       }
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [handleBulkDelete, isInlineEditing, selectionModeEnabled]);
+  }, [bulkDeleteConfirm, handleBulkDelete, isInlineEditing, rowOrderRegistry, selectionModeEnabled]);
 
   return {
     selectionModeEnabled,
@@ -299,6 +306,8 @@ export const useSidebarBulkActions = (args: Args) => {
     handleBulkCreateFolderAndMove,
     handleBulkRemoveFromFolder,
     handleBulkDelete,
+    handleBulkArchive,
+    handleBulkHardDelete,
     handleBulkRestore,
     confirmBulkDelete,
   };

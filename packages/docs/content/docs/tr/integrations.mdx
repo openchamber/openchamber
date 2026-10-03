@@ -1,18 +1,50 @@
 ---
 title: Entegrasyonlar
-description: Claude ya da Cursor aboneliğinizi bir provider olarak kullanın.
+description: OpenChamber’ın birlikte çalıştığı hizmetleri ve abonelikleri bağlayın.
 ---
 
 # Entegrasyonlar
 
-Integration, sahip olduğunuz bir aboneliği kullanarak OpenChamber'a bir provider ekleyen küçük bir eklentidir. Bunları **Settings → Integrations** altında yönetirsiniz.
+**Settings → Integrations**, OpenChamber’ın birlikte çalıştığı servislere giriş yaptığınız yerdir. Giriş OpenChamber sunucusunda saklanır; böylece web, masaüstü ve eşleştirilmiş telefon aynı girişi paylaşır.
 
-> **Experimental feature.** Provider politikalarına uymaya çalışıyoruz, ama hesap kısıtlamaları ve askıya alma kararları yine her provider'ın kendi kararıdır. Integrations'ı kendi sorumluluğunuzda kullanın.
+## GitHub
 
-Kullanılabilir integrations:
+**GitHub** kartını genişletin ve kısa bir cihaz koduyla giriş yapmak için **Connect GitHub** seçin. Bağlandıktan sonra OpenChamber issue’lardan ve pull request’lerden oturum başlatabilir, onları mesajlara ekleyebilir ve PR açıp güncelleyebilir. GitHub’ın yapabildiği her şey [GitHub Issues & PRs](/tr/github/) sayfasında.
 
-- **Claude Code** — Claude Pro ya da Max planınız, API anahtarı gerekmez
-- **Cursor** — Cursor planınızın model limitleri
+## Linear
+
+### Çalışma alanı bağlayın
+
+1. **Linear** kartını genişletin ve **Connect** seçin.
+2. Açılan tarayıcı sekmesinde erişimi onaylayın. O zamana kadar kart **Waiting for Linear** gösterir.
+
+Başka bir Linear organizasyonunu **Add workspace** ile bağlayın. Aynı anda tek bir çalışma alanı geçerlidir: **Switch to** ile geçiş yapın; **Disconnect** yalnızca geçerli olanı kaldırır. Proje eşlemeniz korunur.
+
+### Issue’lara göz atın
+
+Bir çalışma alanı bağlandığında sağdaki bağlam çubuğunda **Linear** paneli belirir. Geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
+
+- duruma (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), atanan kişiye (**Anyone** ya da **Assigned to me**), takıma ve önceliğe göre filtreleme
+- başlık, tanımlayıcı ya da Linear URL’siyle arama
+- bir issue’yu açıp açıklamasını, yorumlarını, etiketlerini ve önceliğini okuma
+- **Status** değiştirme ya da **Close issue** seçme
+- geçerli **Workspace**’i değiştirme
+
+### Bir issue’dan oturum başlatın
+
+- Linear panelinde bir issue açın ve **Start session** seçin. Issue kaydırılırken düğme alt kısımda kalır.
+- Sohbette listeden seçmek için **New Session From Linear Issue** seçin; yeni bir dal istiyorsanız **Create in worktree** kullanın.
+- **New Worktree** iletişim kutusunda bir Linear issue’su seçin. Yeni oturum, issue mesaj kutusuna eklenmiş halde açılır ve ilk mesajı kendiniz yazarsınız.
+
+Linear panelinden ve sohbetten başlatıldığında oturum, issue’nun takımına eşlenen projede açılır ve issue ilk istem olur. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşlenmemiş bir takım için önce eşleme yapmanız istenir. İlk mesaj **Issue Review** magic prompt’undan oluşturulur; bunu **Settings → Magic Prompts → Linear** altında düzenleyebilirsiniz.
+
+### Bir issue’yu mesaja bağlayın
+
+Sohbet yazma alanında **+** menüsünü açın ve **Linear** seçin. Issue, bir sonraki mesajınıza bağlam olarak eklenir ve oturumun çalışma durumu paneli ona bir bağlantı tutar.
+
+### Oturum yorumları
+
+Linear kartında **Session comments** açın; bir issue’dan başlatılan ya da ilk mesajında issue ekli olan oturum, başladığında, bittiğinde ya da başarısız olduğunda o issue’ya oturumu açan bir bağlantıyla yorum bırakır. Yorumlar yalnızca bu OpenChamber sunucusunun herkese açık bir adresi olduğunda gönderilir; böylece bağlantı issue’daki herkes için çalışır. Yerel ya da özel bir adreste hiçbir şey gönderilmez.
 
 ## Bir entegrasyon kurun
 
@@ -25,21 +57,12 @@ Integration'lar kullanıcı düzeyinde kurulur, bu yüzden her projede çalış�
 
 ## Claude Code
 
-Claude Code, Claude Pro ya da Max planınızı kullanır. API anahtarı yoktur ve ayrı bir Claude uygulaması gerekmez.
+Claude Code, Claude Pro ya da Max planınızı bilgisayarınızdaki Claude Code CLI üzerinden kullanır. API anahtarı gerekmez.
 
 1. Integration'ı kurun. Yukarıya bakın.
 2. **Set up** seçin ve giriş yapın. Henüz Claude Code CLI'nız yoksa kurulum önce onu yüklemeyi önerir, sonra giriş yaptırır.
 
-Claude Code, burada provider CLI'sının kurulu ve giriş yapılmış olmasını gerektiren tek integration'dır. Cursor CLI gerektirmez.
-
 **Claude hesabınız nasıl güvende kalır:** Bu integration, Anthropic'in resmi Claude Agent SDK'sını ve kurulu Claude Code CLI'nızı kullanır. OAuth'u kaçırmaz, tarayıcı token'larını çıkarmaz ya da yeniden oynatmaz, desteklenmeyen bir istemciyi taklit etmez ve Anthropic'in kimlik doğrulama akışını atlamaz. Anthropic'in desteklediği erişim yolunda kalır. Bu yüzden token kaçırma ya da yetkisiz kimlik doğrulama kestirmelerinin hesap banı riskini taşımaz.
-
-## Cursor
-
-Cursor, Cursor planınıza dahil modelleri OpenChamber'da kullanılabilir hale getirir.
-
-1. Integration'ı kurun. Yukarıya bakın.
-2. **Set up** seçin, bağlantıyı açın ve tarayıcınızda erişimi onaylayın. API anahtarı gerekmez. Giriş yaptıktan sonra model listesi otomatik yüklenir.
 
 ## Güncelleme ya da kaldırma
 
@@ -48,7 +71,17 @@ Cursor, Cursor planınıza dahil modelleri OpenChamber'da kullanılabilir hale g
 
 Bir kartta girdilerin elle yönetilmesi gerektiği yazıyorsa, **Manage plugins** seçin ve kopyaları orada temizleyin.
 
+## Excalidraw
+
+Excalidraw, `.excalidraw` dosyalarında ve Obsidian `.excalidraw.md` çizimlerinde doğrudan Files içinde çizim yapmanızı sağlar. Bir OpenChamber uzantısıdır ve aynı sayfada **OpenChamber extensions** altında listelenir.
+
+1. **Settings → Integrations** bölümünü açın ve Excalidraw kartında **Install** seçin. Ayrıca Files'ta bir çizim açıp üstündeki bildirimde **Install** seçebilirsiniz.
+2. Çizimi yeniden açın. Tuval dosyanın metninin yerini alır; Cmd/Ctrl+S, otomatik kaydetme, kaynak görünümü geçişi ve tam ekran her dosyada olduğu gibi çalışır.
+
+Kart, yeni bir sürüm çıktığında uzantıyı günceller, duraklattıysanız yeniden açar ve kaldırır. Kaldırdığınızda çizimleriniz olduğu gibi kalır; yalnızca metin olarak açılır. Yalnızca web ve masaüstü.
+
 ## İlgili
 
-- [Providers, Models & Agents](/providers/) — diğer provider'ları bağlayın ve model seçin
-- [Usage & Quotas](/usage/) — ne kadar kullandığınızı izleyin
+- [GitHub Issues & PRs](/tr/github/) — GitHub’ın OpenChamber’da yapabildiği her şey
+- [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer
+- [Magic Prompts](/tr/magic-prompts/) — bir Linear oturumunun başladığı istemi düzenleyin

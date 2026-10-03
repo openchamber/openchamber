@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeTargetArchitecture } from './target-architecture.mjs';
+import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -71,7 +72,7 @@ const defaultCliVersion = (binaryPath) => {
     timeout: 15000,
   });
   if (result.status !== 0) throw new Error(`Failed to run packaged OpenCode CLI: ${binaryPath}`);
-  return (result.stdout || '').trim().split(/\s+/)[0] || '';
+  return parseOpenCodeCliVersion(result.stdout);
 };
 
 export const verifyExtractedPayload = ({
@@ -145,7 +146,7 @@ const main = () => {
     const result = verifyExtractedPayload({
       root: extractAppImage(appImagePath, temporaryDirectory),
       targetArchitecture: target,
-      expectedOpenCodeVersion: rootPackage.dependencies?.['@opencode-ai/sdk'],
+      expectedOpenCodeVersion: readPinnedOpenCodeCliVersion(),
     });
     console.log(`[electron] verified Linux ${target} AppImage: ${appImagePath}`);
     console.log(`[electron] verified OpenCode CLI ${result.openCodeVersion} and ${result.nativeModuleCount} native modules`);

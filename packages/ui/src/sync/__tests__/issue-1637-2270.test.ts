@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@/lib/opencode/model"
 import type { ProjectEntry } from "@/lib/api/types"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
@@ -16,9 +16,14 @@ let nextCreateSessionCalls: Array<{ params: unknown; directory: string | null | 
 
 // Configurable current directory (used as fallback when no directoryOverride is set)
 let currentDirectory: string | null = null
+// Stands in for the runtime's raw client; createSession only compares identity.
+const runtimeSdkClient = {}
 
+let idCounter = 0
 mock.module("@/lib/opencode/client", () => ({
+  ascendingId: (prefix: string) => `${prefix}_${(idCounter += 1).toString(16).padStart(12, "0")}`,
   opencodeClient: {
+    getSdkClient: () => runtimeSdkClient,
     getDirectory: () => currentDirectory,
     setDirectory: mock(() => undefined),
     createSession: mock(async (params: unknown, directory?: string | null) => {
@@ -90,11 +95,14 @@ beforeEach(() => {
   nextCreateSessionResponse = { id: "ses_default", time: { created: 1 } } as Session
   currentDirectory = null
 
-  // Initialize action refs. The first two args (sdk, childStores) are not
-  // exercised by `createSession` itself, only the directory getter is.
+  // Initialize action refs. `createSession` seeds the created session into its
+  // directory's child store, so the mock hands back an empty store.
   setActionRefs(
-    {} as never,
-    { children: new Map(), ensureChild: () => ({}), getChild: () => undefined } as never,
+    {
+      children: new Map(),
+      ensureChild: () => ({ getState: () => ({ session: [] }), setState: () => undefined }),
+      getChild: () => undefined,
+    } as never,
     () => currentDirectory ?? "",
   )
 })
@@ -103,7 +111,7 @@ describe("issue #1637 — server omits directory, falls back to directoryOverrid
   test("when server response omits directory and directoryOverride is set, setCurrentSession receives the directoryOverride (not null)", async () => {
     nextCreateSessionResponse = { id: "ses_1637_a", time: { created: 1 } } as Session
 
-    const result = await createSession("test title", "/projects/alpha", null)
+    const result = await createSession("test title", "/projects/alpha")
 
     expect(result?.id).toBe("ses_1637_a")
     expect(nextCreateSessionCalls).toHaveLength(1)
@@ -126,7 +134,7 @@ describe("issue #1637 — server returns directory, server value wins", () => {
       directory: "/projects/gamma",
     } as Session
 
-    const result = await createSession("test title", "/projects/alpha", null)
+    const result = await createSession("test title", "/projects/alpha")
 
     expect(result?.id).toBe("ses_1637_b")
     expect(setCurrentSessionCalls).toHaveLength(1)
@@ -144,7 +152,7 @@ describe("issue #1637 — no directoryOverride, no server directory", () => {
     currentDirectory = null
     nextCreateSessionResponse = { id: "ses_1637_c", time: { created: 1 } } as Session
 
-    const result = await createSession("test title", null, null)
+    const result = await createSession("test title", null)
 
     expect(result?.id).toBe("ses_1637_c")
     // Without any directory source, the call to opencodeClient.createSession
@@ -171,7 +179,7 @@ describe("issue #1637 — no directoryOverride, server returns directory", () =>
       directory: "/projects/server-side",
     } as Session
 
-    const result = await createSession("test title", null, null)
+    const result = await createSession("test title", null)
 
     expect(result?.id).toBe("ses_1637_d")
     expect(setCurrentSessionCalls).toHaveLength(1)
@@ -193,7 +201,7 @@ describe("issue #2270 — nested Git projects: child directory wins when overrid
     const childProjectDir = "/work/parent-git-repo/child-project-a"
     nextCreateSessionResponse = { id: "ses_2270_child", time: { created: 1 } } as Session
 
-    const result = await createSession(undefined, childProjectDir, null)
+    const result = await createSession(undefined, childProjectDir)
 
     expect(result?.id).toBe("ses_2270_child")
     // The SDK should be called with the child project directory
@@ -267,7 +275,7 @@ describe("issue #2270 — registerSessionDirectory called with effective directo
     const effectiveDir = "/projects/alpha/subdir"
     nextCreateSessionResponse = { id: "ses_2270_reg", time: { created: 1 } } as Session
 
-    await createSession("title", effectiveDir, null)
+    await createSession("title", effectiveDir)
 
     expect(registerSessionDirectoryCalls).toHaveLength(1)
     expect(registerSessionDirectoryCalls[0]).toEqual({
@@ -290,7 +298,7 @@ describe("issue #2270 — registerSessionDirectory called with effective directo
       directory: serverDir,
     } as Session
 
-    await createSession("title", overrideDir, null)
+    await createSession("title", overrideDir)
 
     expect(registerSessionDirectoryCalls).toHaveLength(1)
     expect(registerSessionDirectoryCalls[0]).toEqual({

@@ -8,6 +8,33 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - Markdown loop discovery/parsing is owned by `packages/web/server/lib/scheduled-tasks/loops.js`.
 - Runtime orchestration and execution is owned by `packages/web/server/lib/scheduled-tasks/runtime.js`.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
+- The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
+
+## Chats scope
+
+Chats (sessions outside any project) can have scheduled tasks too. They are
+scheduled like one more project, with three differences:
+
+- **Identity.** The UI and the routes address the scope as `openchamber:chats`
+  (the UI's `CHAT_DRAFT_PROJECT_ID`). A colon is not a valid Windows file name,
+  so tasks are stored under the chats root's path id
+  (`createProjectIdFromPath(<chats root>)`, the same id agent memory uses for
+  chats). The service maps the public id to the storage id on the way in, and
+  `openchamber:scheduled-task-ran` events map it back on the way out.
+- **One new chat per run.** A project run works in the project path. A chats run
+  creates `<chats root>/<yyyy-mm-dd>/session-<uuid>`, the layout the UI uses for
+  a new chat, and starts the session there, so each run lands in the sidebar's
+  chats section as its own chat. If the session cannot be created, the empty
+  directory is removed. The run result carries the directory, so "Run now" can
+  open the new chat.
+- **No loop files.** The chats root is not a repository. User-scope loops
+  already run once per project, so the chats scope never discovers loops.
+- **Directory resolution.** `resolveProjectID({ directory })` maps any
+  directory inside the chats root to the chats scope, after checking registered
+  projects, so an agent working in a chat schedules into chats.
+
+The chats root is `OPENCHAMBER_CHATS_DIR` (default `<config root>/chats`). The
+VS Code extension has no chats, so its UI does not offer the scope.
 
 ## Cross-instance occurrence claiming
 
@@ -25,6 +52,19 @@ in shared project config under the project write lock:
   from the winner's persisted `nextRunAt`.
 - Project config writes also take a cross-process `.json.lock` file so the
   read-modify-write is serialized across processes, not only within one process.
+- `syncAllProjects` (startup and every full resync) syncs each registered
+  project on its own: a project whose config cannot be read or written (a
+  broken file, a lock timeout) is logged with its id and skipped, and every
+  other project's tasks are still scheduled. Only `listProjects` failing
+  aborts the sync as a whole. `syncProject` for one project still throws, so
+  a route for that project reports the failure.
+- The sharing processes may run different OpenChamber versions. Normalization
+  keeps only the fields a build knows, so every writer persists tasks it did
+  not change verbatim from disk and swaps only `state` onto a task whose state
+  it updated; a task goes out normalized only when it was deliberately
+  replaced (upsert, loop adoption). An older server touching the file after a
+  run therefore cannot strip fields a newer build added, such as a task's goal
+  or auto-accept settings.
 - Lock timeout / filesystem errors on claim, manual-start, or completion state
   writes always release the in-process running slot (via `finally`) and best-effort
   re-arm the **next future** occurrence; they must not leave the task permanently
@@ -56,7 +96,9 @@ in shared project config under the project write lock:
 - Claiming always writes `nextRunAt` (including `undefined`) so a past once-slot
   is cleared when there is no following occurrence.
 
-Manual `runNow` does not claim a schedule occurrence.
+Manual `runNow` does not claim a schedule occurrence. It also runs paused
+(`enabled: false`) tasks — that is the point of the button — while scheduled
+dispatches still skip disabled tasks, and completion never re-arms a paused task.
 
 ## Files
 
@@ -173,3 +215,7 @@ project write lock on every `syncProject` when the project path is known:
   - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
   - `GET /api/openchamber/scheduled-tasks/status`
   - `GET /api/openchamber/events`
+
+The shared `/api/openchamber/events` stream also carries web notifications.
+Its connection ownership and browser capability flag stay unchanged. Delivery
+and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.

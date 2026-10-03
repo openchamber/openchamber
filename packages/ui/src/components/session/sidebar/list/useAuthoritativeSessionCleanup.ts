@@ -1,7 +1,9 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { cleanupPersistedSessionState } from '@/sync/session-deletion-cleanup';
+import { reconcileExternallyDeletedSession } from '@/sync/session-actions';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import {
   buildAuthoritativeSessionIdentityMap,
   findRemovedAuthoritativeSessions,
@@ -27,8 +29,18 @@ export const useAuthoritativeSessionCleanup = (args: {
       ? baselineRef.current.identities
       : null;
 
+    // A session of an isolated space is missing from the snapshot when the space did not
+    // answer or answered in part; only a space's complete answer proves a deletion. A
+    // session of a space that is gone altogether is gone with it.
+    const spaces = useSpacesStore.getState().spaces;
     for (const identity of findRemovedAuthoritativeSessions(previous, current)) {
-      cleanupPersistedSessionState({ runtimeKey, ...identity });
+      const spaceId = spaceIdOfDirectory(identity.directory);
+      const space = spaceId === null ? null : spaces.get(spaceId);
+      if (space && space.state !== 'complete') continue;
+      // The same deletion a lost `session.deleted` event would have committed:
+      // clearing persisted state alone left the session in every live store, in
+      // the sidebar, and as the open chat prompting an id the server no longer has.
+      reconcileExternallyDeletedSession({ runtimeKey, ...identity });
     }
     baselineRef.current = { runtimeKey, identities: current };
   }, [enabled, hasAuthoritativeGlobalSessions, sessions]);

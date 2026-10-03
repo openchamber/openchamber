@@ -1,0 +1,41 @@
+---
+title: Desktoptunnels
+description: Maak Cloudflare- of Ngrok-tunnels vanuit de desktopapp.
+---
+
+# Desktoptunnels
+
+De desktopapp kan een openbare tunnel maken via **Instellingen → OpenChamber → Tunnel**. Daarvoor hoeft u OpenChamber niet vanuit de CLI te starten.
+
+## Een provider installeren
+
+OpenChamber start de CLI van de provider op uw computer. Installeer eerst de gewenste provider:
+
+```bash
+brew install cloudflared
+brew install ngrok
+```
+
+Cloudflare gebruikt `cloudflared`. Voor Ngrok hebt u een ngrok-account en een authtoken uit het ngrok-dashboard nodig:
+
+```bash
+ngrok config add-authtoken <your-ngrok-token>
+```
+
+## Starten vanuit de app
+
+1. Open **Instellingen → OpenChamber → Tunnel**.
+2. Kies **Cloudflare** of **Ngrok**.
+3. Start een snelle tunnel.
+4. Scan de gegenereerde QR-code met uw telefoon.
+
+Ngrok ondersteunt momenteel snelle tunnels. Cloudflare ondersteunt zowel snelle tunnels als beheerde Cloudflare-modi.
+
+## Toegangsbescherming
+
+Ook als de provider-URL openbaar is, beschermt OpenChamber de toegang met een eigen verbindingstoken. De gegenereerde link bevat een eenmalig token met een geldigheidsduur. Oude ongebruikte links worden ingetrokken wanneer u een nieuwe maakt of de tunnel stopt of herstart.
+
+## Zie ook
+
+- [Tunnels](/nl/tunnels/) voor de CLI en beheerde Cloudflare-modi
+- [PWA en mobiel](/nl/mobile/) om OpenChamber vanaf uw telefoon te bereiken

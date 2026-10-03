@@ -57,6 +57,8 @@ const createApp = (overrides = {}) => {
       context: emptyContext,
     }),
     deletePlan: async () => ({ deleted: true, context: emptyContext }),
+    sharePlan: async (_projectId, planId) => (planId === 'p1' ? { plan: { id: 'shared:a.md', file: 'a.md', title: 'A', createdAt: 1, pinned: false, source: 'shared' }, context: emptyContext } : null),
+    unsharePlan: async (_projectId, planId) => (planId === 'shared:a.md' ? { plan: { id: 'p2', file: 'a.md', title: 'A', createdAt: 1, pinned: false, source: 'personal' }, context: emptyContext } : null),
     ...overrides,
   };
 
@@ -210,6 +212,22 @@ describe('project context routes over HTTP', () => {
       .put(`${BASE}/plans/p1`)
       .send({ body: 'wrong field' })
       .expect(400);
+  });
+
+  it('shares and unshares a plan, and answers 404 for an unknown one', async () => {
+    const { app } = createApp();
+    const shared = await request(app).post('/api/project-context/proj/plans/p1/share');
+    expect(shared.status).toBe(200);
+    expect(shared.body.plan.id).toBe('shared:a.md');
+    const back = await request(app).post('/api/project-context/proj/plans/shared%3Aa.md/unshare');
+    expect(back.status).toBe(200);
+    expect(back.body.plan.source).toBe('personal');
+    expect((await request(app).post('/api/project-context/proj/plans/nope/share')).status).toBe(404);
+  });
+
+  it('answers 400 when sharing without a shared plans folder', async () => {
+    const { app } = createApp({ sharePlan: async () => { throw new Error('shared plans folder is required'); } });
+    expect((await request(app).post('/api/project-context/proj/plans/p1/share')).status).toBe(400);
   });
 
   it('returns 404 for an unknown plan', async () => {

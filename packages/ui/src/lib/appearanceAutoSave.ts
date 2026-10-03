@@ -1,271 +1,47 @@
 import { useUIStore } from '@/stores/useUIStore';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { isApplyingServerSettings, updateDesktopSettings } from '@/lib/persistence';
 import type { DesktopSettings } from '@/lib/desktop';
-import type { MonoFontOption, UiFontOption } from '@/lib/fontOptions';
-import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { TerminalShell } from '@/lib/api/types';
-
-type AppearanceSlice = {
-  showReasoningTraces: boolean;
-  streamingAutoFollowEnabled: boolean;
-  workStatusPanelEnabled: boolean;
-  workStatusHiddenSections: string[];
-  sessionRecapEnabled: boolean;
-  sessionSuggestionEnabled: boolean;
-  sessionGoalEnabled: boolean;
-  sessionGoalDefaultBudgetEnabled: boolean;
-  sessionGoalDefaultBudget: number;
-  collapsibleThinkingBlocks: boolean;
-  showDeletionDialog: boolean;
-  nativeNotificationsEnabled: boolean;
-  notificationMode: 'always' | 'hidden-only';
-  notifyOnSubtasks: boolean;
-  notifyOnCompletion: boolean;
-  notifyOnError: boolean;
-  notifyOnQuestion: boolean;
-  notificationTemplates: {
-    completion: { title: string; message: string };
-    error: { title: string; message: string };
-    question: { title: string; message: string };
-    subtask: { title: string; message: string };
-  };
-  summarizeLastMessage: boolean;
-  summaryThreshold: number;
-  summaryLength: number;
-  maxLastMessageLength: number;
-  autoDeleteEnabled: boolean;
-  autoSaveEnabled: boolean;
-  autoDeleteAfterDays: number;
-  sessionRetentionAction: 'archive' | 'delete';
-  fontSize: number;
-  terminalFontSize: number;
-  terminalShell: TerminalShell;
-  terminalLoginShells: TerminalShell[];
-  editorFontSize: number;
-  uiFont: UiFontOption;
-  monoFont: MonoFontOption;
-  padding: number;
-  cornerRadius: number;
-  inputBarOffset: number;
-  mobileKeyboardMode: MobileKeyboardMode;
-  diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
-  gitChangesViewMode: 'flat' | 'tree';
-};
+import { AUTO_SAVE_KEYS, readAutoSaveSnapshot } from '@/lib/settings/registry';
 
 let initialized = false;
 
+type SettingsValue = DesktopSettings[keyof DesktopSettings];
+
+const isSameValue = (left: SettingsValue, right: SettingsValue): boolean => {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+};
+
+/**
+ * Mirrors user changes of the registry's auto-saved fields (`ui.autoSave`)
+ * from `useUIStore` to the server. Which fields take part is decided in the
+ * registry, not here; values the settings sync just copied in from the server
+ * become the new baseline instead of a write.
+ */
 export const startAppearanceAutoSave = (): void => {
-  if (initialized || typeof window === 'undefined') {
+  if (initialized || globalThis.window === undefined) {
     return;
   }
 
   initialized = true;
 
-  let previous: AppearanceSlice = {
-    showReasoningTraces: useUIStore.getState().showReasoningTraces,
-    streamingAutoFollowEnabled: useUIStore.getState().streamingAutoFollowEnabled,
-    workStatusPanelEnabled: useUIStore.getState().workStatusPanelEnabled,
-    workStatusHiddenSections: useUIStore.getState().workStatusHiddenSections,
-    sessionRecapEnabled: useUIStore.getState().sessionRecapEnabled,
-    sessionSuggestionEnabled: useUIStore.getState().sessionSuggestionEnabled,
-    sessionGoalEnabled: useUIStore.getState().sessionGoalEnabled,
-    sessionGoalDefaultBudgetEnabled: useUIStore.getState().sessionGoalDefaultBudgetEnabled,
-    sessionGoalDefaultBudget: useUIStore.getState().sessionGoalDefaultBudget,
-    collapsibleThinkingBlocks: useUIStore.getState().collapsibleThinkingBlocks,
-    showDeletionDialog: useUIStore.getState().showDeletionDialog,
-    nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
-    notificationMode: useUIStore.getState().notificationMode,
-    notifyOnSubtasks: useUIStore.getState().notifyOnSubtasks,
-    notifyOnCompletion: useUIStore.getState().notifyOnCompletion,
-    notifyOnError: useUIStore.getState().notifyOnError,
-    notifyOnQuestion: useUIStore.getState().notifyOnQuestion,
-    notificationTemplates: useUIStore.getState().notificationTemplates,
-    summarizeLastMessage: useUIStore.getState().summarizeLastMessage,
-    summaryThreshold: useUIStore.getState().summaryThreshold,
-    summaryLength: useUIStore.getState().summaryLength,
-    maxLastMessageLength: useUIStore.getState().maxLastMessageLength,
-    autoDeleteEnabled: useUIStore.getState().autoDeleteEnabled,
-    autoSaveEnabled: useUIStore.getState().autoSaveEnabled,
-    autoDeleteAfterDays: useUIStore.getState().autoDeleteAfterDays,
-    sessionRetentionAction: useUIStore.getState().sessionRetentionAction,
-    fontSize: useUIStore.getState().fontSize,
-    terminalFontSize: useUIStore.getState().terminalFontSize,
-    terminalShell: useUIStore.getState().terminalShell,
-    terminalLoginShells: useUIStore.getState().terminalLoginShells,
-    editorFontSize: useUIStore.getState().editorFontSize,
-    uiFont: useUIStore.getState().uiFont,
-    monoFont: useUIStore.getState().monoFont,
-    padding: useUIStore.getState().padding,
-    cornerRadius: useUIStore.getState().cornerRadius,
-    inputBarOffset: useUIStore.getState().inputBarOffset,
-    mobileKeyboardMode: useUIStore.getState().mobileKeyboardMode,
-    diffLayoutPreference: useUIStore.getState().diffLayoutPreference,
-    gitChangesViewMode: useUIStore.getState().gitChangesViewMode,
-  };
+  let previous = readAutoSaveSnapshot();
 
-  useUIStore.subscribe((state) => {
-    const current: AppearanceSlice = {
-      showReasoningTraces: state.showReasoningTraces,
-      streamingAutoFollowEnabled: state.streamingAutoFollowEnabled,
-      workStatusPanelEnabled: state.workStatusPanelEnabled,
-      workStatusHiddenSections: state.workStatusHiddenSections,
-      sessionRecapEnabled: state.sessionRecapEnabled,
-      sessionSuggestionEnabled: state.sessionSuggestionEnabled,
-      sessionGoalEnabled: state.sessionGoalEnabled,
-      sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
-      sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
-      collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
-      showDeletionDialog: state.showDeletionDialog,
-      nativeNotificationsEnabled: state.nativeNotificationsEnabled,
-      notificationMode: state.notificationMode,
-      notifyOnSubtasks: state.notifyOnSubtasks,
-      notifyOnCompletion: state.notifyOnCompletion,
-      notifyOnError: state.notifyOnError,
-      notifyOnQuestion: state.notifyOnQuestion,
-      notificationTemplates: state.notificationTemplates,
-      summarizeLastMessage: state.summarizeLastMessage,
-      summaryThreshold: state.summaryThreshold,
-      summaryLength: state.summaryLength,
-      maxLastMessageLength: state.maxLastMessageLength,
-      autoDeleteEnabled: state.autoDeleteEnabled,
-      autoSaveEnabled: state.autoSaveEnabled,
-      autoDeleteAfterDays: state.autoDeleteAfterDays,
-      sessionRetentionAction: state.sessionRetentionAction,
-      fontSize: state.fontSize,
-      terminalFontSize: state.terminalFontSize,
-      terminalShell: state.terminalShell,
-      terminalLoginShells: state.terminalLoginShells,
-      editorFontSize: state.editorFontSize,
-      uiFont: state.uiFont,
-      monoFont: state.monoFont,
-      padding: state.padding,
-      cornerRadius: state.cornerRadius,
-      inputBarOffset: state.inputBarOffset,
-      mobileKeyboardMode: state.mobileKeyboardMode,
-      diffLayoutPreference: state.diffLayoutPreference,
-      gitChangesViewMode: state.gitChangesViewMode,
-    };
+  useUIStore.subscribe(() => {
+    const current = readAutoSaveSnapshot();
 
-    const diff: Partial<DesktopSettings> = {};
+    if (isApplyingServerSettings()) {
+      previous = current;
+      return;
+    }
 
-    if (current.workStatusPanelEnabled !== previous.workStatusPanelEnabled) {
-      diff.workStatusPanelEnabled = current.workStatusPanelEnabled;
-    }
-    // Compared by content: the store hands back a new array on every change,
-    // so an identity check would push a write on unrelated store updates.
-    if (current.workStatusHiddenSections.join('\u0000') !== previous.workStatusHiddenSections.join('\u0000')) {
-      diff.workStatusHiddenSections = current.workStatusHiddenSections;
-    }
-    if (current.showReasoningTraces !== previous.showReasoningTraces) {
-      diff.showReasoningTraces = current.showReasoningTraces;
-    }
-    if (current.streamingAutoFollowEnabled !== previous.streamingAutoFollowEnabled) {
-      diff.streamingAutoFollowEnabled = current.streamingAutoFollowEnabled;
-    }
-    if (current.sessionRecapEnabled !== previous.sessionRecapEnabled) {
-      diff.sessionRecapEnabled = current.sessionRecapEnabled;
-    }
-    if (current.sessionSuggestionEnabled !== previous.sessionSuggestionEnabled) {
-      diff.sessionSuggestionEnabled = current.sessionSuggestionEnabled;
-    }
-    if (current.sessionGoalEnabled !== previous.sessionGoalEnabled) {
-      diff.sessionGoalEnabled = current.sessionGoalEnabled;
-    }
-    if (current.sessionGoalDefaultBudgetEnabled !== previous.sessionGoalDefaultBudgetEnabled) {
-      diff.sessionGoalDefaultBudgetEnabled = current.sessionGoalDefaultBudgetEnabled;
-    }
-    if (current.sessionGoalDefaultBudget !== previous.sessionGoalDefaultBudget) {
-      diff.sessionGoalDefaultBudget = current.sessionGoalDefaultBudget;
-    }
-    if (current.collapsibleThinkingBlocks !== previous.collapsibleThinkingBlocks) {
-      diff.collapsibleThinkingBlocks = current.collapsibleThinkingBlocks;
-    }
-    if (current.showDeletionDialog !== previous.showDeletionDialog) {
-      diff.showDeletionDialog = current.showDeletionDialog;
-    }
-    if (current.nativeNotificationsEnabled !== previous.nativeNotificationsEnabled) {
-      diff.nativeNotificationsEnabled = current.nativeNotificationsEnabled;
-    }
-    if (current.notificationMode !== previous.notificationMode) {
-      diff.notificationMode = current.notificationMode;
-    }
-    if (current.notifyOnSubtasks !== previous.notifyOnSubtasks) {
-      diff.notifyOnSubtasks = current.notifyOnSubtasks;
-    }
-    if (current.notifyOnCompletion !== previous.notifyOnCompletion) {
-      diff.notifyOnCompletion = current.notifyOnCompletion;
-    }
-    if (current.notifyOnError !== previous.notifyOnError) {
-      diff.notifyOnError = current.notifyOnError;
-    }
-    if (current.notifyOnQuestion !== previous.notifyOnQuestion) {
-      diff.notifyOnQuestion = current.notifyOnQuestion;
-    }
-    if (JSON.stringify(current.notificationTemplates) !== JSON.stringify(previous.notificationTemplates)) {
-      diff.notificationTemplates = current.notificationTemplates;
-    }
-    if (current.summarizeLastMessage !== previous.summarizeLastMessage) {
-      diff.summarizeLastMessage = current.summarizeLastMessage;
-    }
-    if (current.summaryThreshold !== previous.summaryThreshold) {
-      diff.summaryThreshold = current.summaryThreshold;
-    }
-    if (current.summaryLength !== previous.summaryLength) {
-      diff.summaryLength = current.summaryLength;
-    }
-    if (current.maxLastMessageLength !== previous.maxLastMessageLength) {
-      diff.maxLastMessageLength = current.maxLastMessageLength;
-    }
-    if (current.autoDeleteEnabled !== previous.autoDeleteEnabled) {
-      diff.autoDeleteEnabled = current.autoDeleteEnabled;
-    }
-    if (current.autoSaveEnabled !== previous.autoSaveEnabled) {
-      diff.autoSaveEnabled = current.autoSaveEnabled;
-    }
-    if (current.autoDeleteAfterDays !== previous.autoDeleteAfterDays) {
-      diff.autoDeleteAfterDays = current.autoDeleteAfterDays;
-    }
-    if (current.sessionRetentionAction !== previous.sessionRetentionAction) {
-      diff.sessionRetentionAction = current.sessionRetentionAction;
-    }
-    if (current.fontSize !== previous.fontSize) {
-      diff.fontSize = current.fontSize;
-    }
-    if (current.terminalFontSize !== previous.terminalFontSize) {
-      diff.terminalFontSize = current.terminalFontSize;
-    }
-    if (current.terminalShell !== previous.terminalShell) {
-      diff.terminalShell = current.terminalShell;
-    }
-    if (current.terminalLoginShells !== previous.terminalLoginShells) {
-      diff.terminalLoginShells = current.terminalLoginShells;
-    }
-    if (current.editorFontSize !== previous.editorFontSize) {
-      diff.editorFontSize = current.editorFontSize;
-    }
-    if (current.uiFont !== previous.uiFont) {
-      diff.uiFont = current.uiFont;
-    }
-    if (current.monoFont !== previous.monoFont) {
-      diff.monoFont = current.monoFont;
-    }
-    if (current.padding !== previous.padding) {
-      diff.padding = current.padding;
-    }
-    if (current.cornerRadius !== previous.cornerRadius) {
-      diff.cornerRadius = current.cornerRadius;
-    }
-    if (current.inputBarOffset !== previous.inputBarOffset) {
-      diff.inputBarOffset = current.inputBarOffset;
-    }
-    if (current.mobileKeyboardMode !== previous.mobileKeyboardMode) {
-      diff.mobileKeyboardMode = current.mobileKeyboardMode;
-    }
-    if (current.diffLayoutPreference !== previous.diffLayoutPreference) {
-      diff.diffLayoutPreference = current.diffLayoutPreference;
-    }
-    if (current.gitChangesViewMode !== previous.gitChangesViewMode) {
-      diff.gitChangesViewMode = current.gitChangesViewMode;
+    const diff: DesktopSettings = {};
+    for (const key of AUTO_SAVE_KEYS) {
+      // Reference equality first: unchanged store slices keep their identity,
+      // so the structural compare only runs for the fields that moved.
+      if (isSameValue(current[key], previous[key])) continue;
+      Object.assign(diff, { [key]: current[key] });
     }
 
     previous = current;
@@ -274,5 +50,4 @@ export const startAppearanceAutoSave = (): void => {
       void updateDesktopSettings(diff);
     }
   });
-
 };

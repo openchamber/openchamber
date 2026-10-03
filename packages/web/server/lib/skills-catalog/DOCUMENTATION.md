@@ -28,6 +28,7 @@ The following functions are exported and used by the web server:
 ### Curated Sources (`curated-sources.js`)
 - `getCuratedSkillsSources()`: Return list of curated skill sources (Anthropic, OpenAI, Cursor, Matt Pocock).
 - `CURATED_SKILLS_SOURCES`: Constant array of predefined sources.
+- `excludedSkills` (optional, per source): skill directory names the catalog never lists for that source. Used for skills whose license forbids redistribution (Anthropic's `docx`, `pdf`, `pptx`, `xlsx`). Server-only; stripped from the sources sent to the UI.
 
 ### GitHub Repository Metadata (`github-meta.js`)
 - `fetchGitHubRepoMetas(normalizedRepos)`: Fetch `{ stars, repoUpdatedAt }` for GitHub `owner/repo` strings. Best-effort: failures resolve to `null`; in-flight requests deduplicate; results cached in memory and on disk (`skills-github-meta.json`) for three hours.
@@ -58,7 +59,7 @@ The following functions are internal helpers used by exported functions:
 - `safeRm(dir)`: Safely remove directory recursively (ignores errors).
 - `ensureDir(dirPath)`: Ensure directory exists with recursive creation.
 - `copyDirectoryNoSymlinks(srcDir, dstDir)`: Copy directory contents without symlinks, with path traversal protection.
-- `normalizeUserSkillDir(userSkillDir)`: Normalize user skill directory path (handles legacy `~/.config/opencode/skill` → `~/.config/opencode/skills` migration).
+- `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
 - `cloneRepo({ cloneUrl, identity, tempDir })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.

@@ -2,7 +2,10 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
+import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { getMermaidViewerController } from './mermaidViewer';
+import { getMarkdownCodeText } from './codeText';
+import { getMarkdownSelectionText } from './selectionMarkdown';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -52,6 +55,7 @@ const ICONS = {
   fit: 'refresh',
   textWrap: 'text-wrap',
   image: 'file-image',
+  disclosure: 'arrow-right-s',
 } as const satisfies Record<string, IconName>;
 
 const ICON_BTN_CLASS =
@@ -78,6 +82,19 @@ const decorateImageLabels = (root: HTMLElement): void => {
     icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
     setIcon(icon, 'image');
     label.prepend(icon);
+  }
+};
+
+const decorateDisclosures = (root: HTMLElement): void => {
+  for (const summary of root.querySelectorAll<HTMLElement>('details[data-md-details] > summary')) {
+    if (summary.querySelector('[data-md-disclosure-icon]')) continue;
+    const label = document.createElement('span');
+    label.append(...Array.from(summary.childNodes));
+    const icon = document.createElement('span');
+    icon.setAttribute('data-md-disclosure-icon', '');
+    icon.setAttribute('aria-hidden', 'true');
+    setIcon(icon, 'disclosure');
+    summary.append(icon, label);
   }
 };
 
@@ -182,12 +199,7 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
   code.toggleAttribute('data-md-code-trailing-newline', hasTrailingNewline);
 };
 
-export const getMarkdownCodeText = (code: HTMLElement): string => {
-  const lineContents = Array.from(code.querySelectorAll<HTMLElement>('[data-md-code-line-content]'));
-  if (lineContents.length === 0) return code.textContent ?? '';
-  const text = lineContents.map((line) => line.textContent ?? '').join('\n');
-  return code.hasAttribute('data-md-code-trailing-newline') ? `${text}\n` : text;
-};
+export { getMarkdownCodeText };
 
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
@@ -219,6 +231,9 @@ const decorateInlineCode = (root: HTMLElement): void => {
     if (code.getAttribute('data-markdown') !== 'inline-code') {
       code.setAttribute('data-markdown', 'inline-code');
     }
+    // Exclude technical text from a containing list item's dir=auto scan.
+    if (code.getAttribute('dir') !== 'ltr') code.setAttribute('dir', 'ltr');
+    if (code.closest('table')) code.classList.add('whitespace-nowrap');
   }
 };
 
@@ -240,6 +255,7 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-component', 'markdown-code');
+    wrapper.setAttribute('dir', 'ltr');
     wrapper.className =
       'my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]';
 
@@ -286,14 +302,48 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 // Tables: wrapper + copy/download toolbars
 // ---------------------------------------------------------------------------
 
-const extractTableData = (table: HTMLTableElement): { headers: string[]; rows: string[][] } => {
+// Double literal backslashes and escape pipes so they stay inside a Markdown table cell.
+const escapeMarkdownCellText = (text: string): string => text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+const tableCellText = (cell: Element, markdown: boolean): string => {
+  const serialize = (node: Node): string => {
+    if (!(node instanceof Element)) {
+      const text = node.textContent ?? '';
+      return markdown ? escapeMarkdownCellText(text) : text;
+    }
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href');
+      if (href) {
+        const url = href.replace(/ /g, '%20');
+        // Keep URLs bare in CSV/TSV so spreadsheet apps can recognize link-only cells.
+        if (!markdown) return url;
+        // Escape opening and closing square brackets in the link label.
+        const escapedLabel = escapeMarkdownCellText(node.textContent ?? '').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+        // Encode pipes in URLs so the table parser does not split the cell.
+        const destinationUrl = url.replace(/\|/g, '%7C');
+        // Parentheses require an angle-bracket destination; encode literal angle brackets inside it.
+        const destination = /[()]/.test(destinationUrl) ? `<${destinationUrl.replace(/</g, '%3C').replace(/>/g, '%3E')}>` : destinationUrl;
+        return `[${escapedLabel}](${destination})`;
+      }
+    }
+    return Array.from(node.childNodes).map(serialize).join('');
+  };
+  return Array.from(cell.childNodes).map(serialize).join('');
+};
+
+const extractTableData = (
+  table: HTMLTableElement,
+  format: string,
+) => {
+  const markdown = format === 'markdown';
+  const cellText = (cell: Element): string => tableCellText(cell, markdown).trim();
   const headers: string[] = [];
   const rows: string[][] = [];
   const headerCells = table.querySelectorAll('thead th');
-  for (const cell of Array.from(headerCells)) headers.push((cell.textContent ?? '').trim());
+  for (const cell of Array.from(headerCells)) headers.push(cellText(cell));
   const bodyRows = table.querySelectorAll('tbody tr');
   for (const row of Array.from(bodyRows)) {
-    const cells = Array.from(row.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
+    const cells = Array.from(row.querySelectorAll('td')).map(cellText);
     if (cells.length > 0) rows.push(cells);
   }
   return { headers, rows };
@@ -333,6 +383,10 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
   return menu;
 };
 
+const TABLE_COLUMN_MIN_WIDTH = 120;
+const TABLE_COLUMN_FALLBACK_MAX_WIDTH = 320;
+const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
+
 const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
@@ -340,7 +394,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'group my-4 flex w-fit max-w-full flex-col space-y-2';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
@@ -373,7 +427,8 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (!parent) continue;
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
-    table.classList.add('w-full', 'border-collapse', 'text-sm');
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'pending');
+    table.classList.add('w-max', 'border-collapse', 'text-sm');
 
     for (const tr of Array.from(table.querySelectorAll('tr'))) {
       tr.classList.add('border-b', 'border-border/60');
@@ -382,15 +437,127 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     lastBodyRow?.classList.remove('border-b');
     lastBodyRow?.classList.add('border-0');
     for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
+      th.classList.add('min-w-[120px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
     }
     for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
+      td.classList.add('min-w-[120px]', 'whitespace-normal', '[overflow-wrap:anywhere]', 'border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
     }
 
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
+  }
+};
+
+export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
+  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
+    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"])`,
+  ));
+  if (tables.length === 0 || !root.isConnected) return;
+
+  const measurementRoot = root.ownerDocument.createElement('div');
+  measurementRoot.setAttribute('aria-hidden', 'true');
+  measurementRoot.setAttribute('data-md-table-measure', '');
+  measurementRoot.style.position = 'fixed';
+  measurementRoot.style.left = '-100000px';
+  measurementRoot.style.top = '0';
+  measurementRoot.style.visibility = 'hidden';
+  measurementRoot.style.pointerEvents = 'none';
+  measurementRoot.style.width = 'max-content';
+
+  const probes = tables.map((table) => {
+    const getRowCells = (row: HTMLTableRowElement): HTMLTableCellElement[] => (
+      Array.from(row.children).filter((child): child is HTMLTableCellElement => (
+        child.tagName === 'TH' || child.tagName === 'TD'
+      ))
+    );
+    const bodyRows = Array.from(table.querySelectorAll<HTMLTableRowElement>('tbody tr'));
+    const sourceRows = bodyRows.some((row) => getRowCells(row).length > 0)
+      ? bodyRows
+      : Array.from(table.querySelectorAll<HTMLTableRowElement>('thead tr'));
+    const columnCount = Math.max(
+      0,
+      ...Array.from(table.querySelectorAll<HTMLTableRowElement>('tr')).map((row) => getRowCells(row).length),
+    );
+    const columnProbes: HTMLTableElement[] = [];
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const probeTable = root.ownerDocument.createElement('table');
+      probeTable.className = table.className;
+      probeTable.style.tableLayout = 'auto';
+      probeTable.style.width = 'max-content';
+      const probeBody = root.ownerDocument.createElement('tbody');
+
+      for (const row of sourceRows) {
+        const sourceCell = getRowCells(row)[columnIndex];
+        if (!sourceCell) continue;
+        const probeRow = root.ownerDocument.createElement('tr');
+        const probeCell = sourceCell.cloneNode(true);
+        if (!(probeCell instanceof HTMLElement)) continue;
+        probeCell.style.width = 'auto';
+        probeCell.style.minWidth = '0';
+        probeCell.style.maxWidth = 'none';
+        probeCell.style.whiteSpace = 'nowrap';
+        probeCell.style.overflowWrap = 'normal';
+        probeRow.appendChild(probeCell);
+        probeBody.appendChild(probeRow);
+      }
+
+      probeTable.appendChild(probeBody);
+      measurementRoot.appendChild(probeTable);
+      columnProbes.push(probeTable);
+    }
+
+    return { table, columnProbes };
+  });
+
+  root.appendChild(measurementRoot);
+  const plans = probes.map(({ table, columnProbes }) => {
+    const availableWidth = table.parentElement?.clientWidth ?? 0;
+    // Without layout (for example, a hidden chat), retain the former limit.
+    const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
+    const naturalWidths = columnProbes.map((probe) => Math.ceil(probe.getBoundingClientRect().width));
+    return {
+      table,
+      widths: naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width))),
+      cappedColumns: naturalWidths.map((width) => width > maxColumnWidth),
+    };
+  });
+  measurementRoot.remove();
+
+  for (const { table, widths, cappedColumns } of plans) {
+    // Identifiers stay on one line only while the column can hold them; in a
+    // column capped at the available width they wrap instead of overflowing
+    // into the neighbouring cell.
+    for (const row of Array.from(table.querySelectorAll<HTMLTableRowElement>('tr'))) {
+      const cells = Array.from(row.children).filter((child) => child.tagName === 'TH' || child.tagName === 'TD');
+      cells.forEach((cell, columnIndex) => {
+        const nowrap = !cappedColumns[columnIndex];
+        for (const code of Array.from(cell.querySelectorAll('code[data-markdown="inline-code"]'))) {
+          code.classList.toggle('whitespace-nowrap', nowrap);
+        }
+      });
+    }
+
+    const existingColumns = Array.from(table.children).find((child) => (
+      child.matches('colgroup[data-md-table-columns]')
+    ));
+    existingColumns?.remove();
+
+    const colgroup = root.ownerDocument.createElement('colgroup');
+    colgroup.setAttribute('data-md-table-columns', '');
+    for (const width of widths) {
+      const column = root.ownerDocument.createElement('col');
+      column.style.width = `${width}px`;
+      colgroup.appendChild(column);
+    }
+    const firstSection = Array.from(table.children).find((child) => (
+      child.tagName === 'THEAD' || child.tagName === 'TBODY' || child.tagName === 'TFOOT'
+    )) ?? null;
+    table.insertBefore(colgroup, firstSection);
+    table.style.tableLayout = 'fixed';
+    table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
+    table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
   }
 };
 
@@ -477,10 +644,13 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
     const href = anchor.getAttribute('href') ?? '';
     if (!isExternalHttpUrl(href)) continue;
     anchor.setAttribute('data-md-link-decorated', 'true');
+    // A bare URL is technical text; a named link remains ordinary prose.
+    if (anchor.textContent === href) anchor.setAttribute('dir', 'ltr');
 
     const faviconUrl = getExternalFaviconUrl(href);
     if (faviconUrl) {
       const favWrap = document.createElement('span');
+      favWrap.setAttribute(MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, 'true');
       favWrap.className =
         'mr-1 inline-flex size-[18px] items-center justify-center rounded border border-[var(--border)] bg-[var(--interactive-hover)] align-middle';
       const img = document.createElement('img');
@@ -511,6 +681,13 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
 
 /** Run all idempotent DOM decoration passes over freshly-rendered markdown. */
 export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void => {
+  // These blocks own directional layout (markers and quote borders). Paragraphs
+  // use CSS plaintext instead, so a nested paragraph cannot hide its text from
+  // the parent's native dir=auto resolution.
+  for (const block of root.querySelectorAll('li, blockquote')) {
+    if (block.getAttribute('dir') !== 'auto') block.setAttribute('dir', 'auto');
+  }
+  decorateDisclosures(root);
   decorateImageLabels(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
@@ -562,27 +739,38 @@ type MarkdownCopyState = {
 
 const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
 
+// Copying a selection inside rendered markdown writes its source form: code
+// as the exact code text, anything else as Markdown. The markdown path keeps
+// the selected HTML too, so rich editors still paste formatted text.
 const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
   let state = markdownCopyStates.get(doc);
   if (!state) {
-    const getSelectedText = (): string | null => {
+    const getSelectedCopy = (): { text: string; html: string | null } | null => {
       const selection = doc.getSelection();
       if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+      const range = selection.getRangeAt(0);
+      const code = getMarkdownCodeSelectionText(range);
+      if (code !== null) return { text: code, html: null };
+      const markdown = getMarkdownSelectionText(range);
+      if (markdown === null) return null;
+      const holder = doc.createElement('div');
+      holder.appendChild(range.cloneContents());
+      return { text: markdown, html: holder.innerHTML };
     };
     const handler = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
       event.stopPropagation();
-      event.clipboardData.setData('text/plain', text);
+      event.clipboardData.setData('text/plain', copy.text);
+      if (copy.html) event.clipboardData.setData('text/html', copy.html);
     };
     const menuHandler = (event: Event) => {
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
-      void copyTextToClipboard(text);
+      void copyTextToClipboard(copy.text);
     };
     state = { registrations: 0, handler, menuHandler };
     markdownCopyStates.set(doc, state);
@@ -657,7 +845,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-copy-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : format === 'tsv' ? tableToTSV(data) : tableToMarkdown(data);
         void copyTextToClipboard(content);
       }
@@ -670,7 +858,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-download-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
         downloadBlob(format === 'csv' ? 'table.csv' : 'table.md', content, format === 'csv' ? 'text/csv' : 'text/markdown');
       }

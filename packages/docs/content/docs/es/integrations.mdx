@@ -1,18 +1,50 @@
 ---
 title: Integraciones
-description: Usa tu suscripción de Claude o Cursor como proveedor.
+description: Conecta los servicios y suscripciones con los que trabaja OpenChamber.
 ---
 
 # Integraciones
 
-Una integración es un pequeño plugin que añade un proveedor a OpenChamber usando una suscripción que ya tienes. Las gestionas en **Settings → Integrations**.
+En **Ajustes → Integraciones** inicias sesión en los servicios con los que trabaja OpenChamber. El inicio de sesión se guarda en el servidor de OpenChamber, así que la web, el escritorio y un teléfono emparejado lo comparten.
 
-> **Función experimental.** Buscamos respetar las políticas de los proveedores, pero las restricciones y suspensiones de cuentas son decisión de cada proveedor. Usa las integraciones bajo tu propia responsabilidad.
+## GitHub
 
-Integraciones disponibles:
+Despliega la tarjeta **GitHub** y elige **Connect GitHub** para iniciar sesión con un código de dispositivo corto. Una vez conectado, OpenChamber puede iniciar sesiones desde issues y pull requests, adjuntarlos a mensajes y abrir o actualizar PRs. Todo lo que GitHub puede hacer está en [Issues y PRs de GitHub](/es/github/).
 
-- **Claude Code** — tu plan Claude Pro o Max, sin claves de API
-- **Cursor** — los límites de modelos de tu plan de Cursor
+## Linear
+
+### Conecta un espacio de trabajo
+
+1. Despliega la tarjeta **Linear** y elige **Connect**.
+2. Aprueba el acceso en la pestaña del navegador que se abre. Mientras tanto la tarjeta muestra **Waiting for Linear**.
+
+Conecta otra organización de Linear con **Add workspace**. Solo un espacio de trabajo es el actual: cambia con **Switch to**, y **Disconnect** quita solo el actual. La asignación de proyectos se conserva.
+
+### Explora issues
+
+Con un espacio de trabajo conectado, el panel **Linear** aparece en la barra de contexto derecha. Lista las issues del espacio actual y te permite:
+
+- filtrar por estado (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), asignado (**Anyone** o **Assigned to me**), equipo y prioridad
+- buscar por título, identificador o URL de Linear
+- abrir una issue para leer su descripción, comentarios, etiquetas y prioridad
+- cambiar su **Status** o elegir **Close issue**
+- cambiar el **Workspace** actual
+
+### Inicia una sesión desde una issue
+
+- En el panel de Linear, abre una issue y elige **Start session**. El botón se queda en el pie mientras la issue se desplaza.
+- En el chat, elige **New Session From Linear Issue** para escoger una de la lista, con **Create in worktree** si quieres una rama nueva.
+- En el diálogo **New Worktree**, elige una issue de Linear. La nueva sesión se abre con la issue adjunta en el cuadro de mensaje, y el primer mensaje lo escribes tú.
+
+Desde el panel de Linear y el chat, la sesión se abre en el proyecto asignado al equipo de la issue, con la issue como primer prompt. Asigna equipos en la tarjeta de Linear: **Default project** cubre todos los equipos y **Team projects** lo sobrescribe por equipo. Un equipo sin asignar te pide asignarlo primero. El primer mensaje se construye con el magic prompt **Issue Review**, que puedes editar en **Ajustes → Magic Prompts → Linear**.
+
+### Vincula una issue a un mensaje
+
+En el compositor del chat, abre el menú **+** y elige **Linear**. La issue acompaña tu siguiente mensaje como contexto y el panel de estado de trabajo de la sesión conserva un enlace a ella.
+
+### Comentarios de sesión
+
+Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde una issue, o cuyo primer mensaje lleva la issue adjunta, publica un comentario en esa issue al empezar, terminar o fallar, cada uno con un enlace que abre la sesión. Los comentarios solo se publican cuando este servidor de OpenChamber tiene una dirección pública, para que el enlace funcione para todos en la issue; en una dirección local o privada no se publica nada.
 
 ## Instalar una integración
 
@@ -25,21 +57,12 @@ Las integraciones se instalan para tu usuario, así que funcionan en todos los p
 
 ## Claude Code
 
-Claude Code usa tu plan Claude Pro o Max — sin claves de API y sin una app de Claude aparte.
+Claude Code usa tu plan Claude Pro o Max a través de la CLI de Claude Code en tu equipo — sin claves de API.
 
 1. Instala la integración (arriba).
 2. Elige **Set up** e inicia sesión. Si aún no tienes la CLI de Claude Code, la configuración ofrece instalarla primero y luego iniciar sesión.
 
-Claude Code es la única integración de esta página que requiere tener la CLI de su proveedor instalada y con sesión iniciada. Cursor no requiere su CLI.
-
 **Cómo se protege tu cuenta de Claude:** esta integración usa el Claude Agent SDK oficial de Anthropic y tu CLI de Claude Code instalada. No secuestra OAuth, no extrae ni reutiliza tokens del navegador, no se hace pasar por un cliente no admitido ni omite la autenticación de Anthropic. Se mantiene en la vía de acceso admitida por Anthropic, por lo que no conlleva el riesgo de baneo asociado al secuestro de tokens o a rodeos de autenticación no autorizados.
-
-## Cursor
-
-Cursor hace disponibles en OpenChamber los modelos incluidos en tu plan de Cursor.
-
-1. Instala la integración (arriba).
-2. Elige **Set up**, abre el enlace y autoriza el acceso en tu navegador. No necesitas clave de API. La lista de modelos se carga automáticamente tras iniciar sesión.
 
 ## Actualizar o eliminar
 
@@ -48,7 +71,17 @@ Cursor hace disponibles en OpenChamber los modelos incluidos en tu plan de Curso
 
 Si una tarjeta indica que las entradas requieren gestión manual, elige **Manage plugins** y limpia ahí los duplicados.
 
+## Excalidraw
+
+Excalidraw te permite dibujar en archivos `.excalidraw` y en dibujos `.excalidraw.md` de Obsidian directamente en Files. Es una extensión de OpenChamber y aparece en **OpenChamber extensions** en la misma página.
+
+1. Abre **Settings → Integrations** y elige **Install** en la tarjeta de Excalidraw. También puedes abrir un dibujo en Files y elegir **Install** en el aviso que aparece encima.
+2. Vuelve a abrir el dibujo. El lienzo sustituye al texto del archivo, y Cmd/Ctrl+S, el guardado automático, el cambio a la vista de código fuente y la pantalla completa funcionan como en cualquier otro archivo.
+
+Desde la tarjeta actualizas la extensión cuando sale una versión nueva, la vuelves a activar si la pausaste y la eliminas. Tus dibujos no cambian al eliminarla; simplemente se abren como texto. Solo en web y escritorio.
+
 ## Relacionado
 
-- [Proveedores, modelos y agentes](/es/providers/) — conecta otros proveedores y elige modelos
-- [Uso y cuotas](/es/usage/) — sigue cuánto has usado
+- [Issues y PRs de GitHub](/es/github/) — todo lo que GitHub puede hacer en OpenChamber
+- [Sesiones en worktree](/es/worktrees/) — donde pueden empezar las sesiones desde issues
+- [Magic Prompts](/es/magic-prompts/) — edita el prompt con el que empieza una sesión de Linear

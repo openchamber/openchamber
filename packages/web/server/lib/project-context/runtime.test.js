@@ -3,6 +3,7 @@ import fsPromises from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
 import { createProjectContextRuntime, parsePlanMarkdown } from './runtime.js';
 
 const PROJECT_ID = 'path_dGVzdA';
@@ -52,6 +53,7 @@ describe('readContext', () => {
       notes: [],
       todos: [],
       plans: [],
+      sharedPlansDir: null,
     });
   });
 
@@ -134,7 +136,7 @@ describe('legacy migration', () => {
     const context = await runtime.readContext(PROJECT_ID);
     expect(context.notes.map((note) => note.body)).toEqual(['legacy notes']);
     expect(context.todos).toEqual([{ id: 't1', text: 'legacy todo', completed: true, createdAt: 5 }]);
-    expect(context.plans).toEqual([{ id: 'p1', file: '10-old.md', title: 'Old plan', createdAt: 10, pinned: false }]);
+    expect(context.plans).toEqual([{ id: 'p1', file: '10-old.md', title: 'Old plan', createdAt: 10, pinned: false, source: 'personal' }]);
 
     const remaining = await readJson(legacyConfigPath());
     expect(remaining).toEqual({
@@ -152,7 +154,7 @@ describe('legacy migration', () => {
     });
 
     const context = await runtime.readContext(PROJECT_ID);
-    expect(context.plans).toEqual([{ id: 'p1', file: 'stray.md', title: 'Stray', createdAt: 10, pinned: false }]);
+    expect(context.plans).toEqual([{ id: 'p1', file: 'stray.md', title: 'Stray', createdAt: 10, pinned: false, source: 'personal' }]);
     expect(await fsPromises.readFile(path.join(plansDir(), 'stray.md'), 'utf8')).toContain('recovered');
   });
 
@@ -170,7 +172,7 @@ describe('legacy migration', () => {
   test('does not run when the legacy config holds no context keys', async () => {
     await writeJson(legacyConfigPath(), { 'setup-worktree': ['bun install'] });
 
-    expect(await runtime.readContext(PROJECT_ID)).toEqual({ version: 2, notes: [], todos: [], plans: [] });
+    expect(await runtime.readContext(PROJECT_ID)).toEqual({ version: 2, notes: [], todos: [], plans: [], sharedPlansDir: null });
     await expect(fsPromises.access(contextPath())).rejects.toThrow();
     expect(await readJson(legacyConfigPath())).toEqual({ 'setup-worktree': ['bun install'] });
   });
@@ -196,6 +198,59 @@ describe('legacy migration', () => {
       expect(result.notes.map((note) => note.body)).toEqual(['concurrent']);
     }
     expect((await readJson(contextPath())).notes[0].body).toBe('concurrent');
+  });
+});
+
+describe('long project ids', () => {
+  // A checkout nested deep enough that its `path_<base64url>` id is longer
+  // than a file or folder name may be; the storage lands under the bounded
+  // stem instead of failing with ENAMETOOLONG.
+  const longProjectId = createProjectIdFromPath(`/private/tmp/claude-501/${'segment-'.repeat(18)}/scratchpad/evidence/demo-repo`);
+  const stem = projectConfigFileStemOf(longProjectId);
+
+  test('the id maps to a bounded folder name', () => {
+    expect(longProjectId.length).toBeGreaterThan(240);
+    expect(stem.startsWith('path_sha256_')).toBe(true);
+    expect(stem.length).toBeLessThan(100);
+    expect(runtime.contextPathFor(longProjectId)).toBe(path.join(projectsDirPath, stem, 'context.json'));
+    expect(runtime.plansDirFor(longProjectId)).toBe(path.join(projectsDirPath, stem, 'plans'));
+    // A short id keeps naming its folder itself.
+    expect(runtime.contextPathFor(PROJECT_ID)).toBe(contextPath());
+  });
+
+  test('a missing context reads as empty instead of failing on the legacy config lookup', async () => {
+    expect(await runtime.readContext(longProjectId)).toEqual({ version: 2, notes: [], todos: [], plans: [], sharedPlansDir: null });
+  });
+
+  test('context and plans round-trip through the bounded folder', async () => {
+    await runtime.saveTodos(longProjectId, [{ id: 't1', text: 'do it', completed: false, createdAt: 1 }]);
+    const { note } = await runtime.createNote(longProjectId, { body: 'kept' });
+    const { plan } = await runtime.createPlan(longProjectId, { title: 'Deep plan', body: 'step one' });
+
+    const context = await runtime.readContext(longProjectId);
+    expect(context.todos).toEqual([{ id: 't1', text: 'do it', completed: false, createdAt: 1 }]);
+    expect(context.notes.map((entry) => entry.id)).toEqual([note.id]);
+    expect(context.plans.map((entry) => entry.id)).toEqual([plan.id]);
+    expect((await runtime.readPlan(longProjectId, plan.id)).body).toBe('step one');
+
+    expect((await readJson(path.join(projectsDirPath, stem, 'context.json'))).todos).toHaveLength(1);
+    await fsPromises.access(path.join(projectsDirPath, stem, 'plans', plan.file));
+    expect(await fsPromises.readdir(projectsDirPath)).toEqual([stem]);
+  });
+
+  test('legacy keys are migrated out of the bounded config file', async () => {
+    const boundedConfigPath = path.join(projectsDirPath, `${stem}.json`);
+    await writeJson(boundedConfigPath, {
+      'setup-worktree': ['bun install'],
+      projectNotes: 'legacy notes',
+      projectTodos: [{ id: 't1', text: 'legacy todo', completed: true, createdAt: 5 }],
+    });
+
+    const context = await runtime.readContext(longProjectId);
+    expect(context.notes.map((entry) => entry.body)).toEqual(['legacy notes']);
+    expect(context.todos).toEqual([{ id: 't1', text: 'legacy todo', completed: true, createdAt: 5 }]);
+    expect(await readJson(boundedConfigPath)).toEqual({ 'setup-worktree': ['bun install'] });
+    expect((await readJson(path.join(projectsDirPath, stem, 'context.json'))).notes[0].body).toBe('legacy notes');
   });
 });
 
@@ -476,6 +531,108 @@ describe('plans', () => {
     const read = await runtime.readPlan(PROJECT_ID, plan.id);
     expect(read.title).toBe('Plan');
     expect(read.body).toBe('');
+  });
+});
+
+describe('shared plans', () => {
+  let sharedDir;
+  let sharedRuntime;
+
+  beforeEach(async () => {
+    sharedDir = path.join(projectsDirPath, 'repo', 'docs', 'plans');
+    sharedRuntime = createProjectContextRuntime({
+      fsPromises,
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+    });
+  });
+
+  test('lists the shared folder\'s markdown files after the personal plans, marked shared, and reads them by file', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'roadmap.md'), '# Roadmap\n\n- ship it\n');
+    await fsPromises.writeFile(path.join(sharedDir, 'notes.txt'), 'not a plan');
+    await fsPromises.writeFile(path.join(sharedDir, 'untitled.md'), 'first line only');
+    const mine = await sharedRuntime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
+
+    const context = await sharedRuntime.readContext(PROJECT_ID);
+    expect(context.sharedPlansDir).toBe(sharedDir);
+    expect(context.plans.map((plan) => `${plan.id}:${plan.source}`)).toEqual(expect.arrayContaining([
+      `${mine.plan.id}:personal`, 'shared:roadmap.md:shared', 'shared:untitled.md:shared',
+    ]));
+    expect(context.plans[0].id).toBe(mine.plan.id);
+    expect(context.plans.find((plan) => plan.id === 'shared:untitled.md').title).toBe('first line only');
+
+    const read = await sharedRuntime.readPlan(PROJECT_ID, 'shared:roadmap.md');
+    expect(read.title).toBe('Roadmap');
+    expect(read.raw).toBe('# Roadmap\n\n- ship it\n');
+    expect(await sharedRuntime.readPlan(PROJECT_ID, 'shared:missing.md')).toBeNull();
+    expect(await sharedRuntime.readPlan(PROJECT_ID, 'shared:../escape.md')).toBeNull();
+  });
+
+  test('a missing shared folder lists nothing; no folder configured lists nothing', async () => {
+    expect((await sharedRuntime.readContext(PROJECT_ID)).plans).toEqual([]);
+    expect((await runtime.readContext(PROJECT_ID)).sharedPlansDir).toBeNull();
+  });
+
+  test('updates and deletes a shared plan in place, verbatim', async () => {
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'a.md'), '# A\n');
+    const updated = await sharedRuntime.updatePlan(PROJECT_ID, 'shared:a.md', { raw: '# Renamed\n\nbody\n' });
+    expect(updated.plan.title).toBe('Renamed');
+    expect(updated.plan.source).toBe('shared');
+    expect(await fsPromises.readFile(path.join(sharedDir, 'a.md'), 'utf8')).toBe('# Renamed\n\nbody\n');
+    expect(await sharedRuntime.updatePlan(PROJECT_ID, 'shared:gone.md', { raw: 'x' })).toBeNull();
+    expect(await sharedRuntime.setPlanPinned(PROJECT_ID, 'shared:a.md', true)).toBeNull();
+
+    const deleted = await sharedRuntime.deletePlan(PROJECT_ID, 'shared:a.md');
+    expect(deleted.deleted).toBe(true);
+    await expect(fsPromises.access(path.join(sharedDir, 'a.md'))).rejects.toThrow();
+    expect((await sharedRuntime.deletePlan(PROJECT_ID, 'shared:a.md')).deleted).toBe(false);
+  });
+
+  test('share moves a personal plan into the shared folder and unshare brings it back, avoiding name collisions', async () => {
+    const { plan } = await sharedRuntime.createPlan(PROJECT_ID, { title: 'Mine', body: 'body' });
+    const shared = await sharedRuntime.sharePlan(PROJECT_ID, plan.id);
+    // The id survives the move: a session that attached the plan still finds it.
+    expect(shared.plan.id).toBe(plan.id);
+    expect(shared.plan.source).toBe('shared');
+    expect(shared.context.plans.map((entry) => `${entry.id}:${entry.source}`)).toEqual([`${plan.id}:shared`]);
+    await expect(fsPromises.access(path.join(plansDir(), plan.file))).rejects.toThrow();
+    expect(await fsPromises.readFile(path.join(sharedDir, plan.file), 'utf8')).toBe('# Mine\n\nbody');
+    expect((await readJson(path.join(projectsDirPath, PROJECT_ID, 'context.json'))).plans[0]).toMatchObject({ id: plan.id, shared: true });
+    const readMoved = await sharedRuntime.readPlan(PROJECT_ID, plan.id);
+    expect(readMoved.source).toBe('shared');
+    expect(readMoved.raw).toBe('# Mine\n\nbody');
+    expect((await sharedRuntime.updatePlan(PROJECT_ID, plan.id, { raw: '# Mine v2\n' })).plan).toMatchObject({ id: plan.id, title: 'Mine v2', source: 'shared' });
+    expect(await fsPromises.readFile(path.join(sharedDir, plan.file), 'utf8')).toBe('# Mine v2\n');
+
+    // A personal file with the same name already exists: the returning plan gets a suffix, same id.
+    await fsPromises.mkdir(plansDir(), { recursive: true });
+    await fsPromises.writeFile(path.join(plansDir(), plan.file), 'squatter');
+    const back = await sharedRuntime.unsharePlan(PROJECT_ID, plan.id);
+    expect(back.plan.id).toBe(plan.id);
+    expect(back.plan.source).toBe('personal');
+    expect(back.plan.file).toBe(plan.file.replace(/\.md$/, '-1.md'));
+    expect(back.plan.title).toBe('Mine v2');
+    expect(back.context.plans.map((entry) => `${entry.id}:${entry.source}`)).toEqual([`${plan.id}:personal`]);
+    await expect(fsPromises.access(path.join(sharedDir, plan.file))).rejects.toThrow();
+    expect(await sharedRuntime.unsharePlan(PROJECT_ID, plan.id)).toBeNull();
+    expect(await sharedRuntime.sharePlan(PROJECT_ID, 'nope')).toBeNull();
+
+    // A plan that only ever lived in the team's folder gets an id of its own on the way in.
+    await fsPromises.writeFile(path.join(sharedDir, 'foreign.md'), '# Foreign\n');
+    const adopted = await sharedRuntime.unsharePlan(PROJECT_ID, 'shared:foreign.md');
+    expect(adopted.plan.id).not.toMatch(/^shared:/);
+    expect(adopted.plan.title).toBe('Foreign');
+    expect(adopted.plan.source).toBe('personal');
+  });
+
+  test('share is refused without a shared plans folder', async () => {
+    const { plan } = await runtime.createPlan(PROJECT_ID, { title: 'Mine', body: 'x' });
+    await expect(runtime.sharePlan(PROJECT_ID, plan.id)).rejects.toThrow('shared plans folder is required');
+    expect((await runtime.readContext(PROJECT_ID)).plans.map((entry) => entry.id)).toEqual([plan.id]);
   });
 });
 

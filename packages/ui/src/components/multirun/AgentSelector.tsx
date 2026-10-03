@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { agentLabel } from '@/lib/agentLabel';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useI18n } from '@/lib/i18n';
@@ -105,7 +106,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                 value={agent.name}
                 className="w-auto whitespace-nowrap"
               >
-                {agent.name}
+                {agentLabel(agent)}
               </SelectItem>
             ))}
           </SelectGroup>

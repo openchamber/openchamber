@@ -9,6 +9,7 @@ import { clampPercent, resolveUsageTone } from '@/lib/quota';
 import { UsageProviderCards } from '@/components/usage/UsageProviderCards';
 import { useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
 import { cn } from '@/lib/utils';
+import { findLatestContextFill } from '@/stores/utils/tokenUtils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
@@ -23,25 +24,26 @@ const getNumericLimit = (limit: unknown, key: 'context' | 'output'): number | un
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 };
 
-const getTokenCount = (value: unknown): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : 0
-);
-
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return String(value);
 };
 
-type ContextDisplay = {
-  percentage: number;
-  tokens: string;
-  colorClass: string;
-} | null;
+type ContextDisplay =
+  | { state: 'measured'; percentage: number; tokens: string; colorClass: string }
+  /** Compacted since the last response that reported tokens: the fill is unknown. */
+  | { state: 'compacted'; tokens: string }
+  /** Nothing to measure yet: a draft, or a session without a response. */
+  | { state: 'pending' }
+  | null;
 
-const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) => {
-  const progressPct = clampPercent(percentage) ?? 0;
-  const tone = resolveUsageTone(percentage);
+const UNKNOWN_VALUE = '\u2014';
+
+/** `percentage: null` draws the empty track only: the fill is unknown after a compaction. */
+const ContextProgressIcon: React.FC<{ percentage: number | null }> = ({ percentage }) => {
+  const progressPct = clampPercent(percentage ?? 0) ?? 0;
+  const tone = resolveUsageTone(percentage ?? 0);
   const progressColor = tone === 'critical'
     ? 'var(--status-error)'
     : tone === 'warn'
@@ -57,7 +59,7 @@ const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) =
       viewBox={`0 0 ${size} ${size}`}
       className="size-[18px] -rotate-90"
       role="progressbar"
-      aria-valuenow={Math.round(progressPct)}
+      aria-valuenow={percentage === null ? undefined : Math.round(progressPct)}
       aria-valuemin={0}
       aria-valuemax={100}
     >
@@ -69,18 +71,20 @@ const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) =
         stroke="var(--interactive-border)"
         strokeWidth={stroke}
       />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={progressColor}
-        strokeWidth={stroke}
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - progressPct / 100)}
-        className="transition-[stroke-dashoffset,stroke] duration-300"
-      />
+      {percentage === null ? null : (
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={progressColor}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - progressPct / 100)}
+          className="transition-[stroke-dashoffset,stroke] duration-300"
+        />
+      )}
     </svg>
   );
 };
@@ -209,7 +213,7 @@ const SessionMetadataOverlay: React.FC<{
         role="dialog"
         aria-label={t('mobile.header.openMetadataAria')}
         className={cn(
-          'overflow-y-auto overscroll-contain rounded-[20px] border border-border/70 bg-[var(--surface-elevated)] p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
+          'oc-surface-elevated overflow-y-auto overscroll-contain rounded-[20px] border border-border/70 bg-surface-elevated p-2 shadow-[0_12px_32px_rgb(0_0_0_/_0.2)] will-change-transform',
           isPopover ? 'absolute origin-top-left' : 'mx-3 mt-2',
           isExiting ? 'pointer-events-none' : 'pointer-events-auto',
         )}
@@ -228,14 +232,26 @@ const SessionMetadataOverlay: React.FC<{
         <div className="space-y-1">
           {contextDisplay ? (
             <MetadataRow
-              iconNode={<ContextProgressIcon percentage={contextDisplay.percentage} />}
+              iconNode={<ContextProgressIcon percentage={contextDisplay.state === 'measured' ? contextDisplay.percentage : null} />}
               label={t('mobile.header.metadata.context')}
             >
-              <span className="inline-flex items-baseline gap-1.5 tabular-nums">
-                <span className={cn('font-semibold', contextDisplay.colorClass)}>{contextDisplay.percentage.toFixed(1)}%</span>
-                <span className="text-muted-foreground">{contextDisplay.tokens}</span>
-              </span>
+              {contextDisplay.state === 'pending' ? null : (
+                <span className="inline-flex items-baseline gap-1.5 tabular-nums">
+                  {contextDisplay.state === 'measured'
+                    ? <span className={cn('font-semibold', contextDisplay.colorClass)}>{contextDisplay.percentage.toFixed(1)}%</span>
+                    : null}
+                  <span className="text-muted-foreground">{contextDisplay.tokens}</span>
+                </span>
+              )}
             </MetadataRow>
+          ) : null}
+          {contextDisplay?.state === 'compacted' ? (
+            <p className="px-2.5 pb-1 typography-meta text-muted-foreground">{t('contextUsage.compacted.description')}</p>
+          ) : null}
+          {/* The header ring is empty on a draft; this row says why, so the
+              empty ring reads as "nothing yet" rather than "still loading". */}
+          {contextDisplay?.state === 'pending' ? (
+            <p className="px-2.5 pb-1 typography-meta text-muted-foreground">{t('mobile.header.metadata.contextPending')}</p>
           ) : null}
           <MobileUsageLimits
             groups={usageGroups}
@@ -332,6 +348,8 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
     ),
   );
   const quotaResults = useQuotaStore((state) => state.results);
+  const quotaRefreshErrors = useQuotaStore((state) => state.refreshErrors);
+  const quotaRefreshAttempted = React.useRef(false);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);
@@ -350,26 +368,28 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
   }, [dropdownProviderIds]);
 
   React.useEffect(() => {
-    if (!open || isQuotaLoading) return;
+    if (!open) {
+      quotaRefreshAttempted.current = false;
+      return;
+    }
+    if (quotaRefreshAttempted.current || isQuotaLoading) return;
     const missingEnabledProvider = dropdownProviderIds.some((providerId) => (
-      !quotaResults.some((result) => result.providerId === providerId)
+      !quotaResults.some((result) => result.providerId === providerId) || quotaRefreshErrors[providerId]
     ));
     if (!missingEnabledProvider) return;
+    // Trigger at most one attempt per opening. A failed first load remains
+    // unknown, not an empty result that can suppress retries.
+    quotaRefreshAttempted.current = true;
     void fetchAllQuotas();
-  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults]);
+  }, [dropdownProviderIds, fetchAllQuotas, isQuotaLoading, open, quotaResults, quotaRefreshErrors]);
 
+  // v2 records the model on the assistant reply (a user message carries none).
   const latestMessageModel = React.useMemo(() => {
     for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = activeSessionMessages[i] as typeof activeSessionMessages[number] & {
-        model?: { providerID?: string; modelID?: string };
-      };
-      if (message.role !== 'user') continue;
-      const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
-        ? message.model.providerID
-        : undefined;
-      const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
-        ? message.model.modelID
-        : undefined;
+      const message = activeSessionMessages[i];
+      if (message.role !== 'assistant') continue;
+      const providerID = message.providerID.trim();
+      const modelID = message.modelID.trim();
       if (providerID && modelID) return { providerID, modelID };
     }
     return null;
@@ -384,51 +404,28 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
   const contextLimit = getNumericLimit((liveModel as { limit?: unknown } | undefined)?.limit, 'context')
     ?? metadata?.limit?.context
     ?? 0;
-  const totalTokens = React.useMemo(() => {
-    for (let i = activeSessionMessages.length - 1; i >= 0; i -= 1) {
-      const message = activeSessionMessages[i] as typeof activeSessionMessages[number] & {
-        tokens?: {
-          total?: unknown;
-          input?: unknown;
-          output?: unknown;
-          reasoning?: unknown;
-          cache?: { read?: unknown; write?: unknown };
-        };
-      };
-      if (message.role !== 'assistant' || !message.tokens) continue;
-      // Multi-step turns accumulate the fields across API round-trips, so
-      // summing them overstates the window. The server-reported total is the
-      // final round-trip's window; sum only when the server did not send it.
-      const reportedTotal = getTokenCount(message.tokens.total);
-      if (reportedTotal > 0) return reportedTotal;
-      const total = getTokenCount(message.tokens.input)
-        + getTokenCount(message.tokens.output)
-        + getTokenCount(message.tokens.reasoning)
-        + getTokenCount(message.tokens.cache?.read)
-        + getTokenCount(message.tokens.cache?.write);
-      if (total > 0) return total;
-    }
-    return 0;
-  }, [activeSessionMessages]);
+  const contextFill = React.useMemo(() => findLatestContextFill(activeSessionMessages), [activeSessionMessages]);
 
-  const contextPercentage =
-    !isNewSessionDraftOpen && totalTokens > 0 && contextLimit > 0
-      ? Math.min((totalTokens / contextLimit) * 100, 999)
-      : null;
-  const contextTokens = contextPercentage !== null
-    ? `${formatTokens(totalTokens)}/${formatTokens(contextLimit)}`
-    : null;
-  const contextColorClass =
-    contextPercentage === null
-      ? ''
-      : contextPercentage >= 90
-        ? 'text-[var(--status-error)]'
-        : contextPercentage >= 75
-          ? 'text-[var(--status-warning)]'
-          : 'text-[var(--status-success)]';
-  const contextDisplay: ContextDisplay = contextPercentage !== null && contextTokens
-    ? { percentage: contextPercentage, tokens: contextTokens, colorClass: contextColorClass }
-    : null;
+  const contextDisplay = React.useMemo<ContextDisplay>(() => {
+    if (contextLimit <= 0) return null;
+    if (isNewSessionDraftOpen || !contextFill) return { state: 'pending' };
+    if (contextFill.state === 'compacted') {
+      return { state: 'compacted', tokens: `${UNKNOWN_VALUE}/${formatTokens(contextLimit)}` };
+    }
+
+    const percentage = Math.min((contextFill.totalTokens / contextLimit) * 100, 999);
+    const colorClass = percentage >= 90
+      ? 'text-[var(--status-error)]'
+      : percentage >= 75
+        ? 'text-[var(--status-warning)]'
+        : 'text-[var(--status-success)]';
+    return {
+      state: 'measured',
+      percentage,
+      tokens: `${formatTokens(contextFill.totalTokens)}/${formatTokens(contextLimit)}`,
+      colorClass,
+    };
+  }, [contextFill, contextLimit, isNewSessionDraftOpen]);
 
   const usageGroups = useUsageProviderGroups();
 
@@ -442,7 +439,7 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       <button
         ref={metadataTriggerRef}
         type="button"
-        className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={t('mobile.header.openMetadataAria')}
         aria-expanded={open}
         onClick={() => onOpenChange((currentOpen) => !currentOpen)}
@@ -450,7 +447,11 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
       >
         {/* Live context gauge doubles as the metadata trigger: filled by the
             session's context usage, an empty ring on a fresh draft. */}
-        <ContextProgressIcon percentage={contextDisplay?.percentage ?? 0} />
+        <ContextProgressIcon
+          percentage={contextDisplay?.state === 'measured'
+            ? contextDisplay.percentage
+            : contextDisplay?.state === 'compacted' ? null : 0}
+        />
       </button>
       <SessionMetadataOverlay
         open={open}

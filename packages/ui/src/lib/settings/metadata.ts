@@ -1,5 +1,6 @@
 import type { SidebarSection } from '@/constants/sidebar';
 import type { IconName } from '@/components/icon/icons';
+import { ISOLATED_SPACES_RELEASED } from '@/lib/spaces/release';
 
 export type SettingsPageSlug =
   | 'home'
@@ -7,6 +8,7 @@ export type SettingsPageSlug =
   | 'projects'
   | 'remote-instances'
   | 'providers'
+  | 'web-search'
   | 'usage'
   | 'agents'
   | 'behavior'
@@ -20,13 +22,16 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'routing'
   | 'magic-prompts'
   | 'snippets'
   | 'notifications'
   | 'voice'
   | 'tunnel'
+  | 'isolated-spaces'
   | 'about'
-  | 'integrations';
+  | 'integrations'
+  | 'extensions';
 
 type SettingsPageGroup =
   | 'general'
@@ -39,6 +44,12 @@ export interface SettingsRuntimeContext {
   isWeb: boolean;
   isDesktop: boolean;
   isMobile: boolean;
+  /** Whether this runtime has Jev routing, which needs the OpenChamber server. */
+  routingAvailable: boolean;
+  /** The server runs in enterprise mode: pages for what it refuses are hidden. */
+  enterpriseMode: boolean;
+  /** Enterprise mode keeps Jev off (no administrator's endpoint), so pages that only configure Jev are hidden. */
+  jevBlockedByEnterprise: boolean;
 }
 
 export interface SettingsPageMeta {
@@ -86,8 +97,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'providers',
     title: 'Providers',
     group: 'opencode',
-    kind: 'split',
+    kind: 'single',
     keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
+  },
+  {
+    slug: 'web-search',
+    title: 'Web search',
+    group: 'opencode',
+    kind: 'single',
+    keywords: ['web search', 'websearch', 'search', 'internet', 'exa', 'tavily', 'firecrawl', 'parallel', 'tinyfish'],
   },
   {
     slug: 'usage',
@@ -121,15 +139,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     slug: 'mcp',
     title: 'MCP',
     group: 'opencode',
-    kind: 'split',
+    kind: 'single',
     keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
   },
   {
     slug: 'plugins',
     title: 'Plugins',
     group: 'opencode',
-    kind: 'split',
-    keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+    kind: 'single',
+    keywords: ['plugin', 'plugins', 'addons', 'npm', 'opencode-wakatime'],
   },
   {
     slug: 'skills.installed',
@@ -150,7 +168,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Git',
     group: 'projects',
     kind: 'single',
-    keywords: ['git', 'github', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji', 'oauth', 'prs', 'issues'],
+    keywords: ['git', 'identity', 'identities', 'ssh', 'profiles', 'credentials', 'keys', 'commit', 'gitmoji'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -183,6 +201,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
   },
   {
+    slug: 'routing',
+    title: 'Routing',
+    group: 'general',
+    kind: 'single',
+    description: 'Pick the right model for each message automatically, and get asked before risky actions in auto-accepted sessions.',
+    keywords: ['routing', 'auto', 'jev', 'typesafe', 'model routing', 'categories', 'safety net', 'auto-accept', 'fallback'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
     slug: 'magic-prompts',
     title: 'Magic Prompts',
     group: 'content',
@@ -200,9 +227,26 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },
   { slug: 'voice', title: 'Voice', group: 'general', kind: 'single', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
-  { slug: 'tunnel', title: 'External Tunnel', group: 'projects', kind: 'single', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  { slug: 'tunnel', title: 'External Tunnel', group: 'projects', kind: 'single', keywords: ['tunnel', 'external', 'cloudflare', 'qr', 'remote', 'mobile', 'share'], isAvailable: (ctx) => !ctx.isVSCode && !ctx.enterpriseMode },
+  {
+    slug: 'isolated-spaces',
+    title: 'Isolated spaces',
+    group: 'projects',
+    kind: 'single',
+    keywords: ['isolated', 'space', 'spaces', 'container', 'docker', 'colima', 'sandbox', 'disk', 'clean up', 'image'],
+    // Never in VS Code (decision 16 of the design), and hidden from everyone until the feature's first release.
+    isAvailable: (ctx) => !ctx.isVSCode && ISOLATED_SPACES_RELEASED,
+  },
   { slug: 'about', title: 'About', group: 'general', kind: 'single', keywords: ['about', 'version', 'updates', 'release', 'changelog'], isAvailable: (ctx) => ctx.isMobile && !ctx.isVSCode },
-  { slug: 'integrations', title: 'Integrations', group: 'general', kind: 'single', keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'command code', 'connect', 'discord', 'telegram', 'messenger'] },
+  { slug: 'integrations', title: 'Integrations', group: 'general', kind: 'single', keywords: ['integration', 'connect', 'oauth', 'github', 'linear', 'extension', 'claude', 'plugin'], isAvailable: (ctx) => !ctx.isVSCode },
+  {
+    slug: 'extensions',
+    title: 'Extensions',
+    group: 'general',
+    kind: 'single',
+    keywords: ['extension', 'extensions', 'guest', 'panel', 'rail', 'folder', 'zip', 'git', 'url'],
+    isAvailable: (ctx) => !ctx.isVSCode && !ctx.isMobile,
+  },
 ] as const;
 
 const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
@@ -266,9 +310,13 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'command';
     case 'sessions':
       return 'chat-history';
+    case 'routing':
+      return 'signpost';
 
     case 'providers':
       return 'cloud';
+    case 'web-search':
+      return 'global';
     case 'agents':
       return 'ai-agent';
     case 'behavior':
@@ -290,6 +338,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
 
     case 'integrations':
       return 'plug';
+    case 'extensions':
+      return 'apps';
 
     case 'usage':
       return 'bar-chart-2';
@@ -297,6 +347,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'mic';
     case 'tunnel':
       return 'home-office';
+    case 'isolated-spaces':
+      return 'box-3';
     case 'about':
       return 'information';
     case 'home':

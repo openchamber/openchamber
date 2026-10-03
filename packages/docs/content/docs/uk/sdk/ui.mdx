@@ -1,0 +1,155 @@
+---
+title: UI-набір
+description: Кнопки, поля, випадні списки, вкладки, списки та інші готові елементи з @openchamber/sdk/ui, з якими розширення виглядає як решта OpenChamber.
+---
+
+# UI-набір
+
+`@openchamber/sdk/ui` - це набір готових елементів, які використовують кольори, шрифти й відступи застосунку, тож ваше розширення виглядає як решта OpenChamber без копіювання його стилів. Кожен елемент - функція: ви даєте їй свій DOM-елемент і налаштування, вона малює себе там і повертає `{ update, dispose }`. Ви складаєте з елементів екран і тримаєте дані в себе. Набір ніколи не звертається ні до вашого провайдера, ні до OpenChamber; `host.request`, `host.attach` і решту ви викликаєте самі. Для всього, чого в наборі немає, можна писати власний HTML і CSS, але спершу беріть набір: його елементи самі підхоплюють тему, відступи й клавіатурні звички користувача, тож зібрана з них панель відчувається частиною OpenChamber, а не сайтом усередині нього.
+
+## Спершу викличте `applyHostReady`
+
+Елементи читають кольори з CSS-змінних, які `applyHostReady` записує на сторінку. Вона також задає шрифт і колір тексту застосунку на корені сторінки, тож звичайний HTML, який ви додаєте самі, теж виглядає як слід. Викликайте її всередині `host.onReady` перед першим монтуванням, і кольори підхоплюватимуть тему застосунку, коли користувач її перемикає.
+
+```ts
+import { applyHostReady } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  // Mount controls and register listeners once here.
+});
+```
+
+Набір використовує обчислені хостом кольори тексту для тонованих кнопок, бейджів, заголовків сповіщень, повідомлень про помилки введення й посилань. Самостійно розраховувати контраст не потрібно.
+
+Для власного CSS `applyHostReady` надає `--primary-text`, `--success-text`, `--warning-text`, `--error-text` та `--info-text`, а також відповідні псевдоніми `--oc-*-text`. Використовуйте їх для тексту на нейтральному або злегка тонованому фоні. Для заливок залишайте базові кольори, а для тексту на суцільній заливці `--oc-primary` використовуйте `--oc-primary-fg`. Застосовуйте кожен знімок `onReady`, щоб кольори залишалися актуальними.
+
+`onReady` може спрацьовувати багато разів, поки панель відкрита, зокрема при зміні контексту сесії. Застосовуйте тему щоразу, але монтуйте елементи й реєструйте слухачів лише один раз. Зберігайте чернетки поза функціями малювання. При перемиканні вкладок приховуйте наявні панелі або відновлюйте значення зі стану, а не очищайте їх.
+
+## Синхронізація вибору та введення
+
+`mountTabs`, `mountSelect`, `mountCheckbox` і `mountSwitch` повідомляють про зміни через `onChange`, але самі не змінюють `activeId`, `value` або `checked`. Збережіть значення й передайте його назад через `update`. Текстові та пошукові поля одразу показують введений текст, але також потребують `update({ value })`, інакше наступне оновлення може повернути старе значення. `onClick` кнопки не змінює її variant. Для вибору режиму краще використати `mountTabs`.
+
+Змонтуйте ці елементи один раз у наявному `root` панелі:
+
+```ts
+import { mountSelect, mountTabs } from "@openchamber/sdk/ui";
+
+let activeId = "convert";
+const tabs = mountTabs(root, {
+  items: [{ id: "convert", label: "Convert" }, { id: "format", label: "Format" }],
+  activeId,
+  onChange: (next) => {
+    activeId = next;
+    tabs.update({ activeId });
+    // Show the matching panel without discarding its draft values.
+  },
+});
+
+let format = "json";
+const select = mountSelect(root, {
+  options: [{ id: "json", label: "JSON" }, { id: "yaml", label: "YAML" }],
+  value: format,
+  onChange: (next) => {
+    format = next;
+    select.update({ value: format });
+  },
+});
+```
+
+Для кнопки обміну форматами поміняйте обидва значення у стані й викличте `update({ value })` на обох наявних select. Не монтуйте нові елементи для зміни значень. При видаленні елемента викликайте `dispose()`.
+
+## Що можна змонтувати
+
+| Функція | Що малює |
+| --- | --- |
+| `mountButton` | Кнопка. `variant` - `default`, `secondary`, `outline`, `ghost` або `destructive`; `size` - `default`, `sm` або `xs`. `loading` показує спінер і блокує кліки. |
+| `mountTextField` | Поле з підписом або textarea з `multiline`. Необов'язковий текст `helper` чи `error`, маскування `password` і `mono` для токенів та id. |
+| `mountSearchField` | Поле пошуку з лупою і кнопкою очищення. Escape очищає його. |
+| `mountSelect` | Випадний список. `searchable` додає фільтр угорі списку. Стрілки рухають, Enter вибирає, Escape закриває. |
+| `mountCheckbox`, `mountSwitch` | Прапорець або перемикач із підписом і необов'язковим `description`. |
+| `mountTabs` | Вкладки-пігулки, кожна з необов'язковим лічильником. Стрілки вліво і вправо перемикають між ними. |
+| `mountBadge` | Маленька пігулка. `tone` - `neutral`, `primary`, `success`, `warning`, `error` або `info`. |
+| `mountList` | Список, зручний для клавіатури. Кожен рядок може мати ключ спереду, заголовок, підзаголовок, метатекст праворуч і бейдж. |
+| `mountEmpty` | Порожній стан по центру із заголовком, рядком тексту і необов'язковою кнопкою. |
+| `mountSpinner` | Кільце завантаження з необов'язковим підписом. |
+| `mountBanner` | Кольорове повідомлення із заголовком, текстом і необов'язковою дією. |
+| `mountSeparator` | Тонка лінія, за бажанням із підписом посередині. |
+| `mountProgress` | Смуга прогресу від 0 до 100. |
+| `mountMenu` | Кнопка, що відкриває список дій. Пункти можуть бути деструктивними, вимкненими або роздільником. |
+| `mountText` | Текст від вашого провайдера. Зображення у стилі Markdown і `http(s)`-посилання стають справжніми зображеннями і посиланнями; усе інше лишається простим текстом, тому ненадійний вміст показувати безпечно. |
+
+Поруч з елементами йдуть три прості помічники. `filterSelectOptions(options, query)` - те саме зіставлення, яке використовує `mountSelect`. `splitTextMedia(text)` - те, що `mountText` робить перед малюванням. `moveListSelection` - крок клавіатури, спільний для списку, випадного списку і меню, якщо ви будуєте власний список.
+
+## Список із пошуком
+
+```ts
+import { applyHostReady, mountEmpty, mountList, mountSearchField } from "@openchamber/sdk/ui";
+
+let mounted = false;
+host.onReady((ctx) => {
+  applyHostReady(ctx, document.documentElement);
+  if (mounted) return;
+  mounted = true;
+  const root = document.querySelector("#root")!;
+  const searchRoot = root.appendChild(document.createElement("div"));
+  const listRoot = root.appendChild(document.createElement("div"));
+  const emptyRoot = root.appendChild(document.createElement("div"));
+
+  let query = "";
+  let empty: { dispose: () => void } | null = null;
+
+  const list = mountList(listRoot, {
+    items: [],
+    onSelect: (id) => {
+      const task = tasks.find((item) => item.id === id);
+      if (task) void host.attach({ providerId: "acme-hello", id, title: task.title, url: task.url });
+    },
+  });
+
+  const paint = () => {
+    const rows = tasks
+      .filter((task) => task.title.toLowerCase().includes(query.toLowerCase()))
+      .map((task) => ({ id: task.id, leading: task.key, title: task.title, meta: task.updated }));
+    list.update({ items: rows });
+    empty?.dispose();
+    empty = rows.length === 0
+      ? mountEmpty(emptyRoot, { title: "No tasks match", body: "Try a shorter search." })
+      : null;
+  };
+
+  const search = mountSearchField(searchRoot, {
+    value: query,
+    placeholder: "Search tasks",
+    onChange: (next) => {
+      query = next;
+      search.update({ value: next });
+      paint();
+    },
+  });
+  paint();
+});
+```
+
+`update` приймає лише ті налаштування, що змінилися. Список зберігає виділений рядок між оновленнями, поки цей рядок є на місці.
+
+## Посилання з тексту провайдера
+
+Ваша сторінка працює в пісочниці і не може сама відкрити нову вкладку. Коли використовуєте `mountText`, передайте `onOpenUrl` і віддайте посилання OpenChamber:
+
+```ts
+import { mountText } from "@openchamber/sdk/ui";
+
+mountText(root, {
+  text: comment.body,
+  onOpenUrl: (url) => void host.openUrl(url),
+});
+```
+
+## Дивіться також
+
+- [Зробити розширення](/sdk/): тека, маніфест і встановлення
+- [Host API](/sdk/host/): `connectHost`, прикріплення і коди помилок

@@ -65,12 +65,12 @@ describe('createUpstreamSseReader', () => {
     let reader;
 
     reader = createUpstreamSseReader({
-      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
       reconnectDelayMs: 0,
       fetchImpl: async (_url, options) => createSseResponse({
         signal: options.signal,
         blocks: [
-          'id: evt-1\r\ndata: {"type":"server.connected","properties":{"directory":"/tmp/project"}}\r\n\r\n',
+          'data: {"id":"evt-1","type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1","title":"t"}}\r\n\r\n',
         ],
       }),
       onEvent(event) {
@@ -85,10 +85,10 @@ describe('createUpstreamSseReader', () => {
     expect(events[0].eventId).toBe('evt-1');
     expect(events[0].directory).toBe('/tmp/project');
     expect(events[0].payload).toEqual({
-      type: 'server.connected',
-      properties: {
-        directory: '/tmp/project',
-      },
+      id: 'evt-1',
+      type: 'session.renamed',
+      location: { directory: '/tmp/project' },
+      data: { sessionID: 's1', title: 't' },
     });
     expect(reader.getLastEventId()).toBe('evt-1');
   });
@@ -100,7 +100,7 @@ describe('createUpstreamSseReader', () => {
     let reader;
 
     reader = createUpstreamSseReader({
-      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
       stallTimeoutMs: 10,
       reconnectDelayMs: 0,
       fetchImpl: async (_url, options) => {
@@ -112,7 +112,7 @@ describe('createUpstreamSseReader', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+              'data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n',
             ],
           });
         }
@@ -120,7 +120,7 @@ describe('createUpstreamSseReader', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-2\ndata: {"type":"session.updated","properties":{}}\n\n',
+            'data: {"id":"evt-2","type":"session.updated","properties":{}}\n\n',
           ],
         });
       },
@@ -146,7 +146,7 @@ describe('createUpstreamSseReader', () => {
     let reader;
 
     reader = createUpstreamSseReader({
-      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
       stallTimeoutMs: () => currentTimeout,
       reconnectDelayMs: 0,
       fetchImpl: async (_url, options) => {
@@ -158,7 +158,7 @@ describe('createUpstreamSseReader', () => {
             signal: options.signal,
             holdOpen: true,
             blocks: [
-              'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+              'data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n',
             ],
           });
         }
@@ -166,7 +166,7 @@ describe('createUpstreamSseReader', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-2\ndata: {"type":"session.updated","properties":{}}\n\n',
+            'data: {"id":"evt-2","type":"session.updated","properties":{}}\n\n',
           ],
         });
       },
@@ -191,7 +191,7 @@ describe('createUpstreamSseReader', () => {
     let reader;
 
     reader = createUpstreamSseReader({
-      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
       reconnectDelayMs: 0,
       fetchImpl: async (_url, options) => {
         attempt += 1;
@@ -210,7 +210,7 @@ describe('createUpstreamSseReader', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+            'data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n',
           ],
         });
       },
@@ -240,7 +240,7 @@ describe('createUpstreamSseReader', () => {
     let reader;
 
     reader = createUpstreamSseReader({
-      buildUrl: () => 'http://127.0.0.1:4096/global/event',
+      buildUrl: () => 'http://127.0.0.1:4096/api/event',
       reconnectDelayMs: 1,
       signal: tracked.signal,
       fetchImpl: async (_url, options) => {
@@ -258,7 +258,7 @@ describe('createUpstreamSseReader', () => {
         return createSseResponse({
           signal: options.signal,
           blocks: [
-            'id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n',
+            'data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n',
           ],
         });
       },

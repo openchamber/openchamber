@@ -34,7 +34,7 @@ import {
   resolveTunnelTtlOverrides,
 } from './cli-tunnel-utils.js';
 import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './cli-tunnel-capabilities.js';
-import { assertSafeBrowserPort, buildLocalUrl, isUnsafeBrowserPort } from './cli-network.js';
+import { assertSafeBrowserPort, buildLocalUrl, generateUiPassword, hasUiPasswordConfigured, isUnsafeBrowserPort } from './cli-network.js';
 import {
   readLastManagedLocalConfigPath,
   writeLastManagedLocalConfigPath,
@@ -1474,7 +1474,16 @@ async function tunnelCommand(options, subcommand, action, deps) {
           }
         }
 
-        const instance = await resolveTargetInstance({ options, serveCommand, allowAutoStart: true, rejectDesktopRuntime: true });
+        // A public tunnel refuses an instance without a UI password, so an
+        // instance started for it gets one; a generated one is shown once below.
+        let generatedUiPassword = null;
+        const serveProtected = (serveOptions) => {
+          if (hasUiPasswordConfigured(serveOptions.uiPassword)) return serveCommand(serveOptions);
+          generatedUiPassword = generateUiPassword();
+          options.uiPassword = generatedUiPassword;
+          return serveCommand({ ...serveOptions, uiPassword: generatedUiPassword });
+        };
+        const instance = await resolveTargetInstance({ options, serveCommand: serveProtected, allowAutoStart: true, rejectDesktopRuntime: true });
         if (instance?.autoStarted && shouldRenderHumanOutput(options)) {
           logStatus(
             'info',
@@ -1585,6 +1594,15 @@ async function tunnelCommand(options, subcommand, action, deps) {
 
         if (!response.ok || !body?.ok) {
           spin?.error('Tunnel start failed');
+          if (body?.code === 'ui_password_required') {
+            // Only an instance this command did not start can lack a password;
+            // `--ui-password` here cannot change a server that is already running.
+            throw new Error(
+              `OpenChamber on port ${instance.port} runs without a UI password, which a public tunnel requires. `
+              + `Stop it with \`openchamber stop -p ${instance.port}\`, then run tunnel start again: `
+              + 'the instance it starts gets a UI password.'
+            );
+          }
           const baseError = body?.error || `Tunnel start failed (${response.status})`;
           const isCloudflareTimeout = /context deadline exceeded|Client\.Timeout exceeded while awaiting headers|failed to request quick Tunnel/i.test(baseError);
           const userError = isCloudflareTimeout
@@ -1614,15 +1632,19 @@ async function tunnelCommand(options, subcommand, action, deps) {
         });
 
         if (isJsonMode(options)) {
-          printJson({ port: instance.port, replayCommand, ...body });
+          printJson({ port: instance.port, replayCommand, ...body, ...(generatedUiPassword ? { password: generatedUiPassword } : {}) });
         } else if (isQuietMode(options)) {
           const quietUrl = body.connectUrl || body.url || 'n/a';
-          process.stdout.write(`port ${instance.port} ${quietUrl}\n`);
+          process.stdout.write(`port ${instance.port} ${quietUrl}${generatedUiPassword ? ` pass:${generatedUiPassword}` : ''}\n`);
         } else {
           console.log('');
           clackIntro(boldText('Tunnel Started'));
           logStatus('success', `port ${instance.port} ${clackFormatProviderWithIcon(body.provider)}/${body.mode}`);
           logStatus('success', body.connectUrl || body.url || 'n/a');
+          if (generatedUiPassword) {
+            logStatus('success', 'UI password', generatedUiPassword);
+            logStatus('warning', 'save this password', 'it is not shown again');
+          }
           if (body.replacedTunnel) {
             const revokedBootstrapCount = Number.isFinite(body.revokedBootstrapCount) ? body.revokedBootstrapCount : 0;
             const invalidatedSessionCount = Number.isFinite(body.invalidatedSessionCount) ? body.invalidatedSessionCount : 0;

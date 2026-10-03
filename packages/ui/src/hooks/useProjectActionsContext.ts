@@ -1,18 +1,45 @@
 import React from 'react';
+import type { ProjectEntry } from '@/lib/api/types';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
 import type { ProjectRef } from '@/lib/openchamberConfig';
+import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import type { WorktreeMetadata } from '@/types/worktree';
 
 export interface ProjectActionsContext {
   projectRef: ProjectRef;
   directory: string;
 }
 
+interface ProjectActionsOwnerInput {
+  projects: ProjectEntry[];
+  worktreesByProject: Map<string, WorktreeMetadata[]>;
+  directory: string | null;
+  activeProjectId: string | null;
+}
+
 const normalize = (value: string): string => {
   if (!value) return '';
   const replaced = value.replace(/\\/g, '/');
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
+};
+
+export const resolveProjectActionsOwner = ({
+  projects,
+  worktreesByProject,
+  directory,
+  activeProjectId,
+}: ProjectActionsOwnerInput): ProjectEntry | null => {
+  const normalizedDirectory = normalize(directory ?? '');
+  if (normalizedDirectory) {
+    const sessionProject = resolveProjectForSessionDirectory(projects, worktreesByProject, normalizedDirectory);
+    if (sessionProject) {
+      return sessionProject;
+    }
+  }
+
+  return projects.find((project) => project.id === activeProjectId) ?? null;
 };
 
 /**
@@ -22,12 +49,9 @@ const normalize = (value: string): string => {
  * good context so the actions button doesn't flicker during session switches.
  */
 export function useProjectActionsContext(): ProjectActionsContext | null {
-  const activeProject = useProjectsStore((state) => {
-    if (!state.activeProjectId) {
-      return null;
-    }
-    return state.projects.find((project) => project.id === state.activeProjectId) ?? null;
-  });
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSession = useSession(currentSessionId ?? null);
@@ -50,16 +74,22 @@ export function useProjectActionsContext(): ProjectActionsContext | null {
   }, [currentSession?.directory]);
 
   const openDirectory = worktreeDirectory || sessionDirectory || draftDirectory;
+  const ownerProject = React.useMemo(() => resolveProjectActionsOwner({
+    projects,
+    worktreesByProject,
+    directory: openDirectory,
+    activeProjectId,
+  }), [activeProjectId, openDirectory, projects, worktreesByProject]);
   const actionDirectory = React.useMemo(
-    () => normalize(openDirectory || activeProject?.path || ''),
-    [activeProject?.path, openDirectory],
+    () => normalize(openDirectory || ownerProject?.path || ''),
+    [openDirectory, ownerProject?.path],
   );
   const activeProjectRef = React.useMemo<ProjectRef | null>(() => {
-    if (!activeProject) {
+    if (!ownerProject) {
       return null;
     }
-    return { id: activeProject.id, path: activeProject.path };
-  }, [activeProject]);
+    return { id: ownerProject.id, path: ownerProject.path };
+  }, [ownerProject]);
 
   const lastContextRef = React.useRef<ProjectActionsContext | null>(null);
   React.useEffect(() => {

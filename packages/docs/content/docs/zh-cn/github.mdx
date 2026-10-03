@@ -9,24 +9,28 @@ description: 连接 GitHub 并从 issue 和拉取请求开始会话。
 
 ## 连接 GitHub
 
-1. 打开 **Settings → Git**。
-2. 在 GitHub 下，选择 **Connect**。OpenChamber 会显示一个链接和一个短码。
+1. 打开 **Settings → Integrations**，展开 **GitHub** 卡片。
+2. 选择 **Connect GitHub**。OpenChamber 会显示一个链接和一个短码。
 3. 打开链接，输入短码并批准。
 
-连接后，你的账号会显示在 GitHub 部分下。你可以连接多个账号并在它们之间切换，或随时断开连接。
+连接后，你的账号会显示在卡片上。你可以连接多个账号并在它们之间切换，或随时断开连接。如果同一台机器上已登录 `gh` CLI，OpenChamber 可以将其作为备用方式。
 
 ## 从 issue 或 PR 开始工作
 
-当你在连接了 GitHub 的情况下创建 [worktree 会话](/zh-cn/worktrees/) 时，你可以选择 **Start from GitHub issue/PR**：
+当你在连接了 GitHub 的情况下创建 [worktree 会话](/zh-cn/worktrees/) 时，可以从一个 issue 或 pull request 开始：
 
-- 选择一个 **issue**，OpenChamber 会以它命名分支，并以该 issue 及其评论作为第一条消息打开会话
+- 选择一个 **issue**，OpenChamber 会以它命名分支
 - 选择一个 **pull request**，它会检出该 PR 的分支；你可以包含 PR 的 diff，以便智能体掌握完整的变更
 
-这会让你直接进入一个已经加载好上下文的会话。
+新会话打开时，issue 或 PR 已经附加在消息框中。不会替你自动发送：选择模型和智能体，说明你想做什么，然后发送。
 
 ## 打开并管理拉取请求
 
 在 [git 视图](/zh-cn/git/) 的 **PR** 标签页中，你可以创建拉取请求、更新它、将草稿标记为就绪或合并它。OpenChamber 可以从你的变更生成 PR 标题和描述。
+
+## 将 issue 或 PR 关联到消息
+
+在聊天输入框中打开 **+** 菜单并选择 **GitHub**。选择一个或多个 issue 或 pull request：每一个都会作为上下文随你的下一条消息一起发送（PR 可以带上它的 diff），会话的工作状态面板会保留指向它的链接。附加只是提供上下文；要做什么由你的消息来说明。
 
 ## 相关内容
 

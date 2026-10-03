@@ -1,6 +1,5 @@
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
-import { runtimeFetch } from '@/lib/runtime-fetch';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,9 +20,7 @@ import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { SkillsCatalogItem, SkillsCatalogSource } from '@/lib/api/types';
-import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { updateDesktopSettings } from '@/lib/persistence';
-import type { DesktopSettings, SkillCatalogConfig } from '@/lib/desktop';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 
 import { AddCatalogDialog } from './AddCatalogDialog';
@@ -102,29 +99,6 @@ const formatRelativeShort = (isoDate: string): { key: RelativeTimeKey; count: nu
   return { key: 'common.relative.yearsAgoShort', count: Math.floor(days / 365) };
 };
 
-const loadSettings = async (): Promise<DesktopSettings | null> => {
-  try {
-    const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-    if (runtimeSettings) {
-      const result = await runtimeSettings.load();
-      return (result?.settings || {}) as DesktopSettings;
-    }
-
-    const response = await runtimeFetch('/api/config/settings', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return (await response.json().catch(() => null)) as DesktopSettings | null;
-  } catch {
-    return null;
-  }
-};
-
 const SourceCard: React.FC<{
   source: SkillsCatalogSource;
   isActive: boolean;
@@ -142,11 +116,11 @@ const SourceCard: React.FC<{
       onClick={onSelect}
       aria-pressed={isActive}
       className={cn(
-        'w-full min-h-24 text-left rounded-lg border bg-[var(--surface-elevated)] p-3.5 flex gap-3 items-start transition-colors',
+        'oc-surface-elevated w-full min-h-24 text-left rounded-lg border bg-surface-elevated p-3.5 flex gap-3 items-start transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         isActive
-          ? 'border-primary'
-          : 'border-[var(--surface-subtle)] hover:border-[var(--interactive-border-hover)]'
+          ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+          : 'border-border hover:border-interactive-border-hover'
       )}
     >
       <span className="min-w-0 flex-1 block">
@@ -290,8 +264,11 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
 
     setIsRemovingCatalog(true);
     try {
-      const settings = await loadSettings();
-      const catalogs = (Array.isArray(settings?.skillCatalogs) ? settings?.skillCatalogs : []) as SkillCatalogConfig[];
+      const settings = await loadDesktopSettings();
+      // A failed load is not an empty list: writing [] here would drop every
+      // other catalog along with the selected one.
+      if (!settings) return;
+      const catalogs = settings.skillCatalogs ?? [];
       const updated = catalogs.filter((c) => c.id !== selectedSourceId);
       await updateDesktopSettings({ skillCatalogs: updated });
       await loadCatalog({ refresh: true });

@@ -76,7 +76,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({ onItemSelect }
         {sortedSnippets.map((snippet) => (
           <ContextMenu key={`${snippet.source}:${snippet.filePath}`} open={rightClickMenuName === snippet.name} onOpenChange={(open) => setRightClickMenuName(open ? snippet.name : null)}>
             <ContextMenuTrigger render={<div className={cn('group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none', selectedSnippetName === snippet.name ? 'bg-interactive-selection' : 'hover:bg-interactive-hover')} onContextMenu={(event) => { event.preventDefault(); setRightClickMenuName(snippet.name); }} />}>
-            <button onClick={() => { setSelectedSnippet(snippet.name); onItemSelect?.(); }} className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
+            <button onClick={() => { setSelectedSnippet(snippet.name); onItemSelect?.(); }} className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <div className="flex items-center gap-2">
                 <span className="typography-ui-label font-normal truncate text-foreground">#{snippet.name}</span>
                 <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">{t(`snippets.source.${snippet.source}`)}</span>

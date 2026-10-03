@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 
 import { buildLiveStreamingEntry, type StreamingTailEntry } from './streamingTailEntry';
 import type { ChatMessageEntry, TurnRecord } from './types';
@@ -19,13 +19,6 @@ const textPart = (id: string, text: string): Part => ({
     id,
     type: 'text',
     text,
-} as Part);
-
-const syntheticTextPart = (id: string, text: string): Part => ({
-    id,
-    type: 'text',
-    text,
-    synthetic: true,
 } as Part);
 
 const reasoningPart = (id: string, text: string): Part => ({
@@ -115,10 +108,13 @@ describe('buildLiveStreamingEntry', () => {
         const stale = message('assistant_1', 'assistant', 'user_1', [textPart('part_1', 'old')]);
         const entry = turnEntry(stale);
         const visible = textPart('part_visible', 'visible');
-        const synthetic = syntheticTextPart('part_synthetic', 'hidden while streaming');
+        // v2 has no synthetic parts; a malformed record is what normalization
+        // drops. SAFETY: the double assertion is the point — this fixture
+        // stands for a part the server sent without a `type`.
+        const malformed = { id: 'part_broken' } as unknown as Part;
 
         const next = buildLiveStreamingEntry(entry, {
-            livePartsByMessageId: { assistant_1: [synthetic, visible] },
+            livePartsByMessageId: { assistant_1: [malformed, visible] },
             showTextJustificationActivity: true,
             showTurnChangedFiles: false,
         });

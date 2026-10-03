@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 import {
   isGlobalSessionRecencyOnlyUpdate,
@@ -13,11 +13,14 @@ type SessionExtra = Partial<Session> & {
   project?: { worktree?: string | null } | null;
 };
 
-const buildSession = (shareUrl: string, extra: SessionExtra = {}): Session => ({
+const buildSession = (title: string, extra: SessionExtra = {}): Session => ({
   id: 'ses_1',
-  title: 'Shared session',
+  projectID: 'project',
+  directory: '',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  title,
   time: { created: 1, updated: 2 },
-  share: { url: shareUrl },
   ...extra,
 } as Session);
 
@@ -39,31 +42,16 @@ describe('useGlobalSessionsStore', () => {
     });
   });
 
-  test('updates an existing session when the share URL changes', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a'));
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b'));
+  test('updates an existing session when its title changes', () => {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('First'));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Second'));
 
-    expect(useGlobalSessionsStore.getState().activeSessions[0]?.share?.url).toBe('https://share.example/b');
-  });
-
-  test('publishes an updated session when sharing is removed', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a'));
-    const sharedSessions = useGlobalSessionsStore.getState().activeSessions;
-
-    useGlobalSessionsStore.getState().upsertSession({
-      ...buildSession('https://share.example/a'),
-      share: undefined,
-      time: { created: 1, updated: 3 },
-    });
-
-    const unsharedSessions = useGlobalSessionsStore.getState().activeSessions;
-    expect(unsharedSessions).not.toBe(sharedSessions);
-    expect(unsharedSessions[0]?.share).toBe(undefined);
+    expect(useGlobalSessionsStore.getState().activeSessions[0]?.title).toBe('Second');
   });
 
   test('preserves directory metadata when a live update omits it', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', { directory: '/repo/app' }));
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session A', { directory: '/repo/app' }));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session B', {
       time: { created: 1, updated: 3 },
     }));
 
@@ -73,8 +61,8 @@ describe('useGlobalSessionsStore', () => {
   });
 
   test('preserves raw directory metadata when a live update only has project worktree', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', { directory: '/repo/app' }));
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session A', { directory: '/repo/app' }));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session B', {
       project: { worktree: '/repo/app' },
       time: { created: 1, updated: 3 },
     }));
@@ -85,8 +73,8 @@ describe('useGlobalSessionsStore', () => {
   });
 
   test('trusts explicit incoming raw directory metadata', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', { directory: '/repo/app' }));
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session A', { directory: '/repo/app' }));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session B', {
       directory: '/repo/app-worktree',
       time: { created: 1, updated: 3 },
     }));
@@ -97,8 +85,8 @@ describe('useGlobalSessionsStore', () => {
   });
 
   test('preserves directory metadata when moving a session to archived', () => {
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/a', { directory: '/repo/app' }));
-    useGlobalSessionsStore.getState().upsertSession(buildSession('https://share.example/b', {
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session A', { directory: '/repo/app' }));
+    useGlobalSessionsStore.getState().upsertSession(buildSession('Session B', {
       time: { created: 1, updated: 3, archived: 4 },
     }));
 
@@ -137,8 +125,8 @@ describe('useGlobalSessionsStore', () => {
     });
 
     useGlobalSessionsStore.getState().upsertSessions([
-      buildSession('https://share.example/a'),
-      buildSession('https://share.example/b', { id: 'ses_2' }),
+      buildSession('Session A'),
+      buildSession('Session B', { id: 'ses_2' }),
     ]);
 
     unsubscribe();
@@ -190,8 +178,8 @@ describe('useGlobalSessionsStore', () => {
   });
 
   test('updates only affected hierarchy buckets when a session is reparented', () => {
-    const parentA = buildSession('https://share.example/a', { id: 'ses_parent_a' });
-    const parentB = buildSession('https://share.example/b', { id: 'ses_parent_b' });
+    const parentA = buildSession('Session A', { id: 'ses_parent_a' });
+    const parentB = buildSession('Session B', { id: 'ses_parent_b' });
     const parentC = buildSession('https://share.example/c', { id: 'ses_parent_c' });
     const child = buildSession('https://share.example/child', { id: 'ses_child', parentID: parentA.id });
     const unrelatedChild = buildSession('https://share.example/other', { id: 'ses_other', parentID: parentC.id });
@@ -232,26 +220,26 @@ describe('useGlobalSessionsStore', () => {
 });
 
 describe('mergeLiveSessionWithGlobalSession', () => {
-  test('preserves global share over live share', () => {
-    const live = buildSession('https://live.example/s', { time: { created: 1, updated: 5 } });
-    const global = buildSession('https://global.example/s', { time: { created: 1, updated: 3 } });
+  test('keeps the live record when it is the newer one', () => {
+    const live = buildSession('Live', { time: { created: 1, updated: 5 } });
+    const global = buildSession('Global', { time: { created: 1, updated: 3 } });
 
     const merged = mergeLiveSessionWithGlobalSession(live, global);
-    expect(merged.share?.url).toBe('https://global.example/s');
+    expect(merged.title).toBe('Live');
     expect(merged.time?.updated).toBe(5);
   });
 
   test('preserves directory from global when live omits it', () => {
-    const live = buildSession('https://live.example/s', { time: { created: 1, updated: 5 } });
-    const global = buildSession('https://global.example/s', { directory: '/repo/app' });
+    const live = buildSession('Live', { time: { created: 1, updated: 5 } });
+    const global = buildSession('Global', { directory: '/repo/app' });
 
     const merged = mergeLiveSessionWithGlobalSession(live, global);
     expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/app');
   });
 
   test('live directory takes precedence over global when present', () => {
-    const live = buildSession('https://live.example/s', { directory: '/repo/worktree' });
-    const global = buildSession('https://global.example/s', { directory: '/repo/app' });
+    const live = buildSession('Live', { directory: '/repo/worktree' });
+    const global = buildSession('Global', { directory: '/repo/app' });
 
     const merged = mergeLiveSessionWithGlobalSession(live, global);
     expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/worktree');
@@ -260,11 +248,11 @@ describe('mergeLiveSessionWithGlobalSession', () => {
 
 describe('isGlobalSessionRecencyOnlyUpdate', () => {
   test('accepts an updated timestamp while preserving omitted directory metadata', () => {
-    const existing = buildSession('https://share.example/s', {
+    const existing = buildSession('Session', {
       directory: '/repo/app',
       time: { created: 1, updated: 2 },
     });
-    const incoming = buildSession('https://share.example/s', {
+    const incoming = buildSession('Session', {
       time: { created: 1, updated: 3 },
     });
 
@@ -272,12 +260,12 @@ describe('isGlobalSessionRecencyOnlyUpdate', () => {
   });
 
   test('rejects title and archive changes as structural updates', () => {
-    const existing = buildSession('https://share.example/s', { time: { created: 1, updated: 2 } });
-    const renamed = buildSession('https://share.example/s', {
+    const existing = buildSession('Session', { time: { created: 1, updated: 2 } });
+    const renamed = buildSession('Session', {
       title: 'Renamed',
       time: { created: 1, updated: 3 },
     });
-    const archived = buildSession('https://share.example/s', {
+    const archived = buildSession('Session', {
       time: { created: 1, updated: 3, archived: 4 },
     });
 
@@ -285,24 +273,10 @@ describe('isGlobalSessionRecencyOnlyUpdate', () => {
     expect(isGlobalSessionRecencyOnlyUpdate(existing, archived)).toBe(false);
   });
 
-  test('rejects parent and slug changes as structural updates', () => {
-    const existing = buildSession('https://share.example/s', {
-      parentID: 'parent-a',
-      slug: 'slug-a',
-      time: { created: 1, updated: 2 },
-    });
-    const reparented = buildSession('https://share.example/s', {
-      parentID: 'parent-b',
-      slug: 'slug-a',
-      time: { created: 1, updated: 3 },
-    });
-    const reslugged = buildSession('https://share.example/s', {
-      parentID: 'parent-a',
-      slug: 'slug-b',
-      time: { created: 1, updated: 3 },
-    });
+  test('rejects a parent change as a structural update', () => {
+    const existing = buildSession('Session', { parentID: 'parent-a', time: { created: 1, updated: 2 } });
+    const reparented = buildSession('Session', { parentID: 'parent-b', time: { created: 1, updated: 3 } });
 
     expect(isGlobalSessionRecencyOnlyUpdate(existing, reparented)).toBe(false);
-    expect(isGlobalSessionRecencyOnlyUpdate(existing, reslugged)).toBe(false);
   });
 });

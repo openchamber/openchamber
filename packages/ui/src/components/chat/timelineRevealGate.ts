@@ -11,14 +11,18 @@ import React from 'react';
  * rows that mount later, while scrolling, must never hide the timeline.
  *
  * A hold that never releases must not hide the chat forever, so the owner
- * reveals after `TIMELINE_REVEAL_CAP_MS` regardless.
+ * reveals after `capMs` regardless: `TIMELINE_REVEAL_CAP_MS`, unless a hold
+ * taken during the opening commit asked for a longer wait.
  */
-type TimelineRevealGate = {
+export type TimelineRevealGate = {
   /** Take a hold; returns the release. Returns null once the gate is closed. */
   hold: () => (() => void) | null;
+  /** Raises the reveal cap for this opening; never lowers it. */
+  extendCap: (ms: number) => void;
   /** Stops accepting holds. Existing holds still count. */
   close: () => void;
   readonly holds: number;
+  readonly capMs: number;
   /** Called when the last hold releases, if the gate is closed by then. */
   onEmpty: (() => void) | null;
 };
@@ -28,7 +32,11 @@ export const TIMELINE_REVEAL_CAP_MS = 250;
 export const createTimelineRevealGate = (): TimelineRevealGate => {
   let holds = 0;
   let accepting = true;
+  let capMs = TIMELINE_REVEAL_CAP_MS;
   const gate: TimelineRevealGate = {
+    extendCap: (ms) => {
+      if (accepting) capMs = Math.max(capMs, ms);
+    },
     hold: () => {
       if (!accepting) return null;
       holds += 1;
@@ -45,6 +53,9 @@ export const createTimelineRevealGate = (): TimelineRevealGate => {
     },
     get holds() {
       return holds;
+    },
+    get capMs() {
+      return capMs;
     },
     onEmpty: null,
   };

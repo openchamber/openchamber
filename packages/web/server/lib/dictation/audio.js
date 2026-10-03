@@ -64,6 +64,34 @@ export function pcm16lePeakAbs(pcm16le) {
 }
 
 /**
+ * RMS of each `frameSamples`-sample frame of a PCM16LE buffer, on the same
+ * 0..32767 scale as the samples. A trailing partial frame is dropped. Used to
+ * find pauses inside a chunk, where a single peak says nothing about where the
+ * speech stops.
+ * @param {Buffer} pcm16le
+ * @param {number} frameSamples
+ * @returns {number[]}
+ */
+export function pcm16leFrameRms(pcm16le, frameSamples) {
+  if (!pcm16le || pcm16le.length === 0 || frameSamples <= 0) {
+    return [];
+  }
+  if (pcm16le.length % 2 !== 0) {
+    throw new Error(`PCM16 chunk byteLength must be even, got ${pcm16le.length}`);
+  }
+  const samples = toInt16Samples(pcm16le);
+  const frames = [];
+  for (let start = 0; start + frameSamples <= samples.length; start += frameSamples) {
+    let sumSquares = 0;
+    for (let i = start; i < start + frameSamples; i += 1) {
+      sumSquares += samples[i] * samples[i];
+    }
+    frames.push(Math.sqrt(sumSquares / frameSamples));
+  }
+  return frames;
+}
+
+/**
  * Convert PCM16LE to Float32 samples in [-1, 1], with optional gain.
  * @param {Buffer} pcm16le
  * @param {number} [gain]

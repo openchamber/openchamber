@@ -74,20 +74,20 @@ describe('rebindUpstream (#2638)', () => {
 
     // Port changes after a managed restart: buildOpenCodeUrl resolves the
     // CURRENT port on every attempt, exactly like production network-runtime.
-    const buildOpenCodeUrl = vi.fn(() => `http://127.0.0.1:${port}/global/event`);
+    const buildOpenCodeUrl = vi.fn(() => `http://127.0.0.1:${port}/api/event`);
     const fetchImpl = vi.fn(async (_url, options) => {
       fetchCalls += 1;
       if (fetchCalls === 1) {
         return createSseResponse({
           signal: options.signal,
           holdOpen: true,
-          blocks: ['id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n'],
+          blocks: ['data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n'],
         });
       }
       return createSseResponse({
         signal: options.signal,
         holdOpen: true,
-        blocks: ['id: evt-2\ndata: {"type":"session.updated","properties":{"sessionID":"ses_1"}}\n\n'],
+        blocks: ['data: {"id":"evt-2","type":"session.updated","properties":{"sessionID":"ses_1"}}\n\n'],
       });
     });
 
@@ -130,7 +130,7 @@ describe('rebindUpstream (#2638)', () => {
     // The hub dialed the new port and the connected client received events
     // from the new upstream without reconnecting its own socket.
     expect(fetchCalls).toBe(2);
-    expect(fetchImpl.mock.calls[1][0]).toContain(':5000/global/event');
+    expect(fetchImpl.mock.calls[1][0]).toContain(':5000/api/event');
     expect(socket.sent.some((frame) => frame.type === 'event' && frame.eventId === 'evt-2')).toBe(true);
 
     socket.close();
@@ -149,7 +149,7 @@ describe('rebindUpstream (#2638)', () => {
       return createSseResponse({
         signal: options.signal,
         holdOpen: true,
-        blocks: ['id: evt-1\ndata: {"type":"server.connected","properties":{}}\n\n'],
+        blocks: ['data: {"id":"evt-1","type":"server.connected","properties":{}}\n\n'],
       });
     });
 

@@ -1,0 +1,100 @@
+---
+title: Configuration du dépôt
+description: Gardez les actions de projet, les commandes de configuration de worktree, les amorces et les plans dans le dépôt pour que tous ceux qui le récupèrent les aient.
+---
+
+# Configuration du dépôt
+
+Les actions de projet, les commandes de configuration de worktree et les amorces de brouillon vivent par défaut dans vos propres réglages OpenChamber. Personne d'autre ne les voit. Si vous voulez qu'un collègue qui clone le dépôt ait la même action de serveur de dev et le même `bun install` dans chaque nouveau worktree, déplacez ces éléments dans le dépôt.
+
+OpenChamber les enregistre dans `.openchamber/project.json` à la racine du dépôt. Le fichier n'apparaît que lorsque vous y déplacez le premier élément, et il disparaît quand vous retirez le dernier. Committez-le comme n'importe quel autre fichier.
+
+## Ce qui va où
+
+| Reste dans vos réglages | Peut aller dans le dépôt |
+|---|---|
+| Notes et tâches | Actions de projet |
+| Tâches planifiées | Commandes de configuration de worktree |
+| Les actions du dépôt que vous avez masquées pour vous | Amorces de brouillon (commandes et skills épinglés) |
+| Votre réponse de confiance pour les commandes du dépôt | Plans |
+
+Les notes, les tâches et les tâches planifiées sont à vous. Elles n'arrivent jamais dans le dépôt.
+
+## Déplacer un élément
+
+Ouvrez **Settings → Projects** et choisissez le projet. Chaque action et chaque commande de configuration a un bouton **Move to repository**, et chaque élément venu du dépôt a **Move to my settings**. Les amorces de l'écran de nouvelle session montrent la même paire au survol. Les plans l'ont sur chaque ligne de l'onglet Plans.
+
+Déplacer, c'est déplacer. L'élément quitte un endroit et arrive à l'autre, rien n'est dupliqué.
+
+Les éléments du dépôt portent le badge **In repo**. Les actions du dépôt peuvent aussi être masquées de votre menu avec **Hide for me**. Cela ne change que votre menu, pas le fichier.
+
+## Le fichier
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Seul `version` est obligatoire. Toutes les autres clés sont facultatives, et OpenChamber n'écrit que celles qui contiennent quelque chose.
+
+`setupWorktree` est la liste des commandes shell qu'OpenChamber exécute dans un nouveau worktree juste après sa création, dans l'ordre. Utilisez `$ROOT_PROJECT_PATH` pour le chemin du checkout principal. `setupWorktreeWait: true` fait attendre OpenChamber la fin de ces commandes avant de démarrer une session dans le worktree.
+
+`projectActions` est la liste des actions du menu d'en-tête. `id`, `name` et `command` sont obligatoires. `icon` est facultatif et retombe sur une icône play ; les noms connus d'OpenChamber sont `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` et `file`. `autoOpenUrl: true` ouvre l'adresse affichée par la commande, voir [Aperçu et serveurs de dev](/preview/). `platforms` limite l'action à `macos`, `linux` ou `windows`. `runIn: "parent"` exécute l'action dans le checkout principal plutôt que dans le worktree courant.
+
+`draftStarters` épingle des commandes et des skills sur l'écran de nouvelle session. Chaque entrée s'écrit `{ "type": "command" | "skill", "name": "..." }`, et la commande ou le skill doit exister dans la configuration OpenCode du dépôt.
+
+`plansDir` indique où vivent les plans du dépôt. Omettez-le pour utiliser `.openchamber/plans`. Voir plus bas.
+
+Vous pouvez écrire ce fichier à la main. Une clé de mauvaise forme rend tout le fichier invalide, et la page Projects vous dit pourquoi au lieu de l'ignorer en silence.
+
+## Comment les éléments du dépôt et les vôtres se combinent
+
+Les commandes de configuration du dépôt s'exécutent d'abord, puis les vôtres. Cochez **Use only my setup commands** dans la section Worktree pour ignorer complètement celles du dépôt.
+
+Les actions sont fusionnées par `id`. Une action de vos réglages avec le même id qu'une action du dépôt la remplace. Les amorces sont fusionnées par nom.
+
+L'indicateur d'attente vient de vos réglages quand vous l'avez défini, sinon du dépôt.
+
+## Confiance
+
+Les commandes de configuration et les actions du dépôt s'exécutent sur votre machine, et un `git pull` peut les changer. Donc la première fois que l'une d'elles est sur le point de s'exécuter, OpenChamber affiche les commandes exactes et demande. **Trust and run** mémorise votre réponse sur cette instance. **Not this time** n'exécute que vos propres commandes.
+
+La réponse est liée aux commandes elles-mêmes. Quand un pull modifie une commande du dépôt, la question revient pour le nouveau texte. Vous pouvez oublier la réponse avec **reset trust** dans la section Worktree des réglages du projet.
+
+Déplacer votre propre commande dans le dépôt vaut confiance, puisque vous venez de la voir.
+
+## Plans dans le dépôt
+
+Les plans de l'onglet Plans peuvent aussi vivre dans le dépôt, sous forme de fichiers Markdown. Le dossier par défaut est `.openchamber/plans`. Définissez **Plans folder** dans les réglages du projet pour utiliser un autre dossier du dépôt, par exemple `docs/plans` si votre équipe y garde déjà ses plans. Un dossier personnalisé remplace entièrement le dossier par défaut : OpenChamber ne lit et n'écrit que ce dossier, déplacez donc vous-même les fichiers existants quand vous le changez.
+
+Chaque fichier `.md` de ce dossier apparaît dans l'onglet Plans, y compris les fichiers écrits par d'autres outils. Modifier un plan dans OpenChamber enregistre le fichier tel que vous l'avez tapé. Un plan que vous déplacez dans le dépôt garde son identité, donc les sessions qui l'avaient attaché le retrouvent.
+
+## Pages liées
+
+- [Actions de projet](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Notes, tâches et plans du projet](/notes-todos-plans/)

@@ -28,6 +28,10 @@ const applyHardLineBreaks = (markdown: string): string => {
     return mapNonFencedSegments(markdown, (segment) => segment.replace(/ *\n/g, '  \n'));
 };
 
+// A message that is only "+", "-" or "*" parses as an empty list item, which shows
+// a bare marker dot instead of the sign the user typed.
+const LONE_LIST_MARKER_PATTERN = /^\s*([+*-])\s*$/;
+
 export const prepareUserMarkdownContent = ({
     textContent,
     agentMention,
@@ -37,6 +41,9 @@ export const prepareUserMarkdownContent = ({
     agentMention?: AgentMentionInfo;
     skillNames: ReadonlySet<string>;
 }): string => {
+    const loneListMarker = LONE_LIST_MARKER_PATTERN.exec(textContent);
+    if (loneListMarker) return `\\${loneListMarker[1]}`;
+
     let content = mapNonFencedSegments(textContent, escapeHtml);
 
     // Insert agent mention links with an internal href so markdown renders them as mentions, not external links.

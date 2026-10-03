@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      finish_published_release:
+        description: 'Finish an already published release: build and add only macOS and iOS, skip npm, Windows, Linux and Android'
+        required: false
+        default: false
+        type: boolean
 
 env:
   CARGO_INCREMENTAL: 0
@@ -31,7 +36,7 @@ jobs:
       release_upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Get version
         id: get_version
@@ -48,44 +53,32 @@ jobs:
           fi
 
       - name: Extract changelog for release
+        id: release_notes
         env:
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const version = process.env.VERSION;
-          const changelogPath = 'CHANGELOG.md';
-          if (!fs.existsSync(changelogPath)) {
-            throw new Error('CHANGELOG.md not found; add it before releasing.');
-          }
-          const changelog = fs.readFileSync(changelogPath, 'utf8');
-          const sections = changelog.split(/^## /m);
-          const section = sections.find(s => s.startsWith('[' + version + ']'));
-          if (!section) {
-            throw new Error('Changelog section [' + version + '] not found. Add a section like "## [' + version + '] - YYYY-MM-DD".');
-          }
-          const content = ('## ' + section).trim();
-          fs.mkdirSync('artifacts', { recursive: true });
-          fs.writeFileSync('artifacts/release-notes.md', content + '\n');
-          NODE
+          title=$(node scripts/changelog/release-notes.mjs "$VERSION" artifacts/release-notes.md)
+          echo "name=OpenChamber v$VERSION: $title" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.get_version.outputs.version }}
-          draft: true
+          # A release being finished is already public; keep it that way.
+          draft: ${{ github.event.inputs.finish_published_release != 'true' }}
           generate_release_notes: false
           body_path: artifacts/release-notes.md
-          name: OpenChamber v${{ steps.get_version.outputs.version }}
+          name: ${{ steps.release_notes.outputs.name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-npm:
     needs: create-release
-    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.finish_published_release != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -102,9 +95,20 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # Both packages are packed and published with bun so the
+      # `workspace:*` link from @openchamber/web to @openchamber/sdk is
+      # rewritten to the released version. npm leaves it in place and the
+      # published tarball then fails to install.
+      - name: Publish SDK to npm
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: packages/sdk
+        run: bun publish --access public
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create npm tarball
         working-directory: packages/web
-        run: npm pack
+        run: bun pm pack
 
       - name: Upload npm tarball to release
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -118,9 +122,9 @@ jobs:
       - name: Publish to npm
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: packages/web
-        run: npm publish --access public
+        run: bun publish --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   build-desktop-electron-macos:
     needs: create-release
@@ -132,13 +136,13 @@ jobs:
           - target: aarch64-apple-darwin
             arch: arm64
             platform: darwin-aarch64
-            runner: macos-26
+            runner: blacksmith-6vcpu-macos-26
           - target: x86_64-apple-darwin
             arch: x64
             platform: darwin-x86_64
             runner: macos-15-intel
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -155,7 +159,7 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
@@ -274,6 +278,7 @@ jobs:
 
   build-desktop-electron-windows:
     needs: create-release
+    if: ${{ github.event.inputs.finish_published_release != 'true' }}
     # windows-latest currently resolves to a runner with Visual Studio 18,
     # which this electron/node-gyp stack does not detect correctly.
     runs-on: windows-2022
@@ -288,7 +293,7 @@ jobs:
             target: aarch64-pc-windows-msvc
             platform: win32-arm64
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -305,7 +310,7 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
@@ -368,23 +373,24 @@ jobs:
 
   build-desktop-electron-linux:
     needs: create-release
+    if: ${{ github.event.inputs.finish_published_release != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          - runner: blacksmith-4vcpu-ubuntu-2404
             arch: x64
             host_arch: x86_64
             artifact_arch: x86_64
             manifest: latest-linux.yml
-          - runner: ubuntu-24.04-arm
+          - runner: blacksmith-4vcpu-ubuntu-2404-arm
             arch: arm64
             host_arch: aarch64
             artifact_arch: arm64
             manifest: latest-linux-arm64.yml
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -410,7 +416,7 @@ jobs:
         id: opencode_cli_version
         shell: bash
         run: |
-          VERSION=$(node -p "require('./package.json').dependencies['@opencode-ai/sdk']")
+          VERSION=$(node -p "require('./packages/electron/package.json').opencodeCli.version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Cache bundled OpenCode CLI artifact
@@ -467,7 +473,7 @@ jobs:
     needs: [create-release, build-desktop-electron-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download x64 Linux release files
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -510,9 +516,10 @@ jobs:
 
   combine-electron-manifests:
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows]
+    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -527,6 +534,7 @@ jobs:
 
       - name: Finalize combined manifests
         env:
+          MAC_ONLY: ${{ github.event.inputs.finish_published_release == 'true' && '1' || '' }}
           LATEST_YML_DIR: ${{ github.workspace }}/artifacts
           GH_REPO: ${{ github.repository }}
           OPENCHAMBER_VERSION: ${{ needs.create-release.outputs.version }}
@@ -552,10 +560,13 @@ jobs:
       build_number: ${{ github.run_number }}
       release_tag: v${{ needs.create-release.outputs.version }}
       upload_github_release: true
+      build_android: ${{ github.event.inputs.finish_published_release != 'true' }}
     secrets: inherit
 
   finalize-release:
     needs: [create-release, build-desktop-electron-macos, build-desktop-electron-windows, build-desktop-electron-linux, publish-electron-linux, publish-npm, combine-electron-manifests, mobile-release]
+    # Jobs a finishing run skips count as done; any failure still stops the release.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

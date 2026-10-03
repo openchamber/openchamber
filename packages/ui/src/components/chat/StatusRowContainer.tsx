@@ -1,6 +1,8 @@
 import React from 'react';
 
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
+import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
+import { useKeybind } from '@/hooks/useKeybind';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { StatusRow } from './StatusRow';
@@ -14,6 +16,14 @@ export const StatusRowContainer: React.FC = React.memo(() => {
     const { activeModel, working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const providers = useConfigStore((state) => state.providers);
+    const backgroundWork = useBackgroundSessionWork();
+
+    // The shortcut lives with the status that knows whether anything can go
+    // to the background; otherwise it yields the key.
+    useKeybind('background_session_work', () => {
+        if (!working.canBackground) return false;
+        backgroundWork();
+    });
 
     const modelDisplayName = React.useMemo(() => {
         if (!activeModel) {
@@ -36,6 +46,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             agentName={currentAgentName}
             modelName={modelDisplayName}
             providerId={activeModel?.providerId ?? null}
+            onBackground={working.canBackground ? backgroundWork : undefined}
         />
     );
 });

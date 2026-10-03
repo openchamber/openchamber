@@ -1,0 +1,100 @@
+---
+title: Configuração no repositório
+description: Guarde ações do projeto, comandos de configuração de worktree, iniciadores e planos no repositório para que todos que o baixarem os tenham.
+---
+
+# Configuração no repositório
+
+Ações do projeto, comandos de configuração de worktree e iniciadores de rascunho ficam por padrão nas suas próprias configurações do OpenChamber. Ninguém mais os vê. Se você quer que quem clonar o repositório tenha a mesma ação de servidor de desenvolvimento e o mesmo `bun install` em cada worktree novo, mova esses itens para o repositório.
+
+O OpenChamber os guarda em `.openchamber/project.json` na raiz do repositório. O arquivo só aparece quando você move o primeiro item para lá e some quando você tira o último. Faça commit dele como de qualquer outro arquivo.
+
+## O que vai para onde
+
+| Fica nas suas configurações | Pode ir para o repositório |
+|---|---|
+| Notas e tarefas | Ações do projeto |
+| Tarefas agendadas | Comandos de configuração de worktree |
+| Quais ações do repositório você ocultou para si | Iniciadores de rascunho (comandos e skills fixados) |
+| Sua resposta de confiança para os comandos do repositório | Planos |
+
+Notas, tarefas e tarefas agendadas são suas. Nunca vão parar no repositório.
+
+## Mover um item
+
+Abra **Settings → Projects** e escolha o projeto. Cada ação e cada comando de configuração tem um botão **Move to repository**, e cada item que veio do repositório tem **Move to my settings**. Os iniciadores da tela de nova sessão mostram o mesmo par ao passar o mouse. Os planos têm isso em cada linha da aba Planos.
+
+Mover é só isso. O item sai de um lugar e chega no outro, nada é duplicado.
+
+Itens do repositório mostram o selo **In repo**. Ações do repositório também podem ser ocultadas do seu menu com **Hide for me**. Isso muda só o seu menu, não o arquivo.
+
+## O arquivo
+
+```json
+{
+  "version": 1,
+  "setupWorktree": [
+    "bun install"
+  ],
+  "setupWorktreeWait": true,
+  "projectActions": [
+    {
+      "id": "dev",
+      "name": "Dev server",
+      "command": "bun run dev",
+      "icon": "rocket",
+      "autoOpenUrl": true,
+      "platforms": ["macos", "linux"]
+    },
+    {
+      "id": "test",
+      "name": "Tests",
+      "command": "bun test"
+    }
+  ],
+  "draftStarters": [
+    { "type": "skill", "name": "triage-prs" }
+  ],
+  "plansDir": "docs/plans"
+}
+```
+
+Só `version` é obrigatório. Todas as outras chaves são opcionais, e o OpenChamber grava apenas as que têm algo.
+
+`setupWorktree` é a lista de comandos de shell que o OpenChamber roda dentro de um worktree novo logo depois de criá-lo, em ordem. Use `$ROOT_PROJECT_PATH` para o caminho do checkout principal. `setupWorktreeWait: true` faz o OpenChamber esperar esses comandos antes de iniciar uma sessão no worktree.
+
+`projectActions` é a lista de ações do menu do cabeçalho. `id`, `name` e `command` são obrigatórios. `icon` é opcional e cai no ícone de play; os nomes que o OpenChamber conhece são `play`, `build`, `lint`, `terminal`, `tools`, `bug`, `flask`, `rocket`, `code`, `server`, `branch`, `search`, `settings`, `brain`, `stack`, `robot`, `command` e `file`. `autoOpenUrl: true` abre o endereço que o comando imprime, veja [Pré-visualização e servidores de desenvolvimento](/preview/). `platforms` limita a ação a `macos`, `linux` ou `windows`. `runIn: "parent"` roda a ação no checkout principal em vez do worktree atual.
+
+`draftStarters` fixa comandos e skills na tela de nova sessão. Cada entrada é `{ "type": "command" | "skill", "name": "..." }`, e o comando ou skill precisa existir na configuração do OpenCode do repositório.
+
+`plansDir` é onde ficam os planos do repositório. Omita para usar `.openchamber/plans`. Veja abaixo.
+
+Você pode escrever esse arquivo à mão. Uma chave com formato errado invalida o arquivo inteiro, e a página Projects diz o motivo em vez de ignorar em silêncio.
+
+## Como itens do repositório e os seus se combinam
+
+Os comandos de configuração do repositório rodam primeiro, depois os seus. Marque **Use only my setup commands** na seção Worktree para pular por completo os comandos do repositório.
+
+As ações são combinadas por `id`. Uma ação nas suas configurações com o mesmo id de uma ação do repositório a substitui. Iniciadores são combinados por nome.
+
+A marca de espera vem das suas configurações quando você a definiu, senão do repositório.
+
+## Confiança
+
+Comandos de configuração e ações do repositório rodam na sua máquina, e um `git pull` pode mudá-los. Por isso, na primeira vez que um deles está prestes a rodar, o OpenChamber mostra os comandos exatos e pergunta. **Trust and run** guarda sua resposta nesta instância. **Not this time** roda só os seus próprios comandos.
+
+A resposta fica presa aos comandos em si. Quando um pull muda um comando do repositório, a pergunta volta para o texto novo. Você pode esquecer a resposta com **reset trust** na seção Worktree das configurações do projeto.
+
+Mover um comando seu para o repositório conta como confiar nele, já que você acabou de vê-lo.
+
+## Planos no repositório
+
+Os planos da aba Planos também podem ficar no repositório, como arquivos Markdown. A pasta padrão é `.openchamber/plans`. Defina **Plans folder** nas configurações do projeto para usar outra pasta dentro do repositório, por exemplo `docs/plans` se a equipe já guarda planos ali. Uma pasta própria substitui a padrão por completo: o OpenChamber lê e grava só nessa pasta, então mova você mesmo os arquivos existentes ao trocar.
+
+Todo arquivo `.md` dessa pasta aparece na aba Planos, inclusive os escritos por outras ferramentas. Editar um deles no OpenChamber salva o arquivo como você digitou. Um plano que você move para o repositório mantém a identidade, então as sessões que o tinham anexado continuam encontrando.
+
+## Relacionado
+
+- [Ações do projeto](/project-actions/)
+- [Worktrees](/worktrees/)
+- [Notas, tarefas e planos do projeto](/notes-todos-plans/)

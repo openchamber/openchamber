@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Radio } from '@/components/ui/radio';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
@@ -14,9 +15,14 @@ import { SettingsInfoHint } from './SettingsInfoHint';
  * and the value clips at 150–200% interface font size. `ch` is measured
  * against the trigger's own `typography-ui-label` font, so the cap grows with
  * the setting. Below `@xl` the field row stacks and the control is plain
- * `w-full`, so this cap only binds on wide panes.
+ * `w-full`, so on narrow panes the cap is the only thing keeping the
+ * trigger from spanning the pane.
+ *
+ * The cap is deliberately tight: every settings picker shares it so a column
+ * of dropdowns reads as one width, and long values truncate inside instead
+ * of stretching the trigger across the pane.
  */
-const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[22ch] max-w-[40ch]';
+const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[16ch] max-w-[28ch]';
 
 /** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
@@ -499,10 +505,7 @@ export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
       />
       <div className="flex min-w-0 flex-col">
         <span
-          className={cn(
-            'typography-settings-field-label font-normal',
-            selected ? 'text-foreground' : 'text-foreground/50',
-          )}
+          className="typography-settings-field-label font-normal text-foreground"
         >
           {label}
         </span>
@@ -537,6 +540,12 @@ interface SettingsChipOption<T extends string> {
   value: T;
   label: React.ReactNode;
   disabled?: boolean;
+  /**
+   * Shown on hover (long-press on touch). The popup stays open while the
+   * pointer is on it, so it may carry a link. Keep what the user must read
+   * visible elsewhere: touch users rarely long-press.
+   */
+  tooltip?: React.ReactNode;
 }
 
 interface SettingsChipGroupProps<T extends string> {
@@ -561,20 +570,35 @@ export function SettingsChipGroup<T extends string>({
       aria-label={ariaLabel}
       className={cn('flex flex-wrap items-center gap-1', className)}
     >
-      {options.map((option) => (
-        <Button
-          key={option.value}
-          type="button"
-          variant="chip"
-          size="xs"
-          disabled={option.disabled}
-          aria-pressed={value === option.value}
-          className="!font-normal"
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </Button>
-      ))}
+      {options.map((option) => {
+        const chip = (
+          <Button
+            key={option.value}
+            type="button"
+            variant="chip"
+            size="xs"
+            disabled={option.disabled}
+            aria-pressed={value === option.value}
+            className="!font-normal"
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        );
+        if (!option.tooltip) return chip;
+        return (
+          <Tooltip key={option.value}>
+            {/* A disabled button gets no hover events, so its tooltip (usually
+                the reason it is disabled) hangs on a wrapper instead. */}
+            <TooltipTrigger asChild>
+              {option.disabled ? <span className="inline-flex" tabIndex={0}>{chip}</span> : chip}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6} className="max-w-xs">
+              {option.tooltip}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }

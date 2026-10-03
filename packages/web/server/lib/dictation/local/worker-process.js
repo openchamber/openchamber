@@ -102,7 +102,9 @@ function getTtsEngine(modelsDir, modelId) {
   const spec = getLocalSttModelSpec(modelId);
   const created = new SherpaTtsEngine({
     modelDir: getLocalSttModelDir(modelsDir, modelId),
+    type: spec.type,
     files: spec.files,
+    lexicon: spec.lexicon,
     numThreads: 2,
   });
   ttsEngines.set(key, created);
@@ -151,8 +153,32 @@ async function handleRequest(message) {
       return;
     }
     case 'session.commit': {
-      sessions.get(message.sessionId)?.commit();
+      const session = sessions.get(message.sessionId);
+      if (!session) {
+        sendOk(message.requestId);
+        return;
+      }
+      // The segment's decode is synchronous. Acknowledging only after it made
+      // the parent's worker-request timeout fire on long segments and blocked
+      // every following IPC packet (session.append) behind the decode. So:
+      // take the segment, ack the commit immediately, and decode on the next
+      // turn of the event loop — the transcript still arrives as a
+      // session.transcript event.
+      const pending = session.takePendingSegment();
       sendOk(message.requestId);
+      if (pending) {
+        setImmediate(() => {
+          try {
+            session.decodeSegment(pending);
+          } catch (err) {
+            sendToParent({
+              type: 'session.error',
+              sessionId: message.sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+      }
       return;
     }
     case 'session.clear': {

@@ -34,6 +34,7 @@ export const TunnelFrameType = {
   WsClose: 10,
   Ping: 11,
   Pong: 12,
+  DeliveryAck: 13,
 };
 
 const TUNNEL_FRAME_TYPE_VALUES = new Set(Object.values(TunnelFrameType));
@@ -42,6 +43,14 @@ const TUNNEL_FRAME_TYPE_VALUES = new Set(Object.values(TunnelFrameType));
 export const isTunnelFrameType = (value) => TUNNEL_FRAME_TYPE_VALUES.has(value);
 
 const MAX_STREAM_ID = 0xffffffff;
+
+/** Decode the client's cumulative raw tunnel-frame byte count. */
+export const decodeDeliveryAck = (payload) => {
+  if (payload.length !== 8) throw new Error('invalid delivery acknowledgement');
+  const bytes = Number(new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getBigUint64(0));
+  if (!Number.isSafeInteger(bytes)) throw new Error('invalid delivery acknowledgement');
+  return bytes;
+};
 
 export class TunnelCodecError extends Error {
   constructor(message) {

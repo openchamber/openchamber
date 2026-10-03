@@ -25,6 +25,7 @@ import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -395,7 +396,7 @@ const TimePill: React.FC<TimePillProps> = ({
   return (
     <div
       className={cn(
-        'inline-flex h-9 w-fit items-center gap-1 rounded-md border border-border bg-background focus-within:ring-1 focus-within:ring-interactive-focusRing focus-within:border-interactive-focusRing',
+        'oc-surface-elevated inline-flex h-9 w-fit items-center gap-1 rounded-md border border-border bg-surface-elevated focus-within:ring-1 focus-within:ring-ring focus-within:border-ring',
         use24Hour ? 'px-2' : 'pl-2 pr-1',
       )}
     >
@@ -843,8 +844,8 @@ export function ScheduledTaskEditorDialog(props: {
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === draft.execution.providerID);
-    const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
+    const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: ModelVariantSource } | undefined;
+    return listModelVariantIds(model?.variants);
   }, [providers, draft.execution.providerID, draft.execution.modelID]);
   const hasVariantOptions = variantOptions.length > 0;
   const selectedVariantValue = React.useMemo(() => {
@@ -1279,7 +1280,7 @@ export function ScheduledTaskEditorDialog(props: {
                   </button>
 
                   {isDatePickerOpen ? (
-                    <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[288px] rounded-xl border border-border bg-background p-3 shadow-sm">
+                    <div className="oc-surface-elevated absolute left-0 top-[calc(100%+6px)] z-50 w-[288px] rounded-xl border border-border bg-surface-elevated p-3 shadow-sm">
                       <div className="mb-2 flex items-center justify-between">
                         <button
                           type="button"
@@ -1340,7 +1341,7 @@ export function ScheduledTaskEditorDialog(props: {
                                 'h-8 rounded-md typography-ui-label',
                                 dayClass,
                                 isToday && !isSelected
-                                  ? 'ring-1 ring-inset ring-interactive-focusRing bg-interactive-hover/50'
+                                  ? 'ring-1 ring-inset ring-ring bg-interactive-selection text-interactive-selection-foreground'
                                   : '',
                                 isPast ? 'cursor-not-allowed opacity-45' : '',
                               ].join(' ')}

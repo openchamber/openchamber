@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Part } from '@opencode-ai/sdk/v2'
+import type { Part } from '@/lib/opencode/model'
 import { CONTEXT_METADATA_KEY, type ContextPartPayload } from '@/lib/messages/contextParts'
 import { getFullText, getMessagePreview, getPromptPreviewText } from './messagePreview'
 
@@ -55,5 +55,13 @@ describe('messagePreview', () => {
   test('falls back to raw text without a translator', () => {
     const parts = [contextPart(chatQuote('quoted bit'), 'raw model text')]
     expect(getPromptPreviewText(parts)).toBe('raw model text')
+  })
+
+  test('labels a Linear issue attachment from its identifier and title', () => {
+    const parts = [contextPart(
+      { kind: 'linear-issue', identifier: 'ENG-12', title: 'Fix login', url: 'https://linear.app/eng-12' },
+      'fetched issue body',
+    )]
+    expect(getPromptPreviewText(parts, t)).toBe('ENG-12 Fix login')
   })
 })

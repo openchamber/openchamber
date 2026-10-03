@@ -34,4 +34,36 @@ describe('validateContextFileOpen', () => {
   test('allows ordinary text files', async () => {
     expect(await validateContextFileOpen(filesApi('hello\nworld\n'), '/repo/notes.txt')).toEqual({ ok: true });
   });
+
+  test('reads outside-workspace paths with allowOutsideWorkspace', async () => {
+    const reads: Array<{ path: string; allowOutsideWorkspace: boolean | undefined }> = [];
+    const files: FilesAPI = {
+      listDirectory: async () => ({ directory: '/', entries: [] }),
+      search: async () => [],
+      createDirectory: async () => ({ success: true, path: '/' }),
+      readFile: async (path, options) => {
+        reads.push({ path, allowOutsideWorkspace: options?.allowOutsideWorkspace });
+        return { content: 'hello\n', path };
+      },
+    };
+
+    expect(await validateContextFileOpen(files, '/tmp/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
+    expect(reads).toEqual([{ path: '/tmp/notes.txt', allowOutsideWorkspace: true }]);
+  });
+
+  test('does not set allowOutsideWorkspace for in-workspace paths', async () => {
+    const reads: Array<{ allowOutsideWorkspace: boolean | undefined }> = [];
+    const files: FilesAPI = {
+      listDirectory: async () => ({ directory: '/', entries: [] }),
+      search: async () => [],
+      createDirectory: async () => ({ success: true, path: '/' }),
+      readFile: async (path, options) => {
+        reads.push({ allowOutsideWorkspace: options?.allowOutsideWorkspace });
+        return { content: 'hello\n', path };
+      },
+    };
+
+    expect(await validateContextFileOpen(files, '/repo/notes.txt', { directory: '/repo' })).toEqual({ ok: true });
+    expect(reads[0]?.allowOutsideWorkspace).toBe(false);
+  });
 });

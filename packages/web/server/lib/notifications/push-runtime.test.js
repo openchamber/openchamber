@@ -9,11 +9,11 @@ const createRuntime = () => createPushRuntime({
     writeFile: vi.fn(async () => {}),
   },
   path: { dirname: () => '/tmp' },
-  webPush: {
+  loadWebPush: async () => ({
     generateVAPIDKeys: vi.fn(() => ({ publicKey: 'public', privateKey: 'private' })),
     sendNotification: vi.fn(async () => {}),
     setVapidDetails: vi.fn(),
-  },
+  }),
   PUSH_SUBSCRIPTIONS_FILE_PATH: '/tmp/push-subscriptions.json',
   readSettingsFromDiskMigrated: vi.fn(async () => ({})),
   writeSettingsToDisk: vi.fn(async () => {}),

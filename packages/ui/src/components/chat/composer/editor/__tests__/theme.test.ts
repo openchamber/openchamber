@@ -145,7 +145,8 @@ describe('composerNativeSelectionTheme', () => {
         expect(rule!.includes('.cm-line')).toBe(true);
         const value = (NATIVE_SELECTION_THEME_SPEC as Record<string, Record<string, string>>)[rule!];
         expect(value.backgroundColor.includes('!important')).toBe(true);
-        expect(value.backgroundColor.includes('transparent')).toBe(true);
+        expect(value.backgroundColor).toBe('var(--interactive-selection) !important');
+        expect(value.color).toBe('var(--interactive-selection-foreground) !important');
     });
 
     test('the painted selection layer is hidden so highlights do not stack', () => {

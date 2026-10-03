@@ -9,16 +9,8 @@ export type MagicPromptId =
   | 'git.conflict.resolve.instructions'
   | 'git.integrate.cherrypick.resolve.visible'
   | 'git.integrate.cherrypick.resolve.instructions'
-  | 'github.pr.review.visible'
-  | 'github.pr.review.instructions'
-  | 'github.issue.review.visible'
-  | 'github.issue.review.instructions'
-  | 'github.pr.checks.review.visible'
-  | 'github.pr.checks.review.instructions'
-  | 'github.pr.comments.review.visible'
-  | 'github.pr.comments.review.instructions'
-  | 'github.pr.comment.single.visible'
-  | 'github.pr.comment.single.instructions'
+  | 'linear.issue.review.visible'
+  | 'linear.issue.review.instructions'
   | 'plan.todo.visible'
   | 'plan.todo.instructions'
   | 'plan.improve.visible'
@@ -50,13 +42,14 @@ export type MagicPromptId =
   | 'session.explore.visible'
   | 'session.explore.instructions'
   | 'session.fusion.visible'
-  | 'session.fusion.instructions';
+  | 'session.fusion.instructions'
+  | 'session.fusion.codeInstructions';
 
 export interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
-  group: 'Git' | 'GitHub' | 'Planning' | 'Session';
+  group: 'Git' | 'GitHub' | 'Linear' | 'Planning' | 'Session';
   template: string;
   placeholders?: Array<{ key: string; description: string }>;
 }
@@ -149,81 +142,21 @@ Files changed across these commits:
 {{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
   },
   {
-    id: 'github.pr.review.visible',
-    title: 'PR Review Visible Prompt',
-    group: 'GitHub',
-    description: 'Visible user message when creating PR review requests from GitHub context.',
+    id: 'linear.issue.review.visible',
+    title: 'Linear Issue Review Visible Prompt',
+    group: 'Linear',
+    description: 'Visible user message when creating a session from a Linear issue.',
     placeholders: [
-      { key: 'pr_number', description: 'Pull request number.' },
+      { key: 'identifier', description: 'Linear issue identifier, such as ENG-12.' },
     ],
-    template: 'Review this pull request #{{pr_number}} using the provided PR context',
+    template: 'Review this Linear issue {{identifier}} using the provided issue context',
   },
   {
-    id: 'github.pr.review.instructions',
-    title: 'PR Review Instructions',
-    group: 'GitHub',
-    description: 'Hidden instructions attached when generating a PR review response.',
-    template: `You are drafting a pull request review comment that will be posted back to the PR author. You are not the implementer; do not propose to write code or run commands.
-
-Before drafting:
-- Read the PR title and body first to anchor on the author's intent. Evaluate whether the implementation matches that intent — missing pieces, incorrect behavior vs intent, scope creep.
-- The PR diff is the source of truth for what changed; the repo on disk may not yet reflect those changes. Read the diff carefully. Use the repo only as ancillary context (imports, call sites, existing patterns, nearby code) when you need to verify a specific claim — not to discover the changes themselves.
-- No speculation: every reported issue must be grounded in the diff plus ancillary repo evidence you actually read. If a claim cannot be verified, drop it — do not hedge or guess.
-- Clarifying question: if the PR's intent itself is unreadable (title/body give no "why", diff is ambiguous on purpose), ask me one focused question about intent and stop. Do not open a discovery loop — this is a review, not a planning session.
-
-High-signal bar — only report issues that meet all of:
-- Objective and verifiable from the diff plus ancillary repo evidence.
-- Introduced by this PR (not pre-existing).
-- Material: bugs that will cause incorrect runtime behavior, security/privacy risks, correctness edge cases, backwards-compat breakage, missing implementations across modules/targets, boundary violations, OR a clear CLAUDE.md / AGENTS.md violation where you can quote the exact rule.
-
-Do NOT report:
-- Pre-existing issues unrelated to the diff.
-- Pedantic nitpicks a senior engineer would not flag.
-- Issues a linter would catch.
-- Subjective style preferences not explicitly required by CLAUDE.md / AGENTS.md.
-- "Might" / "could" / "potential" concerns without concrete evidence.
-- Rules mentioned in CLAUDE.md / AGENTS.md but explicitly silenced in the code (e.g., via an ignore comment or documented exception).
-- Missing tests / coverage gaps unless CLAUDE.md / AGENTS.md explicitly requires them for the changed area.
-
-Validation pass: before writing the final comment, re-check each candidate issue against the diff + ancillary repo evidence. Drop anything you are not certain about. False positives waste the author's time.
-
-Output rules:
-- Produce a single review comment addressed to the PR author, using the exact format below.
-- No emojis. No code snippets. No fenced blocks. Short inline code identifiers are fine.
-- Reference evidence with file paths and line ranges (e.g., path/to/file.ts:120-138) derived from the diff. Use "approx" only as a last resort when the diff does not expose exact lines.
-- One bullet per unique issue; do not duplicate an issue across sections.
-- Keep the whole comment under ~300 words.
-
-Format exactly:
-<1-2 sentence summary of intent and top-level verdict>
-
-Must-fix:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-Nice-to-have:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-
-If nothing clears the high-signal bar, write:
-Must-fix:
-- None
-Nice-to-have:
-- None`,
-  },
-  {
-    id: 'github.issue.review.visible',
-    title: 'Issue Review Visible Prompt',
-    group: 'GitHub',
-    description: 'Visible user message when creating issue review requests from GitHub context.',
-    placeholders: [
-      { key: 'issue_number', description: 'Issue number.' },
-    ],
-    template: 'Review this issue #{{issue_number}} using the provided issue context',
-  },
-  {
-    id: 'github.issue.review.instructions',
-    title: 'Issue Review Instructions',
-    group: 'GitHub',
-    description: 'Hidden instructions attached when generating an issue review response.',
-    template: `Review this issue using the provided issue context.
+    id: 'linear.issue.review.instructions',
+    title: 'Linear Issue Review Instructions',
+    group: 'Linear',
+    description: 'Hidden instructions attached when generating a Linear issue review response.',
+    template: `Review this Linear issue using the provided issue context.
 
 Process:
 - First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
@@ -262,61 +195,6 @@ Question/Support:
 - Missing info (max 4)
 
 Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
-  },
-  {
-    id: 'github.pr.checks.review.visible',
-    title: 'PR Failed Checks Visible Prompt',
-    group: 'GitHub',
-    description: 'Visible user message for PR failed checks analysis.',
-    template: 'Review these PR failed checks and propose likely fixes. Do not implement until I confirm.',
-  },
-  {
-    id: 'github.pr.checks.review.instructions',
-    title: 'PR Failed Checks Instructions',
-    group: 'GitHub',
-    description: 'Hidden instructions for PR failed checks analysis.',
-    template: `Use the attached checks payload.
-- Summarize what is failing.
-- Prioritize check annotations/errors over generic status text.
-- Identify likely root cause(s).
-- Propose a minimal fix plan and verification steps.
-- No speculation: ask for missing info if needed.`,
-  },
-  {
-    id: 'github.pr.comments.review.visible',
-    title: 'PR Comments Review Visible Prompt',
-    group: 'GitHub',
-    description: 'Visible user message for PR comments analysis.',
-    template: 'Review these PR comments and propose the required changes and next actions. Do not implement until I confirm.',
-  },
-  {
-    id: 'github.pr.comments.review.instructions',
-    title: 'PR Comments Review Instructions',
-    group: 'GitHub',
-    description: 'Hidden instructions for PR comments analysis.',
-    template: `Use the attached comments payload.
-- Identify required vs optional changes.
-- Call out intent/implementation mismatch if present.
-- Before proposing a plan: if a comment's intent is ambiguous, or the required change depends on a tradeoff only I can decide, ask me focused clarifying questions in batches of at most 3 and wait for answers. Do not speculate.
-- Once intent is clear, propose a minimal plan and verification steps.`,
-  },
-  {
-    id: 'github.pr.comment.single.visible',
-    title: 'Single PR Comment Visible Prompt',
-    group: 'GitHub',
-    description: 'Visible user message for single PR comment analysis.',
-    template: 'Address this comment from PR and propose required changes. Do not implement until I confirm.',
-  },
-  {
-    id: 'github.pr.comment.single.instructions',
-    title: 'Single PR Comment Instructions',
-    group: 'GitHub',
-    description: 'Hidden instructions for single PR comment analysis.',
-    template: `Use the attached single-comment payload.
-- Explain what the reviewer is asking for.
-- Identify exact code areas likely impacted.
-- Before proposing a plan: if the reviewer's intent is ambiguous or the required change depends on a tradeoff only I can decide, ask me focused clarifying questions in batches of at most 3 and wait for answers. Do not speculate.
-- Once intent is clear, propose a minimal implementation plan and verification steps.`,
   },
   {
     id: 'git.conflict.resolve.visible',
@@ -983,6 +861,34 @@ Respond in the same language the user uses.`,
 Goal: produce the strongest possible final answer by combining complementary information, resolving conflicts, removing duplicates, and preserving useful nuance.
 
 Use the results below as source material. Do not mention that the inputs were hidden parts. If sources disagree, prefer the most specific, well-supported, and internally consistent answer.
+
+--- FUSION INPUTS START ---`,
+  },
+  {
+    id: 'session.fusion.codeInstructions',
+    title: 'Code Fusion Instructions',
+    group: 'Session',
+    description: 'Hidden instructions for fusing parallel runs that changed code. The fusion works in its own worktree and reads each attempt from git.',
+    placeholders: [
+      { key: 'baseCommit', description: 'Commit every attempt started from; the fusion worktree starts here too' },
+      { key: 'attemptCount', description: 'Number of attempts being fused' },
+    ],
+    template: `You are fusing {{attemptCount}} parallel attempts at the same coding task into one result.
+
+You are working in a fresh git worktree created at {{baseCommit}}, the commit every attempt started from. Each attempt's complete result, including uncommitted and new files, is saved as a snapshot commit listed below. Read the attempts with git instead of guessing:
+
+- \`git diff {{baseCommit}} <snapshot> --stat\` gives an overview of an attempt.
+- \`git diff {{baseCommit}} <snapshot> -- <path>\` shows one file's changes.
+- \`git show <snapshot>:<path>\` prints a file as that attempt left it.
+
+How to work:
+1. Read each attempt's final answer and change summary below, then pick the strongest attempt as your base.
+2. Bring the base in with \`git checkout <snapshot> -- .\` (or per path).
+3. Where attempts differ, compare the relevant files and port what is better from the others: fixes, tests, edge cases, clearer code.
+4. Keep the result consistent and run the project's checks when they are available.
+5. Do not commit. Finish with a short summary: which attempt you used as the base and what you took from each of the others.
+
+Read diffs selectively, file by file; do not print every attempt in full.
 
 --- FUSION INPUTS START ---`,
   },

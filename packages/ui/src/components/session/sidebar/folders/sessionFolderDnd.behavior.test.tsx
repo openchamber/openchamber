@@ -4,8 +4,8 @@ import { createRoot } from 'react-dom/client';
 import { installHookTestDom } from '../test-utils/testDom';
 
 type DragEnd = (event: {
-  active: { data: { current: { type: string; sessionId: string } } };
-  over: { data: { current: { type: string; folderId: string } } } | null;
+  active: { data: { current: { type: string; sessionId: string; ownerKey: string } } };
+  over: { data: { current: { type: string; folderId: string; scopeKey: string; ownerKey: string } } } | null;
 }) => void;
 
 let handleDragEnd: DragEnd | null = null;
@@ -16,7 +16,8 @@ mock.module('@dnd-kit/core', () => ({
     return <>{children}</>;
   },
   DragOverlay: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  PointerSensor: class {},
+  MouseSensor: class {},
+  TouchSensor: class {},
   closestCenter: () => null,
   useSensor: () => null,
   useSensors: () => [],
@@ -36,8 +37,9 @@ describe('SessionFolderDndScope public behavior', () => {
       await act(async () => root.render(
         <SessionFolderDndScope
           scopeKey="/workspace"
+          ownerKey="project-a"
           hasFolders
-          onSessionDroppedOnFolder={(sessionId, folderId) => drops.push({ sessionId, folderId })}
+          onSessionDroppedOnFolder={(sessionId, target) => drops.push({ sessionId, folderId: target.folderId })}
         >
           {null}
         </SessionFolderDndScope>,
@@ -45,8 +47,8 @@ describe('SessionFolderDndScope public behavior', () => {
       expect(handleDragEnd).not.toBeNull();
 
       await act(async () => handleDragEnd?.({
-        active: { data: { current: { type: 'session', sessionId: 'session-a' } } },
-        over: { data: { current: { type: 'folder', folderId: 'folder-a' } } },
+        active: { data: { current: { type: 'session', sessionId: 'session-a', ownerKey: 'project-a' } } },
+        over: { data: { current: { type: 'folder', folderId: 'folder-a', scopeKey: '/workspace', ownerKey: 'project-a' } } },
       }));
       expect(drops).toEqual([{ sessionId: 'session-a', folderId: 'folder-a' }]);
     } finally {

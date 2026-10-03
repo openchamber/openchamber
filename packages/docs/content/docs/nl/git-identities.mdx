@@ -1,0 +1,30 @@
+---
+title: Git-identiteiten
+description: Gebruik voor elke repository de juiste naam en het juiste e-mailadres in commits.
+---
+
+# Git-identiteiten
+
+Een Git-identiteit bestaat uit de naam en het e-mailadres die bij uw commits worden vermeld. Werkt u aan zowel privé- als werkrepositories, dan kunt u identiteiten opslaan en per repository de juiste toepassen, in plaats van één algemene instelling te gebruiken. U beheert ze bij **Instellingen → Git**.
+
+## Een identiteit toevoegen
+
+1. Open **Instellingen → Git** en kies **Nieuw**.
+2. Vul de **naam** en het **e-mailadres** voor uw commits in.
+3. Kies hoe u zich bij de remote aanmeldt:
+   - **SSH:** wijs een SSH-sleutel aan
+   - **token:** gebruik opgeslagen aanmeldgegevens voor een host
+4. Geef de identiteit eventueel een kleur en pictogram om haar makkelijk te herkennen.
+
+De algemene identiteit van uw systeem wordt ook getoond, maar is hier alleen-lezen.
+
+## Een identiteit op een repository toepassen
+
+Toepassen schrijft de identiteit naar de **lokale** Git-configuratie van de repository. Andere repositories en uw algemene instelling blijven dus gelijk. Bij een SSH-identiteit wordt ook de SSH-opdracht ingesteld om uw sleutel te gebruiken. Bij een tokenidentiteit wordt de opslag van aanmeldgegevens voor de host ingesteld.
+
+U kunt identiteiten die OpenChamber in bestaande Git-aanmeldgegevens vindt, importeren en als tokenidentiteit opslaan.
+
+## Zie ook
+
+- [Werken met Git en GitHub](/nl/git/) om met de ingestelde identiteit te committen
+- [GitHub-issues en PR's](/nl/github/) om een GitHub-account voor PR's te verbinden

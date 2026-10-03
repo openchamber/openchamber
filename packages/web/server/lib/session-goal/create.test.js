@@ -20,8 +20,9 @@ describe('session goal creation', () => {
     generateSmallModelTextMock.mockReset().mockResolvedValue({ text: '' });
   });
 
-  it('writes the objective before patching active goal metadata', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true }));
+  it('saves the goal in OpenChamber\'s own store, never through OpenCode', async () => {
+    const fetchMock = vi.fn();
+    const persistSessionGoal = vi.fn(async () => undefined);
     const originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock;
     try {
@@ -34,43 +35,41 @@ describe('session goal creation', () => {
         tokenBudget: 200_000,
         providerID: 'openai',
         modelID: 'gpt-5.5',
+        persistSessionGoal,
       });
 
       expect(writeObjectiveMock).toHaveBeenCalledWith('ses_123', 'Finish and verify the migration');
-      expect(writeObjectiveMock.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
       expect(goal).toMatchObject({ objective: '', objectiveFile: true, status: 'active', tokenBudget: 200_000 });
-      expect(fetchMock).toHaveBeenCalledWith(
-        'http://opencode.test/session/ses_123?directory=%2Frepo%2Fapp',
-        expect.objectContaining({ method: 'PATCH' }),
-      );
+      expect(persistSessionGoal).toHaveBeenCalledWith('ses_123', '/repo/app', goal);
+      // v2 has no session-metadata route; nothing may be sent to OpenCode.
+      expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  it('falls back to inline metadata when objective storage fails', async () => {
+  it('falls back to an inline objective when the objective file cannot be written', async () => {
     writeObjectiveMock.mockRejectedValueOnce(new Error('disk unavailable'));
-    const fetchMock = vi.fn(async () => ({ ok: true }));
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = fetchMock;
-    try {
-      await createSessionGoal({
-        baseUrl: 'http://opencode.test',
-        authHeaders: {},
-        sessionID: 'ses_123',
-        directory: '/repo/app',
-        objective: 'Finish the migration',
-        onWarning: vi.fn(),
-      });
+    const persistSessionGoal = vi.fn(async () => undefined);
 
-      const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
-      expect(payload.metadata.openchamber.goal).toMatchObject({
-        objective: 'Finish the migration',
-        objectiveFile: false,
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'Finish the migration',
+      onWarning: vi.fn(),
+      persistSessionGoal,
+    });
+
+    const [, , goal] = persistSessionGoal.mock.calls[0];
+    expect(goal).toMatchObject({ objective: 'Finish the migration', objectiveFile: false });
+  });
+
+  it('refuses to report a goal it has nowhere to save', async () => {
+    await expect(createSessionGoal({
+      sessionID: 'ses_123',
+      directory: '/repo/app',
+      objective: 'Finish the migration',
+    })).rejects.toThrow(/needs a session metadata store/);
   });
 
   it('builds the same goal intro with an optional budget', () => {

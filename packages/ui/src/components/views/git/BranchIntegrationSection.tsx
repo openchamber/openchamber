@@ -243,13 +243,13 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             className={cn(
               'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
               operation === 'merge'
-                ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-border/80 hover:bg-muted/50'
+                ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+                : 'border-border hover:border-border/80 hover:bg-interactive-hover'
             )}
           >
             <div className="flex items-center gap-2">
               <Icon name="git-merge"
-                className={cn('size-4', operation === 'merge' ? 'text-primary' : 'text-muted-foreground')}
+                className={cn('size-4', operation === 'merge' ? 'text-inherit' : 'text-muted-foreground')}
               />
               <span
                 className={cn(
@@ -271,13 +271,13 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             className={cn(
               'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
               operation === 'rebase'
-                ? 'border-primary bg-primary/5'
-                : 'border-border hover:border-border/80 hover:bg-muted/50'
+                ? 'border-border bg-interactive-selection text-interactive-selection-foreground'
+                : 'border-border hover:border-border/80 hover:bg-interactive-hover'
             )}
           >
             <div className="flex items-center gap-2">
               <Icon name="git-branch"
-                className={cn('size-4', operation === 'rebase' ? 'text-primary' : 'text-muted-foreground')}
+                className={cn('size-4', operation === 'rebase' ? 'text-inherit' : 'text-muted-foreground')}
               />
               <span
                 className={cn(

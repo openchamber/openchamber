@@ -49,9 +49,13 @@ const createStreamError = (message: string, retryable: boolean, reasonCode?: str
 };
 
 const CONNECT_TIMEOUT_MS = 10000;
-const START_TIMEOUT_MS = 15000;
+// The first start of a session also loads the local ONNX engine (measured ~3s
+// on an M1, more on slower machines and on first run after boot). 15s left too
+// little headroom and surfaced as "Dictation start timed out" before the worker
+// was ready.
+const START_TIMEOUT_MS = 30000;
 const IDLE_CLOSE_DELAY_MS = 30000;
-const DEFAULT_FINISH_TIMEOUT_MS = 30000;
+const DEFAULT_FINISH_TIMEOUT_MS = 60000;
 
 type ConnectionStatusListener = (connected: boolean) => void;
 type PartialListener = (dictationId: string, text: string) => void;

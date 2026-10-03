@@ -5,10 +5,24 @@ import {
   areAllWorkStatusSectionsHidden,
   getWorkStatusPanelPresentation,
   isWorkStatusSectionVisible,
+  resolveWorkStatusSectionOrder,
   sanitizeWorkStatusHiddenSections,
+  sanitizeWorkStatusSectionOrder,
 } from './sections';
 
 describe('section registry', () => {
+  test('restores defaults for missing or empty saved order', () => {
+    for (const value of [undefined, null, []]) {
+      expect(sanitizeWorkStatusSectionOrder(value)).toEqual([...WORK_STATUS_SECTION_IDS]);
+    }
+  });
+
+  test('preserves chosen positions and appends missing sections once', () => {
+    const order = sanitizeWorkStatusSectionOrder(['pinned', 'repository', 'pinned', 'obsolete', 'session']);
+    expect(order).toEqual(['pinned', 'repository', 'session', 'usage', 'telemetry', 'subagents', 'mcp', 'contextSources']);
+    expect(sanitizeWorkStatusSectionOrder(JSON.parse(JSON.stringify(order)))).toEqual(order);
+  });
+
   test('every section has a label, and every label a section', () => {
     // One list drives the panel and the dialog; a mismatch means a section the
     // user cannot switch, or a switch for nothing.
@@ -28,7 +42,7 @@ describe('isWorkStatusSectionVisible', () => {
 
   test('hides exactly the listed section', () => {
     expect(isWorkStatusSectionVisible(['usage'], 'usage')).toBe(false);
-    expect(isWorkStatusSectionVisible(['usage'], 'tasks')).toBe(true);
+    expect(isWorkStatusSectionVisible(['usage'], 'mcp')).toBe(true);
   });
 });
 
@@ -43,7 +57,7 @@ describe('areAllWorkStatusSectionsHidden', () => {
   });
 
   test('returns false when only some sections are hidden', () => {
-    expect(areAllWorkStatusSectionsHidden(['usage', 'tasks'])).toBe(false);
+    expect(areAllWorkStatusSectionsHidden(['usage', 'mcp'])).toBe(false);
   });
 
   test('returns true when every known section is hidden', () => {
@@ -103,17 +117,50 @@ describe('getWorkStatusPanelPresentation', () => {
 
 describe('sanitizeWorkStatusHiddenSections', () => {
   test('keeps known ids and drops everything else', () => {
-    expect(sanitizeWorkStatusHiddenSections(['usage', 'nope', 42, null, 'tasks']))
-      .toEqual(['usage', 'tasks']);
+    expect(sanitizeWorkStatusHiddenSections(['usage', 'nope', 42, null, 'mcp']))
+      .toEqual(['usage', 'mcp']);
   });
 
   test('deduplicates', () => {
     expect(sanitizeWorkStatusHiddenSections(['usage', 'usage'])).toEqual(['usage']);
   });
 
-  test('treats a non-array payload as no preference', () => {
+  test('treats a non-array payload as default hidden preference', () => {
     expect(sanitizeWorkStatusHiddenSections(undefined)).toEqual([]);
     expect(sanitizeWorkStatusHiddenSections('usage')).toEqual([]);
     expect(sanitizeWorkStatusHiddenSections({ usage: true })).toEqual([]);
+  });
+
+  test('removes only the old implicit telemetry default', () => {
+    expect(sanitizeWorkStatusHiddenSections(['mcp', 'telemetry'], false)).toEqual(['mcp']);
+    expect(sanitizeWorkStatusHiddenSections([], false)).toEqual([]);
+  });
+
+  test('preserves explicit hiding, including hiding every section', () => {
+    expect(sanitizeWorkStatusHiddenSections(['mcp', 'telemetry'], true)).toEqual(['mcp', 'telemetry']);
+    expect(sanitizeWorkStatusHiddenSections([...WORK_STATUS_SECTION_IDS], true)).toEqual([...WORK_STATUS_SECTION_IDS]);
+  });
+});
+
+describe('extension sections', () => {
+  test('saved extension ids survive sanitizing, even before the catalog loads', () => {
+    const order = sanitizeWorkStatusSectionOrder(['ext:git-graph', 'session', 'ext:Bad', 'ext:', 'plugin:x']);
+    expect(order.slice(0, 2)).toEqual(['ext:git-graph', 'session']);
+    expect(order).not.toContain('ext:Bad');
+    expect(sanitizeWorkStatusHiddenSections(['ext:git-graph', 'ext:../x', 'mcp'])).toEqual(['ext:git-graph', 'mcp']);
+  });
+
+  test('the shown order skips unavailable extensions and appends new ones', () => {
+    const shown = resolveWorkStatusSectionOrder(['ext:gone', 'ext:git-graph', 'mcp', 'session'], ['ext:git-graph', 'ext:fresh']);
+    expect(shown.slice(0, 3)).toEqual(['ext:git-graph', 'mcp', 'session']);
+    expect(shown).not.toContain('ext:gone');
+    expect(shown.at(-1)).toBe('ext:fresh');
+    expect(resolveWorkStatusSectionOrder(undefined, [])).toEqual([...WORK_STATUS_SECTION_IDS]);
+  });
+
+  test('all hidden counts available extension sections too', () => {
+    expect(areAllWorkStatusSectionsHidden([...WORK_STATUS_SECTION_IDS], ['ext:git-graph'])).toBe(false);
+    expect(areAllWorkStatusSectionsHidden([...WORK_STATUS_SECTION_IDS, 'ext:git-graph'], ['ext:git-graph'])).toBe(true);
+    expect(isWorkStatusSectionVisible(['ext:git-graph'], 'ext:git-graph')).toBe(false);
   });
 });

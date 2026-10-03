@@ -20,7 +20,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { Message, Part } from '@opencode-ai/sdk/v2/client';
+import type { Message, Part } from '@/lib/opencode/model';
 
 mock.module('sonner', () => ({
   toast: { dismiss: () => undefined, error: () => undefined, info: () => undefined, success: () => undefined },
@@ -28,7 +28,11 @@ mock.module('sonner', () => ({
 mock.module('@/components/ui', () => ({
   toast: { info: () => undefined, error: () => undefined, success: () => undefined },
 }));
+let mockIdCounter = 0;
 mock.module('@/lib/opencode/client', () => ({
+  OpencodeApiError: Error,
+  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
+  ascendingId: (prefix: string) => `${prefix}_${(mockIdCounter += 1).toString(16).padStart(12, '0')}`,
   opencodeClient: {
     getDirectory: () => '/repo',
     setDirectory: () => undefined,
@@ -37,9 +41,10 @@ mock.module('@/lib/opencode/client', () => ({
   },
 }));
 mock.module('@/stores/permissionStore', () => ({
-  usePermissionStore: { getState: () => ({ isSessionAutoAccepting: () => false, hydrate: async () => undefined }) },
+  usePermissionStore: { getState: () => ({ getSessionMode: () => 'ask', hydrate: async () => undefined }) },
 }));
 mock.module('@/stores/useConfigStore', () => ({
+  markConfigCatalogStale: () => undefined,
   useConfigStore: {
     getState: () => ({ isConnected: true, hasEverConnected: true, settingsMessageStreamTransport: 'auto' }),
     setState: () => undefined,
@@ -138,12 +143,25 @@ const buildMaterializedSubagentSession = () => {
   return { messages, part };
 };
 
-const syncContext = (globalThis as unknown as {
+// SAFETY: sync-context.tsx publishes exactly these two keys on globalThis
+// (SYNC_CONTEXT_GLOBAL_KEY / SYNC_RUNTIME_CONTEXT_GLOBAL_KEY) so every module
+// instance shares one context identity; the cast only adds those two optional
+// keys to the global object type, and the guards below re-check presence.
+const syncGlobals = globalThis as {
   __openchamber_sync_context__?: React.Context<unknown>;
-}).__openchamber_sync_context__;
+  __openchamber_sync_runtime_context__?: React.Context<unknown>;
+};
+
+const syncContext = syncGlobals.__openchamber_sync_context__;
 
 if (!syncContext) {
   throw new Error('sync context was not published on globalThis by @/sync/sync-context');
+}
+
+const syncRuntimeContext = syncGlobals.__openchamber_sync_runtime_context__;
+
+if (!syncRuntimeContext) {
+  throw new Error('sync runtime context was not published on globalThis by @/sync/sync-context');
 }
 
 describe('issue #2903 busy embedded subagent status-line-only', () => {
@@ -157,11 +175,13 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
       status: 'complete',
       session: [{
         id: SESSION_ID,
+        projectID: 'project',
         title: 'Audit Searchbar implementation',
         time: { created: 1, updated: 1 },
-        version: '1',
         directory: DIRECTORY,
-      } as State['session'][number]],
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }],
       message: { [SESSION_ID]: messages },
       part,
     } as Partial<State>);
@@ -173,7 +193,16 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
     });
 
     const system = { childStores, messageLoader: {}, sdk: {}, runtimeKey: 'test', directory: DIRECTORY };
-    const Provider = syncContext.Provider as React.Provider<unknown>;
+    // Mirrors SyncProvider's own nesting: system context outer, runtime inner.
+    // Directory-scoped hooks read the runtime context, so the harness must
+    // provide it with a currentDirectory source for the store lookups.
+    const runtime = {
+      childStores,
+      messageLoader: {},
+      sdk: {},
+      runtimeKey: 'test',
+      currentDirectory: { get: () => DIRECTORY, subscribe: () => () => undefined },
+    };
     let inactiveCount = -1;
     let activeCount = -1;
     let enabled = false;
@@ -188,15 +217,22 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
       return null;
     };
 
+    const renderHarness = () =>
+      React.createElement(
+        syncContext.Provider,
+        { value: system },
+        React.createElement(syncRuntimeContext.Provider, { value: runtime }, React.createElement(Harness)),
+      );
+
     try {
       await act(async () => {
-        root.render(React.createElement(Provider, { value: system }, React.createElement(Harness)));
+        root.render(renderHarness());
       });
       expect(inactiveCount).toBe(0);
 
       enabled = true;
       await act(async () => {
-        root.render(React.createElement(Provider, { value: system }, React.createElement(Harness)));
+        root.render(renderHarness());
       });
       expect(activeCount).toBe(14);
     } finally {

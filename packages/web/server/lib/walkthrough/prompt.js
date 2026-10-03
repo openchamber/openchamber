@@ -86,7 +86,9 @@ export function buildPrompt({ digest, fileCount, hunkCount, source, previousWalk
     ? `Uncommitted local changes (${source.scope === 'all' ? 'staged and unstaged' : source.scope}).`
     : source.kind === 'branch'
       ? `All work on branch "${source.headRef}" that is not in "${source.baseRef}". Changes merged in from ${source.baseRef} are already excluded.`
-      : `Pull request #${source.number}.`;
+      : source.kind === 'commit'
+        ? `Only the changes introduced by commit ${source.hash}, relative to its first parent (or the empty tree for a root commit).`
+        : `Pull request #${source.number}.`;
 
   const prompt = `Reviewing: ${sourceLine}
 

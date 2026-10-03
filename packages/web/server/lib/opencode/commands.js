@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  getAncestors,
+  findWorktreeRoot,
   CONFIG_FILE,
   OPENCODE_CONFIG_DIR,
   COMMAND_DIR,
@@ -11,47 +13,60 @@ import {
   readConfigLayers,
   writeConfig,
   getJsonEntrySource,
-  getJsonWriteTarget,
   isPromptFileReference,
   resolvePromptFilePath,
   writePromptFile,
 } from './shared.js';
+import {
+  toCommandEntity,
+  fromCommandEntity,
+  isLegacyCommandFrontmatter,
+  writeSectionEntry,
+  deleteSectionEntry,
+  parseModelSelection,
+  formatModelSelection,
+  isRecord,
+} from './config-v2.js';
 
 // ============== COMMAND SCOPE HELPERS ==============
+//
+// OpenCode 2 discovers commands from `command/` and `commands/`. OpenChamber
+// reads both and writes only `commands/`; a command already living in the v1
+// directory is rewritten at its own path in v2 shape.
 
-/**
- * Ensure project-level command directory exists
- */
+const USER_COMMAND_DIRS = [COMMAND_DIR, path.join(OPENCODE_CONFIG_DIR, 'command')];
+const PROJECT_COMMAND_DIR_NAMES = ['commands', 'command'];
+
+/** Ensure the v2 project command directory exists. */
 function ensureProjectCommandDir(workingDirectory) {
   const projectCommandDir = path.join(workingDirectory, '.opencode', 'commands');
   if (!fs.existsSync(projectCommandDir)) {
     fs.mkdirSync(projectCommandDir, { recursive: true });
   }
-  const legacyProjectCommandDir = path.join(workingDirectory, '.opencode', 'command');
-  if (!fs.existsSync(legacyProjectCommandDir)) {
-    fs.mkdirSync(legacyProjectCommandDir, { recursive: true });
-  }
   return projectCommandDir;
 }
 
-/**
- * Get project-level command path
- */
 function getProjectCommandPath(workingDirectory, commandName) {
-  const pluralPath = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
-  const legacyPath = path.join(workingDirectory, '.opencode', 'command', `${commandName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
-  return pluralPath;
+  const preferred = path.join(workingDirectory, '.opencode', 'commands', `${commandName}.md`);
+  // Same walk as agents: every `.opencode` from the working directory up to
+  // the project root is a source; nested names (`team/review`) map onto paths.
+  const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+  for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+    for (const dirName of PROJECT_COMMAND_DIR_NAMES) {
+      const candidate = path.join(base, '.opencode', dirName, `${commandName}.md`);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return preferred;
 }
 
-/**
- * Get user-level command path
- */
 function getUserCommandPath(commandName) {
-  const pluralPath = path.join(COMMAND_DIR, `${commandName}.md`);
-  const legacyPath = path.join(OPENCODE_CONFIG_DIR, 'command', `${commandName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
-  return pluralPath;
+  const preferred = path.join(COMMAND_DIR, `${commandName}.md`);
+  for (const dir of USER_COMMAND_DIRS) {
+    const candidate = path.join(dir, `${commandName}.md`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return preferred;
 }
 
 /**
@@ -65,12 +80,12 @@ function getCommandScope(commandName, workingDirectory) {
       return { scope: COMMAND_SCOPE.PROJECT, path: projectPath };
     }
   }
-  
+
   const userPath = getUserCommandPath(commandName);
   if (fs.existsSync(userPath)) {
     return { scope: COMMAND_SCOPE.USER, path: userPath };
   }
-  
+
   return { scope: null, path: null };
 }
 
@@ -78,41 +93,40 @@ function getCommandScope(commandName, workingDirectory) {
  * Get the path where a command should be written based on scope
  */
 function getCommandWritePath(commandName, workingDirectory, requestedScope) {
-  // For updates: check existing location first (project takes precedence)
   const existing = getCommandScope(commandName, workingDirectory);
   if (existing.path) {
     return existing;
   }
-  
-  // For new commands or built-in overrides: use requested scope or default to user
+
   const scope = requestedScope || COMMAND_SCOPE.USER;
   if (scope === COMMAND_SCOPE.PROJECT && workingDirectory) {
-    return { 
-      scope: COMMAND_SCOPE.PROJECT, 
-      path: getProjectCommandPath(workingDirectory, commandName) 
+    return {
+      scope: COMMAND_SCOPE.PROJECT,
+      path: getProjectCommandPath(workingDirectory, commandName),
     };
   }
-  
-  return { 
-    scope: COMMAND_SCOPE.USER, 
-    path: getUserCommandPath(commandName) 
+
+  return {
+    scope: COMMAND_SCOPE.USER,
+    path: getUserCommandPath(commandName),
   };
 }
 
+// ============== READ ==============
+
 function getCommandSources(commandName, workingDirectory) {
   const projectPath = workingDirectory ? getProjectCommandPath(workingDirectory, commandName) : null;
-  const projectExists = projectPath && fs.existsSync(projectPath);
+  const projectExists = Boolean(projectPath) && fs.existsSync(projectPath);
 
   const userPath = getUserCommandPath(commandName);
   const userExists = fs.existsSync(userPath);
 
   const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
-  const mdExists = !!mdPath;
+  const mdExists = Boolean(mdPath);
   const mdScope = projectExists ? COMMAND_SCOPE.PROJECT : (userExists ? COMMAND_SCOPE.USER : null);
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  const jsonSection = jsonSource.section;
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
   const jsonPath = jsonSource.path || layers.paths.customPath || layers.paths.projectPath || layers.paths.userPath;
   const jsonScope = jsonSource.path === layers.paths.projectPath ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER;
 
@@ -121,37 +135,75 @@ function getCommandSources(commandName, workingDirectory) {
       exists: mdExists,
       path: mdPath,
       scope: mdScope,
-      fields: []
+      legacy: false,
+      fields: [],
     },
     json: {
       exists: jsonSource.exists,
       path: jsonPath,
       scope: jsonSource.exists ? jsonScope : null,
-      fields: []
+      sectionKey: jsonSource.sectionKey,
+      legacy: Boolean(jsonSource.legacy),
+      fields: [],
     },
     projectMd: {
       exists: projectExists,
-      path: projectPath
+      path: projectPath,
     },
     userMd: {
       exists: userExists,
-      path: userPath
-    }
+      path: userPath,
+    },
   };
 
   if (mdExists) {
     const { frontmatter, body } = parseMdFile(mdPath);
-    sources.md.fields = Object.keys(frontmatter);
-    if (body) {
-      sources.md.fields.push('template');
-    }
+    sources.md.legacy = isLegacyCommandFrontmatter(frontmatter);
+    sources.md.fields = Object.keys(toCommandEntity(frontmatter, body));
   }
 
-  if (jsonSection) {
-    sources.json.fields = Object.keys(jsonSection);
+  if (jsonSource.exists) {
+    sources.json.fields = Object.keys(toCommandEntity(jsonSource.section));
   }
 
   return sources;
+}
+
+/** Canonical v2 command entity plus where it came from. */
+function getCommandConfig(commandName, workingDirectory) {
+  const { path: mdPath, scope } = getCommandScope(commandName, workingDirectory);
+  if (mdPath) {
+    const { frontmatter, body } = parseMdFile(mdPath);
+    return {
+      source: 'md',
+      scope,
+      path: mdPath,
+      legacy: isLegacyCommandFrontmatter(frontmatter),
+      config: toCommandEntity(frontmatter, body),
+    };
+  }
+
+  const layers = readConfigLayers(workingDirectory);
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+  if (jsonSource.exists) {
+    return {
+      source: 'json',
+      scope: jsonSource.path === layers.paths.projectPath ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER,
+      path: jsonSource.path,
+      legacy: Boolean(jsonSource.legacy),
+      config: toCommandEntity(jsonSource.section),
+    };
+  }
+
+  return { source: 'none', scope: null, path: null, legacy: false, config: {} };
+}
+
+// ============== WRITE ==============
+
+function writeCommandMd(targetPath, entity) {
+  const { fields, template } = fromCommandEntity(entity);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  writeMdFile(targetPath, fields, template);
 }
 
 function createCommand(commandName, config, workingDirectory, scope) {
@@ -169,8 +221,7 @@ function createCommand(commandName, config, workingDirectory, scope) {
   }
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  if (jsonSource.exists) {
+  if (getJsonEntrySource(layers, 'commands', commandName).exists) {
     throw new Error(`Command ${commandName} already exists in opencode.json`);
   }
 
@@ -186,110 +237,78 @@ function createCommand(commandName, config, workingDirectory, scope) {
     targetScope = COMMAND_SCOPE.USER;
   }
 
-  const { template, scope: _scopeFromConfig, ...frontmatter } = config;
-
-  writeMdFile(targetPath, frontmatter, template || '');
+  const { scope: _ignoredScope, ...entity } = isRecord(config) ? config : {};
+  writeCommandMd(targetPath, entity);
   console.log(`Created new command: ${commandName} (scope: ${targetScope}, path: ${targetPath})`);
+  return { scope: targetScope, path: targetPath };
+}
+
+// Clearing a v1 field has to reach its v2 location: `subtask` is `subagent`,
+// and `variant` is the suffix on `model`.
+function deleteCommandField(entity, field) {
+  if (field === 'variant') {
+    const parsed = parseModelSelection(entity.model);
+    if (!parsed) return;
+    const stripped = formatModelSelection({ providerID: parsed.providerID, modelID: parsed.modelID });
+    if (stripped) entity.model = stripped;
+    return;
+  }
+  delete entity[field === 'subtask' ? 'subagent' : field];
+}
+
+function applyCommandUpdates(entity, updates) {
+  const next = { ...entity };
+  for (const [field, value] of Object.entries(isRecord(updates) ? updates : {})) {
+    if (field === 'scope' || value === undefined) continue;
+    if (value === null) {
+      deleteCommandField(next, field);
+      continue;
+    }
+    // `subtask` is the v1 spelling of `subagent`; accept it from older clients.
+    next[field === 'subtask' ? 'subagent' : field] = value;
+  }
+  return toCommandEntity(next);
 }
 
 function updateCommand(commandName, updates, workingDirectory) {
   ensureDirs();
 
-  const { scope, path: mdPath } = getCommandWritePath(commandName, workingDirectory);
-  const mdExists = mdPath && fs.existsSync(mdPath);
+  const current = getCommandConfig(commandName, workingDirectory);
+  const entity = applyCommandUpdates(current.config, updates);
 
-  const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  const jsonSection = jsonSource.section;
-  const hasJsonFields = jsonSource.exists && jsonSection && Object.keys(jsonSection).length > 0;
-  const jsonTarget = jsonSource.exists
-    ? { config: jsonSource.config, path: jsonSource.path }
-    : getJsonWriteTarget(layers, workingDirectory ? COMMAND_SCOPE.PROJECT : COMMAND_SCOPE.USER);
-  let config = jsonTarget.config || {};
-
-  const isBuiltinOverride = !mdExists && !hasJsonFields;
-
-  let targetPath = mdPath;
-  let targetScope = scope;
-
-  if (!mdExists && isBuiltinOverride) {
-    targetPath = getUserCommandPath(commandName);
-    targetScope = COMMAND_SCOPE.USER;
+  if (current.source === 'md') {
+    writeCommandMd(current.path, entity);
+    console.log(`Updated command: ${commandName} (md: ${current.path})`);
+    return { source: 'md', scope: current.scope, path: current.path };
   }
 
-  const mdData = mdExists ? parseMdFile(mdPath) : (isBuiltinOverride ? { frontmatter: {}, body: '' } : null);
-
-  let mdModified = false;
-  let jsonModified = false;
-  const creatingNewMd = isBuiltinOverride;
-
-  for (const [field, value] of Object.entries(updates)) {
-    if (field === 'template') {
-      const normalizedValue = typeof value === 'string' ? value : (value == null ? '' : String(value));
-
-      if (mdExists || creatingNewMd) {
-        if (mdData) {
-          mdData.body = normalizedValue;
-          mdModified = true;
-        }
-        continue;
-      } else if (isPromptFileReference(jsonSection?.template)) {
-        const templateFilePath = resolvePromptFilePath(jsonSection.template);
-        if (!templateFilePath) {
-          throw new Error(`Invalid template file reference for command ${commandName}`);
-        }
-        writePromptFile(templateFilePath, normalizedValue);
-        continue;
-      } else if (isPromptFileReference(normalizedValue)) {
-        if (!config.command) config.command = {};
-        if (!config.command[commandName]) config.command[commandName] = {};
-        config.command[commandName].template = normalizedValue;
-        jsonModified = true;
-        continue;
+  if (current.source === 'json') {
+    const layers = readConfigLayers(workingDirectory);
+    const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+    const config = jsonSource.config || {};
+    const rawTemplate = jsonSource.section?.template;
+    if (isPromptFileReference(rawTemplate)) {
+      const templateFilePath = resolvePromptFilePath(rawTemplate);
+      if (!templateFilePath) {
+        throw new Error(`Invalid template file reference for command ${commandName}`);
       }
-
-      if (!config.command) config.command = {};
-      if (!config.command[commandName]) config.command[commandName] = {};
-      config.command[commandName].template = normalizedValue;
-      jsonModified = true;
-      continue;
+      if (entity.template !== current.config.template) {
+        writePromptFile(templateFilePath, entity.template ?? '');
+      }
+      entity.template = rawTemplate;
     }
-
-    const inMd = mdData?.frontmatter?.[field] !== undefined;
-    const inJson = jsonSection?.[field] !== undefined;
-
-    if (inJson) {
-      if (!config.command) config.command = {};
-      if (!config.command[commandName]) config.command[commandName] = {};
-      config.command[commandName][field] = value;
-      jsonModified = true;
-    } else if (inMd || creatingNewMd) {
-      if (mdData) {
-        mdData.frontmatter[field] = value;
-        mdModified = true;
-      }
-    } else {
-      if ((mdExists || creatingNewMd) && mdData) {
-        mdData.frontmatter[field] = value;
-        mdModified = true;
-      } else {
-        if (!config.command) config.command = {};
-        if (!config.command[commandName]) config.command[commandName] = {};
-        config.command[commandName][field] = value;
-        jsonModified = true;
-      }
-    }
+    writeSectionEntry(config, 'commands', commandName, entity);
+    const targetPath = jsonSource.path || CONFIG_FILE;
+    writeConfig(config, targetPath);
+    console.log(`Updated command: ${commandName} (json: ${targetPath})`);
+    return { source: 'json', scope: current.scope, path: targetPath };
   }
 
-  if (mdModified && mdData) {
-    writeMdFile(targetPath, mdData.frontmatter, mdData.body);
-  }
-
-  if (jsonModified) {
-    writeConfig(config, jsonTarget.path || CONFIG_FILE);
-  }
-
-  console.log(`Updated command: ${commandName} (scope: ${targetScope}, md: ${mdModified}, json: ${jsonModified})`);
+  // Built-in override: materialize a user-level v2 markdown command.
+  const { scope, path: targetPath } = getCommandWritePath(commandName, workingDirectory, COMMAND_SCOPE.USER);
+  writeCommandMd(targetPath, entity);
+  console.log(`Created command override: ${commandName} (scope: ${scope}, path: ${targetPath})`);
+  return { source: 'md', scope, path: targetPath };
 }
 
 function deleteCommand(commandName, workingDirectory) {
@@ -312,10 +331,9 @@ function deleteCommand(commandName, workingDirectory) {
   }
 
   const layers = readConfigLayers(workingDirectory);
-  const jsonSource = getJsonEntrySource(layers, 'command', commandName);
-  if (jsonSource.exists && jsonSource.config && jsonSource.path) {
-    if (!jsonSource.config.command) jsonSource.config.command = {};
-    delete jsonSource.config.command[commandName];
+  const jsonSource = getJsonEntrySource(layers, 'commands', commandName);
+  if (jsonSource.exists && jsonSource.config && jsonSource.path
+    && deleteSectionEntry(jsonSource.config, 'commands', commandName)) {
     writeConfig(jsonSource.config, jsonSource.path);
     console.log(`Removed command from opencode.json: ${commandName}`);
     deleted = true;
@@ -328,6 +346,7 @@ function deleteCommand(commandName, workingDirectory) {
 
 export {
   getCommandSources,
+  getCommandConfig,
   createCommand,
   updateCommand,
   deleteCommand,

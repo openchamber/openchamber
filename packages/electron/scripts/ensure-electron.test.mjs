@@ -259,6 +259,32 @@ test('repair skips a command whose runner errors and keeps trying the rest', (t)
   assert.deepEqual(calls, commands);
 });
 
+test('repair resolves Bun before invoking the install command', (t) => {
+  const dir = withFixture(t);
+  const calls = [];
+  const resolvedBun = 'C:\\npm\\node_modules\\bun\\bin\\bun.exe';
+  const result = repair(dir, {
+    env: { TEST_ENV: 'present' },
+    bunResolver: ({ env }) => {
+      assert.equal(env.TEST_ENV, 'present');
+      return resolvedBun;
+    },
+    runner: (bin, args, options) => {
+      calls.push([bin, args, options.windowsHide]);
+      if (bin !== resolvedBun) return { status: 1 };
+      const platform = platformPath();
+      fs.mkdirSync(path.join(dir, 'dist', path.dirname(platform)), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'dist', 'version'), '41.2.1');
+      fs.writeFileSync(path.join(dir, 'path.txt'), platform);
+      fs.writeFileSync(path.join(dir, 'dist', platform), headerBytesForArch(expectedArch()));
+      return { status: 0 };
+    },
+  });
+
+  assert.equal(result, true);
+  assert.deepEqual(calls, [[resolvedBun, ['install.js'], true]]);
+});
+
 test('repair returns false when the runner reports a failure status for every command', (t) => {
   const dir = withFixture(t);
   const calls = [];

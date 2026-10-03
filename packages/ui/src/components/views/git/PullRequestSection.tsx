@@ -20,12 +20,16 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from "@/components/icon/Icon";
+import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -78,6 +82,23 @@ const statusColor = (state: string | undefined | null): string => {
   }
 };
 
+// A PR opened here belongs to the session the user is working in, but only
+// when that session works in this directory: the Git view can show another
+// worktree than the open chat.
+const linkCreatedPrToCurrentSession = (directory: string, pr: GitHubPullRequest) => {
+  const { currentSessionId, getDirectoryForSession } = useSessionUIStore.getState();
+  const sessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : null;
+  if (!currentSessionId || !sessionDirectory || normalizePath(sessionDirectory) !== normalizePath(directory)) {
+    return;
+  }
+  void sessionActions.setLinkedIssue(
+    currentSessionId,
+    sessionDirectory,
+    buildLinkedIssue({ url: pr.url, number: pr.number, title: pr.title, kind: 'pull', linkedAt: Date.now() }),
+    true,
+  ).catch(() => undefined);
+};
+
 const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'open' | 'blocked' | 'merged' | 'closed' | null => {
   const pr = status?.pr;
   if (!pr) {
@@ -94,7 +115,9 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
   }
   const checksFailed = status?.checks?.state === 'failure';
   const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
+  // A `blocked` merge state alone (usually a missing review) keeps the open
+  // colour; orange is for failed checks and conflicts.
+  const notMergeable = pr.mergeable === false || mergeableState === 'dirty';
   if (checksFailed || notMergeable) {
     return 'blocked';
   }
@@ -102,6 +125,10 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
 };
 
 const PR_ACTION_REFRESH_DELAYS_MS = [2_000, 5_000] as const;
+// A manual refresh keeps its spinner visible at least this long: the request
+// often answers from the server cache within a few milliseconds, and a
+// spinner that never reaches the screen reads as "the button did nothing".
+const PR_MANUAL_REFRESH_MIN_SPIN_MS = 600;
 
 const branchToTitle = (branch: string): string => {
   return branch
@@ -337,7 +364,7 @@ export const PullRequestSection: React.FC<{
   const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
 
   const openGitHubSettings = React.useCallback(() => {
-    setSettingsPage('github');
+    setSettingsPage('integrations');
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage]);
 
@@ -1040,6 +1067,31 @@ export const PullRequestSection: React.FC<{
     await refreshPrStatus(prStatusKey, options);
   }, [prStatusKey, refreshPrStatus]);
 
+  const [isManualRefreshing, setIsManualRefreshing] = React.useState(false);
+  const manualRefreshMountedRef = React.useRef(true);
+  React.useEffect(() => {
+    manualRefreshMountedRef.current = true;
+    return () => {
+      manualRefreshMountedRef.current = false;
+    };
+  }, []);
+  const refreshManually = React.useCallback(async () => {
+    if (isManualRefreshing) return;
+    setIsManualRefreshing(true);
+    const startedAt = Date.now();
+    try {
+      await refresh({ force: true });
+    } finally {
+      const remaining = PR_MANUAL_REFRESH_MIN_SPIN_MS - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, remaining));
+      }
+      if (manualRefreshMountedRef.current) {
+        setIsManualRefreshing(false);
+      }
+    }
+  }, [isManualRefreshing, refresh]);
+
   const scheduleActionRefresh = React.useCallback(() => {
     pendingActionRefreshTimersRef.current.forEach((timerId) => {
       window.clearTimeout(timerId);
@@ -1302,6 +1354,7 @@ export const PullRequestSection: React.FC<{
             }),
       });
       toast.success(t('gitView.pr.toast.prCreated'));
+      linkCreatedPrToCurrentSession(directory, pr);
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
       scheduleActionRefresh();
@@ -1406,7 +1459,10 @@ export const PullRequestSection: React.FC<{
     return (
       <section className="border-0 bg-transparent rounded-none">
         <div className="space-y-1 pt-3">
-          <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
+            <GitHubAccountControl />
+          </div>
           <div className="typography-micro text-muted-foreground">
             {t('gitView.pullRequest.availableOnFeatureBranches')}
           </div>
@@ -1450,7 +1506,7 @@ export const PullRequestSection: React.FC<{
   return (
     <section className={containerClassName}>
       <div className={headerClassName}>
-        <div className="flex items-start justify-between gap-2">
+        <div className="@container/pr-actions flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {pr ? (
               <Button
@@ -1472,27 +1528,48 @@ export const PullRequestSection: React.FC<{
               <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
             ) : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {isLoading ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" /> : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {pr && showWalkthroughAction ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
+                onClick={() => {
+                  requestWalkthroughSource(directory, { kind: 'pr', number: pr.number,
+                    sourceRepo: status?.repo ? { owner: status.repo.owner, repo: status.repo.repo } : undefined });
+                  openContextSurface(directory, 'walkthrough');
+                }}
+                aria-label={t('walkthrough.action.open')}
+              >
+                <Icon name="route" className="size-4" />
+                <span className="pr-actions__walkthrough-label typography-ui-label">
+                  {t('walkthrough.action.open')}
+                </span>
+              </Button>
+            ) : null}
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="inline-flex size-5 items-center justify-center rounded hover:bg-interactive-hover/60 disabled:opacity-40"
-                  disabled={isLoading}
-                  onClick={() => void refresh({ force: true })}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 px-0"
+                  disabled={isLoading || isManualRefreshing}
+                  onClick={() => void refreshManually()}
                   aria-label={t('gitView.pr.actions.refreshAria')}
                 >
-                  <Icon name="refresh" className="size-3.5 text-muted-foreground" />
-                </button>
+                  {isLoading || isManualRefreshing
+                    ? <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
+                    : <Icon name="refresh" className="size-4 text-muted-foreground" />}
+                </Button>
               </TooltipTrigger>
               <TooltipContent><p>{t('gitView.pr.actions.refresh')}</p></TooltipContent>
             </Tooltip>
+            <GitHubAccountControl className="h-7 w-7" />
           </div>
         </div>
 
         {pr ? (
-          <div className="@container/pr-actions flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 typography-micro text-muted-foreground">
               <span style={{ color: prColorVar }}>{prStatusText}</span>
               {checks ? (
@@ -1508,23 +1585,6 @@ export const PullRequestSection: React.FC<{
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {showWalkthroughAction ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn('pr-actions__walkthrough-button h-7 shrink-0 gap-1.5 px-2', WALKTHROUGH_ACTION_CLASS)}
-                  onClick={() => {
-                    requestWalkthroughSource(directory, { kind: 'pr', number: pr.number });
-                    openContextSurface(directory, 'walkthrough');
-                  }}
-                  aria-label={t('walkthrough.action.open')}
-                >
-                  <Icon name="route" className="size-4" />
-                  <span className="pr-actions__walkthrough-label typography-ui-label">
-                    {t('walkthrough.action.open')}
-                  </span>
-                </Button>
-              ) : null}
               {canMerge && pr.draft && pr.state === 'open' ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1741,8 +1801,9 @@ export const PullRequestSection: React.FC<{
                       pr.body?.trim() ? (
                         <SimpleMarkdownRenderer
                           content={pr.body}
-                          className="typography-markdown-body min-w-0 text-muted-foreground break-words"
+                          className="typography-markdown-body min-w-0 text-muted-foreground break-words [&_img]:h-auto [&_img]:max-w-full"
                           enableFileReferences={false}
+                          allowRawHtml
                         />
                       ) : (
                         <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
@@ -1944,6 +2005,7 @@ export const PullRequestSection: React.FC<{
                                       selfMentionHighlightClass,
                                     ].filter(Boolean).join(' ')}
                                     enableFileReferences={false}
+                                    allowRawHtml
                                   />
                                 </div>
                               </div>
@@ -2017,11 +2079,11 @@ export const PullRequestSection: React.FC<{
                   />
                 </label>
 
-                <label className="space-y-1">
+                <div className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.baseBranch')}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
-                      <SelectTrigger size="lg">
+                      <SelectTrigger size="lg" aria-label={t('gitView.pr.field.baseBranch')}>
                         <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
                       </SelectTrigger>
                       <SelectContent>
@@ -2035,9 +2097,10 @@ export const PullRequestSection: React.FC<{
                       value={targetBaseBranch}
                       onChange={(e) => setTargetBaseBranch(e.target.value)}
                       placeholder={t('gitView.pr.placeholder.main')}
+                      aria-label={t('gitView.pr.field.baseBranch')}
                     />
                   )}
-                </label>
+                </div>
 
                 <label className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.description')}</div>

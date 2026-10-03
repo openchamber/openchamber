@@ -16,6 +16,7 @@ interface NumberInputProps
   fallbackValue?: number
   onClear?: () => void
   emptyLabel?: string
+  deferExternalValueWhileFocused?: boolean
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -50,10 +51,13 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       className,
       containerClassName,
       onBlur,
+      onFocus,
+      onKeyDown,
       disabled,
       fallbackValue,
       onClear,
       emptyLabel = '—',
+      deferExternalValueWhileFocused = false,
       ...props
     },
     ref
@@ -61,6 +65,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     const { t } = useI18n()
     const [draft, setDraft] = React.useState(() => (value == null ? '' : String(value)))
     const { isMobile } = useDeviceInfo()
+    const isFocusedRef = React.useRef(false)
     const ignoreNextClickRef = React.useRef(false)
     const swallowNextClickCleanupRef = React.useRef<(() => void) | null>(null)
 
@@ -100,8 +105,11 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     }, [])
 
     React.useEffect(() => {
+      if (deferExternalValueWhileFocused && isFocusedRef.current) {
+        return
+      }
       setDraft(value == null ? '' : String(value))
-    }, [value])
+    }, [deferExternalValueWhileFocused, value])
 
     const baseValue = React.useMemo(() => {
       if (value !== undefined) return value
@@ -134,6 +142,28 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       [max, min, onValueChange, step]
     )
 
+    const settleDraft = React.useCallback(() => {
+      if (draft.trim() === '') {
+        if (!onClear) {
+          setDraft(value == null ? '' : String(value))
+        }
+        return
+      }
+
+      const parsed = Number(draft)
+      if (!Number.isFinite(parsed)) {
+        setDraft(value == null ? '' : String(value))
+        return
+      }
+
+      const clamped = clamp(parsed, min, max)
+      const normalized = normalizeToStep(clamped, step)
+      if (normalized !== value) {
+        commitValue(parsed)
+      }
+      setDraft(String(normalized))
+    }, [commitValue, draft, max, min, onClear, step, value])
+
     const handleChange = React.useCallback(
       (event: React.ChangeEvent<HTMLInputElement>) => {
         const nextDraft = event.target.value
@@ -149,43 +179,44 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           return
         }
 
+        if (deferExternalValueWhileFocused) {
+          return
+        }
+
         commitValue(parsed)
       },
-      [commitValue, onClear]
+      [commitValue, deferExternalValueWhileFocused, onClear]
+    )
+
+    const handleFocus = React.useCallback(
+      (event: React.FocusEvent<HTMLInputElement>) => {
+        isFocusedRef.current = true
+        onFocus?.(event)
+      },
+      [onFocus]
     )
 
     const handleBlur = React.useCallback(
       (event: React.FocusEvent<HTMLInputElement>) => {
-        if (draft.trim() === '') {
-          if (!onClear) {
-            setDraft(value == null ? '' : String(value))
-          }
-          onBlur?.(event)
-          return
-        }
-
-        const parsed = Number(draft)
-        if (!Number.isFinite(parsed)) {
-          setDraft(value == null ? '' : String(value))
-        } else {
-          const clamped = clamp(parsed, min, max)
-          const normalized = normalizeToStep(clamped, step)
-          if (normalized !== value) {
-            // Route through commitValue so committedValueRef stays in sync with
-            // the typed value. Without this, a typed-then-stepper sequence
-            // would read a stale ref and drift. See number-input.test.tsx.
-            commitValue(parsed)
-          } else {
-            // No effective change, but keep the ref aligned with the prop in
-            // case it diverged via the baseValue useEffect.
-            committedValueRef.current = normalized
-          }
-          setDraft(String(normalized))
-        }
+        isFocusedRef.current = false
+        settleDraft()
 
         onBlur?.(event)
       },
-      [commitValue, draft, max, min, onBlur, onClear, step, value]
+      [onBlur, settleDraft]
+    )
+
+    const handleKeyDown = React.useCallback(
+      (event: React.KeyboardEvent<HTMLInputElement>) => {
+        onKeyDown?.(event)
+        if (event.defaultPrevented) {
+          return
+        }
+        if (deferExternalValueWhileFocused && event.key === 'Enter') {
+          settleDraft()
+        }
+      },
+      [deferExternalValueWhileFocused, onKeyDown, settleDraft]
     )
 
     const incrementDisabled = Boolean(disabled || baseValue >= max)
@@ -228,7 +259,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         <div
           className={cn(
             // NOTE: mobile.css enforces min-height:36px on buttons; match it to avoid clipping.
-            "flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-transparent select-none overscroll-contain",
+            "oc-surface-elevated flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-lg border border-border bg-surface-elevated select-none overscroll-contain",
             "[-webkit-user-select:none] [-webkit-touch-callout:none]",
             "disabled:pointer-events-none disabled:opacity-50",
             containerClassName
@@ -244,7 +275,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
               "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
-              !decrementDisabled && "active:bg-interactive-hover"
+              !decrementDisabled && "active:bg-interactive-active"
             )}
           >
             <Icon name="subtract" className="block h-4 w-4" />
@@ -271,7 +302,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
               "grid h-full min-h-0 w-9 shrink-0 place-items-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-none",
               "text-muted-foreground",
               "disabled:pointer-events-none disabled:opacity-50",
-              !incrementDisabled && "active:bg-interactive-hover"
+              !incrementDisabled && "active:bg-interactive-active"
             )}
           >
             <Icon name="add" className="block h-4 w-4" />
@@ -283,7 +314,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     return (
       <div
         className={cn(
-          "flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-md border border-border bg-transparent",
+          "oc-surface-elevated flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-md border border-border bg-surface-elevated",
           "disabled:pointer-events-none disabled:opacity-50",
           "transition-[background-color,border-color,box-shadow] duration-150 ease-in-out",
           containerClassName
@@ -310,7 +341,9 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           inputMode={props.inputMode ?? 'numeric'}
           value={draft}
           onChange={handleChange}
+          onFocus={handleFocus}
           onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
           disabled={disabled}
           spellCheck={false}
           autoComplete="off"
@@ -318,7 +351,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           autoCapitalize="off"
           className={cn(
             "h-full min-w-0 w-10 flex-1 bg-transparent px-1.5 text-center typography-ui-label leading-none text-foreground [font-variant-numeric:tabular-nums]",
-            "placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground",
+            "placeholder:text-muted-foreground selection:bg-interactive-selection selection:text-interactive-selection-foreground",
             "appearance-none outline-none [appearance:textfield] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
             "disabled:pointer-events-none disabled:cursor-not-allowed",
             className

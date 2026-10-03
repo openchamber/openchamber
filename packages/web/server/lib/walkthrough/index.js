@@ -165,10 +165,14 @@ const modelLabel = (model) => `${model.providerID}/${model.modelID}`;
  * saved setting, which in turn outranks the small-model chain — the user picking
  * a roomier model for a risky change is the most specific intent there is.
  */
-const resolveModel = (directory, explicitModel) => describeSmallModel({
+// `providerID` is the provider in the user's composer: without a model of its
+// own choosing, the walkthrough stays on it rather than on whichever provider
+// happens to be connected.
+const resolveModel = (directory, explicitModel, providerID) => describeSmallModel({
   directory,
   outputReserveTokens: walkthroughOutputTokens,
   overrideModel: explicitModel || readWalkthroughModelOverride(),
+  preferredProviderID: providerID || undefined,
 });
 
 export const __testing = { generationTimeoutMs, walkthroughOutputTokens };
@@ -233,7 +237,7 @@ const serializeHunks = (files) => files.flatMap((file) => file.hunks.map((hunk) 
  * Read the last walkthrough for a source, resolved against the current diff.
  * Never generates and never spends tokens.
  */
-export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, language: rawLanguage }, deps = {}) {
+export async function getWalkthrough({ directory, source: rawSource, model: explicitModel, providerID, language: rawLanguage }, deps = {}) {
   const source = parseSource(rawSource);
   const repoRoot = await getRepositoryRoot(directory);
   const key = sourceKey(source);
@@ -245,7 +249,7 @@ export async function getWalkthrough({ directory, source: rawSource, model: expl
   // the whole git pipeline twice.
   const [built, model] = await Promise.all([
     loadCurrentDiff(directory, source, deps),
-    resolveModel(directory, explicitModel).catch(() => null),
+    resolveModel(directory, explicitModel, providerID).catch(() => null),
   ]);
   const { files } = built;
   const hunkIndex = indexHunks(files);
@@ -368,7 +372,7 @@ function computeReadiness({ model, digest, files, fileCount, hunkCount, generate
  * which also means returning to a previous state of the working tree costs
  * nothing.
  */
-export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, language: rawLanguage }, deps = {}) {
+export async function generateWalkthrough({ directory, source: rawSource, force = false, model: explicitModel, providerID, language: rawLanguage }, deps = {}) {
   const source = parseSource(rawSource);
   const repoRoot = await getRepositoryRoot(directory);
   const key = sourceKey(source);
@@ -380,7 +384,7 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   if (existing) return existing.promise;
 
   const controller = new AbortController();
-  const promise = runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal: controller.signal }, deps)
+  const promise = runGeneration({ directory, source, repoRoot, key, force, explicitModel, providerID, language, signal: controller.signal }, deps)
     .finally(() => {
       if (jobs.get(jobKey(repoRoot, key))?.controller === controller) {
         jobs.delete(jobKey(repoRoot, key));
@@ -391,9 +395,9 @@ export async function generateWalkthrough({ directory, source: rawSource, force 
   return promise;
 }
 
-async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, language, signal }, deps) {
+async function runGeneration({ directory, source, repoRoot, key, force, explicitModel, providerID, language, signal }, deps) {
 
-  const model = await resolveModel(directory, explicitModel);
+  const model = await resolveModel(directory, explicitModel, providerID);
   if (!model) {
     throw fail('No model is available — sign in to a provider first', 404, { code: 'no-model' });
   }
@@ -474,6 +478,7 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     prompt: options.prompt,
     system: options.system,
     directory,
+    sessionID: `openchamber-walkthrough-${cacheKey}`,
     model: `${model.providerID}/${model.modelID}`,
     responseSchema: options.responseSchema,
     onOverflow: 'error',

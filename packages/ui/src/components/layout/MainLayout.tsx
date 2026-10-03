@@ -5,35 +5,41 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
+import { GuestHosts } from './GuestHosts';
+import { PluginPane } from './PluginPane';
+import { useGuestPages } from '@/hooks/useGuestSurfaces';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
 import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
-import { SessionWorktreeMoveConfirmDialog } from '@/components/session/sidebar/SessionWorktreeMoveConfirmDialog';
 import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
+import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
+import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
+import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
+import { SpaceSetupOutputDialog } from '@/components/session/spaces/SpaceSetupOutput';
 import { ArchiveView } from '@/components/views/ArchiveView';
 import { WorktreesView } from '@/components/views/WorktreesView';
+import { SpacesView } from '@/components/views/SpacesView';
+import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
-import { MultiRunLauncher } from '@/components/multirun';
+import { RunOverview } from '@/components/multirun/RunOverview';
+import { RunAutoFusion } from '@/lib/multirun/autoFusion';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import {
-  cancelSessionTreeMove,
-  confirmSessionTreeMove,
-  useSessionTreeMoveConfirmation,
-} from '@/lib/worktrees/sessionWorktreeMove';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
+import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
-import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useSessionListSync } from '@/components/session/sidebar/list/useSessionListSync';
 
 import { ChatView } from '@/components/views/ChatView';
 
-const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
+const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
 /**
  * Desktop-surface layout: the chat owns the main area, and every other
@@ -43,31 +49,36 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
  */
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
+    useTerminalSessionKeepalive();
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+    // The grant dialog of isolated spaces; the main layout is never VS Code's (decision 16).
+    const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
     const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-    // Mount the windowed settings dialog only after its first open: rendering
-    // the lazy component (even closed) makes React fetch the SettingsView
-    // chunk graph (CodeMirror editor, vim mode, theme tooling) on startup.
-    // Once opened it stays mounted so the close animation and state behave as
-    // before.
-    const [settingsWindowMounted, setSettingsWindowMounted] = React.useState(false);
-    React.useEffect(() => {
-        if (isSettingsDialogOpen) {
-            setSettingsWindowMounted(true);
-        }
-    }, [isSettingsDialogOpen]);
-    const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
-    const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
-    const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
+    // Load the windowed settings dialog on its first open: its chunk graph
+    // (CodeMirror editor, vim mode, theme tooling) stays off startup. Once
+    // loaded it stays mounted so the close animation and state behave as
+    // before. A failed load closes the dialog so the next click tries again.
+    const SettingsWindow = useOnDemandComponent(isSettingsDialogOpen, loadSettingsWindow, () => setSettingsDialogOpen(false));
+    const isRunOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
     const isScheduledTasksPageOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
+    const isUsageStatsPageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    // The spaces page exists only while the feature's switch is on.
+    const isSpacesPageOpen = useUIStore((state) => state.isolatedSpacesEnabled && state.spacesPageProjectId !== null);
+    const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+    const guestPages = useGuestPages();
+    const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
+    React.useEffect(() => {
+        if (openGuestPageId && !guestPage) useUIStore.getState().setOpenGuestPage(null);
+    }, [openGuestPageId, guestPage]);
+    React.useEffect(() => subscribeRuntimeEndpointChanged(() => useUIStore.getState().setOpenGuestPage(null)), []);
     // Any full-page surface replacing the chat area. While open, the chat is
     // fully hidden (not just covered) so none of its floating chrome bleeds
     // through, and selecting a session or draft anywhere closes the surface.
-    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || Boolean(worktreesPageProjectId) || isMultiRunLauncherOpen;
+    const isSurfacePageOpen = isScheduledTasksPageOpen || isArchivePageOpen || isUsageStatsPageOpen || Boolean(worktreesPageProjectId) || isSpacesPageOpen || isRunOverviewOpen || Boolean(guestPage);
 
     React.useEffect(() => {
         const closeSurfacePages = () => useUIStore.getState().closeMainSurfaces();
@@ -86,7 +97,6 @@ export const MainLayout: React.FC = () => {
 
     useUpdatePolling();
 
-    const sessionTreeMoveConfirmation = useSessionTreeMoveConfirmation();
 
     React.useEffect(() => {
         const previous = useUIStore.getState().isMobile;
@@ -104,13 +114,9 @@ export const MainLayout: React.FC = () => {
                 <CommandPalette />
                 <HelpDialog />
                 <OpenCodeStatusDialog />
+                <RunAutoFusion />
                 <SessionDialogs />
-                <SessionWorktreeMoveConfirmDialog
-                    value={sessionTreeMoveConfirmation}
-                    onMoveSessionOnly={() => confirmSessionTreeMove(false)}
-                    onMoveAllChanges={() => confirmSessionTreeMove(true)}
-                    onCancel={cancelSessionTreeMove}
-                />
+                {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
 
                 {/* Persistent top-left controls (toggle + project actions) that
                     stay put while the sidebar/header animate beneath them. */}
@@ -139,23 +145,20 @@ export const MainLayout: React.FC = () => {
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                 <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                             </div>
-                                            {isMultiRunLauncherOpen && (
-                                                <div className="absolute inset-0 z-10 bg-background">
-                                                    <ErrorBoundary>
-                                                        {/* isWindowed: the app Header already shows the surface
-                                                            title, so skip the launcher's own title bar. */}
-                                                        <MultiRunLauncher
-                                                            isWindowed
-                                                            initialPrompt={multiRunLauncherPrefillPrompt}
-                                                            onCreated={() => setMultiRunLauncherOpen(false)}
-                                                            onCancel={() => setMultiRunLauncherOpen(false)}
-                                                        />
-                                                    </ErrorBoundary>
-                                                </div>
-                                            )}
+                                            <ErrorBoundary><RunOverview /></ErrorBoundary>
                                             <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
                                             <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                            {isUsageStatsPageOpen && (
+                                                <div className="absolute inset-0 z-10 bg-background">
+                                                    <ErrorBoundary><UsageStatsView /></ErrorBoundary>
+                                                </div>
+                                            )}
                                             <ErrorBoundary><WorktreesView /></ErrorBoundary>
+                                            {isSpacesPageOpen ? <ErrorBoundary><SpacesView /></ErrorBoundary> : null}
+                                            {guestPage && <div className="absolute inset-0 z-10 bg-background">
+                                                <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
+                                                    onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>
+                                            </div>}
                                         </main>
                                         <ContextPanel />
                                     </div>
@@ -164,18 +167,17 @@ export const MainLayout: React.FC = () => {
                             <div className="border-t border-border" data-page-scroll-lock="true">
                                 <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                             </div>
+                            <ErrorBoundary><GuestHosts /></ErrorBoundary>
                         </div>
                     </div>
                 </div>
 
                 {/* Settings: windowed dialog with blur */}
-                {settingsWindowMounted ? (
-                    <React.Suspense fallback={null}>
-                        <SettingsWindow
-                            open={isSettingsDialogOpen}
-                            onOpenChange={setSettingsDialogOpen}
-                        />
-                    </React.Suspense>
+                {SettingsWindow ? (
+                    <SettingsWindow
+                        open={isSettingsDialogOpen}
+                        onOpenChange={setSettingsDialogOpen}
+                    />
                 ) : null}
             </div>
         </DiffWorkerProvider>

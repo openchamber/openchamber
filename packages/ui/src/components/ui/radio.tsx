@@ -52,11 +52,13 @@ export const Radio = React.memo<RadioProps>(function Radio({
       aria-label={ariaLabel}
       className={cn(
         'group/radio relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full outline-none',
+        // Match checkbox outlines without strengthening borders across the app.
+        '[--choice-border:color-mix(in_srgb,var(--foreground)_40%,var(--interactive-border))]',
         'transition-[background-color,box-shadow] duration-200 ease-out',
         // fill driven from props so first paint is correct
         checked
           ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none hover:bg-[var(--primary-base)]'
-          : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)] hover:bg-[var(--interactive-hover)]',
+          : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--choice-border)] hover:bg-[var(--interactive-hover)]',
         'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-background',
         'disabled:cursor-not-allowed disabled:opacity-50',
         className,
@@ -65,7 +67,7 @@ export const Radio = React.memo<RadioProps>(function Radio({
       <span
         aria-hidden
         className={cn(
-          'block h-[5px] w-[5px] rounded-full bg-white',
+          'block h-[5px] w-[5px] rounded-full bg-primary-foreground',
           !checked && 'opacity-0',
           iconClassName,
         )}

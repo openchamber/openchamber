@@ -1,4 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
 
 type MessageRecord = {
@@ -169,6 +169,7 @@ const areTurnChangedFilesEqual = (left?: TurnChangedFile[], right?: TurnChangedF
       leftFile.file !== rightFile.file
       || leftFile.additions !== rightFile.additions
       || leftFile.deletions !== rightFile.deletions
+      || leftFile.inTurnDiff !== rightFile.inTurnDiff
     ) {
       return false;
     }
@@ -291,13 +292,14 @@ export const areRelevantTurnGroupingContextsEqual = (
 
   if (left.turnId !== right.turnId) return false;
   if (left.isFirstAssistantInTurn !== right.isFirstAssistantInTurn) return false;
+  if (left.hasEarlierAssistantText !== right.hasEarlierAssistantText) return false;
   if (left.isLastAssistantInTurn !== right.isLastAssistantInTurn) return false;
   if (left.isLatestTurn !== right.isLatestTurn) return false;
   if (left.isWorking !== right.isWorking) return false;
   if (left.hasTools !== right.hasTools) return false;
   if (left.hasReasoning !== right.hasReasoning) return false;
   if (left.userMessageCreatedAt !== right.userMessageCreatedAt) return false;
-  if (left.userMessageVariant !== right.userMessageVariant) return false;
+  if (left.assistantVariant !== right.assistantVariant) return false;
 
   const headerRelevant = left.headerMessageId === messageId || right.headerMessageId === messageId;
   if (headerRelevant && left.headerMessageId !== right.headerMessageId) {

@@ -51,6 +51,17 @@ const normalizeRuntimeUrlKey = (value: string): string => {
   }
 };
 
+// Runtime keys that mean "no instance connected": the uninitialized default
+// (`normalizeRuntimeUrlKey` of an empty/unparseable base URL) and the mobile
+// disconnect state (`MobileApp` switches to it when the connection drops).
+// Per-instance client state (e.g. the scoped theme entry) must not be read
+// from or written under them.
+export const MOBILE_DISCONNECTED_RUNTIME_KEY = 'mobile-disconnected';
+const UNINITIALIZED_RUNTIME_KEY = 'url:default';
+
+export const isTransientRuntimeKey = (runtimeKey: string): boolean =>
+  runtimeKey === '' || runtimeKey === UNINITIALIZED_RUNTIME_KEY || runtimeKey === MOBILE_DISCONNECTED_RUNTIME_KEY;
+
 const readInjectedApiBaseUrl = (): string => {
   if (typeof window === 'undefined') return '';
   const injected = (window as typeof window & { __OPENCHAMBER_API_BASE_URL__?: string }).__OPENCHAMBER_API_BASE_URL__;
@@ -127,12 +138,18 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   }
 
   const apiBaseUrl = options.apiBaseUrl?.trim() || readInjectedApiBaseUrl();
-  if (!apiBaseUrl) {
+  const pageOrigin = globalThis.window?.location?.origin ?? '';
+  const sameOriginBaseUrl = /^https?:\/\//.test(pageOrigin) ? pageOrigin : '';
+  if (!apiBaseUrl && !sameOriginBaseUrl) {
     return;
   }
 
+  // An empty API base uses same-origin HTTP, including Electron's Vite proxy.
+  // Give it an instance identity while keeping requests relative to that proxy.
+  const localOrigin = readInjectedLocalOrigin();
+  const isLocal = localOrigin && (!apiBaseUrl || sameOrigin(apiBaseUrl, localOrigin));
   activeApiBaseUrl = apiBaseUrl;
-  activeRuntimeKey = options.runtimeKey?.trim() || (sameOrigin(apiBaseUrl, readInjectedLocalOrigin()) ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl));
+  activeRuntimeKey = options.runtimeKey?.trim() || (isLocal ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl || sameOriginBaseUrl));
 };
 
 export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null }): void => {

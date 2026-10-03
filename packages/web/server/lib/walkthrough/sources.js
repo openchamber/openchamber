@@ -1,4 +1,5 @@
-import { getDiff, getRangeDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import { getDiff, getRangeDiff, getCommitDiff, getUntrackedDiffs, listUntrackedPaths } from '../git/service.js';
+import assert from 'node:assert/strict';
 
 // A walkthrough source resolves to one or more diff *sections*. A section is a
 // patch plus the scope its hunk ids live in; keeping staged and working-tree
@@ -45,7 +46,29 @@ export function parseSource(raw) {
     if (!Number.isInteger(number) || number <= 0) {
       throw new WalkthroughSourceError('pr sources require a positive number');
     }
+    if (raw.sourceRepo !== undefined) {
+      const { owner, repo } = raw.sourceRepo ?? {};
+      try {
+        assert.match(owner, /^[a-zA-Z0-9-]+$/);
+        assert.match(repo, /^[a-zA-Z0-9_.-]+$/);
+      } catch {
+        throw new WalkthroughSourceError('pr sources require a valid repository');
+      }
+      return { kind: 'pr', number, sourceRepo: { owner, repo } };
+    }
     return { kind: 'pr', number };
+  }
+
+  if (raw.kind === 'commit') {
+    // Sources are content-addressed: accept a full object id, never a moving ref.
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.hash)) {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
+    try {
+      return { kind: 'commit', hash: raw.hash.toLowerCase() };
+    } catch {
+      throw new WalkthroughSourceError('commit sources require a full commit hash');
+    }
   }
 
   throw new WalkthroughSourceError(`Unknown source kind "${String(raw.kind)}"`);
@@ -58,7 +81,8 @@ export function parseSource(raw) {
 export function sourceKey(source) {
   if (source.kind === 'working-tree') return `working-tree:${source.scope}`;
   if (source.kind === 'branch') return `branch:${source.baseRef}...${source.headRef}`;
-  return `pr:${source.number}`;
+  if (source.kind === 'commit') return `commit:${source.hash}`;
+  return source.sourceRepo ? `pr:${source.sourceRepo.owner}/${source.sourceRepo.repo}:${source.number}` : `pr:${source.number}`;
 }
 
 // `git diff` never reports untracked files, so a brand-new file would be
@@ -97,10 +121,18 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
   }
 
   if (source.kind === 'branch') {
-    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef });
+    const patch = await getRangeDiff(directory, { base: source.baseRef, head: source.headRef, includeWorkingTree: true });
     return {
       sections: patch && patch.trim() ? [{ scope: 'branch', patch }] : [],
       meta: { baseRef: source.baseRef, headRef: source.headRef },
+    };
+  }
+
+  if (source.kind === 'commit') {
+    const patch = await getCommitDiff(directory, { hash: source.hash });
+    return {
+      sections: patch.trim() ? [{ scope: 'commit', patch }] : [],
+      meta: { hash: source.hash },
     };
   }
 
@@ -108,7 +140,7 @@ export async function loadSourceSections(directory, source, { getPullRequestDiff
     throw new WalkthroughSourceError('Pull request diffs are unavailable', 500);
   }
 
-  const { patch, meta } = await getPullRequestDiff(directory, source.number);
+  const { patch, meta } = await getPullRequestDiff(directory, source.number, source.sourceRepo);
   return {
     sections: patch && patch.trim() ? [{ scope: `pr:${source.number}`, patch }] : [],
     meta: meta || {},

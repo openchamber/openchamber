@@ -24,8 +24,10 @@ interface ContextState {
 
     sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>;
 
-    // sessionId → agentName → "providerId/modelId" → variant
-    sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string>>>;
+    // sessionId → agentName → "providerId/modelId" → variant, where `null` is
+    // an explicit "Default" (send no effort) and a missing entry means the
+    // inherited default applies.
+    sessionAgentModelVariantSelections: Map<string, Map<string, Map<string, string | null>>>;
  
     currentAgentContext: Map<string, string>;
 
@@ -45,8 +47,8 @@ interface ContextActions {
     saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
     getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
 
-    saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void;
-    getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined;
+    saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => void;
+    getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | null | undefined;
 
 
     getContextUsage: (sessionId: string, contextLimit: number, outputLimit: number, messages: Map<string, { info: any; parts: any[] }[]>) => ContextUsage | null;
@@ -145,7 +147,7 @@ export const useContextStore = create<ContextStore>()(
                     return agentMap.get(agentName) || null;
                 },
 
-                saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => {
+                saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | null | undefined) => {
                     set((state) => {
                         const newSelections = new Map(state.sessionAgentModelVariantSelections);
 

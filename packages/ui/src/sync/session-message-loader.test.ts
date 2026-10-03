@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk/v2/client"
+import type { MessagePage } from "@/lib/opencode/client"
+import type { Message, Part } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader } from "./session-message-loader"
 import {
@@ -14,32 +15,108 @@ const createRecord = (sessionID: string, id = "msg_1", created = 1) => ({
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((next, fail) => {
     resolve = next
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
-const response = (data: ReturnType<typeof createRecord>[], cursor?: string) => ({
-  data,
-  response: { headers: { get: (name: string) => name === "x-next-cursor" ? cursor ?? null : null } },
+const response = (items: ReturnType<typeof createRecord>[], cursor?: string): MessagePage => ({
+  items,
+  cursor: cursor ? { next: cursor } : {},
 })
 
-const createLoader = (messages: (input: {
-  sessionID: string
-  directory?: string
-  limit?: number
-  before?: string
-}) => Promise<unknown>) => {
+/** The adapter rejects; the loader only ever sees a thrown error with a status. */
+const failure = (status: number, message: string): never => {
+  throw Object.assign(new Error(`session.messages failed (${status}): ${message}`), { status })
+}
+
+type PageRequest = { sessionID: string; directory?: string; limit?: number; cursor?: string }
+
+const createLoader = (getPage: (input: PageRequest) => Promise<MessagePage>) => {
   const childStores = new ChildStoreManager()
-  const sdk = { session: { messages } } as unknown as OpencodeClient
+  const sdk = {
+    getSessionMessages: (
+      sessionID: string,
+      options?: { limit?: number; cursor?: string },
+      directory?: string | null,
+    ) => getPage({ sessionID, directory: directory ?? undefined, limit: options?.limit, cursor: options?.cursor }),
+  }
   const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: "runtime-a" })
   return { childStores, loader }
 }
 
 describe("SessionMessageLoader", () => {
+  test("opens a confirmed new session without fetching history", async () => {
+    let calls = 0
+    const { childStores, loader } = createLoader(async () => {
+      calls += 1
+      return failure(404, "not found")
+    })
+    const target = { directory: "/created-repo", sessionID: "session-created" }
+
+    loader.initializeCreatedSession(target)
+    await loader.ensure(target, { reason: "navigation" })
+    await loader.ensure(target, { reason: "reactive" })
+
+    expect(calls).toBe(0)
+    expect(loader.getSnapshot(target)).toMatchObject({ status: "ready", resolved: true, complete: true })
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toEqual([])
+
+    const record = createRecord(target.sessionID)
+    loader.optimisticAdd({ ...target, message: record.info, parts: record.parts })
+    await loader.ensure(target)
+    expect(calls).toBe(0)
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toEqual([record.info])
+
+    // Explicit recovery still reaches the server and exposes a real failure.
+    await loader.ensure(target, { force: true })
+    expect(calls).toBe(1)
+    expect(loader.getSnapshot(target).status).toBe("error")
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toEqual([record.info])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("creation supersedes an early history failure without losing the first prompt", async () => {
+    const pending = deferred<MessagePage>()
+    const { childStores, loader } = createLoader(() => pending.promise)
+    const target = { directory: "/created-race", sessionID: "session-created" }
+    const earlyLoad = loader.ensure(target)
+
+    loader.initializeCreatedSession(target)
+    const record = createRecord(target.sessionID)
+    loader.optimisticAdd({ ...target, message: record.info, parts: record.parts })
+    pending.reject(Object.assign(new Error("session.messages failed (404): not found"), { status: 404 }))
+    await earlyLoad
+
+    expect(loader.getSnapshot(target).status).toBe("ready")
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toEqual([record.info])
+    expect(childStores.getChild(target.directory)?.getState().part[record.info.id]).toEqual(record.parts)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("creation preserves messages and history coverage received before its response", async () => {
+    const record = createRecord("session-created")
+    const { childStores, loader } = createLoader(async () => response([record], "older-cursor"))
+    const target = { directory: "/created-events", sessionID: "session-created" }
+    await loader.ensure(target)
+    const before = childStores.getChild(target.directory)?.getState()
+    const coverage = loader.getSnapshot(target)
+
+    loader.initializeCreatedSession(target)
+
+    expect(childStores.getChild(target.directory)?.getState()).toBe(before)
+    expect(loader.getSnapshot(target)).toBe(coverage)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("deduplicates navigation and reactive loading for the same target", async () => {
-    const pending = deferred<ReturnType<typeof response>>()
+    const pending = deferred<MessagePage>()
     let calls = 0
     const { childStores, loader } = createLoader(async () => {
       calls += 1
@@ -61,29 +138,30 @@ describe("SessionMessageLoader", () => {
   })
 
   test("leaves older history loading to explicit viewport demand", async () => {
-    const calls: Array<{ limit?: number; before?: string }> = []
-    const { childStores, loader } = createLoader(async ({ sessionID, limit, before }) => {
-      calls.push({ limit, before })
-      return before
+    const calls: Array<{ limit?: number; cursor?: string }> = []
+    const { childStores, loader } = createLoader(async ({ sessionID, limit, cursor }) => {
+      calls.push({ limit, cursor })
+      // Ten prompts satisfy the cold-navigation turn target without expansion.
+      return cursor
         ? response([createRecord(sessionID, "msg_older", 1)])
-        : response([createRecord(sessionID, "msg_latest", 2)], "older-cursor")
+        : response(Array.from({ length: 10 }, (_, index) => createRecord(sessionID, `msg_${index + 2}`, index + 2)), "older-cursor")
     })
     const target = { directory: "/repo", sessionID: "session-a" }
 
     await loader.ensure(target, { reason: "prefetch" })
     await Promise.resolve()
 
-    expect(calls).toEqual([{ limit: 50, before: undefined }])
+    expect(calls).toEqual([{ limit: 100, cursor: undefined }])
     expect(loader.getSnapshot(target).cursor).toBe("older-cursor")
 
     await loader.loadOlder(target)
 
     expect(calls).toEqual([
-      { limit: 50, before: undefined },
-      { limit: 100, before: "older-cursor" },
+      { limit: 100, cursor: undefined },
+      { limit: 100, cursor: "older-cursor" },
     ])
     expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id))
-      .toEqual(["msg_older", "msg_latest"])
+      .toEqual(["msg_older", ...Array.from({ length: 10 }, (_, index) => `msg_${index + 2}`)])
     loader.dispose()
     childStores.disposeAll()
   })
@@ -93,13 +171,11 @@ describe("SessionMessageLoader", () => {
     for (const runtimeKey of runtimes) {
       const childStores = new ChildStoreManager()
       const sdk = {
-        session: {
-          messages: async ({ sessionID }: { sessionID: string }) => response([
-            createRecord(sessionID, "msg_000000000000Current", 200),
-            createRecord(sessionID, "msg_ffffffffffffLegacy", 100),
-          ]),
-        },
-      } as unknown as OpencodeClient
+        getSessionMessages: async (sessionID: string) => response([
+          createRecord(sessionID, "msg_000000000000Current", 200),
+          createRecord(sessionID, "msg_ffffffffffffLegacy", 100),
+        ]),
+      }
       const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey })
       const target = { directory: `/repo-${runtimeKey}`, sessionID: "session-a" }
 
@@ -113,11 +189,11 @@ describe("SessionMessageLoader", () => {
   })
 
   test("loads every history page for an explicit complete-history request", async () => {
-    const calls: Array<{ before?: string }> = []
-    const { childStores, loader } = createLoader(async ({ sessionID, before }) => {
-      calls.push({ before })
-      if (!before) return response([createRecord(sessionID, "msg_latest")], "cursor-2")
-      if (before === "cursor-2") return response([createRecord(sessionID, "msg_middle")], "cursor-1")
+    const calls: Array<{ cursor?: string }> = []
+    const { childStores, loader } = createLoader(async ({ sessionID, cursor }) => {
+      calls.push({ cursor })
+      if (!cursor) return response([createRecord(sessionID, "msg_latest")], "cursor-2")
+      if (cursor === "cursor-2") return response([createRecord(sessionID, "msg_middle")], "cursor-1")
       return response([createRecord(sessionID, "msg_oldest")])
     })
     const target = { directory: "/repo", sessionID: "session-a" }
@@ -125,9 +201,9 @@ describe("SessionMessageLoader", () => {
     await loader.loadComplete(target)
 
     expect(calls).toEqual([
-      { before: undefined },
-      { before: "cursor-2" },
-      { before: "cursor-1" },
+      { cursor: undefined },
+      { cursor: "cursor-2" },
+      { cursor: "cursor-1" },
     ])
     expect(loader.getSnapshot(target).complete).toBe(true)
     expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toHaveLength(3)
@@ -136,10 +212,7 @@ describe("SessionMessageLoader", () => {
   })
 
   test("rejects a complete-history request when its initial load fails", async () => {
-    const { childStores, loader } = createLoader(async () => ({
-      error: { message: "rejected" },
-      response: { status: 400 },
-    }))
+    const { childStores, loader } = createLoader(async () => failure(400, "rejected"))
     const target = { directory: "/repo", sessionID: "session-a" }
 
     await expect(loader.loadComplete(target)).rejects.toThrow("session.messages failed (400): rejected")
@@ -149,8 +222,8 @@ describe("SessionMessageLoader", () => {
   })
 
   test("rejects a complete-history request when an older page fails", async () => {
-    const { childStores, loader } = createLoader(async ({ sessionID, before }) => before
-      ? { error: { message: "older rejected" }, response: { status: 400 } }
+    const { childStores, loader } = createLoader(async ({ sessionID, cursor }) => cursor
+      ? failure(400, "older rejected")
       : response([createRecord(sessionID)], "older-cursor"))
     const target = { directory: "/repo", sessionID: "session-a" }
 
@@ -182,10 +255,10 @@ describe("SessionMessageLoader", () => {
 
   test("rejects repeated pagination cursors instead of looping forever", async () => {
     let calls = 0
-    const { childStores, loader } = createLoader(async ({ sessionID, before }) => {
+    const { childStores, loader } = createLoader(async ({ sessionID, cursor }) => {
       calls += 1
-      if (!before) return response([createRecord(sessionID, "latest")], "cursor-a")
-      if (before === "cursor-a") return response([createRecord(sessionID, "middle")], "cursor-b")
+      if (!cursor) return response([createRecord(sessionID, "latest")], "cursor-a")
+      if (cursor === "cursor-a") return response([createRecord(sessionID, "middle")], "cursor-b")
       return response([createRecord(sessionID, "older")], "cursor-a")
     })
     const target = { directory: "/repo", sessionID: "session-a" }
@@ -198,8 +271,8 @@ describe("SessionMessageLoader", () => {
   })
 
   test("runs a requested tail refresh after an older in-flight load", async () => {
-    const initial = deferred<ReturnType<typeof response>>()
-    const refresh = deferred<ReturnType<typeof response>>()
+    const initial = deferred<MessagePage>()
+    const refresh = deferred<MessagePage>()
     let calls = 0
     const limits: number[] = []
     const { childStores, loader } = createLoader(async ({ limit }) => {
@@ -219,7 +292,7 @@ describe("SessionMessageLoader", () => {
     await loading
     await Promise.resolve()
     expect(calls).toBe(2)
-    expect(limits).toEqual([50, 80])
+    expect(limits).toEqual([100, 80])
 
     refresh.resolve(response([createRecord(target.sessionID, "msg_2")]))
     await Promise.all([refreshing, duplicateRefresh])
@@ -273,10 +346,10 @@ describe("SessionMessageLoader", () => {
     const providerDirectory = "/repo/provider"
     const selectedDirectory = "/repo/selected-worktree"
     const sessionID = "shared"
-    const calls: Array<{ directory?: string; before?: string }> = []
-    const { childStores, loader } = createLoader(async ({ directory, before }) => {
-      calls.push({ directory, before })
-      return before
+    const calls: Array<{ directory?: string; cursor?: string }> = []
+    const { childStores, loader } = createLoader(async ({ directory, cursor }) => {
+      calls.push({ directory, cursor })
+      return cursor
         ? response([createRecord(sessionID, `older-${directory}`)])
         : response([createRecord(sessionID, `latest-${directory}`)], `${directory}-cursor`)
     })
@@ -285,14 +358,16 @@ describe("SessionMessageLoader", () => {
       loader.ensure({ directory: providerDirectory, sessionID }),
       loader.ensure({ directory: selectedDirectory, sessionID }),
     ])
+
+    // Cold navigation extends each directory's window through its own cursor.
+    expect(calls.filter((call) => call.cursor)).toEqual([
+      { directory: providerDirectory, cursor: `${providerDirectory}-cursor` },
+      { directory: selectedDirectory, cursor: `${selectedDirectory}-cursor` },
+    ])
+    expect(loader.getSnapshot({ directory: selectedDirectory, sessionID }).complete).toBe(true)
     calls.length = 0
-
     await loader.loadOlder({ directory: selectedDirectory, sessionID })
-
-    expect(calls).toEqual([{
-      directory: selectedDirectory,
-      before: `${selectedDirectory}-cursor`,
-    }])
+    expect(calls).toEqual([])
     loader.dispose()
     childStores.disposeAll()
   })
@@ -300,7 +375,7 @@ describe("SessionMessageLoader", () => {
   test("exposes a retryable error without clearing an existing snapshot", async () => {
     let fail = true
     const { childStores, loader } = createLoader(async ({ sessionID }) => {
-      if (fail) return { error: { message: "rejected" }, response: { status: 400 } }
+      if (fail) return failure(400, "rejected")
       return response([createRecord(sessionID)])
     })
     const target = { directory: "/repo", sessionID: "session-a" }
@@ -320,10 +395,7 @@ describe("SessionMessageLoader", () => {
   })
 
   test("propagates a zero response status on SDK errors", async () => {
-    const { childStores, loader } = createLoader(async () => ({
-      error: { message: "network rejected" },
-      response: { status: 0 },
-    }))
+    const { childStores, loader } = createLoader(async () => failure(0, "network rejected"))
     const target = { directory: "/repo", sessionID: "session-a" }
 
     await loader.ensure(target, { force: true })
@@ -334,7 +406,7 @@ describe("SessionMessageLoader", () => {
   })
 
   test("prevents an evicted in-flight request from repopulating the store", async () => {
-    const pending = deferred<ReturnType<typeof response>>()
+    const pending = deferred<MessagePage>()
     const { childStores, loader } = createLoader(async () => pending.promise)
     const target = { directory: "/repo", sessionID: "session-a" }
 
@@ -362,11 +434,11 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
-  test("retries a missing message payload instead of treating it as an empty snapshot", async () => {
+  test("retries a transient page failure instead of treating it as an empty snapshot", async () => {
     let calls = 0
     const { childStores, loader } = createLoader(async ({ sessionID }) => {
       calls += 1
-      return calls === 1 ? {} : response([createRecord(sessionID)])
+      return calls === 1 ? failure(503, "unavailable") : response([createRecord(sessionID)])
     })
     const target = { directory: "/repo", sessionID: "session-a" }
 
@@ -393,7 +465,7 @@ describe("SessionMessageLoader", () => {
     let calls = 0
     const { childStores, loader } = createLoader(async () => {
       calls += 1
-      if (calls === 1) return {}
+      if (calls === 1) return failure(503, "unavailable")
       if (calls === 2) {
         const assistant = createRecord(target.sessionID, "msg_assistant")
         assistant.info = { ...assistant.info, role: "assistant" } as Message
@@ -409,8 +481,8 @@ describe("SessionMessageLoader", () => {
       const initialEvent = events.find((event) => event.operation === "session-messages.initial")
       const pageEvents = events.filter((event) => event.operation === "session-messages.page")
       expect(calls).toBe(3)
-      expect(pageEvents.map((event) => event.requestLimit)).toEqual([50, 100])
-      expect(pageEvents.map((event) => event.cursorPresent)).toEqual([false, false])
+      expect(pageEvents.map((event) => event.requestLimit)).toEqual([100, 100])
+      expect(pageEvents.map((event) => event.cursorPresent)).toEqual([false, true])
       expect(pageEvents.map((event) => event.recordCount)).toEqual([1, 1])
       expect(initialEvent?.outcome).toBe("complete")
       expect(initialEvent?.retryCount).toBe(1)

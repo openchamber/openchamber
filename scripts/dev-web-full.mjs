@@ -3,10 +3,13 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveBunExecutable } from './lib/bun-executable.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const useDetachedChildren = process.platform === 'darwin' || process.platform === 'linux';
+const bunExecutable = resolveBunExecutable();
 
 function run(label, command, args, options = {}) {
   const child = spawn(command, args, {
@@ -14,6 +17,7 @@ function run(label, command, args, options = {}) {
     stdio: ['inherit', 'pipe', 'pipe'],
     env: { ...process.env },
     detached: useDetachedChildren,
+    windowsHide: true,
     ...options,
   });
 
@@ -160,7 +164,7 @@ function waitForFirstBuildSuccess(buildChild) {
 
 let shuttingDown = false;
 let api = null;
-const build = run('build', 'bun', ['run', '--cwd', 'packages/web', 'build:watch']);
+const build = run('build', bunExecutable, ['run', '--cwd', 'packages/web', 'build:watch']);
 
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return;
@@ -193,7 +197,7 @@ waitForFirstBuildSuccess(build)
       return;
     }
     console.log('[dev:web:full] Initial frontend build ready, starting API watcher...');
-    api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch']);
+    api = run('api', bunExecutable, ['run', '--cwd', 'packages/web', 'dev:server:watch']);
     api.on('exit', onChildExit('api'));
   })
   .catch((error) => {

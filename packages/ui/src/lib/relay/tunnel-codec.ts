@@ -18,6 +18,14 @@ import {
 
 const MAX_STREAM_ID = 0xffffffff;
 
+/** Cumulative raw tunnel-frame bytes, excluding stream zero and batch/crypto overhead. */
+export const encodeDeliveryAck = (receivedBytes: number): Uint8Array => {
+  if (!Number.isSafeInteger(receivedBytes) || receivedBytes < 0) throw new Error('invalid delivery acknowledgement');
+  const payload = new Uint8Array(8);
+  new DataView(payload.buffer).setBigUint64(0, BigInt(receivedBytes));
+  return payload;
+};
+
 export class TunnelCodecError extends Error {
   constructor(message: string) {
     super(message);

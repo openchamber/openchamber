@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Message, Part } from '@opencode-ai/sdk/v2/client'
+import type { Message, Part } from '@/lib/opencode/model'
 
 import { shouldFetchSessionForRenderableSync, hasUserMessage } from './use-sync'
 import { mergeOptimisticPage } from './optimistic'
@@ -46,10 +46,6 @@ function assistantMessage(id: string, created = 1): Message {
 function userMessage(id: string, created = 1): Message {
   return { id, sessionID: 'ses_1', role: 'user', time: { created } } as Message
 }
-function assistantMessageWithClientRole(id: string): Message {
-  // OpenCode sets clientRole on the wire; role may be absent.
-  return { id, sessionID: 'ses_1', clientRole: 'user', time: { created: 1 } } as unknown as Message
-}
 function textPart(id: string, messageID: string): Part {
   return { id, messageID, sessionID: 'ses_1', type: 'text', text: id } as Part
 }
@@ -57,10 +53,6 @@ function textPart(id: string, messageID: string): Part {
 describe('hasUserMessage', () => {
   test('returns true when a user message is present', () => {
     expect(hasUserMessage([assistantMessage('m_1'), userMessage('m_2')])).toBe(true)
-  })
-
-  test('returns true when clientRole marks the message as user', () => {
-    expect(hasUserMessage([assistantMessageWithClientRole('m_1')])).toBe(true)
   })
 
   test('returns false when only assistant messages are present', () => {

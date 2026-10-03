@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
-import { registerTtsRoutes } from './routes.js';
+import { registerTtsRoutes, speechVoiceHeaderValue } from './routes.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 const createApp = (sayTTSCapability = null) => {
@@ -31,6 +31,54 @@ describe('tts routes', () => {
       available: true,
       voices: [{ name: 'Samantha', locale: 'en_US' }],
     });
+  });
+
+  it('switches the say voice to the language of the text when asked to', async () => {
+    const capability = Promise.resolve({
+      available: true,
+      voices: [
+        { name: 'Samantha', locale: 'en_US' },
+        { name: 'Lesya', locale: 'uk_UA' },
+        { name: 'Lesya (Enhanced)', locale: 'uk_UA' },
+      ],
+    });
+    const app = createApp(capability);
+    const response = await request(app)
+      .post('/api/tts/say/speak')
+      .send({ text: 'Привіт! Це відповідь українською мовою, і вона досить довга.', voice: 'Samantha', language: 'auto' });
+
+    // On macOS the route synthesizes; elsewhere it refuses before running say.
+    // Either way the chosen voice must be the Ukrainian one when the platform
+    // allows the request to proceed.
+    if (process.platform === 'darwin') {
+      expect(response.status).toBe(200);
+      expect(response.headers['x-speech-voice']).toBe('Lesya%20(Enhanced)');
+      expect(response.headers['x-speech-language']).toBe('uk');
+    } else {
+      expect(response.status).toBe(503);
+    }
+  });
+
+  it('keeps localized say voice names HTTP-header-safe', () => {
+    const encoded = speechVoiceHeaderValue('Milena (Русский (Россия))');
+    // Header values must stay printable ASCII or Node rejects the response outright.
+    expect(encoded).toMatch(/^[\x21-\x7E]*$/);
+    expect(decodeURIComponent(encoded)).toBe('Milena (Русский (Россия))');
+    expect(speechVoiceHeaderValue('Samantha')).toBe('Samantha');
+  });
+
+  it('refuses OpenAI cloud speech in enterprise mode and says so in the status', async () => {
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = 'true';
+    try {
+      const app = createApp();
+      const status = await request(app).get('/api/tts/status');
+      expect(status.body).toMatchObject({ available: false, enterpriseMode: true });
+      const speak = await request(app).post('/api/tts/speak').send({ text: 'The migration is done', apiKey: 'sk-test' });
+      expect(speak.status).toBe(403);
+      expect((await request(app).post('/api/voice/token').send({})).status).toBe(403);
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 
   it('returns local note fallback while model summarization is retired', async () => {
@@ -129,6 +177,18 @@ describe('normalizeCustomOpenAIBaseURL', () => {
 
     const result = normalizeCustomOpenAIBaseURL('https://my-server.com/v1/?key=123');
     expect(result.value).toBe('https://my-server.com/v1');
+  });
+
+  it('keeps custom servers on this machine in enterprise mode, whatever else allows remote', () => {
+    process.env.OPENCHAMBER_RUNTIME = 'desktop';
+    process.env.OPENCHAMBER_ALLOW_REMOTE_OPENAI_COMPAT_URLS = 'true';
+    process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
+    try {
+      expect(normalizeCustomOpenAIBaseURL('https://my-tts-server.example.com/v1').error).toMatch(/enterprise mode/);
+      expect(normalizeCustomOpenAIBaseURL('http://127.0.0.1:8880/v1').value).toBe('http://127.0.0.1:8880/v1');
+    } finally {
+      delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
+    }
   });
 
   it('denies remote URLs on desktop when env var is explicitly false', () => {

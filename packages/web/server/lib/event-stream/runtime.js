@@ -1,11 +1,13 @@
 import { WebSocketServer } from 'ws';
+import { isOpaqueOriginRequest } from '../security/request-security.js';
 
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import {
   MESSAGE_STREAM_DIRECTORY_WS_PATH,
   MESSAGE_STREAM_GLOBAL_WS_PATH,
   MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS,
-  sendMessageStreamWsEvent,
+  serializeMessageStreamWsEvent,
+  sendSerializedMessageStreamWsFrame,
 } from './protocol.js';
 import { createGlobalMessageStreamHub } from './global-hub.js';
 import { createGlobalMessageStreamWsBridge } from './global-ws-bridge.js';
@@ -28,20 +30,22 @@ export function createGlobalUiEventBroadcaster({
     }
 
     if (hasSseClients) {
+      const serializedPayload = JSON.stringify(payload);
       for (const res of sseClients) {
         try {
-          writeSseEvent(res, payload);
+          writeSseEvent(res, payload, serializedPayload);
         } catch {
         }
       }
     }
 
     if (hasWsClients) {
+      const serializedFrame = serializeMessageStreamWsEvent(payload, {
+        directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
+        eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
+      });
       for (const socket of Array.from(wsClients)) {
-        const sent = sendMessageStreamWsEvent(socket, payload, {
-          directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
-          eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
-        });
+        const sent = sendSerializedMessageStreamWsFrame(socket, serializedFrame);
         if (!sent) {
           wsClients.delete(socket);
         }
@@ -138,6 +142,10 @@ export function createMessageStreamWsRuntime({
 
     const handleUpgrade = async () => {
       try {
+        if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {

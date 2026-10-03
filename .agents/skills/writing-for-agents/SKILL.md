@@ -15,6 +15,7 @@ A pointer does two jobs — state what the material is, and list the **branches*
 - **Front-load the leading word** — the pointer is where it does its triggering work.
 - **One trigger per branch.** Synonyms that rename a single branch are one branch written twice; collapse them and keep only genuinely distinct branches.
 - **Cut identity the body already carries.**
+- **Name the work, not an incident.** A trigger fires on what the agent is about to do ("OpenCode SDK calls", "bootstrap"); a fixed bug's symptom fires only when that bug is back. A rule learned from an incident lives in its canonical skill's body, with a one-line pointer in the skills loaded while that kind of code is written.
 
 ## The two loads
 

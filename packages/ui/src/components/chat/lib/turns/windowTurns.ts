@@ -1,9 +1,14 @@
+import { isSubagentRunEntry } from '../timelineRoles';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string => {
     const role = (message.info as { clientRole?: string | null; role?: string | null }).clientRole ?? message.info.role;
     return typeof role === 'string' ? role : '';
 };
+
+/** A user prompt opens a turn, and so does a background subagent run (see `isSubagentRunEntry`). */
+const opensTurn = (message: ChatMessageEntry): boolean =>
+    resolveMessageRole(message) === 'user' || isSubagentRunEntry(message.info);
 
 const resolveParentMessageId = (message: ChatMessageEntry): string | undefined => {
     const parentId = (message.info as { parentID?: unknown }).parentID;
@@ -92,7 +97,7 @@ export const updateTurnWindowModelIncremental = (
     const messageId = nextMessage.info.id;
     const nextModel = cloneTurnWindowModel(previousModel);
 
-    if (role === 'user') {
+    if (opensTurn(nextMessage)) {
         const nextTurnIndex = nextModel.turnIds.length;
         nextModel.turnIds.push(messageId);
         nextModel.turnMessageStartIndexes.push(nextMessages.length - 1);
@@ -150,7 +155,7 @@ export const buildTurnWindowModel = (messages: ChatMessageEntry[]): TurnWindowMo
         const role = resolveMessageRole(message);
         const messageId = message.info.id;
 
-        if (role === 'user') {
+        if (opensTurn(message)) {
             currentTurnIndex = turnIds.length;
             turnIds.push(messageId);
             turnMessageStartIndexes.push(index);

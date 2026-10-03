@@ -39,11 +39,17 @@ const startFakeRelay = () => {
     clients: new Map(), // connectionId -> ws
     buffered: new Map(), // connectionId -> [[data, isBinary]] awaiting host-data
     relayFrames: [], // observed forwarded frames (for plaintext assertions)
+    apps: new Map(),
   };
 
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url, 'http://localhost');
     const role = url.searchParams.get('role');
+    state.apps.set(role, {
+      appId: url.searchParams.get('appId'),
+      appVersion: url.searchParams.get('appVersion'),
+      platform: url.searchParams.get('platform'),
+    });
     const connectionId = url.searchParams.get('connectionId');
 
     if (role === 'host-control') {
@@ -98,6 +104,10 @@ const startFakeRelay = () => {
         wsUrl: `ws://127.0.0.1:${port}`,
         state,
         stop: () => new Promise((r) => {
+          // A socket a failed test left open would hold server.close() until
+          // the hook timeout; drop them so a failure is reported once.
+          for (const client of wss.clients) client.terminate();
+          server.closeAllConnections();
           wss.close();
           server.close(() => r());
         }),
@@ -162,7 +172,6 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
   url.searchParams.set('role', 'client');
   url.searchParams.set('serverId', serverId);
   url.searchParams.set('connectionId', connectionId);
-  const ws = new WebSocket(url.toString());
 
   const hostPub = await globalThis.crypto.subtle.importKey(
     'jwk',
@@ -182,6 +191,12 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }) => {
     resolveDone = resolve;
   });
 
+  // Dialed only now, with the key material ready and the listeners attached
+  // in the same tick. Dialing before the WebCrypto awaits above let a loopback
+  // socket open while the key generation was still queued on the threadpool,
+  // and an `open` event with no listener means no hello, no ready, and a
+  // client that waits forever. Loaded CI runners hit exactly that.
+  const ws = new WebSocket(url.toString());
   ws.on('open', async () => {
     ws.send(JSON.stringify({
       t: 'hello',
@@ -278,6 +293,13 @@ describe('relay host-client integration', () => {
     });
 
     expect(result.status).toBe(200);
+    for (const role of ['host-control', 'host-data']) {
+      expect(relay.state.apps.get(role)).toEqual({
+        appId: 'openchamber',
+        appVersion: expect.stringMatching(/^\d+\.\d+\.\d+/),
+        platform: process.env.OPENCHAMBER_RUNTIME || 'web',
+      });
+    }
     expect(result.body.ok).toBe(true);
     expect(result.body.relayConn).toBe('conn-test-1');
     expect(result.body.origin).toBe(`http://127.0.0.1:${origin.port}`);

@@ -1,3 +1,4 @@
+import { detectTextLanguage } from '../tts/language-detect.js';
 /**
  * Dictation service: resolves STT providers, tracks local model download
  * state, and exposes a readiness snapshot for the status route.
@@ -16,6 +17,8 @@ import { OpenAICompatibleTranscriptionSession } from './openai-compatible-sessio
 import {
   DEFAULT_LOCAL_STT_MODEL,
   DEFAULT_LOCAL_TTS_MODEL,
+  getLocalTtsDefaultSpeaker,
+  resolveLocalTtsModelForLanguage,
   LOCAL_STT_MODEL_CATALOG,
   LOCAL_STT_MODEL_IDS,
   LOCAL_TTS_MODEL_CATALOG,
@@ -220,10 +223,30 @@ export function createDictationService({ modelsDir }) {
   /**
    * Synthesize speech with the local TTS model. Returns WAV bytes, or a
    * readiness error while the model is missing/downloading.
-   * @param {{ text: string, model?: string, speakerId?: number, speed?: number }} options
+   *
+   * With `language: 'auto'` the text's language decides the model: the
+   * caller's model when it speaks that language, otherwise the catalog
+   * model for it (downloaded on first use, reported as in-progress until it
+   * lands). The caller's speaker id is kept only on the caller's model; a
+   * substitute model starts from its own default speaker for the language.
+   * A language no catalog model covers keeps the caller's model, so text is
+   * never silently dropped.
+   * `languageSample` is the whole message the chunk belongs to (or a prefix
+   * of it): the language is judged on that, never on a short chunk alone.
+   * @param {{ text: string, model?: string, speakerId?: number, speed?: number, language?: string, languageSample?: string }} options
    */
-  const synthesizeSpeech = async ({ text, model, speakerId, speed }) => {
-    const modelId = isLocalTtsModelId(model) ? model : DEFAULT_LOCAL_TTS_MODEL;
+  const synthesizeSpeech = async ({ text, model, speakerId, speed, language, languageSample }) => {
+    const requestedModelId = isLocalTtsModelId(model) ? model : DEFAULT_LOCAL_TTS_MODEL;
+    let modelId = requestedModelId;
+    let resolvedLanguage = null;
+    if (language === 'auto') {
+      resolvedLanguage = detectTextLanguage(languageSample || text).language;
+      const forLanguage = resolveLocalTtsModelForLanguage(resolvedLanguage, requestedModelId);
+      if (forLanguage && forLanguage !== requestedModelId) {
+        modelId = forLanguage;
+        speakerId = getLocalTtsDefaultSpeaker(modelId, resolvedLanguage);
+      }
+    }
     const installed = await isLocalSttModelInstalled(modelsDir, modelId);
     if (!installed) {
       const state = downloadStates.get(modelId);
@@ -251,7 +274,7 @@ export function createDictationService({ modelsDir }) {
       speakerId,
       speed,
     });
-    return { audio: result.audio, format: result.format };
+    return { audio: result.audio, format: result.format, modelId, language: resolvedLanguage };
   };
 
   /**

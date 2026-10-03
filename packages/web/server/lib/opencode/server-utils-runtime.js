@@ -22,6 +22,10 @@ export const createServerUtilsRuntime = (dependencies) => {
     setOpenCodeNotReadySince,
     clearLastOpenCodeError,
     getLoginShellPath,
+    getArchivedSessions = null,
+    getMergeSpaceSessionList = null,
+    getSpaceEventHub = null,
+    getStoredSessionMetadata = null,
   } = dependencies;
 
   const setOpenCodePort = (port) => {
@@ -177,31 +181,6 @@ export const createServerUtilsRuntime = (dependencies) => {
     }
   };
 
-  const fetchArraySnapshot = async (route, invalidMessage) => {
-    if (!getOpenCodePort()) {
-      throw new Error('OpenCode port is not available');
-    }
-
-    const response = await fetch(buildOpenCodeUrl(route), {
-      method: 'GET',
-      headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${invalidMessage} (status ${response.status})`);
-    }
-
-    const payload = await response.json().catch(() => null);
-    if (!Array.isArray(payload)) {
-      throw new Error(`Invalid ${invalidMessage} payload from OpenCode`);
-    }
-    return payload;
-  };
-
-  const fetchAgentsSnapshot = () => fetchArraySnapshot('/agent', 'agents snapshot');
-  const fetchProvidersSnapshot = () => fetchArraySnapshot('/provider', 'providers snapshot');
-  const fetchModelsSnapshot = () => fetchArraySnapshot('/model', 'models snapshot');
-
   const setupProxy = (app) => {
     registerOpenCodeProxy(app, {
       fs,
@@ -215,6 +194,11 @@ export const createServerUtilsRuntime = (dependencies) => {
       ensureOpenCodeApiPrefix,
       getSseUpstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
       getUiNotificationClients,
+      getArchivedSessions,
+      getStoredSessionMetadata,
+      // Read when the proxy is set up, after `main` decided whether the spaces host exists.
+      mergeSpaceSessionList: typeof getMergeSpaceSessionList === 'function' ? getMergeSpaceSessionList() : null,
+      spaceEventHub: typeof getSpaceEventHub === 'function' ? getSpaceEventHub() : null,
     });
   };
 
@@ -224,9 +208,6 @@ export const createServerUtilsRuntime = (dependencies) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     parseSseDataPayload,
-    fetchAgentsSnapshot,
-    fetchProvidersSnapshot,
-    fetchModelsSnapshot,
     setupProxy,
   };
 };

@@ -248,6 +248,58 @@ describe('startSessionWorktreeMenuLoad', () => {
     ]);
   });
 
+  test('falls back to the current worktree project directory when the source directory no longer resolves', async () => {
+    const calls: Array<{ projectId: string; force: boolean }> = [];
+    const followUps = worktree({ path: '/repo-follow-ups', projectDirectory: '/repo-linked', branch: 'follow-ups', label: 'follow-ups', name: 'follow-ups' });
+    const rawRef = rawScope('runtime-1', [
+      ['/repo-linked', [followUps]],
+    ]);
+
+    const load = startSessionWorktreeMenuLoad(
+      {
+        // A restored session: no owning project id, and its worktree directory
+        // was deleted, so directory resolution fails. The worktree metadata
+        // still names the owning project root.
+        projectId: null,
+        sourceDirectory: '/deleted-worktree',
+        currentWorktree: worktree({ path: '/deleted-worktree', projectDirectory: '/repo-linked', branch: 'dead', label: 'dead', name: 'dead' }),
+      },
+      {
+        projects: [{ id: 'linked', path: '/repo-linked' }],
+        getCurrentProjects: () => [{ id: 'linked', path: '/repo-linked' }],
+        rawWorktreesByProjectRef: rawRef,
+        getPublishedWorktreesByProject: () => new Map(),
+        resolveProject: (directory) => directory === '/repo-linked' ? { id: 'linked', path: '/repo-linked' } : null,
+        listProjectWorktrees: async (project, options) => {
+          calls.push({ projectId: project.id, force: options.force });
+          return [followUps];
+        },
+        partitionWorktreesByRegisteredProject: (_projects, worktreesByProject) => new Map(worktreesByProject),
+        worktreeMapsEqual: () => false,
+        recordWorktreesSeen: () => {},
+        publishTopology: () => {},
+        getRuntimeKey: () => 'runtime-1',
+        now: () => 123,
+        projectRootBranch: 'main',
+      },
+    );
+
+    expect(load.cachedTargets.map((target) => ({ path: target.metadata.path, isCurrent: target.isCurrent }))).toEqual([
+      { path: '/repo-linked', isCurrent: false },
+      { path: '/deleted-worktree', isCurrent: true },
+      { path: '/repo-follow-ups', isCurrent: false },
+    ]);
+
+    const freshTargets = await load.refreshTargets;
+
+    expect(calls).toEqual([{ projectId: 'linked', force: true }]);
+    expect(freshTargets.map((target) => target.metadata.path)).toEqual([
+      '/repo-linked',
+      '/deleted-worktree',
+      '/repo-follow-ups',
+    ]);
+  });
+
   test('rejects refresh failures without mutating topology and keeps cached targets available for the menu', async () => {
     const published: Array<unknown> = [];
     const existing = worktree({ path: '/repo-existing', branch: 'existing', label: 'existing', name: 'existing' });

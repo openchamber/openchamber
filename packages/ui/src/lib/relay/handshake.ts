@@ -44,7 +44,7 @@ export type HandshakeAction =
   | { type: 'send-text'; text: string }
   // `replyText`, when present, must be sent to the peer before any encrypted frame.
   // `batch` is the negotiated frame-batching capability for the session.
-  | { type: 'established'; channel: EstablishedChannelCrypto; batch: boolean; replyText?: string }
+  | { type: 'established'; channel: EstablishedChannelCrypto; batch: boolean; flowControl: boolean; replyText?: string }
   | { type: 'ignore' }
   | { type: 'fail'; closeCode: number; reason: string };
 
@@ -60,8 +60,9 @@ const parseHandshakeMessage = (raw: string): E2eeHelloMessage | E2eeReadyMessage
   if (message.v !== RELAY_PROTOCOL_VERSION) return null;
   // Unknown/missing capability flag = false = legacy behavior.
   const batch = message.batch === true;
+  const flowControl = message.flowControl === true;
   if (message.t === 'ready') {
-    return { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch };
+    return { t: 'ready', v: RELAY_PROTOCOL_VERSION, batch, flowControl };
   }
   if (
     message.t === 'hello' &&
@@ -75,6 +76,7 @@ const parseHandshakeMessage = (raw: string): E2eeHelloMessage | E2eeReadyMessage
       clientPubJwk: message.clientPubJwk as JsonWebKey,
       nonce: message.nonce,
       batch,
+      flowControl,
     };
   }
   return null;
@@ -97,6 +99,7 @@ export interface ClientHandshake {
 export interface ClientHandshakeOptions {
   /** Advertise frame batching. Default true; set false to force legacy behavior. */
   batch?: boolean;
+  flowControl?: boolean;
 }
 
 // hostEncPubJwk comes from the pairing offer (QR / deep link) and is the trust
@@ -114,8 +117,9 @@ export const createClientHandshake = async (
     v: RELAY_PROTOCOL_VERSION,
     clientPubJwk: await exportPublicKeyJwk(ephemeralKeyPair.publicKey),
     nonce: bytesToBase64Url(nonce),
-    ...(localBatch ? { batch: true } : {}),
   };
+  if (localBatch) hello.batch = true;
+  if (options.flowControl !== false) hello.flowControl = true;
   let established = false;
   return {
     helloText: JSON.stringify(hello),
@@ -143,6 +147,7 @@ export const createClientHandshake = async (
         type: 'established',
         // Batching runs only if both peers advertised it.
         batch: localBatch && message.batch === true,
+        flowControl: options.flowControl !== false && message.flowControl === true,
         channel: {
           encryptor: createFrameEncryptor(keys.clientToHost),
           decryptor: createFrameDecryptor(keys.hostToClient),
@@ -161,6 +166,7 @@ export interface HostHandshake {
 export interface HostHandshakeOptions {
   /** Support frame batching. Default true; set false to force legacy behavior. */
   batch?: boolean;
+  flowControl?: boolean;
 }
 
 export const createHostHandshake = (
@@ -216,13 +222,15 @@ export const createHostHandshake = (
       const ready: E2eeReadyMessage = {
         t: 'ready',
         v: RELAY_PROTOCOL_VERSION,
-        ...(negotiatedBatch ? { batch: true } : {}),
       };
+      if (negotiatedBatch) ready.batch = true;
+      if (options.flowControl !== false && message.flowControl === true) ready.flowControl = true;
       readyText = JSON.stringify(ready);
       established = true;
       return {
         type: 'established',
         batch: negotiatedBatch,
+        flowControl: ready.flowControl === true,
         replyText: readyText,
         channel: {
           encryptor: createFrameEncryptor(keys.hostToClient),

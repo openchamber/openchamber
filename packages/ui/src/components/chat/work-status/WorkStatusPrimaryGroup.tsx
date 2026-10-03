@@ -2,10 +2,12 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useSessionMessages } from '@/sync/sync-context';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -33,54 +35,108 @@ type Props = {
   goalRow: React.ReactNode;
   showSession: boolean;
   showRepository: boolean;
+  /** Lets the panel place the two readouts independently without duplicating their subscriptions. */
+  children: (sections: { session: React.ReactNode; repository: React.ReactNode }) => React.ReactNode;
 };
 
 // Matches the header readout exactly: one decimal, capped the same way, so the
 // two places that report context fill never disagree by a rounding step.
 const formatPercent = (percent: number): string => `${Math.min(percent, 999).toFixed(1)}%`;
+/** Shown after a compaction, until a response reports how much the window holds. */
+const UNKNOWN_PERCENT = '\u2014';
 
 /**
  * The persistent readouts — how full the context is, what the working tree and
  * the pull request look like. All of it stays true for as long as the session
  * is open, so it sits above anything episodic.
  */
-export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository }) => {
+export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository, children }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
   const clearDiffCache = useGitStore((state) => state.clearDiffCache);
 
+  // The repository the readouts describe. Same resolution as the Git tab: the
+  // session directory itself when it is a repository, otherwise the nested
+  // repository selected (or auto-selected) for it, so a session in a plain
+  // folder of repositories still reports the branch and changes the Git tab
+  // shows. Navigation below stays keyed on `directory` — context-panel tabs
+  // are per project root.
+  const { gitDirectory } = useNestedGitDirectory(directory, { enabled: showRepository });
+
   const gitStatus = useGitStore(
     React.useCallback(
-      (state) => (directory ? state.directories.get(directory)?.status ?? null : null),
-      [directory],
+      (state) => (gitDirectory ? state.directories.get(gitDirectory)?.status ?? null : null),
+      [gitDirectory],
     ),
   );
+
+  // A worktree that is still being created transiently looks dirty until its
+  // setup commands and initial git reset finish. Those files are not changes
+  // on the branch, so the changed-files readout stays hidden while the
+  // bootstrap runs — and stays hidden until one fresh status fetch completes
+  // afterwards, because the shared cache may still hold a snapshot captured
+  // mid-creation (refresh hints fire while setup commands touch files) and
+  // lifting the gate onto it would flash the transient state.
+  const worktreeCreationPending = useWorktreeBootstrapPending(gitDirectory);
+  const [postBootstrapRefreshDirectory, setPostBootstrapRefreshDirectory] = React.useState<string | null>(null);
+  const awaitingPostBootstrapStatus = postBootstrapRefreshDirectory !== null
+    && postBootstrapRefreshDirectory === gitDirectory;
 
   // Warm the shared git cache through the background-network gate so the panel
   // never competes with the chat's own bootstrap traffic for sockets.
   React.useEffect(() => {
-    if (!showRepository || !directory || !git) return;
-    void runBackgroundNetworkTask(() => ensureStatus(directory, git));
-  }, [directory, git, ensureStatus, showRepository]);
+    if (!showRepository || !gitDirectory || !git) return;
+    if (worktreeCreationPending) {
+      setPostBootstrapRefreshDirectory(gitDirectory);
+      return;
+    }
+    if (awaitingPostBootstrapStatus) {
+      let cancelled = false;
+      void runBackgroundNetworkTask(() => fetchStatus(gitDirectory, git, {
+        force: true,
+        silent: true,
+        throwOnError: true,
+      }))
+        .then(() => {
+          if (!cancelled) {
+            setPostBootstrapRefreshDirectory((current) => (current === gitDirectory ? null : current));
+          }
+        })
+        .catch(() => undefined);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void runBackgroundNetworkTask(() => ensureStatus(gitDirectory, git));
+  }, [gitDirectory, git, ensureStatus, fetchStatus, showRepository, worktreeCreationPending, awaitingPostBootstrapStatus]);
 
   // Own the live invalidation for the repository readout. The desktop
   // composer's changed-files row no longer renders, so this panel must not
   // depend on ChatInput (or an opened Git surface) to refresh the shared cache
   // on its behalf.
   React.useEffect(() => {
-    if (!showRepository || !directory || !git) return;
+    if (!showRepository || !gitDirectory || !git) return;
     return sessionEvents.onGitRefreshHint((hint) => {
-      if (normalizePath(hint.directory) !== normalizePath(directory)) return;
+      if (normalizePath(hint.directory) !== normalizePath(gitDirectory)) return;
       if (hint.paths?.length) {
-        clearDiffCache(directory, hint.paths);
+        clearDiffCache(gitDirectory, hint.paths);
       }
-      void fetchStatus(directory, git, { silent: true });
+      void fetchStatus(gitDirectory, git, { silent: true });
     });
-  }, [clearDiffCache, directory, fetchStatus, git, showRepository]);
+  }, [clearDiffCache, gitDirectory, fetchStatus, git, showRepository]);
 
   const branch = gitStatus?.current?.trim() || null;
+
+  // Which repository under the project the branch belongs to. Only meaningful
+  // when the readouts come from a nested repository; for a project that is a
+  // repository itself the section header already names it.
+  const nestedRepoLabel = React.useMemo(() => {
+    if (!directory || !gitDirectory || gitDirectory === directory) return null;
+    const rootPrefix = `${directory}/`;
+    return gitDirectory.startsWith(rootPrefix) ? gitDirectory.slice(rootPrefix.length) : gitDirectory;
+  }, [directory, gitDirectory]);
 
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   // Worktrees normally sit beside rather than beneath their project directory,
@@ -103,24 +159,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // Read-only: PR watching is owned by the background tracker. Starting a watch
   // here would multiply GitHub requests per open session, which is exactly the
   // fan-out the PR-status concurrency gate exists to prevent.
-  const prSummary = useFreshestPrVisualSummaryForBranch(directory, branch);
+  const prSummary = useFreshestPrVisualSummaryForBranch(gitDirectory, branch);
 
-  // `getCurrentModel` is an imperative getter: its reference never changes, so
-  // calling it in render subscribes to nothing. Subscribe to the selected model
-  // ids and recompute the limits from those.
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const currentProviderId = useConfigStore((state) => state.currentProviderId);
-  const currentModelId = useConfigStore((state) => state.currentModelId);
   const sessionMessages = useSessionMessages(sessionId ?? '', directory ?? undefined);
-
-  const contextLimit = React.useMemo(() => {
-    const currentModel = getCurrentModel();
-    const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-      ? (currentModel.limit as Record<string, unknown>)
-      : null;
-    return limit && typeof limit.context === 'number' ? limit.context : 0;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- getter output tracks the selected model ids
-  }, [getCurrentModel, currentProviderId, currentModelId]);
+  const { context: contextLimit } = useContextWindowLimits(sessionId, directory ?? undefined);
 
   // Computed from this session's own messages rather than through
   // `useSessionUIStore.getContextUsage`, which reads the *current* directory's
@@ -157,19 +199,20 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // event is reset to an empty array too, and carries real content only on
   // revert. Git status is the one authoritative, already-cached answer.
   const changed = React.useMemo(() => {
+    if (worktreeCreationPending || awaitingPostBootstrapStatus) return null;
     const files = gitStatus?.files ?? [];
     if (files.length === 0) return null;
     const stats = gitStatus?.diffStats;
     let additions = 0;
     let deletions = 0;
     if (stats) {
-      for (const entry of Object.values(stats)) {
+      for (const entry of [...Object.values(stats.staged ?? {}), ...Object.values(stats.working ?? {})]) {
         additions += entry?.insertions ?? 0;
         deletions += entry?.deletions ?? 0;
       }
     }
     return { files: files.length, additions, deletions, hasStats: Boolean(stats) };
-  }, [gitStatus?.files, gitStatus?.diffStats]);
+  }, [gitStatus?.files, gitStatus?.diffStats, worktreeCreationPending, awaitingPostBootstrapStatus]);
 
   const attentionReason = gitStatus?.attentionReason
     ?? (gitStatus?.rebaseInProgress ? 'rebase' : null)
@@ -181,7 +224,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
           : attentionReason === 'bisect' ? t('chat.workStatus.attention.bisect')
             : null;
 
-  const usagePercent = contextUsage?.percent ?? null;
+  const usagePercent = contextUsage?.state === 'measured' ? contextUsage.percent : null;
   // Colour threshold uses the rounded percentage, matching what the header
   // feeds `resolveUsageTone`; the displayed number stays unrounded.
   const usageTone = usagePercent === null ? null : resolveUsageTone(Math.round(usagePercent));
@@ -201,18 +244,15 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // without them the total *is* the session's own cost and the row would
   // restate the number directly above it.
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
-  const hasSession = showSession && (usagePercent !== null || cost !== null || Boolean(goalRow));
+  const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
   const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
-  if (!hasSession && !hasRepository) return null;
-
-  return (
-    <>
-      {hasSession ? (
+  return children({
+      session: hasSession ? (
         <WorkStatusSection title={t('chat.workStatus.section.session')}>
-          {usagePercent !== null ? (
+          {contextUsage !== null ? (
             <>
               <WorkStatusRow
                 icon="donut-chart"
@@ -221,14 +261,19 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={t('chat.workStatus.context.label')}
                 value={(
                   <>
-                    <WorkStatusValue>{formatPercent(usagePercent)}</WorkStatusValue>
+                    <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
                     {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
                   </>
                 )}
               />
-              <WorkStatusMeter percent={usagePercent} color={meterColor} />
+              <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
+              {contextUsage.state === 'compacted' ? (
+                <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">
+                  {t('contextUsage.compacted.description')}
+                </p>
+              ) : null}
               {/* Caption, not a row: it explains the figure above it rather
                   than reporting a reading of its own, so it carries no icon
                   and no label column. */}
@@ -246,9 +291,9 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               while context is the live number the reader came for. */}
           {goalRow}
         </WorkStatusSection>
-      ) : null}
+      ) : null,
 
-      {hasRepository ? (
+      repository: hasRepository ? (
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
           summary={projectLabel}
@@ -271,6 +316,16 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                     ? <WorkStatusValue tone="muted">{`↓${gitStatus?.behind}`}</WorkStatusValue> : null}
                 </>
               ) : undefined}
+            />
+          ) : null}
+
+          {nestedRepoLabel ? (
+            <WorkStatusRow
+              icon="folder"
+              onClick={directory ? () => openSurface('git') : undefined}
+              ariaLabel={t('chat.workStatus.action.openGit')}
+              label={nestedRepoLabel}
+              muted
             />
           ) : null}
 
@@ -344,7 +399,6 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
             </>
           ) : null}
         </WorkStatusSection>
-      ) : null}
-    </>
-  );
+      ) : null,
+  });
 };

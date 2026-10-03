@@ -106,7 +106,7 @@ export function acceptDirectoryMessageStreamWsConnection({
           buildUrlFailed = false;
           let targetUrl;
           try {
-            targetUrl = new URL(buildOpenCodeUrl('/event', ''));
+            targetUrl = new URL(buildOpenCodeUrl('/api/event', ''));
           } catch {
             buildUrlFailed = true;
             throw new Error('OpenCode service unavailable');

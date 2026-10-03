@@ -28,11 +28,19 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
+      const hashedAssetsPrefix = path.join(distPath, 'assets') + path.sep;
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
           // Service workers should never be long-cached; iOS is especially sensitive.
-          if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
+          if (filePath.endsWith(`${path.sep}sw.js`)) {
             res.setHeader('Cache-Control', 'no-store');
+            return;
+          }
+          // Vite names every file under assets/ by its content hash, so a name
+          // never changes meaning. Without this each lazy chunk costs a
+          // revalidation round trip, which is felt on remote connections.
+          if (filePath.startsWith(hashedAssetsPrefix)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           }
         },
       }));
@@ -47,20 +55,20 @@ export const createStaticRoutesRuntime = (dependencies) => {
         normalizePwaOrientation,
       });
 
-      app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
+      app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
       });
       return;
     }
 
     console.warn(`Warning: ${distPath} not found, static files will not be served`);
-    app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
+    app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
       res.status(404).send('Static files not found. Please build the application first.');
     });
   };
 
   const registerApiOnlyFallbackRoutes = (app) => {
-    app.get(/^(?!\/api|\/auth|\/health|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
+    app.get(/^(?!\/api|\/auth|\/health|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
       const command = 'openchamber connect-url --help';
       res.status(200).format({
         html: () => {

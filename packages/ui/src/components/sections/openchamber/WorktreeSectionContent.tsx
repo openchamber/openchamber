@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Icon } from "@/components/icon/Icon";
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
@@ -14,11 +14,13 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import {
-  getWorktreeSetupCommands,
-  getWorktreeSetupWaitEnabled,
+  getProjectSetup,
   saveWorktreeSetupCommands,
   saveWorktreeSetupWaitEnabled,
+  updateProjectSetup,
+  updateSharedProjectSetup,
 } from '@/lib/openchamberConfig';
+import { resetSharedSetupTrust } from '@/lib/sharedTrustConfirmation';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -28,6 +30,7 @@ import {
   ProjectSettingsSubsection,
 } from '@/components/sections/projects/ProjectSettingsSubsection';
 import { useI18n } from '@/lib/i18n';
+import { useProjectWorktrees } from './useProjectWorktrees';
 
 export interface WorktreeSectionContentProps {
   projectRef?: { id: string; path: string } | null;
@@ -54,12 +57,19 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
+  const [sharedSetupCommands, setSharedSetupCommands] = React.useState<string[]>([]);
+  const [sharedConfigPath, setSharedConfigPath] = React.useState('');
+  const [replaceSharedCommands, setReplaceSharedCommands] = React.useState(false);
+  // The trust answer covers the repository's setup commands and actions; it is
+  // shown here, next to the commands it is mostly about.
+  const [sharedTrusted, setSharedTrusted] = React.useState(false);
+  const [isResettingTrust, setIsResettingTrust] = React.useState(false);
+  const [isSharing, setIsSharing] = React.useState(false);
+  const [reloadCounter, setReloadCounter] = React.useState(0);
   const [waitForSetupCommands, setWaitForSetupCommands] = React.useState(false);
   const [isLoadingCommands, setIsLoadingCommands] = React.useState(false);
   const [commandsSnapshot, setCommandsSnapshot] = React.useState<string | null>(null);
   const [isGitRepoLocal, setIsGitRepoLocal] = React.useState<boolean | null>(null);
-  const [availableWorktrees, setAvailableWorktrees] = React.useState<WorktreeMetadata[]>([]);
-  const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
   const isSavingCommandsRef = React.useRef(false);
 
   const projectRef = React.useMemo(() => {
@@ -71,17 +81,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     }
     return { id: activeProject.id, path: projectPath };
   }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path]);
-
-  const refreshWorktrees = React.useCallback(async () => {
-    if (!projectRef || isGitRepoLocal === false) return;
-
-    try {
-      const worktrees = await listProjectWorktrees(projectRef);
-      setAvailableWorktrees(worktrees);
-    } catch {
-      // Ignore errors
-    }
-  }, [projectRef, isGitRepoLocal]);
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -104,41 +103,10 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     };
   }, [projectPath]);
 
-  React.useEffect(() => {
-    if (!projectRef) {
-      setAvailableWorktrees([]);
-      setIsLoadingWorktrees(false);
-      return;
-    }
-
-    if (isGitRepoLocal === false) {
-      setAvailableWorktrees([]);
-      setIsLoadingWorktrees(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingWorktrees(true);
-    setAvailableWorktrees([]);
-
-    (async () => {
-      try {
-        const worktrees = await listProjectWorktrees(projectRef);
-        if (cancelled) return;
-        setAvailableWorktrees(worktrees);
-      } catch {
-        // ignore
-      } finally {
-        if (!cancelled) {
-          setIsLoadingWorktrees(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectRef, isGitRepoLocal]);
+  const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
+  const { availableWorktrees, isLoadingWorktrees } = useProjectWorktrees(
+    projectRef, isGitRepoLocal, sessionsKey, listProjectWorktrees,
+  );
 
   React.useEffect(() => {
     if (!projectRef) return;
@@ -148,19 +116,24 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
     (async () => {
       try {
-        const [commands, waitForSetup] = await Promise.all([
-          getWorktreeSetupCommands(projectRef),
-          getWorktreeSetupWaitEnabled(projectRef),
-        ]);
+        // The page edits the user's own commands; the team's shared commands
+        // come from the repo, run first, and are never copied into the personal file.
+        const setup = await getProjectSetup(projectRef);
         if (!cancelled) {
+          const commands = setup.personal.setupWorktree;
           const nextCommands = commands.length > 0 ? commands : [''];
           setSetupCommands(nextCommands);
+          setSharedSetupCommands(setup.shared.setupWorktree);
+          setSharedConfigPath(setup.shared.path);
+          setReplaceSharedCommands(setup.personal.setupWorktreeMode === 'replace');
+          setSharedTrusted(setup.trust.hash !== null && setup.trust.trusted);
           setCommandsSnapshot(JSON.stringify(nextCommands));
-          setWaitForSetupCommands(waitForSetup);
+          setWaitForSetupCommands(setup.setupWorktreeWait);
         }
       } catch {
         if (!cancelled) {
           setSetupCommands(['']);
+          setSharedSetupCommands([]);
           setCommandsSnapshot(JSON.stringify(['']));
           setWaitForSetupCommands(false);
         }
@@ -174,7 +147,70 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     return () => {
       cancelled = true;
     };
+  }, [projectRef, reloadCounter]);
+
+  const reload = React.useCallback(() => setReloadCounter((count) => count + 1), []);
+
+  // Sharing moves a command between the two files: into the repo file first,
+  // then out of the personal list; the lists reload from disk afterwards.
+  const shareCommand = React.useCallback(async (index: number) => {
+    if (!projectRef || isSharing) return;
+    const command = setupCommands[index]?.trim();
+    if (!command) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        setupWorktree: [...sharedSetupCommands.filter((entry) => entry !== command), command],
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveWorktreeSetupCommands(projectRef, setupCommands.filter((_entry, position) => position !== index));
+      reload();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [isSharing, projectRef, reload, setupCommands, sharedSetupCommands, t]);
+
+  const makeCommandPersonal = React.useCallback(async (command: string) => {
+    if (!projectRef || isSharing) return;
+    setIsSharing(true);
+    try {
+      const shared = await updateSharedProjectSetup(projectRef, {
+        setupWorktree: sharedSetupCommands.filter((entry) => entry !== command),
+      });
+      if (!shared) {
+        toast.error(t('settings.projects.shared.toast.shareFailed'));
+        return;
+      }
+      await saveWorktreeSetupCommands(projectRef, [...setupCommands.filter((entry) => entry.trim().length > 0), command]);
+      reload();
+    } finally {
+      setIsSharing(false);
+    }
+  }, [isSharing, projectRef, reload, setupCommands, sharedSetupCommands, t]);
+
+  const handleResetTrust = React.useCallback(async () => {
+    if (!projectRef) return;
+    setIsResettingTrust(true);
+    try {
+      if (await resetSharedSetupTrust(projectRef)) {
+        setSharedTrusted(false);
+      }
+    } finally {
+      setIsResettingTrust(false);
+    }
   }, [projectRef]);
+
+  const handleReplaceSharedCommandsChange = React.useCallback(async (next: boolean) => {
+    if (!projectRef) return;
+    setReplaceSharedCommands(next);
+    if (!(await updateProjectSetup(projectRef, { setupWorktreeMode: next ? 'replace' : 'append' }))) {
+      toast.error(t('settings.openchamber.worktrees.setup.toast.saveFailed'));
+      setReplaceSharedCommands(!next);
+    }
+  }, [projectRef, t]);
 
   const persistSetupCommands = React.useCallback(async (commands: string[]): Promise<boolean> => {
     if (!projectRef) {
@@ -324,13 +360,6 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     });
   }, [sessions, getWorktreeMetadata]);
 
-  const sessionsKey = React.useMemo(() => sessions.map(s => s.id).join(','), [sessions]);
-  React.useEffect(() => {
-    if (isGitRepoLocal && projectPath) {
-      refreshWorktrees();
-    }
-  }, [sessionsKey, isGitRepoLocal, projectPath, refreshWorktrees]);
-
   const setupTooltip = (
     <SettingsInfoHint>
       {t('settings.openchamber.worktrees.setup.tooltipPrefix')}
@@ -385,6 +414,45 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.worktrees.setup.loading')}</p>
         ) : (
           <div className={cn('space-y-2', PROJECT_SETTINGS_CONTROL_WIDTH)}>
+            {sharedSetupCommands.length > 0 ? (
+              <div className="space-y-1 pb-1">
+                <p className="typography-meta text-muted-foreground">
+                  {t('settings.projects.shared.commandsFromRepo', { path: sharedConfigPath })}
+                </p>
+                {sharedSetupCommands.map((command, index) => (
+                  <div key={`shared-${index}`} className="flex items-center gap-2">
+                    <span className={cn('min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground', replaceSharedCommands && 'line-through opacity-60')}>{command}</span>
+                    <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-muted-foreground bg-[var(--surface-subtle)]">
+                      {t('settings.projects.shared.badge')}
+                    </span>
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal shrink-0" disabled={isSharing} title={t('settings.projects.shared.actions.makePersonalTitle')} onClick={() => void makeCommandPersonal(command)}>
+                      {t('settings.projects.shared.actions.makePersonal')}
+                    </Button>
+                  </div>
+                ))}
+                {sharedTrusted ? (
+                  <div className="flex items-center gap-2">
+                    <span className="typography-meta text-muted-foreground">{t('settings.projects.shared.trusted')}</span>
+                    <Button type="button" variant="ghost" size="xs" className="!font-normal" disabled={isResettingTrust} onClick={() => void handleResetTrust()}>
+                      {t('settings.projects.shared.resetTrust')}
+                    </Button>
+                  </div>
+                ) : null}
+                <label
+                  data-settings-item="projects.worktree.setup.replace"
+                  className="flex cursor-pointer items-center gap-2 py-1"
+                >
+                  <Checkbox
+                    checked={replaceSharedCommands}
+                    onChange={(next) => void handleReplaceSharedCommandsChange(next)}
+                    ariaLabel={t('settings.projects.shared.replaceModeAria')}
+                  />
+                  <span className={cn('typography-ui-label font-normal', replaceSharedCommands ? 'text-foreground' : 'text-foreground/60')}>
+                    {t('settings.projects.shared.replaceMode')}
+                  </span>
+                </label>
+              </div>
+            ) : null}
             {setupCommands.map((command, index) => (
               <div key={index} className="flex w-full gap-2">
                 <Input
@@ -394,6 +462,19 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   placeholder={t('settings.openchamber.worktrees.setup.commandPlaceholder')}
                   className="h-7 min-w-0 flex-1 font-mono text-xs"
                 />
+                {command.trim() ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className="!font-normal h-7 shrink-0"
+                    disabled={isSharing || commandsHaveChanges}
+                    title={commandsHaveChanges ? t('settings.projects.shared.actions.shareAfterSave') : t('settings.projects.shared.actions.shareTitle', { path: sharedConfigPath || '.openchamber/project.json' })}
+                    onClick={() => void shareCommand(index)}
+                  >
+                    {t('settings.projects.shared.actions.share')}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant="ghost"
@@ -470,7 +551,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                   type="button"
                   onClick={() => handleDeleteWorktree(worktree)}
                   className={cn(
-                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground/50 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   )}
                   aria-label={t('settings.openchamber.worktrees.list.deleteWorktreeAria', { name: worktree.branch || worktree.label || worktree.path })}

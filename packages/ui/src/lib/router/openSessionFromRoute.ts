@@ -1,0 +1,43 @@
+import { ensureGlobalSessionsLoaded, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { requestMessageFocus } from './messageFocus';
+
+/**
+ * Opens a session link and, for a message link, asks the session's timeline
+ * to show that message: on entry, or right away if the session is open.
+ */
+export function openSessionLink(sessionId: string, messageId: string | null): Promise<void> {
+  if (messageId) requestMessageFocus(sessionId, messageId);
+  return openSessionFromRoute(sessionId);
+}
+
+/**
+ * Select a session named by `/?session=`. Cold loads often do not know the
+ * owning directory yet, so a first selection may guess the active project.
+ * After the global session list is available, re-select with that directory
+ * unless the user already moved to a different session.
+ */
+export async function openSessionFromRoute(sessionId: string): Promise<void> {
+  const id = sessionId.trim();
+  if (!id) return;
+
+  const initial = useSessionUIStore.getState();
+  if (initial.currentSessionId !== id) {
+    initial.setCurrentSession(id, initial.getDirectoryForSession(id));
+  }
+
+  const snapshot = await ensureGlobalSessionsLoaded().catch(() => null);
+  if (!snapshot) return;
+
+  const latest = useSessionUIStore.getState();
+  if (latest.currentSessionId !== id) return;
+
+  const session = [...snapshot.activeSessions, ...snapshot.archivedSessions]
+    .find((entry) => entry.id === id);
+  if (!session) return;
+
+  const directory = resolveGlobalSessionDirectory(session);
+  if (!directory || directory === latest.currentSessionDirectory) return;
+
+  latest.setCurrentSession(id, directory);
+}

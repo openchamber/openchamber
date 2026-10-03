@@ -4,6 +4,7 @@ import { dict as enDict } from './messages/en';
 import { dict as esDict } from './messages/es';
 import { dict as deDict } from './messages/de';
 import { dict as frDict } from './messages/fr';
+import { dict as nlDict } from './messages/nl';
 import { dict as jaDict } from './messages/ja';
 import { dict as koDict } from './messages/ko';
 import { dict as plDict } from './messages/pl';
@@ -17,6 +18,7 @@ const localeDictionaries = {
   en: enDict,
   de: deDict,
   fr: frDict,
+  nl: nlDict,
   es: esDict,
   ja: jaDict,
   'pt-BR': ptBrDict,
@@ -40,8 +42,32 @@ describe('i18n dictionaries', () => {
   test('all locales expose language label keys', () => {
     for (const [, dictionary] of Object.entries(localeDictionaries)) {
       expect(dictionary['common.language.german']).toBeTruthy();
+      expect(dictionary['common.language.dutch']).toBeTruthy();
       expect(dictionary['common.language.french']).toBeTruthy();
       expect(dictionary['common.language.japanese']).toBeTruthy();
+    }
+  });
+
+  test('telemetry translations retain the numeric token placeholders', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{input}');
+      expect(dictionary['chat.workStatus.telemetry.tokens.inOut']).toContain('{output}');
+      for (const parameter of ['input', 'output', 'reasoning']) {
+        expect(dictionary['chat.workStatus.telemetry.tokensDescription']).toContain(`{${parameter}}`);
+      }
+    }
+  });
+
+  test('all telemetry rows have translated explanations and compact labels', () => {
+    const metrics = ['responseSpeed', 'speed', 'llmDuration', 'toolDuration', 'ttft', 'steps', 'tokens', 'cacheHit', 'cost'] as const;
+    for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
+      for (const metric of metrics) {
+        const label = dictionary[`chat.workStatus.telemetry.${metric}`];
+        const description = dictionary[`chat.workStatus.telemetry.${metric}Description`];
+        expect(label.length <= 16).toBe(true);
+        expect(description.length > 30).toBe(true);
+        if (locale !== 'en') expect(description === enDict[`chat.workStatus.telemetry.${metric}Description`]).toBe(false);
+      }
     }
   });
 });

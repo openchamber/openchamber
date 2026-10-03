@@ -53,7 +53,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     return (
       <div
         className={cn(
-          "relative flex flex-col min-h-0 w-full overflow-hidden",
+          "overlay-scrollbar-wrapper relative flex flex-col min-h-0 w-full overflow-hidden",
           preventOverscroll && "overscroll-none",
           outerClassName
         )}

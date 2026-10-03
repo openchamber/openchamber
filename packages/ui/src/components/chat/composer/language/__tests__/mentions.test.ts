@@ -157,3 +157,31 @@ describe('classifyMention', () => {
         expect(looksLikeFilePath('plain', new Set(['plain']))).toBe(true);
     });
 });
+
+describe('scanMentions — confirmed paths with spaces', () => {
+    const confirmed = new Set(['docs/my document.md', 'docs/my document.md.bak', 'plain.ts']);
+
+    test('a confirmed path keeps its spaces', () => {
+        const tokens = scanMentions('read @docs/my document.md please', confirmed);
+        expect(tokens.map((token) => token.name)).toEqual(['docs/my document.md']);
+        expect(tokens[0]).toMatchObject({ start: 5, end: 25, raw: '@docs/my document.md' });
+    });
+
+    test('the longest confirmed path wins', () => {
+        expect(scanMentions('@docs/my document.md.bak', confirmed).map((token) => token.name))
+            .toEqual(['docs/my document.md.bak']);
+    });
+
+    test('a confirmed path must end at a boundary', () => {
+        expect(scanMentions('@docs/my documentary', confirmed).map((token) => token.name)).toEqual(['docs/my']);
+    });
+
+    test('trailing punctuation ends a confirmed path', () => {
+        expect(scanMentions('(@docs/my document.md), @plain.ts', confirmed).map((token) => token.name))
+            .toEqual(['docs/my document.md', 'plain.ts']);
+    });
+
+    test('without the confirmed set the scan stops at whitespace', () => {
+        expect(names('@docs/my document.md')).toEqual(['docs/my']);
+    });
+});

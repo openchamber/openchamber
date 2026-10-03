@@ -283,6 +283,52 @@ function runStartupCommand(command, args, options = {}) {
   return result;
 }
 
+function parseLingerState(stdout) {
+  if (typeof stdout !== 'string') {
+    return null;
+  }
+  const match = stdout.match(/^Linger=([A-Za-z]+)\s*$/m);
+  if (!match) {
+    return null;
+  }
+  const value = match[1].toLowerCase();
+  if (value === 'yes') return true;
+  if (value === 'no') return false;
+  return null;
+}
+
+function getCurrentUsername() {
+  try {
+    const name = os.userInfo().username;
+    if (typeof name === 'string' && name.length > 0) {
+      return name;
+    }
+  } catch {
+    // userInfo() can throw when the uid has no passwd entry; fall back to env.
+  }
+  return process.env.USER || process.env.LOGNAME || '';
+}
+
+// A systemd --user service only keeps running without an active login session
+// when the user has lingering enabled. Detect it so `startup enable` can warn
+// that the service may otherwise stop on logout. Returns null when the state
+// cannot be determined (no username, loginctl unavailable, or odd output).
+function getUserLingerEnabled(user) {
+  if (!user) {
+    return null;
+  }
+  let result;
+  try {
+    result = runStartupCommand('loginctl', ['show-user', user, '-p', 'Linger'], { allowFailure: true });
+  } catch {
+    return null;
+  }
+  if (result.status !== 0) {
+    return null;
+  }
+  return parseLingerState(result.stdout);
+}
+
 function getStartupStatus() {
   const paths = getStartupServicePaths();
   if (!paths.servicePath) {
@@ -296,6 +342,7 @@ function getStartupStatus() {
     const enabledResult = runStartupCommand('systemctl', ['--user', 'is-enabled', 'openchamber.service'], { allowFailure: true });
     const activeResult = runStartupCommand('systemctl', ['--user', 'is-active', 'openchamber.service'], { allowFailure: true });
     const activeState = (activeResult.stdout || '').trim() || 'inactive';
+    const lingerUser = getCurrentUsername();
     return {
       supported: true,
       platform: paths.platform,
@@ -303,6 +350,8 @@ function getStartupStatus() {
       active: activeState === 'active',
       activeState,
       servicePath: paths.servicePath,
+      lingerEnabled: getUserLingerEnabled(lingerUser),
+      lingerUser: lingerUser || null,
     };
   }
   return {

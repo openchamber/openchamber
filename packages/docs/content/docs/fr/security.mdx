@@ -36,6 +36,157 @@ Les appareils associés via [Connecter un appareil](/connect-devices/) s’authe
 - S’il vous faut une URL publique, préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
 - Si vous placez OpenChamber derrière votre propre serveur HTTPS, consultez [Reverse proxy](/reverse-proxy/).
 
+## Mode entreprise
+
+Si votre équipe ne peut envoyer le contenu des conversations qu’aux fournisseurs de modèles configurés dans OpenCode, activez le mode entreprise. Il y a deux façons de le faire, et une seule suffit.
+
+### Un fichier de politique sur la machine
+
+C’est la méthode à utiliser sur les portables que vous gérez. Placez un fichier nommé `policy.json` dans un dossier où seul un administrateur peut écrire :
+
+| Système | Chemin |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+Le chemin ne dépend pas de la façon dont OpenChamber est installé. L’application de bureau, le serveur web lancé depuis npm, la CLI et l’extension VS Code lisent tous le même fichier. Vous pouvez le déployer avec votre outil de gestion des appareils (Jamf, Intune et autres). Pour un serveur dans Docker, montez le fichier au chemin Linux.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Seul `enterpriseMode` est nécessaire. `organization` s’affiche dans les Paramètres sous la forme « Géré par Acme », pour que chacun sache qui a pris la décision. `relayUrl` et `jev` fixent votre propre relais et votre propre point de terminaison Jev, `allowNetworkAccess` permet à d’autres appareils d’atteindre OpenChamber par le réseau, et `allowedExtensions` liste les dépôts d’extensions auxquels vous faites confiance. Tous sont décrits plus bas.
+
+- Rien de ce qu’un utilisateur règle, dans les Paramètres ou dans l’environnement, ne désactive ce que le fichier active.
+- Quand le fichier active le mode entreprise, seul le fichier décide. Les variables d’environnement ci-dessous pour le relais, Jev et l’accès réseau sont ignorées, car un utilisateur peut les définir lui-même.
+- Si le fichier existe mais ne peut pas être lu ou n’est pas un JSON valide, le mode entreprise reste actif et rien n’est fixé. Les Paramètres indiquent que la politique n’a pas pu être lue. Un fichier cassé ne lève jamais la protection en silence.
+- Les modifications s’appliquent sans redémarrage.
+- OpenChamber tourne sous le compte de l’utilisateur, donc l’utilisateur peut lire le fichier. Pensez-y avant d’y mettre une clé d’API.
+
+### Une variable d’environnement
+
+Sur un serveur ou dans un conteneur, où vous maîtrisez l’environnement, ceci suffit :
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+Sur un portable, c’est un verrou plus faible : l’application de bureau la lit dans le profil du shell de connexion (par exemple `~/.zshrc`), et l’utilisateur peut le modifier. Utilisez plutôt le fichier de politique.
+
+Avec la variable, le relais, Jev, l’accès réseau et les extensions autorisées viennent eux aussi de leurs propres variables : `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (des URL de dépôts séparées par des virgules) et `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. Dans Docker, il vous faudra celle de l’accès réseau, puisque le serveur doit écouter au-delà du conteneur.
+
+### Imposer la CLI OpenCode
+
+Si OpenCode est déjà installé sur vos machines et qu’OpenChamber doit utiliser cette installation, indiquez son chemin dans le fichier de politique. Cela marche avec ou sans le mode entreprise.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber lance OpenCode uniquement depuis ce chemin. Il ignore le chemin des Paramètres, `OPENCODE_BINARY` et la copie fournie avec l’application de bureau, qui reste sur le disque sans servir.
+- S’il n’y a rien d’exécutable à ce chemin, OpenChamber ne se rabat pas sur une autre copie. Il s’arrête avec une erreur qui donne le chemin.
+- Les Paramètres affichent le chemin en lecture seule, avec une note indiquant que l’administrateur l’a défini.
+- OpenChamber n’installe ni ne met à jour un OpenCode imposé et n’annonce pas les nouvelles versions. Les mises à jour arrivent avec votre déploiement.
+- La CLI doit être OpenCode 2.x, au moins la version demandée par OpenChamber. Avec une version plus ancienne, OpenChamber s’arrête sur l’écran « mettre à jour OpenCode ».
+- Un dossier fonctionne aussi, s’il contient `opencode` (`opencode.exe` sous Windows). Il n’y a pas de variable d’environnement pour cela, puisqu’un utilisateur peut les définir lui-même.
+
+### Exemples
+
+Pour placer le fichier de politique sur un Mac, exécutez ceci dans le Terminal en tant qu’administrateur :
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+Sous Linux, c’est pareil avec `/etc/openchamber` comme dossier.
+
+Sous Windows, lancez PowerShell en tant qu’administrateur. La dernière ligne ne laisse le dossier accessible en écriture qu’aux administrateurs et au système :
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+Un serveur dans Docker, ajouté à l’`environment` de `docker-compose.yml`. Le conteneur écoute au-delà de lui-même, il lui faut donc l’accès réseau autorisé :
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+Pour vérifier que ça a marché, ouvrez Paramètres → Fournisseurs : un avis sur le mode entreprise avec le nom de votre organisation apparaît en haut.
+
+### Ce qui change
+
+- Les fournisseurs de modèles viennent uniquement de votre configuration OpenCode. Connecter un fournisseur, s’y identifier, ajouter une clé ou créer un fournisseur personnalisé est désactivé dans OpenChamber ; supprimer ou changer de compte existant fonctionne toujours. Cela ferme seulement l’accès par l’application ; le verrou lui-même, c’est la politique OpenCode décrite plus bas. Se connecter à un serveur MCP de votre configuration OpenCode fonctionne toujours, car cela atteint ce serveur et non un fournisseur de modèles.
+- Les [Fournisseurs de classification (Jev)](/classification-providers/) restent désactivés, y compris un point de terminaison personnalisé que quelqu’un saisit dans les Paramètres. Le filet de sécurité et Auto ne sont pas proposés, et les sessions ne passent en cours qu’à la main. Pour utiliser Jev via votre propre infrastructure, fixez un point de terminaison avec `jev` dans le fichier de politique, ou avec `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` et, s’il en faut une, `OPENCHAMBER_JEV_API_KEY`). Il devient le choix par défaut, on peut toujours le désactiver, et rien d’autre ne peut être choisi.
+- La lecture à voix haute via OpenAI est désactivée. Un serveur personnalisé de synthèse vocale ou de transcription doit tourner sur la même machine. Les voix locales et les modèles de dictée locaux continuent de fonctionner.
+- Les notifications push vers les téléphones et les navigateurs ne portent qu’un titre générique comme « Agent response is ready », sans texte de message ni nom de session. Les notifications de bureau restent sur votre machine et gardent le texte complet.
+- Les vérifications de mises à jour continuent, pour que les correctifs de sécurité vous parviennent toujours, mais elles ne transmettent jamais de données d’utilisation, pas même l’identifiant d’installation anonyme.
+- Les [tunnels externes](/tunnels/) (Cloudflare, ngrok) sont désactivés. Un fournisseur de tunnel déchiffre le trafic à sa périphérie et voit chaque requête en clair.
+- Le [Relais privé](/private-relay/) ne fonctionne que via votre propre relais. Faites tourner un [relais auto-hébergé](https://github.com/openchamber/openchamber-relay) et pointez OpenChamber dessus avec `relayUrl` dans le fichier de politique ou avec `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. Le relais partagé ne peut pas lire votre trafic non plus, puisqu’il est chiffré de bout en bout, mais le vôtre garde les métadonnées de connexion et l’accès à cette machine à l’intérieur de votre réseau. Sans votre propre relais, aucun appareil ne peut être associé.
+- OpenChamber n’écoute que sur la machine où il tourne. Le réglage de bureau qui permet aux autres appareils du réseau local d’ouvrir l’application est désactivé, et le serveur refuse de démarrer sur une adresse réseau, que ce soit via la CLI (`--host`, `--lan`) ou via l’environnement. Si le fichier de politique apparaît pendant que l’application tourne, les connexions depuis d’autres machines sont coupées jusqu’au prochain démarrage. Autorisez l’accès réseau avec `"allowNetworkAccess": true` dans le fichier de politique, ou avec `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` là où l’environnement active le mode entreprise. Gardez en tête que la connexion passe en HTTP simple, donc sur un réseau partagé n’importe qui peut la lire ; placez un serveur que d’autres atteignent derrière [votre propre HTTPS](/reverse-proxy/).
+- Les [extensions](/extensions/) qui peuvent envoyer des données hors de la machine (celles qui parlent à une API externe, chargent depuis des adresses externes ou font tourner un service en arrière-plan) ne s’installent que depuis un dépôt Git listé dans `allowedExtensions`. Les extensions qui ne font rien de tout cela s’installent comme d’habitude. Une extension installée depuis n’importe où ailleurs reste désactivée, et les Paramètres expliquent pourquoi. La liste contient des URL de dépôts, puisqu’une extension choisit elle-même son nom ; une entrée qui se termine par `/`, comme `https://github.com/acme/`, autorise tous les dépôts en dessous. Sur les machines des personnes qui développent des extensions, `"allowLocalExtensions": true` autorise aussi l’installation depuis un dossier local. Un ZIP reste bloqué dans tous les cas.
+- Dans l’extension VS Code, la connexion de fournisseurs est désactivée et les vérifications de mises à jour ne transmettent pas de données d’utilisation. Elle n’a de toute façon ni Jev, ni relais, ni tunnels, ni notifications push, ni synthèse vocale dans le cloud.
+
+Les tâches du petit modèle (titres de session, récapitulatifs, messages de commit, la revue guidée des modifications) n’ont besoin d’aucun mode particulier. Elles tournent toujours sur le petit modèle choisi dans les Paramètres, sur un petit modèle du fournisseur avec lequel vous travaillez, ou sur le modèle par défaut de votre configuration OpenCode. Elles ne se rabattent jamais sur un autre fournisseur qui se trouve simplement connecté.
+
+Quels fournisseurs de modèles peuvent être utilisés, c’est OpenCode qui le décide, pas OpenChamber. Verrouillez-le avec les [politiques OpenCode](https://opencode.ai/v2/docs/policies/) : interdisez tous les fournisseurs, puis autorisez ceux que vous avez approuvés.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+Un fournisseur interdit disparaît même si quelqu’un ajoute une clé pour lui. Placez les politiques dans le fichier global `~/.config/opencode/opencode.jsonc`, où un projet ne peut pas les lever, ou diffusez-les depuis un espace de travail OpenCode Console, qui a le dernier mot. Le mode entreprise couvre en plus ce qu’OpenChamber envoie lui-même.
+
+Les recherches web et les récupérations de pages de l’agent passent aussi par OpenCode, vers le service de recherche et vers les pages elles-mêmes. Si elles ne doivent pas quitter votre réseau, interdisez-les avec le même type de politique :
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## Pages liées
 
 - [Connecter un appareil](/connect-devices/) — association à usage unique et tokens par appareil

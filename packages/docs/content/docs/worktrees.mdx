@@ -9,14 +9,17 @@ A worktree session runs in its own checked-out copy of your repo, on its own bra
 
 ## Create one
 
-1. Open the new-worktree dialog from the button at the top of the session sidebar.
-2. Choose a starting point:
-   - **new branch** — name the branch and pick which branch to start from
+1. Open the new-worktree dialog: pick **New worktree…** in the branch menu above the composer when you start a new session, or use the worktree button on a project row in the sidebar.
+2. Under **Start from**, pick one:
+   - **new branch** — name the branch
    - **existing branch** — check out a branch you already have
-3. Confirm the worktree folder (OpenChamber suggests one from the branch name).
-4. Create it.
+   - **PR or issue** — pick one from GitHub, Linear or an extension; the branch is named after it (a PR checks out its own branch), and the item is attached to your first message
+3. Check **Based on** (the branch a new one starts from, the project's current branch by default) and **Folder name**; change them only if you need to.
+4. Create it. If the project has setup commands, the dialog lists them; they run right after.
 
-OpenChamber makes the branch, sets up the folder, and starts a session in it. You can also kick one off straight from a [todo](/notes-todos-plans/) or a [GitHub issue or PR](/github/).
+OpenChamber makes the branch, sets up the folder, and opens a new session there, ready for your first message. You can also kick one off straight from a [todo](/notes-todos-plans/) or a [GitHub issue or PR](/github/).
+
+To skip the questions, pick **Quick worktree** in the same branch menu: OpenChamber names the branch for you and points the new session at it.
 
 ## Bring the work back
 

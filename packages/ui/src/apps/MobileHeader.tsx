@@ -3,9 +3,14 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+
+import { SpaceAccessButton } from '@/components/session/spaces/SpaceAccessButton';
 
 import { MobileSessionMetadataButton } from './MobileSessionMetadata';
 import { MobileSessionSwitcher } from './MobileSessionSwitcher';
@@ -30,11 +35,25 @@ export const MobileHeader: React.FC<{
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  // Uncommitted changes in the active project or worktree: the workspace
+  // button gets a dot instead of a changed-files bar above the composer.
+  const isGitRepo = useIsGitRepo(effectiveDirectory || null);
+  const hasUncommittedChanges = useGitStore((state) => {
+    if (!effectiveDirectory || isGitRepo !== true) return false;
+    const status = state.directories.get(effectiveDirectory)?.status;
+    return Boolean(status && !status.isClean);
+  });
 
+  // An open run overview covers the chat, so the header names the run and
+  // drops the session-only metadata button rather than describe a session
+  // that is not on screen.
+  const runOverviewKey = useUIStore((state) => state.runOverviewKey);
+  const runTitle = useMultiRunTitle(runOverviewKey);
   const sessionTitle = currentSession?.title?.trim();
   // Single-line title, desktop-style: session title, or the "New session"
   // placeholder on the draft screen. No project/branch metadata line.
-  const primaryLabel = sessionTitle
+  const primaryLabel = (runOverviewKey ? runTitle : null)
+    || sessionTitle
     || (currentSessionId ? t('mobile.sessions.untitled') : t('sessions.switcher.draftTitle'));
 
   React.useEffect(() => {
@@ -74,7 +93,7 @@ export const MobileHeader: React.FC<{
         <div className="flex h-[var(--oc-header-height,56px)] w-full items-center gap-1 px-2">
           <button
             type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('mobile.sessions.openSheetAria')}
             onClick={handleOpenSessions}
             style={{ touchAction: 'manipulation' }}
@@ -87,7 +106,7 @@ export const MobileHeader: React.FC<{
             ref={titleRef}
             type="button"
             className={cn(
-              'flex min-w-0 items-center rounded-lg px-2 py-1.5 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'flex min-w-0 items-center rounded-lg px-2 py-1.5 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               compactTitle ? 'shrink' : 'flex-1',
             )}
             aria-label={t('sessions.switcher.openAria')}
@@ -114,18 +133,28 @@ export const MobileHeader: React.FC<{
               controls stay pinned to the right edge. */}
           {compactTitle ? <div className="min-w-0 flex-1" /> : null}
 
-          <MobileSessionMetadataButton
-            open={metadataOpen}
-            onOpenChange={handleMetadataOpenChange}
-            currentSessionId={currentSessionId}
-            effectiveDirectory={effectiveDirectory}
-            isNewSessionDraftOpen={isNewSessionDraftOpen}
+          {runOverviewKey ? null : (
+            <MobileSessionMetadataButton
+              open={metadataOpen}
+              onOpenChange={handleMetadataOpenChange}
+              currentSessionId={currentSessionId}
+              effectiveDirectory={effectiveDirectory}
+              isNewSessionDraftOpen={isNewSessionDraftOpen}
+            />
+          )}
+
+          <SpaceAccessButton
+            directory={effectiveDirectory}
+            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            iconClassName="size-5"
           />
 
           <button
             type="button"
-            className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label={t('mobile.header.openWorkspaceAria')}
+            className="relative flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={hasUncommittedChanges
+              ? t('mobile.header.openWorkspaceWithChangesAria')
+              : t('mobile.header.openWorkspaceAria')}
             onClick={() => {
               setMetadataOpen(false);
               setSwitcherOpen(false);
@@ -134,6 +163,12 @@ export const MobileHeader: React.FC<{
             style={{ touchAction: 'manipulation' }}
           >
             <Icon name="pencil-ruler-2" className="size-5" />
+            {hasUncommittedChanges ? (
+              <span
+                className="absolute right-1.5 top-1.5 size-2.5 rounded-full border-2 border-[var(--background)] bg-[var(--status-warning)]"
+                aria-hidden
+              />
+            ) : null}
           </button>
         </div>
       </header>

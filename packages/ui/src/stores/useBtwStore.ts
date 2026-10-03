@@ -1,4 +1,32 @@
+import type { PermissionMode } from './utils/permissionAutoAccept';
 import { create } from 'zustand';
+import type { Agent } from '@/lib/opencode/model';
+
+type BtwModelSelection = { providerId: string; modelId: string };
+export type BtwSelection = {
+  agent: string | undefined;
+  model: BtwModelSelection | null;
+  variant: string | null | undefined;
+};
+
+export const resolveBtwSelection = ({ agents, savedAgent, savedModel, savedVariant, composerModel, composerVariant }: {
+  agents: readonly Pick<Agent, 'name' | 'hidden' | 'mode'>[];
+  savedAgent: string | null;
+  savedModel: BtwModelSelection | null;
+  savedVariant?: string | null;
+  composerModel: BtwModelSelection | null;
+  composerVariant: string | null | undefined;
+}): BtwSelection => {
+  const selectable = agents.filter((agent) => !agent.hidden && (agent.mode === 'primary' || agent.mode === 'all'));
+  const agent = selectable.find((candidate) => candidate.name === savedAgent)
+    ?? selectable.find((candidate) => candidate.name === 'plan')
+    ?? selectable[0];
+  return {
+    agent: agent?.name,
+    model: savedModel ?? composerModel,
+    variant: savedModel ? savedVariant : composerVariant,
+  };
+};
 
 /**
  * UI-only state for the `/btw` peek panel.
@@ -15,11 +43,16 @@ import { create } from 'zustand';
  *   landing, so the panel can show its starting state immediately.
  * - `destroying`: close was clicked; hides the panel optimistically while the
  *   unlink/delete round-trip completes.
+ * - `pending`: `/btw` has opened an unsent local composer. No fork exists yet.
  */
 type BtwPanelUIState = {
   collapsed?: boolean;
   creating?: boolean;
   destroying?: boolean;
+  pending?: boolean;
+  /** The shield button's choice for the fork; absent means the new session takes the default from Settings. */
+  pendingPermissionMode?: PermissionMode;
+  pendingSend?: symbol;
 };
 
 type BtwStore = {

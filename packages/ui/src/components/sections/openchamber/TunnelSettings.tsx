@@ -8,15 +8,15 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
-import { requestFileAccess } from '@/lib/desktop';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { requestFileAccess, type DesktopSettings } from '@/lib/desktop';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 type TunnelState =
@@ -103,6 +103,8 @@ interface TunnelSessionRecord {
 
 interface TunnelStatusResponse {
   active: boolean;
+  /** The server refuses every tunnel; sent only while none is active. */
+  enterpriseMode?: boolean;
   url: string | null;
   mode?: ApiTunnelMode;
   hasManagedRemoteTunnelToken?: boolean;
@@ -352,6 +354,7 @@ export const TunnelSettings: React.FC = () => {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
+  const [enterpriseLocked, setEnterpriseLocked] = React.useState(false);
   const [tunnelInfo, setTunnelInfo] = React.useState<TunnelInfo | null>(null);
   const [activeTunnelMode, setActiveTunnelMode] = React.useState<TunnelMode | null>(null);
   const [qrDataUrl, setQrDataUrl] = React.useState<string | null>(null);
@@ -524,37 +527,27 @@ export const TunnelSettings: React.FC = () => {
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
     try {
-      const [checkRes, statusRes, settingsRes, providersRes] = await Promise.all([
+      const [checkRes, statusRes, loadedSettings, providersRes] = await Promise.all([
         runtimeFetch('/api/openchamber/tunnel/check', { signal }),
         runtimeFetch('/api/openchamber/tunnel/status', { signal }),
-        runtimeFetch('/api/config/settings', { signal, headers: { Accept: 'application/json' } }),
+        loadDesktopSettings(),
         runtimeFetch('/api/openchamber/tunnel/providers', { signal }),
       ]);
 
       const checkData = (await checkRes.json()) as TunnelCheckResponse;
       const statusData = (await statusRes.json()) as TunnelStatusResponse;
-      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const settingsData: DesktopSettings = loadedSettings ?? {};
       const providersData = providersRes.ok ? await providersRes.json() : {};
 
       const loadedBootstrapTtl = statusData.ttlConfig?.bootstrapTtlMs
-        ?? (settingsData?.tunnelBootstrapTtlMs === null
-          ? null
-          : typeof settingsData?.tunnelBootstrapTtlMs === 'number'
-            ? settingsData.tunnelBootstrapTtlMs
-            : 30 * 60 * 1000);
+        ?? (settingsData.tunnelBootstrapTtlMs === undefined ? 30 * 60 * 1000 : settingsData.tunnelBootstrapTtlMs);
       const loadedSessionTtl = typeof statusData.ttlConfig?.sessionTtlMs === 'number'
         ? statusData.ttlConfig.sessionTtlMs
-        : typeof settingsData?.tunnelSessionTtlMs === 'number'
-          ? settingsData.tunnelSessionTtlMs
-          : 8 * 60 * 60 * 1000;
+        : settingsData.tunnelSessionTtlMs ?? 8 * 60 * 60 * 1000;
 
-      const loadedMode: TunnelMode = toUiTunnelMode(statusData.mode ?? settingsData?.tunnelMode);
-      const loadedProvider = typeof settingsData?.tunnelProvider === 'string' && settingsData.tunnelProvider.trim().length > 0
-        ? settingsData.tunnelProvider.trim().toLowerCase()
-        : 'cloudflare';
-      const loadedManagedLocalConfigPath = typeof settingsData?.managedLocalTunnelConfigPath === 'string'
-        ? settingsData.managedLocalTunnelConfigPath.trim() || null
-        : null;
+      const loadedMode: TunnelMode = toUiTunnelMode(statusData.mode ?? settingsData.tunnelMode);
+      const loadedProvider = settingsData.tunnelProvider ?? 'cloudflare';
+      const loadedManagedLocalConfigPath = settingsData.managedLocalTunnelConfigPath ?? null;
       const dependencyAvailable = applyDependencyCheck(checkData, loadedProvider);
 
       const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
@@ -573,6 +566,7 @@ export const TunnelSettings: React.FC = () => {
 
       const selectedId = presets[0]?.id || '';
 
+      setEnterpriseLocked(statusData.enterpriseMode === true);
       setBootstrapTtlMs(loadedBootstrapTtl);
       setSessionTtlMs(loadedSessionTtl);
       setTunnelProvider(loadedProvider);
@@ -1234,6 +1228,14 @@ export const TunnelSettings: React.FC = () => {
       <div className="flex items-center justify-center py-12">
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.openchamber.tunnel.state.loading')} />
       </div>
+    );
+  }
+
+  if (enterpriseLocked) {
+    return (
+      <SettingsSection title={t('settings.openchamber.tunnel.title')} divider={false}>
+        <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.openchamber.tunnel.enterpriseMode')}</p>
+      </SettingsSection>
     );
   }
 

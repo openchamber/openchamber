@@ -7,7 +7,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useKeybinds } from './useKeybind';
-import { isEditableEventTarget } from './keyboard-shortcut-dom';
+import { hasActiveBtwComposer, isEditableEventTarget } from './keyboard-shortcut-dom';
 
 export const useMiniChatKeyboardShortcuts = () => {
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -25,6 +25,7 @@ export const useMiniChatKeyboardShortcuts = () => {
   const dispatcher = dispatcherRef.current;
 
   const cycleFavoriteModel = (delta: number): boolean | void => {
+    if (hasActiveBtwComposer()) return false;
     const { favoriteModels, addRecentModel } = useUIStore.getState();
     if (favoriteModels.length === 0) return false;
 
@@ -64,10 +65,12 @@ export const useMiniChatKeyboardShortcuts = () => {
       focusChatInput();
     },
     open_model_selector: () => {
+      if (hasActiveBtwComposer()) return false;
       const { isModelSelectorOpen, setModelSelectorOpen } = useUIStore.getState();
       setModelSelectorOpen(!isModelSelectorOpen);
     },
     cycle_thinking_variant: () => {
+      if (hasActiveBtwComposer()) return false;
       const configState = useConfigStore.getState();
       if (configState.getCurrentModelVariants().length === 0) return false;
 
@@ -90,6 +93,11 @@ export const useMiniChatKeyboardShortcuts = () => {
     },
     cycle_favorite_model_forward: () => cycleFavoriteModel(1),
     cycle_favorite_model_backward: () => cycleFavoriteModel(-1),
+    toggle_dictation: () => {
+      if (hasActiveBtwComposer()) return false;
+      // Same event the main app dispatches; ComposerDictation listens for it.
+      window.dispatchEvent(new CustomEvent('openchamber:dictation-toggle'));
+    },
   });
 
   React.useEffect(() => {

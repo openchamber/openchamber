@@ -4,6 +4,7 @@ import path from 'path';
 import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { createScheduledTaskService } from './service.js';
 import { registerScheduledTaskRoutes } from './routes.js';
+import { CHATS_SCOPE_PUBLIC_ID, createChatsScope } from './chats-scope.js';
 
 const createService = (overrides = {}) => {
   const projectConfigRuntime = {
@@ -22,6 +23,7 @@ const createService = (overrides = {}) => {
     sanitizeProjects: (projects) => projects,
     projectConfigRuntime,
     scheduledTasksRuntime,
+    chatsScope: overrides.chatsScope ?? null,
   });
   return { service, projectConfigRuntime, scheduledTasksRuntime };
 };
@@ -280,5 +282,42 @@ describe('scheduled-task service run', () => {
     const result = await service.run('project-test', 'task-1');
     expect(result.sessionId).toBe('sess-1');
     expect(result.persistError).toMatch(/timeout acquiring project config lock/);
+  });
+});
+
+describe('scheduled-task service chats scope', () => {
+  const chatsScope = createChatsScope('/home/user/.config/openchamber/chats');
+
+  it('keys the chats id the UI sends by the chats root storage id', async () => {
+    const { service, scheduledTasksRuntime } = createService({
+      chatsScope,
+      scheduledTasksRuntime: {
+        syncProject: vi.fn(async () => []),
+        runNow: vi.fn(async () => ({ ok: true, sessionID: 'ses_chat', directory: '/chat/dir' })),
+      },
+    });
+
+    await service.list(CHATS_SCOPE_PUBLIC_ID);
+    expect(scheduledTasksRuntime.syncProject).toHaveBeenCalledWith(chatsScope.id);
+    await expect(service.run(CHATS_SCOPE_PUBLIC_ID, 'task-1')).resolves.toMatchObject({
+      sessionId: 'ses_chat',
+      directory: '/chat/dir',
+    });
+    expect(scheduledTasksRuntime.runNow).toHaveBeenCalledWith(chatsScope.id, 'task-1');
+    expect(chatsScope.id).not.toContain(':');
+  });
+
+  it('resolves a directory inside a chat to the chats scope, and projects first', async () => {
+    const { service } = createService({ chatsScope });
+
+    await expect(service.resolveProjectID({ directory: `${chatsScope.root}/2026-09-30/session-a` })).resolves.toBe(chatsScope.id);
+    await expect(service.resolveProjectID({ directory: '/repo' })).resolves.toBe('project-test');
+    await expect(service.resolveProjectID({ directory: `${chatsScope.root}-other/session-a` })).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('rejects the chats id when the server has no chats scope', async () => {
+    const { service } = createService();
+
+    await expect(service.list(CHATS_SCOPE_PUBLIC_ID)).rejects.toMatchObject({ statusCode: 404 });
   });
 });

@@ -979,10 +979,6 @@ function buildTheme(
         typing: weakText,
       },
       markdown: {
-        heading1: token(resolved, 'markdown-heading', primaryBase),
-        heading2: token(resolved, 'markdown-heading', primaryBase),
-        heading3: strongText,
-        heading4: foreground,
         link: token(resolved, 'markdown-link', primaryBase),
         linkHover: token(resolved, 'markdown-link-text', primaryHover),
         inlineCode: token(resolved, 'markdown-code', successBase),

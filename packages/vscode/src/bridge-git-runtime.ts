@@ -1,10 +1,37 @@
+import { OpenCode } from '@opencode/client';
 import * as gitService from './gitService';
-import type { BridgeResponse } from './bridge';
+import type { BridgeContext, BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {
   id: string;
   type: string;
   payload?: unknown;
+};
+
+// A removal should not hang on an unresponsive OpenCode server: disposal is
+// best-effort and `gitService.removeWorktree` swallows its failure.
+const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
+
+/**
+ * Builds the best-effort disposal hook for the extension's active runtime. The
+ * API URL and auth headers are read at call time, and the client is created
+ * per call so a restarted managed process is always addressed correctly.
+ */
+const createWorktreeInstanceDisposer = (ctx?: BridgeContext) => {
+  return async (worktreeDirectory: string): Promise<void> => {
+    const apiUrl = ctx?.manager?.getApiUrl();
+    if (!apiUrl) {
+      throw new Error('OpenCode API URL is not available');
+    }
+    // OpenCode 2 has no instance route; evicting the location drops its cached
+    // services (file watchers, LSP, MCP), which is what held the folder.
+    const client = OpenCode.make({
+      baseUrl: apiUrl.replace(/\/+$/, ''),
+      headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},
+      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }),
+    });
+    await client.debug.location.evict({ location: { directory: worktreeDirectory } });
+  };
 };
 
 const requireDirectory = (id: string, type: string, directory?: string): BridgeResponse | null => {
@@ -18,7 +45,7 @@ const isValidCommitHash = (hash: string | undefined): hash is string => (
   typeof hash === 'string' && /^[0-9a-fA-F]{7,40}$/.test(hash)
 );
 
-export async function handleStandardGitBridgeMessage(message: BridgeMessageInput): Promise<BridgeResponse | null> {
+export async function handleStandardGitBridgeMessage(message: BridgeMessageInput, ctx?: BridgeContext): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
 
   switch (type) {
@@ -81,6 +108,16 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:git/branch-push-status': {
+      const { directory, branches } = (payload || {}) as { directory?: string; branches?: string[] };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      if (!Array.isArray(branches) || branches.some((branch) => typeof branch !== 'string')) {
+        return { id, type, success: false, error: 'branches must be an array of branch names' };
+      }
+      return { id, type, success: true, data: await gitService.getGitUnpushedBranchCounts(directory!, branches) };
     }
 
     case 'api:git/remote-branches': {
@@ -146,11 +183,20 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
         const removed = await gitService.removeWorktree(directory!, {
           directory: worktreeDirectory,
           deleteLocalBranch: removePayload?.body?.deleteLocalBranch === true || removePayload?.deleteLocalBranch === true,
+          disposeInstance: createWorktreeInstanceDisposer(ctx),
         });
         return { id, type, success: true, data: { success: Boolean(removed) } };
       }
 
       return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+    }
+
+    case 'api:git/worktrees/snapshot': {
+      const { directory, ref } = (payload || {}) as { directory?: string; ref?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const result = await gitService.snapshotWorktree(directory!, { ref });
+      return { id, type, success: true, data: result };
     }
 
     case 'api:git/worktrees/validate': {

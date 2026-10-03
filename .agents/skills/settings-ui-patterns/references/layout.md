@@ -29,7 +29,7 @@ All primitives and class constants below live in
 | L2 | `SettingsSection` title (`SETTINGS_SECTION_TITLE_CLASS`) | Section |
 | L3 | `SettingsControlGroup` title (`SETTINGS_GROUP_TITLE_CLASS`) | Sub-cluster inside a section |
 | L4 | `SETTINGS_FIELD_LABEL_CLASS` | Field / control labels |
-| Helper | `SETTINGS_HELPER_CLASS`, `SETTINGS_DESCRIPTION_CLASS` | Rare visible helper text (most goes behind `info`) |
+| Helper | `SETTINGS_HELPER_CLASS`, `SETTINGS_DESCRIPTION_CLASS` | Rare visible helper text (most goes behind `info`; see the skill's Description Policy) |
 
 ## Navigation Placement
 
@@ -45,6 +45,17 @@ Placement rules:
 - **General** hosts app-level settings that don't belong to a feature page: startup/tray/window, network access + UI password, passkeys, OpenCode CLI binary, terminal shell/navigation, message stream transport, privacy.
 - Feature pages (Appearance, Chat, Sessions…) keep only settings about that feature. If a setting reads awkwardly on its page, move it to General rather than inventing a new page.
 - New pages need metadata, `pageOrder`, nav icon, `settings.page.<slug>.title/description` in every locale, and mobile whitelist (`MOBILE_SETTINGS_PAGES` in `MobileApp.tsx`) when relevant.
+
+## Browse Pages: Card Grid vs List
+
+A page that browses things with a glanceable state (Providers, MCP, Plugins)
+opens on a card grid from `shared/SettingsCards.tsx`: a dashed add card leads
+the grid, each card opens a detail screen with `SettingsBackButton`, and the
+page kind is `single`. The shown item is page-local or cleared on unmount, so
+every visit starts at the grid. Pages that edit long text (Agents, Commands,
+Skills, Snippets, Magic Prompts) keep the `split` list-plus-editor layout; a list
+that can grow long filters with `SettingsSidebarSearch`. Card chrome lives only in the shared
+card components; section content inside a detail screen stays flat.
 
 ## Responsiveness: Container Queries
 
@@ -63,5 +74,6 @@ pattern when touching nav.
 - Sections own vertical rhythm: divider + `py-8` come from `SettingsSection`.
 - Fields inside a column: `SETTINGS_FIELDS_STACK_CLASS` (`space-y-4`).
 - Checkbox/radio lists: `SETTINGS_OPTION_STACK_CLASS` (`space-y-1.5`).
+- Groups requiring a title and visible description: separate them from preceding controls with `space-y-6` on the parent. Keep simple checkbox/radio lists compact. The title sits closer to its own description and controls than to the preceding group; use `SettingsControlGroup`'s internal spacing.
 - Two-column areas: `SettingsTwoColumn` (`@3xl:grid-cols-2`); use `SettingsStackedField` inside cells (a `SettingsFieldRow` overflows half-width columns).
 - No elevated backgrounds, rounded rows, or hover fills without explicit UX value.

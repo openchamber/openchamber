@@ -9,24 +9,28 @@ GitHub hesabınızı bağlayın. OpenChamber issue'ları ve pull request'leri i�
 
 ## GitHub'ı bağlayın
 
-1. **Settings → Git** bölümünü açın.
-2. GitHub altında **Connect** seçin. OpenChamber bir bağlantı ve kısa bir kod gösterir.
+1. **Settings → Integrations** bölümünü açın ve **GitHub** kartını genişletin.
+2. **Connect GitHub** seçin. OpenChamber bir bağlantı ve kısa bir kod gösterir.
 3. Bağlantıyı açın, kodu girin ve onaylayın.
 
-Bağlantı kurulunca hesabınız GitHub bölümünde görünür. Birden fazla hesap bağlayabilir, aralarında geçiş yapabilir ya da istediğiniz zaman bağlantıyı kesebilirsiniz.
+Bağlantı kurulunca hesabınız kartta görünür. Birden fazla hesap bağlayabilir, aralarında geçiş yapabilir ya da istediğiniz zaman bağlantıyı kesebilirsiniz. Aynı makinede `gh` CLI ile giriş yapılmışsa OpenChamber onu yedek olarak kullanabilir.
 
 ## Bir issue veya PR'den işe başlayın
 
-GitHub bağlıyken bir [worktree session](/worktrees/) oluşturduğunuzda, **Start from GitHub issue/PR** seçebilirsiniz:
+GitHub bağlıyken bir [worktree session](/worktrees/) oluşturduğunuzda, onu bir issue ya da pull request üzerinden başlatabilirsiniz:
 
-- bir **issue** seçin. OpenChamber branch'i onun adına göre adlandırır ve oturumu, issue ve yorumları ilk mesaj olarak açar
+- bir **issue** seçin. OpenChamber branch'i onun adına göre adlandırır
 - bir **pull request** seçin. PR'nin branch'ini checkout eder. İsterseniz PR'nin diff'ini de ekleyebilirsiniz, böylece agent değişikliğin tamamını görür
 
-Bu sizi, bağlam zaten yüklenmiş halde doğrudan bir oturuma sokar.
+Yeni oturum, issue ya da PR mesaj kutusuna zaten eklenmiş halde açılır. Sizin yerinize hiçbir şey gönderilmez: modeli ve agent'ı seçin, ne yapılmasını istediğinizi yazın ve gönderin.
 
 ## Pull request açma ve yönetme
 
 [git view](/git/) içindeki **PR** sekmesinden pull request oluşturabilir, güncelleyebilir, taslağı hazır diye işaretleyebilir ya da merge edebilirsiniz. OpenChamber PR başlığını ve açıklamasını değişikliklerinizden oluşturabilir.
+
+## Bir issue ya da PR'ı mesaja bağlayın
+
+Sohbet yazma alanında **+** menüsünü açın ve **GitHub** seçin. Bir veya daha fazla issue ya da pull request seçin: her biri bir sonraki mesajınıza bağlam olarak eklenir (bir PR diff'ini de getirebilir) ve oturumun çalışma durumu paneli ona bir bağlantı tutar. Eklemek yalnızca bağlam sağlar; onunla ne yapılacağını mesajınız söyler.
 
 ## İlgili
 

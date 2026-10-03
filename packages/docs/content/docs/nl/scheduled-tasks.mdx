@@ -1,0 +1,78 @@
+---
+title: Geplande taken
+description: Laat een prompt automatisch op vaste momenten uitvoeren.
+---
+
+# Geplande taken
+
+Een geplande taak voert op ingestelde momenten een prompt uit, bijvoorbeeld dagelijks een samenvatting van de wijzigingen van gisteren of wekelijks een opruimtaak. OpenChamber start daarvoor zelf een nieuwe sessie en verstuurt de prompt. Open de planner met de knop bovenaan de sessiezijbalk.
+
+## Een taak maken
+
+1. Open het venster voor geplande taken vanuit de sessiezijbalk.
+2. Voeg een taak toe en geef die een naam.
+3. Kies wanneer de taak draait:
+   - **dagelijks** op een of meer tijdstippen
+   - **wekelijks** op gekozen weekdagen en tijdstippen
+   - **eenmalig** op een specifieke datum en tijd
+   - **cron** volgens een zelfgekozen cron-expressie
+4. Stel de prompt, provider, het model en de agent in. De prompt mag een slash-opdracht zijn, zoals `/review`.
+5. Sla de taak op en controleer of deze is ingeschakeld.
+
+Met **Nu uitvoeren** kunt u elke taak meteen starten om te controleren of die doet wat u verwacht.
+
+Vink **Uitvoeren als doel** aan om de prompt tot voltooiing te laten uitvoeren in plaats van na één antwoord te stoppen. Zie [Sessiedoelen](/nl/session-goals/).
+
+## Loops: geplande taken als Markdown-bestanden
+
+Een **loop** is een geplande taak in een overdraagbaar Markdown-bestand dat u in uw repository kunt committen. Plaats een bestand in `.agents/loops/` en open de lijst met geplande taken om het te synchroniseren. Een serverherstart is niet nodig:
+
+```markdown
+---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: anthropic/claude-sonnet-4-5
+agent: plan
+timezone: Europe/Kyiv
+---
+Summarize repository changes since yesterday and post the digest.
+```
+
+### Waar bestanden staan
+
+- **Per project:** `.agents/loops/*.md` in de projectmap of een bovenliggende map, tot en met de hoofdmap van de Git-worktree.
+- **Per gebruiker:** `~/.agents/loops/*.md` geldt voor elk project dat u opent.
+
+Hebben een projectloop en een gebruikersloop dezelfde naam, dan krijgt de projectloop voorrang.
+
+### Velden
+
+| Veld | Betekenis |
+|---|---|
+| `name` | Taaknaam, verplicht en maximaal 80 tekens. |
+| `schedule` | Cron-expressie, verplicht. Loopbestanden ondersteunen alleen cron. |
+| `enabled` | Stel in op `true` om de taak uit te voeren. Loops staan **standaard uit**, zodat het committen van een bestand niet vanzelf een taak start. |
+| `model` | `provider/model`, verplicht, bijvoorbeeld `anthropic/claude-sonnet-4-5`. |
+| `agent` | Te gebruiken agent, optioneel. |
+| `timezone` | IANA-tijdzone, optioneel. Standaard wordt de tijdzone van de server gebruikt. |
+| inhoud | De uit te voeren prompt, verplicht. Mag een slash-opdracht zijn, zoals `/review src/`. |
+
+### Hoe loops werken
+
+- Zolang het bestand bestaat, **bepaalt het bestand de taakdefinitie**. **Bewerken** opent de ingebouwde bestandseditor, de aan/uit-schakelaar wijzigt de frontmatter en het verwijderen van de taak wist na bevestiging het Markdown-bestand. **Nu uitvoeren** blijft beschikbaar.
+- Uitvoeringsgegevens, zoals de vorige en volgende uitvoering en de status, staan in de projectconfiguratie en worden nooit in het Markdown-bestand teruggeschreven.
+- Een wijziging van `name` hernoemt de bestaande taak. Kan een bestand tijdelijk niet worden gelezen, bijvoorbeeld tijdens het bewerken of door een mergeconflict, dan blijft de laatst geldige taakdefinitie in gebruik totdat het bestand is hersteld.
+- Schema's van het type `daily`, `weekly` en `once`, en doelinstellingen, zijn alleen via de interface beschikbaar. Loopbestanden gebruiken altijd cron.
+
+## Het resultaat controleren
+
+Na een uitvoering toont de taak wanneer die voor het laatst draaide, of dat is gelukt en een link naar de aangemaakte sessie. Als de uitvoering mislukt, ziet u daar ook de fout.
+
+## Om te onthouden
+
+Taken starten alleen zolang de OpenChamber-server draait. Als u die sluit, worden geplande uitvoeringen onderbroken totdat de server weer draait.
+
+## Zie ook
+
+- [Opdrachten en snippets](/nl/commands-snippets/) om een slash-opdracht als prompt te hergebruiken

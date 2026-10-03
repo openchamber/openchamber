@@ -1,14 +1,11 @@
-import type { IconName } from '@/components/icon/icons';
 import type { I18nKey } from '@/lib/i18n';
 import type { PluginEntry, RegistryResult } from '@/stores/usePluginsStore';
 
 export interface ThirdPartyPluginDefinition {
   id: string;
   packageName: string;
+  /** The provider the plugin registers; its card shows that provider's logo. */
   providerId: string;
-  icon: IconName;
-  /** Brand mark tint (e.g. Claude orange); neutral marks use text-foreground. */
-  brandClassName: string;
   nameKey: I18nKey;
   descriptionKey: I18nKey;
   homepage: string;
@@ -19,21 +16,9 @@ export const THIRD_PARTY_PLUGINS: readonly ThirdPartyPluginDefinition[] = [
     id: 'opencode-claude',
     packageName: '@openchamber/opencode-claude',
     providerId: 'claude-code',
-    icon: 'claude-code',
-    brandClassName: 'text-[#D97757]',
     nameKey: 'settings.integrations.thirdParty.opencodeClaude.name',
     descriptionKey: 'settings.integrations.thirdParty.opencodeClaude.description',
     homepage: 'https://github.com/openchamber/opencode-claude',
-  },
-  {
-    id: 'opencode-cursor-oauth',
-    packageName: '@openchamber/opencode-cursor',
-    providerId: 'cursor',
-    icon: 'cursor',
-    brandClassName: 'text-foreground',
-    nameKey: 'settings.integrations.thirdParty.opencodeCursorOauth.name',
-    descriptionKey: 'settings.integrations.thirdParty.opencodeCursorOauth.description',
-    homepage: 'https://github.com/openchamber/opencode-cursor',
   },
 ] as const;
 

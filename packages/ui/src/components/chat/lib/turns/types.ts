@@ -1,4 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 
 export interface ChatMessageEntry {
     info: Message;
@@ -10,7 +10,6 @@ type TurnActivityKind = 'tool' | 'reasoning' | 'justification';
 export interface TurnMessageRecord {
     messageId: string;
     role: string;
-    parentMessageId?: string;
     message: ChatMessageEntry;
     order: number;
 }
@@ -36,8 +35,11 @@ export interface TurnDiffStats {
 
 export interface TurnChangedFile {
     file: string;
-    additions: number;
-    deletions: number;
+    /** Absent when neither the turn diff nor the tool call reports line counts. */
+    additions?: number;
+    deletions?: number;
+    /** False when the turn diff view has no entry for this path, so a pill cannot open it. */
+    inTurnDiff?: boolean;
 }
 
 export interface TurnActivityGroup {
@@ -115,6 +117,7 @@ export interface TurnGroupingContext {
     activityOwnerMessageId?: string;
     isFirstAssistantInTurn: boolean;
     isLastAssistantInTurn: boolean;
+    hasEarlierAssistantText?: boolean;
     isLatestTurn: boolean;
     summaryBody?: string;
     activityParts?: TurnActivityRecord[];
@@ -125,7 +128,8 @@ export interface TurnGroupingContext {
     diffStats?: TurnDiffStats;
     changedFiles?: TurnChangedFile[];
     userMessageCreatedAt?: number;
-    userMessageVariant?: string;
+    /** Model variant ("thinking" etc.) the turn ran with, read off its assistant messages. */
+    assistantVariant?: string;
     isWorking: boolean;
     isGroupExpanded?: boolean;
     toggleGroup?: () => void;

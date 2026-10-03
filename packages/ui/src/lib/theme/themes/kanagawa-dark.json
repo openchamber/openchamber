@@ -2,9 +2,9 @@
   "metadata": {
     "id": "kanagawa-dark",
     "name": "Kanagawa",
+    "variant": "dark",
     "description": "A color scheme inspired by Japanese art and ink painting - dark variant",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "japanese",
@@ -15,11 +15,10 @@
   "colors": {
     "primary": {
       "base": "#7FB4CA",
+      "foreground": "#1F1F28",
       "hover": "#9DC5E0",
       "active": "#658594",
-      "foreground": "#1F1F28",
-      "muted": "#7FB4CA80",
-      "emphasis": "#7E9CD8"
+      "muted": "#7FB4CA80"
     },
     "surface": {
       "background": "#1F1F28",
@@ -27,51 +26,30 @@
       "muted": "#23232d",
       "mutedForeground": "#8b8b85",
       "elevated": "#2A2A37",
-      "elevatedForeground": "#DCD7BA",
       "overlay": "#16161DCC",
       "subtle": "#2a2a36"
     },
     "interactive": {
       "border": "#333343",
-      "borderHover": "#54546D",
-      "borderFocus": "#7FB4CA",
       "selection": "#729fb333",
-      "selectionForeground": "#DCD7BA",
-      "focus": "#7FB4CA",
+      "borderHover": "#54546D",
       "focusRing": "#7FB4CA50",
-      "cursor": "#DCD7BA",
       "hover": "#363646",
       "active": "#54546D"
     },
     "status": {
       "error": "#E82424",
       "errorForeground": "#DCD7BA",
-      "errorBackground": "#E8242420",
-      "errorBorder": "#E8242450",
       "warning": "#FF9E3B",
       "warningForeground": "#1F1F28",
-      "warningBackground": "#FF9E3B20",
-      "warningBorder": "#FF9E3B50",
       "success": "#98BB6C",
       "successForeground": "#1F1F28",
-      "successBackground": "#98BB6C20",
-      "successBorder": "#98BB6C50",
       "info": "#7E9CD8",
-      "infoForeground": "#1F1F28",
-      "infoBackground": "#7E9CD820",
-      "infoBorder": "#7E9CD850"
-    },
-    "pr": {
-      "open": "#98BB6C",
-      "draft": "#54546D",
-      "blocked": "#FF9E3B",
-      "merged": "#957FB8",
-      "closed": "#E82424"
+      "infoForeground": "#1F1F28"
     },
     "syntax": {
       "base": {
-        "background": "#16161D",
-        "foreground": "#DCD7BA",
+        "background": "#18181f",
         "comment": "#54546D",
         "keyword": "#7E9CD8",
         "string": "#98BB6C",
@@ -83,56 +61,40 @@
       },
       "tokens": {
         "commentDoc": "#727169",
-        "stringEscape": "#DCD7BA",
         "keywordImport": "#957FB8",
-        "storageModifier": "#7E9CD8",
-        "functionCall": "#E6C384",
         "method": "#76946A",
         "variableProperty": "#7E9CD8",
         "variableOther": "#76946A",
         "variableGlobal": "#D27E99",
         "variableLocal": "#2A2A37",
-        "parameter": "#DCD7BA",
         "constant": "#DCD7BA",
-        "class": "#E6C384",
         "className": "#E6C384",
-        "interface": "#C8C093",
-        "struct": "#E6C384",
-        "enum": "#E6C384",
         "typeParameter": "#E6C384",
-        "namespace": "#C8C093",
-        "module": "#C34043",
-        "tag": "#7E9CD8",
         "jsxTag": "#D27E99",
         "tagAttribute": "#C8C093",
-        "tagAttributeValue": "#98BB6C",
         "boolean": "#C8C093",
         "decorator": "#C8C093",
         "label": "#D27E99",
-        "punctuation": "#54546D",
-        "macro": "#7E9CD8",
         "preprocessor": "#D27E99",
-        "regex": "#98BB6C",
         "url": "#7E9CD8",
         "key": "#E6C384",
         "exception": "#D27E99"
       },
       "highlights": {
-        "diffAdded": "#98BB6C",
         "diffAddedBackground": "#76946A20",
         "diffRemoved": "#C34043",
-        "diffRemovedBackground": "#E8242420",
-        "diffModified": "#7E9CD8",
-        "diffModifiedBackground": "#7E9CD820",
-        "lineNumber": "#363646",
-        "lineNumberActive": "#DCD7BA"
+        "lineNumber": "#363646"
       }
     },
+    "pr": {
+      "draft": "#54546D",
+      "merged": "#957FB8"
+    },
+    "chat": {
+      "userMessageBackground": "#2A2A37",
+      "divider": "#363646"
+    },
     "markdown": {
-      "heading1": "#DCD7BA",
-      "heading2": "#DCD7BA",
-      "heading3": "#DCD7BA",
-      "heading4": "#DCD7BA",
       "link": "#7FB4CA",
       "linkHover": "#7E9CD8",
       "inlineCode": "#98BB6C",
@@ -141,25 +103,13 @@
       "blockquoteBorder": "#363646",
       "listMarker": "#FF9E3B99"
     },
-    "chat": {
-      "userMessage": "#DCD7BA",
-      "userMessageBackground": "#2A2A37",
-      "assistantMessage": "#DCD7BA",
-      "assistantMessageBackground": "#2f2f3d",
-      "timestamp": "#54546D",
-      "divider": "#363646"
-    },
     "tools": {
-      "background": "#16161D50",
       "border": "#4a4a5f80",
-      "headerHover": "#36364650",
       "icon": "#afad9c",
       "title": "#DCD7BA",
       "description": "#818182",
       "edit": {
-        "added": "#98BB6C",
         "addedBackground": "#98BB6C25",
-        "removed": "#C34043",
         "removedBackground": "#C3404325",
         "lineNumber": "#56566d"
       }

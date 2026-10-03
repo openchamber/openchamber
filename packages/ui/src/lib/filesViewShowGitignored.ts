@@ -25,6 +25,9 @@ const notifyFilesViewShowGitignoredChanged = () => {
   window.dispatchEvent(new Event(SHOW_GITIGNORED_EVENT));
 };
 
+/** The device's current choice, read the same way the hook reads it. */
+export const getFilesViewShowGitignored = (): boolean => readStoredShowGitignored();
+
 export const setFilesViewShowGitignored = (
   value: boolean,
   options: { persist?: boolean } = {}

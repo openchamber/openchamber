@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 
@@ -112,8 +112,8 @@ export const isPathWithinProject = (directory?: string | null, projectPath?: str
 const isNormalizedPathWithinProject = (normalizedDirectory: string | null, normalizedProjectPath: string | null): boolean => {
   if (!normalizedDirectory || !normalizedProjectPath) return false;
   if (normalizedDirectory === normalizedProjectPath) return true;
-  if (normalizedProjectPath === '/') return normalizedDirectory.startsWith('/');
-  return normalizedDirectory.startsWith(`${normalizedProjectPath}/`);
+  const prefix = normalizedProjectPath.endsWith('/') ? normalizedProjectPath : `${normalizedProjectPath}/`;
+  return normalizedDirectory.startsWith(prefix);
 };
 
 export const normalizeForBranchComparison = (value: string): string => {

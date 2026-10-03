@@ -34,7 +34,12 @@ type DeviceFlowCompleteResponse =
   | { connected: true; user: GitHubUser; scope?: string }
   | { connected: false; status?: string; error?: string };
 
-export const GitHubSettings: React.FC = () => {
+type GitHubSettingsProps = {
+  /** Rendered inside the Integrations card: no section chrome of its own. */
+  embedded?: boolean;
+};
+
+export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
@@ -269,14 +274,8 @@ export const GitHubSettings: React.FC = () => {
     ? t('settings.github.page.accountSource.cli')
     : t('settings.github.page.accountSource.oauth');
 
-  return (
+  const accountSection = (
     <>
-      <SettingsSection
-        title={t('settings.github.page.oauth.title')}
-        divider={false}
-        settingsItem="git.github-account"
-        info={t('settings.github.page.tooltip.connectAccount')}
-      >
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         {connected ? (
           <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
@@ -445,10 +444,12 @@ export const GitHubSettings: React.FC = () => {
         </div>
       )}
 
-      </SettingsSection>
+    </>
+  );
 
-      {ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled) && (
-        <SettingsSection title={t('settings.github.page.ghCli.title')}>
+  const ghCliSection = ghCli?.available && !ghCli?.active && (!ghCli.user || ghCli.disabled)
+    ? (
+      <>
           <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
             <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
               <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
@@ -499,8 +500,40 @@ export const GitHubSettings: React.FC = () => {
               </Button>
             </div>
           </div>
+      </>
+    )
+    : null;
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        {accountSection}
+        {ghCliSection ? (
+          <div className="space-y-2">
+            <SettingsGroupTitle>{t('settings.github.page.ghCli.title')}</SettingsGroupTitle>
+            {ghCliSection}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <SettingsSection
+        title={t('settings.github.page.oauth.title')}
+        divider={false}
+        settingsItem="git.github-account"
+        info={t('settings.github.page.tooltip.connectAccount')}
+      >
+        {accountSection}
+      </SettingsSection>
+
+      {ghCliSection ? (
+        <SettingsSection title={t('settings.github.page.ghCli.title')}>
+          {ghCliSection}
         </SettingsSection>
-      )}
+      ) : null}
     </>
   );
 };

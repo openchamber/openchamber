@@ -1,18 +1,50 @@
 ---
 title: Integracje
-description: Używaj subskrypcji Claude lub Cursor jako dostawcy.
+description: Połącz usługi i subskrypcje, z którymi pracuje OpenChamber.
 ---
 
 # Integracje
 
-Integracja to mała wtyczka, która dodaje dostawcę do OpenChamber na podstawie subskrypcji, którą już masz. Zarządzasz nimi w **Settings → Integrations**.
+W **Ustawienia → Integracje** logujesz się do usług, z którymi pracuje OpenChamber. Logowanie jest zapisywane na serwerze OpenChamber, więc web, desktop i sparowany telefon korzystają z niego wspólnie.
 
-> **Funkcja eksperymentalna.** Staramy się przestrzegać zasad dostawców, ale ograniczenia i zawieszenia kont pozostają decyzją każdego dostawcy. Używaj integracji na własne ryzyko.
+## GitHub
 
-Dostępne integracje:
+Rozwiń kartę **GitHub** i wybierz **Connect GitHub**, aby zalogować się krótkim kodem urządzenia. Po połączeniu OpenChamber może rozpoczynać sesje z issues i pull requestów, dołączać je do wiadomości oraz otwierać i aktualizować PR-y. Wszystko, co potrafi GitHub, opisuje strona [Issues i PR na GitHub](/pl/github/).
 
-- **Claude Code** — Twój plan Claude Pro lub Max, bez kluczy API
-- **Cursor** — limity modeli z Twojego planu Cursor
+## Linear
+
+### Połącz przestrzeń roboczą
+
+1. Rozwiń kartę **Linear** i wybierz **Connect**.
+2. Zatwierdź dostęp w karcie przeglądarki, która się otworzy. Do tego czasu karta pokazuje **Waiting for Linear**.
+
+Kolejną organizację Linear połączysz przez **Add workspace**. Bieżąca jest zawsze jedna przestrzeń: przełączaj przez **Switch to**, a **Disconnect** usuwa tylko bieżącą. Mapowanie projektów zostaje.
+
+### Przeglądaj issues
+
+Gdy przestrzeń robocza jest połączona, w prawym pasku kontekstu pojawia się panel **Linear**. Wyświetla issues bieżącej przestrzeni i pozwala:
+
+- filtrować po statusie (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), osobie przypisanej (**Anyone** lub **Assigned to me**), zespole i priorytecie
+- szukać po tytule, identyfikatorze lub adresie URL Linear
+- otworzyć issue, aby przeczytać opis, komentarze, etykiety i priorytet
+- zmienić jego **Status** lub wybrać **Close issue**
+- przełączyć bieżący **Workspace**
+
+### Rozpocznij sesję z issue
+
+- W panelu Linear otwórz issue i wybierz **Start session**. Przycisk zostaje w stopce, gdy przewijasz issue.
+- W czacie wybierz **New Session From Linear Issue**, aby wybrać z listy, z opcją **Create in worktree**, jeśli chcesz świeżej gałęzi.
+- W oknie **New Worktree** wybierz issue z Linear. Nowa sesja otwiera się z issue dołączonym do pola wiadomości, a pierwszą wiadomość piszesz sam.
+
+Z panelu Linear i z czatu sesja otwiera się w projekcie zmapowanym do zespołu issue, a issue staje się pierwszym promptem. Zespoły mapujesz na karcie Linear: **Default project** obejmuje wszystkie zespoły, a **Team projects** nadpisuje go dla poszczególnych. Niezmapowany zespół najpierw poprosi o mapowanie. Pierwsza wiadomość powstaje z magic promptu **Issue Review**, który edytujesz w **Ustawienia → Magic Prompts → Linear**.
+
+### Dołącz issue do wiadomości
+
+W polu czatu otwórz menu **+** i wybierz **Linear**. Issue trafia jako kontekst do Twojej następnej wiadomości, a panel statusu pracy sesji zachowuje do niego link.
+
+### Komentarze sesji
+
+Włącz **Session comments** na karcie Linear, a sesja rozpoczęta z issue albo taka, której pierwsza wiadomość ma to issue dołączone, doda na nim komentarz przy starcie, zakończeniu lub błędzie, każdy z linkiem otwierającym sesję. Komentarze są publikowane tylko wtedy, gdy ten serwer OpenChamber ma publiczny adres, aby link działał dla wszystkich w issue; przy adresie lokalnym lub prywatnym nic nie jest publikowane.
 
 ## Instalacja integracji
 
@@ -25,21 +57,12 @@ Integracje instalują się dla Twojego użytkownika, więc działają w każdym 
 
 ## Claude Code
 
-Claude Code korzysta z Twojego planu Claude Pro lub Max — bez kluczy API i bez osobnej aplikacji Claude.
+Claude Code korzysta z Twojego planu Claude Pro lub Max przez Claude Code CLI na Twoim komputerze — bez kluczy API.
 
 1. Zainstaluj integrację (patrz wyżej).
 2. Wybierz **Set up** i zaloguj się. Jeśli nie masz jeszcze Claude Code CLI, konfiguracja zaoferuje najpierw jego instalację, a potem logowanie.
 
-Claude Code jest jedyną integracją tutaj, która wymaga zainstalowanego i zalogowanego CLI swojego dostawcy. Cursor nie wymaga swojego CLI.
-
 **Jak chronione jest Twoje konto Claude:** ta integracja używa oficjalnego Claude Agent SDK od Anthropic i Twojego zainstalowanego Claude Code CLI. Nie przechwytuje OAuth, nie wyodrębnia ani nie odtwarza tokenów przeglądarki, nie podszywa się pod nieobsługiwany klient i nie omija uwierzytelniania Anthropic. Działa na obsługiwanej przez Anthropic ścieżce dostępu, więc nie niesie ryzyka zablokowania konta związanego z przechwytywaniem tokenów lub nieautoryzowanymi obejściami uwierzytelniania.
-
-## Cursor
-
-Cursor udostępnia w OpenChamber modele zawarte w Twoim planie Cursor.
-
-1. Zainstaluj integrację (patrz wyżej).
-2. Wybierz **Set up**, otwórz link i zatwierdź dostęp w przeglądarce. Klucz API nie jest potrzebny. Lista modeli wczyta się automatycznie po zalogowaniu.
 
 ## Aktualizacja i usuwanie
 
@@ -48,7 +71,17 @@ Cursor udostępnia w OpenChamber modele zawarte w Twoim planie Cursor.
 
 Jeśli karta wskazuje, że wpisy wymagają ręcznego zarządzania, wybierz **Manage plugins** i wyczyść tam duplikaty.
 
+## Excalidraw
+
+Excalidraw pozwala rysować w plikach `.excalidraw` i rysunkach Obsidian `.excalidraw.md` bezpośrednio w Files. To rozszerzenie OpenChamber, widoczne w sekcji **OpenChamber extensions** na tej samej stronie.
+
+1. Otwórz **Settings → Integrations** i wybierz **Install** na karcie Excalidraw. Możesz też otworzyć rysunek w Files i wybrać **Install** w komunikacie nad nim.
+2. Otwórz rysunek ponownie. Płótno zastępuje tekst pliku, a Cmd/Ctrl+S, autozapis, przełącznik widoku źródła i tryb pełnoekranowy działają jak w każdym innym pliku.
+
+Karta aktualizuje rozszerzenie, gdy pojawi się nowa wersja, włącza je ponownie, jeśli je wstrzymano, i je usuwa. Po usunięciu Twoje rysunki pozostają bez zmian; po prostu otwierają się jako tekst. Tylko w wersji web i desktop.
+
 ## Powiązane
 
-- [Dostawcy, modele i agenci](/pl/providers/) — podłączanie innych dostawców i wybór modeli
-- [Zużycie i limity](/pl/usage/) — śledź, ile wykorzystałeś
+- [Issues i PR na GitHub](/pl/github/) — wszystko, co GitHub potrafi w OpenChamber
+- [Sesje worktree](/pl/worktrees/) — gdzie mogą zaczynać się sesje z issue
+- [Magic Prompts](/pl/magic-prompts/) — edytuj prompt, od którego zaczyna się sesja Linear

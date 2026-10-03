@@ -32,8 +32,9 @@ const createFixture = async ({ sources, markdown } = {}) => {
   const requestedSources = sources ?? [new URL(`file://${defaultPath}`).toString()];
   const text = markdown ?? requestedSources.map((source) => `![image](${source})`).join('\n');
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-    info: { id: 'msg_1', role: 'assistant' },
-    parts: [{ type: 'text', text }],
+    id: 'msg_1',
+    type: 'assistant',
+    content: [{ type: 'text', text }],
   }), { status: 200, headers: { 'content-type': 'application/json' } }));
   vi.stubGlobal('fetch', fetchMock);
 
@@ -95,8 +96,9 @@ describe('session image assets', () => {
     await fs.writeFile(temporaryPath, PNG);
     const temporarySource = new URL(`file://${temporaryPath}`).toString();
     fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      info: { id: 'msg_1', role: 'assistant' },
-      parts: [{ type: 'text', text: `![workspace](workspace.png)\n![temporary](${temporarySource})` }],
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `![workspace](workspace.png)\n![temporary](${temporarySource})` }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
 
     const response = await prepare(fixture.app, fixture.directory, ['workspace.png', temporarySource]);
@@ -212,8 +214,9 @@ describe('session image assets', () => {
     await fs.writeFile(outsidePath, PNG);
     const source = new URL(`file://${outsidePath}`).toString();
     fixture.fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      info: { id: 'msg_1', role: 'assistant' },
-      parts: [{ type: 'text', text: `![outside](${source})` }],
+      id: 'msg_1',
+      type: 'assistant',
+      content: [{ type: 'text', text: `![outside](${source})` }],
     }), { status: 200, headers: { 'content-type': 'application/json' } }));
 
     const response = await prepare(fixture.app, fixture.directory, [source]);

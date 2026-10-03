@@ -10,9 +10,7 @@ import {
   discoverGitCredentials,
   getGlobalGitIdentity
 } from "@/lib/gitApi";
-import { reportSettingsSaveState, updateDesktopSettings } from "@/lib/persistence";
-import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
-import { runtimeFetch } from "@/lib/runtime-fetch";
+import { loadDesktopSettings, reportSettingsSaveState, updateDesktopSettings } from "@/lib/persistence";
 
 export type GitIdentityAuthType = 'ssh' | 'token';
 
@@ -136,45 +134,9 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
         },
 
         loadDefaultGitIdentityId: async () => {
-          const normalize = (value: unknown): string | null => {
-            if (typeof value !== 'string') {
-              return null;
-            }
-            const trimmed = value.trim();
-            return trimmed.length > 0 ? trimmed : null;
-          };
-
           try {
-            let defaultId: string | null = null;
-
-            if (defaultId === null) {
-              const runtimeSettings = getRegisteredRuntimeAPIs()?.settings;
-              if (runtimeSettings) {
-                try {
-                  const result = await runtimeSettings.load();
-                  const settings = (result?.settings || {}) as Record<string, unknown>;
-                  defaultId = normalize(settings.defaultGitIdentityId);
-                } catch {
-                  // fall through
-                }
-              }
-            }
-
-            if (defaultId === null) {
-              try {
-                const response = await runtimeFetch('/api/config/settings', {
-                  method: 'GET',
-                  headers: { Accept: 'application/json' },
-                });
-                if (response.ok) {
-                  const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-                  defaultId = normalize(data?.defaultGitIdentityId);
-                }
-              } catch {
-                // ignore
-              }
-            }
-
+            const settings = await loadDesktopSettings();
+            const defaultId = settings?.defaultGitIdentityId?.trim() || null;
             set({ defaultGitIdentityId: defaultId });
             return true;
           } catch (error) {

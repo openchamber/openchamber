@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
+import { BlockLine } from './BlockLine';
 
 const IDENTITY_KEYS = new Set(['id', 'identifier', 'title', 'name']);
 
@@ -43,12 +44,12 @@ const JsonSummaryValue = React.memo(({
         const summary = label ? `${formatKey(label)} (${value.length})` : `(${value.length})`;
         return (
             <details open={depth < 2} className="group/json-summary">
-                <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-[var(--surface-mutedForeground)]">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-foreground hover:text-muted-foreground">
                     <Icon name="arrow-right-s" className="h-3.5 w-3.5 shrink-0 transition-transform group-open/json-summary:rotate-90" />
                     <span className="min-w-0 truncate font-medium">{summary}</span>
                 </summary>
                 <div className="relative ml-1 pl-3 pb-1">
-                    <span aria-hidden="true" className="pointer-events-none absolute bottom-1 left-0 top-0 w-px bg-[var(--tools-border)]" />
+                    <BlockLine bottomOffset={4} />
                     <div className="space-y-1">
                     {value.map((item, index) => <JsonSummaryValue key={index} value={item} depth={depth + 1} />)}
                     </div>
@@ -68,17 +69,17 @@ const JsonSummaryValue = React.memo(({
         );
 
         if (!label && depth === 0) {
-            return <div className="space-y-2">{identity ? <div className="typography-meta font-medium text-[var(--surface-foreground)]">{identity}</div> : null}{content}</div>;
+            return <div className="space-y-2">{identity ? <div className="typography-meta font-medium text-foreground">{identity}</div> : null}{content}</div>;
         }
 
         return (
             <details open={depth < 2} className="group/json-summary">
-                <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-[var(--surface-mutedForeground)]">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-foreground hover:text-muted-foreground">
                     <Icon name="arrow-right-s" className="h-3.5 w-3.5 shrink-0 transition-transform group-open/json-summary:rotate-90" />
                     <span className="min-w-0 truncate font-medium">{summary ?? (label ? formatKey(label) : '{}')}</span>
                 </summary>
                 <div className="relative ml-1 pl-3 pb-1">
-                    <span aria-hidden="true" className="pointer-events-none absolute bottom-1 left-0 top-0 w-px bg-[var(--tools-border)]" />
+                    <BlockLine bottomOffset={4} />
                     {content}
                 </div>
             </details>
@@ -89,12 +90,12 @@ const JsonSummaryValue = React.memo(({
     const renderedValue = typeof value === 'string' && isUrl(value) ? (
         <a href={value} target="_blank" rel="noopener noreferrer" className="truncate text-[var(--status-info)] underline underline-offset-2 hover:opacity-80" title={value}>{value}</a>
     ) : (
-        <span className={cn('min-w-0 break-words', value === null ? 'text-[var(--surface-mutedForeground)]' : 'text-[var(--surface-foreground)]')}>{text}</span>
+        <span className={cn('min-w-0 break-words', value === null ? 'text-muted-foreground' : 'text-foreground')}>{text}</span>
     );
 
     return (
         <div className="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-2 py-1 typography-meta">
-            {label ? <span className="truncate text-[var(--surface-mutedForeground)]" title={label}>{formatKey(label)}</span> : <span />}
+            {label ? <span className="truncate text-muted-foreground" title={label}>{formatKey(label)}</span> : <span />}
             {renderedValue}
         </div>
     );

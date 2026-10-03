@@ -1,9 +1,10 @@
-import type { UsageWindow } from '@/types';
+import type { QuotaProviderId, UsageWindow } from '@/types';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
+import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 
 interface UsageCardProps {
   title: string;
@@ -12,6 +13,7 @@ interface UsageCardProps {
   showToggle?: boolean;
   toggleEnabled?: boolean;
   onToggle?: (enabled: boolean) => void;
+  providerId?: QuotaProviderId;
 }
 
 export const UsageCard: React.FC<UsageCardProps> = ({
@@ -21,13 +23,20 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   showToggle = false,
   toggleEnabled = false,
   onToggle,
+  providerId,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const displayPercent = displayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+  // A balance-only window (DeepSeek's credits balance) carries a value label
+  // and no percentage. An empty track with a "used" caption under it read as
+  // "0% used", so the bar and its caption only render when there is a share
+  // to show; the reset time still does.
+  const hasPercent = displayPercent !== null;
   const barLabel = displayMode === 'remaining' ? 'remaining' : 'used';
   const percentLabel = formatQuotaValueLabel(window.valueLabel, displayPercent);
   const resetLabel = formatQuotaResetLabel(window.resetAt, window.resetAfterFormatted ?? window.resetAtFormatted, timeFormatPreference);
+  const resetText = resetLabel ? `Resets ${resetLabel}` : '';
   const windowLabel = formatWindowLabel(title);
 
   return (
@@ -48,26 +57,33 @@ export const UsageCard: React.FC<UsageCardProps> = ({
             )}
           </div>
         </div>
-        <div className="typography-ui-label text-foreground tabular-nums flex items-center justify-end">
-          {percentLabel === '-' ? '' : percentLabel}
+        <div className="flex items-center justify-end gap-1">
+          {providerId && <UsageGiftResetButton window={window} providerId={providerId} />}
+          <div className="typography-ui-label text-foreground tabular-nums">
+            {percentLabel === '-' ? '' : percentLabel}
+          </div>
         </div>
       </div>
 
-      <div className="mt-2.5">
-        <UsageProgressBar
-          percent={displayPercent}
-          tonePercent={window.usedPercent}
-          className="h-1.5"
-        />
-        <div className="mt-1 flex items-center justify-between">
-          <span className="typography-micro text-muted-foreground">
-            {resetLabel ? `Resets ${resetLabel}` : ''}
-          </span>
-          <span className="typography-micro text-muted-foreground">
-            {barLabel}
-          </span>
+      {hasPercent ? (
+        <div className="mt-2.5">
+          <UsageProgressBar
+            percent={displayPercent}
+            tonePercent={window.usedPercent}
+            className="h-1.5"
+          />
+          <div className="mt-1 flex items-center justify-between">
+            <span className="typography-micro text-muted-foreground">
+              {resetText}
+            </span>
+            <span className="typography-micro text-muted-foreground">
+              {barLabel}
+            </span>
+          </div>
         </div>
-      </div>
+      ) : resetText ? (
+        <div className="mt-1 typography-micro text-muted-foreground">{resetText}</div>
+      ) : null}
 
     </div>
   );

@@ -14,7 +14,7 @@ interface InlineCommentCardProps {
   maxWidth?: number;
 }
 
-const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]';
+const HEADER_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
 
 /**
  * A saved inline comment shown under its lines in the diff/editor. Styled to
@@ -49,13 +49,13 @@ export function InlineCommentCard({
     >
       <div
         className="flex items-center gap-1.5 px-3 py-1.5"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 8%, transparent)' }}
+        style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}
       >
-        <span className="min-w-0 max-w-[200px] truncate text-xs font-medium text-[var(--surface-foreground)]" title={draft.fileLabel}>
+        <span className="min-w-0 max-w-[200px] truncate text-xs font-medium text-foreground" title={draft.fileLabel}>
           {draft.fileLabel}
         </span>
-        <span className="text-xs text-[var(--surface-mutedForeground)]">•</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-[var(--surface-mutedForeground)]">
+        <span className="text-xs text-muted-foreground">•</span>
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           {t('inlineComment.range.lines', { start: draft.startLine, end: draft.endLine })}
           {draft.side ? ` (${draft.side})` : ''}
         </span>
@@ -83,7 +83,7 @@ export function InlineCommentCard({
 
       <div className="px-3 py-2">
         <Collapsible open={isOpen || !isLongContent} onOpenChange={setIsOpen}>
-          <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-[var(--surface-foreground)]', !isOpen && isLongContent && 'line-clamp-3')}>
+          <div className={cn('whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground', !isOpen && isLongContent && 'line-clamp-3')}>
             {draftText}
           </div>
 

@@ -12,6 +12,7 @@ describe('shouldScheduleFileAutosave', () => {
     selectedFilePath: '/repo/a.txt',
     loadedFilePath: '/repo/a.txt',
     isNonEditableBinary: false,
+    wouldEmptyFile: false,
   };
 
   test('schedules when dirty text file is fully loaded', () => {
@@ -27,6 +28,10 @@ describe('shouldScheduleFileAutosave', () => {
   test('skips when autosave disabled or file is binary', () => {
     expect(shouldScheduleFileAutosave({ ...ready, autoSaveEnabled: false })).toBe(false);
     expect(shouldScheduleFileAutosave({ ...ready, isNonEditableBinary: true })).toBe(false);
+  });
+
+  test('never empties a non-empty file on its own', () => {
+    expect(shouldScheduleFileAutosave({ ...ready, wouldEmptyFile: true })).toBe(false);
   });
 
   test('skips when not dirty, cannot write, or already saving', () => {
