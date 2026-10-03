@@ -42,6 +42,7 @@ import {
 import { ReviewFlowDialog, type ReviewFlowExecution } from '@/components/session/ReviewFlowDialog';
 import { BtwPanel } from './btw/BtwPanel';
 import { useBtwPanelState } from './btw/useBtwPanelState';
+import { findCatalogModel } from '@/lib/opencode/model';
 import { resolveBtwSelection, useBtwStore } from '@/stores/useBtwStore';
 import { wasPromotedBtwSession } from '@/lib/sessionBtwMetadata';
 import { buildBtwSyntheticTexts, preparePendingBtwSend, startBtwSession } from '@/lib/btw';
@@ -519,6 +520,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [reviewDialogOpen, setReviewDialogOpen] = React.useState(false);
     const [reviewFlowSubmitting, setReviewFlowSubmitting] = React.useState(false);
 
+    const providerCatalog = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => state.currentProviderId);
     const currentModelId = useConfigStore((state) => state.currentModelId);
     const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
@@ -548,6 +550,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const effectiveBtwSelection = resolveBtwSelection({
         agents,
         savedAgent: btwAgentSelection,
+        isModelAvailable: React.useCallback(({ providerId, modelId }: { providerId: string; modelId: string }) => {
+            const provider = providerCatalog.find((candidate) => candidate.id === providerId);
+            return Boolean(provider && findCatalogModel(provider.models, modelId));
+        }, [providerCatalog]),
         savedModel: btwModelSelection,
         savedVariant: btwSavedVariant,
         composerModel: currentProviderId && currentModelId ? { providerId: currentProviderId, modelId: currentModelId } : null,
