@@ -26,10 +26,9 @@ Use this doc when you ask an agent to change tool/header/description behavior.
   - If you want to change expandable tool layout, edit here.
 
 - `taskToolModel.ts`
-  - Owns subagent metadata parsing and child-session summary projection.
-  - `part.state.metadata.sessionID` is the only live identity contract between a `subagent` call and its child session.
-  - A running subagent may briefly have no session id; render it as waiting until the authoritative part update arrives. Never match parallel children by order, title, timestamp, or status.
-  - Part-level metadata and output parsing exist only for older persisted records and never override state metadata.
+  - Owns subagent metadata parsing and child-session summary projection. `ToolPart.tsx` resolves the call's child identity.
+  - A subagent's `state.metadata.sessionID` is the preferred child identity from progress/result updates. Legacy part metadata and output IDs remain readable, then a non-empty `state.input.sessionID` identifies a resumed child when those IDs are absent.
+  - If none of those sources names a child, a running call may infer one from child sessions created at or after the call start. Candidates must belong to the parent, match the requested agent when the session has one, and remain unclaimed by sibling calls. A unique candidate is accepted; when several remain, the call description must uniquely match the child title. Ambiguous calls stay unlinked. Inference never pairs children by sibling order or status.
 
 - `toolPresentation.tsx`
   - Shared icon mapping for tool names (`getToolIcon`).

@@ -173,7 +173,7 @@ test('subagent patch summaries show file names and update when the same call cha
 test('a running subagent without the progress join resolves its child session from the store', async () => {
   const running: ToolPartData = {
     ...parent,
-    state: { status: 'running', input: { description: 'Look around', agent: 'explore' }, time: { start: 100 } },
+    state: { status: 'running', input: { description: 'Look around', agent: 'explore', sessionID: '  ' }, time: { start: 100 } },
   };
   await withHarness(running, async (store, container) => {
     expect(container.textContent).toContain('Waiting for subagent activity');
@@ -192,5 +192,80 @@ test('a running subagent without the progress join resolves its child session fr
     }));
     expect(container.textContent).not.toContain('Waiting for subagent activity');
     expect(container.textContent).toContain('found.ts');
+  });
+});
+
+test('a resumed subagent uses its explicit child id when that child predates the call', async () => {
+  const running: ToolPartData = {
+    ...parent,
+    state: {
+      status: 'running',
+      input: { description: 'Look around', agent: 'explore', sessionID: 'child' },
+      time: { start: 100 },
+    },
+  };
+  await withHarness(running, async (store, container) => {
+    await act(async () => store.setState({
+      session: [{
+        id: 'child', parentID: 'parent', projectID: 'p', directory: '/workspace', title: 'child', agent: 'explore',
+        cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 50, updated: 120 },
+      }],
+      message: { child: [{
+        id: 'child-message', sessionID: 'child', role: 'assistant',
+        agent: 'explore', providerID: 'test', modelID: 'test',
+        time: { created: 121, completed: 122 },
+      }] },
+      part: { 'child-message': [patchPart(['src/resumed.ts'])] },
+    }));
+
+    expect(container.textContent).not.toContain('Waiting for subagent activity');
+    expect(container.textContent).toContain('resumed.ts');
+    expect(container.textContent).toContain('Open Explore subtask');
+  });
+});
+
+test('progress metadata takes precedence over a different explicit child id', async () => {
+  const running: ToolPartData = {
+    ...parent,
+    state: {
+      status: 'running',
+      input: { description: 'Look around', agent: 'explore', sessionID: 'input-child' },
+      metadata: { sessionID: 'metadata-child' },
+      time: { start: 100 },
+    },
+  };
+  await withHarness(running, async (store, container) => {
+    const childMessage = (sessionID: string) => ({
+      id: `${sessionID}-message`, sessionID, role: 'assistant' as const,
+      agent: 'explore', providerID: 'test', modelID: 'test',
+      time: { created: 121, completed: 122 },
+    });
+    const childPatch = (sessionID: string, path: string) => ({
+      ...patchPart([path]),
+      id: `${sessionID}-patch`,
+      sessionID,
+      messageID: `${sessionID}-message`,
+    });
+    const childSession = (id: string) => ({
+      id, parentID: 'parent', projectID: 'p', directory: '/workspace', title: id, agent: 'explore',
+      cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 50, updated: 120 },
+    });
+
+    await act(async () => store.setState({
+      session: [childSession('metadata-child'), childSession('input-child')],
+      message: {
+        'metadata-child': [childMessage('metadata-child')],
+        'input-child': [childMessage('input-child')],
+      },
+      part: {
+        'metadata-child-message': [childPatch('metadata-child', 'src/metadata.ts')],
+        'input-child-message': [childPatch('input-child', 'src/input.ts')],
+      },
+    }));
+
+    expect(container.textContent).toContain('metadata.ts');
+    expect(container.textContent).not.toContain('input.ts');
   });
 });
