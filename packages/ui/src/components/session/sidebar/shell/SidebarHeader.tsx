@@ -99,7 +99,27 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const onToggleSectionCollapse = offerCollapseAll ? collapseAllSections : expandAllSections;
 
   if (hideDirectoryControls) {
-    return null;
+    // VS Code: the sidebar is always a single workspace, so project/directory
+    // controls stay hidden, but session search is still useful. Show a compact,
+    // always-visible search input at the top of the sessions list.
+    return (
+      <div className="select-none flex-shrink-0 px-2.5 py-1.5">
+        <SessionSearchInput
+          inputRef={sessionSearchInputRef}
+          value={sessionSearchQuery}
+          onSearch={setSessionSearchQuery}
+          onClose={() => setIsSessionSearchOpen(false)}
+          placeholder={t('sessions.sidebar.header.search.placeholder')}
+          clearLabel={t('sessions.sidebar.header.search.clear')}
+          leadingHint={hasSessionSearchQuery
+            ? (searchMatchCount === 1
+              ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+              : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
+            : undefined}
+          trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+        />
+      </div>
+    );
   }
 
   return (
