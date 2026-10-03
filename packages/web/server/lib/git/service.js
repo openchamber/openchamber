@@ -370,6 +370,27 @@ const buildGitEnv = async () => {
   return env;
 };
 
+// simple-git refuses every command whose env holds a variable that runs a
+// program (EDITOR, PAGER, GIT_SSH_COMMAND, GIT_ASKPASS, ...) unless its unsafe
+// category is enabled, and the same categories also guard -c and other
+// arguments, so enabling them would weaken argument protection. A variable the
+// server's own environment passes through unchanged is what git would inherit
+// without an env anyway, so it goes on the prototype: simple-git's check copies
+// only own keys, while child_process.spawn passes inherited keys to the child.
+// Whatever OpenChamber sets or changes stays an own key and is still checked.
+const toSimpleGitEnv = (env) => {
+  const passedThrough = {};
+  const changed = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (process.env[key] === value) {
+      passedThrough[key] = value;
+    } else {
+      changed[key] = value;
+    }
+  }
+  return Object.assign(Object.create(passedThrough), changed);
+};
+
 const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
   const env = await buildGitEnv();
   // simple-git scans explicit env values, including inherited ones. Remove its
@@ -405,13 +426,14 @@ const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafe
   if (typeof baseDir !== 'string' || !baseDir.trim()) {
     throw new Error('Git directory is required');
   }
+  // simple-git ignores an `env` constructor option; only .env() reaches git.
   return createSimpleGit({
     baseDir,
     spawnOptions,
     binary,
     unsafe,
     ...(timeout ? { timeout } : {}),
-  });
+  }).env(toSimpleGitEnv(env));
 };
 
 // Global config reads do not need a repository; use the home directory as a
