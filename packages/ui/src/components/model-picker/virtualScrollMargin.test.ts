@@ -44,4 +44,11 @@ describe('virtualized section below other content', () => {
     const bottom = visibleIndexes(SECTION_TOP + COUNT * ROW - VIEWPORT);
     expect(bottom.at(-1)).toBe(COUNT - 1);
   });
+
+  test('keeps a full window of rows when the scroller is past the section end', () => {
+    // Unclamped, an offset beyond the section collapses the range to its last row.
+    const past = visibleIndexes(SECTION_TOP + COUNT * ROW + 200);
+    expect(past.at(-1)).toBe(COUNT - 1);
+    expect(past.length).toBeGreaterThan(1);
+  });
 });

@@ -200,7 +200,7 @@
     "vite": "^7.1.2"
   },
   "patchedDependencies": {
-    "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
+    "@tanstack/virtual-core@3.17.11": "bun-patches/@tanstack+virtual-core+3.17.11.patch",
     "bun-pty@0.4.8": "bun-patches/bun-pty@0.4.8.patch",
     "@legendapp/list@3.3.10": "bun-patches/@legendapp%2Flist@3.3.10.patch",
     "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch"
