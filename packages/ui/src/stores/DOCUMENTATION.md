@@ -33,6 +33,16 @@ new one, and a load never joins a read that began in an older generation. It
 waits for that read and reads again, so a refresh after a delete cannot be
 answered by the read the delete itself started.
 
+Agent refreshes keep the ambient project and each location that raised the
+catalog event in the same batch. Settings can show a different project from the
+app, so refreshing only the ambient cache leaves its list stale. Invalidating a
+directory retires the Settings store, the composer store and the shared client
+request for that key. Their older responses cannot restore a pre-change list or
+stamp a fresh TTL over the replacement request. A runtime switch clears the
+directory maps and rejects loads captured from the previous runtime.
+
+A same-runtime load retired by a catalog change waits for the replacement list before it returns. A create or delete waiting for that read therefore keeps its successful result; the retired response itself publishes nothing. A runtime switch still returns failure instead of joining work for another runtime.
+
 Plugin catalogs carry `loadedDirectory` and `loadedRuntimeKey`, the owner of
 the installed list. The editor waits for that directory's catalog before hydrating a draft;
 plugin IDs alone are not unique across projects. Catalog requests and their

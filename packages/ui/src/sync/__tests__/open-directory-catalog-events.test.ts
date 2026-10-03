@@ -6,6 +6,7 @@ import { createEventRoutingIndex, handleEvent } from "../sync-context"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { useAgentsStore } from "@/stores/useAgentsStore"
 import { useMcpStore } from "@/stores/useMcpStore"
+import { useConfigStore } from "@/stores/useConfigStore"
 
 // OpenCode announces a rebuilt catalog in the location it rebuilt it for. The
 // project being worked in has a directory store, so its events take the
@@ -20,6 +21,7 @@ describe("catalog events for an open directory", () => {
   let agentLoads = 0
   let directoryAgentReads: Array<string | null | undefined> = []
   const originalLoadAgents = useAgentsStore.getState().loadAgents
+  const originalConfigLoadAgents = useConfigStore.getState().loadAgents
   const originalListAgents = opencodeClient.listAgents
   const originalDirectory = opencodeClient.getDirectory()
 
@@ -28,6 +30,8 @@ describe("catalog events for an open directory", () => {
     childStores.ensureChild("/open", { bootstrap: false })
     agentLoads = 0
     directoryAgentReads = []
+    opencodeClient.setDirectory("/open")
+    useConfigStore.setState({ loadAgents: async () => true })
     useAgentsStore.setState({
       loadAgents: async () => {
         agentLoads += 1
@@ -43,6 +47,7 @@ describe("catalog events for an open directory", () => {
   afterEach(() => {
     childStores.disposeAll()
     useAgentsStore.setState({ loadAgents: originalLoadAgents })
+    useConfigStore.setState({ loadAgents: originalConfigLoadAgents })
     opencodeClient.listAgents = originalListAgents
     opencodeClient.setDirectory(originalDirectory)
   })
@@ -60,7 +65,7 @@ describe("catalog events for an open directory", () => {
 
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
-    expect(agentLoads).toBe(1)
+    expect(agentLoads).toBe(2)
   })
 
   // Reading a directory makes OpenCode start it, MCP servers included. The

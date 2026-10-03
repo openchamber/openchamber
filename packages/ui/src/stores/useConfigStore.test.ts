@@ -186,6 +186,7 @@ mock.module('@/lib/opencode/client', () => ({
     }),
     clearConfigCache: mock(() => undefined),
     getDirectoryAvailability: mock(async () => directoryAvailability),
+    invalidateAgentList: mock(() => undefined),
   },
 }));
 
@@ -243,6 +244,7 @@ const {
   markConfigCatalogStale,
   selectKnownAgent,
   selectKnownCatalogModel,
+  invalidateConfigAgentsLoad,
 } = await import('./useConfigStore');
 const { emitSyncConfigChanged, setSyncRefs } = await import('@/sync/sync-refs');
 const { useSelectionStore } = await import('@/sync/selection-store');
@@ -1407,6 +1409,30 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().isInitialized).toBe(true);
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
   }, 10_000);
+
+  test('agent invalidation supersedes the config store load already in flight', async () => {
+    const staleAgents = deferred<TestAgent[]>();
+    let calls = 0;
+    listAgentsImpl = async () => {
+      calls += 1;
+      if (calls === 1) return staleAgents.promise;
+      return [{ name: 'new-agent', mode: 'primary' }];
+    };
+
+    const staleLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:stale' });
+    await Promise.resolve();
+    expect(calls).toBe(1);
+
+    invalidateConfigAgentsLoad(DIRECTORY);
+    const freshLoad = useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:fresh' });
+    staleAgents.resolve([{ name: 'old-agent', mode: 'primary' }]);
+
+    expect(calls).toBe(2);
+    expect(await staleLoad).toBe(true);
+    expect(await freshLoad).toBe(true);
+    expect(selectConfigAgentsForDirectory(useConfigStore.getState(), DIRECTORY).map((entry) => entry.name))
+      .toEqual(['new-agent']);
+  });
 
   test('publishes configured defaults before slow catalogs finish', async () => {
     const providers = deferred<TestProviderResponse>();

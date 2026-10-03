@@ -992,6 +992,9 @@ subscribeRuntimeEndpointChanged((detail) => {
     _providersStaleAt.clear();
     _agentsStaleAt.clear();
     _agentsLoadErrors.clear();
+    _inFlightProviders.clear();
+    _inFlightAgents.clear();
+    _agentsLoadGeneration.clear();
     _initializeAppInFlight = null;
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     useConfigStore.setState({
@@ -1353,7 +1356,18 @@ export type InitFailure = {
 // In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
 const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
+const _agentsLoadGeneration = new Map<string, number>();
 let _initializeAppInFlight: Promise<void> | null = null;
+
+export const invalidateConfigAgentsLoad = (directory?: string | null): void => {
+    const runtimeContext = captureConfigRuntimeContext();
+    const directoryKey = toConfigDirectoryKey(directory);
+    const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
+    _agentsLoadedAt.delete(directoryKey);
+    _agentsLoadGeneration.set(inFlightKey, (_agentsLoadGeneration.get(inFlightKey) ?? 0) + 1);
+    _inFlightAgents.delete(inFlightKey);
+    opencodeClient.invalidateAgentList(fromDirectoryKey(directoryKey));
+};
 
 /**
  * Providers of one project. Returns a stored array, so components can select it
@@ -2526,8 +2540,13 @@ export const useConfigStore = create<ConfigStore>()(
                         return existing;
                     }
 
+                    const loadGeneration = _agentsLoadGeneration.get(inFlightKey) ?? 0;
+                    const isCurrentAgentLoad = () => (
+                        isConfigRuntimeContextCurrent(runtimeContext)
+                        && (_agentsLoadGeneration.get(inFlightKey) ?? 0) === loadGeneration
+                    );
                     const promise = (async (): Promise<boolean> => {
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                    if (!isCurrentAgentLoad()) return false;
                     const loadRevision = _catalogRevision;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadAgents:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
@@ -2555,7 +2574,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 get().loadSessionDefaults(),
                             ]);
 
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                            if (!isCurrentAgentLoad()) return false;
                             if (!defaultsLoaded && !get().settingsDefaultsLoaded) {
                                 throw new Error('Session defaults are not available yet');
                             }
@@ -2582,9 +2601,9 @@ export const useConfigStore = create<ConfigStore>()(
                             });
                             const resolvedZenModel = resolvedGitSelection?.modelId || defaultZenModel;
 
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                            if (!isCurrentAgentLoad()) return false;
                             set((state) => {
-                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                                if (!isCurrentAgentLoad()) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers,
                                     agents: previousAgents,
@@ -2656,9 +2675,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 ) {
                                     get().applyDefaultModelAgentSelection(getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey)));
                                 }
-                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                                if (!isCurrentAgentLoad()) return false;
                                 set((state) => {
-                                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                                    if (!isCurrentAgentLoad()) return state;
                                     const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                         providers,
                                         agents: [],
@@ -2727,9 +2746,9 @@ export const useConfigStore = create<ConfigStore>()(
                             const resolvedModelId = resolvedDefault.modelId;
                             const resolvedVariant = resolvedDefault.variant;
 
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                            if (!isCurrentAgentLoad()) return false;
                             set((state) => {
-                                if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                                if (!isCurrentAgentLoad()) return state;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers,
                                     agents: safeAgents,
@@ -2832,11 +2851,11 @@ export const useConfigStore = create<ConfigStore>()(
                             if (readProjectConfigError(error)) break;
                             const waitMs = 200 * (attempt + 1);
                             await new Promise((resolve) => setTimeout(resolve, waitMs));
-                            if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                            if (!isCurrentAgentLoad()) return false;
                         }
                     }
 
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                    if (!isCurrentAgentLoad()) return false;
                     console.error("Failed to load agents:", lastError);
                     _agentsLoadErrors.set(directoryKey, lastError instanceof Error ? lastError.message : String(lastError ?? ''));
                     const configError = readProjectConfigError(lastError);
@@ -2851,9 +2870,9 @@ export const useConfigStore = create<ConfigStore>()(
                         error: lastError instanceof Error ? lastError.message : String(lastError),
                     });
 
-                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
+                    if (!isCurrentAgentLoad()) return false;
                     set((state) => {
-                        if (!isConfigRuntimeContextCurrent(runtimeContext)) return state;
+                        if (!isCurrentAgentLoad()) return state;
                         const providers = state.activeDirectoryKey === directoryKey
                             ? state.providers
                             : (state.directoryScoped[directoryKey]?.providers ?? []);
@@ -2890,10 +2909,22 @@ export const useConfigStore = create<ConfigStore>()(
                     });
 
                     return false;
-                    })().finally(() => _inFlightAgents.delete(inFlightKey));
+                    })();
 
                     _inFlightAgents.set(inFlightKey, promise);
-                    return promise;
+                    let loaded: boolean;
+                    try {
+                        loaded = await promise;
+                    } finally {
+                        if (_inFlightAgents.get(inFlightKey) === promise) {
+                            _inFlightAgents.delete(inFlightKey);
+                        }
+                    }
+                    if (isConfigRuntimeContextCurrent(runtimeContext)
+                        && (_agentsLoadGeneration.get(inFlightKey) ?? 0) !== loadGeneration) {
+                        return get().loadAgents({ directory: configDirectory, source });
+                    }
+                    return loaded;
                 },
 
                 invalidateModelMetadataCache: () => {
