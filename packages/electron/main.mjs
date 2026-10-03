@@ -3831,7 +3831,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
       const client = await getDevTunnelClient();
       const result = await client.open({ baseUrl, port, headers });
-      return { localPort: result.localPort, reused: result.reused, url: `http://127.0.0.1:${result.localPort}/` };
+      return { localPort: result.localPort, reused: result.reused, url: `http://openchamber-preview.localhost:${result.localPort}/` };
     }
 
     case 'desktop_dev_tunnel_close': {

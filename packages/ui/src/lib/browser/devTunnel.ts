@@ -17,7 +17,7 @@ import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { isLoopbackUrl } from './url';
+import { DEV_TUNNEL_HOSTNAME, isLoopbackUrl } from './url';
 
 type TunnelResult = { localPort: number };
 
@@ -120,7 +120,7 @@ const rewriteToLocalPort = (url: string, localPort: number): string => {
   try {
     const parsed = new URL(url);
     parsed.protocol = 'http:';
-    parsed.hostname = '127.0.0.1';
+    parsed.hostname = DEV_TUNNEL_HOSTNAME;
     parsed.port = String(localPort);
     return parsed.toString();
   } catch {
@@ -223,7 +223,7 @@ export const toDisplayUrl = (url: string): string => {
   if (!url) return url;
   try {
     const parsed = new URL(url);
-    if (parsed.hostname !== '127.0.0.1') return url;
+    if (parsed.hostname !== DEV_TUNNEL_HOSTNAME && parsed.hostname !== '127.0.0.1') return url;
     const origin = originByLocalPort.get(Number.parseInt(parsed.port || '0', 10));
     if (!origin) return url;
     return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
