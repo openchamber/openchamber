@@ -534,13 +534,16 @@ describe('writeConfig preserves JSONC comments (issue #3587)', () => {
   it('keeps comments when adding a new MCP server', () => {
     const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
 
-    withCustomConfig(file, () => createMcpConfig('linear', { type: 'remote', url: 'https://mcp.linear.app/sse' }));
+    // A name no real global config carries: the user-level config of the
+    // machine running the tests is still read, and an existing entry there
+    // would make the create fail.
+    withCustomConfig(file, () => createMcpConfig('jsonc-comment-fixture', { type: 'remote', url: 'https://mcp.linear.app/sse' }));
 
     const raw = fs.readFileSync(file, 'utf8');
     expect(raw).toContain('// schema for editor hints');
     expect(raw).toContain('/* my servers */');
     expect(raw).toContain('// toggle per environment');
-    expect(readConfigFile(file).mcp.servers.linear).toEqual({
+    expect(readConfigFile(file).mcp.servers['jsonc-comment-fixture']).toEqual({
       type: 'remote',
       url: 'https://mcp.linear.app/sse',
     });
