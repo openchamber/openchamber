@@ -46,13 +46,19 @@ type CachedGitDiff = {
   submodule: GitSubmoduleState | null;
 };
 
+/**
+ * Cache entry: the diff, when it was fetched, and its UTF-8 byte size measured
+ * once at insertion so eviction never re-encodes cached contents.
+ */
+type CachedGitDiffEntry = CachedGitDiff & { fetchedAt: number; sizeBytes: number };
+
 interface DirectoryGitState {
   isGitRepo: boolean | null;
   status: GitStatus | null;
   branches: GitBranch | null;
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
-  diffCache: Map<string, CachedGitDiff & { fetchedAt: number }>;
+  diffCache: Map<string, CachedGitDiffEntry>;
   indexRevision: number;
   lastRepoCheckAt: number;
   lastStatusFetch: number;
@@ -378,15 +384,15 @@ const seedNestedRepoSelection = (runtimeKey: string): Map<string, string> => {
 
 // LRU eviction helper for diff cache
 const evictDiffCacheIfNeeded = (
-  diffCache: Map<string, CachedGitDiff & { fetchedAt: number }>,
+  diffCache: Map<string, CachedGitDiffEntry>,
   maxEntries: number = DIFF_CACHE_MAX_ENTRIES,
   maxTotalSize: number = DIFF_CACHE_MAX_TOTAL_SIZE_BYTES
-): Map<string, CachedGitDiff & { fetchedAt: number }> => {
-  // Calculate total size
+): Map<string, CachedGitDiffEntry> => {
+  // Sizes were measured at insertion; the eviction path must not re-encode
+  // cached contents on every call.
   let totalSize = 0;
   for (const entry of diffCache.values()) {
-    totalSize += new TextEncoder().encode(entry.original ?? '').byteLength
-      + new TextEncoder().encode(entry.modified ?? '').byteLength;
+    totalSize += entry.sizeBytes;
   }
 
   // If within limits, return as-is
@@ -398,20 +404,18 @@ const evictDiffCacheIfNeeded = (
   const entries = Array.from(diffCache.entries())
     .sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
 
-  const newCache = new Map<string, CachedGitDiff & { fetchedAt: number }>();
+  const newCache = new Map<string, CachedGitDiffEntry>();
   let newTotalSize = 0;
 
   // Keep entries from newest to oldest until limits are reached
   for (let i = entries.length - 1; i >= 0; i--) {
     const [path, entry] = entries[i];
-    const entrySize = new TextEncoder().encode(entry.original ?? '').byteLength
-      + new TextEncoder().encode(entry.modified ?? '').byteLength;
 
     if (newCache.size >= maxEntries) break;
-    if (newTotalSize + entrySize > maxTotalSize) continue;
+    if (newTotalSize + entry.sizeBytes > maxTotalSize) continue;
 
     newCache.set(path, entry);
-    newTotalSize += entrySize;
+    newTotalSize += entry.sizeBytes;
   }
 
   return newCache;
@@ -427,9 +431,8 @@ const evictGlobalDiffCachesIfNeeded = (directories: Map<string, DirectoryGitStat
   let totalSize = 0;
   for (const [directory, state] of directories) {
     for (const [path, entry] of state.diffCache) {
-      const size = diffEntrySize(entry);
-      entries.push({ directory, path, fetchedAt: entry.fetchedAt, size });
-      totalSize += size;
+      entries.push({ directory, path, fetchedAt: entry.fetchedAt, size: entry.sizeBytes });
+      totalSize += entry.sizeBytes;
     }
   }
   if (entries.length <= DIFF_CACHE_MAX_GLOBAL_ENTRIES && totalSize <= DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return directories;
@@ -1154,11 +1157,12 @@ export const useGitStore = create<GitStore>()(
 
       setDiff: (directory, filePath, diff, expectedRuntimeKey) => {
         if (expectedRuntimeKey && expectedRuntimeKey !== get().runtimeKey) return;
-        if (diffEntrySize(diff) > DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return;
+        const sizeBytes = diffEntrySize(diff);
+        if (sizeBytes > DIFF_CACHE_MAX_TOTAL_SIZE_BYTES) return;
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
         const newDiffCache = new Map(dirState.diffCache);
-        newDiffCache.set(filePath, { ...diff, fetchedAt: Date.now() });
+        newDiffCache.set(filePath, { ...diff, fetchedAt: Date.now(), sizeBytes });
         // Apply LRU eviction to prevent memory bloat
         const evictedCache = evictDiffCacheIfNeeded(newDiffCache);
         newDirectories.set(directory, { ...dirState, diffCache: evictedCache });
@@ -1314,7 +1318,8 @@ export const useGitStore = create<GitStore>()(
         results.forEach((result) => {
           newDiffCache.set(result.path, {
             ...result.diff,
-            fetchedAt: now
+            fetchedAt: now,
+            sizeBytes: diffEntrySize(result.diff),
           });
         });
 
