@@ -25,6 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
+import { isSplashColor } from './remote-page-policy.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,7 +224,9 @@ const readSplashColor = (settings, key, fallback) => {
     : undefined;
   const legacy = settings[`splash${key.charAt(0).toUpperCase()}${key.slice(1)}`];
   const value = typeof owned === 'string' ? owned : legacy;
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+  // Checked again on read: a value stored before the IPC check existed is
+  // still interpolated into the trusted splash page.
+  return isSplashColor(value) ? value : fallback;
 };
 
 const buildStartupSplashHtml = () => {
