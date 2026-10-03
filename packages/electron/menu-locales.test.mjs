@@ -15,7 +15,8 @@ test('menuLabel returns proper English labels for en and other locales', () => {
   assert.equal(menuLabel('en', 'settings'), 'Settings');
   assert.equal(menuLabel('en', 'app.name'), 'OpenChamber');
   assert.equal(menuLabel(undefined, 'file'), 'File');
-  assert.equal(menuLabel('fr', 'file'), 'File');
+  assert.equal(menuLabel('xx', 'file'), 'File');
+  assert.equal(menuLabel('fr', 'file'), 'Fichier');
   assert.equal(menuLabel('zh-CN', 'file'), '文件');
   assert.equal(menuLabel('zh-TW', 'file'), '檔案');
 });
@@ -25,23 +26,26 @@ test('menuLabel falls back to the raw key for unknown keys', () => {
   assert.equal(menuLabel('en', 'not.a.real.key'), 'not.a.real.key');
 });
 
-test('normalizeMenuLocale maps zh variants and defaults everything else to en', () => {
+test('normalizeMenuLocale keeps translated locales and defaults everything else to en', () => {
   assert.equal(normalizeMenuLocale('zh-CN'), 'zh-CN');
   assert.equal(normalizeMenuLocale('zh-TW'), 'zh-TW');
   assert.equal(normalizeMenuLocale('en'), 'en');
-  assert.equal(normalizeMenuLocale('de'), 'en');
+  assert.equal(normalizeMenuLocale('de'), 'de');
+  assert.equal(normalizeMenuLocale('uk'), 'uk');
+  assert.equal(normalizeMenuLocale('pt-BR'), 'pt-BR');
+  assert.equal(normalizeMenuLocale('xx'), 'en');
   assert.equal(normalizeMenuLocale(undefined), 'en');
 });
 
 test('menu dictionaries share identical key sets across locales', () => {
   const enKeys = Object.keys(MENU_LOCALE_DICTIONARIES.en).sort();
-  for (const locale of ['zh-CN', 'zh-TW']) {
+  for (const locale of Object.keys(MENU_LOCALE_DICTIONARIES)) {
     const keys = Object.keys(MENU_LOCALE_DICTIONARIES[locale]).sort();
     assert.deepEqual(keys, enKeys, `menu dictionary ${locale} key mismatch`);
   }
 
   const enContextKeys = Object.keys(CONTEXT_MENU_LABEL_DICTIONARIES.en).sort();
-  for (const locale of ['zh-CN', 'zh-TW']) {
+  for (const locale of Object.keys(CONTEXT_MENU_LABEL_DICTIONARIES)) {
     const keys = Object.keys(CONTEXT_MENU_LABEL_DICTIONARIES[locale]).sort();
     assert.deepEqual(keys, enContextKeys, `context menu dictionary ${locale} key mismatch`);
   }
@@ -62,6 +66,9 @@ test('createContextMenuLabels starts in English and applies locale dictionaries'
   assert.equal(labels.selectAll, '全選');
 
   apply('de');
+  assert.equal(labels.copy, 'Kopieren');
+
+  apply('xx');
   assert.equal(labels.copy, '&Copy');
   assert.equal(labels.selectAll, 'Select &All');
 
@@ -71,6 +78,7 @@ test('createContextMenuLabels starts in English and applies locale dictionaries'
 
 test('roleMenuItem keeps Electron role labels in English and translates other locales', () => {
   assert.deepEqual(roleMenuItem('en', 'quit', 'quit'), { role: 'quit' });
-  assert.deepEqual(roleMenuItem('de', 'hide', 'hide'), { role: 'hide' });
+  assert.deepEqual(roleMenuItem('xx', 'hide', 'hide'), { role: 'hide' });
+  assert.deepEqual(roleMenuItem('uk', 'quit', 'quit'), { role: 'quit', label: menuLabel('uk', 'quit') });
   assert.deepEqual(roleMenuItem('zh-CN', 'quit', 'quit'), { role: 'quit', label: menuLabel('zh-CN', 'quit') });
 });
