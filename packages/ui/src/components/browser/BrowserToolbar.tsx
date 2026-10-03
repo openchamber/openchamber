@@ -52,6 +52,7 @@ export type BrowserToolbarProps = {
   onForward: () => void;
   onReload: () => void;
   onOpenExternal: () => void;
+  canOpenExternal?: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   isLoading: boolean;
@@ -81,6 +82,7 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
   onForward,
   onReload,
   onOpenExternal,
+  canOpenExternal = true,
   canGoBack,
   canGoForward,
   isLoading,
@@ -235,7 +237,12 @@ export const BrowserToolbar: React.FC<BrowserToolbarProps> = ({
       {onOpenDevTools ? (
         <ToolbarButton icon="terminal-box" label={t('contextPanel.browser.devTools')} onClick={onOpenDevTools} />
       ) : null}
-      <ToolbarButton icon="external-link" label={t('contextPanel.browser.openExternal')} onClick={onOpenExternal} />
+      <ToolbarButton
+        icon="external-link"
+        label={t('contextPanel.browser.openExternal')}
+        onClick={onOpenExternal}
+        disabled={!canOpenExternal}
+      />
     </div>
   );
 };

@@ -92,6 +92,15 @@ const isRemoteRuntime = (baseUrl: string): boolean => {
   }
 };
 
+export const isRemoteWebLoopbackUrl = (url: string): boolean => {
+  if (!url || isDesktopRuntime() || !isLoopbackUrl(url) || !globalThis.window) return false;
+  return isRemoteRuntime(getRuntimeApiBaseUrl() || globalThis.window.location.href);
+};
+
+export const resolveIframeBrowserUrl = (url: string): string => (
+  isRemoteWebLoopbackUrl(url) ? '' : url
+);
+
 /**
  * True when the desktop reaches the instance's dev servers through this
  * tunnel. Only loopback addresses can go through it: a named local address

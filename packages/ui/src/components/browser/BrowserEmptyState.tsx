@@ -6,8 +6,8 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 import { fetchDevServers, mergeDevServerCandidates, type DevServerDiscovery } from '@/lib/browser/devServers';
 import { clearAnnouncedDevServers, useAnnouncedDevServers } from '@/lib/browser/announcedServers';
-import { browserUrlLabel, isLoopbackUrl } from '@/lib/browser/url';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { browserUrlLabel } from '@/lib/browser/url';
+import { isRemoteWebLoopbackUrl } from '@/lib/browser/devTunnel';
 
 /**
  * What the panel shows before anything is loaded.
@@ -36,17 +36,7 @@ const REFRESH_INTERVAL_MS = 2_000;
  * way to reach them. The desktop shell tunnels a local port for exactly this
  * case; a browser tab has no equivalent, and its `localhost` is its own.
  */
-const isUnreachableFromHere = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  if (window.__OPENCHAMBER_ELECTRON__) return false;
-  const baseUrl = getRuntimeApiBaseUrl();
-  if (!baseUrl) return false;
-  try {
-    return !isLoopbackUrl(new URL(baseUrl, window.location.href).toString());
-  } catch {
-    return false;
-  }
-};
+const isUnreachableFromHere = (): boolean => isRemoteWebLoopbackUrl('http://localhost');
 
 export const BrowserEmptyState: React.FC<{
   onOpen: (url: string) => void;
@@ -115,6 +105,7 @@ export const BrowserEmptyState: React.FC<{
                 variant="outline"
                 size="sm"
                 className="w-full shrink-0 justify-start gap-2"
+                disabled={remoteOnly}
                 onClick={() => {
                   // The offer is answered; leaving it up would keep suggesting
                   // servers behind a page the user is already looking at.
