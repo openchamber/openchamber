@@ -8,6 +8,7 @@ import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
+import { normalizeGitOutputPath } from './output-path.js';
 
 const fsp = fs.promises;
 const require = createRequire(import.meta.url);
@@ -348,6 +349,11 @@ const buildGitEnv = async () => {
   // Git runs the user's hooks, so they must not see what the AppImage launcher
   // added to LD_LIBRARY_PATH and friends (#4177).
   const env = stripAppImageLauncherEnv({ ...process.env });
+  if (process.platform === 'win32') {
+    // Node already passes an argument array. MSYS globbing corrupts Git refs
+    // such as HEAD^{commit} and branch@{upstream} before Git sees them.
+    env.MSYS = [env.MSYS, 'noglob'].filter(Boolean).join(' ');
+  }
   if (!env.SSH_AUTH_SOCK || !env.SSH_AUTH_SOCK.trim()) {
     const resolved = await resolveSshAuthSock();
     if (resolved) {
@@ -365,6 +371,16 @@ const buildGitEnv = async () => {
 
 const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
   const env = await buildGitEnv();
+  // simple-git scans explicit env values, including inherited ones. Remove its
+  // blocked overrides from this copy so ordinary shell settings cannot reject
+  // every command; keep argument checks and the parent environment intact.
+  for (const key of Object.keys(env)) {
+    const name = key.trim().toUpperCase();
+    if (/^(EDITOR|PAGER|PREFIX|SSH_ASKPASS|GIT_(ASKPASS|EDITOR|EXEC_PATH|EXTERNAL_DIFF|PAGER|PROXY_COMMAND|SEQUENCE_EDITOR|SSH|SSH_COMMAND|TEMPLATE_DIR))$/.test(name)
+      || name === 'GIT_CONFIG' || name.startsWith('GIT_CONFIG_')) {
+      delete env[key];
+    }
+  }
   const spawnOptions = { windowsHide: true };
   // simple-git's block timeout kills the process once it has produced no
   // output for this long. Opt-in per caller: a background read must never hold
@@ -390,7 +406,6 @@ const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafe
   }
   return createSimpleGit({
     baseDir,
-    env,
     spawnOptions,
     binary,
     unsafe,
@@ -494,7 +509,7 @@ const isInsideOrSameDirectory = (root, target) => {
 
 const resolveGitRepositoryRoot = async (directoryPath, git) => {
   const topLevel = await git.raw(['rev-parse', '--show-toplevel']);
-  const normalizedTopLevel = topLevel.trim();
+  const normalizedTopLevel = normalizeGitOutputPath(topLevel.trim());
   return path.isAbsolute(normalizedTopLevel)
     ? path.resolve(normalizedTopLevel)
     : path.resolve(directoryPath, normalizedTopLevel);
@@ -523,7 +538,7 @@ export async function getRepositoryRoot(directory) {
 
 const resolveGitInternalPath = async (repoRoot, git, gitPath) => {
   const resolved = await git.raw(['rev-parse', '--git-path', gitPath]);
-  return path.resolve(repoRoot, resolved.trim());
+  return path.resolve(repoRoot, normalizeGitOutputPath(resolved.trim()));
 };
 
 const GITLINK_MODE = '160000';
@@ -766,7 +781,7 @@ const parseWorktreePorcelain = (raw) => {
       if (current?.worktree) {
         entries.push(current);
       }
-      current = { worktree: line.substring('worktree '.length).trim() };
+      current = { worktree: normalizeGitOutputPath(line.substring('worktree '.length).trim()) };
       continue;
     }
 
@@ -1100,7 +1115,7 @@ const getWorktreeIndexLockPath = async (directory) => {
   if (!result.success) {
     return null;
   }
-  const value = String(result.stdout || '').trim();
+  const value = normalizeGitOutputPath(String(result.stdout || '').trim());
   return value ? (path.isAbsolute(value) ? value : path.resolve(directory, value)) : null;
 };
 
@@ -1205,7 +1220,7 @@ const runPostCheckoutHook = async (directory) => {
   try {
     const result = await runGitCommand(directory, ['rev-parse', '--git-path', 'hooks']);
     if (!result.success) return;
-    hookDirectory = normalizeDirectoryPath(String(result.stdout || '').trim());
+    hookDirectory = normalizeDirectoryPath(normalizeGitOutputPath(String(result.stdout || '').trim()));
   } catch {
     return;
   }
@@ -1229,7 +1244,7 @@ const runPostCheckoutHook = async (directory) => {
   ]);
   if (!headResult.success || !gitDirResult.success) return;
   const head = String(headResult.stdout || '').trim();
-  const gitDir = String(gitDirResult.stdout || '').trim();
+  const gitDir = normalizeGitOutputPath(String(gitDirResult.stdout || '').trim());
   if (!head || !gitDir) return;
 
   try {
@@ -1272,12 +1287,12 @@ export async function resolvePrimaryWorktreeRoot(directory) {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
-  const absoluteGitDir = normalizePath(lines[0] || '');
+  const absoluteGitDir = normalizePath(normalizeGitOutputPath(lines[0] || ''));
   const rootFromAbsoluteGitDir = derivePrimaryWorktreeRootFromGitDir(absoluteGitDir);
   if (rootFromAbsoluteGitDir) {
     return { root: rootFromAbsoluteGitDir };
   }
-  const rawCommonDir = normalizePath(lines[1] || '');
+  const rawCommonDir = normalizePath(normalizeGitOutputPath(lines[1] || ''));
   if (rawCommonDir) {
     const commonDir = path.isAbsolute(rawCommonDir)
       ? rawCommonDir
@@ -1295,7 +1310,7 @@ export async function resolveWorktreeTopLevel(directory) {
   if (!result.success) {
     return { root: directory };
   }
-  const root = normalizePath(String(result.stdout || '').trim());
+  const root = normalizePath(normalizeGitOutputPath(String(result.stdout || '').trim()));
   return { root: root || directory };
 }
 
@@ -1693,14 +1708,14 @@ const resolveWorktreeProjectContext = async (directory, options = {}) => {
     ['rev-parse', '--show-toplevel'],
     'Failed to resolve git top-level directory'
   );
-  const sandbox = path.resolve(directoryPath, topResult.stdout.trim());
+  const sandbox = path.resolve(directoryPath, normalizeGitOutputPath(topResult.stdout.trim()));
 
   const commonResult = await runGitCommandOrThrow(
     sandbox,
     ['rev-parse', '--git-common-dir'],
     'Failed to resolve git common directory'
   );
-  const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
+  const commonDir = path.resolve(sandbox, normalizeGitOutputPath(commonResult.stdout.trim()));
   const primaryWorktree = path.dirname(commonDir);
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
