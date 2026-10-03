@@ -8,6 +8,7 @@ Object.assign(globalThis, { window: dom, document: dom.document, localStorage: d
 const { createRoot } = await import('react-dom/client');
 const { flushSync } = await import('react-dom');
 const { UsageCard } = await import('./UsageCard');
+const { I18nProvider } = await import('@/lib/i18n');
 
 const balanceWindow: UsageWindow = {
   usedPercent: null,
@@ -32,7 +33,7 @@ const render = (window: UsageWindow) => {
   const container = document.createElement('div');
   document.body.appendChild(container);
   containers.push(container);
-  flushSync(() => createRoot(container).render(<UsageCard title="credits_balance" window={window} />));
+  flushSync(() => createRoot(container).render(<I18nProvider><UsageCard title="credits_balance" window={window} /></I18nProvider>));
   return container;
 };
 
