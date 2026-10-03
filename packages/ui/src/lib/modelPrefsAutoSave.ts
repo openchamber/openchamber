@@ -1,6 +1,7 @@
 import { useUIStore } from '@/stores/useUIStore';
 import { isApplyingServerSettings, updateDesktopSettings } from '@/lib/persistence';
 import { subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
+import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 
 type ModelRef = { providerID: string; modelID: string };
 type ModelPrefsPayload = {
@@ -10,6 +11,7 @@ type ModelPrefsPayload = {
   recentModels: ModelRef[];
   recentAgents: string[];
   recentEfforts: Record<string, string[]>;
+  customProviderIcons: Record<string, CustomProviderIcon>;
 };
 
 const refsEqual = (a: ModelRef[], b: ModelRef[]): boolean => {
@@ -38,6 +40,12 @@ const recentEffortsEqual = (a: Record<string, string[]>, b: Record<string, strin
   return aKeys.every((key) => Array.isArray(b[key]) && stringsEqual(a[key], b[key]));
 };
 
+const customProviderIconsEqual = (a: Record<string, CustomProviderIcon>, b: Record<string, CustomProviderIcon>): boolean => {
+  if (a === b) return true;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+};
+
 const snapshotModelPrefs = (): ModelPrefsPayload => {
   const state = useUIStore.getState();
   return {
@@ -47,6 +55,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     recentModels: state.recentModels,
     recentAgents: state.recentAgents,
     recentEfforts: state.recentEfforts,
+    customProviderIcons: state.customProviderIcons,
   };
 };
 
@@ -56,7 +65,8 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   stringsEqual(a.collapsedModelProviders, b.collapsedModelProviders) &&
   refsEqual(a.recentModels, b.recentModels) &&
   stringsEqual(a.recentAgents, b.recentAgents) &&
-  recentEffortsEqual(a.recentEfforts, b.recentEfforts)
+  recentEffortsEqual(a.recentEfforts, b.recentEfforts) &&
+  customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
 
 const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
@@ -66,6 +76,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   recentModels: prefs.recentModels.slice(),
   recentAgents: prefs.recentAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
+  customProviderIcons: { ...prefs.customProviderIcons },
 });
 
 export const startModelPrefsAutoSave = () => {
@@ -99,6 +110,7 @@ export const startModelPrefsAutoSave = () => {
       recentModels: state.recentModels,
       recentAgents: state.recentAgents,
       recentEfforts: state.recentEfforts,
+      customProviderIcons: state.customProviderIcons,
     };
     const prev = {
       favoriteModels: prevState.favoriteModels,
@@ -107,6 +119,7 @@ export const startModelPrefsAutoSave = () => {
       recentModels: prevState.recentModels,
       recentAgents: prevState.recentAgents,
       recentEfforts: prevState.recentEfforts,
+      customProviderIcons: prevState.customProviderIcons,
     };
     if (modelPrefsEqual(next, prev)) {
       return;

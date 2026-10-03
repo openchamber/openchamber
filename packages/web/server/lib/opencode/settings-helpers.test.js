@@ -607,6 +607,13 @@ describe('settings helpers', () => {
       expect(hiddenResult.hiddenModels).toEqual(favoriteResult.favoriteModels);
     });
 
+    it('keeps custom provider icons it knows and drops the rest entry by entry', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        customProviderIcons: { 'campus-llm': 'cloud', other: 'rocket', '': 'server', local: 'ai' },
+      })).toEqual({ customProviderIcons: { 'campus-llm': 'cloud', local: 'ai' } });
+    });
+
     it('round-trips collapsedModelProviders and recentAgents as string arrays', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -804,6 +811,7 @@ describe('settings registry gate', () => {
     globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
     inputBarOffset: 10,
+    customProviderIcons: { 'campus-llm': 'cloud' },
   };
 
   it('accepts a valid value for every persistable registry key (no server-side drift)', () => {

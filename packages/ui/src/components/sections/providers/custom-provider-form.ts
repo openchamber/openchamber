@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Model } from '@/lib/opencode/model';
+import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 
 /**
  * Custom provider form helpers.
@@ -38,6 +39,18 @@ export type ModelRow = {
   row: string;
   id: string;
   name: string;
+  contextWindow: string;
+  maxOutputTokens: string;
+  inputCapabilities: string[];
+  outputCapabilities: string[];
+  tools: boolean;
+  /**
+   * Whether the capabilities above are known (saved config, discovery, or the
+   * user's own edit). Unknown ones are not written, so a save never replaces
+   * what OpenCode knows about the model with a text-only default.
+   */
+  capabilitiesKnown: boolean;
+  metadataSource?: 'provider-api' | 'models.dev' | 'manual';
   /** Comma-separated reasoning levels, e.g. "low, medium, high". */
   variants: string;
   /**
@@ -57,6 +70,8 @@ export type HeaderRow = {
 export type CustomProviderFormState = {
   providerID: string;
   name: string;
+  /** Null keeps the provider's own logo or the generic fallback. */
+  icon: CustomProviderIcon | null;
   protocol: CustomProviderProtocol;
   baseURL: string;
   apiKey: string;
@@ -74,6 +89,8 @@ export type FieldErrors = {
 export type ModelFieldErrors = {
   id?: string;
   name?: string;
+  contextWindow?: string;
+  maxOutputTokens?: string;
 };
 
 export type HeaderFieldErrors = {
@@ -96,11 +113,14 @@ export type CustomProviderModelConfig = {
   modelID: string;
   name: string;
   variants?: ModelVariantConfig[];
+  limit?: { context?: number; output?: number };
+  capabilities?: { tools: boolean; input: string[]; output: string[] };
 };
 
 export type CustomProviderPersistPlan = {
   providerID: string;
   name: string;
+  icon: CustomProviderIcon | null;
   /** Literal API key stored as an OpenCode credential after the config write; omitted when using {env:VAR} or empty. */
   apiKey?: string;
   /** Edit without a new key or env: the provider keeps the credential OpenCode already holds. */
@@ -147,6 +167,8 @@ export type ProviderLikeForCustomForm = {
       package?: string;
       api?: { npm?: string };
       variants?: readonly ModelVariantConfig[];
+      limit?: { context?: number; output?: number };
+      capabilities?: { tools?: boolean; input?: string[]; output?: string[] };
     }>
     | Record<string, unknown>;
 };
@@ -176,8 +198,68 @@ export const createModelRow = (): ModelRow => ({
   row: nextRow(),
   id: '',
   name: '',
+  contextWindow: '',
+  maxOutputTokens: '',
+  inputCapabilities: ['text'],
+  outputCapabilities: ['text'],
+  tools: true,
+  capabilitiesKnown: false,
   variants: '',
 });
+
+const discoveredLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
+const discoveredCapabilitiesSchema = z.object({
+  tools: z.boolean(),
+  input: z.array(z.string()),
+  output: z.array(z.string()),
+});
+const discoveredModelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  limit: discoveredLimitSchema.optional(),
+  capabilities: discoveredCapabilitiesSchema.optional(),
+  metadata: z.object({
+    providerID: z.string(),
+    modelID: z.string(),
+    name: z.string().optional(),
+    limit: discoveredLimitSchema.optional(),
+    capabilities: discoveredCapabilitiesSchema.optional(),
+  }).optional(),
+});
+
+/** What `POST /api/provider/discover-models` answers on success. */
+export const modelDiscoveryResponseSchema = z.object({ models: z.array(discoveredModelSchema) });
+/** What it answers on failure. */
+export const modelDiscoveryErrorSchema = z.object({ error: z.string() });
+
+export type DiscoveredModel = z.infer<typeof discoveredModelSchema>;
+
+/**
+ * A form row for one discovered model. The provider's own numbers win over
+ * models.dev field by field; a model nothing describes defaults to text in,
+ * text out, with tool calls.
+ */
+export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
+  const metadata = model.metadata;
+  const context = model.limit?.context ?? metadata?.limit?.context;
+  const output = model.limit?.output ?? metadata?.limit?.output;
+  const capabilities = model.capabilities ?? metadata?.capabilities;
+  const describedByProvider = Boolean(model.limit || model.capabilities);
+  return {
+    ...createModelRow(),
+    id: model.id,
+    name: model.name !== model.id ? model.name : (metadata?.name ?? model.id),
+    contextWindow: context ? String(context) : '',
+    maxOutputTokens: output ? String(output) : '',
+    inputCapabilities: capabilities?.input ?? ['text'],
+    outputCapabilities: capabilities?.output ?? ['text'],
+    tools: capabilities?.tools ?? true,
+    capabilitiesKnown: Boolean(capabilities),
+    ...(describedByProvider
+      ? { metadataSource: 'provider-api' as const }
+      : metadata ? { metadataSource: 'models.dev' as const } : {}),
+  };
+};
 
 /**
  * The request change for one reasoning level, spelled the way OpenCode spells
@@ -215,6 +297,7 @@ export const createHeaderRow = (): HeaderRow => ({
 export const createEmptyCustomProviderForm = (): CustomProviderFormState => ({
   providerID: '',
   name: '',
+  icon: null,
   protocol: 'openai-chat',
   baseURL: '',
   apiKey: '',
@@ -357,6 +440,8 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
             name: typeof entry.name === 'string' ? entry.name : id,
             package: typeof entry.package === 'string' ? entry.package : undefined,
             variants: storedVariantsSchema.safeParse(entry.variants).data,
+            limit: storedLimitSchema.safeParse(entry.limit).data,
+            capabilities: storedCapabilitiesSchema.safeParse(entry.capabilities).data,
           };
         })
       : []);
@@ -371,6 +456,12 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
           row: nextRow(),
           id,
           name: typeof model?.name === 'string' ? model.name : id,
+          contextWindow: model.limit?.context ? String(model.limit.context) : '',
+          maxOutputTokens: model.limit?.output ? String(model.limit.output) : '',
+          inputCapabilities: model.capabilities?.input ?? ['text'],
+          outputCapabilities: model.capabilities?.output ?? ['text'],
+          tools: model.capabilities?.tools ?? true,
+          capabilitiesKnown: Boolean(model.capabilities),
           variants: Object.keys(savedVariants).join(', '),
           savedVariants,
         };
@@ -388,6 +479,7 @@ export function providerToCustomFormState(provider: ProviderLikeForCustomForm): 
   return {
     providerID: provider.id,
     name: typeof provider.name === 'string' && provider.name.trim() ? provider.name : provider.id,
+    icon: null,
     protocol: protocolFromPackage(readPackage(provider) ?? modelPackage),
     baseURL,
     apiKey: envName ? `{env:${envName}}` : '',
@@ -403,6 +495,13 @@ const storedVariantsSchema = z.array(z.object({
   body: z.record(z.string(), z.unknown()).optional(),
 }));
 
+const storedLimitSchema = z.object({ context: z.number().optional(), output: z.number().optional() });
+const storedCapabilitiesSchema = z.object({
+  tools: z.boolean().optional(),
+  input: z.array(z.string()).optional(),
+  output: z.array(z.string()).optional(),
+});
+
 export const storedProviderEntrySchema = z.object({
   name: z.string().optional(),
   package: z.string().optional(),
@@ -414,6 +513,8 @@ export const storedProviderEntrySchema = z.object({
     name: z.string().optional(),
     package: z.string().optional(),
     variants: storedVariantsSchema.optional(),
+    limit: storedLimitSchema.optional(),
+    capabilities: storedCapabilitiesSchema.optional(),
   })).optional(),
 });
 
@@ -435,19 +536,21 @@ export type StoredProviderEntry = z.infer<typeof storedProviderEntrySchema>;
 export function providerToEditFormState(
   live: ProviderLikeForCustomForm,
   stored: StoredProviderEntry | null,
+  icon: CustomProviderIcon | null = null,
 ): CustomProviderFormState {
   const liveModels = Array.isArray(live.models)
     ? live.models.map((model) => ({ ...model, variants: undefined }))
     : live.models;
   const liveState = providerToCustomFormState({ ...live, models: liveModels });
   if (!stored) {
-    return { ...liveState, models: liveState.models.map((model) => ({ ...model, savedVariants: undefined })) };
+    return { ...liveState, icon, models: liveState.models.map((model) => ({ ...model, savedVariants: undefined })) };
   }
 
   const storedState = providerToCustomFormState({ ...stored, id: live.id });
   return {
     providerID: live.id,
     name: stored.name?.trim() ? storedState.name : liveState.name,
+    icon,
     protocol: stored.package ? storedState.protocol : liveState.protocol,
     baseURL: storedState.baseURL || liveState.baseURL,
     // The live `env` and headers may come from a built-in provider this one
@@ -514,15 +617,31 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
     const modelNameError = !model.name.trim()
       ? input.t('settings.providers.page.custom.error.required')
       : undefined;
-    return { id: modelIdError, name: modelNameError };
+    const contextWindowError = model.contextWindow.trim() && !parsePositiveInteger(model.contextWindow)
+      ? input.t('settings.providers.page.custom.error.positiveInteger')
+      : undefined;
+    const maxOutputTokensError = model.maxOutputTokens.trim() && !parsePositiveInteger(model.maxOutputTokens)
+      ? input.t('settings.providers.page.custom.error.positiveInteger')
+      : undefined;
+    return { id: modelIdError, name: modelNameError, contextWindow: contextWindowError, maxOutputTokens: maxOutputTokensError };
   });
 
-  const modelsValid = modelErrors.every((entry) => !entry.id && !entry.name);
+  const modelsValid = modelErrors.every((entry) => !entry.id && !entry.name && !entry.contextWindow && !entry.maxOutputTokens);
   // v2 keeps the model id inside the entry too; the catalog reads `modelID`.
   const modelConfig = Object.fromEntries(
     input.form.models.map((model) => {
       const modelID = model.id.trim();
       const entry: CustomProviderModelConfig = { modelID, name: model.name.trim() };
+      const context = parsePositiveInteger(model.contextWindow);
+      const output = parsePositiveInteger(model.maxOutputTokens);
+      if (context || output) entry.limit = { ...(context ? { context } : {}), ...(output ? { output } : {}) };
+      if (model.capabilitiesKnown) {
+        entry.capabilities = {
+          tools: model.tools,
+          input: model.inputCapabilities,
+          output: model.outputCapabilities,
+        };
+      }
       const variantIDs = parseVariantIDs(model.variants);
       // A row loaded from config always sends its list, so emptying the field
       // clears saved levels; a new row with no levels leaves the key out.
@@ -584,6 +703,7 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
     result: {
       providerID,
       name,
+      icon: input.form.icon,
       apiKey: key,
       ...(!env && !key ? { keepsStoredCredential: true } : {}),
       config: buildCustomProviderConfig({
@@ -596,6 +716,13 @@ export function validateCustomProvider(input: ValidateCustomProviderInput): Vali
       }),
     },
   };
+}
+
+function parsePositiveInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function buildCustomProviderConfig(input: {

@@ -24,6 +24,7 @@ import { useDeviceInfo } from '@/lib/device';
 import type { ModelMetadata } from '@/types';
 import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { updateDesktopSettings } from '@/lib/persistence';
 import { opencodeClient } from '@/lib/opencode/client';
 import { listWebSearchProviders } from '@/lib/opencode/websearch';
 import type { IntegrationInfo } from '@opencode/client';
@@ -187,6 +188,8 @@ export const ProvidersPage: React.FC = () => {
   }, [openRequested, setOpenRequested]);
   const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
   const hiddenModels = useUIStore((state) => state.hiddenModels);
+  const customProviderIcons = useUIStore((state) => state.customProviderIcons);
+  const setCustomProviderIcon = useUIStore((state) => state.setCustomProviderIcon);
   const toggleHiddenModel = useUIStore((state) => state.toggleHiddenModel);
   const hideAllModels = useUIStore((state) => state.hideAllModels);
   const showAllModels = useUIStore((state) => state.showAllModels);
@@ -544,6 +547,14 @@ export const ProvidersPage: React.FC = () => {
           throw error;
         }
       }
+
+      // Only a chosen icon is stored; "default" removes the entry so the
+      // provider's own logo (or the generic fallback) shows again.
+      const nextCustomProviderIcons = { ...useUIStore.getState().customProviderIcons };
+      if (plan.icon) nextCustomProviderIcons[plan.providerID] = plan.icon;
+      else delete nextCustomProviderIcons[plan.providerID];
+      await updateDesktopSettings({ customProviderIcons: nextCustomProviderIcons });
+      setCustomProviderIcon(plan.providerID, plan.icon);
 
       toast.success(t('settings.providers.page.toast.customProviderSaved', { provider: plan.name }));
       setCandidateProviderId('');
@@ -1021,6 +1032,7 @@ export const ProvidersPage: React.FC = () => {
                   setEditingCustomFormInitial(providerToEditFormState(
                     selectedProvider,
                     storedProviderConfigs[selectedProvider.id] ?? null,
+                    customProviderIcons[selectedProvider.id],
                   ));
                   setEditingCustomScope(resolveProviderConfigScope(selectedSources));
                   setEditingCustomProviderId(selectedProvider.id);

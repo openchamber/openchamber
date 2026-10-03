@@ -498,6 +498,32 @@ describe('custom provider config persistence', () => {
     });
   });
 
+  test('persists validated custom model limits and capabilities', () => {
+    const providerId = 'metadata-llm';
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+
+    upsertProviderConfig(providerId, {
+      name: 'Metadata LLM',
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      settings: { baseURL: 'https://metadata.example.com/v1' },
+      models: {
+        vision: {
+          modelID: 'vision',
+          name: 'Vision',
+          limit: { context: 128_000, output: 16_000 },
+          capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+        },
+      },
+    }, projectDir, 'project', { hasStoredAuth: true });
+
+    expect(readJson(configPath).providers[providerId].models.vision).toEqual({
+      modelID: 'vision',
+      name: 'Vision',
+      limit: { context: 128_000, output: 16_000 },
+      capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+    });
+  });
+
   test('custom-scope edit updates custom layer without creating a user entry', () => {
     const providerId = `custom-scope-${Date.now()}`;
     const customPath = path.join(projectDir, 'custom-opencode.json');

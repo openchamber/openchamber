@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildIntegrationKeyRequest,
+  createEmptyCustomProviderForm,
+  modelRowFromDiscovery,
   buildProviderUpsertRequest,
   storeKeyAfterConfigWrite,
   isConfigDefinedCustomProvider,
@@ -19,13 +21,49 @@ const t = (key: string) => key;
 const baseForm = (overrides: Partial<CustomProviderFormState> = {}): CustomProviderFormState => ({
   providerID: 'custom-provider',
   name: 'Custom Provider',
+  icon: 'server',
   protocol: 'openai-chat',
   baseURL: 'https://api.example.com/v1',
   apiKey: 'sk-test',
-  models: [{ row: 'm0', id: 'model-a', name: 'Model A', variants: '' }],
+  models: [{
+    row: 'm0',
+    id: 'model-a',
+    name: 'Model A',
+    contextWindow: '',
+    maxOutputTokens: '',
+    inputCapabilities: ['text'],
+    outputCapabilities: ['text'],
+    tools: true,
+    capabilitiesKnown: false,
+    variants: '',
+  }],
   headers: [{ row: 'h0', key: '', value: '' }],
   ...overrides,
 });
+
+const baseModel = (overrides: Partial<CustomProviderFormState['models'][number]> = {}): CustomProviderFormState['models'][number] => ({
+  row: 'm0',
+  id: 'model-a',
+  name: 'Model A',
+  contextWindow: '',
+  maxOutputTokens: '',
+  inputCapabilities: ['text'],
+  outputCapabilities: ['text'],
+  tools: true,
+  capabilitiesKnown: false,
+  variants: '',
+  ...overrides,
+});
+
+/** The editable fields a model row carries before anyone fills them in. */
+const MODEL_ROW_DEFAULTS = {
+  contextWindow: '',
+  maxOutputTokens: '',
+  inputCapabilities: ['text'],
+  outputCapabilities: ['text'],
+  tools: true,
+  capabilitiesKnown: false,
+};
 
 /** Mirrors server upsert semantics for request-construction tests. */
 function mergeProviderConfig(
@@ -57,7 +95,7 @@ describe('validateCustomProvider', () => {
         name: ' Custom Provider ',
         baseURL: ' https://api.example.com/v1 ',
         apiKey: ' sk-secret ',
-        models: [{ row: 'm0', id: ' model-a ', name: ' Model A ', variants: '' }],
+        models: [baseModel({ id: ' model-a ', name: ' Model A ' })],
         headers: [
           { row: 'h0', key: ' X-Test ', value: ' enabled ' },
           { row: 'h1', key: '', value: '' },
@@ -69,6 +107,7 @@ describe('validateCustomProvider', () => {
 
     expect(result.result).toEqual({
       providerID: 'custom-provider',
+      icon: 'server',
       name: 'Custom Provider',
       apiKey: 'sk-secret',
       config: {
@@ -85,6 +124,75 @@ describe('validateCustomProvider', () => {
         },
       },
     });
+  });
+
+  test('persists reviewed model limits and capabilities', () => {
+    const result = validateCustomProvider({
+      form: baseForm({
+        models: [baseModel({
+          contextWindow: '128000',
+          maxOutputTokens: '16384',
+          inputCapabilities: ['text', 'image'],
+          outputCapabilities: ['text'],
+          tools: false,
+          capabilitiesKnown: true,
+        })],
+      }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.config.models['model-a']).toEqual({
+      modelID: 'model-a',
+      name: 'Model A',
+      limit: { context: 128000, output: 16384 },
+      capabilities: { tools: false, input: ['text', 'image'], output: ['text'] },
+    });
+  });
+
+  test('keeps the selected OpenChamber provider icon in the persistence plan', () => {
+    const result = validateCustomProvider({
+      form: baseForm({ icon: 'cloud' }),
+      t,
+      existingProviderIDs: new Set(),
+    });
+
+    expect(result.result?.icon).toBe('cloud');
+    expect('icon' in (result.result?.config ?? {})).toBe(false);
+  });
+
+  test('keeps no icon for a new provider so its own logo still shows', () => {
+    expect(createEmptyCustomProviderForm().icon).toBeNull();
+  });
+
+  test('turns a discovered model into a row, the provider winning over models.dev field by field', () => {
+    const row = modelRowFromDiscovery({
+      id: 'llama-3',
+      name: 'llama-3',
+      limit: { context: 8192 },
+      metadata: {
+        providerID: 'meta',
+        modelID: 'llama-3',
+        name: 'Llama 3',
+        limit: { context: 128000, output: 4096 },
+        capabilities: { tools: false, input: ['text', 'image'], output: ['text'] },
+      },
+    });
+    expect(row.id).toBe('llama-3');
+    expect(row.name).toBe('Llama 3');
+    expect(row.contextWindow).toBe('8192');
+    expect(row.maxOutputTokens).toBe('4096');
+    expect(row.inputCapabilities).toEqual(['text', 'image']);
+    expect(row.tools).toBe(false);
+    expect(row.metadataSource).toBe('provider-api');
+  });
+
+  test('a discovered model nothing describes gets text in and out with tool calls', () => {
+    const row = modelRowFromDiscovery({ id: 'plain', name: 'plain' });
+    expect(row.contextWindow).toBe('');
+    expect(row.inputCapabilities).toEqual(['text']);
+    expect(row.tools).toBe(true);
+    expect(row.metadataSource).toBe(undefined);
   });
 
   test('supports {env:VAR} credentials without writing an auth key', () => {
@@ -141,8 +249,8 @@ describe('validateCustomProvider', () => {
         providerID: 'Bad ID',
         baseURL: 'ftp://example.com',
         models: [
-          { row: 'm0', id: 'model-a', name: 'Model A', variants: '' },
-          { row: 'm1', id: 'model-a', name: 'Model A 2', variants: '' },
+          baseModel(),
+          baseModel({ row: 'm1', name: 'Model A 2' }),
         ],
         headers: [
           { row: 'h0', key: 'Authorization', value: 'one' },
@@ -356,7 +464,7 @@ describe('provider edit helpers', () => {
     expect(state.baseURL).toBe('https://llm.example.edu/v1');
     expect(state.apiKey).toBe('{env:CAMPUS_KEY}');
     expect(state.protocol).toBe('openai-chat');
-    expect(state.models[0]).toEqual({ row: state.models[0].row, id: 'fast', name: 'Fast', variants: '', savedVariants: {} });
+    expect(state.models[0]).toEqual({ ...MODEL_ROW_DEFAULTS, row: state.models[0].row, id: 'fast', name: 'Fast', variants: '', savedVariants: {} });
     expect(state.headers[0]).toEqual({ row: state.headers[0].row, key: 'X-Campus', value: '1' });
   });
 
@@ -384,7 +492,7 @@ describe('provider edit helpers', () => {
     expect(state.protocol).toBe('anthropic-messages');
     expect(state.baseURL).toBe('https://llm.example.edu/v1');
     expect(state.headers[0]).toEqual({ row: state.headers[0].row, key: 'X-Campus', value: '1' });
-    expect(state.models[0]).toEqual({ row: state.models[0].row, id: 'fast-model', name: 'Fast', variants: '', savedVariants: {} });
+    expect(state.models[0]).toEqual({ ...MODEL_ROW_DEFAULTS, row: state.models[0].row, id: 'fast-model', name: 'Fast', variants: '', savedVariants: {} });
   });
 
   test('a v2 provider with only a known package still reads as custom', () => {
@@ -443,7 +551,7 @@ describe('provider edit helpers', () => {
 describe('custom provider reasoning levels', () => {
   test('turns typed levels into variants spelled for the protocol', () => {
     const chat = validateCustomProvider({
-      form: baseForm({ models: [{ row: 'm0', id: 'model-a', name: 'Model A', variants: 'low, medium high,low' }] }),
+      form: baseForm({ models: [baseModel({ variants: 'low, medium high,low' })] }),
       t,
       existingProviderIDs: new Set(),
     });
@@ -456,7 +564,7 @@ describe('custom provider reasoning levels', () => {
     const anthropic = validateCustomProvider({
       form: baseForm({
         protocol: 'anthropic-messages',
-        models: [{ row: 'm0', id: 'model-a', name: 'Model A', variants: 'max' }],
+        models: [baseModel({ variants: 'max' })],
       }),
       t,
       existingProviderIDs: new Set(),
@@ -468,7 +576,10 @@ describe('custom provider reasoning levels', () => {
 
   test('leaves variants out for a new model without levels', () => {
     const output = validateCustomProvider({ form: baseForm(), t, existingProviderIDs: new Set() });
-    expect(output.result?.config.models['model-a']).toEqual({ modelID: 'model-a', name: 'Model A' });
+    expect(output.result?.config.models['model-a']).toEqual({
+      modelID: 'model-a',
+      name: 'Model A',
+    });
   });
 
   test('edit keeps saved overlays and sends an empty list when levels are cleared', () => {
@@ -570,6 +681,21 @@ describe('edit form from the stored config entry', () => {
     const config = editAndSave(form);
     expect(config?.env).toEqual(['CAMPUS_KEY']);
     expect(config?.models.fast).toEqual({ modelID: 'fast', name: 'Fast', variants: [{ id: 'max', body: { think: true } }] });
+  });
+
+  test('keeps saved limits and capabilities through an edit', () => {
+    const stored = storedProviderEntrySchema.parse({
+      name: 'Campus LLM',
+      settings: { baseURL: 'https://llm.example.edu/v1' },
+      models: { vision: {
+        name: 'Vision',
+        limit: { context: 200000, output: 8192 },
+        capabilities: { tools: true, input: ['text', 'image'], output: ['text'] },
+      } },
+    });
+    const config = editAndSave(providerToEditFormState(live, stored));
+    expect(config?.models.vision?.limit).toEqual({ context: 200000, output: 8192 });
+    expect(config?.models.vision?.capabilities).toEqual({ tools: true, input: ['text', 'image'], output: ['text'] });
   });
 
   test('a stored model without levels saves without the generated ones', () => {

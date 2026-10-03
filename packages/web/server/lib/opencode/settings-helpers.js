@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { createRequire } from 'node:module';
 
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
@@ -35,6 +36,26 @@ import {
   isInputHistoryLimit,
   isInputHistoryScope,
 } from './input-history-scope.js';
+
+// Icons a custom provider may show instead of its logo; mirrors
+// CUSTOM_PROVIDER_ICONS in packages/ui/src/lib/customProviderIcons.ts.
+const customProviderIconsSchema = z.record(
+  z.string().trim().min(1).max(128),
+  z.enum(['server', 'cloud', 'database', 'terminal', 'code', 'ai']),
+);
+const CUSTOM_PROVIDER_ICONS_MAX = 256;
+
+/** Provider id -> icon id; unknown icons and malformed entries are dropped one by one. */
+const sanitizeCustomProviderIcons = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [providerID, icon] of Object.entries(record.data).slice(0, CUSTOM_PROVIDER_ICONS_MAX)) {
+    const entry = customProviderIconsSchema.safeParse({ [providerID]: icon });
+    if (entry.success) Object.assign(result, entry.data);
+  }
+  return result;
+};
 
 export const createSettingsHelpers = (dependencies) => {
   const {
@@ -779,6 +800,11 @@ export const createSettingsHelpers = (dependencies) => {
 
     if (Array.isArray(candidate.collapsedModelProviders)) {
       result.collapsedModelProviders = normalizeStringArray(candidate.collapsedModelProviders);
+    }
+
+    const customProviderIcons = sanitizeCustomProviderIcons(candidate.customProviderIcons);
+    if (customProviderIcons) {
+      result.customProviderIcons = customProviderIcons;
     }
 
     if (Array.isArray(candidate.recentAgents)) {

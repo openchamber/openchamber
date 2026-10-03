@@ -76,6 +76,27 @@ refetches its own provider sources and integrations and lets the catalog
 events refresh the stores. (The old "nudge" went through `/api/config/reload`,
 which restarts a managed OpenCode and showed the reload overlay.)
 
+The custom-provider form can discover models before save through
+`POST /api/provider/discover-models`. Discovery is a one-time prefill the user
+starts with "Find models": they pick which returned models to add, the review
+panel closes, and nothing stays in sync with the provider afterwards (a
+maintainer decision; never add a recurring refresh). Provider metadata wins
+field by field and models.dev fills the gaps. Discovery failure never removes
+rows or blocks saving.
+
+Model rows render collapsed (name, id, limits, non-text inputs) so a provider
+with dozens of models stays scannable; a row added by hand opens, and a row
+with a validation error opens on submit. Capabilities are written to the
+OpenCode config only when they are known (saved config, discovery, or the
+user's edit, `capabilitiesKnown`); otherwise the key is left out so a save
+never replaces what OpenCode knows about a model with a text-only default.
+
+Custom-provider icons are OpenChamber profile preferences, keyed by provider
+ID. They are not written into OpenCode config because OpenCode has no provider
+icon field. "Default" stores nothing, so the provider's own logo (or the
+generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
+provider logos, so Settings and every model picker agree.
+
 The "Add provider" list is `GET /api/integration` minus the integrations that
 already have a connection and minus MCP OAuth registrations (`mcp_*`); v2's
 `GET /api/provider` lists only what is configured or connected right now, so

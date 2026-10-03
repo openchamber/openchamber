@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { getProviderSources, getStoredProviderConfig, upsertProviderConfig } from './opencodeConfig';
+import { getProviderSources, getStoredProviderConfig, readConfig, upsertProviderConfig } from './opencodeConfig';
 import { getProviderAuth } from './opencodeAuth';
 import { OpenCode } from '@opencode/client';
 import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
@@ -17,6 +17,16 @@ import { resolveWorkspaceFolders } from './workspaceResolver';
 import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+import { discoverProviderModels } from './model-discovery';
+
+/** The base URL a custom provider was saved with; discovery sends its stored key only there. */
+const readStoredProviderBaseURL = (providerID: string): string | undefined => {
+  const provider = readConfig().provider;
+  if (!provider || typeof provider !== 'object') return undefined;
+  const entry = (provider as Record<string, { options?: { baseURL?: unknown } } | undefined>)[providerID];
+  const baseURL = entry?.options?.baseURL;
+  return typeof baseURL === 'string' ? baseURL : undefined;
+};
 
 const isSessionNotFound = (error: Error): boolean => error.name === 'SessionNotFoundError';
 
@@ -508,6 +518,26 @@ export async function handleSystemBridgeMessage(
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
+      }
+    }
+
+    case 'api:provider:discover-models': {
+      if (isEnterpriseMode()) {
+        return { id, type, success: false, error: ENTERPRISE_MODE_ERROR };
+      }
+      try {
+        const providerID = payload && typeof payload === 'object' && typeof (payload as { providerID?: unknown }).providerID === 'string'
+          ? (payload as { providerID: string }).providerID.trim()
+          : '';
+        // A stored key that cannot be read leaves discovery to the key in the form.
+        const storedAuth = providerID ? await getProviderAuth(providerID).catch(() => null) : null;
+        const storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string'
+          ? storedAuth.key
+          : null;
+        const storedBaseURL = providerID ? readStoredProviderBaseURL(providerID) : undefined;
+        return { id, type, success: true, data: await discoverProviderModels(payload, { storedApiKey, storedBaseURL }) };
+      } catch (error) {
+        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
       }
     }
 

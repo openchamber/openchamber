@@ -30,7 +30,8 @@ import { z } from 'zod';
  * at its own server boundary:
  * - Model providers come only from the OpenCode config: connecting one,
  *   signing in, adding a key or creating a custom provider through this
- *   server is refused (`opencode/routes.js`). OpenCode's `provider.use`
+ *   server is refused, as is probing a custom provider's model endpoint
+ *   (`opencode/routes.js`). OpenCode's `provider.use`
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.

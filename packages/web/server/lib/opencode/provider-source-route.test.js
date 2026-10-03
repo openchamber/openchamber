@@ -4,6 +4,12 @@ import request from 'supertest';
 import { registerOpenCodeRoutes } from './routes.js';
 import { configureOpenCodeCredentials } from './auth.js';
 
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
 const createApp = (getProviderSources) => {
   const app = express();
   app.use(express.json());
@@ -40,7 +46,10 @@ describe('provider writes in enterprise mode', () => {
         expect(response.status).toBe(403);
         expect(response.body.code).toBe('enterprise_mode');
       }
-      // Removing or switching an account only narrows access and still reaches OpenCode.
+      const discovery = await agent.post('/api/provider/discover-models').send({ baseURL: 'https://example.test/v1' });
+      expect(discovery.status).toBe(403);
+      expect(discovery.body.code).toBe('enterprise_mode');
+      // Removing an account only narrows access and still reaches OpenCode.
       expect((await agent.delete('/api/credential/cred_1')).status).toBe(404);
       expect((await agent.post('/api/credential/cred_1/activate')).status).toBe(404);
       // Signing in to a remote MCP server reaches a tool server, not a model provider.
@@ -140,5 +149,34 @@ describe('GET /api/provider/:providerId/source', () => {
       .expect(200);
 
     expect(response.body.config).toBeNull();
+  });
+});
+
+describe('POST /api/provider/discover-models', () => {
+  it('uses the stored provider key without returning it to the browser', async () => {
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      expect(init.headers.Authorization).toBe('Bearer replacement-secret');
+      return new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 });
+    });
+    const app = express();
+    app.use(express.json());
+    registerOpenCodeRoutes(app, {
+      resolveProjectDirectory: vi.fn(async () => ({ directory: '/projects/app' })),
+      getProviderSources: vi.fn(),
+    });
+
+    // The route's auth module reads the real OpenCode credential store. This
+    // fixture cannot inject that private module, so the module-level fallback
+    // is covered in model-discovery.test.js and this keeps the route contract:
+    // provider id enters, no credential leaves in the response.
+    const response = await request(app)
+      .post('/api/provider/discover-models')
+      .send({ providerID: 'stored-llm', baseURL: 'https://provider.test', apiKey: 'replacement-secret', enrich: false })
+      .expect(200);
+    expect(response.body).toEqual({
+      models: [{ id: 'model-a', name: 'model-a' }],
+      enrichment: { requested: false, available: false },
+    });
+    expect(JSON.stringify(response.body)).not.toContain('replacement-secret');
   });
 });
