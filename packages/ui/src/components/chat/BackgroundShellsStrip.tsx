@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatSessionActivityDuration } from '@/components/session/sessionActivityDurationFormat';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
@@ -21,6 +22,7 @@ interface BackgroundShellsStripProps {
 }
 
 const ELAPSED_TICK_MS = 1000;
+const COMMAND_TOOLTIP_DELAY_MS = 500;
 
 /**
  * Commands of this session and of its subagents. The tree is resolved only
@@ -81,9 +83,20 @@ const ShellRow: React.FC<{ shell: TrackedShell; rootSessionId: string; rootDirec
   return (
     <div className="flex h-10 items-center gap-2 pl-3 pr-1.5">
       <Icon name="terminal-box" className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate font-mono typography-meta text-foreground" title={shell.command}>
-        {shell.command}
-      </span>
+      <Tooltip delayDuration={COMMAND_TOOLTIP_DELAY_MS}>
+        <TooltipTrigger asChild>
+          <span className="min-w-0 flex-1 truncate font-mono typography-meta text-foreground">
+            {shell.command}
+          </span>
+        </TooltipTrigger>
+        {/* The row shows one truncated line; the tooltip keeps the command's
+            own line breaks and indentation and wraps only overlong lines. */}
+        <TooltipContent side="top" sideOffset={6} className="max-w-[min(36rem,90vw)] [text-wrap:wrap]">
+          <pre className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words font-mono typography-meta">
+            {shell.command}
+          </pre>
+        </TooltipContent>
+      </Tooltip>
       {fromSubagent ? (
         <span className="shrink-0 typography-meta text-muted-foreground">{t('chat.backgroundShells.subagent')}</span>
       ) : null}
