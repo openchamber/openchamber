@@ -46,6 +46,8 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.validate': 'Valideren',
   'settings.providers.page.openCodeGo.delete': 'Verwijderen',
   'settings.providers.page.quotaCredentials.saved': 'Inloggegevens van {provider} opgeslagen.',
+  'settings.providers.page.quotaCredentials.platformApiKey': 'Platform-API-sleutel',
+  'settings.providers.page.quotaCredentials.zenmuxInstructions': 'Voor gebruik is een Platform-API-sleutel uit de ZenMux-console nodig. De sleutel die OpenCode voor chat gebruikt, staat daar los van en wordt hier niet gebruikt.',
   'settings.providers.page.quotaCredentials.accessToken': 'Toegangstoken',
   'settings.providers.page.quotaCredentials.usageToken': 'Gebruik-API-token',
   'settings.providers.page.quotaCredentials.exeDevTokenInstructions': 'Voer deze opdracht uit in uw terminal en plak daarna het token hieronder. Het kan alleen het tegoedgebruik van LLM\'s uitlezen en verloopt na 30 dagen.',

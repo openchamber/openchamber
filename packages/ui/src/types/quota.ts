@@ -22,6 +22,8 @@ export type QuotaProviderId =
   | 'exe-dev'
   | 'hyper'
   | 'neuralwatt'
+  | 'kilo'
+  | 'zenmux'
   | 'xai';
 
 export interface UsageWindowGiftReset {

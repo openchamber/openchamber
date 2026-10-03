@@ -34,6 +34,8 @@ describe('resolveQuotaProviderId', () => {
   test('maps the known divergences', () => {
     expect(resolveQuotaProviderId('openai')).toBe('codex');
     expect(resolveQuotaProviderId('anthropic')).toBe('claude');
+    expect(resolveQuotaProviderId('kilocode')).toBe('kilo');
+    expect(resolveQuotaProviderId('kilo-code')).toBe('kilo');
   });
 
   test('maps the opencode-claude integration provider onto Claude quota', () => {
