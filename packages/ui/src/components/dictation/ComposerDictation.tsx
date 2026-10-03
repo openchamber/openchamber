@@ -39,6 +39,10 @@ interface ComposerDictationProps {
     /** Called once when a dictation leaves idle, before any transcript exists,
         so the host can record which draft the dictation belongs to. */
     onStart?: () => void;
+    /** Called when the record-and-send button is pressed, before the async
+        transcript resolves; the host holds the composer open until onInsert
+        or onInsertAndSend settles. */
+    onSendStart?: () => void;
     /** Reports whether dictation is active (recording/transcribing/failed overlay shown). */
     onActiveChange?: (active: boolean) => void;
     /** Reports the height (px) failed-dictation salvage text needs, so the host
@@ -115,6 +119,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     onInsert,
     onInsertAndSend,
     onStart,
+    onSendStart,
     onActiveChange,
     onContentHeightChange,
     renderTrigger = true,
@@ -178,6 +183,10 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
     React.useEffect(() => {
         onStartRef.current = onStart;
     }, [onStart]);
+    const onSendStartRef = React.useRef(onSendStart);
+    React.useEffect(() => {
+        onSendStartRef.current = onSendStart;
+    }, [onSendStart]);
     const wasIdleRef = React.useRef(true);
     React.useLayoutEffect(() => {
         const idle = status === 'idle';
@@ -343,6 +352,12 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
 
     const confirmWith = (action: 'insert' | 'send') => {
         pendingActionRef.current = action;
+        // Record-and-send keeps the composer open until the submit settles:
+        // the transcript arrives asynchronously and the dictation-end collapse
+        // used to fold the composer into the pill mid-send.
+        if (action === 'send') {
+            onSendStartRef.current?.();
+        }
         void confirmDictation();
     };
 

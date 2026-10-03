@@ -45,7 +45,7 @@ describe('mobile comment composer integration', () => {
         const mobileShell: MobileComposerShell = {
             expanded: true, focused: false, overlayHostBusy: false, dictationActive: false,
             expand: () => { expansions += 1; },
-            onDictationActiveChange: noop, onEditorFocus: noop, onEditorBlur: noop,
+            onDictationActiveChange: noop, holdDictationSend: noop, onEditorFocus: noop, onEditorBlur: noop,
             skipNextOverlayCloseRestore: noop, cancelOverlayCloseRestore: noop,
         };
         const Composer = ({ sessionKey, isMobile }: { sessionKey: string; isMobile: boolean }) => {

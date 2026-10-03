@@ -408,6 +408,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
+    const dictationSendInFlightRef = React.useRef(false);
     const currentChatDraftIdentityRef = React.useRef<ChatDraftIdentity | null>(initialDraftIdentityRef.current);
     const pendingPastedAttachmentFilenamesRef = React.useRef<Set<string>>(new Set());
     const largeTextPasteToastIdRef = React.useRef<string | number | null>(null);
@@ -2189,6 +2190,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // be inserted or sent here.
     const handleDictationInsert = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
+        dictationSendEndRef.current?.();
         setMessage((prev) => {
             // The editor is controlled by this state; getCurrentInputSnapshot
             // reads it back, so no imperative write is needed.
@@ -2201,11 +2203,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const handleDictationInsertAndSend = React.useCallback((text: string) => {
         if (keepTranscriptForOrigin(text)) return;
-        // Same as preset chips: the composed text goes into the submit as an
-        // explicit override instead of being staged in the textarea, which may
-        // not be mounted (collapsed mobile pill).
-        const next = appendInlineText(composerRef.current?.getValue() ?? messageRef.current, text);
-        void handleSubmitRef.current({ presetText: next });
+        // Read the pending draft from the ref, NOT from the editor: the
+        // transcript resolves asynchronously, and on mobile the shell may have
+        // already collapsed into the pill by then, so the editor is unmounted
+        // and getValue() returns '' — which silently dropped the user's typed
+        // text and (once the composer cleared) the transcript with it.
+        const next = appendInlineText(messageRef.current, text);
+        // Land the composed text in the composer state first, so a failed send
+        // restores exactly what the user dictated, then submit it as an
+        // explicit override (the textarea may be unmounted at this point).
+        setMessage(next);
+        dictationSendInFlightRef.current = true;
+        void handleSubmitRef.current({ presetText: next }).finally(() => {
+            dictationSendEndRef.current?.();
+        });
     }, [keepTranscriptForOrigin]);
 
     // A command with an argument sends once the isolated composer owns its draft.
@@ -3516,6 +3527,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
 
+    // The record-and-send overlay holds the composer open until its submit
+    // settles; the hold is released here (both handlers cover every exit).
+    const dictationSendEndRef = React.useRef<(() => void) | null>(null);
+    dictationSendEndRef.current = () => {
+        dictationSendInFlightRef.current = false;
+        mobileShell.holdDictationSend(false);
+    };
+    const handleDictationSendStart = React.useCallback(() => {
+        // Only the mobile shell collapses on dictation end, and only its
+        // dictation reports when it ends, which is what releases a hold
+        // that never reaches a submit.
+        if (isMobile) mobileShell.holdDictationSend(true);
+    }, [isMobile, mobileShell]);
+    // A record-and-send that never reaches a submit (failed or empty
+    // transcript, cancel, a transcript kept for another draft) still releases
+    // the hold once dictation ends. The transcript callback runs in the same
+    // tick the status turns idle, so a real send is already in flight here.
+    const { onDictationActiveChange } = mobileShell;
+    const handleDictationActiveChange = React.useCallback((active: boolean) => {
+        onDictationActiveChange(active);
+        if (!active && !dictationSendInFlightRef.current) dictationSendEndRef.current?.();
+    }, [onDictationActiveChange]);
+
     // Mobile comment mode: subscription, scope ownership and the attach/cancel
     // transitions live in the hook; ChatInput only renders from it.
     const mobileComment = useMobileCommentComposerMode({
@@ -4111,6 +4145,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onStartDictation={toggleDictation}
                         onDictationInsert={handleDictationInsert}
                         onDictationInsertAndSend={handleDictationInsertAndSend}
+                        onDictationSendStart={handleDictationSendStart}
                         onDictationStart={markDictationStart}
                         onDictationContentHeightChange={handleDictationContentHeightChange}
                         isBtw={isBtwActive}
@@ -4149,8 +4184,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         sendIconSizeClass={sendIconSizeClass}
                         onInsert={handleDictationInsert}
                         onInsertAndSend={handleDictationInsertAndSend}
+                        onSendStart={handleDictationSendStart}
                         onStart={markDictationStart}
-                        onActiveChange={mobileShell.onDictationActiveChange}
+                        onActiveChange={handleDictationActiveChange}
                         onContentHeightChange={handleDictationContentHeightChange}
                         renderTrigger={false}
                     />
