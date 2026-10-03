@@ -20,20 +20,50 @@ const hasValidFoldersMapShape = (foldersMap) => (
   ))
 );
 
+// folderId -> deletedAt. Optional so snapshots written before tombstones
+// existed stay valid.
+const hasValidTombstonesShape = (tombstones) => (
+  tombstones === undefined
+  || (isObjectRecord(tombstones)
+    && Object.values(tombstones).every((deletedAt) => typeof deletedAt === 'number' && Number.isFinite(deletedAt)))
+);
+
 const hasValidFolderSnapshotShape = (snapshot) => (
   isObjectRecord(snapshot)
   && snapshot.version === 1
   && hasValidFoldersMapShape(snapshot.foldersMap)
   && Array.isArray(snapshot.collapsedFolderIds)
   && snapshot.collapsedFolderIds.every((folderId) => typeof folderId === 'string')
+  && hasValidTombstonesShape(snapshot.deletedFolderIds)
 );
+
+// A deleted folder id is remembered this long, which is longer than any device
+// plausibly stays offline with a stale copy that still holds it.
+const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const EMPTY_SNAPSHOT = { version: 1, foldersMap: {}, collapsedFolderIds: [] };
+
+const mergeTombstones = (current, incoming, now) => {
+  const merged = {};
+  for (const source of [current, incoming]) {
+    if (!isObjectRecord(source)) continue;
+    for (const [folderId, deletedAt] of Object.entries(source)) {
+      if (now - deletedAt > TOMBSTONE_TTL_MS) continue;
+      merged[folderId] = Math.max(merged[folderId] ?? 0, deletedAt);
+    }
+  }
+  return merged;
+};
 
 // POST bodies are whole-device maps from clients that may never have seen the
 // current server state (bootstrap-only hydration, long-open tabs, clock skew),
 // so absence of a scope or folder is not deletion. Merge per scope instead of
 // replacing the file: keep what the writer never saw, let the incoming
-// version win per folder id, and keep updatedAt monotonic.
-const mergeSnapshots = (current, incoming) => {
+// version win per folder id, and keep updatedAt monotonic. Deletion travels
+// explicitly as tombstones: a tombstoned id is dropped from every scope even
+// when a stale device sends it again.
+const mergeSnapshots = (current, incoming, now) => {
+  const deletedFolderIds = mergeTombstones(current.deletedFolderIds, incoming.deletedFolderIds, now);
   const currentMap = isObjectRecord(current.foldersMap) ? current.foldersMap : {};
   const incomingMap = isObjectRecord(incoming.foldersMap) ? incoming.foldersMap : {};
   const mergedScopes = {};
@@ -69,17 +99,32 @@ const mergeSnapshots = (current, incoming) => {
     }
     mergedScopes[scope] = [...foldersById.values()];
   }
+  for (const [scope, folders] of Object.entries(mergedScopes)) {
+    const kept = folders.filter((folder) => deletedFolderIds[folder.id] === undefined);
+    if (kept.length > 0) {
+      mergedScopes[scope] = kept;
+    } else {
+      delete mergedScopes[scope];
+    }
+  }
+  // The writer's collapse state is authoritative for folders it knows; a
+  // union would keep a folder it just expanded collapsed forever.
+  const incomingFolderIds = new Set(
+    Object.values(incomingMap).flatMap((folders) => (Array.isArray(folders) ? folders.map((folder) => folder.id) : [])),
+  );
+  const incomingCollapsed = Array.isArray(incoming.collapsedFolderIds) ? incoming.collapsedFolderIds : [];
+  const currentCollapsed = Array.isArray(current.collapsedFolderIds) ? current.collapsedFolderIds : [];
   const collapsedFolderIds = [
     ...new Set([
-      ...(Array.isArray(current.collapsedFolderIds) ? current.collapsedFolderIds : []),
-      ...(Array.isArray(incoming.collapsedFolderIds) ? incoming.collapsedFolderIds : []),
+      ...incomingCollapsed,
+      ...currentCollapsed.filter((folderId) => !incomingFolderIds.has(folderId)),
     ]),
-  ];
+  ].filter((folderId) => deletedFolderIds[folderId] === undefined);
   const updatedAt = Math.max(
     Number.isFinite(current.updatedAt) ? current.updatedAt : 0,
     Number.isFinite(incoming.updatedAt) ? incoming.updatedAt : 0,
   );
-  return { version: 1, foldersMap: mergedScopes, collapsedFolderIds, updatedAt };
+  return { version: 1, foldersMap: mergedScopes, collapsedFolderIds, deletedFolderIds, updatedAt };
 };
 
 export const registerSessionFoldersRoutes = (app, dependencies) => {
@@ -149,15 +194,17 @@ export const registerSessionFoldersRoutes = (app, dependencies) => {
           if (error && error.code === 'ENOENT') return null;
           throw error;
         });
-        let outgoing = body;
+        const now = Date.now();
+        let current = EMPTY_SNAPSHOT;
         if (currentRaw) {
           try {
-            const current = JSON.parse(currentRaw);
-            if (hasValidFolderSnapshotShape(current)) {
-              outgoing = mergeSnapshots(current, body);
+            const parsed = JSON.parse(currentRaw);
+            if (hasValidFolderSnapshotShape(parsed)) {
+              current = parsed;
             }
           } catch { /* A valid new snapshot repairs malformed prior state. */ }
         }
+        const outgoing = mergeSnapshots(current, body, now);
 
         const outgoingSerialized = JSON.stringify(outgoing, null, 2);
         await ensureDir();

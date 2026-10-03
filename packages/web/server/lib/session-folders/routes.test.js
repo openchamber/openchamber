@@ -302,6 +302,89 @@ describe('session folders routes', () => {
     expect(saved.foldersMap['/home/ai'].map((entry) => entry.id).sort()).toEqual(['f1', 'f2', 'f3']);
   });
 
+  const createPersistingRoutes = (initial) => {
+    const { app, getRoute } = createRouteRegistry();
+    const state = { persisted: initial === undefined ? null : JSON.stringify(initial) };
+    const fsPromises = {
+      readFile: vi.fn(async () => {
+        if (state.persisted === null) return missingFile();
+        return state.persisted;
+      }),
+      mkdir: vi.fn(async () => {}),
+      writeFile: vi.fn(async (_tempPath, value) => {
+        state.persisted = value;
+      }),
+      rename: vi.fn(async () => {}),
+      unlink: vi.fn(async () => {}),
+    };
+    registerSessionFoldersRoutes(app, { fsPromises, path, openchamberDataDir: '/tmp/openchamber-test' });
+    const post = async (body) => {
+      const response = createMockResponse();
+      await getRoute('POST', '/api/session-folders')({ body }, response);
+      return response;
+    };
+    const get = async () => {
+      const response = createMockResponse();
+      await getRoute('GET', '/api/session-folders')({}, response);
+      return response.body;
+    };
+    return { post, get };
+  };
+
+  it('keeps a deleted folder deleted when a stale device sends it again', async () => {
+    const now = Date.now();
+    const routes = createPersistingRoutes({
+      ...folderPayload(10),
+      foldersMap: { '/home/ai': [folder('f1', 'Keep', ['s1']), folder('fx', 'Gone', ['s2'])] },
+    });
+
+    await routes.post({
+      ...folderPayload(20),
+      foldersMap: { '/home/ai': [folder('f1', 'Keep', ['s1'])] },
+      deletedFolderIds: { fx: now },
+    });
+    await routes.post({
+      ...folderPayload(15),
+      foldersMap: { '/home/ai': [folder('f1', 'Keep', ['s1']), folder('fx', 'Gone', ['s2'])] },
+      collapsedFolderIds: ['fx'],
+    });
+
+    const snapshot = await routes.get();
+    expect(snapshot.foldersMap['/home/ai'].map((entry) => entry.id)).toEqual(['f1']);
+    expect(snapshot.collapsedFolderIds).toEqual([]);
+    expect(snapshot.deletedFolderIds).toEqual({ fx: now });
+  });
+
+  it('forgets tombstones older than thirty days', async () => {
+    const routes = createPersistingRoutes({
+      ...folderPayload(10),
+      deletedFolderIds: { old: Date.now() - 31 * 24 * 60 * 60 * 1000 },
+    });
+    await routes.post({ ...folderPayload(20) });
+    expect((await routes.get()).deletedFolderIds).toEqual({});
+  });
+
+  it('takes collapse state for a known folder from the writer', async () => {
+    const routes = createPersistingRoutes({
+      ...folderPayload(10),
+      foldersMap: { '/home/ai': [folder('f1', 'One', []), folder('f2', 'Two', [])] },
+      collapsedFolderIds: ['f1', 'f2'],
+    });
+    await routes.post({
+      ...folderPayload(20),
+      foldersMap: { '/home/ai': [folder('f1', 'One', [])] },
+      collapsedFolderIds: [],
+    });
+    // f1 was expanded by the writer; f2 is unknown to it, so its state stays.
+    expect((await routes.get()).collapsedFolderIds).toEqual(['f2']);
+  });
+
+  it('rejects a tombstone map with a non-numeric timestamp', async () => {
+    const routes = createPersistingRoutes();
+    const response = await routes.post({ ...folderPayload(20), deletedFolderIds: { fx: 'yesterday' } });
+    expect(response.statusCode).toBe(400);
+  });
+
   it('lets the incoming version win for the same folder id', async () => {
     const { app, getRoute } = createRouteRegistry();
     let persisted = JSON.stringify({
