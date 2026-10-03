@@ -137,7 +137,7 @@ export function registerGitHubRoutes(app) {
         setGhCliActive(false);
       }
 
-      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && (ghCliActive || !usingOwnToken);
+      const ghCliCurrent = ghToken !== null && !ghCliDisabled && Boolean(ghCliUser) && ghCliActive;
       if (ghCliUser) {
         accounts = accounts
           .map((account) => ({ ...account, current: ghCliCurrent ? false : Boolean(account.current) }))

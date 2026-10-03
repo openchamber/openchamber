@@ -483,7 +483,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = ({ embedded = false
                   <div className={cn("typography-meta text-muted-foreground", ghCli.disabled ? "opacity-60" : undefined)}>
                     {ghCli.disabled
                       ? t('settings.github.page.ghCli.disabledDescription')
-                      : t('settings.github.page.ghCli.fallbackDescription')}
+                      : t('settings.github.page.ghCli.availableDescription')}
                   </div>
                 </div>
               </div>
