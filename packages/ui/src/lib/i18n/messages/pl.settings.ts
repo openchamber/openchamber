@@ -1143,7 +1143,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Włącz sprawdzanie pisowni w polach tekstowych',
   'settings.openchamber.visual.field.largeTextPaste': 'Wklejanie dużego tekstu',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'Wybierz sposób wklejania tekstu mającego co najmniej 2000 znaków lub 25 wierszy. W trybie podwójnego wklejania tekst najpierw trafia do wiadomości. Naciśnij Ctrl/Cmd+V ponownie przed upływem 1000 ms z tym samym tekstem, aby zastąpić ten fragment plikiem. Edycja, przesunięcie zaznaczenia, opuszczenie pola lub zmiana szkicu anuluje konwersję. Wklejanie przez menu lub dotyk pozostaje w treści; jeśli załączanie się nie powiedzie, tekst zostaje zachowany.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Przy wklejaniu ponad około 2000 znaków lub 25 wierszy wybierz, czy dołączyć tekst jako plik, wkleić go w treści, czy pytać za każdym razem. W trybie podwójnego wklejania ponowne wklejenie tego samego tekstu w ciągu sekundy zamienia go w plik.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Zachowanie przy wklejaniu dużego tekstu',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Wklejanie dużego tekstu: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Pytaj za każdym razem',

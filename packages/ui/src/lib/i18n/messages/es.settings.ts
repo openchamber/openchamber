@@ -2185,7 +2185,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Habilitar ortografía en campos de texto",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Habilitar ortografía en campos de texto",
   "settings.openchamber.visual.field.largeTextPaste": "Pegado de texto grande",
-  "settings.openchamber.visual.field.largeTextPasteHint": "Elige cómo pegar textos de al menos 2000 caracteres o 25 líneas. En el modo de doble pegado, el primer pegado queda en el mensaje. Pulsa Ctrl/Cmd+V de nuevo menos de 1000 ms después con el mismo texto para sustituir esa inserción por un archivo. Editar, mover la selección, salir del campo o cambiar de borrador cancela la conversión. El pegado mediante menú o toque queda en el mensaje; si falla el adjunto, se conserva el texto.",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Al pegar más de unos 2000 caracteres o 25 líneas, elige si adjuntar el texto como archivo, pegarlo en línea o preguntar cada vez. Con doble pegado, volver a pegar el mismo texto en menos de un segundo lo convierte en un archivo.",
   "settings.openchamber.visual.field.largeTextPasteAria": "Comportamiento del pegado de texto grande",
   "settings.openchamber.visual.field.largeTextPasteOptionAria": "Pegado de texto grande: {option}",
   "settings.openchamber.visual.option.largeTextPaste.ask.label": "Preguntar cada vez",

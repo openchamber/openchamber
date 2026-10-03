@@ -12,7 +12,7 @@ function setup(text = 'x'.repeat(2000), doc = 'before selected after', from = 7,
     let state = EditorState.create({ doc, selection: { anchor: from, head: to } });
     let scope = 'runtime/directory/session';
     const read = () => ({ value: state.doc.toString(), selection: { start: state.selection.main.from, end: state.selection.main.to }, scope });
-    const key = (repeat = false, metaKey = false) => gesture.keyDown({ key: 'v', ctrlKey: !metaKey, metaKey, altKey: false, shiftKey: false, repeat });
+    const key = (repeat = false, metaKey = false, keyValue = 'v', code = 'KeyV') => gesture.keyDown({ key: keyValue, code, ctrlKey: !metaKey, metaKey, altKey: false, shiftKey: false, repeat });
     const paste = (now: number, clipboard = text) => {
         const candidate = gesture.beginPaste(clipboard, read(), now);
         if (!candidate) {
@@ -23,7 +23,7 @@ function setup(text = 'x'.repeat(2000), doc = 'before selected after', from = 7,
             state = transaction.state;
             gesture.change({ ...read(), fromPaste: true, insertedText });
         }
-        gesture.keyUp({ key: 'v' });
+        gesture.keyUp({ key: 'v', code: 'KeyV', altKey: false });
         return candidate;
     };
     const replace = (start: number, end: number, citation: string) => {
@@ -37,6 +37,34 @@ function setup(text = 'x'.repeat(2000), doc = 'before selected after', from = 7,
 }
 
 describe('large text double-paste gesture with real CodeMirror edits', () => {
+    for (const metaKey of [false, true]) test(`${metaKey ? 'Cmd' : 'Ctrl'}+V converts with a Cyrillic key value`, async () => {
+        const h = setup();
+        h.key(false, metaKey, 'м'); h.paste(100);
+        h.key(false, metaKey, 'м'); const candidate = h.paste(200);
+        if (!candidate) throw new Error('Expected non-Latin paste conversion');
+        expect(await h.gesture.convert(candidate, async () => true, h.read, h.replace, '[file]')).toBe(true);
+        expect(h.read().value).toBe('before [file] after');
+    });
+
+    test('Latin layouts keep the character-based meaning when V moves to another physical key', () => {
+        const h = setup();
+        h.key(false, false, 'v', 'Period'); h.paste(100);
+        h.key(false, false, 'v', 'Period'); expect(h.paste(200)).not.toBeNull();
+    });
+
+    test('a physical V key producing another Latin character does not arm conversion', () => {
+        const h = setup();
+        h.key(false, false, 'k', 'KeyV'); h.paste(100);
+        h.key(false, false, 'k', 'KeyV'); expect(h.paste(200)).toBeNull();
+    });
+
+    test('a Cyrillic key release without a delivered paste cannot authorize a later menu paste', () => {
+        const h = setup(); h.key(); h.paste(100);
+        h.key(false, false, 'м');
+        h.gesture.keyUp({ key: 'м', code: 'KeyV', altKey: false });
+        expect(h.paste(200)).toBeNull();
+    });
+
     test('first paste inserts immediately; second replaces only its measured CRLF range after acceptance', async () => {
         const text = Array.from({ length: 25 }, (_, i) => `line ${i}`).join('\r\n');
         const h = setup(text);
@@ -84,7 +112,7 @@ describe('large text double-paste gesture with real CodeMirror edits', () => {
     });
 
     test('releasing V without a paste cannot authorize a later menu paste', () => {
-        const h = setup(); h.key(); h.paste(100); h.key(); h.gesture.keyUp({ key: 'v' });
+        const h = setup(); h.key(); h.paste(100); h.key(); h.gesture.keyUp({ key: 'v', code: 'KeyV', altKey: false });
         expect(h.paste(200)).toBeNull();
     });
 
@@ -108,7 +136,7 @@ describe('large text double-paste gesture with real CodeMirror edits', () => {
 
     test('non-paste keyboard movement invalidates even when caret returns', () => {
         const h = setup(); h.key(); h.paste(100);
-        h.gesture.keyDown({ key: 'ArrowLeft', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false });
+        h.gesture.keyDown({ key: 'ArrowLeft', code: 'ArrowLeft', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false });
         h.key(); expect(h.paste(200)).toBeNull();
     });
 

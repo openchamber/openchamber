@@ -31,13 +31,12 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
-  test('double-paste settings copy is translated and keeps the timing explicit', () => {
+  test('double-paste settings copy is translated', () => {
     const labelKey = 'settings.openchamber.visual.option.largeTextPaste.inlineDoublePaste.label';
     const hintKey = 'settings.openchamber.visual.field.largeTextPasteHint';
     expect(enDict[labelKey]).toBe('Paste inline, double-paste to attach');
     for (const [locale, dictionary] of Object.entries(localeDictionaries)) {
       expect(dictionary[labelKey]).toBeTruthy();
-      expect(dictionary[hintKey]).toContain('1000');
       if (locale !== 'en') {
         expect(dictionary[labelKey]).not.toBe(enDict[labelKey]);
         expect(dictionary[hintKey]).not.toBe(enDict[hintKey]);

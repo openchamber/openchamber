@@ -2185,7 +2185,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Ativar ortografia em campos de texto",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Ativar ortografia em campos de texto",
   "settings.openchamber.visual.field.largeTextPaste": "Colagem de texto grande",
-  "settings.openchamber.visual.field.largeTextPasteHint": "Escolha como colar textos com pelo menos 2.000 caracteres ou 25 linhas. No modo de colagem dupla, a primeira colagem fica no corpo da mensagem. Pressione Ctrl/Cmd+V novamente em menos de 1000 ms com o mesmo texto para substituir essa inserção por um arquivo. Editar, mover a seleção, sair do campo ou trocar de rascunho cancela a conversão. Colar pelo menu ou por toque mantém o texto no corpo; se o anexo falhar, o texto será mantido.",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Ao colar mais de cerca de 2.000 caracteres ou 25 linhas, escolha anexar o texto como arquivo, colar no corpo da mensagem ou perguntar sempre. No modo de colar duas vezes, colar o mesmo texto de novo em até um segundo o transforma em arquivo.",
   "settings.openchamber.visual.field.largeTextPasteAria": "Comportamento da colagem de texto grande",
   "settings.openchamber.visual.field.largeTextPasteOptionAria": "Colagem de texto grande: {option}",
   "settings.openchamber.visual.option.largeTextPaste.ask.label": "Perguntar sempre",

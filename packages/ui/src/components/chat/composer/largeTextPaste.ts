@@ -6,6 +6,8 @@
  * the attachment pipeline can send like any other .txt attachment.
  */
 
+import { resolveShortcutEventKey } from '@/lib/shortcuts';
+
 export const LARGE_TEXT_PASTE_CHAR_THRESHOLD = 2000;
 export const LARGE_TEXT_PASTE_LINE_THRESHOLD = 25;
 
@@ -89,16 +91,16 @@ export class LargeTextPasteGesture {
         this.state = { kind: 'idle' };
     }
 
-    keyDown(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'repeat'>): void {
+    keyDown(event: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey' | 'repeat'>): void {
         if (['Control', 'Meta', 'Shift', 'Alt'].includes(event.key)) return;
-        const paste = event.key.toLowerCase() === 'v'
+        const paste = resolveShortcutEventKey(event).toLowerCase() === 'v'
             && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.repeat;
         if (!paste) this.invalidate();
         this.keyboardPaste = paste;
     }
 
-    keyUp(event: Pick<KeyboardEvent, 'key'>): void {
-        if (event.key.toLowerCase() === 'v') this.keyboardPaste = false;
+    keyUp(event: Pick<KeyboardEvent, 'key' | 'code' | 'altKey'>): void {
+        if (resolveShortcutEventKey(event).toLowerCase() === 'v') this.keyboardPaste = false;
     }
 
     beginPaste(text: string, snapshot: PasteSnapshot, now = performance.now()): LargeTextPasteCandidate | null {

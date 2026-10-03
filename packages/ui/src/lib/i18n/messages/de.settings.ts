@@ -2131,7 +2131,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Rechtschreibprüfung in Texteingaben aktivieren',
   'settings.openchamber.visual.field.largeTextPaste': 'Großes Texteinfügen',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'Für Text mit mindestens 2.000 Zeichen oder 25 Zeilen wählen Sie die Einfügeart. Beim doppelten Einfügen wird der Text zunächst direkt eingefügt. Drücken Sie mit demselben Text nach weniger als 1000 ms erneut Strg/Cmd+V, um diese Einfügung durch eine Datei zu ersetzen. Bearbeiten, Verschieben der Auswahl, Verlassen des Feldes oder Wechseln des Entwurfs bricht die Umwandlung ab. Einfügen per Menü oder Touch bleibt direkt; bei fehlgeschlagenem Anhängen bleibt der Text erhalten.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Beim Einfügen von mehr als etwa 2.000 Zeichen oder 25 Zeilen wählen, ob der Text als Datei angehängt, direkt eingefügt oder jedes Mal nachgefragt werden soll. Beim doppelten Einfügen wird derselbe Text, innerhalb einer Sekunde erneut eingefügt, zur Datei.',
   'settings.openchamber.visual.field.enterToSend': 'Tastenkürzel zum Senden',
   'settings.openchamber.visual.field.enterToSendHint': 'Wählen Sie das Tastenkürzel zum Senden im Standard-Composer. Im erweiterten Composer fügt Enter immer eine neue Zeile ein, und Strg/Cmd+Enter sendet.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Mit Enter senden',

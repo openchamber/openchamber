@@ -75,14 +75,14 @@ describe('mounted composer native paste and double-paste conversion', () => {
         }
     });
 
-    async function paste(keyboard = true, repeat = false, metaKey = false) {
+    async function paste(keyboard = true, repeat = false, metaKey = false, key = 'v', code = 'KeyV') {
         const content = browser.document.querySelector('.cm-content');
         if (!content) throw new Error('Composer not mounted');
         await act(async () => {
-            if (keyboard) content.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: !metaKey, metaKey, repeat, bubbles: true, cancelable: true }));
+            if (keyboard) content.dispatchEvent(new browser.KeyboardEvent('keydown', { key, code, ctrlKey: !metaKey, metaKey, repeat, bubbles: true, cancelable: true }));
             const clipboardData = new browser.DataTransfer(); clipboardData.setData('text/plain', text);
             content.dispatchEvent(new browser.ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
-            if (keyboard) content.dispatchEvent(new browser.KeyboardEvent('keyup', { key: 'v', bubbles: true }));
+            if (keyboard) content.dispatchEvent(new browser.KeyboardEvent('keyup', { key, code, bubbles: true }));
         });
     }
 
@@ -108,6 +108,34 @@ describe('mounted composer native paste and double-paste conversion', () => {
     test('Cmd+V uses the same conversion path', async () => {
         await paste(true, false, true); await paste(true, false, true);
         expect(attaches).toBe(1); expect(editor.current?.getValue()).toBe('before [pasted-context-1.txt] after');
+    });
+
+    for (const metaKey of [false, true]) test(`${metaKey ? 'Cmd' : 'Ctrl'}+V converts the native paste with a Cyrillic layout`, async () => {
+        await paste(true, false, metaKey, 'м');
+        await paste(true, false, metaKey, 'м');
+        expect(attaches).toBe(1);
+        expect(nativeChanges).toBe(1);
+        expect(editor.current?.getValue()).toBe('before [pasted-context-1.txt] after');
+    });
+
+    test('Dvorak V follows the character rather than its physical position', async () => {
+        await paste(true, false, false, 'v', 'Period');
+        await paste(true, false, false, 'v', 'Period');
+        expect(attaches).toBe(1);
+        expect(editor.current?.getValue()).toBe('before [pasted-context-1.txt] after');
+    });
+
+    test('a non-Latin key release cancels a shortcut that did not deliver a paste', async () => {
+        await paste(true, false, false, 'м');
+        const content = browser.document.querySelector('.cm-content');
+        if (!content) throw new Error('Composer not mounted');
+        await act(async () => {
+            content.dispatchEvent(new browser.KeyboardEvent('keydown', { key: 'м', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true }));
+            content.dispatchEvent(new browser.KeyboardEvent('keyup', { key: 'м', code: 'KeyV', bubbles: true }));
+        });
+        await paste(false);
+        expect(attaches).toBe(0);
+        expect(nativeChanges).toBe(2);
     });
 
     test('opening the context menu cancels a keyboard press that did not deliver a paste', async () => {

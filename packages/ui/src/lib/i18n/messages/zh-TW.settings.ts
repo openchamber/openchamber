@@ -2090,7 +2090,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文字輸入方塊啟用拼寫檢查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文字輸入方塊啟用拼寫檢查',
   'settings.openchamber.visual.field.largeTextPaste': '貼上大段文字',
-  'settings.openchamber.visual.field.largeTextPasteHint': '為至少 2000 個字元或 25 行的文字選擇貼上方式。連續貼上模式下，第一次會直接貼到內文。在不到 1000 毫秒內，使用相同文字再次按 Ctrl/Cmd+V，即可將第一次插入的內容替換為檔案。編輯、移動選取範圍、離開輸入框或切換草稿會取消轉換。透過選單或觸控貼上仍保留在內文中；附件失敗時也會保留文字。',
+  'settings.openchamber.visual.field.largeTextPasteHint': '貼上超過約 2000 個字元或 25 行時，可選擇附加為檔案、直接貼到輸入框，或每次詢問。在兩次貼上模式下，一秒內再次貼上相同文字會將其轉為檔案。',
   'settings.openchamber.visual.field.largeTextPasteAria': '大段文字貼上行為',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': '大段文字貼上：{option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': '每次詢問',

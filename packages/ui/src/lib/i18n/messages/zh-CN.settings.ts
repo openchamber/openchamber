@@ -2185,7 +2185,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '在文本输入框启用拼写检查',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '在文本输入框启用拼写检查',
   'settings.openchamber.visual.field.largeTextPaste': '粘贴大段文本',
-  'settings.openchamber.visual.field.largeTextPasteHint': '为至少 2000 个字符或 25 行的文本选择粘贴方式。双次粘贴模式下，第一次会直接粘贴到正文。在不到 1000 毫秒内，使用相同文本再次按 Ctrl/Cmd+V，即可将第一次插入的内容替换为文件。编辑、移动选区、离开输入框或切换草稿会取消转换。通过菜单或触控粘贴仍保留在正文中；附件失败时也会保留文本。',
+  'settings.openchamber.visual.field.largeTextPasteHint': '粘贴超过约 2000 个字符或 25 行时，可选择附加为文件、直接粘贴到输入框，或每次询问。在两次粘贴模式下，一秒内再次粘贴相同文本会将其转为文件。',
   'settings.openchamber.visual.field.largeTextPasteAria': '大段文本粘贴行为',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': '大段文本粘贴：{option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': '每次询问',

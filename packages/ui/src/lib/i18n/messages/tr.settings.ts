@@ -2128,7 +2128,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.persistDraftMessagesAria': 'Taslak mesajları kalıcı olarak sakla',
   'settings.openchamber.visual.field.persistDraftMessages': 'Taslak mesajları kalıcı olarak sakla',
   'settings.openchamber.visual.field.largeTextPaste': 'Büyük metin yapıştırma',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'En az 2.000 karakter veya 25 satır içeren metinlerin nasıl yapıştırılacağını seçin. Çift yapıştırma modunda ilk yapıştırma mesajın içinde kalır. Aynı metinle 1000 ms dolmadan tekrar Ctrl/Cmd+V tuşlarına basarak bu eklemeyi bir dosyayla değiştirin. Düzenleme, seçimi taşıma, alandan çıkma veya taslak değiştirme dönüşümü iptal eder. Menü veya dokunma yoluyla yapıştırma mesaj içinde kalır; dosya ekleme başarısız olursa metin korunur.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Yaklaşık 2.000 karakterden veya 25 satırdan fazlasını yapıştırırken metnin dosya olarak eklenmesini mi, satır içi yapıştırılmasını mı yoksa her seferinde sorulmasını mı istediğinizi seçin. Çift yapıştırma modunda aynı metni bir saniye içinde yeniden yapıştırmak onu dosyaya dönüştürür.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Büyük metin yapıştırma davranışı',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Büyük metin yapıştırma: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Her seferinde sor',

@@ -2208,7 +2208,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Spelcontrole in tekstvelden aanzetten',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Spelcontrole in tekstvelden aanzetten',
   'settings.openchamber.visual.field.largeTextPaste': 'Plakken van grote tekst',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'Kies de plakwijze voor tekst van minstens 2.000 tekens of 25 regels. Bij dubbel plakken wordt de tekst eerst direct geplakt. Druk met dezelfde tekst minder dan 1000 ms later nogmaals op Ctrl/Cmd+V om die invoeging door een bestand te vervangen. Bewerken, de selectie verplaatsen, het invoerveld verlaten of van concept wisselen annuleert de omzetting. Plakken via het menu of aanraking blijft direct; bij een mislukte bijlage blijft de tekst behouden.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Bij het plakken van meer dan ongeveer 2.000 tekens of 25 regels kiest u of de tekst als bestand wordt toegevoegd, direct wordt geplakt of dat telkens wordt gevraagd. Bij dubbel plakken wordt dezelfde tekst die je binnen een seconde opnieuw plakt een bestand.',
   'settings.openchamber.visual.field.enterToSend': 'Sneltoets voor verzenden',
   'settings.openchamber.visual.field.enterToSendHint': 'Kies de sneltoets voor verzenden in het gewone invoerveld. In het uitgebreide invoerveld voegt Enter altijd een nieuwe regel toe en verzendt Ctrl/Cmd+Enter.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Verzenden met Enter',

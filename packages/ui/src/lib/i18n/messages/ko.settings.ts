@@ -2185,7 +2185,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': '텍스트 입력에서 맞춤법 검사 활성화',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': '텍스트 입력에서 맞춤법 검사 활성화',
   'settings.openchamber.visual.field.largeTextPaste': '긴 텍스트 붙여넣기',
-  'settings.openchamber.visual.field.largeTextPasteHint': '2,000자 이상 또는 25줄 이상인 텍스트의 붙여넣기 방식을 선택합니다. 두 번 붙여넣기 모드에서는 처음에는 본문에 붙여넣습니다. 같은 텍스트로 1000ms가 지나기 전에 Ctrl/Cmd+V를 다시 누르면 해당 삽입 부분을 파일로 바꿉니다. 편집, 선택 영역 이동, 입력란에서 나가기 또는 초안 전환은 변환을 취소합니다. 메뉴나 터치로 붙여넣으면 본문에 남으며, 첨부에 실패해도 텍스트는 유지됩니다.',
+  'settings.openchamber.visual.field.largeTextPasteHint': '약 2,000자 또는 25줄을 넘는 텍스트를 붙여넣을 때 파일로 첨부할지, 본문에 붙여넣을지, 매번 물어볼지 선택합니다. 두 번 붙여넣기 모드에서는 1초 안에 같은 텍스트를 다시 붙여넣으면 파일로 바뀝니다.',
   'settings.openchamber.visual.field.largeTextPasteAria': '긴 텍스트 붙여넣기 동작',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': '긴 텍스트 붙여넣기: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': '매번 묻기',

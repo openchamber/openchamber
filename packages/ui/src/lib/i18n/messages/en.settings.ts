@@ -2208,7 +2208,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Enable spellcheck in text inputs',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Enable Spellcheck in Text Inputs',
   'settings.openchamber.visual.field.largeTextPaste': 'Large text paste',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'For text of at least 2,000 characters or 25 lines, choose how to paste. In double-paste mode, the first paste is inline. Press Ctrl/Cmd+V again less than 1000 ms later with the same text to replace that insertion with a file. Editing, moving the selection, leaving the input or switching drafts cancels conversion. Menu and touch pastes stay inline; failed attachments keep the text.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'When pasting more than about 2,000 characters or 25 lines, choose whether to attach the text as a file, paste it inline, or ask each time. With double-paste, pasting the same text again within a second turns it into a file.',
   'settings.openchamber.visual.field.enterToSend': 'Send shortcut',
   'settings.openchamber.visual.field.enterToSendHint': 'Choose the send shortcut for the standard composer. In the expanded composer, Enter always adds a new line and Ctrl/Cmd+Enter sends.',
   'settings.openchamber.visual.option.enterToSend.enter.label': 'Send with Enter',

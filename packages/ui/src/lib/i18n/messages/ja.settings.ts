@@ -2218,7 +2218,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'テキスト入力のスペルチェックを有効化',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'テキスト入力のスペルチェックを有効化',
   'settings.openchamber.visual.field.largeTextPaste': '大きなテキストの貼り付け',
-  'settings.openchamber.visual.field.largeTextPasteHint': '2,000 文字以上または 25 行以上のテキストの貼り付け方法を選びます。2 回貼り付けモードでは、最初は本文に貼り付けます。同じテキストで 1000 ミリ秒未満の間にもう一度 Ctrl/Cmd+V を押すと、その挿入部分をファイルに置き換えます。編集、選択範囲の移動、入力欄からの移動、下書きの切り替えで変換は取り消されます。メニューやタッチ操作では本文に貼り付けたままになり、添付に失敗した場合もテキストは残ります。',
+  'settings.openchamber.visual.field.largeTextPasteHint': '約 2,000 文字または 25 行を超えるテキストを貼り付けるとき、ファイルとして添付するか、そのまま貼り付けるか、毎回確認するかを選べます。2 回貼り付けモードでは、1 秒以内に同じテキストをもう一度貼り付けるとファイルになります。',
   'settings.openchamber.visual.field.largeTextPasteAria': '大きなテキスト貼り付けの動作',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': '大きなテキストの貼り付け: {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': '毎回確認する',

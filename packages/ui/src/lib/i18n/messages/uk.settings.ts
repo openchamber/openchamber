@@ -2185,7 +2185,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.enableSpellcheckInTextInputsAria": "Увімкнути перевірку орфографії під час введення тексту",
   "settings.openchamber.visual.field.enableSpellcheckInTextInputs": "Увімкнути перевірку орфографії в текстових полях",
   "settings.openchamber.visual.field.largeTextPaste": "Вставлення великого тексту",
-  "settings.openchamber.visual.field.largeTextPasteHint": "Виберіть спосіб вставлення тексту від 2000 символів або 25 рядків. У режимі подвійного вставлення текст спочатку залишається в повідомленні. Натисніть Ctrl/Cmd+V ще раз менш ніж через 1000 мс із тим самим текстом, щоб замінити цю вставку файлом. Редагування, переміщення виділення, вихід із поля або зміна чернетки скасовує перетворення. Вставлення через меню або дотиком залишається в повідомленні; якщо долучення не вдасться, текст зберігається.",
+  "settings.openchamber.visual.field.largeTextPasteHint": "Під час вставлення понад приблизно 2000 символів або 25 рядків виберіть, чи долучити текст як файл, вставити його в повідомлення чи запитувати щоразу. У режимі подвійної вставки повторна вставка того самого тексту протягом секунди перетворює його на файл.",
   "settings.openchamber.visual.field.largeTextPasteAria": "Поведінка вставлення великого тексту",
   "settings.openchamber.visual.field.largeTextPasteOptionAria": "Вставлення великого тексту: {option}",
   "settings.openchamber.visual.option.largeTextPaste.ask.label": "Запитувати щоразу",

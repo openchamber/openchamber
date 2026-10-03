@@ -2085,7 +2085,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.enableSpellcheckInTextInputsAria': 'Activer la vérification orthographique dans les saisies de texte',
   'settings.openchamber.visual.field.enableSpellcheckInTextInputs': 'Activer la vérification orthographique dans les entrées de texte',
   'settings.openchamber.visual.field.largeTextPaste': 'Collage de texte volumineux',
-  'settings.openchamber.visual.field.largeTextPasteHint': 'Pour un texte de 2 000 caractères ou 25 lignes au moins, choisissez le mode de collage. En mode double collage, le premier collage reste dans le message. Appuyez de nouveau sur Ctrl/Cmd+V moins de 1000 ms après avec le même texte pour remplacer cet ajout par un fichier. Modifier le texte, déplacer la sélection, quitter le champ ou changer de brouillon annule la conversion. Le collage par menu ou au toucher reste dans le message ; si la pièce jointe échoue, le texte est conservé.',
+  'settings.openchamber.visual.field.largeTextPasteHint': 'Lors d’un collage de plus d’environ 2 000 caractères ou 25 lignes, choisir de joindre le texte comme fichier, de le coller en ligne ou de demander à chaque fois. En mode double collage, recoller le même texte dans la seconde le transforme en fichier.',
   'settings.openchamber.visual.field.largeTextPasteAria': 'Comportement du collage de texte volumineux',
   'settings.openchamber.visual.field.largeTextPasteOptionAria': 'Collage de texte volumineux : {option}',
   'settings.openchamber.visual.option.largeTextPaste.ask.label': 'Demander à chaque fois',

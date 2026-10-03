@@ -20,7 +20,7 @@ const runtimeCtx = {
 
 describe('settings search', () => {
   test('finds double-paste on every shared Settings surface', () => {
-    for (const query of ['double paste', 'ctrl v', 'cmd v', '500ms']) {
+    for (const query of ['double paste', 'ctrl v', 'cmd v']) {
       for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
         const results = buildSettingsSearchResults({ query, runtimeCtx: context, t, getPageTitle: (page) => page });
         expect(results.find((result) => result.id === 'chat.large-text-paste')?.page).toBe('chat');
