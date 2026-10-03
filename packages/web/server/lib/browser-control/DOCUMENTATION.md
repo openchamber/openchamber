@@ -102,3 +102,6 @@ itself; it can only ask and wait.
   (`packages/sdk/src/service-providers.ts`); `browser.capture` still returns
   `base64`/`mime` and the control service writes the file, so the agent sees
   the same result whoever took the picture.
+- Clipboard contents never cross this broker. A page writes directly to the host
+  clipboard and native paste reads from it, so neither request nor result payloads
+  contain the copied value.
