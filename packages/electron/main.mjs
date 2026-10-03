@@ -545,8 +545,10 @@ const sshManager = new ElectronSshManager({
 
 const writeJsonFile = async (filePath, data) => {
   const directory = path.dirname(filePath);
-  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  if (process.platform !== 'win32') await fsp.chmod(directory, 0o700);
+  // Tighten only a directory this write created: an existing one keeps the
+  // permissions and ACLs an administrator gave it.
+  const created = await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+  if (created && process.platform !== 'win32') await fsp.chmod(directory, 0o700);
   // Atomic: write to a temp file then rename. Readers never see a partial
   // JSON file that could parse-error and get coerced to {}.
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
