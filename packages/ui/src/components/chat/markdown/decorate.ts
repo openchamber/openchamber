@@ -302,14 +302,48 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 // Tables: wrapper + copy/download toolbars
 // ---------------------------------------------------------------------------
 
-const extractTableData = (table: HTMLTableElement): { headers: string[]; rows: string[][] } => {
+// Double literal backslashes and escape pipes so they stay inside a Markdown table cell.
+const escapeMarkdownCellText = (text: string): string => text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+const tableCellText = (cell: Element, markdown: boolean): string => {
+  const serialize = (node: Node): string => {
+    if (!(node instanceof Element)) {
+      const text = node.textContent ?? '';
+      return markdown ? escapeMarkdownCellText(text) : text;
+    }
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href');
+      if (href) {
+        const url = href.replace(/ /g, '%20');
+        // Keep URLs bare in CSV/TSV so spreadsheet apps can recognize link-only cells.
+        if (!markdown) return url;
+        // Escape opening and closing square brackets in the link label.
+        const escapedLabel = escapeMarkdownCellText(node.textContent ?? '').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+        // Encode pipes in URLs so the table parser does not split the cell.
+        const destinationUrl = url.replace(/\|/g, '%7C');
+        // Parentheses require an angle-bracket destination; encode literal angle brackets inside it.
+        const destination = /[()]/.test(destinationUrl) ? `<${destinationUrl.replace(/</g, '%3C').replace(/>/g, '%3E')}>` : destinationUrl;
+        return `[${escapedLabel}](${destination})`;
+      }
+    }
+    return Array.from(node.childNodes).map(serialize).join('');
+  };
+  return Array.from(cell.childNodes).map(serialize).join('');
+};
+
+const extractTableData = (
+  table: HTMLTableElement,
+  format: string,
+) => {
+  const markdown = format === 'markdown';
+  const cellText = (cell: Element): string => tableCellText(cell, markdown).trim();
   const headers: string[] = [];
   const rows: string[][] = [];
   const headerCells = table.querySelectorAll('thead th');
-  for (const cell of Array.from(headerCells)) headers.push((cell.textContent ?? '').trim());
+  for (const cell of Array.from(headerCells)) headers.push(cellText(cell));
   const bodyRows = table.querySelectorAll('tbody tr');
   for (const row of Array.from(bodyRows)) {
-    const cells = Array.from(row.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
+    const cells = Array.from(row.querySelectorAll('td')).map(cellText);
     if (cells.length > 0) rows.push(cells);
   }
   return { headers, rows };
@@ -811,7 +845,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-copy-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : format === 'tsv' ? tableToTSV(data) : tableToMarkdown(data);
         void copyTextToClipboard(content);
       }
@@ -824,7 +858,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-download-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
         downloadBlob(format === 'csv' ? 'table.csv' : 'table.md', content, format === 'csv' ? 'text/csv' : 'text/markdown');
       }
