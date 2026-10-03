@@ -28,6 +28,8 @@ describe('turn telemetry', () => {
 
   test('formats durations, counts and approximate throughput', () => {
     expect(formatTelemetryDuration(0)).toBe('0.0s');
+    expect(formatTelemetryDuration(49)).toBe('<0.1s');
+    expect(formatTelemetryDuration(50)).toBe('0.1s');
     expect(formatTelemetryDuration(1234)).toBe('1.2s');
     expect(formatTelemetryDuration(84000)).toBe('1m 24s');
     expect(formatTelemetryDuration(2796044)).toBe('46m 36s');
@@ -138,6 +140,15 @@ describe('turn telemetry', () => {
     expect(stats?.totalToolDurationMs).toBe(2000);
     expect(stats?.totalLlmDurationMs).toBe(2000);
     expect(stats?.avgTtftMs).toBe(200);
+  });
+
+  test('a part stamped at step creation is not a measured TTFT', () => {
+    const stamped = getLatestCompletedTurnStats(turn(assistant(), [text(1000), tool(1000, 4000)]));
+    expect(stamped?.avgTtftMs).toBeNull();
+    expect(stamped?.stepsCount).toBe(1);
+
+    const later = getLatestCompletedTurnStats(turn(assistant(), [text(1000), text(1800)]));
+    expect(later?.avgTtftMs).toBe(800);
   });
 
   for (const [start, end] of [[0, 2000], [2000, 6000], [3000, 2000], [NaN, 3000]]) {

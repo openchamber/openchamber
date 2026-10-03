@@ -3326,7 +3326,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': '도구 시간',
   'chat.workStatus.telemetry.toolDurationDescription': '실패한 호출을 포함한 도구 실행 시간입니다. 동시에 실행된 도구의 시간은 중복해서 더하지 않습니다.',
   'chat.workStatus.telemetry.ttft': '평균 TTFT',
-  'chat.workStatus.telemetry.ttftDescription': '각 모델 단계에서 첫 텍스트나 추론이 시작되기까지의 평균 대기 시간입니다. 시작 시간이 없는 단계가 있으면 표시하지 않습니다. 도구만 호출하는 단계에서 흔히 발생합니다.',
+  'chat.workStatus.telemetry.ttftDescription': '각 모델 단계에서 첫 텍스트나 추론이 시작되기까지의 평균 대기 시간입니다. 생성 이후의 시작 시각이 없는 단계가 있으면 표시하지 않습니다. 도구만 호출하는 단계나 생성 시각만 기록된 파트에서 흔히 발생합니다.',
   'chat.workStatus.telemetry.steps': '단계',
   'chat.workStatus.telemetry.stepsDescription': '이 프롬프트에서 모델을 호출한 횟수입니다. 도구 결과를 읽고 다음 작업을 결정하려면 보통 한 단계가 더 필요합니다.',
   'chat.workStatus.telemetry.tokens': '토큰',

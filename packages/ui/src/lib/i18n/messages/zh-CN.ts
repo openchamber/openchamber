@@ -3327,7 +3327,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': '工具耗时',
   'chat.workStatus.telemetry.toolDurationDescription': '工具执行所用的时间，包括失败的调用。多个工具同时运行的时间只计算一次，不重复相加。',
   'chat.workStatus.telemetry.ttft': '平均首字延迟',
-  'chat.workStatus.telemetry.ttftDescription': '每个模型步骤开始输出文本或推理前的平均等待时间。如果有任何步骤缺少开始时间戳，就不显示。只调用工具的步骤经常没有这项数据。',
+  'chat.workStatus.telemetry.ttftDescription': '每个模型步骤开始输出文本或推理前的平均等待时间。如果有任何步骤在创建后没有开始时间，就不显示。只调用工具的步骤和只带创建时间戳的部分经常如此。',
   'chat.workStatus.telemetry.steps': '步骤',
   'chat.workStatus.telemetry.stepsDescription': '处理这条提示时调用模型的次数。读取工具结果并决定下一步通常需要再次调用模型。',
   'chat.workStatus.telemetry.tokens': 'Token',

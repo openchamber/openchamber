@@ -3327,7 +3327,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': 'Ferramentas',
   'chat.workStatus.telemetry.toolDurationDescription': 'Tempo de execução das ferramentas, incluindo chamadas que falharam. Ferramentas executadas ao mesmo tempo contam uma vez só.',
   'chat.workStatus.telemetry.ttft': 'TTFT médio',
-  'chat.workStatus.telemetry.ttftDescription': 'Espera média até o primeiro texto ou raciocínio de cada etapa. Não aparece se faltar o horário de início de alguma etapa, algo comum em chamadas apenas de ferramentas.',
+  'chat.workStatus.telemetry.ttftDescription': 'Espera média até o primeiro texto ou raciocínio de cada etapa do modelo. Não aparece se alguma etapa não tiver início depois de criada, algo comum em etapas só com ferramentas e em partes marcadas com o horário de criação.',
   'chat.workStatus.telemetry.steps': 'Etapas',
   'chat.workStatus.telemetry.stepsDescription': 'Quantas vezes o modelo foi chamado para este prompt. Ler o resultado de uma ferramenta e decidir o próximo passo geralmente exige outra chamada.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

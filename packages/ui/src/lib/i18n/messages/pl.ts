@@ -3331,7 +3331,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': 'Narzędzia',
   'chat.workStatus.telemetry.toolDurationDescription': 'Czas wykonywania narzędzi, także nieudanych wywołań. Narzędzia działające równolegle liczymy czasowo tylko raz.',
   'chat.workStatus.telemetry.ttft': 'Średni TTFT',
-  'chat.workStatus.telemetry.ttftDescription': 'Średnie oczekiwanie na pierwszy tekst lub rozumowanie w każdym kroku. Ukryte, gdy choć jeden krok nie ma czasu rozpoczęcia, co często dotyczy kroków z samymi narzędziami.',
+  'chat.workStatus.telemetry.ttftDescription': 'Średnie oczekiwanie na pierwszy tekst lub rozumowanie w każdym kroku modelu. Ukryte, gdy choć jeden krok nie ma startu po utworzeniu, co często dotyczy kroków z samymi narzędziami i części oznaczonych tylko czasem utworzenia.',
   'chat.workStatus.telemetry.steps': 'Kroki',
   'chat.workStatus.telemetry.stepsDescription': 'Liczba wywołań modelu dla tego promptu. Odczytanie wyniku narzędzia i decyzja o dalszym działaniu zwykle wymaga kolejnego kroku.',
   'chat.workStatus.telemetry.tokens': 'Tokeny',

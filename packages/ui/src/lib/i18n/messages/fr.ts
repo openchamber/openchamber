@@ -3324,7 +3324,7 @@ export const dict = {
   'chat.workStatus.telemetry.toolDuration': 'Outils',
   'chat.workStatus.telemetry.toolDurationDescription': 'Temps passé à exécuter les outils, y compris les appels échoués. Les outils exécutés en parallèle ne sont comptés qu’une fois.',
   'chat.workStatus.telemetry.ttft': 'TTFT moyen',
-  'chat.workStatus.telemetry.ttftDescription': 'Attente moyenne avant le premier texte ou raisonnement de chaque étape. Masquée si une étape manque d’horodatage de début, ce qui arrive souvent pour les appels aux outils sans texte.',
+  'chat.workStatus.telemetry.ttftDescription': 'Attente moyenne avant le premier texte ou raisonnement de chaque étape du modèle. Masquée si une étape n’a pas de début après sa création, ce qui arrive souvent pour les étapes limitées aux outils et pour les parties horodatées à leur création.',
   'chat.workStatus.telemetry.steps': 'Étapes',
   'chat.workStatus.telemetry.stepsDescription': 'Nombre d’appels au modèle pour ce prompt. Lire les résultats d’un outil et décider de la suite demande généralement une nouvelle étape.',
   'chat.workStatus.telemetry.tokens': 'Jetons',

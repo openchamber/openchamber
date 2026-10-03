@@ -3324,7 +3324,7 @@ export const dict = {
   'chat.workStatus.telemetry.toolDuration': 'Werkzeugzeit',
   'chat.workStatus.telemetry.toolDurationDescription': 'Laufzeit der Werkzeuge einschließlich fehlgeschlagener Aufrufe. Parallel laufende Werkzeuge zählen zeitlich nur einmal.',
   'chat.workStatus.telemetry.ttft': 'Mittlere TTFT',
-  'chat.workStatus.telemetry.ttftDescription': 'Mittlere Wartezeit bis zum ersten Text oder Denkabschnitt jedes Modellschritts. Fehlt bei einem Schritt der Startzeitstempel, wird kein Wert angezeigt. Das ist bei reinen Werkzeugaufrufen häufig der Fall.',
+  'chat.workStatus.telemetry.ttftDescription': 'Mittlere Wartezeit bis zum ersten Text oder Denkabschnitt jedes Modellschritts. Ausgeblendet, wenn ein Schritt nach seiner Erstellung keinen Start hat. Das ist bei reinen Werkzeugschritten häufig und bei Teilen, die nur mit ihrer Erstellungszeit versehen sind.',
   'chat.workStatus.telemetry.steps': 'Schritte',
   'chat.workStatus.telemetry.stepsDescription': 'Wie oft das Modell für diesen Prompt aufgerufen wurde. Werkzeugergebnisse lesen und den nächsten Schritt entscheiden erfordert meist einen weiteren Aufruf.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

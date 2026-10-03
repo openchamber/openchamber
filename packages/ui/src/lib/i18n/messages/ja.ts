@@ -3326,7 +3326,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': 'ツール時間',
   'chat.workStatus.telemetry.toolDurationDescription': '失敗した呼び出しも含むツールの実行時間です。同時に動いたツールの時間は重複して加算しません。',
   'chat.workStatus.telemetry.ttft': '平均 TTFT',
-  'chat.workStatus.telemetry.ttftDescription': '各ステップで最初のテキストや推論が始まるまでの平均待ち時間です。開始時刻がないステップがあれば表示しません。ツール呼び出しのみのステップでは時刻がないことがあります。',
+  'chat.workStatus.telemetry.ttftDescription': '各モデルステップで最初のテキストや推論が始まるまでの平均待ち時間です。作成後に開始時刻がないステップがあれば表示しません。ツールのみのステップや、作成時刻だけが記録されたパートでよく起こります。',
   'chat.workStatus.telemetry.steps': 'ステップ数',
   'chat.workStatus.telemetry.stepsDescription': 'このプロンプトでモデルを呼び出した回数です。ツールの結果を読み、次の処理を決める際は通常もう一度呼び出します。',
   'chat.workStatus.telemetry.tokens': 'トークン',

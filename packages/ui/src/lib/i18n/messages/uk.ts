@@ -3327,7 +3327,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.telemetry.toolDuration': 'Час інструментів',
   'chat.workStatus.telemetry.toolDurationDescription': 'Час виконання інструментів, включно з невдалими викликами. Паралельне виконання рахується один раз, а не додається кілька разів.',
   'chat.workStatus.telemetry.ttft': 'Середній TTFT',
-  'chat.workStatus.telemetry.ttftDescription': 'Середнє очікування до початку тексту або міркувань на кожному кроці моделі. Не показуємо, якщо хоча б один крок не має часової мітки початку, як часто буває з викликами лише інструментів.',
+  'chat.workStatus.telemetry.ttftDescription': 'Середнє очікування до початку тексту або міркувань на кожному кроці моделі. Не показуємо, якщо хоча б один крок не має початку після створення, як часто буває з кроками лише з інструментами та з частинами, позначеними часом створення.',
   'chat.workStatus.telemetry.steps': 'Кроки',
   'chat.workStatus.telemetry.stepsDescription': 'Скільки разів зверталися до моделі для цього промпту. Прочитати результат інструмента й вирішити, що робити далі, зазвичай означає ще один крок.',
   'chat.workStatus.telemetry.tokens': 'Токени',

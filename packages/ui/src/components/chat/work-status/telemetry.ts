@@ -80,6 +80,10 @@ export const formatTelemetryDuration = (ms: number): string => {
   if (!Number.isFinite(ms) || ms <= 0) {
     return '0.0s';
   }
+  // 1–49ms rounds to 0.0s at one decimal. That is a real wait, not zero.
+  if (ms < 50) {
+    return '<0.1s';
+  }
   if (ms < 60_000) {
     return `${(ms / 1000).toFixed(1)}s`;
   }
@@ -194,12 +198,16 @@ function calculateCompletedStepStats(record: SessionMessageRecord): CompletedSte
     ? nonnegative(totalDurationMs - toolDurationMs)
     : null;
 
-  // Measure TTFT from first text or reasoning part start timestamp
+  // Wait until the first text or reasoning part that starts after the step
+  // was created. A start equal to `created` is the creation stamp copied onto
+  // the part, not a measured first token. Counting it made tool-heavy turns
+  // show Average TTFT 0.0s. Leaving it unset hides the row, same as a missing
+  // timestamp.
   let ttftMs: number | null = null;
   for (const part of parts) {
     if (part.type === 'text' || part.type === 'reasoning') {
       const partStart = part.time?.start;
-      if (validWindow && partStart !== undefined && Number.isFinite(partStart) && partStart >= created && partStart <= completed) {
+      if (validWindow && partStart !== undefined && Number.isFinite(partStart) && partStart > created && partStart <= completed) {
         const delta = partStart - created;
         ttftMs = ttftMs === null ? delta : Math.min(ttftMs, delta);
       }

@@ -3327,7 +3327,7 @@ export const dict = {
   'chat.workStatus.telemetry.toolDuration': 'Tool time',
   'chat.workStatus.telemetry.toolDurationDescription': 'Time spent running tools, including failed calls. Tools running at the same time are counted once, not added together.',
   'chat.workStatus.telemetry.ttft': 'Average TTFT',
-  'chat.workStatus.telemetry.ttftDescription': 'Average wait before the first text or reasoning starts in each model step. Hidden when any step lacks a start timestamp, as tool-only steps often do.',
+  'chat.workStatus.telemetry.ttftDescription': 'Average wait before the first text or reasoning starts in each model step. Hidden when a step has no start after it was created, which is common for tool-only steps and for parts stamped at creation time.',
   'chat.workStatus.telemetry.steps': 'Steps',
   'chat.workStatus.telemetry.stepsDescription': 'How many times the model was called for this prompt. Reading tool results and deciding what to do next usually takes another step.',
   'chat.workStatus.telemetry.tokens': 'Tokens',

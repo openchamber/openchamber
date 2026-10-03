@@ -3230,7 +3230,7 @@ export const dict = {
   'chat.workStatus.telemetry.toolDuration': 'Araç süresi',
   'chat.workStatus.telemetry.toolDurationDescription': 'Başarısız çağrılar dahil araçların çalışma süresi. Aynı anda çalışan araçların süreleri bir kez sayılır.',
   'chat.workStatus.telemetry.ttft': 'Ortalama TTFT',
-  'chat.workStatus.telemetry.ttftDescription': 'Her model adımında ilk metin veya akıl yürütme başlayana kadar ortalama bekleme. Bir adımın başlangıç zamanı yoksa gösterilmez; yalnızca araç çağıran adımlarda bu sık görülür.',
+  'chat.workStatus.telemetry.ttftDescription': 'Her model adımında ilk metin veya akıl yürütme başlayana kadar ortalama bekleme. Bir adımın oluşturulduktan sonra başlangıcı yoksa gösterilmez; bu, yalnızca araç çağıran adımlarda ve yalnızca oluşturulma zamanı damgalı parçalarda sık görülür.',
   'chat.workStatus.telemetry.steps': 'Adımlar',
   'chat.workStatus.telemetry.stepsDescription': 'Bu prompt için modelin kaç kez çağrıldığı. Araç sonucunu okuyup sıradaki işi belirlemek genellikle yeni bir adım gerektirir.',
   'chat.workStatus.telemetry.tokens': 'Tokenlar',
