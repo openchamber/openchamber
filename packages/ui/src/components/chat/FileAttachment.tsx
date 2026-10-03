@@ -6,7 +6,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
-import { isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
+import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -587,6 +587,29 @@ const issueLinkIcon = (kind: IssueLinkKind): 'github' | 'git-pull-request' | 'li
   return 'github';
 };
 
+const TEXT_LIKE_MIME_PREFIXES = ['text/', 'application/json'];
+
+const isTextLikeFile = (file: FilePart): boolean => {
+  const mime = file.mime;
+  return mime !== undefined && TEXT_LIKE_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+};
+
+/**
+ * Decodes the base64 data URL the message pipeline stores for pasted files
+ * (`data:<mime>;base64,<data>`) into UTF-8 text. Returns null for any other
+ * URL shape, which keeps remote-URI attachments on the image-dialog path.
+ */
+const decodeDataUrlText = (url: string): string | null => {
+  const match = /^data:[^,]*;base64,(.+)$/.exec(url);
+  if (!match) return null;
+  try {
+    const bytes = Uint8Array.from(atob(match[1]), (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+};
+
 interface MessageFilesDisplayProps {
   files: FilePart[];
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -672,6 +695,36 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     });
   }, [imageGallery, onShowPopup]);
 
+  const showFilePopup = React.useCallback((file: FilePart, fileName: string) => {
+    if (!onShowPopup || !file.url) {
+      return;
+    }
+
+    if (isTextLikeFile(file)) {
+      const text = decodeDataUrlText(file.url);
+      if (text !== null) {
+        onShowPopup({
+          open: true,
+          title: fileName,
+          content: text,
+          language: getLanguageFromExtension(fileName) || undefined,
+        });
+        return;
+      }
+    }
+
+    onShowPopup({
+      open: true,
+      title: fileName,
+      content: '',
+      image: {
+        url: file.url,
+        mimeType: file.mime,
+        filename: fileName,
+      },
+    });
+  }, [onShowPopup]);
+
   if (fileItems.length === 0) return null;
 
   if (compact) {
@@ -697,6 +750,17 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                       >
                         <Icon name={issueLinkIcon(issueLinkKind)} className="text-muted-foreground h-3.5 w-3.5" />
                         <div className="overflow-hidden max-w-[220px]">
+                          <span className="truncate block" title={fileName}>{fileName}</span>
+                        </div>
+                      </button>
+                    ) : onShowPopup && file.url && isTextLikeFile(file) ? (
+                      <button
+                        type="button"
+                        onClick={() => showFilePopup(file, fileName)}
+                        className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
+                      >
+                        <FileTypeIcon filePath={fileName} extension={ext} className="text-muted-foreground h-3.5 w-3.5" />
+                        <div className="overflow-hidden max-w-[140px]">
                           <span className="truncate block" title={fileName}>{fileName}</span>
                         </div>
                       </button>
@@ -875,18 +939,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
               <button
                 type="button"
                 onClick={() => {
-                  if (onShowPopup && file.url) {
-                    onShowPopup({
-                      open: true,
-                      title: fileName,
-                      content: '',
-                      image: {
-                        url: file.url,
-                        mimeType: file.mime,
-                        filename: fileName,
-                      },
-                    });
-                  }
+                  showFilePopup(file, fileName);
                 }}
                 className={cn(
                   "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-left",
