@@ -1,4 +1,4 @@
-import { isSubagentRunEntry } from '../timelineRoles';
+import { isBackgroundReportEntry } from '../timelineRoles';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string => {
@@ -6,9 +6,9 @@ const resolveMessageRole = (message: ChatMessageEntry): string => {
     return typeof role === 'string' ? role : '';
 };
 
-/** A user prompt opens a turn, and so does a background subagent run (see `isSubagentRunEntry`). */
+/** A user prompt opens a turn, and so does a background report (see `isBackgroundReportEntry`). */
 const opensTurn = (message: ChatMessageEntry): boolean =>
-    resolveMessageRole(message) === 'user' || isSubagentRunEntry(message.info);
+    resolveMessageRole(message) === 'user' || isBackgroundReportEntry(message.info);
 
 const resolveParentMessageId = (message: ChatMessageEntry): string | undefined => {
     const parentId = (message.info as { parentID?: unknown }).parentID;

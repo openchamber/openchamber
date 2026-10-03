@@ -104,6 +104,7 @@ import { createApnsRuntime } from './lib/notifications/apns-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/runtime.js';
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
+import { createDispatchResultsRuntime } from './lib/dispatch-results/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createJevClient } from './lib/routing/jev.js';
 import { createSessionWorkRuntime } from './lib/session-work/runtime.js';
@@ -1073,6 +1074,18 @@ const messageQueueRuntime = createMessageQueueRuntime({
 });
 messageQueueRuntime.start();
 
+// Sessions an agent dispatched with `returnResult` report back to it: their
+// final answer lands in the dispatching session and wakes it.
+const dispatchResultsRuntime = createDispatchResultsRuntime({
+  globalEventHub: globalMessageStreamHub,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  dataDir: OPENCHAMBER_DATA_DIR,
+  // Declared further down; only ever called after startup.
+  isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
+});
+dispatchResultsRuntime.start();
+
 // Full-text search over this server's conversations (user messages and agent
 // replies). Opt-in: off by default, and off means idle. The index is derived
 // data in the data dir, fed from the same event stream; see lib/message-search.
@@ -1716,6 +1729,8 @@ const openChamberControlService = createOpenChamberControlService({
     updateMetadata: updateSessionMetadataWith,
     createError: (message, status) => new OpenChamberControlError(message, status),
   }),
+  dispatchResults: dispatchResultsRuntime,
+  archiveStore: openChamberSessionService.archiveStore,
 });
 
 const ensureGlobalWatcherStarted = async () => {
@@ -1767,6 +1782,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   sessionGoalRuntime,
   contextObligatoryRuntime,
   messageQueueRuntime,
+  dispatchResultsRuntime,
   messageSearchRuntime,
   sessionRuntime,
   getHealthCheckInterval: () => healthCheckInterval,

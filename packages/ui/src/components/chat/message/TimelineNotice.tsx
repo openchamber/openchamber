@@ -6,7 +6,9 @@
  * own. Only `user` and `assistant` carry parts, so the roles that have
  * something to show render here as small, self-contained rows instead of
  * going through `ChatMessage`. So does a background subagent run, which v2
- * reports as a synthetic message (see `@/lib/opencode/subagent-run`).
+ * reports as a synthetic message (see `@/lib/opencode/subagent-run`), and the
+ * result of a session the agent dispatched with `returnResult` (see
+ * `@/lib/opencode/dispatched-session`).
  */
 
 import React from 'react';
@@ -18,6 +20,9 @@ import { ReasoningTimelineBlock } from './parts/ReasoningPart';
 import ToolPart from './parts/ToolPart';
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import { isRunningSubagentRunMessage, readSubagentRun, type SubagentRun } from '@/lib/opencode/subagent-run';
+import { readDispatchedSessionResult, type DispatchedSessionResult } from '@/lib/opencode/dispatched-session';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import type { IconName } from '@/components/icon/icons';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -237,9 +242,69 @@ const SubagentRunNotice: React.FC<{ message: SyntheticMessage; run: SubagentRun 
     );
 };
 
+const dispatchedSessionTitle = (
+    result: DispatchedSessionResult,
+    t: ReturnType<typeof useI18n>['t'],
+): string => {
+    const title = result.title?.trim();
+    switch (result.state) {
+        case 'completed':
+            return title ? t('chat.dispatchedSession.completed', { title }) : t('chat.dispatchedSession.completedUntitled');
+        case 'error':
+            return title ? t('chat.dispatchedSession.failed', { title }) : t('chat.dispatchedSession.failedUntitled');
+        case 'cancelled':
+            return title ? t('chat.dispatchedSession.cancelled', { title }) : t('chat.dispatchedSession.cancelledUntitled');
+    }
+};
+
+const DISPATCHED_SESSION_ICONS: Record<DispatchedSessionResult['state'], IconName> = {
+    completed: 'chat-ai-3',
+    error: 'error-warning',
+    cancelled: 'close-circle',
+};
+
+/**
+ * The result of a session this one dispatched with `returnResult`: one
+ * collapsed line saying how it ended, opening to its answer, like a
+ * compaction summary. The agent's reaction renders below it as its own turn.
+ */
+const DispatchedSessionNotice: React.FC<{ message: SyntheticMessage; result: DispatchedSessionResult }> = ({ message, result }) => {
+    const { t } = useI18n();
+    const handleOpen = React.useCallback(() => {
+        void openSessionLink(result.sessionID, null);
+    }, [result.sessionID]);
+
+    return (
+        <NoticeRow>
+            <ReasoningTimelineBlock
+                text={result.output}
+                variant="thinking"
+                blockId={message.id}
+                presentation={{
+                    icon: DISPATCHED_SESSION_ICONS[result.state],
+                    iconClassName: result.state === 'error' ? 'text-[var(--status-error)]' : undefined,
+                    title: dispatchedSessionTitle(result, t),
+                    expandLabel: t('chat.dispatchedSession.showAnswer'),
+                    collapseLabel: t('chat.dispatchedSession.hideAnswer'),
+                    markdownVariant: 'assistant',
+                    maxHeightClassName: 'max-h-[60vh]',
+                }}
+                actions={(
+                    <Button type="button" variant="ghost" size="xs" onClick={handleOpen}>
+                        <Icon name="external-link" className="h-3.5 w-3.5" />
+                        {t('chat.dispatchedSession.open')}
+                    </Button>
+                )}
+            />
+        </NoticeRow>
+    );
+};
+
 const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) => {
     const run = React.useMemo(() => readSubagentRun(message), [message]);
-    return run ? <SubagentRunNotice message={message} run={run} /> : null;
+    const dispatched = React.useMemo(() => (run ? undefined : readDispatchedSessionResult(message)), [message, run]);
+    if (run) return <SubagentRunNotice message={message} run={run} />;
+    return dispatched ? <DispatchedSessionNotice message={message} result={dispatched} /> : null;
 };
 
 /**

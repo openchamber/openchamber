@@ -4,7 +4,7 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react';
 import ChatMessage from './ChatMessage';
 import { TimelineNotice } from './message/TimelineNotice';
 import { useRunningSubagentRuns, withRunningSubagentRuns } from './lib/runningSubagentRuns';
-import { isSkippedTimelineMessage, isSubagentRunEntry, isTimelineNoticeRole } from './lib/timelineRoles';
+import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole } from './lib/timelineRoles';
 import { filterVisibleParts, isEmptyTextPart } from './message/partUtils';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
@@ -216,7 +216,7 @@ const MessageRow = React.memo<MessageRowProps>(({
     // (or as nothing); only user and assistant go through ChatMessage.
     const role = message.info.role;
     if (isSkippedTimelineMessage(message.info)) return null;
-    if (isTimelineNoticeRole(role) || isSubagentRunEntry(message.info)) return <TimelineNotice message={message.info} />;
+    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) return <TimelineNotice message={message.info} />;
 
     return (
         <ChatMessage
@@ -291,10 +291,10 @@ const TurnBlock = React.memo(({
 }: TurnBlockProps) => {
 
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    // A hidden prompt has nothing to pin, and a subagent run opens its turn as
+    // A hidden prompt has nothing to pin, and a background report opens its turn as
     // a notice row, which never sticks.
     const turnHeaderCanStick = React.useMemo(
-        () => !isHiddenUserMessage(turn.userMessage) && !isSubagentRunEntry(turn.userMessage.info),
+        () => !isHiddenUserMessage(turn.userMessage) && !isBackgroundReportEntry(turn.userMessage.info),
         [turn.userMessage]
     );
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };

@@ -12,7 +12,7 @@
  * message belongs to that message, and so does context right after it whose id
  * was minted before the prompt's (see the loop). The ones carrying context metadata come
  * back as text parts on the user message, which is exactly where v1 kept them,
- * so they render as context chips inside the user bubble. A subagent run report
+ * so they render as context chips inside the user bubble. A background report
  * stays as its own entry. Everything else the timeline never shows is dropped
  * here instead of rendering as an empty row.
  */
@@ -20,7 +20,7 @@
 import type { Part, TextPart } from '@/lib/opencode/model';
 import { readContextPart } from '@/lib/messages/contextParts';
 
-import { isSkippedTimelineRole, isSubagentRunEntry } from './timelineRoles';
+import { isSkippedTimelineRole, isBackgroundReportEntry } from './timelineRoles';
 import type { ChatMessageEntry } from './turns/types';
 
 const contextPartFromSyntheticMessage = (message: ChatMessageEntry): TextPart => {
@@ -75,7 +75,7 @@ export const attachSyntheticContext = (messages: ChatMessageEntry[]): ChatMessag
     for (const message of messages) {
         const role = message.info.role;
 
-        if (isSubagentRunEntry(message.info)) {
+        if (isBackgroundReportEntry(message.info)) {
             pendingContext = [];
             openUser = null;
             result.push(message);

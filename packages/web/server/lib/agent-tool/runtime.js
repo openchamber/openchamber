@@ -82,9 +82,8 @@ const ALL_PARAMETER_PROPERTIES = {
   setUpstream: { type: 'boolean', description: 'Make the new worktree branch track its upstream' },
   goal: { type: 'boolean', description: 'Run the dispatched prompt in Goal Mode; use only when the user explicitly requests it' },
   goalTokenBudget: { type: 'integer', minimum: 1000, maximum: 100_000_000, description: 'Goal token budget; requires goal' },
-  wait: { type: 'boolean', description: 'Wait for current session activity to become idle. Omit by default; use only when the user asks or the next step requires the completed result' },
-  timeout: { type: 'integer', minimum: 1, maximum: 86_400, description: 'Wait timeout in seconds (default 600); requires wait' },
-  lastAssistant: { type: 'boolean', description: 'Return the last assistant text; create/send/fork require wait' },
+  returnResult: { type: 'boolean', description: 'For session.create, send and fork with a prompt: deliver the session\'s final answer back to you as a message when it finishes, waking you to continue. The call still returns at once. Set only when the user wants the outcome back or your next step needs it' },
+  lastAssistant: { type: 'boolean', description: 'session.messages: return only the last assistant message' },
   limit: { type: 'integer', minimum: 1, description: 'Maximum sessions or messages to return (default 10)' },
   all: { type: 'boolean', description: 'Include archived sessions or all messages, depending on the action' },
   last: { type: 'boolean', description: 'Return only the last matching session message' },
@@ -141,13 +140,34 @@ const NOTIFY_PARAMETER_PROPERTIES = {
 // agent handed an issue to investigate never opened this tool and never
 // linked it. SESSION_LINK_GUIDANCE in ../session-knowledge/runtime.js states
 // the same rule in every session's context; change both together.
-const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. Also controls OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with. Do not decide on your own to hand parts of your current task to another session; when the user asks you to create a session, send a prompt to one, or schedule a task, do it, including when the work relates to your current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default and you receive no notification when a dispatched session finishes, so never promise to report back on it; the user follows it in OpenChamber; a dispatched session needs no follow-up from you. If the user later asks how it went, use session.messages (add wait to block until it is idle, lastAssistant for just the final answer) — session.send always sends a NEW prompt and never just waits. Set wait only when the user asks or the next step requires the completed result. Session and worktree deletion are unavailable.";
+const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. Also controls OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with. To delegate part of your own task and get the answer for yourself, use the subagent tool; use session.create, send or fork when the user asks for a separate session they will follow and talk to (any agent, optionally in a worktree, with its own linked issues and PRs). Do not decide on your own to hand parts of your current task to another session; when the user asks you to create a session, send a prompt to one, or schedule a task, do it, including when the work relates to your current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches always return at once. Without returnResult you are not told when the session finishes: the user follows it in OpenChamber and it needs no follow-up from you, so never promise to report back on it. With returnResult its final answer arrives in this session as a message when it finishes and you continue from there; never poll or sleep for it. If the user later asks how a session went, read it with session.messages (lastAssistant for just the final answer); session.send always sends a NEW prompt. Session and worktree deletion are unavailable.";
 
 const WEB_TOOL_DESCRIPTION = "Look at and interact with a web page in OpenChamber's browser panel, so you can check your own work rather than describing what you expect. Use one action per call. Open a page, snapshot it to read its text and its interactive elements, then click, type or scroll using the selectors the snapshot returned; snapshots also report any errors the page logged. Pass a selector to browser.snapshot to read one part of a long page. browser.inspect returns computed styles when the question is how something renders. Set viewport to check a layout at mobile, tablet or desktop size. The page runs with the user's real logins, so treat what you see as their live session.";
 
 const MEMORY_TOOL_DESCRIPTION = "Keep what you learn across sessions, so the user does not have to explain the same thing twice. Use one action per call. The session already lists the titles of what is stored. A title is an abbreviation, not the memory: read the entry with memory.read once before acting on it (it then stays in your context; do not re-read it on later turns), because titles leave out the conditions and exceptions that decide how the memory applies, and the ones that look self-explanatory hide them most often. Save something only when it will still be true in a later session — a stable preference, a project convention, a decision and its reason, or a hard-won pointer. Do not save one-off task state, anything you can read from the code, secrets or credentials, or anything the user asked you not to keep; when the user explicitly asks you to remember something, save it, unless it is a secret or credential. Choose the scope deliberately: global is about the user and reaches every project, so put a project's conventions in project scope. Save in the moment, without asking first, when the user corrects how you work or states a preference, confirms that a non-obvious approach worked, or when you learn a project fact that took real effort to find. One fact per entry. The user can review and remove what you save, so save when it fits and mention it briefly.";
 
 const NOTIFY_TOOL_DESCRIPTION = "Send the user a notification through OpenChamber, so they learn about something without watching the session. Use it when you finish work that took long enough for the user to step away, when you are blocked on something only the user can resolve, or when the user asked to be told about something. Do not use it for routine progress, for every finished step, or to repeat what your reply already says to a user who is present. Keep the title short and put detail in the body.";
+
+const DISPATCH_ACTIONS = new Set(['session.create', 'session.send', 'session.fork']);
+
+/**
+ * The control service still waits for the CLI, whose user sits at a terminal
+ * with no session to deliver into. An agent never waits: a blocked tool call
+ * holds its whole turn open, and `returnResult` brings the answer back
+ * instead. A stale habit of sending `wait` gets the way that replaced it.
+ */
+const agentOnlyUsageError = (action, input) => {
+  if (!action.startsWith('session.')) return null;
+  if (input.wait === true || input.timeout !== undefined) {
+    return action === 'session.messages'
+      ? 'session.messages does not wait: it returns the current messages and sessionStatus. To get a session\'s answer when it finishes, dispatch the prompt with returnResult'
+      : 'wait is not available to agents: a dispatch returns at once. Set returnResult to have the session\'s final answer delivered to you when it finishes';
+  }
+  if (input.lastAssistant === true && DISPATCH_ACTIONS.has(action)) {
+    return 'lastAssistant belongs to session.messages. To get a dispatched session\'s answer when it finishes, set returnResult';
+  }
+  return null;
+};
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -444,6 +464,10 @@ export const createAgentToolRuntime = (dependencies) => {
     const action = resolution.action;
     if (!ACTIONS.has(action)) {
       return createResult({ ok: false, action, error: { message: `Unsupported OpenChamber action: ${action}`, kind: 'usage' } });
+    }
+    const usageError = agentOnlyUsageError(action, payload.input ?? {});
+    if (usageError) {
+      return createResult({ ok: false, action, error: { message: usageError, kind: 'usage' } });
     }
     if (typeof executeAction !== 'function') {
       return createResult({ ok: false, action, error: { message: 'OpenChamber control service is unavailable', kind: 'runtime' } });

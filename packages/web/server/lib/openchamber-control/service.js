@@ -157,6 +157,9 @@ export const createOpenChamberControlService = (dependencies) => {
     notifyUser = null,
     agentMemoryActions = null,
     sessionLinks = null,
+    // Delivers a dispatched session's result back to the session that asked
+    // (`returnResult`); absent means the server cannot offer it.
+    dispatchResults = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
@@ -198,9 +201,10 @@ export const createOpenChamberControlService = (dependencies) => {
     });
   };
 
-  const archivedAt = (sessionID) => {
-    if (!archiveStore || typeof archiveStore.isArchived !== 'function') return null;
-    return archiveStore.isArchived(sessionID) || null;
+  // The store answers asynchronously; its archive timestamp, or null.
+  const archivedAt = async (sessionID) => {
+    if (!archiveStore) return null;
+    return (await archiveStore.archivedAt(sessionID)) ?? null;
   };
 
   const projects = async () => {
@@ -315,11 +319,51 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
-  const executeSessionAction = async (action, input, contextDirectory, signal) => {
+  // Checked before anything is created or sent: a result nobody can deliver
+  // must fail the call, not leave a dispatched session the agent waits on.
+  const assertReturnResult = (action, input, parentSessionID) => {
+    if (input.wait === true) throw new OpenChamberControlError('returnResult cannot be combined with wait', 400);
+    if (!dispatchResults) throw new OpenChamberControlError('Returning a session result is not available on this server', 503);
+    if (!parentSessionID) throw new OpenChamberControlError('returnResult needs a calling session to deliver the result to', 400);
+    if (!asNonEmptyString(input.prompt)) throw new OpenChamberControlError('returnResult requires prompt', 400);
+    // A fork is a new session, so only a send can target the caller itself.
+    if (action === 'session.send' && asNonEmptyString(input.sessionId) === parentSessionID) {
+      throw new OpenChamberControlError('returnResult cannot deliver a session\'s result to itself', 400);
+    }
+  };
+
+  // What the agent is told when its result is on the way. It replaces a wait,
+  // so it has to stop the agent from building one out of polls or sleeps.
+  const RESULT_PENDING_NOTE = 'The session runs in the background. Its final answer will be delivered to you automatically as a message when it finishes, and you will continue from there. Do not poll, sleep, or call session.messages to wait for it; carry on with other work or end your turn.';
+
+  /**
+   * After the dispatch: the session is already running, so a failure here is
+   * reported in the result rather than thrown, and the agent is told plainly
+   * that no answer is coming instead of waiting for one.
+   */
+  const scheduleResultDelivery = async (result, parentSessionID, dispatchedAt) => {
+    if (result.promptDispatched !== true) {
+      return { status: 'not-scheduled', reason: 'The prompt was not dispatched, so there is no result to return.' };
+    }
+    try {
+      await dispatchResults.register({ parentSessionId: parentSessionID, sessionId: result.sessionId, dispatchedAt });
+      return { status: 'pending', note: RESULT_PENDING_NOTE };
+    } catch (error) {
+      return {
+        status: 'not-scheduled',
+        reason: `The session runs, but its result will not be delivered: ${error instanceof Error ? error.message : String(error)}. Read it later with session.messages if the user asks.`,
+      };
+    }
+  };
+
+  const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     assertSingleScope(input);
     const sessionID = asNonEmptyString(input.sessionId);
+    const parentSessionID = asNonEmptyString(contextSessionId);
+    const returnResult = input.returnResult === true;
+    if (returnResult) assertReturnResult(action, input, parentSessionID);
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
       const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
@@ -354,6 +398,11 @@ export const createOpenChamberControlService = (dependencies) => {
       } else {
         result = await sessionService.fork(sessionID, payload);
       }
+    }
+    if (returnResult) {
+      const publicResult = { ...result, resultDelivery: await scheduleResultDelivery(result, parentSessionID, startedAt) };
+      delete publicResult.baselineAssistantMessageId;
+      return publicResult;
     }
     if (input.wait !== true) {
       const publicResult = { ...result };
@@ -602,7 +651,7 @@ export const createOpenChamberControlService = (dependencies) => {
         }
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
-        return executeSessionAction(action, input, contextDirectory, options.signal);
+        return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId);
       }
       if (action === 'session.link') {
         if (!sessionLinks) throw new OpenChamberControlError('Linking is not available on this server', 503);
@@ -629,10 +678,10 @@ export const createOpenChamberControlService = (dependencies) => {
           const response = await client.session.list(directory ? { directory } : {});
           // Archive is OpenChamber state; overlay it so callers keep reading
           // it off the session the way OpenCode used to report it.
-          let sessions = (Array.isArray(response?.data) ? response.data : []).map((session) => {
-            const archived = archivedAt(session?.id);
+          let sessions = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(async (session) => {
+            const archived = await archivedAt(session?.id);
             return archived ? { ...session, time: { ...session.time, archived } } : session;
-          });
+          }));
           if (input.all !== true) sessions = sessions.filter((session) => !session?.time?.archived);
           sessions = sessions.slice(0, limit);
           if (input.withStatus === true) {

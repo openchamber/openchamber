@@ -1,5 +1,5 @@
 import { isHiddenUserMessage } from '../../message/hiddenUserMessage';
-import { isSubagentRunEntry } from '../timelineRoles';
+import { isBackgroundReportEntry } from '../timelineRoles';
 import { projectTurnActivity } from './projectTurnActivity';
 import { projectTurnIndexes } from './projectTurnIndexes';
 import { projectTurnChangedFiles, projectTurnDiffStats, projectTurnSummary } from './projectTurnSummary';
@@ -204,7 +204,7 @@ export const projectTurnRecords = (
             groupedMessageIds.add(message.info.id);
             return;
         }
-        if (role !== 'user' && !isSubagentRunEntry(message.info)) {
+        if (role !== 'user' && !isBackgroundReportEntry(message.info)) {
             return;
         }
 
