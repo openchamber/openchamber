@@ -19,6 +19,7 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import {
+  resolveConfigApiKey,
   getAuthEntry,
   normalizeAuthEntry,
   buildResult,
@@ -85,7 +86,7 @@ function getApiKey(auth) {
     for (const alias of aliases) {
       const providerConfig = mergedConfig?.provider?.[alias];
       if (providerConfig?.options?.apiKey) {
-        return providerConfig.options.apiKey;
+        return resolveConfigApiKey(providerConfig.options.apiKey);
       }
     }
   } catch {
