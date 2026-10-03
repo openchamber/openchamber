@@ -76,6 +76,7 @@ describe('OpenCode API proxy agent wiring', () => {
       // request. See createOpenCodeProxyAgent in ./proxy.js.
       expect(agent).toBeTruthy();
       expect(agent.options?.keepAlive).toBe(true);
+      expect(agent.options?.timeout).toBe(4_000);
     }
   });
 
