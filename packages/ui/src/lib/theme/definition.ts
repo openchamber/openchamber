@@ -3,7 +3,15 @@ import type { Theme } from '../../types/theme';
 import { mixColor, onColor, readableText, withOpacity } from './color';
 import { resolveSyntaxTokens } from './syntax';
 
-const color = z.string().trim().min(1);
+// Theme values are written into a <style> element. A colour has to be a
+// colour, and a free-form value (fonts, transitions) must not close its
+// declaration or load anything, so an imported theme cannot add rules of its
+// own or make the app fetch from another server.
+const COLOR_PATTERN = /^(?:#[\da-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\([\w#.,%\s/+()-]*\))$/i;
+const LOADS_RESOURCE = /\b(?:url|image|image-set|cross-fade|element)\s*\(|@import/i;
+const text = z.string().trim().min(1);
+const color = text.refine((value) => COLOR_PATTERN.test(value) && !LOADS_RESOURCE.test(value), 'Expected a CSS colour');
+const cssValue = z.string().refine((value) => !/[;{}<>\\]/.test(value) && !LOADS_RESOURCE.test(value), 'Unsupported CSS value');
 const optionalColors = (keys: string[]) => z.record(z.string(), color).transform((values) => Object.fromEntries(Object.entries(values).filter(([key]) => keys.includes(key))));
 const primary = z.object({ base: color, foreground: color.optional(), hover: color.optional(), active: color.optional(), muted: color.optional() });
 const surface = z.object({ background: color, foreground: color, muted: color, mutedForeground: color, elevated: color, elevatedForeground: color.optional(), overlay: color.optional(), subtle: color.optional() });
@@ -20,7 +28,7 @@ const syntax = z.object({
   highlights: z.record(z.string(), color).optional(),
 });
 const definition = z.object({
-  metadata: z.object({ id: color, name: color, variant: z.enum(['light', 'dark']), description: z.string().default(''), version: z.string().default('1.0.0'), author: z.string().optional(), tags: z.array(z.string()).default([]) }),
+  metadata: z.object({ id: text, name: text, variant: z.enum(['light', 'dark']), description: z.string().default(''), version: z.string().default('1.0.0'), author: z.string().optional(), tags: z.array(z.string()).default([]) }),
   colors: z.object({
     primary, surface, interactive, status, syntax,
     pr: z.object({ open: color.optional(), draft: color.optional(), blocked: color.optional(), merged: color.optional(), closed: color.optional() }).optional(),
@@ -28,7 +36,7 @@ const definition = z.object({
     markdown: optionalColors(['link', 'linkHover', 'inlineCode', 'inlineCodeBackground', 'blockquote', 'blockquoteBorder', 'listMarker', 'bold', 'italic', 'strikethrough', 'hr']).optional(),
     tools: z.object({ border: color.optional(), icon: color.optional(), title: color.optional(), description: color.optional(), edit: optionalColors(['addedBackground', 'removedBackground', 'modifiedBackground', 'lineNumber']).optional() }).optional(),
   }),
-  config: z.object({ fonts: z.object({ sans: z.string().optional(), mono: z.string().optional(), heading: z.string().optional() }).optional(), transitions: z.object({ fast: z.string().optional(), normal: z.string().optional(), slow: z.string().optional() }).optional() }).optional(),
+  config: z.object({ fonts: z.object({ sans: cssValue.optional(), mono: cssValue.optional(), heading: cssValue.optional() }).optional(), transitions: z.object({ fast: cssValue.optional(), normal: cssValue.optional(), slow: cssValue.optional() }).optional() }).optional(),
 });
 
 export type ThemeDefinition = z.input<typeof definition>;

@@ -34,7 +34,7 @@
       "borderHover": "#3c3c3c",
       "borderFocus": "#00000000",
       "focus": "#00000000",
-      "focusRing": "#0000000050",
+      "focusRing": "#00000050",
       "cursor": "#CECDC3",
       "hover": "#eeeeee14",
       "active": "#eeeeee18"

@@ -220,3 +220,29 @@ describe('rendered theme color pairs', () => {
     expect(withOpacity('rgba(255, 255, 255, 0.2)', 0.5)).toBe('#ffffff80');
   });
 });
+
+describe('theme values written into CSS', () => {
+  test('accepts the colour forms themes use', () => {
+    for (const value of ['#ffcc66', '#fc6', '#ffcc6680', 'rgb(255 204 102)', 'rgba(255, 204, 102, 0.5)', 'hsl(40 100% 70%)', 'oklch(0.85 0.12 80)', 'color-mix(in oklab, #ffcc66 40%, transparent)', 'transparent']) {
+      expect(themeSchema.safeParse({ ...minimal, colors: { ...minimal.colors, primary: { base: value } } }).success).toBe(true);
+    }
+  });
+
+  test('refuses a colour that would add rules or fetch from another server', () => {
+    for (const value of ['#fff; } body { display: none', 'url(https://example.test/seen.png)', 'rgb(1 2 3)</style>', 'image-set("https://example.test/x" 1x)', '@import "https://example.test/x.css"']) {
+      expect(themeSchema.safeParse({ ...minimal, colors: { ...minimal.colors, primary: { base: value } } }).success).toBe(false);
+    }
+  });
+
+  test('keeps quoted font stacks and refuses ones that leave the declaration', () => {
+    const withFont = (sans: string) => themeSchema.safeParse({ ...minimal, config: { fonts: { sans } } }).success;
+    expect(withFont('"IBM Plex Sans", ui-sans-serif, system-ui')).toBe(true);
+    expect(withFont('Inter; } * { background: url(https://example.test/x)')).toBe(false);
+  });
+
+  test('every built-in theme still parses', () => {
+    for (const theme of themes) {
+      expect(themeSchema.safeParse(compactTheme(theme)).success).toBe(true);
+    }
+  });
+});
