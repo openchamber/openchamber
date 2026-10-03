@@ -423,6 +423,8 @@ Each of them therefore keeps two things:
 - a flat mirror (`agents`, `commands`, `skills`, `mcpServers`, `providers`) that
   tracks the **active** directory only.
 
+`config-store` hydrates provider catalogs only for the matching runtime. Since 1.x and 2.x used the same unversioned key, a cached list whose models lack 2.x variant arrays is discarded for its directory and marked unloaded; the active mirror is checked separately. Valid 2.x lists, other directories, agents, and saved model and effort selections remain available. A successful provider read replaces the discarded list.
+
 A project whose OpenCode config OpenCode rejects (`ConfigInvalidError` and the
 other `Config*Error` names) is recorded in `useConfigStore.projectConfigErrors`,
 keyed by config directory, runtime-only. `loadAgents` stops retrying on it and a

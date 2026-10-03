@@ -1075,6 +1075,18 @@ const resolveVariantFromSelection = (selection: CurrentVariantSelection): string
     selection.override === null ? undefined : selection.override ?? selection.inherited
 );
 
+const hasCompatibleCachedVariants = (providers: ProviderWithModelList[] | undefined): boolean => (
+    Array.isArray(providers) && providers.every((provider) => (
+        isRecord(provider)
+        && Array.isArray(provider.models)
+        && provider.models.every((model) => (
+            isRecord(model)
+            && Array.isArray(model.variants)
+            && model.variants.every(isRecord)
+        ))
+    ))
+);
+
 /**
  * The effort the next send carries after a loader resolved `resolved` for the
  * model: a pick kept in `selection` wins. Loaders that kept the pick in
@@ -3969,7 +3981,28 @@ export const useConfigStore = create<ConfigStore>()(
                     // partial store. Only an explicitly matching runtime may hydrate it.
                     const persisted = persistedState as Partial<ConfigStore> | undefined;
                     if (!persisted || persisted.configRuntimeKey !== getRuntimeKey()) return currentState;
-                    return hydrateActiveDirectorySnapshot({ ...currentState, ...persisted });
+
+                    const storedScopes = isRecord(persisted.directoryScoped) && !Array.isArray(persisted.directoryScoped)
+                        ? persisted.directoryScoped
+                        : currentState.directoryScoped;
+                    const directoryScoped = { ...storedScopes };
+                    for (const [directory, snapshot] of Object.entries(directoryScoped)) {
+                        if (!isRecord(snapshot)) {
+                            delete directoryScoped[directory];
+                        } else if (!hasCompatibleCachedVariants(snapshot.providers)) {
+                            directoryScoped[directory] = {
+                                ...snapshot, providers: [], providersLoaded: false, defaultProviders: {},
+                            };
+                        }
+                    }
+
+                    const merged = { ...currentState, ...persisted, directoryScoped };
+                    if (!hasCompatibleCachedVariants(persisted.providers)) {
+                        merged.providers = currentState.providers;
+                        merged.providersLoaded = currentState.providersLoaded;
+                        merged.defaultProviders = currentState.defaultProviders;
+                    }
+                    return hydrateActiveDirectorySnapshot(merged);
                 },
                 // Stale-while-revalidate: persist the last-known provider/agent
                 // snapshots so the model/agent pickers paint instantly on cold
