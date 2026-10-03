@@ -28,7 +28,7 @@
       "subtle": "#162431"
     },
     "interactive": {
-      "border": "#2b3339",
+      "border": "#222D36",
       "selection": "#555d6d94",
       "selectionForeground": "#FFFFFF",
       "borderHover": "#234561",
@@ -90,7 +90,7 @@
     },
     "chat": {
       "userMessageBackground": "#0f283f",
-      "divider": "#1D3B53"
+      "divider": "#152F45"
     },
     "markdown": {
       "link": "#7FDBCA",
@@ -98,7 +98,7 @@
       "inlineCode": "#C5E478",
       "inlineCodeBackground": "#0E2334",
       "blockquote": "#5F7E97",
-      "blockquoteBorder": "#1D3B53",
+      "blockquoteBorder": "#152F45",
       "listMarker": "#82AAFF99"
     },
     "tools": {

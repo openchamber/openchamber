@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { buildChildrenIndex, computeSubtreeCost } from './subagentCost';
 

@@ -83,6 +83,14 @@ describe('generation jobs', () => {
     fs.rmSync(TEMP_DATA_DIR, { recursive: true, force: true });
   });
 
+  it('resolves the model on the composer provider it was given', async () => {
+    generateSmallModelText.mockResolvedValue({ text: RESPONSE });
+
+    await generateWalkthrough({ directory: '/repo', source: SOURCE, providerID: 'anthropic' });
+
+    expect(describeSmallModel.mock.calls.at(-1)[0]).toMatchObject({ directory: '/repo', preferredProviderID: 'anthropic' });
+  });
+
   it('runs a second request against the same job instead of paying twice', async () => {
     let release;
     generateSmallModelText.mockImplementation(() => new Promise((resolve) => {

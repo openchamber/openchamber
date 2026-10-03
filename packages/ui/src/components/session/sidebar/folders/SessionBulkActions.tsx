@@ -44,7 +44,7 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
   });
 
   return <>
-    {bulk.selectionModeEnabled && bulk.hasSelection ? <BulkActionBar
+    {bulk.selectionModeEnabled ? <BulkActionBar
       selectedCount={bulk.selectedIdsSize}
       scopeKey={bulk.derivedSelectionScope}
       scopeFolders={bulk.bulkScopeFolders}
@@ -54,7 +54,8 @@ export function SessionBulkActions({ getFolderScopesForProject, isInlineEditing,
       onRemoveFromFolder={bulk.handleBulkRemoveFromFolder}
       canRemoveFromFolder={bulk.bulkCanRemoveFromFolder}
       onRestore={bulk.handleBulkRestore}
-      onDelete={bulk.handleBulkDelete}
+      onArchive={bulk.handleBulkArchive}
+      onDelete={bulk.handleBulkHardDelete}
       onDone={bulk.handleExitSelectionMode}
     /> : null}
     <BulkSessionDeleteConfirmDialog

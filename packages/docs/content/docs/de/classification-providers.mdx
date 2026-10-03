@@ -1,0 +1,115 @@
+---
+title: Klassifizierungsanbieter (Jev)
+description: Richte Jev ein, das kleine Klassifizierungsmodell hinter Entscheidungen in verschiedenen Abläufen von OpenChamber.
+---
+
+# Klassifizierungsanbieter (Jev)
+
+Manche Funktionen von OpenChamber brauchen eine schnelle Entscheidung, bevor sie handeln: Ist dieser Befehl riskant, was für eine Aufgabe ist dieser Prompt, hat der Nutzer gerade mit echter Arbeit angefangen? Diese Fragen beantwortet Jev, ein kleines Entscheidungsmodell von TypeSafe. Auf dieser Seite erfährst du, wie du OpenChamber Zugang zu Jev gibst.
+
+Jev schreibt keinen Code und antwortet nicht in deinem Chat. Es liefert nur ein Urteil, und OpenChamber handelt danach. Auf eine Antwort wartet OpenChamber höchstens vier Sekunden.
+
+## Was Jev nutzt
+
+| Funktion | Die Frage, die Jev beantwortet |
+| --- | --- |
+| [Berechtigungen und Sicherheitsnetz](/de/permissions/) | Soll der Agent dich fragen, bevor er diese Aktion ausführt? |
+| [Automatische Modellwahl](/de/auto-model-routing/) | Zu welcher deiner Kategorien gehört dieser Prompt? |
+| [Sitzungen in Arbeit](/de/sessions-in-work/) | Hast du gerade um echte Arbeit gebeten? Sieht dieser Zug nach ihrem Ende aus? |
+| [Zusammenfassung und Vorschlag für die nächste Nachricht](/de/sessions-in-work/) | Lohnt sich nach diesem Zug eine Zusammenfassung oder ein Vorschlag? |
+
+Ohne Anbieter sind das Sicherheitsnetz und Auto ausgeblendet, und Sitzungen kommen nur in Arbeit, wenn du sie selbst verschiebst. Zusammenfassungen und Vorschläge funktionieren weiter, nur ohne den Filter.
+
+## Einrichtung
+
+Jev ist aus, bis du es einschaltest: Aus deinen Unterhaltungen geht nichts an einen Klassifizierungsanbieter, solange du keinen auswählst. Öffne **Einstellungen → Anbieter → Klassifizierungsanbieter** und wähle, wohin Anfragen an Jev gehen. Neben **Aus** gibt es sechs Möglichkeiten.
+
+### OpenCode-Zen-Aktion
+
+Für begrenzte Zeit kostenlos, kein Schlüssel nötig. Solange die Aktion läuft, lässt OpenCode OpenChamber Jev über OpenCode Zen kostenlos nutzen.
+
+Wenn die Aktion endet, verschwindet die Option, und OpenChamber wechselt zu einem der Schlüssel unten, falls du einen hast.
+
+### OpenCode-Zen-Schlüssel
+
+Nutzt den in OpenCode gespeicherten Zen-API-Schlüssel und rechnet über dein Zen-Guthaben ab.
+
+1. Öffne **Einstellungen → Anbieter** und füge dem Anbieter **OpenCode Zen** einen API-Schlüssel hinzu (siehe [Anbieter, Modelle und Agenten](/de/providers/)).
+2. Geh zurück zu **Klassifizierungsanbieter** und wähle **OpenCode-Zen-Schlüssel**.
+
+Die Anmeldung mit einem OpenCode-Konto reicht nicht. Für Jev akzeptiert Zen nur einen API-Schlüssel.
+
+### OpenRouter-Schlüssel
+
+Nutzt den in OpenCode gespeicherten OpenRouter-API-Schlüssel und rechnet über dein OpenRouter-Konto ab. Wenn du OpenRouter-Modelle in OpenCode schon nutzt, musst du nichts einrichten. Ein Schlüssel in der Umgebungsvariable `OPENROUTER_API_KEY` funktioniert auch. Gibt es beide, gewinnt der in OpenCode gespeicherte.
+
+1. Öffne **Einstellungen → Anbieter** und füge dem Anbieter **OpenRouter** einen API-Schlüssel hinzu.
+2. Geh zurück zu **Klassifizierungsanbieter** und wähle **OpenRouter-Schlüssel**.
+
+### Vercel-AI-Gateway-Schlüssel
+
+Nutzt den in OpenCode gespeicherten AI-Gateway-API-Schlüssel und rechnet über dein Vercel-Konto ab. Ein Schlüssel in der Umgebungsvariable `AI_GATEWAY_API_KEY` funktioniert auch. Gibt es beide, gewinnt der in OpenCode gespeicherte.
+
+1. Öffne **Einstellungen → Anbieter** und füge dem Anbieter **Vercel AI Gateway** einen API-Schlüssel hinzu.
+2. Geh zurück zu **Klassifizierungsanbieter** und wähle **Vercel-AI-Gateway-Schlüssel**.
+
+### TypeSafe-API-Schlüssel
+
+Dein eigener TypeSafe-Schlüssel und dein eigenes Kontingent.
+
+1. Hol dir einen API-Schlüssel bei [TypeSafe](https://docs.typesafe.ai).
+2. Füge ihn in das Feld **TypeSafe-API-Schlüssel** ein und klicke auf **Speichern**.
+
+Ein gespeicherter Schlüssel wird gleich ausgewählt. Er bleibt in einer eigenen Datei auf dem OpenChamber-Server und wird nie an den Browser gesendet.
+
+### Eigener Endpunkt
+
+Jeder Dienst, der die System One API von TypeSafe spricht: ein selbst gehostetes Gateway, ein Firmen-Proxy oder ein Anbieter, der hier nicht aufgeführt ist.
+
+1. Trag unter **Eigener Endpunkt** die **Endpunkt-URL** und das **Modell** ein (zum Beispiel `jev-latest`).
+2. Füge einen **API-Schlüssel** hinzu, falls der Dienst einen braucht. Er wird als `Bearer`-Token gesendet.
+3. Klicke auf **Speichern**.
+
+Als URL kannst du die vollständige Adresse mit `/v1/systemone` am Ende einfügen, eine Basis-URL im OpenAI-Stil mit `/v1` am Ende oder die API-Wurzel (etwa `https://api.typesafe.ai`). OpenChamber ergänzt den fehlenden Teil und zeigt die genaue Adresse, die es aufruft. Nur `http` und `https` funktionieren, und der Schlüssel gehört in sein eigenes Feld, nie in die URL.
+
+Speichern wählt den Endpunkt auch gleich aus. Wie der TypeSafe-Schlüssel bleiben der Endpunkt und sein Schlüssel in einer eigenen Datei auf dem OpenChamber-Server, und der Schlüssel wird nie an den Browser gesendet.
+
+Ein Server kann seinen Endpunkt auch aus der Umgebung beziehen. Das ist praktisch, wenn du OpenChamber für ein Team einrichtest:
+
+```bash
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_MODEL=jev-latest        # optional, das ist der Standard
+OPENCHAMBER_JEV_API_KEY=...             # optional
+```
+
+Auf Laptops, die du verwaltest, trägst du denselben Endpunkt stattdessen unter `jev` in die [Richtliniendatei](/de/security/) des Rechners ein. Sie hat Vorrang vor der Umgebung.
+
+So oder so ersetzt dieser Endpunkt den in den Einstellungen gespeicherten Endpunkt, und die Einstellungen zeigen ihn an, ohne dass ihn jemand bearbeiten kann. Im [Enterprise-Modus](/de/security/) ist er neben **Aus** die einzige erlaubte Jev-Quelle und standardmäßig ausgewählt.
+
+Sobald ein Anbieter funktioniert, zeigt die Karte unter **Einstellungen → Anbieter** **Bereit**.
+
+## Wenn deine Wahl nicht mehr funktioniert
+
+Lässt sich der gewählte Anbieter nicht nutzen (die Aktion ist vorbei, ein Schlüssel wurde entfernt), weicht OpenChamber auf den ersten deiner eigenen Schlüssel aus, der funktioniert: TypeSafe-Schlüssel, dann dein eigener Endpunkt, dann OpenRouter, dann Vercel AI Gateway, dann Zen-Schlüssel. Auf die Aktion weicht es nie aus, und **Aus** bleibt aus. Die Seite zeigt, welcher gerade benutzt wird.
+
+Ist Jev bei einer einzelnen Anfrage langsam oder schlägt fehl, geht nichts kaputt. Jede Funktion hat für diesen Fall eine sichere Antwort:
+
+- Das Sicherheitsnetz lässt die Aktion auf dich warten.
+- Auto schickt den Prompt an dein Fallback-Modell.
+- Sitzungen in Arbeit bleiben, wie sie sind.
+- Zusammenfassung und Vorschlag entstehen so, als gäbe es Jev nicht.
+
+## Was Jev sieht
+
+Jev bekommt kurze Auszüge deiner Unterhaltung: deine letzte Nachricht und als Kontext bis zu drei vorherige Züge, gekürzt auf ihre ersten paar hundert Zeichen. Für das Sicherheitsnetz bekommt es außerdem die geprüfte Aktion, so wie OpenCode sie beschreibt: den Befehl, den der Agent ausführen will, oder die Datei und die Änderung bei einer Bearbeitung. Ganze Dateien oder Bilder bekommt es nie.
+
+Anfragen gehen vom OpenChamber-Server direkt an OpenCode Zen, OpenRouter, Vercel AI Gateway, TypeSafe oder deinen eigenen Endpunkt, je nach deiner Wahl.
+
+## Wo es funktioniert
+
+Jev läuft im OpenChamber-Server, also in der Desktop-App, in der Web-App und auf deinem Handy, wenn es mit einer der beiden verbunden ist. Die VS-Code-Erweiterung spricht direkt mit OpenCode und hat kein Jev: Dort gibt es kein Sicherheitsnetz, kein Auto, und Sitzungen kommen nur von Hand in Arbeit.
+
+## Verwandt
+
+- [Anbieter, Modelle und Agenten](/de/providers/): wo die Schlüssel für OpenCode Zen, OpenRouter und Vercel AI Gateway liegen
+- [Sicherheit](/de/security/): wie OpenChamber mit Schlüsseln und Zugriff umgeht

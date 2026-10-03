@@ -1,0 +1,35 @@
+---
+title: Worktrees en Git
+description: Los veelvoorkomende problemen met worktrees en Git op.
+---
+
+# Worktrees en Git
+
+Hier vindt u oplossingen voor problemen met [worktree-sessies](/nl/worktrees/) en de [Git-weergave](/nl/git/).
+
+## Een worktree heeft aandacht nodig
+
+OpenChamber markeert een worktree als er iets niet klopt:
+
+- **map ontbreekt:** de map is buiten OpenChamber verwijderd of verplaatst; verwijder de sessie en maak een nieuwe worktree
+- **losgekoppelde HEAD of branch zonder eerste commit:** de worktree staat niet op een normale branch; check een bestaande branch uit
+- **merge, rebase of cherry-pick loopt:** een bewerking is niet afgemaakt; rond haar af of breek haar af via de Git-weergave
+
+## Een worktree maken lukt niet
+
+- **branch bestaat al:** kies een andere branchnaam of gebruik de optie voor een bestaande branch
+- **naam is al in gebruik:** kies een andere worktreenaam
+
+## Een commitbericht of PR-beschrijving genereren mislukt
+
+Genereren gebeurt in uw actieve sessie. Er moet dus een sessie openstaan met een werkend model. Open of selecteer een sessie en probeer opnieuw.
+
+## Problemen met SSH of Windows-paden
+
+- controleer of de repository dezelfde SSH-sleutel gebruikt als uw [Git-identiteit](/nl/git-identities/)
+- op Windows gebruikt Git Unix-achtige paden, zoals `/c/Users/...`; OpenChamber verwerkt die, maar eigen SSH-sleutelpaden moeten dezelfde vorm volgen
+
+## Zie ook
+
+- [Worktree-sessies](/nl/worktrees/) voor het maken en verwijderen van worktrees
+- [Git-identiteiten](/nl/git-identities/) voor de juiste sleutel en identiteit per repository

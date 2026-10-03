@@ -28,7 +28,7 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import process from "node:process"
 
-import { CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
 import { growthPerSecond, metricMap, round, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
@@ -69,6 +69,13 @@ Options:
   --chrome <path>          Chrome/Chromium executable
   --profile-dir <path>     Reusable isolated Chrome profile
   --headed                 Show the browser (default: headless)
+  --attach <port>          Measure a browser that is already running and
+                           exposes CDP on this port, such as the desktop shell
+                           started with --remote-debugging-port, instead of
+                           launching Chrome. The session opens in its window.
+                           --url still names the OpenChamber server the CLI
+                           talks to; --headed, --chrome and --profile-dir do
+                           not apply.
   --sampling-interval <us> CPU sampler interval (default: 200)
   --thread-breakdown       Also trace scheduler, compositor and GPU categories,
                            and report CPU per thread with the events that
@@ -117,6 +124,7 @@ const parseArgs = (argv) => {
     chrome: null,
     profileDir: join(homedir(), ".openchamber", "browser-profile-google-chrome"),
     headless: true,
+    attach: null,
     samplingInterval: 200,
     processCpuOnly: false,
     threadBreakdown: false,
@@ -154,6 +162,7 @@ const parseArgs = (argv) => {
     else if (value === "--tail") options.tail = Number(argv[++index])
     else if (value === "--output") options.output = argv[++index]
     else if (value === "--chrome") options.chrome = argv[++index]
+    else if (value === "--attach") options.attach = Number(argv[++index])
     else if (value === "--profile-dir") options.profileDir = argv[++index]
     else if (value === "--sampling-interval") options.samplingInterval = Number(argv[++index])
     else if (value === "--inject-css") options.injectCss = argv[++index]
@@ -326,6 +335,7 @@ const printReport = (summary, baseline) => {
   if (summary.label) console.log(`Label: ${summary.label}`)
   if (summary.injectedCss) console.log(`MODIFIED APP — injected CSS: ${summary.injectedCss}`)
   if (summary.injectedScript) console.log(`MODIFIED APP — injected script: ${summary.injectedScript}`)
+  if (summary.attachedPort) console.log(`ATTACHED — an already running browser on port ${summary.attachedPort} showing ${summary.pageUrl}`)
   console.log(`Session: ${summary.sessionId}${summary.model ? `  Model: ${summary.model}` : ""}`)
   console.log("")
   if (summary.instrumented === false) {
@@ -421,7 +431,8 @@ const main = async () => {
     return
   }
 
-  const chrome = resolveChrome(options.chrome)
+  const attached = options.attach !== null
+  const chrome = attached ? null : resolveChrome(options.chrome)
   const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")
   const output = resolve(options.output ?? join("artifacts", `session-profile-${timestamp}`))
   const profileDir = resolve(options.profileDir)
@@ -446,21 +457,29 @@ const main = async () => {
     console.log(`Reusing session ${sessionId}`)
   }
 
-  const target = new URL(options.url)
-  // The displayed session and the streaming session are deliberately separable:
-  // a background session must not make the foreground one expensive.
-  target.searchParams.set("session", options.viewSession ?? sessionId)
-
-  const port = await reservePort()
-  const chromeProcess = launchChrome({ chrome, profileDir, port, headless: options.headless })
+  const port = attached ? options.attach : await reservePort()
+  const chromeProcess = attached ? null : launchChrome({ chrome, profileDir, port, headless: options.headless })
   let client
   let browserClient
   try {
-    const pageTarget = await createPageTarget(port)
+    const pageTarget = attached ? await findPageTarget(port) : await createPageTarget(port)
+    // An attached window keeps its own document: the session is opened on the
+    // page's current URL, which for the packaged desktop shell is its own scheme.
+    const target = new URL(attached ? pageTarget.url : options.url)
+    // The displayed session and the streaming session are deliberately separable:
+    // a background session must not make the foreground one expensive.
+    target.searchParams.set("session", options.viewSession ?? sessionId)
     client = new CdpClient(pageTarget.webSocketDebuggerUrl)
     await client.connect()
     browserClient = await openBrowserClient(port)
-    const serverProcesses = await resolveServerProcesses(options.port)
+    let serverProcesses = await resolveServerProcesses(options.port)
+    if (attached) {
+      // The desktop shell runs the server inside Electron's main process, which
+      // the browser-level process list already reports; counting it twice would
+      // inflate the total.
+      const browserPids = new Set(((await browserClient.send("SystemInfo.getProcessInfo")).processInfo ?? []).map((info) => Number(info.id)))
+      serverProcesses = serverProcesses.filter((entry) => !browserPids.has(entry.pid))
+    }
     const processCpu = createProcessCpuSampler({ browserClient, serverProcesses })
     await Promise.all([
       client.send("Page.enable"),
@@ -484,7 +503,8 @@ const main = async () => {
     if (options.injectScript) {
       await client.send("Page.addScriptToEvaluateOnNewDocument", { source: await readFile(resolve(options.injectScript), "utf8") })
     }
-    await client.send("Emulation.setDeviceMetricsOverride", {
+    // An attached window is measured at the size the user gave it.
+    if (!attached) await client.send("Emulation.setDeviceMetricsOverride", {
       width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false,
     })
 
@@ -678,6 +698,8 @@ const main = async () => {
       recordedAt: new Date(startedAt).toISOString(),
       label: options.label,
       url: options.url,
+      attachedPort: attached ? port : null,
+      pageUrl: attached ? pageTarget.url : null,
       sessionId,
       viewedSessionId: options.viewSession ?? sessionId,
       directory: options.dir,
@@ -796,7 +818,7 @@ const main = async () => {
   } finally {
     client?.close()
     browserClient?.close()
-    if (!chromeProcess.killed) chromeProcess.kill("SIGTERM")
+    if (chromeProcess && !chromeProcess.killed) chromeProcess.kill("SIGTERM")
   }
 }
 

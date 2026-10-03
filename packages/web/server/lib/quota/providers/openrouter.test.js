@@ -1,13 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ openrouter: { key: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ openrouter: { key: 'test-token' } }),
 }));
+
+// The quota base URL is resolved through the real config-layer reader. Point
+// its global config directory at a path that does not exist so the machine's
+// own opencode.json can never leak into these assertions; the custom layer is
+// resolved from OPENCODE_CONFIG at call time, so each test stubs it fresh.
+vi.hoisted(() => {
+  process.env.OPENCODE_CONFIG_DIR = 'openrouter-quota-test-without-config-dir';
+});
 
 import { fetchQuota, resolveResetAt } from './openrouter.js';
 
+const createdConfigPaths = [];
+
+const stubCustomConfigPath = () => {
+  const filePath = path.join(os.tmpdir(), `openrouter-quota-config-${process.pid}-${Math.random().toString(16).slice(2)}`);
+  vi.stubEnv('OPENCODE_CONFIG', filePath);
+  createdConfigPaths.push(filePath);
+  return filePath;
+};
+
+const writeCustomConfig = (config) => {
+  fs.writeFileSync(stubCustomConfigPath(), JSON.stringify(config));
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  for (const filePath of createdConfigPaths.splice(0)) {
+    fs.rmSync(filePath, { recursive: true, force: true });
+  }
 });
 
 const mockResponse = (body, init = {}) => ({
@@ -290,6 +318,99 @@ describe('OpenRouter quota provider', () => {
     const requestedUrl = fetchMock.mock.calls[0][0];
     expect(requestedUrl).toBe('https://openrouter.ai/api/v1/key');
     expect(requestedUrl).not.toContain('/api/v1/credits');
+  });
+
+  it('reads the key endpoint from the configured v2 provider baseURL', async () => {
+    writeCustomConfig({
+      providers: {
+        openrouter: { settings: { baseURL: 'https://gateway.example.com/v1' } },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://gateway.example.com/v1/key');
+  });
+
+  it('reads the key endpoint from the legacy provider options baseURL', async () => {
+    writeCustomConfig({
+      provider: {
+        openrouter: { options: { baseURL: 'https://legacy.example.com/v1' } },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://legacy.example.com/v1/key');
+  });
+
+  it('reads the key endpoint from the legacy provider api field', async () => {
+    writeCustomConfig({
+      provider: {
+        openrouter: { api: 'https://legacy-api.example.com/v1' },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://legacy-api.example.com/v1/key');
+  });
+
+  it('keeps a legacy baseURL when the v2 entry has no address', async () => {
+    writeCustomConfig({
+      providers: {
+        openrouter: { models: { 'openai/gpt-5': {} } },
+      },
+      provider: {
+        openrouter: { options: { baseURL: 'https://legacy.example.com/v1' } },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://legacy.example.com/v1/key');
+  });
+
+  it('strips trailing slashes from the configured baseURL', async () => {
+    writeCustomConfig({
+      providers: {
+        openrouter: { settings: { baseURL: 'https://gateway.example.com/v1/' } },
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://gateway.example.com/v1/key');
+  });
+
+  it('keeps the default key endpoint when no baseURL is configured', async () => {
+    stubCustomConfigPath();
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/v1/key');
+  });
+
+  it('keeps the default key endpoint when the config cannot be read', async () => {
+    fs.mkdirSync(stubCustomConfigPath());
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(DOCUMENTED_PAYLOAD));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://openrouter.ai/api/v1/key');
   });
 
   it('resolves daily reset at the next UTC day across year boundaries', () => {

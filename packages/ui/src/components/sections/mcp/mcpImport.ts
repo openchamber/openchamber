@@ -1,4 +1,4 @@
-import type { McpDraft } from '@/stores/useMcpConfigStore';
+import { MCP_PROTOCOLS, type McpCodemodeChoice, type McpDraft, type McpProtocol } from '@/stores/useMcpConfigStore';
 
 export interface ImportedMcpResult {
   readonly ok: true;
@@ -13,8 +13,15 @@ export interface ImportedMcpResult {
   readonly oauthClientSecret: string;
   readonly oauthScope: string;
   readonly oauthRedirectUri: string;
-  readonly timeout: string;
-  readonly enabled: boolean;
+  readonly oauthCallbackPort: string;
+  readonly oauthAuthServerMetadataUrl: string;
+  readonly timeoutStartup: string;
+  readonly timeoutCatalog: string;
+  readonly timeoutExecution: string;
+  readonly codemode: McpCodemodeChoice;
+  readonly disabled: boolean;
+  /** Absent in the paste means legacy, as OpenCode reads it. */
+  readonly protocol: McpProtocol;
 }
 
 type ImportedMcpError =
@@ -48,23 +55,21 @@ function buildResult(
   const environment = buildEnv(raw, 'env', 'environment');
   const headers = buildEnv(raw, 'headers');
 
-  const oauthEnabled = buildOAuthEnabled(raw);
-  const oauthClientId = typeof raw.oauth === 'object' && raw.oauth !== null
-    ? String((raw.oauth as Record<string, unknown>).clientId ?? '').trim()
-    : '';
-  const oauthClientSecret = typeof raw.oauth === 'object' && raw.oauth !== null
-    ? String((raw.oauth as Record<string, unknown>).clientSecret ?? '').trim()
-    : '';
-  const oauthScope = typeof raw.oauth === 'object' && raw.oauth !== null
-    ? String((raw.oauth as Record<string, unknown>).scope ?? '').trim()
-    : '';
-  const oauthRedirectUri = typeof raw.oauth === 'object' && raw.oauth !== null
-    ? String((raw.oauth as Record<string, unknown>).redirectUri ?? '').trim()
-    : '';
+  // OAuth is snake_case in v2 and camelCase in v1; both spellings are read.
+  const oauth = isObject(raw.oauth) ? raw.oauth : null;
+  const oauthClientId = readString(oauth, 'client_id', 'clientId');
+  const oauthClientSecret = readString(oauth, 'client_secret', 'clientSecret');
+  const oauthScope = readString(oauth, 'scope');
+  const oauthRedirectUri = readString(oauth, 'redirect_uri', 'redirectUri');
+  const oauthCallbackPort = readNumeric(oauth, 'callback_port', 'callbackPort');
+  const oauthAuthServerMetadataUrl = readString(oauth, 'auth_server_metadata_url', 'authServerMetadataUrl');
+  const oauthEnabled = raw.oauth === false || raw.oauth === null || raw.oauth === undefined
+    ? false
+    : Boolean(oauth) && Boolean(
+      oauthClientId || oauthClientSecret || oauthScope || oauthRedirectUri || oauthCallbackPort || oauthAuthServerMetadataUrl,
+    );
 
-  const timeout = buildTimeout(raw);
-
-  const enabled = buildEnabled(raw);
+  const timeouts = buildTimeouts(raw);
 
   return {
     ok: true,
@@ -79,9 +84,46 @@ function buildResult(
     oauthClientSecret,
     oauthScope,
     oauthRedirectUri,
-    timeout,
-    enabled,
+    oauthCallbackPort,
+    oauthAuthServerMetadataUrl,
+    timeoutStartup: timeouts.startup,
+    timeoutCatalog: timeouts.catalog,
+    timeoutExecution: timeouts.execution,
+    codemode: raw.codemode === true ? 'on' : raw.codemode === false ? 'off' : 'default',
+    disabled: buildDisabled(raw),
+    protocol: MCP_PROTOCOLS.find((candidate) => candidate === raw.protocol) ?? 'legacy',
   };
+}
+
+/** First of the given keys that holds a non-empty string. */
+function readString(source: Record<string, unknown> | null, ...keys: string[]): string {
+  if (!source) return '';
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+/** First of the given keys that reads as a positive whole number. */
+function readNumeric(source: Record<string, unknown> | null, ...keys: string[]): string {
+  if (!source) return '';
+  for (const key of keys) {
+    const parsed = positiveInteger(source[key]);
+    if (parsed) return parsed;
+  }
+  return '';
+}
+
+function positiveInteger(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return String(Math.floor(value));
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return String(Math.floor(parsed));
+  }
+  return '';
 }
 
 function buildCommand(raw: Record<string, unknown>): string[] {
@@ -126,44 +168,30 @@ function buildEnv(
   return [];
 }
 
-function buildOAuthEnabled(raw: Record<string, unknown>): boolean {
-  if (raw.oauth === false || raw.oauth === null || raw.oauth === undefined) {
-    return false;
+/**
+ * v2 splits the timeout by phase; a v1 paste carries one number, which stood
+ * for the whole request, so it lands on `execution`.
+ */
+function buildTimeouts(raw: Record<string, unknown>): { startup: string; catalog: string; execution: string } {
+  if (isObject(raw.timeout)) {
+    return {
+      startup: positiveInteger(raw.timeout.startup),
+      catalog: positiveInteger(raw.timeout.catalog),
+      execution: positiveInteger(raw.timeout.execution),
+    };
   }
-  if (!isObject(raw.oauth)) {
-    return false;
-  }
-  const oauth = raw.oauth as Record<string, unknown>;
-  return !!(
-    (typeof oauth.clientId === 'string' && oauth.clientId.trim()) ||
-    (typeof oauth.clientSecret === 'string' && oauth.clientSecret.trim()) ||
-    (typeof oauth.scope === 'string' && oauth.scope.trim()) ||
-    (typeof oauth.redirectUri === 'string' && oauth.redirectUri.trim())
-  );
+  return { startup: '', catalog: '', execution: positiveInteger(raw.timeout) };
 }
 
-function buildTimeout(raw: Record<string, unknown>): string {
-  const t = raw.timeout;
-  if (typeof t === 'number' && Number.isFinite(t) && t > 0) {
-    return String(Math.floor(t));
-  }
-  if (typeof t === 'string' && t.trim()) {
-    const n = Number(t);
-    if (Number.isFinite(n) && n > 0) {
-      return String(Math.floor(n));
-    }
-  }
-  return '';
-}
-
-function buildEnabled(raw: Record<string, unknown>): boolean {
-  if ('disabled' in raw && raw.disabled === true) {
-    return false;
-  }
-  if ('enabled' in raw) {
-    return Boolean(raw.enabled);
-  }
-  return true;
+/**
+ * v2 uses `disabled`; a v1 paste says `enabled`. When neither is present the
+ * server is active, which is what both versions mean by an absent flag.
+ */
+function buildDisabled(raw: Record<string, unknown>): boolean {
+  if (raw.disabled === true) return true;
+  if (raw.disabled === false) return false;
+  if ('enabled' in raw) return !raw.enabled;
+  return false;
 }
 
 /**
@@ -215,13 +243,15 @@ function isServerConfig(val: Record<string, unknown>): boolean {
 }
 
 /**
- * Parse a raw JSON string as an MCP server snippet and return normalized result
- * or a structured error.  Does not mutate the current draft — caller applies
- * the result to form state.
+ * Parse a raw JSON string as an MCP server snippet and return a normalized
+ * result or a structured error. Does not mutate the current draft — the caller
+ * applies the result to form state. Both OpenCode versions are accepted; the
+ * result is always in the v2 vocabulary.
  *
  * Supported shapes:
- *   { "mcpServers": { "name": { ... } } }
- *   { "mcp": { "name": { ... } } }
+ *   { "mcpServers": { "name": { ... } } }   (Claude Desktop / generic)
+ *   { "mcp": { "servers": { "name": { ... } } } }   (OpenCode 2)
+ *   { "mcp": { "name": { ... } } }          (OpenCode 1)
  *   { "name": { ... } }
  *   { ...serverConfig }
  */
@@ -271,8 +301,12 @@ export function parseImportedMcpSnippet(
     return buildResult(serverName, inferType(entry as Record<string, unknown>), entry as Record<string, unknown>);
   }
 
-  // Detect OpenCode config shape { "mcp": { "name": { ... } } }
-  const mcp = obj.mcp;
+  // v2 config shape { "mcp": { "servers": { "name": { ... } } } }, and the v1
+  // shape { "mcp": { "name": { ... } } } it replaced.
+  const mcpSection = obj.mcp;
+  const mcp = isObject(mcpSection) && isObject(mcpSection.servers)
+    ? mcpSection.servers
+    : mcpSection;
   if (isObject(mcp)) {
     const keys = Object.keys(mcp);
     if (keys.length === 0) {
@@ -355,8 +389,15 @@ export function applyImportedMcpToDraft(
     oauthClientSecret: result.type === 'remote' ? result.oauthClientSecret : '',
     oauthScope: result.type === 'remote' ? result.oauthScope : '',
     oauthRedirectUri: result.type === 'remote' ? result.oauthRedirectUri : '',
-    timeout: result.type === 'remote' ? result.timeout : '',
-    enabled: result.enabled,
+    oauthCallbackPort: result.type === 'remote' ? result.oauthCallbackPort : '',
+    oauthAuthServerMetadataUrl: result.type === 'remote' ? result.oauthAuthServerMetadataUrl : '',
+    // `startup` only means something for a server OpenChamber spawns.
+    timeoutStartup: result.type === 'local' ? result.timeoutStartup : '',
+    timeoutCatalog: result.timeoutCatalog,
+    timeoutExecution: result.timeoutExecution,
+    codemode: result.codemode,
+    disabled: result.disabled,
+    protocol: result.protocol,
   };
 
   return draft;

@@ -1,3 +1,5 @@
+import { guestFramePolicy } from '@openchamber/sdk';
+
 const DOCUMENT_ORIGIN = 'https://extension.invalid';
 const MAX_FILES = 500;
 const MAX_BYTES = 40 * 1024 * 1024;
@@ -27,7 +29,12 @@ const decodeCssUrl = (value: string): string => value.replace(/\\(?:([0-9a-f]{1,
 const CSS_REFERENCES = /\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|\burl\(\s*(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)'|((?:\\[\s\S]|[^)\\])*?))\s*\)|@import\s+(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')/gi;
 
 /** Prepare package-owned static resources for an iframe that has no HTTP origin. */
-export const loadRelayGuestDocument = async (guestId: string, entry: string, load: LoadAsset): Promise<string> => {
+export const loadRelayGuestDocument = async (
+  guestId: string,
+  entry: string,
+  load: LoadAsset,
+  origins: readonly string[] = [],
+): Promise<string> => {
   const prefix = `/api/guests/${guestId}/`;
   const root = new URL(entry, `${DOCUMENT_ORIGIN}${prefix}`);
   const files = new Map<string, Promise<string>>();
@@ -138,6 +145,14 @@ export const loadRelayGuestDocument = async (guestId: string, entry: string, loa
     baseElement.href = effectiveBase.href;
     if (declaredTarget) baseElement.target = declaredTarget;
     document.head.prepend(baseElement);
+    // A srcDoc gets no response headers, so the network lock the server sends
+    // for direct frames travels as the document's first element instead.
+    // Everything here is already inlined as data: URLs; only the origins the
+    // user approved may be reached.
+    const policy = document.createElement('meta');
+    policy.httpEquiv = 'Content-Security-Policy';
+    policy.content = guestFramePolicy(null, origins);
+    document.head.prepend(policy);
     for (const node of document.querySelectorAll('script[src], link[href], img[src], source[src], video[src], audio[src], iframe[src], embed[src], object[data], image[href], image[xlink\\:href], use[href], use[xlink\\:href]')) {
       for (const attribute of ['src', 'href', 'data', 'xlink:href']) {
         const value = node.getAttribute(attribute);

@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
+import { browserProviderGuests } from './browser-providers.ts';
 import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
+import { enabledGuestSurfaces } from './surfaces.ts';
 
 describe('parseGuestCatalogJson', () => {
   test('reads a valid catalog', () => {
@@ -168,6 +170,30 @@ describe('parseGuestCatalogJson', () => {
     ]);
   });
 
+  test('keeps a service\'s provider role and surface, so the dropdown and the rail see them', () => {
+    const [guest] = parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'server-chrome',
+        name: 'Server Chrome',
+        icon: 'window',
+        capabilities: { requested: ['service'], granted: ['service'] },
+        service: { runtime: 'host', granted: true, provides: ['browser'], surface: true },
+      }],
+    })) ?? [];
+    expect(guest?.service).toEqual({ runtime: 'host', granted: true, provides: ['browser'], surface: true });
+    expect(browserProviderGuests(guest ? [guest] : [])).toHaveLength(1);
+    expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(1);
+
+    // An unknown role is a newer server; the row still parses, minus that field.
+    const [newer] = parseGuestCatalogJson(JSON.stringify({
+      guests: [{
+        id: 'x', name: 'X', icon: 'window', capabilities: { requested: [], granted: [] },
+        service: { runtime: 'host', granted: true, provides: ['printer'] },
+      }],
+    })) ?? [];
+    expect(newer?.service).toEqual({ runtime: 'host', granted: true });
+  });
+
   test('keeps declared tool presentations and drops a malformed list', () => {
     const tools = [
       { match: 'mcp.tasks.*', name: 'Tasks', icon: 'checkbox-circle', title: '{input.id}', output: 'table', columns: ['id', 'title'] },
@@ -184,6 +210,13 @@ describe('parseGuestCatalogJson', () => {
     expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools })] }))).toEqual([guest({ tools })]);
     expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools: [{ match: 'mcp.*.search' }] })] }))).toBeNull();
     expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
+  });
+
+  test('keeps a status section without a panel entry and drops an out-of-range height', () => {
+    const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
+      .toEqual([{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }]);
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
   });
 
   test('rejects junk instead of returning an empty catalog', () => {

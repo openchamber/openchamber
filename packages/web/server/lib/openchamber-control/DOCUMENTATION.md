@@ -54,11 +54,39 @@ other.
   callers can correct an invalid request without an upfront usage manual.
 - Explicit `projectId` or `directory` scope takes precedence over the managed
   tool's current-session directory fallback; the fallback never creates a
-  conflicting second scope.
+  conflicting second scope. Session reads (`session.list`, `session.status`,
+  `session.messages`) resolve `projectId` through the session service's
+  `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
+  404 and a missing project folder a 400, never a read of the current or every
+  directory. Every `session.*` action refuses `projectId` and `directory`
+  together with a 400, so neither silently wins.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- `session.link` records a code change under review or an issue on a session
+  (`../openchamber-sessions/session-link.js`), defaulting to the calling
+  session. When to link is not in the action's description but at the head of
+  the tool description and in the session context
+  (`../session-knowledge/DOCUMENTATION.md`): what the work is about, never one
+  mentioned in passing. It sends one service-neutral record (`url`, `title`, `kind`
+  `change` or `issue`, optional `identifier`) and nothing is looked up, so any
+  tracker works. The URL decides what is stored: a GitHub pull or issue
+  address becomes the GitHub entry (kind from the path, live state as for any
+  link), a Linear issue address the Linear entry, anything else an `external`
+  entry shown by identifier. It only adds or refreshes links, never removes
+  one: the user owns removal. A missing field or a non-http(s) URL is a 400 and
+  nothing is written.
+- `file.open` shows a file in the user's viewer. `file-open.js` resolves a
+  relative path against the session directory (an explicit `directory` wins),
+  refuses a relative path with no directory at all, checks the target is an
+  existing file, then hands `{ path, directory, sessionId }` to the injected
+  `emit`, which `index.js` writes to every UI control stream as
+  `openchamber:file-open-request`. Nothing comes back: opening a tab does not
+  fail quietly on a client, so the count of clients reached is the signal, and
+  zero is a 503, never a claimed success. Paths outside the workspace are
+  allowed on purpose: screenshots and recordings often land in a temp
+  directory, and the viewer already reads such files.
 - `browser.capture` writes its image on the server, into
   `.openchamber/screenshots/` under the scoped project directory, and returns
   the project-relative path rather than the image bytes. The client that took

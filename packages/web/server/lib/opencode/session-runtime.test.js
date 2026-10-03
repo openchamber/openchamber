@@ -12,6 +12,49 @@ describe('session runtime', () => {
     runtimes.length = 0;
   });
 
+  it('keeps pending permission requests and forms until they are answered', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const permission = { id: 'perm-1', sessionID: 'session-1', action: 'bash', resources: ['rm *'], metadata: {} };
+    const form = { id: 'form-1', sessionID: 'session-2', title: 'Pick one', fields: {} };
+
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: permission });
+    runtime.processOpenCodeSsePayload({ type: 'permission.asked', properties: permission });
+    runtime.processOpenCodeSsePayload({ type: 'form.created', properties: { sessionID: 'session-2', form } });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({
+      'session-1': { permissions: [permission], forms: [] },
+      'session-2': { permissions: [], forms: [form] },
+    });
+
+    runtime.processOpenCodeSsePayload({ type: 'permission.replied', properties: { sessionID: 'session-1', requestID: 'perm-1' } });
+    runtime.processOpenCodeSsePayload({ type: 'form.settled', properties: { sessionID: 'session-2' } });
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
+  it('drops pending requests when the session is deleted or OpenCode restarts', () => {
+    const runtime = createSessionRuntime({
+      writeSseEvent() {},
+      getNotificationClients: () => new Set(),
+      broadcastEvent: () => {},
+    });
+    runtimes.push(runtime);
+    const ask = (sessionID, id) => runtime.processOpenCodeSsePayload({
+      type: 'permission.asked', properties: { id, sessionID, action: 'edit', resources: [], metadata: {} },
+    });
+
+    ask('session-1', 'perm-1');
+    ask('session-2', 'perm-2');
+    runtime.processOpenCodeSsePayload({ type: 'session.deleted', properties: { sessionID: 'session-1', info: { id: 'session-1' } } });
+    expect(Object.keys(runtime.getPendingBlockingRequestsSnapshot())).toEqual(['session-2']);
+
+    runtime.interruptBusySessionsAfterRestart();
+    expect(runtime.getPendingBlockingRequestsSnapshot()).toEqual({});
+  });
+
   it('broadcasts attention clears through the shared broadcaster', () => {
     const events = [];
     const runtime = createSessionRuntime({

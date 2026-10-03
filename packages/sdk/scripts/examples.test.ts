@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseManifestJson } from '../src/schemas';
+import { lanesBelow, layoutGraph } from '../examples/git-graph-status/status/graph';
 import { z } from 'zod';
 
 const examples = new URL('../examples/', import.meta.url);
@@ -29,6 +30,31 @@ describe('checked-in SDK examples', () => {
     expect(replies[3].result.content?.[0].text).toContain('no commands run');
   });
 
+  test('Git Graph lays out a merge like the Git view: the side branch opens a lane and curves back', () => {
+    // newest first: M merges B into A's line; B and A both descend from R.
+    const { rows, width } = layoutGraph([
+      { hash: 'M', parents: ['A', 'B'] },
+      { hash: 'B', parents: ['R'] },
+      { hash: 'A', parents: ['R'] },
+      { hash: 'R', parents: [] },
+    ]);
+    expect(width).toBe(2);
+    expect(rows[0]).toEqual({ lane: 0, connectors: [
+      { fromLane: 0, toLane: 0, type: 'bottom-stub' }, { fromLane: 0, toLane: 1, type: 'branch-out' },
+    ] });
+    expect(rows[1]).toEqual({ lane: 1, connectors: [
+      { fromLane: 1, toLane: 1, type: 'commit-lane' }, { fromLane: 0, toLane: 0, type: 'passing' },
+    ] });
+    expect(rows[2]).toEqual({ lane: 0, connectors: [
+      { fromLane: 0, toLane: 0, type: 'commit-lane' }, { fromLane: 1, toLane: 1, type: 'passing' },
+    ] });
+    expect(rows[3]).toEqual({ lane: 0, connectors: [
+      { fromLane: 0, toLane: 0, type: 'top-stub' }, { fromLane: 1, toLane: 0, type: 'merge-in' },
+    ] });
+    expect(lanesBelow(rows[0])).toEqual([0, 1]);
+    expect(lanesBelow(rows[3])).toEqual([]);
+  });
+
   test('all manifests remain valid', async () => {
     for (const entry of await readdir(examples, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
@@ -41,7 +67,8 @@ describe('checked-in SDK examples', () => {
     const temporary = await mkdtemp(path.join(tmpdir(), 'oc-example-bundles-'));
     try {
     for (const entry of ['hello-kit/panel/main', 'hello-kit/background/main', 'github-token/panel/main', 'config-editor/panel/main', 'service-echo/panel/main',
-      'service-echo/service/main', 'tools-only/mcp', 'tasks-demo/panel/main', 'tasks-demo/panel/attach', 'tasks-demo/panel/page']) {
+      'service-echo/service/main', 'browser-provider-stub/service/main', 'browser-provider-stub/panel/main', 'tools-only/mcp', 'tasks-demo/panel/main', 'tasks-demo/panel/attach', 'tasks-demo/panel/page',
+      'git-graph-status/status/main', 'git-graph-status/service/main', 'checklist-editor/editor/main']) {
       const node = entry.includes('/service/') || entry === 'tools-only/mcp';
       const output = path.join(temporary, 'bundle.js');
       const result = spawnSync('bun', [fileURLToPath(new URL('./bundle-guest.ts', import.meta.url)), ...(node ? ['--node'] : []), fileURLToPath(new URL(`${entry}.ts`, examples)), output], {

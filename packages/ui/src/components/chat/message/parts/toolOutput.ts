@@ -139,7 +139,7 @@ export const getToolOutput = (
     metadataOutput: unknown,
     status?: string,
 ): string | undefined => {
-    const isBash = tool === 'bash';
+    const isBash = isShellTool(tool);
     const shouldNormalize = isBash && status !== 'running';
 
     if (typeof stateOutput === 'string') {
@@ -156,3 +156,4 @@ export const getToolOutput = (
 export const getStreamingOutputAppend = (previous: string, next: string): string | undefined => {
     return next.startsWith(previous) ? next.slice(previous.length) : undefined;
 };
+import { isShellTool } from '@/lib/opencode/tools';

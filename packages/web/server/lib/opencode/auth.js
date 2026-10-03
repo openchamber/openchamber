@@ -1,84 +1,155 @@
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+/**
+ * READ-ONLY view of OpenCode's provider credentials, shared by the web server
+ * and the VS Code extension host.
+ *
+ * OpenCode 2.x owns every credential. Since 2.0.20 it hands them back over
+ * `GET /api/credential`, secrets included, so the quota providers, voice keys
+ * and routing read what the running OpenCode actually uses. Each call asks
+ * OpenCode; concurrent callers share one request. A failed read throws rather
+ * than answering `{}`: "OpenCode is unreachable" must not look like "the user
+ * has no keys".
+ *
+ * A key OpenCode picks up from an environment variable (`ZAI_API_KEY`, ...)
+ * is never stored, and that route does not list it. `GET /api/integration`
+ * names the variable a connection came from, but not its value. When
+ * OpenChamber launched OpenCode itself it knows the environment it passed, so
+ * the source reads the value from there; an external OpenCode runs with an
+ * environment of its own, and its variable keys stay unknown. A stored
+ * credential wins over a variable, which is the order OpenCode itself uses.
+ *
+ * The answer keeps the legacy `auth.json` entry shape the consumers were
+ * written against: `{ type: 'api', key }` / `{ type: 'oauth', access, refresh,
+ * expires, accountId?, enterpriseUrl? }`, keyed by integration id, which for
+ * providers is the provider id. Nothing here writes.
+ */
 
-const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
-const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
+import { OpenCode } from '@opencode/client';
+import { z } from 'zod';
 
-function readAuthFile() {
-  if (!fs.existsSync(AUTH_FILE)) {
-    return {};
-  }
-  try {
-    const content = fs.readFileSync(AUTH_FILE, 'utf8');
-    const trimmed = content.trim();
-    if (!trimmed) {
-      return {};
+// Wired once per runtime: `server/index.js` on the web server, the extension
+// entry point in VS Code. Until then every read throws.
+let source = null;
+
+/** Wires the reader to a credential source (`{ list }`). Pass `null` to detach. */
+export function configureOpenCodeCredentials(next) {
+  source = next ?? null;
+}
+
+/**
+ * The value of each variable OpenCode reports as a connection, keyed by
+ * integration id, taken from the environment OpenCode was launched with.
+ */
+export const projectEnvironmentKeys = (integrations, environment) => {
+  const result = {};
+  for (const integration of integrations) {
+    for (const connection of integration.connections) {
+      if (connection.type !== 'env' || integration.id in result) continue;
+      const key = (environment[connection.name] ?? '').trim();
+      if (key) result[integration.id] = key;
     }
-    return JSON.parse(trimmed);
-  } catch (error) {
-    console.error('Failed to read auth file:', error);
-    throw new Error('Failed to read OpenCode auth configuration');
   }
-}
-
-function writeAuthFile(auth) {
-  try {
-    if (!fs.existsSync(OPENCODE_DATA_DIR)) {
-      fs.mkdirSync(OPENCODE_DATA_DIR, { recursive: true, mode: 0o700 });
-    }
-    if (process.platform !== 'win32') fs.chmodSync(OPENCODE_DATA_DIR, 0o700);
-
-    if (fs.existsSync(AUTH_FILE)) {
-      const backupFile = `${AUTH_FILE}.openchamber.backup`;
-      fs.copyFileSync(AUTH_FILE, backupFile);
-      if (process.platform !== 'win32') fs.chmodSync(backupFile, 0o600);
-      console.log(`Created auth backup: ${backupFile}`);
-    }
-
-    fs.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2), { encoding: 'utf8', mode: 0o600 });
-    if (process.platform !== 'win32') fs.chmodSync(AUTH_FILE, 0o600);
-    console.log('Successfully wrote auth file');
-  } catch (error) {
-    console.error('Failed to write auth file:', error);
-    throw new Error('Failed to write OpenCode auth configuration');
-  }
-}
-
-function removeProviderAuth(providerId) {
-  if (!providerId || typeof providerId !== 'string') {
-    throw new Error('Provider ID is required');
-  }
-
-  const auth = readAuthFile();
-  
-  if (!auth[providerId]) {
-    console.log(`Provider ${providerId} not found in auth file, nothing to remove`);
-    return false;
-  }
-
-  delete auth[providerId];
-  writeAuthFile(auth);
-  console.log(`Removed provider auth: ${providerId}`);
-  return true;
-}
-
-function getProviderAuth(providerId) {
-  const auth = readAuthFile();
-  return auth[providerId] || null;
-}
-
-function listProviderAuths() {
-  const auth = readAuthFile();
-  return Object.keys(auth);
-}
-
-export {
-  readAuthFile,
-  writeAuthFile,
-  removeProviderAuth,
-  getProviderAuth,
-  listProviderAuths,
-  AUTH_FILE,
-  OPENCODE_DATA_DIR
+  return result;
 };
+
+/**
+ * The running OpenCode as a credential source. The URL and auth headers are
+ * read on every call because the port and the server password both move
+ * across an OpenCode restart. `getLaunchEnvironment` answers the environment
+ * a managed OpenCode was started with, or null for an external one.
+ *
+ * Credentials are global, but integrations are read through a location:
+ * without a directory OpenCode would start its own working directory, MCP
+ * servers included, so that read is scoped to `getDefaultDirectory()`.
+ */
+export const openCodeCredentialSource = ({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getLaunchEnvironment = () => null,
+  getDefaultDirectory = () => null,
+}) => {
+  const client = (directory = null) => {
+    const headers = { ...getOpenCodeAuthHeaders() };
+    if (directory) headers['x-opencode-directory'] = encodeURIComponent(directory);
+    return OpenCode.make({ baseUrl: buildOpenCodeUrl('', '').replace(/\/+$/, ''), headers });
+  };
+  return {
+    list: () => client().credential.list(),
+    listEnvironmentKeys: async () => {
+      const environment = getLaunchEnvironment();
+      if (!environment) return {};
+      const { data } = await client(getDefaultDirectory()).integration.list();
+      return projectEnvironmentKeys(data, environment);
+    },
+  };
+};
+
+const metadataString = z.string();
+
+/** One stored credential value → legacy `auth.json` entry. */
+const projectCredentialValue = (value) => {
+  if (value.type === 'key') {
+    return value.metadata ? { type: 'api', key: value.key, metadata: value.metadata } : { type: 'api', key: value.key };
+  }
+  const entry = { type: 'oauth', access: value.access, refresh: value.refresh, expires: value.expires };
+  const accountId = metadataString.safeParse(value.metadata?.accountID).data;
+  const enterpriseUrl = metadataString.safeParse(value.metadata?.enterpriseUrl).data;
+  if (accountId !== undefined) entry.accountId = accountId;
+  if (enterpriseUrl !== undefined) entry.enterpriseUrl = enterpriseUrl;
+  return entry;
+};
+
+/** Each integration's selected credential; OpenCode marks exactly one `active` per integration. */
+export const projectCredentialEntries = (entries) => {
+  const result = {};
+  for (const entry of entries) {
+    if (entry.active) result[entry.integrationID] = projectCredentialValue(entry.value);
+  }
+  return result;
+};
+
+const readStored = async (current) => projectCredentialEntries(await current.list());
+
+const readWithEnvironment = async (current) => {
+  const [stored, environmentKeys] = await Promise.all([
+    readStored(current),
+    current.listEnvironmentKeys ? current.listEnvironmentKeys() : {},
+  ]);
+  const result = {};
+  for (const [integrationID, key] of Object.entries(environmentKeys)) result[integrationID] = { type: 'api', key };
+  return { ...result, ...stored };
+};
+
+const coalesce = () => {
+  let pending = null;
+  return (read) => {
+    if (!pending) {
+      const current = source;
+      pending = (current ? read(current) : Promise.reject(new Error('OpenCode is not connected yet')))
+        .finally(() => {
+          pending = null;
+        });
+    }
+    return pending;
+  };
+};
+
+const sharedRead = coalesce();
+const sharedStoredRead = coalesce();
+
+/**
+ * The keys the running OpenCode uses, keyed by provider id: stored
+ * credentials, plus variable keys when OpenChamber launched OpenCode.
+ * Throws when OpenCode cannot be asked.
+ */
+export function readOpenCodeCredentials() {
+  return sharedRead(readWithEnvironment);
+}
+
+/**
+ * The credential stored for one provider, or null. Variables do not count:
+ * callers ask whether a login exists in OpenCode's own store.
+ */
+export async function getProviderAuth(providerId) {
+  const credentials = await sharedStoredRead(readStored);
+  return credentials[providerId] || null;
+}

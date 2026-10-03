@@ -1,6 +1,7 @@
 import React from 'react';
 import { ComposerFloatingPanel } from '../composer/ui/ComposerFloatingPanel';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
+import { getLastConversationRecord, isIncompleteAssistantTurn } from '@/lib/opencode/model';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -14,7 +15,7 @@ import {
     useSessionRenderable,
     useSessionStatus,
     useScopedBlockingPermissions,
-    useScopedBlockingQuestions,
+    useScopedBlockingForms,
 } from '@/sync/sync-context';
 import { useStreamingStore } from '@/sync/streaming';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
@@ -24,7 +25,7 @@ import { ChatSurfaceProvider } from '../ChatSurfaceContext';
 import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeight';
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
-import { QuestionCard } from '../QuestionCard';
+import { FormCard } from '../FormCard';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -115,7 +116,7 @@ type BtwSessionData = {
     streamingMessageId: string | null;
     activeStreamingPhase: 'streaming' | 'cooldown' | 'completed' | null;
     sessionPermissions: ReturnType<typeof useScopedBlockingPermissions>;
-    sessionQuestions: ReturnType<typeof useScopedBlockingQuestions>;
+    sessionForms: ReturnType<typeof useScopedBlockingForms>;
     isEmpty: boolean;
 };
 
@@ -148,7 +149,7 @@ const useBtwSessionData = (
         ),
     );
     const sessionPermissions = useScopedBlockingPermissions(sessionId, directory);
-    const sessionQuestions = useScopedBlockingQuestions(sessionId, directory);
+    const sessionForms = useScopedBlockingForms(sessionId, directory);
 
     const tailRecords = React.useMemo(
         () => filterBtwTailMessages(messageRecords, boundaryMessageID),
@@ -156,23 +157,17 @@ const useBtwSessionData = (
     );
 
     const sessionIsWorking = React.useMemo(() => {
-        if (sessionPermissions.length > 0 || sessionQuestions.length > 0) {
+        if (sessionPermissions.length > 0 || sessionForms.length > 0) {
             return false;
         }
         const statusType = status.type ?? 'idle';
         if (statusType === 'busy' || statusType === 'retry') {
             return true;
         }
-        // SAFETY: reads only the optional `time.completed` field, which the
-        // SDK Message union does not expose uniformly; a missing value means
-        // the assistant turn has not completed.
-        const lastMessage = tailRecords[tailRecords.length - 1]?.info as (Message & { time?: { completed?: number } }) | undefined;
-        return Boolean(
-            lastMessage
-            && lastMessage.role === 'assistant'
-            && typeof lastMessage.time?.completed !== 'number',
-        );
-    }, [sessionPermissions.length, sessionQuestions.length, status.type, tailRecords]);
+        // Plumbing roles trail the assistant message, so the working state
+        // follows the last conversation message, not the last record.
+        return isIncompleteAssistantTurn(getLastConversationRecord(tailRecords)?.info);
+    }, [sessionPermissions.length, sessionForms.length, status.type, tailRecords]);
 
     return {
         messageRecords: tailRecords,
@@ -180,7 +175,7 @@ const useBtwSessionData = (
         streamingMessageId,
         activeStreamingPhase,
         sessionPermissions,
-        sessionQuestions,
+        sessionForms,
         isEmpty: tailRecords.length === 0,
     };
 };
@@ -451,10 +446,10 @@ const BtwMessages: React.FC<{
                         }
                     />
                 ))}
-                {data.sessionQuestions.length > 0 || data.sessionPermissions.length > 0 ? (
+                {data.sessionForms.length > 0 || data.sessionPermissions.length > 0 ? (
                     <div>
-                        {data.sessionQuestions.map((question) => (
-                            <QuestionCard key={question.id} question={question} />
+                        {data.sessionForms.map((form) => (
+                            <FormCard key={form.id} form={form} />
                         ))}
                         {data.sessionPermissions.map((permission) => (
                             <PermissionCard key={permission.id} permission={permission} />

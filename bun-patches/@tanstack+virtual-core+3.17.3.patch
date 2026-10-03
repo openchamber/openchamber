@@ -2,11 +2,13 @@ diff --git a/dist/cjs/index.cjs b/dist/cjs/index.cjs
 index 52ae6ca12f8d1c650ee7f1bd55573ee7d4f8b65f..bcee09df7377c37ffb220606b741c9ff434b3470 100644
 --- a/dist/cjs/index.cjs
 +++ b/dist/cjs/index.cjs
-@@ -723,10 +723,12 @@ class Virtualizer {
+@@ -723,10 +723,14 @@ class Virtualizer {
            this.range = null;
            return null;
          }
-+        const maxScrollOffset = Math.max(this.getTotalSize() - outerSize, 0);
++        // scrollOffset is scroller-absolute while getTotalSize() is list-local,
++        // so the ceiling adds the list's own offset inside a shared scroller.
++        const maxScrollOffset = Math.max(this.getTotalSize() + this.options.scrollMargin - outerSize, 0);
 +        const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
          this.range = calculateRangeImpl(
            measurements,
@@ -20,11 +22,13 @@ diff --git a/dist/esm/index.js b/dist/esm/index.js
 index 3032c0ca457582be3f47923cba1f7d92c848745c..90b574881a073aabac99c075f7eab0a8f363fff6 100644
 --- a/dist/esm/index.js
 +++ b/dist/esm/index.js
-@@ -721,10 +721,12 @@ class Virtualizer {
+@@ -721,10 +721,14 @@ class Virtualizer {
            this.range = null;
            return null;
          }
-+        const maxScrollOffset = Math.max(this.getTotalSize() - outerSize, 0);
++        // scrollOffset is scroller-absolute while getTotalSize() is list-local,
++        // so the ceiling adds the list's own offset inside a shared scroller.
++        const maxScrollOffset = Math.max(this.getTotalSize() + this.options.scrollMargin - outerSize, 0);
 +        const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
          this.range = calculateRangeImpl(
            measurements,

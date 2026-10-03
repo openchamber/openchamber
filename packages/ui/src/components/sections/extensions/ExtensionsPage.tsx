@@ -23,9 +23,11 @@ import { GuestApprovalDialog } from './GuestApprovalDialog';
 import { toast } from '@/components/ui';
 import { setGuestServiceSocketPath } from '@/lib/guests/service';
 import { guestNeedsApproval } from '@/lib/guests/capabilities';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getGuestSourceUrl } from '@/lib/guests/source-url';
-import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip, type InstallGuestErrorCode } from '@/lib/guests/install';
+import { approveGuestCapabilities, installGuest, setGuestEnabled, uninstallGuest, uploadGuestZip } from '@/lib/guests/install';
+import { errorToastKey, updateErrorToastKey } from './extensionToasts';
 import { closeGuestTabsById } from '@/lib/guests/tabs';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { describeGuestRequestFailure } from '@/lib/guests/request-failure';
@@ -33,7 +35,7 @@ import { getGitIdentities, getGlobalGitIdentity } from '@/lib/gitApi';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
-import { checkGuestUpdates, updateGuest, type UpdateGuestErrorCode } from '@/lib/guests/updates';
+import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
 import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -43,21 +45,6 @@ import { openExternalUrl } from '@/lib/url';
 import { canRequestNativeDirectoryAccess, pathForDroppedFile, requestDirectoryAccess, requestFileAccess } from '@/lib/desktop';
 import type { PublicSocketBinding } from '@openchamber/sdk';
 
-const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
-  if (code === 'invalid-path') return 'settings.extensions.toast.invalidPath';
-  if (code === 'invalid-url') return 'settings.extensions.toast.invalidUrl';
-  if (code === 'not-found') return 'settings.extensions.toast.notFound';
-  if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
-  if (code === 'reserved-id') return 'settings.extensions.toast.reservedId';
-  if (code === 'id-taken') return 'settings.extensions.toast.idTaken';
-  if (code === 'already-installed') return 'settings.extensions.toast.alreadyInstalled';
-  if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
-  if (code === 'host-too-old') return 'settings.extensions.toast.hostTooOld';
-  if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
-  if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
-  if (code === 'too-large') return 'settings.extensions.toast.zipTooLarge';
-  return 'settings.extensions.toast.failed';
-};
 
 /**
  * What the user handed us to install: a typed path or URL (also what the
@@ -70,15 +57,6 @@ type InstallSource =
 
 const isZipFile = (file: File): boolean => file.name.toLowerCase().endsWith('.zip');
 
-const updateErrorToastKey = (code: UpdateGuestErrorCode): I18nKey => {
-  if (code === 'not-git') return 'settings.extensions.toast.notGit';
-  if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
-  if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
-  if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
-  if (code === 'swap-failed') return 'settings.extensions.toast.swapFailed';
-  if (code === 'not-found') return 'settings.extensions.toast.notFound';
-  return 'settings.extensions.toast.updateFailed';
-};
 
 const sourceKey = (source?: GuestSource): I18nKey => {
   if (source === 'path') return 'settings.extensions.source.path';
@@ -233,7 +211,9 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const enabled = guest.enabled !== false;
-  const needsApproval = guestNeedsApproval(guest);
+  // Enterprise mode refuses what this package asks for; approving cannot change that.
+  const enterpriseBlocked = (guest.enterpriseBlocked?.length ?? 0) > 0;
+  const needsApproval = !enterpriseBlocked && guestNeedsApproval(guest);
   const permissions = servicePermissionList(guest);
   const canRemove = Boolean(guest.source && guest.source !== 'bundled');
   const builtIn = guest.source === 'bundled';
@@ -252,12 +232,14 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
     guest.entry ? null : t('settings.extensions.source.noPanel'),
   ].filter(Boolean).join(' · ');
   const location = guest.path || guest.id;
-  const statusLabel = needsApproval
+  const statusLabel = enterpriseBlocked
+    ? t('settings.extensions.status.enterpriseBlocked')
+    : needsApproval
     ? t('settings.extensions.status.needsApproval')
     : enabled
       ? t('settings.extensions.status.enabled')
       : t('settings.extensions.status.disabled');
-  const statusClassName = needsApproval
+  const statusClassName = enterpriseBlocked || needsApproval
     ? 'bg-[var(--status-warning)]/15 text-[var(--status-warning)]'
     : enabled
       ? 'bg-[var(--status-success)]/15 text-[var(--status-success)]'
@@ -311,6 +293,7 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
             <p className="typography-meta truncate font-mono text-muted-foreground" title={location}>
               {location}
             </p>
+            {enterpriseBlocked ? <p className="typography-meta text-foreground">{t('settings.extensions.enterpriseBlocked')}</p> : null}
             {builtIn ? <p className="typography-meta text-muted-foreground">{t('settings.extensions.builtIn.info')}</p> : null}
             {permissions ? (
               <p className="typography-meta truncate text-muted-foreground">
@@ -425,6 +408,7 @@ export const ExtensionsPage: React.FC = () => {
   const [selectedGitIdentityId, setSelectedGitIdentityId] = React.useState('global');
   const unsupported = status === 'unsupported';
   const [installValue, setInstallValue] = React.useState('');
+  const enterpriseMode = useEnterpriseMode();
   const [busy, setBusy] = React.useState(false);
   const [checking, setChecking] = React.useState(false);
   const checkedOnOpen = React.useRef(false);
@@ -734,12 +718,16 @@ export const ExtensionsPage: React.FC = () => {
     <SettingsPageLayout
       title={t('settings.page.extensions.title')}
       description={t('settings.page.extensions.description')}
-      outerClassName="extensions-settings-page"
     >
       {unsupported ? null : (
         <SettingsSection
           title={t('settings.extensions.add.action')}
-          info={t('settings.extensions.add.info')}
+          info={enterpriseMode ? (
+            <>
+              <span className="block">{t('settings.extensions.add.enterpriseRule')}</span>
+              <span className="mt-2 block">{t('settings.extensions.add.info')}</span>
+            </>
+          ) : t('settings.extensions.add.info')}
         >
           <SettingsStackedField
             label={t('settings.extensions.add.label')}

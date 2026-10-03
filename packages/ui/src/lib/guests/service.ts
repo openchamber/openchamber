@@ -54,12 +54,14 @@ const parseGuestServiceProxyResponse = async (
 export const proxyGuestServiceRequest = async (
   guestId: string,
   request: GuestRequest,
+  /** The shared-surface viewer open in this window (`surface-viewers.ts`). */
+  viewerId?: string,
 ): Promise<GuestRequestProxyResult> => {
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/service/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify(viewerId ? { ...request, viewerId } : request),
     });
     return parseGuestServiceProxyResponse(response);
   } catch {

@@ -7,7 +7,7 @@ import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { useFreshestPrVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { useSessionMessages } from '@/sync/sync-context';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -161,22 +161,8 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // fan-out the PR-status concurrency gate exists to prevent.
   const prSummary = useFreshestPrVisualSummaryForBranch(gitDirectory, branch);
 
-  // `getCurrentModel` is an imperative getter: its reference never changes, so
-  // calling it in render subscribes to nothing. Subscribe to the selected model
-  // ids and recompute the limits from those.
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const currentProviderId = useConfigStore((state) => state.currentProviderId);
-  const currentModelId = useConfigStore((state) => state.currentModelId);
   const sessionMessages = useSessionMessages(sessionId ?? '', directory ?? undefined);
-
-  const contextLimit = React.useMemo(() => {
-    const currentModel = getCurrentModel();
-    const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null
-      ? (currentModel.limit as Record<string, unknown>)
-      : null;
-    return limit && typeof limit.context === 'number' ? limit.context : 0;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- getter output tracks the selected model ids
-  }, [getCurrentModel, currentProviderId, currentModelId]);
+  const { context: contextLimit } = useContextWindowLimits(sessionId, directory ?? undefined);
 
   // Computed from this session's own messages rather than through
   // `useSessionUIStore.getContextUsage`, which reads the *current* directory's

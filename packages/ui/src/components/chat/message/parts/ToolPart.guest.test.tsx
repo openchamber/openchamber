@@ -4,7 +4,8 @@ import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { createOpencodeClient, type ToolPart as ToolPartData } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
+import type { ToolPart as ToolPartData } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
 import { I18nProvider } from '@/lib/i18n';
 import { ThemeSystemContext, type ThemeContextValue } from '@/contexts/theme-system-context';
@@ -73,7 +74,6 @@ const part: ToolPartData = {
       { id: 'DEMO-1', title: 'Write docs', assignee: { name: 'Ada' } },
       { id: 'DEMO-2', title: 'Ship it' },
     ] }),
-    title: 'List tasks',
     metadata: {},
     time: { start: 1, end: 2 },
   },
@@ -109,7 +109,7 @@ test('a declared tool rule sets the header, icon, and table body of a matching t
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);
-  const sdk = createOpencodeClient({
+  const sdk = OpenCode.make({
     baseUrl: 'http://localhost',
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
   });

@@ -12,7 +12,7 @@ Do normalnego użytku ta strona nie jest potrzebna. Sięgnij po nią, gdy chcesz
 ## Edytuj prompt
 
 1. Otwórz **Settings → Magic Prompts**.
-2. Wybierz prompt z grup w pasku bocznym — Git, GitHub, Planning i Session.
+2. Wybierz prompt z grup w pasku bocznym — Git, Linear, Planning i Session.
 3. Edytuj tekst i zapisz.
 
 Niektóre prompty mają część widoczną (wiadomość, którą zobaczysz) i część z instrukcjami (ukryte wskazówki dla agenta). Prompty mogą zawierać `{{placeholders}}`, które OpenChamber uzupełnia, jak diff czy tytuł issue — zostaw je na miejscu.
@@ -33,14 +33,6 @@ Dla każdego prompta poniżej podano, gdzie się wykonuje i co go uruchamia. Spr
 | Generowanie PR | Formularz tworzenia pull requesta w zakładce PR widoku git | Generujesz tytuł i treść PR. Wstawiane są gałęzie base i head, commity i zmienione pliki między nimi, twój dodatkowy kontekst oraz szablon PR repozytorium, jeśli istnieje. |
 | Rozwiązywanie konfliktu merge/rebase | Okno konfliktów w widoku git, gdy merge lub rebase zatrzyma się na konfliktach | Wybierasz "Resolve in current session" albo "Resolve in new session". Agent czyta pliki z konfliktem, proponuje strategię dla każdego pliku i czeka na twoje potwierdzenie przed edycją, stage'owaniem lub kontynuowaniem operacji. |
 | Rozwiązywanie konfliktu cherry-pick | Sekcja "Re-integrate commits" sesji w worktree | Przenoszenie commitów sesji na gałąź docelową trafia na konflikt i przekazujesz go agentowi. Agent rozwiązuje konflikty w tymczasowym worktree, robi stage plików i kontynuuje cherry-pick. |
-
-### GitHub
-
-| Prompt | Gdzie się wykonuje | Kiedy się uruchamia |
-| --- | --- | --- |
-| Review PR | Selektor "Link GitHub PR" w menu załączników kompozytora oraz okno nowego worktree | Dwa wyzwalacze. Przypięcie PR jako kontekstu przygotowuje instrukcje, które wychodzą z twoją następną wiadomością. Utworzenie sesji worktree z PR używa prompta jako pierwszej wiadomości tej sesji, z pełnym kontekstem PR w załączeniu. |
-| Review issue | Okno nowego worktree, gdy worktree startuje z issue | Pierwsza wiadomość nowej sesji przegląda issue, z jej treścią i komentarzami jako kontekstem. |
-| Review nieudanych checków PR / komentarzy PR / pojedynczego komentarza PR | — | Dziś żaden przepływ ich nie wysyła. Widok PR uruchamiał je kiedyś akcjami review jednym kliknięciem; teraz nieudane checki i komentarze są przypinane jako szkice kontekstu czatu. Zostają edytowalne, aby istniejące nadpisania dalej działały. |
 
 ### Planning
 

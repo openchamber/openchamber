@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button';
 import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   formatShortcutForDisplay,
   getCustomizableShortcutActions,
@@ -28,10 +27,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
   const [editingAction, setEditingAction] = React.useState<CustomizableShortcutAction | null>(null);
 
-  const actions = React.useMemo(() => {
-    const all = getCustomizableShortcutActions();
-    return isVSCodeRuntime() ? all.filter((action) => action.id !== 'toggle_prompt_navigator') : all;
-  }, []);
+  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
   const persist = (nextOverrides: Record<string, ShortcutCombo>) => {
     void updateDesktopSettings({ shortcutOverrides: nextOverrides });
   };

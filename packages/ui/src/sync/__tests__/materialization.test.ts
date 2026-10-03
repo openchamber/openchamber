@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, ToolPart } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, PartType, ToolPart } from "@/lib/opencode/model"
 import {
   getSessionMaterializationRequestKey,
   getSessionMaterializationStatus,
@@ -9,11 +9,11 @@ import {
 } from "../materialization"
 
 function message(id: string, sessionID = "ses_1"): Message {
-  return { id, sessionID, role: "assistant", time: { created: 1 } } as Message
+  return { id, sessionID, role: "assistant", time: { created: 1 }, agent: "agent", providerID: "provider", modelID: "model" }
 }
 
 function userMessage(id: string, sessionID = "ses_1"): Message {
-  return { id, sessionID, role: "user", time: { created: 1 } } as Message
+  return { id, sessionID, role: "user", time: { created: 1 } }
 }
 
 function completedAssistantMessage(id: string, sessionID = "ses_1"): Message {
@@ -22,19 +22,22 @@ function completedAssistantMessage(id: string, sessionID = "ses_1"): Message {
     sessionID,
     role: "assistant",
     time: { created: 1, completed: 4000 },
-    parentID: "msg_parent",
     modelID: "model",
     providerID: "provider",
-    mode: "mode",
     agent: "agent",
-    path: { cwd: "/repo", root: "/repo" },
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   }
 }
 
-function part(id: string, messageID: string, type = "text", text = id): Part {
-  return { id, messageID, sessionID: "ses_1", type, text } as Part
+function part(id: string, messageID: string, type: PartType = "text", text = id): Part {
+  if (type === "reasoning") return { id, messageID, sessionID: "ses_1", type, text, time: { start: 1 } }
+  if (type === "file") return { id, messageID, sessionID: "ses_1", type, mime: "text/plain", url: text }
+  if (type === "agent") return { id, messageID, sessionID: "ses_1", type, name: text }
+  if (type === "tool") {
+    return { id, messageID, sessionID: "ses_1", type, callID: `call-${id}`, tool: text, state: { status: "pending", input: {}, raw: "" } }
+  }
+  return { id, messageID, sessionID: "ses_1", type: "text", text }
 }
 
 describe("getSessionMaterializationRequestKey", () => {
@@ -83,7 +86,6 @@ describe("materializeSessionSnapshots", () => {
         status: "completed",
         input: { command: "ls" },
         output: "done",
-        title: "bash",
         metadata: {},
         time: { start: 1000, end: 2000 },
       },
@@ -158,8 +160,8 @@ describe("materializeSessionSnapshots", () => {
     const result = materializeSessionSnapshots(
       { message: {}, part: {} },
       "ses_1",
-      [{ info: message("msg_1"), parts: [part("prt_patch", "msg_1", "patch"), part("prt_text", "msg_1")] }],
-      { skipPartTypes: new Set(["patch"]) },
+      [{ info: message("msg_1"), parts: [part("prt_agent", "msg_1", "agent"), part("prt_text", "msg_1")] }],
+      { skipPartTypes: new Set(["agent"]) },
     )
 
     expect(result.part.msg_1.map((item) => item.id)).toEqual(["prt_text"])
@@ -205,7 +207,7 @@ describe("materializeSessionSnapshots", () => {
     const abortedMessage: Message = {
       ...unfinishedMessage,
       time: { created: 1, completed: 5000 },
-      error: { name: "MessageAbortedError", data: { message: "aborted" } },
+      error: { type: "aborted", message: "aborted" },
     }
     const staleMessage = message("msg_1")
     const state = {
@@ -230,7 +232,7 @@ describe("materializeSessionSnapshots", () => {
     const abortedMessage: Message = {
       ...unfinishedMessage,
       time: { created: 1, completed: 5000 },
-      error: { name: "MessageAbortedError", data: { message: "aborted" } },
+      error: { type: "aborted", message: "aborted" },
     }
     const completedMessage: Message = {
       ...unfinishedMessage,
@@ -334,6 +336,56 @@ describe("materializeSessionSnapshots", () => {
     expect(result.part.msg_1[0]).toBe(interruptedTool)
     expect(result.part.msg_1[0]).not.toBe(staleRunningTool)
     expect((result.part.msg_1[0] as { state: { status: string } }).state.status).toBe("error")
+  })
+
+  test("keeps a live running subagent call when a stale pending snapshot arrives", () => {
+    const runningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call-1",
+      tool: "subagent",
+      state: { status: "running", input: {}, metadata: { sessionID: "ses_child" }, time: { start: 1000 } },
+    } satisfies ToolPart
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [runningTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [{ ...runningTool, state: { status: "pending", input: {}, raw: "" } }] }],
+    )
+
+    expect(result.part.msg_1[0]).toBe(runningTool)
+  })
+
+  test("keeps live progress metadata when a stale running snapshot lacks it", () => {
+    const runningTool = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      callID: "call-1",
+      tool: "subagent",
+      state: { status: "running", input: {}, metadata: { sessionID: "ses_child" }, time: { start: 1000 } },
+    } satisfies ToolPart
+    const state = {
+      message: { ses_1: [message("msg_1")] },
+      part: { msg_1: [runningTool] },
+    }
+
+    const result = materializeSessionSnapshots(
+      state,
+      "ses_1",
+      [{ info: message("msg_1"), parts: [{ ...runningTool, state: { status: "running", input: {}, time: { start: 1000 } } }] }],
+    )
+
+    const merged = result.part.msg_1[0]
+    if (merged?.type !== "tool" || merged.state.status !== "running") throw new Error("Expected running tool part")
+    expect(merged.state.metadata).toEqual({ sessionID: "ses_child" })
   })
 
   test("does not regress a completed tool when a stale running snapshot arrives", () => {

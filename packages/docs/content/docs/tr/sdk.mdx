@@ -89,7 +89,7 @@ Yerel bir `.zip` dosyası ya da bir git deposuna veya zip dosyasına giden https
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` pencerede size ait ayrı bir sayfa açar; böylece seçicinin şerit paneliyle kod paylaşması gerekmez
 - atlarsanız eklenti o menüde görünmez
 
-`ctx.surface`, `panel`, `dialog` veya `page` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
+`ctx.surface`, `panel`, `dialog`, `page` veya `status` olur. İliştirilmiş bir öğeye tıklanınca verileri `ctx.item` içinde gelir; diğer durumlarda değer `null` olur.
 
 `contributes.page: true`, paneli oturum listesinin üstündeki Uzantı sayfaları menüsünden tam ekran açılabilir yapar. `{ "entry": "panel/page.html", "title": "Board" }` ayrı HTML ve isteğe bağlı başlık kullanır. `panel.entry` zorunludur; yalıtım ve izinler aynıdır. Sayfayı yalnızca kullanıcı açar. Yenileme, duraklatma, kaldırma veya sunucu değiştirme sayfayı kapatır.
 
@@ -97,7 +97,7 @@ Panolar `host.storage` ile proje, worktree ve oturum listelerini ve canlı durum
 
 `contributes.integration` isteğe bağlıdır. Ayarlar → Entegrasyonlar sayfasına kullanıcının hesap bağladığı bir kart ekler. Bkz. [Hesaplar ve ağ](#hesaplar-ve-ağ).
 
-`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın.
+`contributes.service` isteğe bağlıdır. OpenChamber'ın eklentinin yanında başlattığı yerel bir süreç tanımlar; bir web sayfasının ulaşamadığı şeyler için, örneğin bir Docker soketi. Bu süreç kullanıcının tam erişimiyle ve sandbox olmadan çalışır, bu yüzden onay iletişim kutusu bunu uyarır; sayfa işi yapamadığında bir tane tanımlayın. Paket dosyası `GUEST_SERVICES.md` dosyasına bakın. `provides: ["browser"]` içeren bir hizmet ajanın tarayıcısının yerine de geçebilir: `browser.*` eylemlerini sunucuda yanıtlar, böylece ajanlar açık bir masaüstü uygulaması olmadan gezinir; kullanıcı bunu Ayarlar → OpenChamber Araçları'ndan seçer. Böyle bir hizmetin panele ihtiyacı yoktur.
 
 ## Yetenekler
 
@@ -110,13 +110,13 @@ Panel çizmek ve geçerli oturumu okumak izin gerektirmez. Kullanıcı adına bi
 | `files` | açık projedeki dosyaları okuyup yazmak (göreli yol ile `readFile`, `writeFile`, `listDir`, `stat`) |
 | `model` | kullanıcının Small Model'iyle tek seferlik metin üretimi (`generate`), herhangi bir oturumun dışında |
 
-Dört tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
+Beş tanesi sizin için otomatik eklenir: bir `integration` tanımladığınızda `network`, bir `service` tanımladığınızda `service`, `filesystem` desenleri tanımladığınızda `filesystem`, `origins` tanımladığınızda `origins` ve bir oturum eylemi mesajları istediğinde `conversation` (bkz. [Eylemler, komutlar ve rozet](#eylemler-komutlar-ve-rozet)).
 
 Kullanıcı tam listeyi bir kez, eklentiyi kurarken görür ve ya onaylar ya da eklentiyi kaldırır. Yeni bir sürüm daha fazlasını isterse pencere yeniden görünür. Kullanıcının onaylamadığı bir yeteneği gerektiren çağrı `NOT_GRANTED` ile başarısız olur.
 
 ## Metin üretme
 
-`model` yeteneğiyle `host.generate`, kullanıcının Small Model'inden tek seferlik bir yanıt ister: bir özet, bir başlık, bir taslak. Hiçbir şey bir oturuma girmez, geçmiş tutulmaz ve eklenti asla bir sağlayıcı seçmez. OpenChamber, kendi arka plan işleri için kullandığı aynı modeli kullanır; bu model Ayarlar → Oturumlar → Small Model üzerinden seçilir veya kullanıcının oturum açtığı sağlayıcılardan otomatik olarak seçilir.
+`model` yeteneğiyle `host.generate`, kullanıcının Small Model'inden tek seferlik bir yanıt ister: bir özet, bir başlık, bir taslak. Hiçbir şey bir oturuma girmez, geçmiş tutulmaz ve eklenti asla bir sağlayıcı seçmez. OpenChamber, kendi arka plan işleri için kullandığı aynı modeli kullanır; bu model Ayarlar → Oturumlar → Small Model üzerinden seçilen model, kullanıcının çalıştığı sağlayıcının küçük modeli ya da kullanıcının OpenCode yapılandırmasındaki varsayılan modeldir.
 
 ```ts
 const { text } = await host.generate({
@@ -130,7 +130,19 @@ Hiçbir model kullanılamadığında çağrı `NO_MODEL` ile başarısız olur; 
 
 ## Hesaplar ve ağ
 
-Sayfanız bir sandbox içinde çalışır ve internete doğrudan erişemez. Bir `integration` tanımlayın; OpenChamber çağrıları `host.request` üzerinden, kullanıcının token'ı ekli olarak sizin yerinize yapar. Token sayfanıza asla ulaşmaz.
+Sayfanız bir sandbox içinde çalışır ve ağa kendi başına erişemez: betikler, stiller, görseller, yazı tipleri ve medya yalnızca paketinizden yüklenir, `fetch` de yalnızca paketinizdeki dosyalara ulaşır. Yazı tiplerini ve görselleri bir CDN'den yüklemek yerine paketin içinde gönderin.
+
+Dışarıdaki bir hizmetle konuşmak için bir `integration` tanımlayın; OpenChamber çağrıları `host.request` üzerinden, kullanıcının token'ı ekli olarak sizin yerinize yapar. Token sayfanıza asla ulaşmaz.
+
+Sayfanızın doğrudan ihtiyaç duyduğu diğer her şey için, örneğin bir CDN'den yazı tipleri veya görseller ya da herkese açık bir API için, en fazla 8 https kaynağı listeleyin:
+
+```json
+"origins": ["https://fonts.example.com"]
+```
+
+Kullanıcı bunları onay penceresinde eklentinizin veri gönderip veri alabileceği adresler olarak görür ve bir güncelleme yenisini eklerse yeniden onaylar. Onaylanan kaynaklar `fetch`, görseller, yazı tipleri, stiller ve medya için açıktır ama betikler için asla: kod paketinizle birlikte gelmelidir. Sayfanın kaynağı `null` olduğundan, bir `fetch` yanıtını okuyabilmeniz için sunucunun bu kaynağa CORS izni vermesi gerekir.
+
+[Kurumsal modda](/security/) `origins`, `integration` ya da `service` içeren bir eklenti yalnızca yöneticinin listeye eklediği bir Git deposundan kurulur. Eklentiniz bunlar olmadan çalışabiliyorsa, bu ekipler için kurulabilir kalır. Böyle bir makinede eklenti geliştirmek için yöneticiden `allowLocalExtensions` isteyin; bununla eklentiyi kendi klasöründen kurabilirsiniz.
 
 - `token`: kullanıcı Ayarlar → Entegrasyonlar kartına bir API token'ı yapıştırır. `apiOrigin`, `request` çağrısının erişebileceği tek kaynaktır. `account` isteğe bağlıdır: bir GET yolu ve bir alan adı; kart böylece kimin bağlı olduğunu gösterebilir. `scheme`, token'ın nasıl gönderileceğini belirler; aşağıdaki tabloya bakın. Hangi başlığı beklediğini sağlayıcının API belgelerinden kontrol edin.
 - `oauth`: kullanıcı bir client id yapıştırır, yetkilendirme akışını OpenChamber yürütür. `authorizeUrl`, `tokenUrl` ve `apiOrigin` gerekir.
@@ -166,6 +178,78 @@ const { entries } = await host.listDir(".");
 ```
 
 Yazmalar atomiktir: OpenChamber geçici bir dosya yazıp yeniden adlandırır, böylece okuyan taraf hiçbir zaman yarım yazılmış bir dosya görmez. Dosyalar UTF-8 metin olarak, en fazla 2 MB'a kadar okunur ve yazılır.
+
+## Work Status'ta bir bölüm
+
+`contributes.statusSection`, sohbetin yanındaki Work Status paneline kendi bölümünüzü ekler. Kullanıcılar onu yerleşik bölümler gibi o panelin bölüm listesinde açıp kapatır ve taşır.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true`, `panel.entry` sayfasını kullanır.
+- `entry`, klasörünüzdeki ayrı bir HTML sayfasıdır. Bununla `panel.entry` gerekmez, yani eklenti şeritte simgesi olmadan yalnızca bu bölümden oluşabilir.
+- `title`, bölüm başlığındaki panel adının yerini alır, en fazla 60 karakter.
+- `height`, piksel cinsinden başlangıç yüksekliğidir, 24 ile 320 arası (varsayılan 120). İçeriğinizin boyutu değişince [`host.setHeight()`](/sdk/host/) çağırın.
+
+Sayfanız `ctx.surface` değerini `status` olarak görür. OpenChamber sayfayı yalnızca Work Status paneli görünürken ve bölümünüz açıkken yükler, kullanıcı bölümü kapatınca kaldırır. Bu yüzden orada yeniden kuramayacağınız bir şey tutmayın. Yalnızca bölümden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `git-graph-status` örneği eksiksiz bir bölümdür.
+
+## Dosya türünüz için bir düzenleyici
+
+`contributes.fileEditors`, dosyaları metin düzenleyici yerine sayfanızda açar. Kullanıcı Files içinde eşleşen bir dosyayı açtığında OpenChamber orada düzenleyicinizi gösterir; yerleşik görüntüleyicilerdeki kaynak geçişi, tam ekran düğmesi ve kaydet düğmesi de aynen bulunur.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` yalnızca dosya adlarını karşılaştırır ve büyük/küçük harfi yok sayar. `*` herhangi bir karakter dizisiyle, `?` tek bir karakterle eşleşir. Bir desen `/` içeremez ve yalnızca joker karakterlerden oluşamaz.
+- `entry`, klasörünüzdeki bir HTML sayfasıdır. `panel.entry` gerekmez, yani eklenti şeritte simgesi olmadan yalnızca düzenleyiciden oluşabilir.
+- `content`, `"text"` (varsayılan) ya da `"binary"` olur, aşağıya bakın.
+- Eklenti başına en fazla 8 düzenleyici, her birinde en fazla 16 desen.
+
+Dosyayı OpenChamber yönetir. Sayfanız dosyayı hiçbir zaman okumaz veya yazmaz ve bunun için bir izne ihtiyaç duymaz. OpenChamber size metni verir, kaydederken düzenlenmiş metni ister ve Cmd/Ctrl+S, otomatik kaydetme, kaydedilmemiş değişiklik uyarısı, satır sonları ve diskte yapılan değişikliklerle kendisi ilgilenir:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // bir metin düzenleyici her zaman metin alır
+  load(file.content); // file.path, file.name, file.readOnly da var
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Her düzenlemeden sonra bunu çağırın. `edited`, kullanıcı durana kadar otomatik kaydetmeyi bekletir.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// OpenChamber yazarken yapılan düzenlemeler dosyayı kaydedilmemiş bırakır.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version`, belge değiştiğinde değişen herhangi bir kısa dizedir, örneğin bir hash. Bir dosya düzenleyicinizin açabileceği bir şey değilse `host.reportFileUnsupported()` çağırın; OpenChamber dosyanın kaynağını bir uyarıyla gösterir. 20 MB'tan büyük dosyalar kaynak görünümünde kalır.
+
+### İkili dosyalar
+
+Elektronik tablolar, belgeler veya görseller gibi metin olmayan dosyaları açmak için `"content": "binary"` ayarlayın. Düzenleyiciniz dosyanın baytlarını alır ve bayt geri verir; geri kalan her şey aynı şekilde çalışır.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // diskteki haliyle birebir bir Uint8Array
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+İkili bir düzenleyici, desenlerinin eşleştiği her dosyayı üstlenebilir; görseller ve PDF'ler gibi OpenChamber'ın kendisinin önizlediği dosyalar da buna dahildir. Kaynak görünümü yoktur ve kullanıcı onu kaydedilmemiş değişikliklerle tam ekrana aldığında veya tam ekrandan çıkardığında OpenChamber önce değişiklikleri kaydeder. Biçimi okumak ve yazmak düzenleyicinizin işidir: OpenChamber döndürdüğünüz baytları olduğu gibi geri yazar.
+
+Sayfanız `ctx.surface` değerini `file` olarak görür. Dosya diskte değiştiğinde, kullanıcı değişiklikleri attığında ya da düzenleyici tam ekrana geçtiğinde veya tam ekrandan çıktığında OpenChamber sayfayı yeniden yükler ve dosyayı tekrar verir. Deseni eşleşen ilk etkin eklenti kazanır ve OpenChamber'ın kendi önizlemelerinden önce gelir. Yalnızca düzenleyiciden oluşan bir eklenti izinleri, bir servisi, bir entegrasyonu ve dosyaları kullanabilir, ama `page`, `attach`, `actions` veya `commands` kullanamaz. Yalnızca web ve masaüstü. `checklist-editor` örneği eksiksiz bir düzenleyicidir.
 
 ## Eylemler, komutlar ve rozet
 
@@ -219,7 +303,7 @@ OpenCode eklentiniz veya MCP sunucunuz bir araç eklediğinde sohbet, çağrıla
 
 `match`, OpenCode'un bildirdiği haliyle aracın adıdır; sondaki `*` bir öneki eşleştirir. `icon`, `panel.icon` gibi bir Remixicon adı ya da paketinizdeki bir `.svg` dosyasıdır. `title` ve `subtitle`, çağrının `input`, `output` ve `metadata` değerleri üzerinde çalışan şablonlardır. `output`, gövdenin nasıl çizileceğini seçer: `text`, `json` (ağaç), `markdown`, `language` ile `code`, `columns` ile `table` (satırlar çıktı dizisinden veya `output.items` içinden gelir) ya da varsayılan için `auto`. Tam bir `match` joker karakteri yener; eşitlikte ilk yüklenen eklenti kazanır. İzin gerekmez: bu yalnızca sohbette zaten bulunan verilerin nasıl çizildiğini değiştirir.
 
-Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz.
+Yalnızca araçları biçimlendiren bir eklentinin sayfaya hiç ihtiyacı yoktur: `panel.entry` öğesini atlayın, şeritte simgesi olmaz, sadece Ayarlar → Uzantılar içinde bir kart görünür. Sayfası olmadan yalnızca `tools` tanımlayabilir, başka bir şey tanımlamaz. Diğer istisna, kendi `entry` sayfası olan bir Work Status bölümü veya dosya düzenleyicisidir, yukarıya bakın.
 
 ## Paneldeki ilk satırlar
 

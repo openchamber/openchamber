@@ -4,43 +4,80 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# A new push to the same PR makes the older run pointless.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Four independent jobs on their own Blacksmith runners (same image as
+# ubuntu-24.04, faster CPUs, colocated cache; the Blacksmith GitHub App is
+# installed on the openchamber org). None of them reads another's output: the
+# tests and type-check need only what `bun install` prepares (postinstall
+# builds the SDK and the built-in extensions), so the wall time is the slowest
+# job, not the sum.
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-
+  type-check:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      - name: Build
-        run: bun run build
-
       - name: Type check
         run: bun run type-check
 
+  lint:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
       - name: Lint
         run: bun run lint
-
       - name: Changelog outputs match their sources
         run: bun run changelog:check
 
+  tests:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
       - name: Tests
         run: bun run test
-
       - name: Electron Linux packaging unit tests
         working-directory: packages/electron
         run: |
           bun run test:architecture
           bun run test:updater
-          bun run type-check
+
+  # Catches what type-check cannot: bundling, Vite-only syntax, the web
+  # build's memory ceiling. The packages whose `build` is only `tsc --noEmit`
+  # (ui) or a no-op (electron) are covered by the type-check job.
+  build:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Build web
+        run: bun run --cwd packages/web build
+      - name: Build VS Code extension
+        run: bun run --cwd packages/vscode build
+      - name: Prepare mobile web assets
+        run: bun run --cwd packages/mobile build:assets

@@ -1,5 +1,16 @@
 import { sessionCookieNameForRequest } from '../ui-auth/session-cookie.js';
 
+/**
+ * A sandboxed page (an HTML file preview, an extension frame) sends
+ * `Origin: null`. No OpenChamber client connects that way, so every socket
+ * refuses it, also when the UI has no password and origins go unchecked.
+ */
+export const isOpaqueOriginRequest = (req) => {
+  const header = req?.headers?.origin;
+  const value = Array.isArray(header) ? header[0] : header;
+  return String(value ?? '').trim() === 'null';
+};
+
 export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never

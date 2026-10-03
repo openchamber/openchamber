@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test';
 
 import { pluginPanelI18n } from './plugin-panel.i18n';
 
-const locales = ['en', 'de', 'fr', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
+const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 'zh-CN', 'zh-TW', 'tr'] as const;
 
 const requiredKeys = [
   'chat.chatInput.toast.guestHasNoPanel',
   'contextRail.surface.plugin',
   'contextRail.surface.plugin.description',
   'contextPanel.plugin.loadFailed',
+  'chat.workStatus.sections.extensionBadge',
   'contextPanel.plugin.actionFailed',
   'contextPanel.plugin.toast.copy',
   'contextPanel.plugin.toast.copied',
@@ -32,8 +33,6 @@ const requiredKeys = [
   'chat.chatInput.linked.guest.pr.number',
   'chat.workStatus.linkedIssues.openGuest',
   'session.newWorktree.actions.startFromGuest',
-  'session.newWorktree.fromGuest',
-  'session.newWorktree.error.sendGuestContextFailed',
   'contextPanel.plugin.actionDialog.description',
   'contextRail.surface.plugin.badgeAriaSingle',
   'contextRail.surface.plugin.badgeAriaPlural',
@@ -52,6 +51,11 @@ const sameInEveryLocale = new Set<string>([
   // "item" is the same word in Portuguese, so the singular forms match English there.
   'contextRail.surface.plugin.badgeAriaSingle',
   'contextRail.surface.plugin.badgeTooltipSingle',
+  // "item"/"items" are the same words in Dutch, so both forms match English there.
+  'contextRail.surface.plugin.badgeAriaPlural',
+  'contextRail.surface.plugin.badgeTooltipPlural',
+  // French spells "Extension" the same way.
+  'chat.workStatus.sections.extensionBadge',
 ]);
 
 describe('plugin panel translations', () => {

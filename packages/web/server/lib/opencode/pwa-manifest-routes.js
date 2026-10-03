@@ -101,7 +101,7 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         return `?directory=${encodeURIComponent(preparedDirectory)}`;
       })();
 
-      const response = await fetch(buildOpenCodeUrl(`/session${query}`, ''), {
+      const response = await fetch(buildOpenCodeUrl(`/api/session${query}`, ''), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
@@ -114,7 +114,9 @@ export const registerPwaManifestRoute = (app, dependencies) => {
         return [];
       }
 
-      const payload = await response.json().catch(() => null);
+      // v2 pages the session list as `{ data, cursor }`.
+      const body = await response.json().catch(() => null);
+      const payload = Array.isArray(body) ? body : body?.data;
       return Array.isArray(payload) ? payload : [];
     };
 

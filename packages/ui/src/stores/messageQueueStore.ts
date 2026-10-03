@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { z } from 'zod';
-import type { Event } from '@opencode-ai/sdk/v2';
+import type { SyncEvent } from '@/lib/opencode/events';
 import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
@@ -74,7 +74,11 @@ export type QueuedContextPart =
         kind: 'context';
         text: string;
         metadata: ContextPartMetadata;
-        /** Delivered as its own synthetic part right before this one (a linked PR's reading instructions). */
+        /**
+         * Delivered as its own synthetic part right before this one. Nothing writes it any
+         * more (attached PRs no longer carry review instructions); messages queued before
+         * that still do, and are delivered as they were captured.
+         */
         instructions?: string;
     }
     | {
@@ -893,7 +897,7 @@ export const messageQueueUpdatedEventSchema = z.object({
 export type MessageQueueUpdatedEvent = z.infer<typeof messageQueueUpdatedEventSchema>;
 
 /** `openchamber:message-queue.updated` broadcast → projection. */
-export const applyMessageQueueUpdatedEvent = (payload: Event | MessageQueueUpdatedEvent, expectedRuntimeKey: string): void => {
+export const applyMessageQueueUpdatedEvent = (payload: SyncEvent | MessageQueueUpdatedEvent, expectedRuntimeKey: string): void => {
     if (!isServerOwnedMessageQueue()) return;
     const parsed = messageQueueUpdatedEventSchema.safeParse(payload);
     if (!parsed.success) return;

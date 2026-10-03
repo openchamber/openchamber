@@ -4,7 +4,7 @@ const originalFetch = globalThis.fetch;
 
 import type { PluginEntry, PluginFile, RegistryResult } from './usePluginsStore';
 
-const activeProjectPath = '/workspace/project';
+let activeProjectPath = '/workspace/project';
 
 const refreshAfterOpenCodeRestartMock = mock(async () => undefined);
 const startConfigUpdateMock = mock(() => undefined);
@@ -19,6 +19,8 @@ mock.module('@/stores/useProjectsStore', () => ({
 }));
 
 mock.module('@/lib/opencode/client', () => ({
+  OpencodeApiError: Error,
+  normalizeOpencodeError: (operation: string, error: unknown) => new Error(`${operation}: ${String(error)}`),
   opencodeClient: {
     getDirectory: () => '/fallback/project',
   },
@@ -97,10 +99,11 @@ type FetchCall = {
 const fetchCalls: FetchCall[] = [];
 let queuedResponses: Response[] = [];
 
-const fetchMock = mock(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+const handleFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
   fetchCalls.push({ input, init });
   return queuedResponses.shift() ?? jsonResponse(pluginListPayload);
-});
+};
+const fetchMock = mock(handleFetch);
 
 const queueFetchResponses = (responses: Response[]) => {
   queuedResponses = [...responses];
@@ -109,6 +112,8 @@ const queueFetchResponses = (responses: Response[]) => {
 const resetStore = () => {
   usePluginsStore.setState({
     entries: [],
+    loadedDirectory: undefined,
+    loadedRuntimeKey: undefined,
     files: [],
     selectedId: null,
     isLoading: false,
@@ -132,6 +137,7 @@ const flushPluginFollowUps = async (): Promise<void> => {
 
 describe('usePluginsStore', () => {
   beforeEach(() => {
+    activeProjectPath = '/workspace/project';
     resetStore();
     fetchCalls.length = 0;
     queuedResponses = [];
@@ -154,6 +160,74 @@ describe('usePluginsStore', () => {
     expect(usePluginsStore.getState().entries).toEqual([entry]);
     expect(usePluginsStore.getState().files).toEqual([file]);
     expect(usePluginsStore.getState().isLoading).toBe(false);
+  });
+
+  for (const status of [200, 500]) {
+    test(`stale project response (${status}) cannot replace current catalog or loading state`, async () => {
+      const pending = new Map<string, (response: Response) => void>();
+      fetchMock.mockImplementation((input) => new Promise<Response>((resolve) => {
+        pending.set(String(input), resolve);
+      }));
+      const finish = (directory: string, response: Response) => {
+        const resolve = pending.get(`/api/config/plugins?directory=${encodeURIComponent(directory)}`);
+        if (!resolve) throw new Error('Expected pending plugin request');
+        resolve(response);
+      };
+      try {
+        activeProjectPath = '/project-a';
+        const first = usePluginsStore.getState().loadPlugins({ force: true });
+        activeProjectPath = '/project-b';
+        const second = usePluginsStore.getState().loadPlugins({ force: true });
+        finish('/project-a', jsonResponse(pluginListPayload, { status }));
+        expect(await first).toBe(false);
+        expect(usePluginsStore.getState().isLoading).toBe(true);
+        finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'plugin-b' }], files: [] }));
+        expect(await second).toBe(true);
+        expect(usePluginsStore.getState().loadedDirectory).toBe('/project-b');
+        expect(usePluginsStore.getState().entries[0]?.spec).toBe('plugin-b');
+        expect(usePluginsStore.getState().isLoading).toBe(false);
+
+        activeProjectPath = '/project-a';
+        const late = usePluginsStore.getState().loadPlugins({ force: true });
+        activeProjectPath = '/project-b';
+        const current = usePluginsStore.getState().loadPlugins({ force: true });
+        finish('/project-b', jsonResponse({ entries: [{ ...entry, spec: 'current-b' }], files: [] }));
+        expect(await current).toBe(true);
+        finish('/project-a', jsonResponse(pluginListPayload, { status }));
+        expect(await late).toBe(false);
+        expect(usePluginsStore.getState().loadedDirectory).toBe('/project-b');
+        expect(usePluginsStore.getState().entries[0]?.spec).toBe('current-b');
+        expect(usePluginsStore.getState().isLoading).toBe(false);
+      } finally {
+        fetchMock.mockImplementation(handleFetch);
+      }
+    });
+
+  }
+
+  test('runtime roundtrip with the same directory reloads the owning catalog within TTL', async () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    const runtimeWindow = { __OPENCHAMBER_API_BASE_URL__: 'https://runtime-a.test' };
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: runtimeWindow });
+    try {
+      queueFetchResponses([jsonResponse(pluginListPayload)]);
+      await usePluginsStore.getState().loadPlugins({ force: true });
+      expect(usePluginsStore.getState().loadedRuntimeKey).toBe('url:https://runtime-a.test');
+      runtimeWindow.__OPENCHAMBER_API_BASE_URL__ = 'https://runtime-b.test';
+      queueFetchResponses([jsonResponse({ entries: [{ ...entry, spec: 'from-b' }], files: [] })]);
+      await usePluginsStore.getState().loadPlugins({ force: true });
+      expect(usePluginsStore.getState().loadedRuntimeKey).toBe('url:https://runtime-b.test');
+      runtimeWindow.__OPENCHAMBER_API_BASE_URL__ = 'https://runtime-a.test';
+      queueFetchResponses([jsonResponse(pluginListPayload), jsonResponse({ results: [] })]);
+      await usePluginsStore.getState().loadPlugins();
+      await flushPluginFollowUps();
+      expect(usePluginsStore.getState().loadedRuntimeKey).toBe('url:https://runtime-a.test');
+      expect(usePluginsStore.getState().entries).toEqual([entry]);
+      expect(fetchCalls).toHaveLength(4);
+    } finally {
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
   });
 
   test('second loadPlugins within TTL reuses cached store data', async () => {

@@ -47,6 +47,47 @@ describe('server-owned chat directories', () => {
     expect(deleteRequests()).toHaveLength(2);
   });
 
+  test('does not adopt or delete a distinct case-variant project beside a server-owned root', async () => {
+    await ensureChatsRootDirectory();
+    expect(isChatDirectoryPath('/srv/Chats/project')).toBe(false);
+    expect(getChatsRootFromDirectory('/srv/Chats/project')).toBeNull();
+    await deleteChatDirectory('/srv/Chats/project');
+    expect(deleteRequests()).toHaveLength(0);
+  });
+
+  test('recognizes server-confirmed aliases without changing folder scope identities', async () => {
+    home.mockResolvedValue({
+      home: '/Users/wayne', chatsRoot: '/srv/chat-alias',
+      canonicalChatsRoot: '/storage/Chats',
+      canonicalLegacyChatsRoot: '/Users/Wayne/.config/openchamber/chats',
+    });
+    await ensureChatsRootDirectory();
+    expect(getChatsRootFromDirectory('/storage/Chats/day/session-a')).toBe('/srv/chat-alias');
+    expect(getChatsRootFromDirectory('/Users/Wayne/.config/openchamber/chats/day/session-a')).toBe('/Users/wayne/.config/openchamber/chats');
+    expect(isChatDirectoryPath('/storage/chats/project')).toBe(false);
+    expect(isChatDirectoryPath('/storage/Chats-other/project')).toBe(false);
+    for (const root of ['/srv/chat-alias', '/storage/Chats', '/Users/wayne/.config/openchamber/chats', '/Users/Wayne/.config/openchamber/chats']) {
+      await deleteChatDirectory(root);
+    }
+    expect(deleteRequests()).toHaveLength(0);
+    await deleteChatDirectory('/storage/Chats/day/session-a');
+    expect(deleteRequests()).toHaveLength(1);
+  });
+
+  test('parses filesystem aliases from the home API and rejects relative aliases', async () => {
+    home.mockRestore();
+    request.mockResolvedValue(new Response(JSON.stringify({
+      home: '/Users/wayne', chatsRoot: '/Users/wayne/.config/openchamber/chats',
+      canonicalChatsRoot: '/Users/Wayne/.config/openchamber/chats',
+    })));
+    await ensureChatsRootDirectory();
+    expect(isChatDirectoryPath('/Users/Wayne/.config/openchamber/chats/session-a')).toBe(true);
+    nextRuntime();
+    request.mockResolvedValue(new Response(JSON.stringify({ home: '/home/user', canonicalChatsRoot: '../project' })));
+    await expect(deleteChatDirectory('/home/user/.config/openchamber/chats/session-a')).rejects.toThrow();
+    expect(deleteRequests()).toHaveLength(0);
+  });
+
   test('failed root lookup never creates or deletes, and the next attempt retries', async () => {
     home.mockRejectedValueOnce(new Error('offline'));
     await expect(deleteChatDirectory('/srv/chats/day/session-a')).rejects.toThrow('offline');

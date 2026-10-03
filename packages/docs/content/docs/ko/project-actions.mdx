@@ -23,6 +23,8 @@ description: 자주 실행하는 명령을 저장하고 클릭 한 번으로 실
 
 서버를 시작하는 액션에 **auto-open URL**을 켭니다. OpenChamber가 출력에서 로컬 주소를 감시하다가 열기를 제안합니다. [Preview & Dev Servers](/ko/preview/)를 참고하세요. 데스크톱에서는 SSH 포트 포워딩을 통해 라우팅할 수도 있습니다.
 
+서버 주소가 정해져 있다면 액션의 URL 필드에 입력하세요. `{worktree}`와 `{branch}`는 액션이 실행되는 체크아웃으로 바뀌므로 액션 하나를 모든 worktree에서 쓸 수 있습니다. [portless](https://github.com/vercel-labs/portless)를 쓰면 `https://{worktree}.myapp.localhost`가 `feature/auth` worktree에서는 `https://auth.myapp.localhost`를, 기본 체크아웃에서는 `https://myapp.localhost`를 엽니다. 필드가 아예 필요 없을 수도 있습니다. portless가 주소를 출력하면 OpenChamber는 그 뒤의 포트 대신 그 주소를 엽니다. 원격 인스턴스에 연결된 데스크톱에서는 터널을 통과하는 것이 루프백 포트뿐이라 대신 포트를 엽니다.
+
 ## 관련 항목
 
 - [저장소 설정](/repository-config/) — 작업과 설정 명령을 저장소에 두어 팀 전체가 사용

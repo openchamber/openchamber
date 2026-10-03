@@ -24,9 +24,11 @@ JSON bodies enabled in `opencode/core-routes.js`; stopped by
 
 ## Auto routing
 
-`resolvePromptBody` (the routing runtime) runs on the assembled body right
-before the prompt or command send, turning a queued `openchamber/auto` model
-into a real one. The queue captures the sentinel like any other send config.
+`resolveAutoSelection` (the routing runtime) runs right before the send when
+the queued send config names `openchamber/auto`, and answers with the real
+model and agent. OpenCode 2.x holds both on the session, so the queue applies
+them with the `POST /api/session/:id/model` and `/agent` calls it already
+makes. The queue captures the sentinel like any other send config.
 
 ## Item
 
@@ -100,27 +102,39 @@ persisted "sending" flag would strand a message forever.
    old behavior: a stop is not immediately followed by the next prompt) or
    while the head item is in retry backoff.
 4. Idleness is re-verified against OpenCode before sending, because
-   `prompt_async` into a running turn steers into it instead of starting the
-   next one: `GET /session/status` must not list the session as busy/retry,
-   and the trailing message must not be an unfinished assistant reply (the
-   status map only lists busy sessions, so a missed busy event leaves no
-   entry while a turn still streams). A failed fetch is unknown, never idle:
+   a prompt into a running turn steers into it instead of starting the
+   next one: `GET /api/session/active` must not list the session, and the
+   trailing message must not be an unfinished assistant reply (that route
+   lists only running sessions, so a missed busy event leaves no entry while
+   a turn still streams). An unfinished reply created before this
+   runtime started does not block: its run died with the previous server and
+   will never complete, so a restored queue would wait on it forever. A reply
+   with no `created` time still blocks. A failed fetch is unknown, never idle:
    the tick re-arms with backoff.
-5. The head is marked in flight (broadcast), then sent:
+   The turn must also be over for the session's subagents: a parent idles
+   while a background subagent works and runs again when OpenCode hands the
+   result back. While `../opencode/session-activity.js` finds a running child
+   the head waits (the rerun's idle event re-arms it, a 5 s recheck covers a
+   missed one); a failed check is unknown and backs off like the rest.
+5. The head is marked in flight (broadcast), then sent. The captured model and
+   agent are switched onto the session first (`POST /session/:id/model`,
+   `/agent`), because v2 holds both on the session rather than in the body; a
+   captured `openchamber/auto` is resolved into a real pair by the routing
+   runtime beforehand. Then the captured context goes ahead as synthetic
+   messages (`POST /session/:id/synthetic` with `resume: false`, an attached
+   item's metadata riding along), followed by pending project knowledge
+   (`sessionKnowledgeRuntime.resolvePendingForSession`, recorded as delivered
+   only after the send is accepted), and then the message itself:
    - text starting with `/` that names a command in OpenCode's `/command`
-     list (skills included) and carries no captured context goes to
-     `POST /session/:id/command` with the captured model, agent, variant, and
-     file parts. That route accepts file parts only, so a command queued
-     **with** context takes the prompt route instead, the same rule the
-     composer applies: the command's template is expanded with its arguments
-     (`$ARGUMENTS`, `$1..$N`, or appended), a skill keeps its `/name args` text
-     and gets an explicit "the user invoked this skill" synthetic part after
-     the context;
-   - otherwise `POST /session/:id/prompt_async` with the parts in the same
-     order a UI send uses: text, files, the captured context, the skill
-     invocation when there is one, pending project knowledge
-     (`sessionKnowledgeRuntime.resolvePendingForSession`, synthetic, recorded
-     as delivered only after the prompt is accepted), then the agent mention.
+     list (skills included) goes to `POST /session/:id/command` (body fields
+     `name` and `text` since OpenCode 2.0.8) with its file attachments. The
+     command route takes files only, which is why the context went ahead of
+     it; sending "/name args" as a prompt instead would skip the template
+     OpenCode expands only on that route. The command lookup runs before
+     anything is admitted, so a failed lookup fails the send without leaving
+     context behind for the retry to duplicate;
+   - otherwise `POST /session/:id/prompt` with the user's text, files and
+     agent mention.
    Success removes the item, persists, broadcasts, and marks the user
    message sent for notifications. Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.

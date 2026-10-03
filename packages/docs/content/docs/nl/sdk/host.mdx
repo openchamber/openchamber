@@ -1,0 +1,263 @@
+---
+title: Host-API
+description: Alle connectHost-methoden voor extensies, de gegevens die OpenChamber doorgeeft, limieten en foutcodes.
+---
+
+# Host-API
+
+Gebruik deze pagina voor de precieze `connectHost`-methoden, limieten en foutcodes. Begin voor de mapindeling, het manifest en installatie bij [Een extensie bouwen](/nl/sdk/).
+
+```ts
+import { connectHost, HostRequestError } from "@openchamber/sdk";
+
+const host = connectHost();
+```
+
+`connectHost` werpt `HOST_UNAVAILABLE` als er geen `window` is. Buiten OpenChamber geeft het een client terug waarvan elke aanroep met `HOST_UNAVAILABLE` wordt geweigerd. Roep `dispose()` aan wanneer u de pagina opruimt. Nog lopende aanroepen worden dan met dezelfde code afgewezen.
+
+## Wat OpenChamber doorgeeft
+
+`onReady` wordt aangeroepen met de eerste momentopname en telkens wanneer OpenChamber deze ververst.
+
+Het is geen eenmalige callback voor het opbouwen van de interface. Bouw uw UI en registreer abonnementen één keer. Gebruik latere momentopnamen om thema en context bij te werken zonder invoervelden of concepten te vervangen. Het voorbeeld bij [UI-kit](/nl/sdk/ui/) laat zien hoe u voorkomt dat de interface opnieuw wordt opgebouwd. Veldlisteners zoals `onConnection` geven hun huidige waarde meteen door en kunnen dezelfde waarde opnieuw ontvangen bij een verversing. Vergelijk de velden waarvan uw gegevens afhangen voordat u een nieuw verzoek start en negeer antwoorden van inmiddels achterhaalde verzoeken.
+
+| Veld | Betekenis |
+| --- | --- |
+| `theme.mode` | `light` of `dark` |
+| `theme.tokens` | appkleuren voor achtergronden, tekst, interactiestatussen, primary en success/warning/error/info, plus `font`, `mono` en `radius`; geef deze vóór het opbouwen van de UI aan `applyHostReady` door |
+| `locale` | taalcode van de app |
+| `directory` | huidige projectmap, of `null` |
+| `session` | `{ id, title, busy }` of `null`; zonder titel wordt de sessie-ID gebruikt. `busy` is de livestatus. `model` en `agent`, de OpenCode-agent, zijn aanwezig wanneer de sessie die heeft. |
+| `surface` | `panel` in de balk, `dialog` in het bijlagevenster, `page` schermvullend, `status` in Werkstatus, `file` als editor in Bestanden |
+| `item` | waarvoor de weergave werd geopend, of `null`: het aangeklikte gekoppelde item met dezelfde velden als bij `attach`, inclusief `data`, een bericht met `kind: "message"` of een sessie met `kind: "session"` uit een opgegeven actie. Zie [Acties](/nl/sdk/#acties-opdrachten-en-de-badge). |
+| `connection` | `{ connected, account }` voor uw integratie |
+| `settings` | waarden van de velden uit `integration.settings` |
+
+Toegangstokens verschijnen hier nooit, ook niet in een `request`-resultaat.
+
+`onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` en `onItem` geven bij een late aanmelding eerst de recentste waarde door en blijven daarna wijzigingen melden.
+
+`theme.tokens` bevat `primaryText`, `successText`, `warningText`, `errorText` en `infoText`. Deze verplichte velden bevatten door de host berekende tekstkleuren voor neutrale achtergronden en lichtgekleurde UI-kitonderdelen, niet voor volle kleurvlakken. `applyHostReady` past ze bij elke momentopname toe. Zie [UI-kit](/nl/sdk/ui/) voor de CSS-variabelen.
+
+## Methoden
+
+| Aanroep | Werking |
+| --- | --- |
+| `toast({ kind, message })` | toont een melding in de app; `kind` is `info`, `success` of `error` |
+| `openUrl(url)` | opent een URL in de browser van de gebruiker |
+| `openSurface(surfaceId)` | schakelt de app naar die weergave |
+| `writeClipboard(text)` | kopieert tekst, van 1 tot 32000 tekens |
+| `compose({ text, mode? })` | plaatst tekst in het chatveld zonder te versturen; `mode` is standaard `append`, of `replace`; 1 tot 16000 tekens na trimmen |
+| `attach({ ... })` | koppelt een item aan het chatveld, op dezelfde plek als GitHub- en Linear-items; maximaal één tegelijk |
+| `startSession({ ... })` | maakt een sessie met het item gekoppeld; geeft `{ sessionId, sent }` terug en vereist `sessions` |
+| `prompt({ text, send? })` | schrijft of verstuurt tekst in de huidige sessie; geeft `{ sent }` terug; versturen vereist `prompt` |
+| `sessionLink({ ... })` | koppelt een item aan de huidige sessie zonder een nieuwe te maken |
+| `close()` | sluit het bijlagevenster; doet niets in de balk |
+| `oauthStart()` | opent de autorisatiepagina van de provider, of van Linear bij `host: { provider: "linear" }` |
+| `oauthDisconnect()` | wist het opgeslagen token of de Linear-verbinding |
+| `request({ method, path, query?, body? })` | roept `apiOrigin` van uw integratie aan met het gebruikerstoken |
+| `serviceRequest({ method, path, query?, body? })` | roept de lokale service van de extensie aan; zie `GUEST_SERVICES.md` |
+| `serviceStatus()` | geeft `stopped`, `starting`, `ready` of `failed` |
+| `readFile(path)` | leest een tekstbestand en geeft `{ content }` terug |
+| `writeFile(path, content)` | schrijft een tekstbestand atomair, maakt bovenliggende mappen en geeft `{ written: true }` terug |
+| `listDir(path)` | geeft `{ entries: [{ name, kind }] }`, met `kind` als `file`, `directory` of `other` |
+| `stat(path)` | geeft `{ kind, size, mtime }`, met `kind` als `file`, `directory`, `other` of `missing` |
+| `generate({ prompt, system?, maxOutputTokens? })` | genereert eenmalig tekst met het Small Model; geeft `{ text }` terug en vereist `model` |
+| `onResolve(handler)` | registreert de afhandeling van slash-opdrachten; ontvangt `{ command, args }` en geeft een te koppelen item of `null` terug |
+| `setBadge(count)` | toont een getal van 0 tot 999 op het balkpictogram; `null` wist het |
+| `openCommit(sha)` | opent de diffweergave voor de commit in het huidige project; `sha` heeft 7 tot 64 hexadecimale tekens; OpenChamber leest de commit zelf |
+| `setHeight(px)` | stelt de hoogte van uw Werkstatus-onderdeel in, begrensd tot 24 tot 320 pixels; grotere inhoud scrolt binnen de pagina; elders genegeerd |
+| `onFileOpen(listener)` | voor editors: ontvangt `{ path, name, readOnly }` plus `encoding: "text"` met `content`, of `encoding: "binary"` met `bytes`; activeert ook opslaan via Cmd/Ctrl+S in de pagina |
+| `onFileSnapshot(handler)` | voor editors: geeft het volledige bewerkte bestand als `{ content, version }` of `{ bytes, version }` terug; aangeroepen bij opslaan en vóór wisselen naar bronweergave of volledig scherm |
+| `onFileSaved(listener)` | voor editors: de momentopname met die `version` staat op schijf; antwoord met `reportFileChange` |
+| `reportFileChange({ dirty, edited })` | voor editors: meldt of er niet-opgeslagen wijzigingen zijn en of het document zojuist veranderde |
+| `requestFileSave()` | voor editors: slaat direct op, net als Cmd/Ctrl+S |
+| `reportFileUnsupported()` | voor editors: geeft aan dat het bestand hier niet kan worden geopend; toon de bron |
+
+## attach, startSession en sessionLink
+
+Deze drie methoden accepteren dezelfde itemvelden:
+
+```ts
+await host.attach({
+  providerId: "acme-hello",
+  id: "TICKET-1",
+  title: "Login is broken",
+  url: "https://example.com/TICKET-1",
+});
+
+await host.attach({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  author: "ada",
+  branches: { head: "feature", base: "main" },
+  text: "Optional notes for the model",
+});
+
+await host.startSession({
+  providerId: "acme-hello",
+  id: "!12",
+  title: "Fix login",
+  url: "https://example.com/merge_requests/12",
+  kind: "pull",
+  worktree: true,
+  text: "Optional first message",
+});
+```
+
+`providerId` is uw paneel-ID. OpenChamber overschrijft deze hoe dan ook met uw ID. `id` is uw eigen item-ID. `kind` is standaard `issue`, of `pull`. `text` is optionele modelcontext van 1 tot 16000 tekens na trimmen. `data` is eigen optionele JSON, bijvoorbeeld status of reacties, maximaal 16000 tekens na serialisatie. OpenChamber bewaart die bij het gekoppelde item en geeft haar ongewijzigd terug in `ctx.item` als de gebruiker erop klikt. Ze gaat nooit naar het model.
+
+`startSession` accepteert `projectId` zonder het huidige project te wisselen. Laat `worktree` weg voor de doelmap, gebruik `true` voor een gegenereerde worktree, `{ kind: "existing", directory }` voor een bekende worktree of `{ kind: "new", name?, baseBranch? }` voor een benoemde nieuwe worktree. De naam bepaalt zowel de branch als de worktree. `navigation` is standaard `"preserve"`; gebruik `"open"` om de nieuwe chat te selecteren. Model, agent en variant voor het eerste bericht worden vastgelegd bij het begin van het aanmaken.
+
+Het resultaat bevat `sessionId`, `directory`, `sent`, `linked` en eventueel `worktree`. `sent` is `sent`, `no-model`, `skipped` of `failed`. `linked: false` betekent dat het item niet op de aangemaakte sessie is opgeslagen. Blijft na een mislukte inrichting of sessieaanmaak een worktree achter, dan krijgt u `sessionId: null`, `failure: "bootstrap-failed" | "session-create-failed"` en de map/worktree terug. Controleer dit voordat u opnieuw probeert. De aanroep wacht maximaal 180 seconden. Een time-out betekent niet dat het aanmaken is teruggedraaid.
+
+`sessionLink` koppelt het item aan de nu geopende sessie. Zonder project of sessie geeft dit `NO_SESSION`.
+
+Limieten die de client vóór het versturen toepast:
+
+| Veld | Maximum aantal tekens |
+| --- | --- |
+| `id` | 128 |
+| `title` | 200 |
+| `url` | 2000 |
+| `text` | 16000 |
+| `data` na serialisatie | 16000 |
+| `author` | 80 |
+| elke branchnaam | 200 |
+
+## prompt en de sessielevenscyclus
+
+```ts
+await host.prompt({ text: "Fix the login" });
+await host.prompt({ text: "Fix the login", send: true });
+
+host.onSessionLifecycle((event) => {
+  document.body.dataset.phase = event.phase;
+});
+```
+
+Zonder `send` vervangt `prompt` de tekst in het chatveld. Met `send: true` wordt het bericht verstuurd met het model en de agent die de gebruiker heeft gekozen. De extensie kiest die nooit. Zonder geopende sessie volgt `NO_SESSION`. Versturen naar een bezige sessie geeft `SESSION_BUSY`; tekst in het veld plaatsen mag wel. Het resultaat is `{ sent }` met dezelfde waarden als `startSession`.
+
+`onSessionLifecycle` meldt wat de sessie doet. `phase` is `started` terwijl het model werkt, `completed` als het inactief wordt en `failure` bij een onverwachte status. Een later geregistreerde listener krijgt direct de huidige fase.
+
+## Projecten, worktrees en livesessies
+
+Deze methoden gebruiken het bestaande recht `sessions` en de gedeelde appstores. Ze voeren niet voor elk verzoek een Git-scan uit en geven geen gespreksinhoud vrij.
+
+```ts
+const projects = await host.listProjects();
+const projectId = projects.projects[0]?.id;
+if (projectId) {
+  const worktrees = await host.listWorktrees(projectId);
+  const sessions = await host.listSessions(projectId);
+  const stop = await host.onSessions(projectId, (snapshot) => {
+    renderSessions(snapshot.sessions, snapshot.state);
+  });
+  // Call stop() when this view closes.
+}
+```
+
+`onProjects(listener)` en `onWorktrees(projectId, listener)` werken op dezelfde manier. Wacht met `await` op de registratie om toestemmingsfouten af te handelen. Het resultaat is een functie om het abonnement op te zeggen. Eerst komt een momentopname, daarna volgen wijzigingen. `dispose()` beëindigt alle abonnementen. De host staat maximaal 32 per frame toe en ruimt ze op bij sluiten, pauzeren, verwijderen of serverwisseling.
+
+Momentopnamen hebben `state: "loading" | "ready" | "error"`. Tijdens laden of bij fouten kunnen eerdere gegevens bewaard blijven. Alleen `ready` bevestigt dat een leeg resultaat volledig en geldig is. Sessiemomentopnamen bevatten `coverage` per map en bekende gearchiveerde sessies. Projecten geven ID, naam en map; worktrees geven map, naam, branch en beschikbaarheid. Sessies bevatten hun project, map en worktree, tijdstempels, bovenliggende ID en de gekoppelde item-ID's en gegevens van deze extensie.
+
+`activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission` of `waiting-question`. `outcome` is een waargenomen beurt met `completed` of `failed`, of `null`. Dit wordt niet uit de geschiedenis afgeleid en blijft voor maximaal 2.000 waargenomen sessies in het geheugen. Inactief worden na een fout behoudt de mislukte uitkomst totdat een nieuwe run begint. Noch `idle` noch `completed` markeert uw taak als klaar. Gebruik `host.openSession(sessionId)` om vanuit een kaart bewust naar de chat te gaan.
+
+## Blijvende extensiegegevens
+
+```ts
+await host.storage.set("board", { columns: ["Todo", "Review"] });
+const board = await host.storage.get("board");
+const keys = await host.storage.keys();
+await host.storage.delete("board");
+```
+
+Extra toestemming is niet nodig. De opslag hoort bij deze extensie op de verbonden server, blijft na herladen bestaan en wordt bij verwijderen gewist. `get` geeft `undefined` voor een ontbrekende sleutel; opgeslagen JSON-null blijft null. Sleutels bevatten 1 tot 128 tekens. Elke geserialiseerde JSON-waarde is maximaal 64 KiB UTF-8. De hele naamruimte is maximaal 2 MiB of 2.000 sleutels. Neem voor projectgebonden gegevens een project-ID op in de sleutel. Schrijfbewerkingen worden na elkaar uitgevoerd en zijn atomair. Bij fouten blijven bestaande gegevens behouden.
+
+## request
+
+```ts
+const user = await host.request({ method: "GET", path: "/api/v2/user" });
+```
+
+`path` begint met `/` en bevat geen protocol of host. OpenChamber voegt het toe aan `apiOrigin` uit uw manifest en voegt de `Authorization`-header toe. Tokenintegraties versturen het geplakte token ongewijzigd, als `Bearer <token>` bij `token.scheme: "bearer"`, of als `Basic base64(username:token)` bij `"basic"`. OAuth- en Linear-integraties gebruiken altijd `Bearer`. Het resultaat is `{ status, body }`. De body is tekst; JSON verwerkt u zelf.
+
+Een Linear-integratie mag ook `GET /api/linear/issues/get` gebruiken. OpenChamber beantwoordt dat via de eigen Linear-route.
+
+Geen antwoord binnen 20 seconden geeft `HOST_TIMEOUT`.
+
+```ts
+try {
+  await host.request({ method: "GET", path: "/api/v2/user" });
+} catch (error) {
+  if (error instanceof HostRequestError && error.code === "DISCONNECTED") {
+    await host.oauthStart();
+  }
+}
+```
+
+## serviceRequest
+
+Als het manifest `contributes.service` opgeeft, start OpenChamber dat proces. Uw pagina spreekt ermee via een vergelijkbare aanroep en opent nooit zelf de socket.
+
+```ts
+const status = await host.serviceStatus();
+const result = await host.serviceRequest({ method: "GET", path: "/containers" });
+```
+
+Voor `path` gelden dezelfde regels als bij `request`. Een service declareren voegt `service` toe aan de bij installatie goed te keuren rechten. Tot goedkeuring geeft elke `serviceRequest` `NO_SERVICE`. Het volledige contract staat in `GUEST_SERVICES.md` in het pakket.
+
+## Bestanden
+
+Een relatief pad ligt binnen het geopende project en vereist `files`. Een pad met `/` of `~/` moet passen bij een opgegeven `contributes.filesystem`-patroon en vereist `filesystem`. Zie [Een extensie bouwen](/nl/sdk/#bestanden) voor de regels.
+
+```ts
+const { content } = await host.readFile("package.json");
+await host.writeFile("notes/today.md", "# Today\n");
+const { entries } = await host.listDir("src");
+const info = await host.stat("~/.config/opencode/opencode.json");
+```
+
+Limieten: paden tot 1024 tekens, inhoud tot 2.000.000 tekens en mappenlijsten tot 2000 vermeldingen. Te grote inhoud geeft `FILE_TOO_LARGE`.
+
+## generate
+
+```ts
+const { text } = await host.generate({ prompt: notes, system: "Summarize in one sentence." });
+```
+
+`prompt` bevat na trimmen 1 tot 64.000 tekens, `system` maximaal 8.000 en `maxOutputTokens` ligt tussen 1 en 4.000. Niets gaat een sessie in en er wordt geen geschiedenis bewaard. De extensie kiest nooit het model. De aanroep wacht maximaal 90 seconden. Zonder bruikbaar Small Model volgt `NO_MODEL`; een modelfout geeft `MODEL_FAILED`. Zie [Tekst genereren](/nl/sdk/#tekst-genereren).
+
+## Foutcodes
+
+Mislukte aanroepen werpen `HostRequestError`. `code` is een van de onderstaande waarden; `message` geeft meer informatie.
+
+| Code | Wanneer |
+| --- | --- |
+| `HOST_UNAVAILABLE` | geen window, niet binnen OpenChamber of `dispose()` is uitgevoerd |
+| `HOST_TIMEOUT` | geen antwoord binnen 20 seconden |
+| `HOST_REJECTED` | OpenChamber weigert of antwoordt met een code die deze SDK niet kent |
+| `DISCONNECTED` | geen token of Linear-verbinding voor de integratie |
+| `BAD_PATH` | ongeldig pad of poging buiten de toegestane origin te gaan |
+| `NO_INTEGRATION` | het manifest bevat geen `integration` |
+| `NO_SESSION` | `prompt` of `sessionLink` zonder geopende sessie |
+| `SESSION_BUSY` | `prompt({ send: true })` terwijl de sessie bezig is |
+| `DISABLED` | de gebruiker heeft de extensie gepauzeerd bij Instellingen → Extensies |
+| `NO_SERVICE` | geen service opgegeven, goedgekeurd of actief |
+| `NOT_GRANTED` | het benodigde recht is niet goedgekeurd |
+| `SERVICE_FAILED` | de service is vastgelopen of werd nooit gereed |
+| `NO_DIRECTORY` | relatief bestandspad of `openCommit` zonder geopend project |
+| `NOT_FOUND` | `readFile` voor een ontbrekend bestand of `openCommit` voor een commit buiten het project |
+| `FILE_TOO_LARGE` | bestandsinhoud boven de lees- of schrijflimiet |
+| `DENIED` | het besturingssysteem weigert de bestandsbewerking |
+| `NO_MODEL` | `generate` zonder beschikbaar Small Model |
+| `MODEL_FAILED` | het Small Model gaf een fout |
+| `UNSUPPORTED` | deze OpenChamber kan de aanroep niet uitvoeren, bijvoorbeeld `openCommit` zonder diffweergave |
+
+## Zie ook
+
+- [Een extensie bouwen](/nl/sdk/) voor mapindeling, manifest, installatie en rechten
+- [UI-kit](/nl/sdk/ui/) voor knoppen, velden, lijsten en andere onderdelen

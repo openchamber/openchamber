@@ -206,12 +206,13 @@ other language mirrors the English files under a locale folder.
 | German | `de/` | `de` |
 | Japanese | `ja/` | `ja` |
 | Turkish | `tr/` | `tr` |
+| Dutch | `nl/` | `nl` |
 
 > [!IMPORTANT]
 > The **content folder** uses the lowercase locale key (`zh-cn`, `pt-br`); the
 > **sidebar `translations`** key uses the BCP-47 language tag (`zh-CN`, `pt-BR`).
 > They look similar but are not interchangeable — Starlight resolves them with
-> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `de`, `ja`, `tr`, `en`) is identical
+> different rules. Everything else (`uk`, `es`, `ko`, `pl`, `fr`, `de`, `ja`, `tr`, `nl`, `en`) is identical
 > in both columns.
 
 This locale set is mirrored in the website at

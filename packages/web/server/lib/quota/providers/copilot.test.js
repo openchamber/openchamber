@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ 'github-copilot': { access: 'test-token' } }),
+  readOpenCodeCredentials: async () => ({ 'github-copilot': { access: 'test-token' } }),
 }));
 
 import { fetchQuota, fetchQuotaAddon } from './copilot.js';

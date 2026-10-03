@@ -20,6 +20,14 @@ extension applies the same policy in its own process at activation.
 
 These provider IDs are currently dispatchable via `fetchQuotaForProvider(providerId)` in `packages/web/server/lib/quota/providers/index.js`.
 
+Where this table says "OpenCode `auth.json`", the credential is the one the
+running OpenCode uses (stored, or from an environment variable when
+OpenChamber launched OpenCode), read through `../opencode/auth.js` (`GET
+/api/credential`, see the opencode module docs); the name is the legacy shape
+the entries keep. The provider list reads it once and hands it to every
+`isConfigured(auth)`; each `fetchQuota` reads it again. When OpenCode cannot be
+asked, `/api/quota/providers` answers 500 instead of an empty list.
+
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry, Claude Code credentials file, OpenCode `auth.json` (`anthropic`, `claude`), `CLAUDE_CODE_OAUTH_TOKEN` |
@@ -33,7 +41,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
-| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-for-coding`, `kimi` |
+| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
@@ -118,6 +126,8 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 - The weekly `usage` block returns `used` (consumed) with no `remaining` field.
 - Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
 
+Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai, API base `api.kimi.ai`) stays last: it is not verified that a global key works at the `api.kimi.com` usage address, so it must not outrank a working pre-split key.
+
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
 ## Ollama Cloud settings-page shapes
@@ -145,7 +155,7 @@ snapshot carries `entitlement`, `remaining`, `unlimited`, and
 
 ## OpenRouter key semantics
 
-OpenRouter quota reads `GET https://openrouter.ai/api/v1/key`, which is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
+OpenRouter quota reads `GET <base>/key`, where `<base>` is the provider's configured `baseURL` (`settings.baseURL`, legacy `options.baseURL`, or legacy `api`, folded by `toProviderEntity`; the v2 `providers.openrouter` entry wins, and the v1 `provider.openrouter` entry is read when the v2 one sets no address) read from the merged opencode config layers; with nothing configured or a config read failure, `<base>` falls back to `https://openrouter.ai/api/v1`. A gateway user's key is only valid against that gateway, so the usage lookup must ride the same base as chat. The default endpoint `GET https://openrouter.ai/api/v1/key` is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
 
 The documented `limit`, `limit_remaining`, and `limit_reset` fields are present and null on unlimited keys; null means unlimited, never missing data. For a limited key, window usage is `limit - limit_remaining`, not `usage`: `usage` is all-time and measures a different axis from the current reset window. Pairing `usage` with the current limit produces a wrong number. `limit_remaining` is server-computed and already honors `include_byok_in_limit`, so `byok_*` fields are ignored.
 
@@ -153,8 +163,15 @@ Unlimited keys report `usage_monthly` in a `monthly` window with no percent. `li
 
 Keep `packages/web/server/lib/quota/providers/openrouter.js` and `packages/vscode/src/quotaProviders.ts` in sync, as with the Kimi and Copilot providers; the VS Code extension duplicates this parsing logic rather than importing the web provider.
 
+## Zhipu AI Coding Plan semantics
+
+`GET https://open.bigmodel.cn/api/monitor/usage/quota/limit` reports business failures inside HTTP 200 bodies (`{code, msg, success: false}`; an invalid token yields code 401 with `msg` "令牌已过期或验证不正确"). Providers must validate the envelope (`success === false` or a `code` other than 200) and return the failure with `msg` instead of parsing an empty `data.limits`; a missing envelope is treated as legacy success.
+
+The limit type was renamed from `TOKENS_LIMIT` to `CREDIT_LIMIT` with unchanged `unit`/`number` window semantics: unit 3 marks hourly blocks (`5h`), unit 6 weekly. `CREDIT_LIMIT` entries carry `usage` (total), `currentValue` (consumed), and `remaining`, surfaced as a credit `valueLabel`; when `percentage` is absent the used percent is derived from `currentValue/usage`. `data.level` (for example `lite`) becomes `planLabel`. `TIME_LIMIT` stays the monthly `MCP Tools` window. Keep `packages/web/server/lib/quota/providers/zhipuai-coding-plan.js` and `packages/vscode/src/quotaProviders.ts` (`fetchZhipuaiCodingPlanQuota`) in sync.
+
 ## Notes for contributors
 - Keep provider IDs stable; clients use them directly.
 - Avoid adding alias-based dispatch in `fetchQuotaForProvider`; dispatch currently expects exact provider IDs.
 - Keep Google behavior changes isolated and review `providers/google/*` together.
 - Z.ai Coding Plan exposes separate 5-hour and weekly token/credit limit entries plus a monthly `TIME_LIMIT` for MCP tools. The API renamed the limit type from `TOKENS_LIMIT` to `CREDIT_LIMIT` (same `unit`/`number` window semantics); `CREDIT_LIMIT` entries additionally carry `usage` (total), `currentValue` (consumed), and `remaining`, surfaced as a credit `valueLabel`, and the payload's `data.level` becomes `planLabel`. Web and VS Code must preserve these windows and stay in sync.
+- Z.ai gift (bonus) resets come from a supplementary `GET https://api.z.ai/api/biz/customer-package-reset/list?targetType=PERSONAL` with the same bearer token, fetched after a successful quota fetch. `expireTime` strings (`YYYY-MM-DD HH:mm:ss`) are parsed as UTC+8. Only `available: true` records with a numeric `recordId` and a parseable, non-expired `expireTime` are considered; the nearest expiry wins and is attached as `giftReset` (`{recordId, expireAt}`) on the window matching `windowSeconds` (`fiveHourResets` → 5h, `weekResets` → weekly). Expired records are never shown. The request is supplementary: any failure, non-ok response, or malformed payload leaves the quota result untouched with no `giftReset`. Activation goes through `POST /api/quota/:providerId/gift-reset/use` (z.ai aliases only), which posts `{targetType: 'PERSONAL', resetType, recordId, requestId: <uuid>}` to `https://api.z.ai/api/biz/customer-package-reset/use` (`resetType` is `'FIVE_HOUR'` for the 5h window and `'WEEK'` for the weekly window — the weekly value was verified live against a real weekly reset). Both runtimes must keep this in sync.

@@ -58,6 +58,8 @@ Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestr
 
 Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. También puede dar a sus propias herramientas un icono, un título y un diseño de salida propios en el chat, como los que tienen las herramientas integradas de OpenChamber. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión.
 
+Algunas extensiones muestran una imagen en vivo en lugar de un panel propio: aquello en lo que un agente está trabajando en el servidor, como un navegador o un simulador. Haz clic en la imagen o escribe para tomar el control; la línea de estado dirá **Tienes el control** y las acciones de navegador del agente se rechazarán hasta que pulses **Devolver al agente**. Copiar y pegar funcionan como siempre. Otro dispositivo conectado a la vez ve quién tiene el control y no puede quitarlo. Una extensión así puede añadir sus propios controles junto a la imagen, por ejemplo una barra de direcciones encima o una columna de herramientas al lado.
+
 ## Conectar su cuenta
 
 Una extensión que habla con un servicio recibe una tarjeta en **Configuración → Integraciones** bajo **Cuentas de extensiones**. Según el servicio, la tarjeta pide un token de API, un usuario y token, o un client id para un flujo de inicio de sesión. Elige **Conectar**; **Desconectar** olvida el token guardado. Los campos extra que declara la extensión se guardan solos al salir de ellos.

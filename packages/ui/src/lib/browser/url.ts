@@ -2,7 +2,9 @@
  * Address-bar input handling for the browser surface.
  */
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
+export const DEV_TUNNEL_HOSTNAME = 'openchamber-preview.localhost';
+
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]', DEV_TUNNEL_HOSTNAME]);
 
 /** `localhost:5173`, `127.0.0.1:3000` — an authority with no scheme. */
 const isLoopbackAuthority = (value: string): boolean => {

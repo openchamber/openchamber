@@ -1,4 +1,5 @@
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 export const createOpenCodeWatcherRuntime = (deps) => {
   const {
@@ -16,6 +17,12 @@ export const createOpenCodeWatcherRuntime = (deps) => {
   let reader = null;
   let unsubscribeEvent = null;
   let unsubscribeStatus = null;
+
+  // `onPayload` consumers speak the server's own event vocabulary, so the v2
+  // wire payload is translated here rather than in each consumer.
+  const emitTranslated = (payload) => {
+    for (const translated of translateWireEvent(payload)) onPayload(translated);
+  };
 
   const unwrapGlobalEventPayload = (eventData) => {
     if (!eventData || typeof eventData !== 'object') {
@@ -40,13 +47,15 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     const signal = abortController.signal;
 
     if (globalEventHub) {
+      // The events of isolated spaces feed this watcher too, so live status, unread marks and
+      // notifications work for a space's sessions as for the host's.
       unsubscribeEvent = globalEventHub.subscribeEvent((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
         if (!payload || typeof payload !== 'object') {
           return;
         }
-        onPayload(payload);
-      });
+        emitTranslated(payload);
+      }, { spaces: true });
       unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
         if (signal.aborted) {
           return;
@@ -65,7 +74,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
 
     reader = createUpstreamSseReader({
       signal,
-      buildUrl: () => buildOpenCodeUrl('/global/event', ''),
+      buildUrl: () => buildOpenCodeUrl('/api/event', ''),
       getHeaders: getOpenCodeAuthHeaders,
       fetchImpl,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -78,7 +87,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
         if (!payload || typeof payload !== 'object') {
           return;
         }
-        onPayload(payload);
+        emitTranslated(payload);
       },
       onError(error) {
         if (signal.aborted) {

@@ -23,7 +23,7 @@ test('large drafts preserve the tail and line endings through editing and saving
   };
   expect(shouldAllowFileDraftSave(gate)).toBe(true);
   expect(serializeEditorContent(draft, prepared.lineEnding)).toBe(raw.replace('TAIL\r\n', 'EDITED TAIL\r\n'));
-  expect(shouldScheduleFileAutosave({ ...gate, autoSaveEnabled: true, canWrite: true, isSaving: false, isDirty: false })).toBe(false);
+  expect(shouldScheduleFileAutosave({ ...gate, autoSaveEnabled: true, canWrite: true, isSaving: false, isDirty: false, wouldEmptyFile: false })).toBe(false);
   expect(shouldAllowFileDraftSave({ ...gate, loadedFilePath: '/repo/another.ts' })).toBe(false);
   expect(shouldAllowFileDraftSave({ ...gate, isNonEditableBinary: true })).toBe(false);
 });

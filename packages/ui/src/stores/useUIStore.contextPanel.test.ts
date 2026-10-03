@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
+import {
+  forgetBrowserTabOpenedWithAddress,
+  subscribeBrowserTabLoadRequests,
+  wasBrowserTabOpenedWithAddress,
+} from '../lib/browser/devServerWait';
 import { useTerminalStore } from './useTerminalStore';
 import { useUIStore } from './useUIStore';
 
@@ -11,6 +16,41 @@ const originalPersistOptions = useUIStore.persist.getOptions();
 beforeEach(() => {
   useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
   useTerminalStore.getState().clearAll();
+});
+
+describe('useUIStore preview file tabs', () => {
+  const fileTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'file');
+
+  test('a preview replaces the previous preview in its slot instead of adding a tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/kept.ts');
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/kept.ts', false],
+      ['/repo/b.ts', true],
+    ]);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(fileTabs()[1].id);
+  });
+
+  test('a regular open, an explicit pin, or a preview of an open file keeps the tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts');
+    expect(fileTabs().map((tab) => tab.preview)).toEqual([false]);
+
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+    store.pinContextPanelTab('/repo', fileTabs()[1].id);
+    store.openContextFile('/repo', '/repo/c.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/a.ts', false],
+      ['/repo/b.ts', false],
+      ['/repo/c.ts', true],
+    ]);
+  });
 });
 
 describe('useUIStore context panel tabs', () => {
@@ -443,6 +483,45 @@ describe('useUIStore context panel tabs', () => {
 
     const sanitizedDiffTab = getContextPanelTabs('/repo-worktree').find((tab) => tab.mode === 'diff');
     expect(sanitizedDiffTab?.targetDirectory).toBe(null);
+  });
+});
+
+describe('useUIStore browser tabs opened with an address', () => {
+  const url = 'http://localhost:5173/';
+  const tabID = `browser:${url}`;
+
+  test('a new tab counts as opened now, so its first load may wait for the server', () => {
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    useUIStore.getState().openContextPreview('/repo', url);
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(true);
+    expect(wasBrowserTabOpenedWithAddress('/other', tabID)).toBe(false);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+  });
+
+  test('opening the address of an existing tab asks that tab to load it again', () => {
+    useUIStore.getState().openContextBrowser('/repo', url);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    const requested: string[] = [];
+    const elsewhere: string[] = [];
+    const stop = subscribeBrowserTabLoadRequests('/repo', tabID, (next) => requested.push(next));
+    const stopElsewhere = subscribeBrowserTabLoadRequests('/other', tabID, (next) => elsewhere.push(next));
+
+    useUIStore.getState().openContextPreview('/repo', url);
+    useUIStore.getState().openContextBrowser('/repo', url);
+
+    expect(requested).toEqual([url, url]);
+    expect(elsewhere).toEqual([]);
+    // Loaded through the request, not marked: a later remount still counts as restored.
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(false);
+    stop();
+    stopElsewhere();
+  });
+
+  test('an agent tab opened with an address counts as opened now', () => {
+    const agentTabID = useUIStore.getState().openAgentBrowserTab('/repo', url);
+    expect(agentTabID === null).toBe(false);
+    expect(wasBrowserTabOpenedWithAddress('/repo', agentTabID ?? '')).toBe(true);
+    forgetBrowserTabOpenedWithAddress('/repo', agentTabID ?? '');
   });
 });
 
@@ -971,5 +1050,22 @@ describe('context panel tab limits', () => {
     const tabs = state?.tabs ?? [];
     expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
+  });
+});
+
+describe('useUIStore openAgentBrowserTab', () => {
+  const directory = '/agent-repo';
+
+  test('opens a new background tab even when one already shows the address, and returns its id', () => {
+    useUIStore.getState().openContextBrowser(directory, 'https://a.test');
+    const shownId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
+
+    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test');
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(agentId).not.toBeNull();
+    expect(agentId).not.toBe(shownId);
+    expect(state?.tabs.find((tab) => tab.id === agentId)?.targetPath).toBe('https://a.test');
+    expect(state?.activeTabId).toBe(shownId);
   });
 });

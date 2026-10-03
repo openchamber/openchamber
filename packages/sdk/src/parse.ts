@@ -11,6 +11,8 @@ import {
   GUEST_COMMAND_NAME,
   GUEST_FILESYSTEM_PATTERNS_MAX,
   GUEST_FILESYSTEM_PATTERN_MAX,
+  GUEST_ORIGINS_MAX,
+  GUEST_SERVICE_PROVIDES,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_COLUMNS_MAX,
   GUEST_TOOL_COLUMN_MAX,
@@ -32,7 +34,19 @@ import {
   type ParseManifestResult,
   type ParseManifestSuccess,
   type SocketBinding,
+  GUEST_SURFACE_DOCKS,
+  GUEST_SURFACE_DOCK_SIZE_MAX,
+  GUEST_SURFACE_DOCK_SIZE_MIN,
+  GUEST_STATUS_SECTION_HEIGHT_MAX,
+  GUEST_STATUS_SECTION_HEIGHT_MIN,
+  GUEST_STATUS_SECTION_TITLE_MAX,
 } from './manifest.ts';
+import {
+  GUEST_FILE_EDITORS_MAX,
+  GUEST_FILE_EDITOR_PATTERNS_MAX,
+  GUEST_FILE_EDITOR_TITLE_MAX,
+  isFileEditorPattern,
+} from './file-editor.ts';
 
 const isPanelIcon = (value: string): boolean => (
   PANEL_ID.test(value) || isGuestPackageSvgIcon(value)
@@ -45,6 +59,14 @@ const isHttpsUrl = (value: string): boolean => {
   } catch {
     return false;
   }
+};
+
+// An origin the host writes into the frame's CSP as is: a literal hostname,
+// so no `*` or other CSP syntax can widen what the user approved.
+const APPROVABLE_HOSTNAME = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
+const isApprovableOrigin = (value: string): boolean => {
+  if (!isHttpsOrigin(value)) return false;
+  return APPROVABLE_HOSTNAME.test(new URL(value).hostname);
 };
 
 const isHttpsOrigin = (value: string): boolean => {
@@ -88,6 +110,8 @@ const panelSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().refine(isPanelIcon),
   entry: z.string().trim().refine(isSafeAssetPath).optional(),
+  dock: z.enum(GUEST_SURFACE_DOCKS).optional(),
+  size: z.number().int().min(GUEST_SURFACE_DOCK_SIZE_MIN).max(GUEST_SURFACE_DOCK_SIZE_MAX).optional(),
 });
 
 const integrationSettingSchema = z.object({
@@ -197,6 +221,10 @@ const serviceSchema = z.object({
   entry: z.string().trim().refine(isSafeAssetPath),
   runtime: z.literal('host'),
   permissions: servicePermissionsSchema.optional(),
+  provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).min(1).max(GUEST_SERVICE_PROVIDES.length)
+    .refine((roles) => new Set(roles).size === roles.length, { message: 'provides entries must be unique' })
+    .optional(),
+  surface: z.literal(true).optional(),
 });
 
 const uniqueBy = <T,>(items: T[], key: (item: T) => string): boolean => (
@@ -244,6 +272,17 @@ const toolSchema = z.object({
 
 const toolsSchema = z.array(toolSchema).min(1).max(GUEST_TOOLS_MAX);
 
+const fileEditorSchema = z.object({
+  id: z.string().trim().regex(PANEL_ID),
+  title: z.string().trim().min(1).max(GUEST_FILE_EDITOR_TITLE_MAX),
+  match: z.array(z.string().trim().refine(isFileEditorPattern)).min(1).max(GUEST_FILE_EDITOR_PATTERNS_MAX),
+  entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+  content: z.enum(['text', 'binary']).optional(),
+});
+
+const fileEditorsSchema = z.array(fileEditorSchema).min(1).max(GUEST_FILE_EDITORS_MAX)
+  .refine((editors) => uniqueBy(editors, (editor) => editor.id), { message: 'file editor ids must be unique' });
+
 const contributesSchema = z.object({
   panel: panelSchema,
   background: z.object({
@@ -254,15 +293,24 @@ const contributesSchema = z.object({
     entry: z.string().trim().refine(isSafeAssetPath),
     title: z.string().trim().min(1).max(200).optional(),
   })]).optional(),
+  statusSection: z.union([z.literal(true), z.object({
+    entry: z.string().trim().refine((value) => isSafeAssetPath(value) && value.toLowerCase().endsWith('.html')),
+    title: z.string().trim().min(1).max(GUEST_STATUS_SECTION_TITLE_MAX).optional(),
+    height: z.number().int().min(GUEST_STATUS_SECTION_HEIGHT_MIN).max(GUEST_STATUS_SECTION_HEIGHT_MAX).optional(),
+  })]).optional(),
   capabilities: z.array(z.enum(DECLARED_GUEST_CAPABILITIES)).max(8).optional(),
   integration: integrationSchema.optional(),
   service: serviceSchema.optional(),
   filesystem: z.array(
     z.string().max(GUEST_FILESYSTEM_PATTERN_MAX).refine(isGuestFilesystemPattern),
   ).min(1).max(GUEST_FILESYSTEM_PATTERNS_MAX).optional(),
+  origins: z.array(z.string().trim().refine(isApprovableOrigin)).min(1).max(GUEST_ORIGINS_MAX)
+    .refine((origins) => new Set(origins).size === origins.length, { message: 'origins must be unique' })
+    .optional(),
   actions: actionsSchema.optional(),
   commands: commandsSchema.optional(),
   tools: toolsSchema.optional(),
+  fileEditors: fileEditorsSchema.optional(),
 });
 
 /**
@@ -274,8 +322,12 @@ const runtimeContributions = (contributes: z.output<typeof contributesSchema>): 
   if (contributes.attach !== undefined && contributes.attach !== false) declared.push('attach');
   if (contributes.capabilities && contributes.capabilities.length > 0) declared.push('capabilities');
   if (contributes.integration !== undefined) declared.push('integration');
-  if (contributes.service !== undefined) declared.push('service');
+  // A service the host starts itself (it provides a role or a surface) needs
+  // no frame; one that only answers a panel's `serviceRequest` has no caller
+  // without one.
+  if (contributes.service !== undefined && !contributes.service.provides?.length && !contributes.service.surface) declared.push('service');
   if (contributes.filesystem !== undefined) declared.push('filesystem');
+  if (contributes.origins !== undefined) declared.push('origins');
   if (contributes.actions !== undefined) declared.push('actions');
   if (contributes.commands !== undefined) declared.push('commands');
   return declared;
@@ -287,6 +339,23 @@ export const openChamberManifestSchema = z.object({
     openchamber: z.string().trim().regex(OPENCHAMBER_ENGINE_PATTERN),
   }).strict().optional(),
   contributes: contributesSchema.superRefine((contributes, ctx) => {
+    // Docking only means something for a page beside a shared surface.
+    const docked = contributes.panel.dock !== undefined || contributes.panel.size !== undefined;
+    if (docked && !(contributes.service?.surface && hasGuestPage(contributes))) {
+      ctx.addIssue({
+        code: 'custom', path: ['panel', 'dock'],
+        message: 'panel.dock and panel.size place panel.entry beside service.surface; they need both.',
+      });
+      return;
+    }
+    // `true` reuses the panel page; without one the section has nothing to load.
+    if (contributes.statusSection === true && !hasGuestPage(contributes)) {
+      ctx.addIssue({
+        code: 'custom', path: ['statusSection'],
+        message: 'contributes.statusSection: true reuses panel.entry; without a panel page, name its own { "entry": "<package .html>" }.',
+      });
+      return;
+    }
     if (hasGuestPage(contributes)) return;
     if (contributes.background) {
       const needsPanel = [];
@@ -296,6 +365,21 @@ export const openChamberManifestSchema = z.object({
       if (needsPanel.length > 0) ctx.addIssue({
         code: 'custom', path: ['panel'],
         message: `${needsPanel.join(', ')} needs panel.entry; background-only actions must declare mode "background".`,
+      });
+      return;
+    }
+    if (contributes.statusSection || contributes.fileEditors) {
+      // A status section or file editor frame runs code and may use what the
+      // package is granted, but it only hosts itself: things the host opens or
+      // invokes elsewhere need a panel or background entry.
+      const needsFrame = [];
+      if (contributes.page !== undefined) needsFrame.push('page');
+      if (contributes.attach !== undefined && contributes.attach !== false) needsFrame.push('attach');
+      if (contributes.actions !== undefined) needsFrame.push('actions');
+      if (contributes.commands !== undefined) needsFrame.push('commands');
+      if (needsFrame.length > 0) ctx.addIssue({
+        code: 'custom', path: ['panel'],
+        message: `${needsFrame.map((key) => `contributes.${key}`).join(', ')} needs panel.entry or background.entry; a status section or file editor only hosts itself.`,
       });
       return;
     }
@@ -369,6 +453,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       return fail('invalid-panel-icon', 'panel.icon must be a Remixicon name or a package .svg path.');
     case 'contributes.panel.entry':
       return fail('invalid-panel-entry', 'panel.entry must be a relative path inside the package.');
+    case 'contributes.panel.dock':
+      return fail('invalid-panel', issue.code === 'custom'
+        ? issue.message
+        : `panel.dock is one of ${GUEST_SURFACE_DOCKS.join(', ')}.`);
+    case 'contributes.panel.size':
+      return fail('invalid-panel', `panel.size is a whole number of CSS pixels from ${GUEST_SURFACE_DOCK_SIZE_MIN} to ${GUEST_SURFACE_DOCK_SIZE_MAX}.`);
     case 'contributes.capabilities':
       return fail('invalid-capabilities', 'contributes.capabilities may list "prompt", "sessions", and "files".');
     default:
@@ -376,6 +466,11 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
   }
   if (path === 'contributes.page' || path.startsWith('contributes.page.')) {
     return fail('invalid-page', 'contributes.page must be true or { entry: "<package HTML>", title?: "Page title" }.');
+  }
+  if (path === 'contributes.statusSection' || path.startsWith('contributes.statusSection.')) {
+    return fail('invalid-status-section', issue.code === 'custom'
+      ? issue.message
+      : `contributes.statusSection must be true or { entry: "<package .html>", title?: "1 to ${GUEST_STATUS_SECTION_TITLE_MAX} characters", height?: ${GUEST_STATUS_SECTION_HEIGHT_MIN} to ${GUEST_STATUS_SECTION_HEIGHT_MAX} }.`);
   }
   if (path === 'contributes.background' || path.startsWith('contributes.background.')) {
     return fail('invalid-background', 'contributes.background needs an entry ending in .html inside the package.');
@@ -393,6 +488,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     return fail(
       'invalid-filesystem',
       'contributes.filesystem lists 1 to 16 patterns starting with "/" or "~/", without "..", empty segments, or backslashes.',
+    );
+  }
+  if (path.startsWith('contributes.origins')) {
+    return fail(
+      'invalid-origins',
+      `contributes.origins lists 1 to ${GUEST_ORIGINS_MAX} unique https origins like "https://fonts.example.com", without a path.`,
     );
   }
   if (path.startsWith('contributes.actions')) {
@@ -413,6 +514,12 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
       'contributes.tools lists up to 16 entries with a match of 1 to 128 characters ([A-Za-z0-9_.:-], "*" only at the end), optional name (1 to 40), icon (Remixicon name or package .svg path), title and subtitle templates (1 to 200), output "auto" | "text" | "json" | "markdown" | "code" | "table", language (code only), and columns (table only, 1 to 16).',
     );
   }
+  if (path.startsWith('contributes.fileEditors')) {
+    return fail(
+      'invalid-file-editors',
+      `contributes.fileEditors lists 1 to ${GUEST_FILE_EDITORS_MAX} editors with a unique kebab-case id, a title of 1 to ${GUEST_FILE_EDITOR_TITLE_MAX} characters, match: 1 to ${GUEST_FILE_EDITOR_PATTERNS_MAX} file-name patterns (no "/", not only wildcards, like "*.excalidraw"), an entry ending in .html inside the package, and optional content "text" or "binary".`,
+    );
+  }
   if (path.startsWith('contributes.integration')) {
     return fail(
       'invalid-integration',
@@ -420,7 +527,7 @@ const failureFromIssue = (issue: { path: ReadonlyArray<PropertyKey>; code: strin
     );
   }
   if (path.startsWith('contributes.service')) {
-    return fail('invalid-service', 'contributes.service needs entry, runtime "host", and optional permissions.');
+    return fail('invalid-service', 'contributes.service needs entry, runtime "host", optional permissions, optional provides ("browser"), and optional surface (true).');
   }
   return fail('missing-panel', 'contributes.panel is required.');
 };

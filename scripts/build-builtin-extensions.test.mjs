@@ -14,6 +14,23 @@ const temporary = async () => {
 };
 
 describe('built-in extension build', () => {
+  test.skipIf(process.platform === 'win32')('publishes a traversable catalog when build and runtime users differ', async () => {
+    const root = await temporary();
+    const sourceRoot = path.join(root, 'source');
+    const outDir = path.join(root, 'bundle');
+    await fs.mkdir(sourceRoot);
+    await fs.writeFile(path.join(sourceRoot, 'registry.json'), JSON.stringify({ version: 1, extensions: [] }));
+
+    await buildBuiltInExtensions({ sourceRoot, outDir });
+    expect((await fs.stat(outDir)).mode & 0o777).toBe(0o755);
+
+    // Rebuilding must also replace the owner-only permissions of older bundles.
+    await fs.chmod(outDir, 0o700);
+    await buildBuiltInExtensions({ sourceRoot, outDir });
+    expect((await fs.stat(outDir)).mode & 0o777).toBe(0o755);
+    expect((await readBuiltInRegistry(outDir)).extensions).toEqual([]);
+  });
+
   test('builds a fixture using only the public SDK and stamps the app version', async () => {
     const root = await temporary();
     const sourceRoot = path.join(root, 'source');

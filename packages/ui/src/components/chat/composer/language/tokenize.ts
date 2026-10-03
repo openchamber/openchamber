@@ -52,7 +52,7 @@ export function tokenizeMentions(
     context: Pick<ComposerLanguageContext, 'knownAgentNames' | 'confirmedMentions'>,
 ): MentionRange[] {
     const ranges: MentionRange[] = [];
-    for (const token of scanMentions(text)) {
+    for (const token of scanMentions(text, context.confirmedMentions)) {
         const kind = classifyMention(token.name, context);
         if (kind) ranges.push({ start: token.start, end: token.end, kind });
     }

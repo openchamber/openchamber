@@ -24,6 +24,7 @@ import { WebSocketServer } from 'ws';
 
 import { DictationStreamManager } from './stream-manager.js';
 import { createDictationService } from './service.js';
+import { isOpaqueOriginRequest } from '../security/request-security.js';
 
 const DICTATION_WS_PATH = '/api/dictation/ws';
 
@@ -234,6 +235,10 @@ export function createDictationRuntime({
 
     const handleUpgrade = async () => {
       try {
+        if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
         if (uiAuthController?.enabled) {
           const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {

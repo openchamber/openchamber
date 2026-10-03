@@ -54,8 +54,12 @@ Walkthrough also retains its last PR read across visibility changes and reloads
 after push, source, model or language changes. The PR picker retains its list
 on panel switches; opening the picker or changing search still refreshes it.
 
-Full-local-file loading and working-tree mutations are unavailable for PR
-snapshots. Existing inline comment controls still attach selected code to chat.
+Working-tree mutations are unavailable for PR snapshots, and "Load full files"
+does not apply to them. Expanding collapsed context on one file works: the
+expander asks `useGitComparison.fetchFullFile`, which reads both sides of that
+file from GitHub through `/api/walkthrough/pr-file` (merge base and PR head),
+never from disk, so local edits and unfetched fork commits cannot leak in or
+block it. Existing inline comment controls still attach selected code to chat.
 Changes hands its PR source to walkthrough; walkthrough's Changes action opens
 PR mode with the shared selection. Picking a PR never generates a walkthrough.
 

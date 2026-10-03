@@ -1,6 +1,6 @@
 ---
 title: Integrações
-description: Conecte o GitHub e o Linear ao OpenChamber.
+description: Conecte os serviços e assinaturas com os quais o OpenChamber trabalha.
 ---
 
 # Integrações
@@ -34,17 +34,51 @@ Com um workspace conectado, o painel **Linear** aparece na barra de contexto à 
 
 - No painel do Linear, abra uma issue e escolha **Start session**. O botão fica no rodapé enquanto a issue rola.
 - No chat, escolha **New Session From Linear Issue** para escolher uma da lista, com **Create in worktree** se quiser um branch novo.
-- Na caixa de diálogo **New Worktree**, escolha **Start from Linear Issue**.
+- Na caixa de diálogo **New Worktree**, escolha uma issue do Linear. A nova sessão abre com a issue anexada à caixa de mensagem, e você mesmo escreve a primeira mensagem.
 
-A sessão abre no projeto mapeado para o time da issue, com a issue como primeiro prompt. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Um time sem mapeamento pede que você o mapeie primeiro. A primeira mensagem é montada a partir do magic prompt **Issue Review**, editável em **Configurações → Magic Prompts → Linear**.
+A partir do painel do Linear e do chat, a sessão abre no projeto mapeado para o time da issue, com a issue como primeiro prompt. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Um time sem mapeamento pede que você o mapeie primeiro. A primeira mensagem é montada a partir do magic prompt **Issue Review**, editável em **Configurações → Magic Prompts → Linear**.
 
 ### Vincule uma issue a uma mensagem
 
-No compositor do chat, escolha **Link Linear Issue**. A issue acompanha sua próxima mensagem como contexto, e o painel de status de trabalho da sessão mantém um link para ela.
+No compositor do chat, abra o menu **+** e escolha **Linear**. A issue acompanha sua próxima mensagem como contexto, e o painel de status de trabalho da sessão mantém um link para ela.
 
 ### Comentários de sessão
 
-Ative **Session comments** no cartão do Linear e uma sessão iniciada a partir de uma issue publica um comentário nela ao começar, terminar ou falhar, cada um com um link que abre a sessão. Os comentários só são publicados quando este servidor do OpenChamber tem um endereço público, para que o link funcione para todos na issue; em um endereço local ou privado nada é publicado.
+Ative **Session comments** no cartão do Linear e uma sessão iniciada a partir de uma issue, ou cuja primeira mensagem tem a issue anexada, publica um comentário nela ao começar, terminar ou falhar, cada um com um link que abre a sessão. Os comentários só são publicados quando este servidor do OpenChamber tem um endereço público, para que o link funcione para todos na issue; em um endereço local ou privado nada é publicado.
+
+## Instalar uma integração
+
+1. Abra **Settings → Integrations**.
+2. Encontre a integração e escolha **Install**.
+3. Reinicie o OpenCode quando solicitado — o provedor aparece após a reinicialização.
+4. Escolha **Set up** e faça login. Os modelos aparecem então no seletor de modelos do chat.
+
+As integrações são instaladas para o seu usuário, então funcionam em todos os projetos. Você pode atualizá-las ou removê-las do mesmo cartão a qualquer momento.
+
+## Claude Code
+
+O Claude Code usa seu plano Claude Pro ou Max pela CLI do Claude Code no seu computador — sem chaves de API.
+
+1. Instale a integração (acima).
+2. Escolha **Set up** e faça login. Se você ainda não tem a CLI do Claude Code, a configuração oferece instalá-la primeiro e depois fazer login.
+
+**Como sua conta Claude fica protegida:** esta integração usa o Claude Agent SDK oficial da Anthropic e a CLI do Claude Code instalada em sua máquina. Ela não sequestra OAuth, não extrai nem reproduz tokens do navegador, não se passa por um cliente não suportado e não contorna a autenticação da Anthropic. Ela permanece no caminho de acesso suportado pela Anthropic, portanto não traz o risco de banimento de conta associado a sequestro de tokens ou a contornos de autenticação não autorizados.
+
+## Atualizar ou remover
+
+- **Update** instala a versão publicada mais recente do plugin.
+- **Remove** exclui o plugin da sua configuração do OpenCode. O provedor deixa de ser carregado quando o OpenCode é recarregado.
+
+Se um cartão indicar que as entradas precisam de gerenciamento manual, escolha **Manage plugins** e limpe as duplicatas lá.
+
+## Excalidraw
+
+O Excalidraw permite desenhar em arquivos `.excalidraw` e em desenhos `.excalidraw.md` do Obsidian direto no Files. É uma extensão do OpenChamber, listada em **OpenChamber extensions** na mesma página.
+
+1. Abra **Settings → Integrations** e escolha **Install** no cartão do Excalidraw. Você também pode abrir um desenho no Files e escolher **Install** no aviso acima dele.
+2. Abra o desenho de novo. A tela de desenho substitui o texto do arquivo, e Cmd/Ctrl+S, o salvamento automático, a alternância para o código-fonte e a tela cheia funcionam como em qualquer arquivo.
+
+O cartão atualiza a extensão quando sai uma nova versão, reativa a extensão se você a pausou e a remove. Seus desenhos continuam como estão quando você a remove; eles só passam a abrir como texto. Somente web e desktop.
 
 ## Relacionado
 

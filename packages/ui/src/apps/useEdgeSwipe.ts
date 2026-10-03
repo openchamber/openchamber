@@ -8,11 +8,8 @@ import React from 'react';
  * workspace); on an open drawer the mirrored swipe closes it (sessions drawer
  * closes from the right edge, workspace drawer from the left edge).
  *
- * Only `touchstart`/`touchend` are observed (both passive), so this never
- * interferes with vertical chat scrolling or the horizontal scroll inside code
- * blocks — it just reads where the gesture began and ended. The edge zone
- * keeps it clear of in-content horizontal scroll, which lives away from the
- * screen edges.
+ * Touch listeners are passive to preserve native scrolling and text selection.
+ * A selection cancels the pending swipe, even if it clears before touchend.
  */
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
@@ -47,16 +44,26 @@ export const useEdgeSwipe = (
     if (!enabled) return;
     const element = ref.current;
     if (!element) return;
+    // SAFETY: Native Capacitor shells inject this bridge; both accesses are optional for web builds.
     const platform = (window as typeof window & { Capacitor?: { getPlatform?: () => string } }).Capacitor?.getPlatform?.();
     const edgeZone = platform === 'android' ? ANDROID_EDGE_ZONE : EDGE_ZONE;
+    const ownerDocument = element.ownerDocument;
 
     let tracking = false;
     let fromLeftEdge = false;
     let startX = 0;
     let startY = 0;
 
+    const hasSelection = () => ownerDocument.getSelection()?.isCollapsed === false;
+    const cancelSwipe = () => {
+      tracking = false;
+    };
+    const onSelectionChange = () => {
+      if (tracking && hasSelection()) cancelSwipe();
+    };
+
     const onTouchStart = (event: TouchEvent) => {
-      if (event.touches.length !== 1) {
+      if (event.touches.length !== 1 || hasSelection()) {
         tracking = false;
         return;
       }
@@ -73,6 +80,7 @@ export const useEdgeSwipe = (
     const onTouchEnd = (event: TouchEvent) => {
       if (!tracking) return;
       tracking = false;
+      if (hasSelection()) return;
       const touch = event.changedTouches[0];
       if (!touch) return;
 
@@ -90,9 +98,15 @@ export const useEdgeSwipe = (
 
     element.addEventListener('touchstart', onTouchStart, { passive: true });
     element.addEventListener('touchend', onTouchEnd, { passive: true });
+    element.addEventListener('touchcancel', cancelSwipe, { passive: true });
+    element.addEventListener('selectstart', cancelSwipe);
+    ownerDocument.addEventListener('selectionchange', onSelectionChange);
     return () => {
       element.removeEventListener('touchstart', onTouchStart);
       element.removeEventListener('touchend', onTouchEnd);
+      element.removeEventListener('touchcancel', cancelSwipe);
+      element.removeEventListener('selectstart', cancelSwipe);
+      ownerDocument.removeEventListener('selectionchange', onSelectionChange);
     };
   }, [enabled, ref]);
 };

@@ -1,5 +1,6 @@
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 
 export type HostThemeMode = 'light' | 'dark';
@@ -58,8 +59,11 @@ export type SessionSnapshot = {
   agent?: string;
 };
 
-/** Which host chrome mounted this iframe. Not `openSurface`. */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background';
+/**
+ * Which host chrome mounted this iframe. Not `openSurface`. `status` is the
+ * extension's section in the chat's Work Status panel.
+ */
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'status' | 'file';
 
 export type GuestConnection = {
   connected: boolean;
@@ -275,6 +279,21 @@ export type BadgeRequest = {
   count: number | null;
 };
 
+/** A commit the guest asks the host to show in its Diff view. */
+export type OpenCommitRequest = {
+  sha: string;
+};
+
+/** Abbreviated or full hex commit id: 7 to 64 characters. The host resolves it in the open project. */
+export const GUEST_COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
+
+export const isGuestCommitSha = (value: string): boolean => GUEST_COMMIT_SHA.test(value);
+
+/** The content height the guest would like, in CSS px. Only the `status` surface sizes its frame from it. */
+export type ResizeRequest = {
+  height: number;
+};
+
 export type ToastKind = 'info' | 'success' | 'error';
 
 export type ToastRequest = {
@@ -369,6 +388,8 @@ export const GUEST_ITEM_MESSAGE_TEXT_MAX = 200_000;
 export const GUEST_ITEM_SESSION_MAX = 2_000_000;
 /** Largest count a rail badge shows. */
 export const GUEST_BADGE_MAX = 999;
+/** Largest height a `resize` message may carry; the host clamps further per surface. */
+export const GUEST_FRAME_HEIGHT_MAX = 10_000;
 /** Characters in a `resolve-result` error string. */
 export const GUEST_RESOLVE_ERROR_MAX = 500;
 
@@ -391,6 +412,7 @@ export const HOST_REQUEST_ERROR_CODES = [
   'DENIED',
   'NO_MODEL',
   'MODEL_FAILED',
+  'UNSUPPORTED',
 ] as const;
 
 export const SERVICE_STATUS_VALUES = ['stopped', 'starting', 'ready', 'failed'] as const;
@@ -495,6 +517,12 @@ export const clampBadgeCount = (count: number | null): number | null => {
   return Math.min(GUEST_BADGE_MAX, Math.max(0, Math.round(count)));
 };
 
+/** Resize heights are whole CSS pixels from 0 to `GUEST_FRAME_HEIGHT_MAX`; a non-number asks for 0. */
+export const clampFrameHeight = (height: number): number => {
+  if (!Number.isFinite(height)) return 0;
+  return Math.min(GUEST_FRAME_HEIGHT_MAX, Math.max(0, Math.ceil(height)));
+};
+
 /**
  * Which grant a file path needs. `/…` and `~/…` are outside the project and
  * go through the declared `filesystem` patterns; anything else is joined to
@@ -549,6 +577,12 @@ export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestI
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
+/** The file a `file` surface edits; pushed after `ready` and again whenever the frame reconnects. */
+export type HostFileOpenMessage = Envelope & { type: 'file-open'; payload: FileEditorDocument };
+/** Host → guest request. The guest answers with `file-snapshot-result` carrying the same `id`. */
+export type HostFileSnapshotMessage = Envelope & { type: 'file-snapshot'; id: string; payload: FileSnapshotRequest };
+/** The snapshot with this `version` is on disk. */
+export type HostFileSavedMessage = Envelope & { type: 'file-saved'; payload: { version: string } };
 export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: true; payload?: HostResultPayload }
   | { ok: false; error: string; code: HostRequestErrorCode }
@@ -565,6 +599,9 @@ export type HostMessage =
   | HostItemMessage
   | HostResolveMessage
   | HostActionMessage
+  | HostFileOpenMessage
+  | HostFileSnapshotMessage
+  | HostFileSavedMessage
   | HostResultMessage;
 
 type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
@@ -593,10 +630,20 @@ export type GuestFileListMessage = GuestCall<'file-list', FileListRequest>;
 export type GuestFileStatMessage = GuestCall<'file-stat', FileStatRequest>;
 export type GuestGenerateMessage = GuestCall<'generate', GenerateRequest>;
 export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
+export type GuestResizeMessage = GuestCall<'resize', ResizeRequest>;
+export type GuestOpenCommitMessage = GuestCall<'open-commit', OpenCommitRequest>;
 /** Answers a host `resolve` by `id`. The host sends no `result` back for it. */
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
 /** Completes a host `action`. The host sends no `result` back. */
 export type GuestActionResultMessage = Envelope & { type: 'action-result'; id: string; payload: ActionResultPayload };
+/** Answers a host `file-snapshot` by `id`. The host sends no `result` back. */
+export type GuestFileSnapshotResultMessage = Envelope & { type: 'file-snapshot-result'; id: string; payload: FileSnapshotResultPayload };
+/** A file editor's state changed. Fire and forget. */
+export type GuestFileChangeMessage = Envelope & { type: 'file-change'; payload: FileEditorChange };
+/** The user asked to save (Cmd/Ctrl+S inside the frame). Fire and forget. */
+export type GuestFileSaveMessage = Envelope & { type: 'file-save' };
+/** The editor cannot open this file; the host shows its source instead. Fire and forget. */
+export type GuestFileUnsupportedMessage = Envelope & { type: 'file-unsupported' };
 
 export type GuestMessage =
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
@@ -626,8 +673,14 @@ export type GuestMessage =
   | GuestFileStatMessage
   | GuestGenerateMessage
   | GuestBadgeMessage
+  | GuestResizeMessage
+  | GuestOpenCommitMessage
   | GuestActionResultMessage
-  | GuestResolveResultMessage;
+  | GuestResolveResultMessage
+  | GuestFileSnapshotResultMessage
+  | GuestFileChangeMessage
+  | GuestFileSaveMessage
+  | GuestFileUnsupportedMessage;
 
 const serviceStatusSet: ReadonlySet<string> = new Set(SERVICE_STATUS_VALUES);
 
@@ -666,6 +719,7 @@ export const isGenerateResult = (
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
   'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
+  'file-open', 'file-snapshot', 'file-saved',
 ]);
 
 /** What a postMessage payload may carry before it is read as a host message. */

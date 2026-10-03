@@ -1,4 +1,4 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { getSessionMetadata, type SessionMetadataRecord } from '@/lib/sessionReviewMetadata';
 
 /**

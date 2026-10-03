@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { Window } from 'happy-dom';
 import type { GitWorktreeCreateResult } from '@/lib/api/types';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 
 type WorktreeListEntry = {
@@ -13,6 +15,7 @@ const listCalls: string[] = [];
 const listResolvers: Array<(value: WorktreeListEntry[]) => void> = [];
 const listRejecters: Array<(reason: Error) => void> = [];
 let listImplementation: ((directory: string) => Promise<WorktreeListEntry[]>) | undefined;
+let removeImplementation: (() => Promise<{ success: boolean }>) | undefined;
 const createPayloads: unknown[] = [];
 const validatePayloads: unknown[] = [];
 const createdWorktree = {
@@ -108,10 +111,16 @@ mock.module('@/lib/gitApi', () => ({
         validatePayloads.push(payload);
         return Promise.resolve({ ok: true, errors: [] });
       }),
-      remove: mock(() => Promise.resolve({ success: true })),
+      remove: mock(() => removeImplementation?.() ?? Promise.resolve({ success: true })),
     },
   },
 }));
+
+// The manager subscribes to runtime switches at import, which needs a window.
+const dom = new Window({ url: 'http://instance-a.test' });
+for (const [name, value] of Object.entries({ window: dom, CustomEvent: dom.CustomEvent })) {
+  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
+}
 
 const {
   createWorktree,
@@ -124,6 +133,7 @@ const {
   validateWorktreeCreate,
   worktreeMapsEqual,
 } = await import('./worktreeManager');
+const { isWorktreeRemoving } = await import('./worktreeRemovalState');
 
 const waitForListCallCount = async (count: number): Promise<void> => {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -235,6 +245,45 @@ describe('worktreeManager list invalidation', () => {
       '/repo-force-inflight',
       '/repo-force-inflight',
     ]);
+  });
+
+  test('an instance switch drops worktrees cached for the same path on the previous instance', async () => {
+    const project = { id: 'project-switch', path: '/repo-switch' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const firstListing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+      listResolvers[0]([{ path: '/repo-switch-a', branch: 'a', name: 'a' }]);
+      await firstListing;
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-b.test', runtimeKey: 'instance-b' });
+
+      const secondListing = listProjectWorktrees(project);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-b', branch: 'b', name: 'b' }]);
+      expect((await secondListing).map((entry) => entry.path)).toEqual(['/repo-switch-b']);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  test('a list still in flight across an instance switch is read again from the new instance', async () => {
+    const project = { id: 'project-switch-inflight', path: '/repo-switch-inflight' };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 404 }));
+    try {
+      const listing = listProjectWorktrees(project);
+      await waitForListCallCount(1);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'http://instance-c.test', runtimeKey: 'instance-c' });
+
+      listResolvers[0]([{ path: '/repo-switch-old', branch: 'old', name: 'old' }]);
+      await waitForListCallCount(2);
+      listResolvers[1]([{ path: '/repo-switch-new', branch: 'new', name: 'new' }]);
+      expect((await listing).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+      expect((await listProjectWorktrees(project)).map((entry) => entry.path)).toEqual(['/repo-switch-new']);
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   test('older completions do not replace a forced refresh result with stale topology', async () => {
@@ -453,6 +502,48 @@ describe('worktreeManager list invalidation', () => {
     expect(sessionState.availableWorktrees).toEqual([sibling, ...unrelatedEntries]);
     expect(sessionState.worktreeMetadata.has('removed-session')).toBe(false);
     expect(sessionState.worktreeMetadata.get('sibling-session')).toBe(sibling);
+  });
+
+  describe('removal shown on the row', () => {
+    const target: WorktreeMetadata = {
+      path: '/worktrees/target',
+      projectDirectory: '/repo',
+      branch: 'target',
+      label: 'target',
+    };
+
+    beforeEach(() => {
+      sessionState.availableWorktreesByProject = new Map([['/repo', [target]]]);
+      sessionState.availableWorktrees = [target];
+    });
+
+    test('the row shows the removal until git answers, then leaves with it', async () => {
+      let answerGit: (value: { success: boolean }) => void = () => undefined;
+      removeImplementation = () => new Promise((resolve) => { answerGit = resolve; });
+      try {
+        const removal = removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target);
+        expect(isWorktreeRemoving(target.path)).toBe(true);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+
+        answerGit({ success: true });
+        await removal;
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
+
+    test('a failed removal clears the state and keeps the row', async () => {
+      removeImplementation = () => Promise.reject(new Error('folder in use'));
+      try {
+        await expect(removeProjectWorktree({ id: 'path:/repo', path: '/repo' }, target)).rejects.toThrow('folder in use');
+        expect(isWorktreeRemoving(target.path)).toBe(false);
+        expect(sessionState.availableWorktrees).toEqual([target]);
+      } finally {
+        removeImplementation = undefined;
+      }
+    });
   });
 });
 

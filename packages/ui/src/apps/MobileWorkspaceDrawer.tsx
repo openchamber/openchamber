@@ -32,7 +32,7 @@ export type MobileWorkspaceTab = 'changes' | 'files' | 'terminal' | 'notes' | 'm
 /** Quick MCP enable/disable toggles as a workspace pane, with its own slim
     action row (add server → settings, refresh) replacing the old fullscreen
     surface's header actions. */
-const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenMcpSettings }) => {
+const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void; active: boolean }> = ({ onOpenMcpSettings, active }) => {
   const { t } = useI18n();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
@@ -77,7 +77,7 @@ const McpWorkspacePane: React.FC<{ onOpenMcpSettings: () => void }> = ({ onOpenM
       </div>
       <div className="min-h-0 flex-1">
         <McpDropdownContent
-          active
+          active={active}
           className="h-full"
           listClassName="max-h-none"
           hideHeader
@@ -277,7 +277,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('mcp') ? (
           <div className={cn('h-full', tab !== 'mcp' && 'hidden')}>
             <ErrorBoundary>
-              <McpWorkspacePane onOpenMcpSettings={onOpenMcpSettings} />
+              <McpWorkspacePane active={open && tab === 'mcp'} onOpenMcpSettings={onOpenMcpSettings} />
             </ErrorBoundary>
           </div>
         ) : null}

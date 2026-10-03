@@ -1,0 +1,40 @@
+---
+title: Besturingstool voor agents
+description: Laat een agent vanuit de chat OpenChamber-sessies, worktrees en geplande taken beheren.
+---
+
+# Besturingstool voor agents
+
+Met de agenttool `openchamber` beheert u werk in de app rechtstreeks vanuit de chat. De tool staat standaard aan wanneer OpenChamber zijn eigen lokale OpenCode-server draait. U hoeft geen aparte tool te installeren of shell-opdracht uit te voeren.
+
+## Wat kunt u vragen?
+
+Vraag het in gewone taal, bijvoorbeeld:
+
+- 'Maak een nieuwe OpenChamber-sessie in dit project, gebruik het model `openai/gpt-5.6-sol` en stuur deze prompt: beoordeel de authenticatieprocedure.'
+- 'Maak voor deze taak een nieuwe OpenChamber-sessie in een aparte worktree en vraag om tests voor het aanmelden toe te voegen.'
+- 'Toon via OpenChamber mijn tien recentste sessies met hun huidige status.'
+- 'Maak een geplande OpenChamber-taak met de naam Werkdagreview die elke werkdag om 09:00 deze prompt verstuurt: beoordeel de wijzigingen sinds de vorige uitvoering.'
+- 'Voer de geplande OpenChamber-taak Werkdagreview nu uit.'
+- 'Controleer de OpenChamber-sessie Authenticatiereview en toon het laatste antwoord van de assistent.'
+
+De tool kan projecten en modelvoorkeuren opvragen, sessies maken en vervolgen, sessies forken, geïsoleerde worktree-sessies starten en geplande taken beheren. Gestarte sessies verschijnen zoals andere sessies in OpenChamber. U kunt ze openen en zelf verdergaan.
+
+## Om te onthouden
+
+- Verzoeken om een nieuwe sessie te starten keren standaard meteen terug. Volg de sessie in OpenChamber of vraag de agent later de status te controleren.
+- Een aparte worktree wordt alleen gemaakt als u erom vraagt. Niet-gecommitte wijzigingen uit de huidige worktree worden niet meegenomen.
+- De tool kan geen sessies of worktrees verwijderen, projectpaden registreren, willekeurige shell-opdrachten uitvoeren of willekeurige URL's aanroepen.
+
+## De tool in- of uitschakelen
+
+Open **Instellingen → Algemeen → OpenChamber-tools** en wijzig **Besturingstool voor agents**. De instelling gaat in na een herstart van de beheerde OpenCode-server. OpenChamber biedt daarvoor **Toepassen en herstarten** aan.
+
+De tool is niet beschikbaar bij een externe OpenCode-server via `OPENCODE_HOST` of skip-start, en ook niet in de VS Code-extensie. Desktop- en webinstallaties met de door OpenChamber beheerde OpenCode-server ondersteunen haar automatisch.
+
+## Zie ook
+
+- [Geplande taken](/nl/scheduled-tasks/)
+- [Worktree-sessies](/nl/worktrees/)
+- [Sessiedoelen](/nl/session-goals/)
+- [Browserpaneel](/nl/desktop-browser/) voor de OpenChamber Web-tool om pagina's te bekijken en bedienen

@@ -346,8 +346,8 @@ export const registerProjectIconRoutes = (app, dependencies) => {
       });
 
       const filtered = faviconCandidates
-        .filter((entry) => /(^|\/)favicon\.(ico|png|svg|jpg|jpeg|webp)$/i.test(entry.path))
-        .sort((a, b) => a.path.length - b.path.length);
+        .filter((entry) => /(^|\/)favicon\.(ico|png|svg|jpg|jpeg|webp)$/i.test(entry.relativePath))
+        .sort((a, b) => a.relativePath.length - b.relativePath.length);
 
       const selected = filtered[0];
       if (!selected) {

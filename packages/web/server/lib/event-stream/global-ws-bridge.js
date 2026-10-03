@@ -86,6 +86,8 @@ export function createGlobalMessageStreamWsBridge({
     }
   };
 
+  // Browser clients take the events of isolated spaces too: each frame carries its directory,
+  // and a space's directory is one more project directory to the UI.
   const unsubscribeEvent = globalHub.subscribeEvent((event) => {
     const { payload } = event;
     for (const socket of Array.from(clients)) {
@@ -111,7 +113,7 @@ export function createGlobalMessageStreamWsBridge({
         }
       }
     });
-  });
+  }, { spaces: true });
 
   const unsubscribeStatus = globalHub.subscribeStatus((status) => {
     if (status.type === 'connect') {

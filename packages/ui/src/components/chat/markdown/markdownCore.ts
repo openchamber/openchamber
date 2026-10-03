@@ -1,14 +1,24 @@
-import { Marked, marked, type Tokens, type TokenizerAndRendererExtension } from 'marked';
+import { Marked, marked, type MarkedExtension, type Tokens, type TokenizerAndRendererExtension } from 'marked';
 import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
-import DOMPurify from 'dompurify';
+import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isAppLinkUrl } from '@/lib/url';
+import { isSessionDeepLink } from '@/lib/sessionLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { contentFingerprint, HighlightResultCache, utf16Bytes } from './highlightResultCache';
 import { highlightCodeInWorker } from './markdown-worker';
-import { escapeRawMarkdownHtml, isLocalFileUrl, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
+import { streamTuning } from '../lib/streamTuningFlags';
+import {
+  DOCUMENT_HTML_ALLOWED_ATTR,
+  DOCUMENT_HTML_ALLOWED_TAGS,
+  escapeRawMarkdownHtml,
+  isGeneratedMarkdownClass,
+  isLocalFileUrl,
+  isSafeSrcset,
+  MARKDOWN_FORBIDDEN_TAGS,
+} from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -23,6 +33,13 @@ export interface MarkdownImageCandidate {
 }
 
 export type MarkdownImageMode = 'inline' | 'label';
+
+/**
+ * `escape` keeps raw HTML visible as text (assistant output and every other
+ * untrusted surface). `sanitize` renders it through a GitHub-like allowlist and
+ * is for documents a user opens to read, such as a README in the Files preview.
+ */
+export type MarkdownRawHtmlMode = 'escape' | 'sanitize';
 
 export const MAX_MARKDOWN_IMAGE_COUNT = 12;
 
@@ -103,7 +120,14 @@ const getMarkdownImageCandidates = (markdown: string): MarkdownImageCandidate[] 
     return cached.candidates;
   }
 
-  const candidates = scanMarkdownImageCandidates(markdown);
+  let candidates: MarkdownImageCandidate[];
+  try {
+    candidates = scanMarkdownImageCandidates(markdown);
+  } catch {
+    // Image discovery is optional; a malformed message must not hide the chat
+    // or prevent discovery in the other messages.
+    return [];
+  }
   const bytes = estimateMarkdownImageCandidateCacheEntryBytes(markdown, candidates);
   if (bytes > MARKDOWN_IMAGE_CANDIDATE_CACHE_MAX_ENTRY_BYTES) return candidates;
 
@@ -185,6 +209,9 @@ type MarkdownBlock = {
   // very large open fence falls back to plain text until it closes, keeping
   // the repeated worker re-tokenization bounded.
   highlight: boolean;
+  // Set when the lexer already failed on this text. Parsing runs the same
+  // lexer and would fail the same way, after the same cost.
+  plainText?: true;
 };
 
 const hasReferenceDefinitions = (text: string): boolean =>
@@ -209,13 +236,102 @@ const hasOpenFence = (raw: string): boolean => {
 // pass when the fence closes.
 const OPEN_FENCE_HIGHLIGHT_LINE_LIMIT = 300;
 
+// A single `~` between word characters would be escaped only while streaming,
+// so the settled message could render differently.
+const HEAL_OPTIONS = { linkMode: 'text-only', singleTilde: false } as const;
+
+// remend 1.4 turns an unfinished image into one pointing at this placeholder,
+// which our sanitizer drops, leaving a broken image while the message streams.
+// Earlier versions removed the unfinished image, so the source is cut at its
+// `![` and the rest healed again; closers for markers opened inside its alt
+// text go with it. remend may rewrite the alt text, so the cut uses the last
+// `![` of the source rather than matching the alt. A tail of many nested
+// unfinished images stops after a few cuts and streams unhealed.
+const INCOMPLETE_IMAGE_TARGET = '](streamdown:incomplete-image)';
+const INCOMPLETE_IMAGE_MAX_CUTS = 4;
+
 const heal = (text: string): string => {
   try {
-    return remend(text, { linkMode: 'text-only' });
+    let source = text;
+    let healed = remend(source, HEAL_OPTIONS);
+    for (let cuts = 0; healed.includes(INCOMPLETE_IMAGE_TARGET); cuts += 1) {
+      const start = source.lastIndexOf('![');
+      if (start < 0 || cuts === INCOMPLETE_IMAGE_MAX_CUTS) return text;
+      source = source.slice(0, start);
+      healed = remend(source, HEAL_OPTIONS);
+    }
+    return healed;
   } catch {
     return text;
   }
 };
+
+// While a fence stays open, every new line of code used to lex the whole
+// message again, although nothing above the fence can change and everything
+// after its opening line is code. The previous split is remembered, and text
+// that only extends an open trailing fence reuses it: the blocks above are
+// returned as they were and the fence block grows by the added text. Anything
+// that could change the split (a closing fence, a reference definition) takes
+// the full path. A few entries cover parts that stream side by side.
+type LiveSplit = { text: string; blocks: MarkdownBlock[]; fence: { char: string; size: number } };
+
+const LIVE_SPLIT_MEMO_MAX = 4;
+let liveSplits: LiveSplit[] = [];
+const liveSplitStats = { reused: 0, lexed: 0 };
+
+const openFenceMarker = (raw: string): { char: string; size: number } | null => {
+  if (!hasOpenFence(raw)) return null;
+  const mark = raw.match(/^[ \t]{0,3}(`{3,}|~{3,})/)?.[1];
+  return mark ? { char: mark[0] ?? '`', size: mark.length } : null;
+};
+
+const rememberLiveSplit = (text: string, blocks: MarkdownBlock[]): void => {
+  // The lexer path keeps a text with reference definitions as one healed
+  // block; extending it as a plain fence would render it differently.
+  if (hasReferenceDefinitions(text)) return;
+  const last = blocks.at(-1);
+  const fence = last ? openFenceMarker(last.raw) : null;
+  // The fence block has to be exactly the tail of the text for the added text
+  // to belong to it, and a block the lexer failed on is not a split at all.
+  if (!last || last.plainText || !fence || !text.endsWith(last.raw)) return;
+  liveSplits = [{ text, blocks, fence }, ...liveSplits.filter((entry) => entry.text !== text)].slice(0, LIVE_SPLIT_MEMO_MAX);
+};
+
+const extendOpenFence = (text: string): MarkdownBlock[] | null => {
+  let base: LiveSplit | undefined;
+  for (const entry of liveSplits) {
+    if (entry.text.length >= text.length || (base && base.text.length >= entry.text.length)) continue;
+    if (text.startsWith(entry.text)) base = entry;
+  }
+  if (!base) return null;
+
+  // Judge whole lines: the line the previous text ended in may only now have
+  // become a closing fence or a reference definition.
+  const region = text.slice(base.text.lastIndexOf('\n') + 1);
+  if (hasReferenceDefinitions(region)) return null;
+  const closing = new RegExp(`^[\\t ]{0,3}${base.fence.char}{${base.fence.size},}[\\t ]*$`, 'm');
+  if (closing.test(region)) return null;
+
+  const previous = base.blocks.at(-1);
+  if (!previous) return null;
+  const raw = previous.raw + text.slice(base.text.length);
+  const blocks = [
+    ...base.blocks.slice(0, -1),
+    { raw, src: raw, mode: 'live' as const, highlight: raw.split('\n').length <= OPEN_FENCE_HIGHLIGHT_LINE_LIMIT },
+  ];
+  liveSplits = [{ text, blocks, fence: base.fence }, ...liveSplits.filter((entry) => entry !== base)].slice(0, LIVE_SPLIT_MEMO_MAX);
+  return blocks;
+};
+
+/** Test-only: forget remembered splits and read how many were reused. */
+export const resetLiveSplitMemoForTests = (): void => {
+  liveSplits = [];
+  liveSplitStats.reused = 0;
+  liveSplitStats.lexed = 0;
+};
+export const __liveSplitStatsForTests = () => ({ ...liveSplitStats });
+export const __streamBlocksForTests = (text: string, live: boolean): Array<Pick<MarkdownBlock, 'raw' | 'src' | 'mode' | 'highlight'>> =>
+  streamBlocks(text, live).map(({ raw, src, mode, highlight }) => ({ raw, src, mode, highlight }));
 
 /**
  * Split markdown into render blocks. When not streaming, returns a single
@@ -225,6 +341,18 @@ const heal = (text: string): string => {
  */
 const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
   if (!live) return [{ raw: text, src: text, mode: 'full', highlight: true }];
+  const extended = streamTuning.reuseLiveSplit() ? extendOpenFence(text) : null;
+  if (extended) {
+    liveSplitStats.reused += 1;
+    return extended;
+  }
+  liveSplitStats.lexed += 1;
+  const blocks = lexStreamBlocks(text);
+  rememberLiveSplit(text, blocks);
+  return blocks;
+};
+
+const lexStreamBlocks = (text: string): MarkdownBlock[] => {
   // Reference-style links/footnotes span multiple tokens (definition elsewhere);
   // keep them as a single block so per-block parsing doesn't break the refs.
   if (hasReferenceDefinitions(text)) {
@@ -235,7 +363,7 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
   try {
     tokens = inlineImageParser.lexer(text);
   } catch {
-    return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
+    return [{ raw: text, src: text, mode: 'live', highlight: true, plainText: true }];
   }
 
   let tail = -1;
@@ -262,7 +390,10 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
       && raw.split('\n').length <= OPEN_FENCE_HIGHLIGHT_LINE_LIMIT;
     blocks.push({
       raw,
-      src: openFence ? raw : heal(raw),
+      // A finished block renders from its own text, as it will once the
+      // message settles: healing it made, say, a ``` mentioned mid-sentence
+      // show as code until the stream ended.
+      src: openFence || !isLast ? raw : heal(raw),
       mode: isLast ? 'live' : 'full',
       highlight: !openFence || openFenceHighlight,
     });
@@ -296,13 +427,32 @@ const renderKatex = (math: string, raw: string, displayMode: boolean): string =>
   }
 };
 
-const inlineMathExtension = {
+type MathRender = (math: string, raw: string, displayMode: boolean) => string;
+
+// KaTeX output depends on inline styles, which the raw-HTML allowlist pass of
+// `sanitize` mode drops. There the extensions leave a placeholder that
+// survives the pass and becomes KaTeX after it; a placeholder written by the
+// author only renders more math.
+const MATH_PLACEHOLDER_RE = /<span data-oc-math="(inline|display)">([^<]*)<\/span>/g;
+
+const renderMathPlaceholder: MathRender = (math, _raw, displayMode) =>
+  `<span data-oc-math="${displayMode ? 'display' : 'inline'}">${escapeAttr(math)}</span>`;
+
+const renderMathPlaceholders = (html: string): string => html.replace(
+  MATH_PLACEHOLDER_RE,
+  (_placeholder, mode: string, escapedMath: string) => {
+    const math = unescapeHtml(escapedMath);
+    return renderKatex(math, escapeAttr(math), mode === 'display');
+  },
+);
+
+// No `start` hint: marked's inline text rule already stops before every
+// backslash, so a hint could not end a text run any earlier, and searching the
+// rest of the paragraph for `\(` at every inline token costs the square of its
+// length (openchamber/openchamber#4204).
+const createInlineMathExtension = (render: MathRender) => ({
   name: 'inlineMath',
   level: 'inline' as const,
-  start(src: string) {
-    const index = src.indexOf('\\(');
-    return index < 0 ? undefined : index;
-  },
   tokenizer(src: string): MathToken | undefined {
     const match = /^\\\(([\s\S]+?)\\\)/.exec(src);
     if (!match) return undefined;
@@ -310,9 +460,9 @@ const inlineMathExtension = {
   },
   renderer(token: Tokens.Generic) {
     const math = token as MathToken;
-    return renderKatex(math.text, math.raw, false);
+    return render(math.text, math.raw, false);
   },
-};
+});
 
 // `\[` is display math in LaTeX, but it is also CommonMark's escape for a
 // literal `[`, and prose escapes brackets far more often than it opens display
@@ -323,11 +473,40 @@ const inlineMathExtension = {
 const BLOCK_MATH_RE = /^[ \t]*\\\[([\s\S]+?)\\\][ \t]*(?:\n|$)/;
 const BLOCK_MATH_LINE_START_RE = /(?:^|\n)[ \t]*\\\[/;
 
-const blockMathExtension = {
+// Characters the `start` searches below have read, so tests can show that a
+// large message costs work in proportion to its length.
+const scanStats = { linkify: 0, blockStart: 0 };
+
+/** Test-only: reset and read the `start` search counters. */
+export const resetScanStatsForTests = (): void => {
+  scanStats.linkify = 0;
+  scanStats.blockStart = 0;
+};
+export const __scanStatsForTests = () => ({ ...scanStats });
+
+// A block extension's `start` only tells marked where to end the paragraph it
+// is lexing. marked's paragraph never continues past a line that is empty or
+// holds only spaces (a tab-only line does not end it), so the search stops
+// there. Searching the whole rest made every block rescan the message, which
+// cost seconds on messages of thousands of short paragraphs
+// (openchamber/openchamber#4204). A hint beyond that line only flagged the
+// paragraph as cut, which let marked glue a following stray line such as an
+// empty `1. ` onto it; that no longer depends on text further down. User
+// messages turn every newline into "  \n", so their empty lines hold two
+// spaces. The newline before the ending line stays in, so patterns that end at
+// a line break still match.
+const untilParagraphEnd = (src: string): string => {
+  const end = /\n *\n/.exec(src);
+  const window = end ? src.slice(0, end.index + 1) : src;
+  scanStats.blockStart += window.length;
+  return window;
+};
+
+const createBlockMathExtension = (render: MathRender) => ({
   name: 'blockMath',
   level: 'block' as const,
   start(src: string) {
-    const match = BLOCK_MATH_LINE_START_RE.exec(src);
+    const match = BLOCK_MATH_LINE_START_RE.exec(untilParagraphEnd(src));
     // Point marked at the `\[` itself, never at the newline before it.
     return match ? match.index + match[0].length - 2 : undefined;
   },
@@ -338,9 +517,9 @@ const blockMathExtension = {
   },
   renderer(token: Tokens.Generic) {
     const math = token as MathToken;
-    return renderKatex(math.text, math.raw, true);
+    return render(math.text, math.raw, true);
   },
-};
+});
 
 // Own the entire disclosure token, including an unfinished streamed body. HTML
 // token boundaries otherwise split it at blank lines and close the DOM early.
@@ -348,7 +527,7 @@ const detailsExtension: TokenizerAndRendererExtension = {
   name: 'disclosure',
   level: 'block',
   start(src) {
-    const match = /(?:^|\n) {0,3}<details(?:\s|>)/i.exec(src);
+    const match = /(?:^|\n) {0,3}<details(?:\s|>)/i.exec(untilParagraphEnd(src));
     return match ? match.index + (match[0].startsWith('\n') ? 1 : 0) : undefined;
   },
   tokenizer(src) {
@@ -413,38 +592,89 @@ const detailsExtension: TokenizerAndRendererExtension = {
 // marked's GFM autolink swallows CJK punctuation after a bare URL, so switch
 // to marked-linkify-it, which treats Unicode punctuation as a URL boundary.
 // Plain CJK characters right after a URL are still consumed, matching GitHub.
-const createParser = (imageMode: MarkdownImageMode) => new Marked().use(
-  markedLinkifyIt({ fuzzyLink: false }),
-  {
-    gfm: true,
-    breaks: false,
-    extensions: [inlineMathExtension, blockMathExtension, detailsExtension],
-  renderer: {
-    // Assistant output is untrusted. Markdown constructs still render as HTML,
-    // but raw HTML must remain visible text so it cannot introduce active DOM
-    // such as stylesheets or positioned overlays into the application shell.
-    html({ text }) {
-      return escapeRawMarkdownHtml(text);
-    },
-    link({ href, title, text }) {
-      const target = href ?? '';
-      const agentName = parseAgentHref(target);
-      if (agentName) {
-        return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
-      }
-      const skillName = parseSkillHref(target);
-      if (skillName) {
-        return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
-      }
-      const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-      return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
-    },
-    ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
-  },
+//
+// marked-linkify-it searches all the remaining inline text at every inline
+// token, so one long paragraph costs the square of its length: a 250 KB data
+// dump without blank lines froze the window for most of a minute
+// (openchamber/openchamber#4204). While more than LINKIFY_SOURCE_LIMIT
+// characters of inline text remain, it steps aside and marked's own GFM
+// autolink, which is linear, links bare URLs without the CJK boundary.
+export const LINKIFY_SOURCE_LIMIT = 5_000;
+
+// A pasted session or message link (`openchamber://session/<id>?message=<id>`)
+// becomes a link too; other `openchamber:` routes stay text.
+const OPENCHAMBER_SESSION_LINK_TAIL = /^\/\/session\/[A-Za-z0-9_-]{1,128}(?:\?message=[A-Za-z0-9_-]{1,128})?/;
+const OPENCHAMBER_SESSION_LINK_SCHEMA = {
+  // Length of the link after `openchamber:` at `pos`, or 0 when it is not one.
+  validate: (text: string, pos: number): number => OPENCHAMBER_SESSION_LINK_TAIL.exec(text.slice(pos))?.[0].length ?? 0,
+};
+
+const boundedLinkify = (): MarkedExtension => ({
+  extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { 'openchamber:': OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
+    if (!('tokenizer' in extension)) return extension;
+    const { start, tokenizer } = extension;
+    return {
+      ...extension,
+      start(src) {
+        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        scanStats.linkify += src.length;
+        return start?.call(this, src);
+      },
+      tokenizer(src, tokens) {
+        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        scanStats.linkify += src.length;
+        return tokenizer.call(this, src, tokens);
+      },
+    };
+  }),
 });
 
-const inlineImageParser = createParser('inline');
-const imageLabelParser = createParser('label');
+const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
+  const renderMath = rawHtml === 'sanitize' ? renderMathPlaceholder : renderKatex;
+  return new Marked().use(
+    boundedLinkify(),
+    {
+      gfm: true,
+      breaks: false,
+      extensions: [createInlineMathExtension(renderMath), createBlockMathExtension(renderMath), detailsExtension],
+      renderer: {
+        // Assistant output is untrusted. Markdown constructs still render as
+        // HTML, but raw HTML must remain visible text so it cannot introduce
+        // active DOM such as stylesheets or positioned overlays into the
+        // application shell. Documents keep it for the allowlist pass instead.
+        html({ text }) {
+          return rawHtml === 'sanitize' ? text : escapeRawMarkdownHtml(text);
+        },
+        link({ href, title, tokens }) {
+          // The link text goes through the inline renderer, so an image
+          // inside it (a badge) renders and raw HTML in it follows the mode.
+          const text = this.parser.parseInline(tokens);
+          const target = href ?? '';
+          const agentName = parseAgentHref(target);
+          if (agentName) {
+            return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
+          }
+          const skillName = parseSkillHref(target);
+          if (skillName) {
+            return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
+          }
+          const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
+          return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        },
+        ...(imageMode === 'label' ? { image: renderMarkdownImageLabel } : {}),
+      },
+    },
+  );
+};
+
+const inlineImageParser = createParser('inline', 'escape');
+const imageLabelParser = createParser('label', 'escape');
+const documentParser = createParser('inline', 'sanitize');
+
+const parserFor = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode) => {
+  if (rawHtml === 'sanitize') return documentParser;
+  return imageMode === 'label' ? imageLabelParser : inlineImageParser;
+};
 
 // ---------------------------------------------------------------------------
 // Math (KaTeX) — post-process the parsed HTML, skipping code/pre/kbd content
@@ -490,7 +720,8 @@ const renderMathInText = (text: string): string =>
     if (display !== undefined) {
       return renderKatex(unescapeHtml(display), match, true);
     }
-    if (inline !== undefined && !DOLLAR_AMOUNT_RE.test(inline)) {
+    // The quote guard also runs on the decoded text, where `&quot;` is a quote.
+    if (inline !== undefined && !unescapeHtml(inline).includes('"') && !DOLLAR_AMOUNT_RE.test(inline)) {
       return renderKatex(unescapeHtml(inline), match, false);
     }
     return match;
@@ -594,28 +825,98 @@ const SANITIZE_CONFIG = {
 
 let sanitizeHookInstalled = false;
 
-const ensureSanitizeHook = (): void => {
-  if (sanitizeHookInstalled) return;
-  if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
-  sanitizeHookInstalled = true;
-  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+const installAnchorHooks = (purifier: DOMPurifyInstance): void => {
+  purifier.addHook('uponSanitizeAttribute', (node, data) => {
     if (!(node instanceof HTMLAnchorElement) || data.attrName !== 'href') return;
     // DOMPurify's default URI policy strips custom application schemes
     // (obsidian://, vscode://, ...). Keep them for anchors; dangerous schemes
     // stay excluded via isAppLinkUrl and clicks go through confirmation.
-    if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue)) data.forceKeepAttr = true;
+    // OpenChamber's own scheme is kept only for session links, which the chat
+    // opens in place; pairing and other privileged routes stay stripped. VS
+    // Code keeps them as text: its sessions live on its own OpenCode.
+    const keepSessionLink = isSessionDeepLink(data.attrValue) && !isVSCodeRuntime();
+    if (isLocalFileUrl(data.attrValue) || isAppLinkUrl(data.attrValue) || keepSessionLink) {
+      data.forceKeepAttr = true;
+    }
   });
-  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  purifier.addHook('afterSanitizeAttributes', (node) => {
     if (!(node instanceof HTMLAnchorElement)) return;
     if (node.target !== '_blank') return;
     node.setAttribute('rel', 'noopener noreferrer');
   });
 };
 
+const ensureSanitizeHook = (): void => {
+  if (sanitizeHookInstalled) return;
+  if (typeof window === 'undefined' || !DOMPurify.isSupported) return;
+  sanitizeHookInstalled = true;
+  installAnchorHooks(DOMPurify);
+};
+
 const sanitize = (html: string): string => {
   if (!DOMPurify.isSupported) return '';
   ensureSanitizeHook();
   return DOMPurify.sanitize(html, SANITIZE_CONFIG) as unknown as string;
+};
+
+// Raw HTML in a document passes this allowlist right after marked, before
+// highlighting and KaTeX add the inline styles the final pass has to allow.
+// It runs on its own DOMPurify instance so its hooks never touch that pass.
+const DOCUMENT_HTML_SANITIZE_CONFIG = {
+  ALLOWED_TAGS: [...DOCUMENT_HTML_ALLOWED_TAGS],
+  ALLOWED_ATTR: [...DOCUMENT_HTML_ALLOWED_ATTR],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+};
+
+let documentPurifier: DOMPurifyInstance | null = null;
+
+const getDocumentPurifier = (): DOMPurifyInstance | null => {
+  if (documentPurifier) return documentPurifier;
+  // The default instance is unsupported exactly when there is no window.
+  if (!DOMPurify.isSupported) return null;
+  const purifier = DOMPurify(window);
+  if (!purifier.isSupported) return null;
+  installAnchorHooks(purifier);
+  purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+    if (data.attrName === 'class' && !isGeneratedMarkdownClass(data.attrValue)) data.keepAttr = false;
+    if (data.attrName === 'srcset' && !isSafeSrcset(data.attrValue)) data.keepAttr = false;
+  });
+  purifier.addHook('afterSanitizeAttributes', (node) => {
+    // Only the task-list checkbox marked renders; any other input is a form control.
+    if (node.tagName === 'INPUT') {
+      if (node.getAttribute('type') !== 'checkbox') {
+        node.remove();
+        return;
+      }
+      node.setAttribute('disabled', '');
+    }
+    // Tailwind preflight gives images `height: auto`, which beats the height
+    // attribute, so `<img height="28">` would render at its natural size.
+    // With a width too (a GitHub screenshot: 1920 x 906) the image is scaled
+    // down to the column, so the pair becomes a ratio rather than a fixed
+    // height that would stretch it.
+    const height = node.tagName === 'IMG' ? node.getAttribute('height')?.trim() : undefined;
+    const width = node.tagName === 'IMG' ? node.getAttribute('width')?.trim() : undefined;
+    if (height && /^\d+$/.test(height)) {
+      node.setAttribute('style', width && /^\d+$/.test(width) && Number(height) > 0
+        ? `aspect-ratio:${width}/${height}`
+        : `height:${height}px`);
+    }
+  });
+  documentPurifier = purifier;
+  return purifier;
+};
+
+const sanitizeDocumentHtml = (html: string): string => {
+  const purifier = getDocumentPurifier();
+  if (!purifier) return '';
+  return renderMathPlaceholders(purifier.sanitize(html, DOCUMENT_HTML_SANITIZE_CONFIG));
+};
+
+const parseMarkdown = (text: string, imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode): string => {
+  const parsed = parserFor(imageMode, rawHtml).parse(text, { async: false });
+  return rawHtml === 'sanitize' ? sanitizeDocumentHtml(parsed) : parsed;
 };
 
 
@@ -661,7 +962,8 @@ const markdownBlockCacheKey = (
   mode: MarkdownBlock['mode'],
   highlight: boolean,
   imageMode: MarkdownImageMode,
-): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}`;
+  rawHtml: MarkdownRawHtmlMode,
+): string => `${contentHash}:${mode}:${highlight ? 1 : 0}:${imageMode}${rawHtml === 'sanitize' ? ':html' : ''}`;
 
 /** Test-only: clear the render HTML caches between cases. */
 export const resetMarkdownHtmlCacheForTests = (): void => {
@@ -683,6 +985,7 @@ export const __markdownBlockCacheSizesForTests = (): { full: number; live: numbe
 export const getCachedMarkdownBlocks = (
   text: string,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): RenderedBlock[] | null => {
   if (!text) return [];
 
@@ -690,7 +993,7 @@ export const getCachedMarkdownBlocks = (
   const rendered: RenderedBlock[] = [];
   for (const block of blocks) {
     const contentHash = contentFingerprint(block.raw);
-    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+    const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode, rawHtml);
     const html = fullBlockCache.get(id);
     if (html === undefined) return null;
     rendered.push({ id, html });
@@ -698,9 +1001,22 @@ export const getCachedMarkdownBlocks = (
   return rendered;
 };
 
-const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): Promise<string> => {
-  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
-  const parsed = await Promise.resolve(parser.parse(block.src));
+const renderPlainText = (text: string): string =>
+  `<div class="whitespace-pre-wrap break-words">${escapeRawMarkdownHtml(text)}</div>`;
+
+const parseBlock = async (
+  block: MarkdownBlock,
+  imageMode: MarkdownImageMode,
+  rawHtml: MarkdownRawHtmlMode,
+): Promise<string> => {
+  if (block.plainText) return renderPlainText(block.raw);
+  let parsed: string;
+  try {
+    parsed = parseMarkdown(block.src, imageMode, rawHtml);
+  } catch {
+    // Preserve the original source, not the syntax repaired for streaming.
+    return renderPlainText(block.raw);
+  }
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
   return sanitize(highlighted);
@@ -718,10 +1034,15 @@ const parseBlock = async (block: MarkdownBlock, imageMode: MarkdownImageMode): P
 export const renderMarkdownSync = (
   text: string,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): string => {
   if (!text) return '';
-  const parser = imageMode === 'label' ? imageLabelParser : inlineImageParser;
-  const parsed = parser.parse(text) as string;
+  let parsed: string;
+  try {
+    parsed = parseMarkdown(text, imageMode, rawHtml);
+  } catch {
+    return renderPlainText(text);
+  }
   const withMath = renderMathExpressions(parsed);
   return sanitize(withMath);
 };
@@ -747,6 +1068,7 @@ export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
   imageMode: MarkdownImageMode = 'inline',
+  rawHtml: MarkdownRawHtmlMode = 'escape',
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
@@ -754,13 +1076,13 @@ export const renderMarkdownBlocks = async (
   return Promise.all(
     blocks.map(async (block) => {
       const contentHash = contentFingerprint(block.raw);
-      const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode);
+      const id = markdownBlockCacheKey(contentHash, block.mode, block.highlight, imageMode, rawHtml);
       const cache = cacheForMode(block.mode);
       const cached = cache.get(id);
       if (cached !== undefined) {
         return { id, html: cached };
       }
-      const html = await parseBlock(block, imageMode);
+      const html = await parseBlock(block, imageMode, rawHtml);
       cache.set(id, html, utf16Bytes(id) + utf16Bytes(html));
       return { id, html };
     }),

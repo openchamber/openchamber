@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { GUEST_SCROLLBAR_CSS } from '@openchamber/sdk';
+import { GUEST_SCROLLBAR_CSS, guestFramePolicy } from '@openchamber/sdk';
 
 import { loadRelayGuestDocument } from './relay-document';
 
@@ -37,6 +37,22 @@ describe('relay guest documents', () => {
     const document = new DOMParser().parseFromString(html, 'text/html');
     expect(document.querySelector('[data-openchamber-guest-styles]')?.textContent).toBe(GUEST_SCROLLBAR_CSS);
     expect(requests).toEqual([`${prefix}index.html`]);
+  });
+
+  test('locks the relay document off the network before any of its own content', async () => {
+    const assets = new Map<string, Asset>([
+      [`${prefix}index.html`, { type: 'text/html', body: '<!doctype html><html><head><script>1</script></head><body></body></html>' }],
+    ]);
+    const html = await loadRelayGuestDocument('demo', 'index.html', loader(assets, []));
+    const first = new DOMParser().parseFromString(html, 'text/html').head.firstElementChild;
+    expect(first?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
+    expect(first?.getAttribute('content')).toBe(guestFramePolicy(null));
+    expect(first?.getAttribute('content')).toContain("connect-src 'none'");
+
+    const approved = await loadRelayGuestDocument('demo', 'index.html', loader(assets, []), ['https://fonts.example.com']);
+    const policy = new DOMParser().parseFromString(approved, 'text/html').head.firstElementChild?.getAttribute('content');
+    expect(policy).toBe(guestFramePolicy(null, ['https://fonts.example.com']));
+    expect(policy).toContain('connect-src https://fonts.example.com');
   });
 
   test('embeds scripts, nested CSS, images and fonts without requesting host UI paths', async () => {

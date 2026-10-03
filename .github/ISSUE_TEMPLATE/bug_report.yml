@@ -1,27 +1,50 @@
 name: Bug report
-description: Report something broken
+description: Something is broken, crashes, or behaves differently than before.
 title: "[Bug] "
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
+        This form is for bugs. Feature ideas go to [Ideas discussions](https://github.com/openchamber/openchamber/discussions/categories/ideas), questions to [Q&A discussions](https://github.com/openchamber/openchamber/discussions/categories/q-a).
+
         Please write in English. The maintainers skim every report, and one in another language waits until someone translates it. Machine translation is fine.
 
   - type: checkboxes
-    id: language
+    id: checks
     attributes:
-      label: Language
+      label: Before submitting
       options:
-        - label: This report is written in English
+        - label: I searched existing issues and didn't find this bug
+          required: true
+        - label: This is one bug. Other problems get their own issue.
           required: true
 
   - type: textarea
-    id: what
+    id: steps
     attributes:
-      label: What's wrong? Maybe some steps to reproduce.
-      description: What happened and what you expected.
-      placeholder: "Expected … but got …"
+      label: Steps to reproduce
+      description: What you did, step by step. If it only happens sometimes, say how often.
+      placeholder: |
+        1. Open a project with ...
+        2. Send a message with ...
+        3. Switch to another session and back
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      placeholder: The reply keeps streaming in the first session.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      placeholder: The reply stops and the session shows as idle.
     validations:
       required: true
 
@@ -30,9 +53,12 @@ body:
     attributes:
       label: Where does it happen?
       options:
-        - Desktop (macOS)
-        - Desktop Web
-        - Mobile (Web/PWA)
+        - Desktop app (macOS)
+        - Desktop app (Windows)
+        - Desktop app (Linux)
+        - Web in a browser
+        - Mobile (web/PWA)
+        - Mobile app (iOS/Android)
         - VS Code extension
         - Not sure
     validations:
@@ -41,11 +67,17 @@ body:
   - type: input
     id: version
     attributes:
-      label: Version
+      label: OpenChamber version
       description: Settings > About shows it.
       placeholder: "e.g. 1.23.0"
     validations:
       required: true
+
+  - type: input
+    id: opencode
+    attributes:
+      label: OpenCode version and model/provider (if relevant)
+      placeholder: "e.g. 2.0.3, zen / claude-sonnet-5"
 
   - type: textarea
     id: screenshots
@@ -57,5 +89,5 @@ body:
     id: logs
     attributes:
       label: Logs (optional)
-      description: "Paste relevant logs."
+      description: "Paste relevant logs. Remove tokens, keys and anything personal."
       render: shell

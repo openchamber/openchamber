@@ -1,11 +1,14 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.24.1",
+  "version": "2.1.0",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
   "type": "module",
-  "main": "./dist-bundle/main.mjs",
+  "main": "./dist-bundle/entry.mjs",
+  "opencodeCli": {
+    "version": "2.0.22"
+  },
   "dependencies": {
     "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
@@ -42,14 +45,14 @@
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "rebuild:native": "node ./scripts/rebuild-native.mjs",
     "test": "node ../../scripts/run-isolated-tests.mjs .",
-    "test:architecture": "node --test ./startup-url-selection.test.mjs ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs ./scripts/ensure-electron.test.mjs",
+    "test:architecture": "node --test ./startup-url-selection.test.mjs ./menu-locales.test.mjs ./scripts/target-architecture.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs ./scripts/ensure-electron.test.mjs",
     "test:updater": "node --test ./updater-capability.test.mjs ./updater-channel.test.mjs ./updater-check.test.mjs ./updater-feed.test.mjs ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "node --test ./linux-autostart.test.mjs && node ./scripts/smoke-linux-app-discovery.mjs && node ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:opencode-cli && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
-    "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
+    "type-check": "node --check ./entry.mjs && node --check ./early-startup.mjs && node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
   },
   "build": {
@@ -59,7 +62,9 @@
       "node_modules/@openchamber/web/server/built-in-extensions/**/*"
     ],
     "files": [
+      "dist-bundle/entry.mjs",
       "dist-bundle/main.mjs",
+      "dist-bundle/early-startup.mjs",
       "preload.mjs"
     ],
     "extraResources": [
@@ -96,7 +101,8 @@
       "icon": "resources/icons/icon.icns",
       "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "extendInfo": {
-        "CFBundleIconName": "AppIcon"
+        "CFBundleIconName": "AppIcon",
+        "NSLocalNetworkUsageDescription": "OpenChamber needs access to devices and services on your local network."
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

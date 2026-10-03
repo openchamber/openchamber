@@ -604,6 +604,8 @@ export const VoiceSettings: React.FC = () => {
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
+    const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
+    const setTtsChunkedMode = useConfigStore((state) => state.setTtsChunkedMode);
     // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
@@ -627,6 +629,8 @@ export const VoiceSettings: React.FC = () => {
     const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [isOpenAIAvailable, setIsOpenAIAvailable] = useState(false);
+    // The server refuses cloud speech and remote custom servers; this only explains why.
+    const [voiceEnterpriseMode, setVoiceEnterpriseMode] = useState(false);
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
     const [openaiPreviewAudio, setOpenaiPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
@@ -720,7 +724,9 @@ export const VoiceSettings: React.FC = () => {
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
-                setIsOpenAIAvailable(hasServerKey || hasSettingsKey);
+                const enterpriseMode = data.enterpriseMode === true;
+                setVoiceEnterpriseMode(enterpriseMode);
+                setIsOpenAIAvailable(!enterpriseMode && (hasServerKey || hasSettingsKey));
             } catch {
                 setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
             }
@@ -983,6 +989,10 @@ export const VoiceSettings: React.FC = () => {
                                 ]}
                             />
                         </SettingsControlGroup>
+
+                            {voiceEnterpriseMode && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <p className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.enterpriseMode')}</p>
+                            )}
 
                             {/* OpenAI API Key */}
                             {voiceProvider === 'openai' && (
@@ -1249,6 +1259,16 @@ export const VoiceSettings: React.FC = () => {
                                     ]}
                                 />
                             </SettingsControlGroup>
+
+                            {(voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <SettingsCheckboxRow
+                                    checked={ttsChunkedMode}
+                                    onChange={setTtsChunkedMode}
+                                    label={t('settings.voice.page.field.ttsChunkedMode')}
+                                    ariaLabel={t('settings.voice.page.field.ttsChunkedModeAria')}
+                                    info={t('settings.voice.page.tooltip.ttsChunked')}
+                                />
+                            )}
                     </>
                 )}
             </SettingsSection>

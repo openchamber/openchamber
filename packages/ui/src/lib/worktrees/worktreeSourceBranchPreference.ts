@@ -1,64 +1,18 @@
-export const LAST_WORKTREE_SOURCE_BRANCH_KEY = 'oc:lastWorktreeSourceBranch';
-
-export interface WorktreeSourceBranchPreferenceArgs {
+export interface WorktreeSourceBranchArgs {
   branches: readonly string[];
-  savedSourceBranch: string | null;
+  /** The branch checked out at the project root, when known. */
   rootBranch: string | null;
 }
 
-export interface WorktreeSourceBranchPreferenceResult {
-  sourceBranch: string;
-  shouldClearSavedSourceBranch: boolean;
-}
-
-export interface WorktreeSourceBranchPersistArgs {
-  mode: 'new-branch' | 'existing-branch';
-  sourceBranch: string;
-  linkedPr: boolean;
-  selectedBranch: string;
-}
-
-export const resolveWorktreeSourceBranchToPersist = ({
-  mode,
-  sourceBranch,
-  linkedPr,
-  selectedBranch,
-}: WorktreeSourceBranchPersistArgs): string | null => {
-  if (mode === 'existing-branch') {
-    return selectedBranch || null;
-  }
-
-  if (linkedPr) {
-    return null;
-  }
-
-  return sourceBranch || null;
-};
-
-export const resolveWorktreeSourceBranchPreference = ({
-  branches,
-  savedSourceBranch,
-  rootBranch,
-}: WorktreeSourceBranchPreferenceArgs): WorktreeSourceBranchPreferenceResult => {
-  const savedSourceBranchIsValid = Boolean(savedSourceBranch && branches.includes(savedSourceBranch));
-
-  if (savedSourceBranchIsValid && savedSourceBranch) {
-    return {
-      sourceBranch: savedSourceBranch,
-      shouldClearSavedSourceBranch: false,
-    };
-  }
-
-  const sourceBranch = rootBranch && branches.includes(rootBranch)
-    ? rootBranch
-    : branches.includes('main')
-      ? 'main'
-      : branches.includes('master')
-        ? 'master'
-        : branches[0] ?? '';
-
-  return {
-    sourceBranch,
-    shouldClearSavedSourceBranch: Boolean(savedSourceBranch),
-  };
+/**
+ * The branch a new worktree starts from unless the user picks another: the one
+ * the project root is on, else `main`, `master`, or the first branch. An earlier
+ * pick is deliberately not remembered: it silently based later worktrees on a
+ * branch that had moved on.
+ */
+export const resolveDefaultSourceBranch = ({ branches, rootBranch }: WorktreeSourceBranchArgs): string => {
+  if (rootBranch && branches.includes(rootBranch)) return rootBranch;
+  if (branches.includes('main')) return 'main';
+  if (branches.includes('master')) return 'master';
+  return branches[0] ?? '';
 };

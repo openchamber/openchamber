@@ -23,6 +23,8 @@ Las acciones viven en un menú del encabezado de la app. Haz clic en una y OpenC
 
 Activa **auto-open URL** para una acción que inicia un servidor. OpenChamber observa la salida en busca de una dirección local y se ofrece a abrirla; consulta [Vista previa y servidores de desarrollo](/es/preview/). En el escritorio también puedes enrutarla a través de un reenvío de puertos SSH.
 
+Si el servidor tiene una dirección fija, ponla en el campo URL de la acción. `{worktree}` y `{branch}` insertan la copia de trabajo donde se ejecuta la acción, así una sola acción sirve en cada worktree. Con [portless](https://github.com/vercel-labs/portless), `https://{worktree}.myapp.localhost` abre `https://auth.myapp.localhost` en un worktree de `feature/auth` y `https://myapp.localhost` en la copia principal. Puede que no necesites el campo: cuando portless imprime su dirección, OpenChamber abre esa en lugar del puerto que hay detrás. En un escritorio conectado a una instancia remota abre el puerto, porque solo los puertos de loopback pasan por el túnel hasta la máquina remota.
+
 ## Relacionado
 
 - [Configuración en el repositorio](/repository-config/) — guarda acciones y comandos de configuración en el repositorio para todo el equipo

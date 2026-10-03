@@ -1,8 +1,7 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
-import type { Event } from '@opencode-ai/sdk/v2/client';
+import type { Session } from '@/lib/opencode/model';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { deriveRecentSessions } from '../recent/activitySections';
@@ -112,6 +111,17 @@ describe('projectSidebarActiveSessions', () => {
     }).map((entry) => entry.id)).toEqual(['unknown', 'empty']);
   });
 
+  test('retains unknown active full-app records when topology directories are known', () => {
+    const restored = { ...session('restored', '/deleted/worktrees/feature'), time: { created: 1, updated: 1 } };
+
+    expect(projectSidebarActiveSessions({
+      globalActiveSessions: [restored],
+      liveSessions: [],
+      knownDirectories: new Set(['/workspace/known']),
+      isVSCode: false,
+    }).map((entry) => entry.id)).toEqual(['restored']);
+  });
+
   test('keeps archived sessions despite directory filtering', () => {
     const archived = session('archived', '/workspace/unknown');
     archived.time.archived = 1;
@@ -213,6 +223,19 @@ describe('projectSidebarCollection', () => {
     })).toEqual([]);
   });
 
+  test('keeps a canonical managed chat visible when the server root uses different home casing', () => {
+    const managed = session('canonical-chat', '/HOME/.config/openchamber/chats/day/session-a');
+    const project = session('project', '/workspace/a');
+    const projection = buildSidebarSessionProjection({
+      globalActiveSessions: [managed, project], liveSessions: [],
+      knownDirectories: new Set(['/workspace/a']), isVSCode: false,
+      pinnedSessionIds: new Set(), sessionOrderRanks: new Map(),
+    });
+    expect(projection.chatSessions.map(entry => entry.id)).toEqual(['canonical-chat']);
+    expect(projection.projectSessions.map(entry => entry.id)).toEqual(['project']);
+    expect(projection.orderedSessions.map(entry => entry.id)).toContain('canonical-chat');
+  });
+
   test('excludes a /btw fork before project ownership and restores it when the marker is removed', () => {
     const fork = {
       ...session('fork', '/home/.config/openchamber/chats/2026-08-24/session-fork'),
@@ -295,22 +318,20 @@ describe('useRecentSessionCollection', () => {
       expect(renderedIds).toEqual([]);
 
       await act(async () => {
-        // SAFETY: This fixture matches the SDK event shape consumed by the status event reducer.
         applyGlobalSessionStatusEvent('/workspace/a', {
           type: 'session.status',
           properties: { sessionID: 'old-root', status: { type: 'busy' } },
-        } as Event);
+        });
       });
       expect(renderedIds).toEqual(['old-root']);
       const activeRenderCount = renderCount;
       const activeDeriveOperationCount = timeReadCount;
 
       await act(async () => {
-        // SAFETY: This fixture matches the SDK event shape consumed by the status event reducer.
         applyGlobalSessionStatusEvent('/other-workspace', {
           type: 'session.status',
-          properties: { sessionID: 'old-root', status: { type: 'retry', attempt: 2, message: 'waiting' } },
-        } as Event);
+          properties: { sessionID: 'old-root', status: { type: 'retry', attempt: 2, message: 'waiting', next: 0 } },
+        });
       });
       expect(renderCount).toBe(activeRenderCount);
       expect(timeReadCount).toBe(activeDeriveOperationCount);
@@ -402,6 +423,10 @@ describe('buildActiveSessionNode', () => {
 });
 
 const originalHomeInfo = opencodeClient.getFilesystemHomeInfo;
-opencodeClient.getFilesystemHomeInfo = async () => ({ home: '/home' });
+opencodeClient.getFilesystemHomeInfo = async () => ({
+  home: '/home',
+  canonicalChatsRoot: '/HOME/.config/openchamber/chats',
+  canonicalLegacyChatsRoot: '/HOME/.config/openchamber/chats',
+});
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;

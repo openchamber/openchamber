@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Part, UserMessage } from "@opencode-ai/sdk/v2";
+import type { AssistantMessage, Message, Part } from "@/lib/opencode/model";
 import type { SessionContextUsage } from "../types/sessionTypes";
 
 type TokenBreakdown = {
@@ -56,9 +56,12 @@ export type ContextFillMessage = {
     id?: string;
     role?: string;
     tokens?: TokenBreakdown;
-    /** `true` on the assistant record of a compaction. User messages carry their diff summary here. */
-    summary?: AssistantMessage['summary'] | UserMessage['summary'];
-    finish?: AssistantMessage['finish'];
+    /**
+     * Compaction records carry OpenCode's lifecycle for the summarizing turn
+     * here. Widened to `string` so a whole `Message` (a shell record reports its
+     * own statuses) still satisfies this reader.
+     */
+    status?: string;
     error?: AssistantMessage['error'];
 };
 
@@ -77,21 +80,20 @@ type LatestContextFill =
  * finished compaction yields `compacted` instead of falling back to an older,
  * pre-compaction response. A compaction still running or one that failed has
  * not changed the window, so it is skipped and the previous reading stands.
- * "Finished" is OpenCode's own rule for a completed compaction
- * (`summary && finish && !error`): an overflowing compaction request gets
- * `time.completed` before its `error`, so the timestamp alone would briefly
- * report a failed compaction as done.
+ * OpenCode v2 records a compaction as its own `compaction` message carrying
+ * that lifecycle in `status`, so "finished" is `status === 'completed'` with
+ * no error rather than the v1 `summary && finish && !error` heuristic.
  */
 export const findLatestContextFill = (messages: readonly ContextFillMessage[]): LatestContextFill | null => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         const message = messages[index];
-        if (message?.role !== 'assistant') continue;
 
-        if (message.summary === true) {
-            const finished = Boolean(message.finish) && !message.error;
-            if (finished) return { state: 'compacted', index };
+        if (message?.role === 'compaction') {
+            if (message.status === 'completed' && !message.error) return { state: 'compacted', index };
             continue;
         }
+
+        if (message?.role !== 'assistant') continue;
 
         const totalTokens = contextTokensFromBreakdown(message.tokens);
         if (totalTokens > 0) return { state: 'measured', index, totalTokens };

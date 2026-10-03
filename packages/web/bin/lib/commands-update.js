@@ -92,13 +92,16 @@ function createUpdateCommand({ importFromFilePath, packageManagerPath, serveComm
     }
 
     const pm = detectPackageManager();
-    const result = executeUpdate(pm, { silent: isJsonMode(options) || isQuietMode(options) });
+    const result = executeUpdate(pm, {
+      targetVersion: updateInfo.version,
+      silent: isJsonMode(options) || isQuietMode(options),
+    });
     if (!result.success) {
-      updateSpin?.error('Update failed');
+      updateSpin?.error(result.error || 'Update failed');
       if (showOutput) {
         clackOutro('update failed');
       }
-      throw new Error(`Update failed with exit code ${result.exitCode}`);
+      throw new Error(result.error || `Update failed with exit code ${result.exitCode}`);
     }
 
     if (runningInstances.length > 0) {

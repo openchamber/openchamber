@@ -17,7 +17,7 @@ export const openApplyPatchFileInEditor = ({
     isVSCode: boolean;
 }): boolean => {
     const filePath = getApplyPatchFilePath(file);
-    if (!filePath || file.type === 'delete') {
+    if (!filePath || file.status === 'deleted' || file.type === 'delete') {
         return false;
     }
 

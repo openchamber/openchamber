@@ -20,8 +20,9 @@ for (const mode of ['timeout', 'malformed', 'abort', 'ready']) {
     process.env.OPENCHAMBER_MANAGED_PROCESS_REGISTRY = registry;
     const descendant = `process.on('SIGTERM', () => {}); require('node:fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n'); process.stdout.write('ready'); setInterval(() => {}, 1000);`;
     let message = '';
-    if (mode === 'malformed') message = 'opencode server listening without URL\n';
-    if (mode === 'ready') message = 'opencode server listening on http://127.0.0.1:45678\n';
+    // OpenCode 2.x prints the line without the `opencode ` prefix.
+    if (mode === 'malformed') message = 'server listening without URL\n';
+    if (mode === 'ready') message = 'server listening on http://127.0.0.1:45678\n';
     const script = `
       require('node:fs').appendFileSync(${JSON.stringify(marker)}, process.pid + '\\n');
       const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: ['ignore', 'pipe', 'ignore'] });

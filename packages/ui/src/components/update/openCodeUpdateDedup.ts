@@ -87,14 +87,20 @@ export interface OpenCodeUpgradeStatusLike {
 /**
  * Pulls the candidate version out of an `/api/opencode/upgrade-status` JSON
  * payload. Returns `''` when the payload is missing the field, has the wrong
- * type, or reports `available !== true`.
+ * type, or reports `available !== true`. Whether OpenChamber can install it is
+ * a separate question (`isOpenCodeUpgradeSupported`): a newer OpenCode is
+ * worth announcing even when the user has to run the update themselves.
  */
 export const resolveOpenCodeUpgradeStatusVersion = (
   status: OpenCodeUpgradeStatusLike | null | undefined,
 ): string => {
   if (!status) return '';
-  if (status.upgrade?.supported !== true) return '';
   if (status.available !== true) return '';
   if (typeof status.latestVersion !== 'string') return '';
   return status.latestVersion.trim();
 };
+
+/** True only when the runtime says it can run the upgrade on the user's behalf. */
+export const isOpenCodeUpgradeSupported = (
+  status: OpenCodeUpgradeStatusLike | null | undefined,
+): boolean => status?.upgrade?.supported === true;

@@ -1,3 +1,4 @@
+import { spaceApiPath } from '@/lib/spaces/space-route';
 import { z } from 'zod';
 import type {
   GitStatus,
@@ -19,6 +20,8 @@ import type {
   CreateGitWorktreePayload,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  GitWorktreeSnapshotPayload,
+  GitWorktreeSnapshotResult,
   GitWorktreeValidationResult,
   CreateGitCommitOptions,
   GitCommitResult,
@@ -140,7 +143,8 @@ function buildUrl(
   const query: Record<string, string | number | boolean | undefined> = { ...params };
   if (directory) query.directory = directory;
 
-  return getRuntimeUrlResolver().api(path, query);
+  // A directory inside an isolated space addresses that space's git.
+  return getRuntimeUrlResolver().api(spaceApiPath(path, directory), query);
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
@@ -803,6 +807,25 @@ export async function deleteGitWorktree(directory: string, payload: RemoveGitWor
   }
 
   return response.json();
+}
+
+const worktreeSnapshotResultSchema = z.object({
+  ref: z.string(),
+  commit: z.string().min(1),
+  head: z.string().min(1),
+});
+
+export async function snapshotGitWorktree(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult> {
+  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees/snapshot`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to snapshot worktree');
+  }
+  return worktreeSnapshotResultSchema.parse(await response.json());
 }
 
 export async function createGitCommit(

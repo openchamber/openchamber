@@ -8,6 +8,8 @@ import {
   GUEST_ACCOUNT_MAX,
   GUEST_ATTACH_AUTHOR_MAX,
   GUEST_BADGE_MAX,
+  GUEST_FRAME_HEIGHT_MAX,
+  GUEST_COMMIT_SHA,
   GUEST_ITEM_MESSAGE_TEXT_MAX,
   GUEST_ITEM_SESSION_MAX,
   GUEST_RESOLVE_ERROR_MAX,
@@ -44,6 +46,12 @@ import {
   type GuestMessage,
   type HostMessage,
 } from './contract.ts';
+import { GUEST_FILE_EDITOR_CONTENT_MAX, GUEST_FILE_EDITOR_VERSION_MAX } from './file-editor.ts';
+
+// Structured clone recreates a frame's Uint8Array in the receiving realm, so
+// `instanceof` holds for bytes that crossed postMessage.
+const fileBytesSchema = z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength <= GUEST_FILE_EDITOR_CONTENT_MAX);
+const fileTextSchema = z.string().max(GUEST_FILE_EDITOR_CONTENT_MAX);
 
 const envelope = {
   channel: z.literal(OPENCHAMBER_SDK_CHANNEL),
@@ -212,7 +220,7 @@ const readyPayloadSchema = z.object({
   locale: z.string().min(1),
   directory: z.string().nullable(),
   session: sessionSnapshotSchema,
-  surface: z.enum(['panel', 'dialog', 'page', 'background']),
+  surface: z.enum(['panel', 'dialog', 'page', 'background', 'status', 'file']),
   connection: guestConnectionSchema,
   settings: guestSettingsSchema,
   item: guestItemSchema,
@@ -326,6 +334,37 @@ export const hostMessageSchema = z.union([
     type: z.literal('action'),
     id: z.string().min(1),
     payload: z.union([messageItemSchema, sessionItemSchema]),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('file-open'),
+    payload: z.union([
+      z.object({
+        path: z.string().min(1).max(4096),
+        name: z.string().min(1).max(1024),
+        readOnly: z.boolean(),
+        encoding: z.literal('text'),
+        content: fileTextSchema,
+      }),
+      z.object({
+        path: z.string().min(1).max(4096),
+        name: z.string().min(1).max(1024),
+        readOnly: z.boolean(),
+        encoding: z.literal('binary'),
+        bytes: fileBytesSchema,
+      }),
+    ]),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('file-snapshot'),
+    id: z.string().min(1),
+    payload: z.object({ purpose: z.enum(['save', 'handoff']) }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('file-saved'),
+    payload: z.object({ version: z.string().max(GUEST_FILE_EDITOR_VERSION_MAX) }),
   }),
 ]);
 
@@ -515,6 +554,22 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     ...envelope,
+    type: z.literal('open-commit'),
+    id: z.string().min(1),
+    payload: z.object({
+      sha: z.string().regex(GUEST_COMMIT_SHA),
+    }),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('resize'),
+    id: z.string().min(1),
+    payload: z.object({
+      height: z.number().int().min(0).max(GUEST_FRAME_HEIGHT_MAX),
+    }),
+  }),
+  z.object({
+    ...envelope,
     type: z.literal('resolve-result'),
     id: z.string().min(1),
     payload: z.union([
@@ -522,6 +577,27 @@ export const guestMessageSchema = z.discriminatedUnion('type', [
       z.object({ error: z.string().trim().min(1).max(GUEST_RESOLVE_ERROR_MAX) }),
     ]),
   }),
+  z.object({
+    ...envelope,
+    type: z.literal('file-snapshot-result'),
+    id: z.string().min(1),
+    payload: z.union([
+      z.object({
+        snapshot: z.union([
+          z.object({ content: fileTextSchema, version: z.string().max(GUEST_FILE_EDITOR_VERSION_MAX) }),
+          z.object({ bytes: fileBytesSchema, version: z.string().max(GUEST_FILE_EDITOR_VERSION_MAX) }),
+        ]),
+      }),
+      z.object({ error: z.string().trim().min(1).max(GUEST_RESOLVE_ERROR_MAX) }),
+    ]),
+  }),
+  z.object({
+    ...envelope,
+    type: z.literal('file-change'),
+    payload: z.object({ dirty: z.boolean(), edited: z.boolean() }),
+  }),
+  z.object({ ...envelope, type: z.literal('file-save') }),
+  z.object({ ...envelope, type: z.literal('file-unsupported') }),
 ]);
 
 type ParsedHostMessage = z.infer<typeof hostMessageSchema>;

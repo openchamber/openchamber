@@ -1,0 +1,31 @@
+---
+title: Projectacties
+description: Bewaar veelgebruikte opdrachten en start ze met één klik.
+---
+
+# Projectacties
+
+Een projectactie is een shell-opdracht die u één keer opslaat en daarna met een klik uitvoert, bijvoorbeeld uw ontwikkelserver, een build of een testrun. Elk project heeft zijn eigen lijst. U stelt ze in bij **Instellingen → Projecten → Projectacties**.
+
+## Een actie toevoegen
+
+1. Open **Instellingen → Projecten** en zoek **Projectacties**.
+2. Voeg een actie toe, geef haar een naam, kies een pictogram en voer de opdracht in.
+3. Sla de actie op.
+
+U kunt een actie beperken tot bepaalde besturingssystemen als de opdracht alleen daar bruikbaar is.
+
+## Een actie uitvoeren
+
+Acties staan in een menu bovenaan de app. Klik op een actie en OpenChamber voert haar uit in een terminal in uw projectmap. De app opent de terminalweergave zodat u de uitvoer kunt volgen. Stop de actie vanuit hetzelfde menu.
+
+## Een ontwikkelserver automatisch openen
+
+Schakel **URL automatisch openen** in voor een actie die een server start. OpenChamber zoekt in de uitvoer naar een lokaal adres en biedt aan dat te openen. Zie [Voorbeeldweergave en ontwikkelservers](/nl/preview/). Op de desktop kunt u het adres ook via SSH-poortdoorsturing bereiken.
+
+Heeft de server een vast adres, vul het dan in het URL-veld van de actie in. `{worktree}` en `{branch}` vullen de checkout in waarin de actie draait, zodat één actie in elke worktree werkt. Met [portless](https://github.com/vercel-labs/portless) opent `https://{worktree}.myapp.localhost` in een worktree op `feature/auth` het adres `https://auth.myapp.localhost` en in de hoofdcheckout `https://myapp.localhost`. Vaak is het veld niet eens nodig: als portless zijn adres toont, opent OpenChamber dat adres in plaats van de poort erachter. Op een desktop die met een externe instantie is verbonden, opent het in plaats daarvan de poort, omdat alleen loopbackpoorten via de tunnel naar de externe machine gaan.
+
+## Zie ook
+
+- [Repositoryconfiguratie](/nl/repository-config/) om acties en inrichtingsopdrachten met het hele team te delen
+- [Voorbeeldweergave en ontwikkelservers](/nl/preview/) om een draaiende ontwikkelserver binnen OpenChamber te openen

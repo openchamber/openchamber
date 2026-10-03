@@ -3,9 +3,18 @@ import {
   GUEST_CAPABILITIES,
   GUEST_COMMANDS_MAX,
   GUEST_COMMAND_NAME,
+  GUEST_FILE_EDITORS_MAX,
+  GUEST_FILE_EDITOR_PATTERNS_MAX,
+  GUEST_FILE_EDITOR_TITLE_MAX,
+  GUEST_SERVICE_PROVIDES,
+  GUEST_STATUS_SECTION_HEIGHT_MAX,
+  GUEST_STATUS_SECTION_HEIGHT_MIN,
+  GUEST_STATUS_SECTION_TITLE_MAX,
+  GUEST_SURFACE_DOCKS,
   GUEST_TOOLS_MAX,
   GUEST_TOOL_MATCH,
   GUEST_TOOL_OUTPUTS,
+  isFileEditorPattern,
 } from '@openchamber/sdk';
 import { z } from 'zod';
 
@@ -43,6 +52,10 @@ const publicServiceSchema = z.object({
     exec: z.array(z.string().trim().min(1)).optional(),
   }).optional(),
   socketBindings: z.array(publicSocketBindingSchema).optional(),
+  // A role this build does not know (a newer server) drops the field, not the
+  // catalog: every other extension must keep working.
+  provides: z.array(z.enum(GUEST_SERVICE_PROVIDES)).optional().catch(undefined),
+  surface: z.literal(true).optional().catch(undefined),
 });
 
 const guestActionSchema = z.object({
@@ -71,6 +84,14 @@ const guestToolSchema = z.object({
   columns: z.array(z.string().trim().min(1)).optional(),
 });
 
+const guestFileEditorSchema = z.object({
+  id: z.string().regex(PANEL_ID),
+  title: z.string().trim().min(1).max(GUEST_FILE_EDITOR_TITLE_MAX),
+  match: z.array(z.string().refine(isFileEditorPattern)).min(1).max(GUEST_FILE_EDITOR_PATTERNS_MAX),
+  entry: z.string().trim().min(1),
+  content: z.enum(['text', 'binary']).optional(),
+});
+
 export const guestUpdateSchema = z.object({
   version: z.string().trim().min(1).max(64),
 });
@@ -80,22 +101,31 @@ const installedGuestSchema = z.object({
   name: z.string().trim().min(1),
   icon: z.string().trim().min(1),
   entry: z.string().trim().min(1).optional(),
+  /** Edge and thickness beside a shared surface; see `PanelContribution.dock`. */
+  entryDock: z.enum(GUEST_SURFACE_DOCKS).optional(),
+  entrySize: z.number().int().positive().optional(),
   backgroundEntry: z.string().trim().min(1).optional(),
   version: z.string().trim().min(1).max(64).optional(),
   attach: z.union([z.boolean(), z.enum(['panel', 'dialog'])]).optional(),
   attachEntry: z.string().trim().min(1).optional(),
   pageEntry: z.string().trim().min(1).optional(),
   pageTitle: z.string().trim().min(1).max(200).optional(),
+  statusEntry: z.string().trim().min(1).optional(),
+  statusTitle: z.string().trim().min(1).max(GUEST_STATUS_SECTION_TITLE_MAX).optional(),
+  statusHeight: z.number().int().min(GUEST_STATUS_SECTION_HEIGHT_MIN).max(GUEST_STATUS_SECTION_HEIGHT_MAX).optional(),
   integration: publicIntegrationSchema.optional(),
   filesystem: z.array(z.string().trim().min(1)).optional(),
+  origins: z.array(z.string().trim().min(1)).optional(),
   service: publicServiceSchema.optional(),
   actions: z.array(guestActionSchema).max(GUEST_ACTIONS_MAX).optional(),
   commands: z.array(guestCommandSchema).max(GUEST_COMMANDS_MAX).optional(),
   tools: z.array(guestToolSchema).max(GUEST_TOOLS_MAX).optional(),
+  fileEditors: z.array(guestFileEditorSchema).max(GUEST_FILE_EDITORS_MAX).optional(),
   capabilities: z.object({
     requested: z.array(z.enum(GUEST_CAPABILITIES)),
     granted: z.array(z.enum(GUEST_CAPABILITIES)),
   }),
+  enterpriseBlocked: z.array(z.enum(GUEST_CAPABILITIES)).optional(),
   source: z.enum(['bundled', 'path', 'zip', 'git']).optional(),
   path: z.string().nullable().optional(),
   enabled: z.boolean().optional(),

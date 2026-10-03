@@ -89,7 +89,7 @@ Możesz też dodać lokalny plik `.zip` albo link https do repozytorium git lub 
 - `{ "mode": "dialog", "entry": "panel/attach.html" }` otwiera w oknie osobną Twoją stronę, żeby wybór nie musiał dzielić kodu z panelem na pasku bocznym
 - bez tego klucza rozszerzenie nie pojawia się w tym menu
 
-`ctx.surface` ma wartość `panel`, `dialog` lub `page`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
+`ctx.surface` ma wartość `panel`, `dialog`, `page` lub `status`. Kliknięcie dołączonego elementu przekazuje jego dane w `ctx.item`; w pozostałych przypadkach jest to `null`.
 
 `contributes.page: true` udostępnia panel na pełnym ekranie w menu Strony rozszerzeń nad listą sesji. `{ "entry": "panel/page.html", "title": "Board" }` wskazuje osobny HTML i opcjonalny tytuł. `panel.entry` jest wymagane, a izolacja i uprawnienia pozostają te same. Stronę otwiera tylko użytkownik. Przeładowanie, wstrzymanie, usunięcie lub zmiana serwera zamyka ją.
 
@@ -97,7 +97,7 @@ Tablica może używać `host.storage` oraz list projektów, worktree i sesji ze 
 
 `contributes.integration` jest opcjonalne. Dodaje kartę w Ustawienia → Integracje, gdzie użytkownik podłącza konto. Zobacz [Konta i sieć](#konta-i-sieć).
 
-`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie.
+`contributes.service` jest opcjonalne. Deklaruje usługę lokalną (proces, który OpenChamber uruchamia obok rozszerzenia) do rzeczy, do których strona internetowa nie ma dostępu, na przykład socketu Dockera. Ten proces działa z pełnym dostępem użytkownika i bez piaskownicy, dlatego okno zatwierdzania o nim ostrzega; deklaruj taką usługę tylko wtedy, gdy strona nie jest w stanie wykonać tego zadania. Zobacz plik `GUEST_SERVICES.md` w pakiecie. Usługa z `provides: ["browser"]` może też zastąpić przeglądarkę agenta: odpowiada na działania `browser.*` na serwerze, więc agenci przeglądają bez otwartej aplikacji desktopowej, a użytkownik wybiera ją w Ustawienia → Narzędzia OpenChamber. Taka usługa nie potrzebuje panelu.
 
 ## Uprawnienia
 
@@ -110,13 +110,13 @@ Rysowanie panelu i odczyt bieżącej sesji nie wymagają żadnej zgody. Wszystko
 | `files` | odczyt i zapis plików w otwartym projekcie (`readFile`, `writeFile`, `listDir`, `stat` ze ścieżką względną) |
 | `model` | jednorazowe generowanie tekstu za pomocą Small Model użytkownika (`generate`), poza jakąkolwiek sesją |
 
-Cztery kolejne są dodawane automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
+Pięć kolejnych jest dodawanych automatycznie: `network`, gdy deklarujesz `integration`, `service`, gdy deklarujesz `service`, `filesystem`, gdy deklarujesz wzorce `filesystem`, `origins`, gdy deklarujesz `origins`, oraz `conversation`, gdy akcja sesji prosi o wiadomości (zobacz [Akcje, polecenia i odznaka](#akcje-polecenia-i-odznaka)).
 
 Użytkownik widzi pełną listę raz, przy instalacji rozszerzenia, i albo ją zatwierdza, albo usuwa rozszerzenie. Jeśli nowa wersja prosi o więcej, okno pojawia się ponownie. Wywołanie, które wymaga niezatwierdzonego uprawnienia, kończy się błędem `NOT_GRANTED`.
 
 ## Generowanie tekstu
 
-Dzięki uprawnieniu `model` `host.generate` prosi Small Model użytkownika o jednorazową odpowiedź: podsumowanie, tytuł, szkic. Nic nie trafia do sesji, historia nie jest zapisywana, a rozszerzenie nigdy nie wybiera dostawcy. OpenChamber używa tego samego modelu, którego używa do własnej pracy w tle, wybranego w Ustawienia → Sesje → Small Model, albo dobieranego automatycznie spośród dostawców, do których użytkownik jest zalogowany.
+Dzięki uprawnieniu `model` `host.generate` prosi Small Model użytkownika o jednorazową odpowiedź: podsumowanie, tytuł, szkic. Nic nie trafia do sesji, historia nie jest zapisywana, a rozszerzenie nigdy nie wybiera dostawcy. OpenChamber używa tego samego modelu, którego używa do własnej pracy w tle, wybranego w Ustawienia → Sesje → Small Model, albo małego modelu dostawcy, z którym użytkownik akurat pracuje, albo domyślnego modelu z jego konfiguracji OpenCode.
 
 ```ts
 const { text } = await host.generate({
@@ -130,7 +130,19 @@ Gdy żaden model nie jest dostępny, wywołanie kończy się błędem `NO_MODEL`
 
 ## Konta i sieć
 
-Twoja strona działa w sandboxie i nie może sama łączyć się z internetem. Zadeklaruj `integration`, a OpenChamber wykona wywołania za Ciebie przez `host.request`, dołączając token użytkownika. Token nigdy nie trafia do Twojej strony.
+Twoja strona działa w sandboxie i nie może sama łączyć się z siecią: skrypty, style, obrazy, czcionki i multimedia ładują się tylko z Twojego pakietu, a `fetch` sięga tylko do plików Twojego pakietu. Dołącz czcionki i obrazy do pakietu, zamiast ładować je z CDN.
+
+Aby rozmawiać z zewnętrzną usługą, zadeklaruj `integration`, a OpenChamber wykona wywołania za Ciebie przez `host.request`, dołączając token użytkownika. Token nigdy nie trafia do Twojej strony.
+
+Dla wszystkiego innego, czego Twoja strona potrzebuje bezpośrednio, np. czcionek lub obrazów z CDN albo publicznego API, wymień do 8 originów https:
+
+```json
+"origins": ["https://fonts.example.com"]
+```
+
+Użytkownik widzi je w oknie zatwierdzania jako adresy, do których Twoje rozszerzenie może wysyłać dane i z których może je odbierać, i zatwierdza je ponownie, gdy aktualizacja doda nowy. Zatwierdzone originy są otwarte dla `fetch`, obrazów, czcionek, stylów i multimediów, ale nigdy dla skryptów: kod musi być dostarczony w Twoim pakiecie. Origin strony to `null`, więc aby odczytać odpowiedź `fetch`, serwer musi zezwolić na CORS dla tego originu.
+
+W [trybie enterprise](/security/) rozszerzenie z `origins`, `integration` albo `service` instaluje się tylko z repozytorium Git, które administrator umieścił na liście. Jeśli Twoje rozszerzenie może działać bez nich, takie zespoły nadal mogą je zainstalować. Aby tworzyć rozszerzenie na takiej maszynie, poproś administratora o `allowLocalExtensions`, dzięki czemu zainstalujesz je z jego folderu.
 
 - `token`: użytkownik wkleja token API na karcie w Ustawienia → Integracje. `apiOrigin` to jedyny origin, który `request` może wywołać. `account` jest opcjonalne: ścieżka GET i nazwa pola, żeby karta mogła pokazać, kto jest podłączony. `scheme` określa, jak token jest wysyłany; zobacz tabelę poniżej. Sprawdź w dokumentacji API dostawcy, jakiego nagłówka oczekuje.
 - `oauth`: użytkownik wkleja client id, a OpenChamber przeprowadza proces autoryzacji. Wymaga `authorizeUrl`, `tokenUrl` i `apiOrigin`.
@@ -166,6 +178,78 @@ const { entries } = await host.listDir(".");
 ```
 
 Zapisy są atomowe: OpenChamber zapisuje plik tymczasowy i zmienia jego nazwę, więc czytający nigdy nie zobaczy pliku zapisanego do połowy. Pliki są czytane i zapisywane jako tekst UTF-8, do 2 MB.
+
+## Sekcja w Work Status
+
+`contributes.statusSection` dodaje twoją własną sekcję do panelu Work Status obok czatu. Użytkownicy włączają ją, wyłączają i przesuwają na liście sekcji tego panelu, tak jak wbudowane sekcje.
+
+```json
+"statusSection": { "entry": "status/index.html", "title": "Recent commits", "height": 160 }
+```
+
+- `true` używa `panel.entry`.
+- `entry` to osobna strona HTML w twoim folderze. Z nią nie potrzebujesz `panel.entry`, więc rozszerzenie może być tylko tą sekcją, bez ikony na pasku bocznym.
+- `title` zastępuje nazwę panelu w nagłówku sekcji, do 60 znaków.
+- `height` to początkowa wysokość w pikselach, od 24 do 320 (domyślnie 120). Wywołaj [`host.setHeight()`](/sdk/host/), gdy zmieni się rozmiar treści.
+
+Twoja strona widzi `ctx.surface` jako `status`. OpenChamber ładuje ją tylko wtedy, gdy panel Work Status jest widoczny, a twoja sekcja rozwinięta, i zwalnia ją, gdy użytkownik zwinie sekcję, więc nie trzymaj tam niczego, czego nie da się odtworzyć. Rozszerzenie z samą sekcją może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `git-graph-status` to kompletna sekcja.
+
+## Edytor dla twojego typu pliku
+
+`contributes.fileEditors` otwiera pliki w twojej stronie zamiast w edytorze tekstu. Gdy użytkownik otworzy pasujący plik w Files, OpenChamber pokaże tam twój edytor, z tym samym przełącznikiem źródła, przyciskiem pełnego ekranu i przyciskiem zapisu, co wbudowane podglądy.
+
+```json
+"fileEditors": [
+  { "id": "canvas", "title": "Excalidraw", "match": ["*.excalidraw", "*.excalidraw.md"], "entry": "editor/index.html" }
+]
+```
+
+- `match` porównuje tylko nazwy plików, bez rozróżniania wielkości liter. `*` pasuje do dowolnego ciągu znaków, a `?` do jednego znaku. Wzorzec nie może zawierać `/` ani składać się wyłącznie z symboli wieloznacznych.
+- `entry` to strona HTML w twoim folderze. Nie potrzebujesz `panel.entry`, więc rozszerzenie może być tylko edytorem, bez ikony na pasku bocznym.
+- `content` to `"text"` (domyślnie) albo `"binary"`, patrz niżej.
+- Do 8 edytorów na rozszerzenie, każdy z maksymalnie 16 wzorcami.
+
+Plikiem zarządza OpenChamber. Twoja strona nigdy go nie czyta ani nie zapisuje i nie potrzebuje do tego żadnego uprawnienia. OpenChamber przekazuje ci tekst, prosi o zmieniony tekst przy zapisie i obsługuje Cmd/Ctrl+S, automatyczny zapis, pytanie o niezapisane zmiany, końce linii oraz zmiany wprowadzone na dysku:
+
+```ts
+import { connectHost, createFileSaveTracker } from "@openchamber/sdk";
+
+const host = connectHost();
+let tracker = createFileSaveTracker(null);
+
+host.onFileOpen((file) => {
+  if (file.encoding !== "text") return; // edytor tekstu zawsze dostaje tekst
+  load(file.content); // a także file.path, file.name, file.readOnly
+  tracker = createFileSaveTracker(versionOf(currentText()));
+});
+
+// Wywołuj to po każdej zmianie. `edited` wstrzymuje automatyczny zapis, dopóki użytkownik nie przestanie.
+const changed = () => host.reportFileChange(tracker.observe(versionOf(currentText())));
+
+host.onFileSnapshot(() => ({ content: currentText(), version: versionOf(currentText()) }));
+
+// Zmiany wprowadzone w trakcie zapisu przez OpenChamber zostawiają plik niezapisany.
+host.onFileSaved((version) => host.reportFileChange({ dirty: tracker.markSaved(version), edited: false }));
+```
+
+`version` to dowolny krótki ciąg znaków, który zmienia się razem z dokumentem, na przykład hash. Jeśli plik nie nadaje się do otwarcia w twoim edytorze, wywołaj `host.reportFileUnsupported()`, a OpenChamber pokaże jego źródło z komunikatem. Pliki większe niż 20 MB zostają w widoku źródła.
+
+### Pliki binarne
+
+Ustaw `"content": "binary"`, żeby otwierać pliki, które nie są tekstem, na przykład arkusze kalkulacyjne, dokumenty czy obrazy. Twój edytor dostaje bajty pliku i oddaje bajty; cała reszta działa tak samo.
+
+```ts
+host.onFileOpen((file) => {
+  if (file.encoding !== "binary") return;
+  open(file.bytes); // Uint8Array, dokładnie taki jak na dysku
+});
+
+host.onFileSnapshot(() => ({ bytes: currentBytes(), version: versionOf(currentBytes()) }));
+```
+
+Edytor binarny może przejąć każdy plik pasujący do jego wzorców, także te, które OpenChamber sam pokazuje w podglądzie, jak obrazy i pliki PDF. Nie ma widoku źródła, a gdy użytkownik przełącza go na pełny ekran lub z niego wychodzi, mając niezapisane zmiany, OpenChamber najpierw je zapisuje. Odczyt i zapis formatu należy do twojego edytora: OpenChamber zapisuje dokładnie te bajty, które zwrócisz.
+
+Twoja strona widzi `ctx.surface` jako `file`. OpenChamber przeładowuje ją i ponownie przekazuje plik, gdy plik zmieni się na dysku, użytkownik odrzuci zmiany albo edytor przejdzie na pełny ekran lub z niego wyjdzie. Wygrywa pierwsze włączone rozszerzenie z pasującym wzorcem, przed własnymi podglądami OpenChamber. Rozszerzenie z samym edytorem może używać uprawnień, usługi, integracji i plików, ale nie `page`, `attach`, `actions` ani `commands`. Tylko web i desktop. Przykład `checklist-editor` to kompletny edytor.
 
 ## Akcje, polecenia i odznaka
 
@@ -219,7 +303,7 @@ Gdy Twoja wtyczka OpenCode lub serwer MCP dodaje narzędzie, czat pokazuje jego 
 
 `match` to nazwa narzędzia w takiej postaci, w jakiej zgłasza ją OpenCode; `*` na końcu dopasowuje prefiks. `icon` to nazwa ikony Remixicon albo plik `.svg` w Twoim pakiecie, tak jak `panel.icon`. `title` i `subtitle` to szablony nad `input`, `output` i `metadata` wywołania. `output` wybiera sposób renderowania treści: `text`, `json` (drzewo), `markdown`, `code` z `language`, `table` z `columns` (wiersze pochodzą z tablicy wyniku lub z `output.items`) albo `auto` dla domyślnego. Dokładny `match` wygrywa z symbolem wieloznacznym, a przy remisie wygrywa pierwsze zainstalowane rozszerzenie. Żadna zgoda nie jest potrzebna: to zmienia tylko sposób rysowania danych, które już są w czacie.
 
-Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej.
+Rozszerzenie, które tylko stylizuje narzędzia, nie potrzebuje żadnej strony: pomiń `panel.entry`, a nie będzie miało ikony na pasku bocznym, tylko kartę w Ustawienia → Rozszerzenia. Bez strony może deklarować `tools` i nic więcej. Drugi wyjątek to sekcja Work Status lub edytor plików z własnym `entry`, patrz wyżej.
 
 ## Pierwsze linie w panelu
 

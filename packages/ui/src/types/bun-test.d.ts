@@ -63,6 +63,7 @@ declare module "bun:test" {
 
 // Vite asset-query imports need a URL loader when real UI modules run in Bun.
 declare module "bun" {
+  export function gc(force?: boolean): void;
   export function plugin(options: {
     name: string;
     setup(build: {

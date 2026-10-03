@@ -10,10 +10,14 @@ const isAllowedSsePath = (pathname) => {
     || pathname === '/api/notifications/stream';
 };
 
+// The same three sockets of an isolated space, under `/api/spaces/<id>/`, matched by shape.
+const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|event\/ws|global\/event\/ws)$/;
+
 const isAllowedWebSocketPath = (pathname) => {
   return pathname === '/api/event/ws'
     || pathname === '/api/global/event/ws'
-    || pathname === '/api/terminal/ws';
+    || pathname === '/api/terminal/ws'
+    || SPACE_WS_PATH.test(pathname);
 };
 
 const normalizeBaseUrl = (value) => {
@@ -200,6 +204,8 @@ export const attachRealtimeProxy = ({ app, server, getDesktopRuntimeConfig, getU
 
     const upstream = new WebSocket(resolved.target.toString(), {
       headers: resolved.requestHeaders,
+      // ws does not send Origin by default; protected upstreams require it.
+      origin: `${resolved.target.protocol === 'wss:' ? 'https:' : 'http:'}//${resolved.target.host}`,
     });
     const pending = [];
 

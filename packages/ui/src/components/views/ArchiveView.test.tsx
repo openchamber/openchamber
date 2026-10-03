@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 const browser = new Window({ url: 'http://localhost' });
 let root: Root;
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
@@ -19,7 +19,7 @@ const { ArchiveView } = await import('./ArchiveView');
 const initialUI = useUIStore.getState();
 const initialSessions = useGlobalSessionsStore.getState();
 const session = (id: string, title: string, archived = 2): Session => ({
-  id, title, slug: id, projectID: 'project', version: '1', directory: '/workspace',
+  id, title, projectID: 'project', cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, directory: '/workspace',
   time: { created: 1, updated: 1, archived },
 });
 
@@ -75,4 +75,29 @@ test('archive search uses exact IDs and preserves title search and archive membe
   expect(await search('release')).toEqual(['Release notes']);
   expect(await search('releaze')).toEqual(['Release notes']);
   expect(await search('')).toHaveLength(2);
+});
+
+test('the chats of a deleted space are grouped under its name and cannot be restored', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async () => new Response(JSON.stringify({
+    archives: [{ spaceId: 'a1b2c3d4e5f6', name: 'Fix login', directory: '/data/spaces/archive/a1b2c3d4e5f6' }],
+  }), { status: 200 }), originalFetch);
+  try {
+    useGlobalSessionsStore.setState({
+      archivedSessions: [
+        { ...session('ses_space1', 'Agent chat'), directory: '/data/spaces/archive/a1b2c3d4e5f6' },
+        session('ses_mine1', 'My chat'),
+      ],
+      activeSessions: [],
+    });
+    await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const groups = [...document.querySelectorAll('.group\\/dir button[title]')].map((button) => button.textContent);
+    expect(groups.some((label) => label?.startsWith('Fix login'))).toBe(true);
+    expect(document.querySelector('[aria-label="Restore Agent chat"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Restore My chat"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Delete Agent chat"]')).not.toBeNull();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

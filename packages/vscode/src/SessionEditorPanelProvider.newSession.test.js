@@ -85,6 +85,18 @@ describe('SessionEditorPanelProvider.createOrShowNewSession', () => {
     expect(newSessionMessage).toBeUndefined();
     expect(panel.webview.html).toContain('workspaceFolder: "/work/alpha"');
     expect(panel.webview.html).toContain('workspaceFolders: [{"name":"alpha","path":"/work/alpha"}]');
+    expect(panel.webview.html).toContain('initialComposer: null');
+  });
+
+  it('opens the "Run on several models" tab with its draft in parallel mode', () => {
+    createWebviewPanel.mockClear();
+    const provider = createProvider();
+    provider.createOrShowParallelDraft();
+
+    expect(createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(createWebviewPanel.mock.calls[0][1]).toBe('Run on several models');
+    expect(panel.webview.html).toContain('initialComposer: "parallel"');
+    expect(panel.webview.html).toContain('initialSessionId: null');
   });
 
   it('does not open a panel or post a newSession command when no workspace folder is open', () => {

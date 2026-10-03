@@ -6,6 +6,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { ProjectFileSearchHit } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
@@ -14,13 +15,19 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { mentionServerQuery, rankFileMentionResults } from './fileMentionResults';
+import { isFileMissingError } from '@/lib/api/files-errors';
+import {
+  filterStaleRecentFiles,
+  mentionServerQuery,
+  rankFileMentionResults,
+} from './fileMentionResults';
 import { matchesRankQuery, rankByQuery } from '@/lib/search/fuzzySearch';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
   name: string;
+  displayName: string;
   description?: string;
   mode?: string | null;
 };
@@ -63,6 +70,10 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       [projectRoot],
     ),
   );
+  const { files: filesApi } = useRuntimeAPIs();
+  const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const [staleRecentPaths, setStaleRecentPaths] = React.useState<ReadonlySet<string>>(() => new Set());
+  const verifiedPathsRef = React.useRef<Set<string>>(new Set());
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
@@ -85,6 +96,18 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const isMobile = useUIStore((state) => state.isMobile);
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true);
   const normalizedSearchQuery = (searchQuery ?? '').trim();
+
+  React.useEffect(() => {
+    setStaleRecentPaths(new Set());
+    verifiedPathsRef.current.clear();
+  }, [projectRoot]);
+
+  React.useEffect(() => {
+    if (currentDirectory) {
+      useFileSearchStore.getState().invalidateDirectory(currentDirectory);
+    }
+  }, [currentDirectory]);
+
   const recentFiles = React.useMemo(() => {
     if (!projectRoot || !projectTabs) {
       return [] as FileInfo[];
@@ -120,11 +143,69 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
 
     return mapped;
   }, [normalizedSearchQuery, projectRoot, projectTabs]);
+
+  const recentCandidatePathsKey = React.useMemo(
+    () => recentFiles.map((file) => file.path).join('\n'),
+    [recentFiles],
+  );
+
+  React.useEffect(() => {
+    if (!projectRoot || !filesApi?.statFile || recentCandidatePathsKey.length === 0) {
+      return;
+    }
+
+    const candidatePaths = recentCandidatePathsKey.split('\n').filter(Boolean);
+    const unverifiedCandidates = candidatePaths.filter((path) => !verifiedPathsRef.current.has(path));
+    if (unverifiedCandidates.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all(
+      unverifiedCandidates.map(async (filePath) => {
+        try {
+          const stat = await filesApi.statFile?.(filePath, { directory: projectRoot });
+          if (cancelled) return;
+          verifiedPathsRef.current.add(filePath);
+          if (stat && !stat.isFile) {
+            setStaleRecentPaths((prev) => {
+              if (prev.has(filePath)) return prev;
+              const next = new Set(prev);
+              next.add(filePath);
+              return next;
+            });
+            removeOpenPathsByPrefix(projectRoot, filePath);
+          }
+        } catch (error) {
+          if (cancelled) return;
+          verifiedPathsRef.current.add(filePath);
+          if (isFileMissingError(error)) {
+            setStaleRecentPaths((prev) => {
+              if (prev.has(filePath)) return prev;
+              const next = new Set(prev);
+              next.add(filePath);
+              return next;
+            });
+            removeOpenPathsByPrefix(projectRoot, filePath);
+          }
+        }
+      }),
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filesApi, projectRoot, recentCandidatePathsKey, removeOpenPathsByPrefix]);
+
   const visibleAgents = React.useMemo(
     () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, 2),
     [agents, normalizedSearchQuery.length],
   );
-  const visibleRecentFiles = recentFiles;
+  const visibleRecentFiles = React.useMemo(
+    () => filterStaleRecentFiles(recentFiles, staleRecentPaths),
+    [recentFiles, staleRecentPaths],
+  );
   const visibleResults = React.useMemo(
     () => rankFileMentionResults(files, directories, normalizedSearchQuery, 20),
     [files, directories, normalizedSearchQuery],
@@ -175,7 +256,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
           return;
         }
 
-        const recentSet = new Set(recentFiles.map((file) => file.path));
+        const recentSet = new Set(visibleRecentFiles.map((file) => file.path));
         setFiles(hits.filter((hit) => !recentSet.has(hit.path)));
       })
       .catch(() => {
@@ -200,7 +281,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         setLoading(false);
       }
     };
-  }, [currentDirectory, debouncedQuery, recentFiles, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedQuery, visibleRecentFiles, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
@@ -259,18 +340,19 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       .filter((agent) => agent.mode && agent.mode !== 'primary')
       .map((agent) => ({
         name: agent.name,
+        displayName: agent.displayName,
         description: agent.description,
         mode: agent.mode,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-    setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.description]));
+    setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]));
   }, [getVisibleAgents, searchQuery]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
     setOverflowMap({});
     setMarqueeDurations({});
-  }, [visibleResults, visibleRecentFiles.length, visibleAgents.length]);
+  }, [visibleResults, visibleRecentFiles, visibleAgents.length]);
 
   React.useEffect(() => {
     selectedIndexRef.current = selectedIndex;

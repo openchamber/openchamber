@@ -1,14 +1,15 @@
-import type { Event, PermissionRequest, QuestionRequest, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SyncEvent } from "@/lib/opencode/events"
+import type { FormRequest, PermissionRequest, SessionStatus } from "@/lib/opencode/model"
 import type { State } from "./types"
 
 export type DirectoryRecoverySource = { getState: () => State }
 
-type RecoveryObserver = (event: Event) => void
+type RecoveryObserver = (event: SyncEvent) => void
 const observers = new WeakMap<DirectoryRecoverySource, Set<RecoveryObserver>>()
 
 // Only in-flight reads retain events. Even a repeated busy event that produces
 // no store publication must supersede an older HTTP snapshot.
-export function recordDirectoryRecoveryEvent(source: DirectoryRecoverySource, event: Event): void {
+export function recordDirectoryRecoveryEvent(source: DirectoryRecoverySource, event: SyncEvent): void {
   const listeners = observers.get(source)
   if (listeners) for (const listener of listeners) listener(event)
 }
@@ -32,9 +33,9 @@ async function withRecoveryObserver<T>(
   }
 }
 
-function removedSessionID(event: Event): string | undefined {
-  if (event.type === "session.deleted") return event.properties.info?.id ?? event.properties.sessionID
-  if (event.type === "session.updated" && event.properties.info.time.archived) return event.properties.info.id
+function removedSessionID(event: SyncEvent): string | undefined {
+  if (event.type === "session.deleted") return event.properties.sessionID
+  if (event.type === "session.patched" && event.properties.patch.time?.archived) return event.properties.sessionID
 }
 
 export function readDirectoryStatusSnapshot(
@@ -77,7 +78,7 @@ function readBlockingSnapshot<T extends BlockingRequest>(
   source: DirectoryRecoverySource,
   currentGroups: () => Record<string, T[]>,
   read: () => Promise<T[]>,
-  mutation: (event: Event) => BlockingMutation<T> | undefined,
+  mutation: (event: SyncEvent) => BlockingMutation<T> | undefined,
 ): Promise<Record<string, T[]>> {
   const before = indexRequests(currentGroups())
   const changes = new Map<string, T | null>()
@@ -115,11 +116,11 @@ export const readDirectoryPermissionSnapshot = (source: DirectoryRecoverySource,
   })
 )
 
-export const readDirectoryQuestionSnapshot = (source: DirectoryRecoverySource, read: () => Promise<QuestionRequest[]>) => (
-  readBlockingSnapshot(source, () => source.getState().question, read, (event) => {
-    if (event.type === "question.asked") return { id: event.properties.id, request: event.properties }
-    if (event.type === "question.replied" || event.type === "question.rejected") {
-      return { id: event.properties.requestID, request: null }
+export const readDirectoryFormSnapshot = (source: DirectoryRecoverySource, read: () => Promise<FormRequest[]>) => (
+  readBlockingSnapshot(source, () => source.getState().form, read, (event) => {
+    if (event.type === "form.created") return { id: event.properties.form.id, request: event.properties.form }
+    if (event.type === "form.settled") {
+      return { id: event.properties.formID, request: null }
     }
   })
 )

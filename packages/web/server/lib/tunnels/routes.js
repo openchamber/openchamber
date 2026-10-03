@@ -1,3 +1,9 @@
+import { isEnterpriseMode } from '../enterprise-mode.js';
+
+// Tunnel providers terminate TLS at their edge and see every request in plain
+// text, so enterprise mode refuses them outright.
+const TUNNEL_BLOCKED_ERROR = 'External tunnels are not available in enterprise mode. Pair devices on your network or through your own relay instead.';
+
 export const createTunnelRoutesRuntime = (dependencies) => {
   const {
     crypto,
@@ -5,6 +11,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     tunnelService,
     tunnelProviderRegistry,
     tunnelAuthController,
+    hasUiPassword,
     readSettingsFromDiskMigrated,
     readManagedRemoteTunnelConfigFromDisk,
     normalizeTunnelProvider,
@@ -74,6 +81,13 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     selectedPresetId,
     selectedPresetName,
   }) => {
+    // Every tunnel start passes here: the Settings button and `--tunnel` at startup.
+    if (isEnterpriseMode()) {
+      throw Object.assign(new Error(TUNNEL_BLOCKED_ERROR), { code: 'enterprise_mode' });
+    }
+    if (!hasUiPassword) {
+      throw new Error('A UI password is required before starting a public tunnel. Restart OpenChamber with --ui-password.');
+    }
     if (provider === TUNNEL_PROVIDER_CLOUDFLARE && mode === TUNNEL_MODE_MANAGED_REMOTE) {
       setRuntimeManagedRemoteTunnelHostname(hostname);
       setRuntimeManagedRemoteTunnelToken(token);
@@ -351,6 +365,7 @@ export const createTunnelRoutesRuntime = (dependencies) => {
         if (!publicUrl) {
           return res.json({
             active: false,
+            enterpriseMode: isEnterpriseMode(),
             url: null,
             mode: normalizedMode,
             provider,
@@ -445,6 +460,12 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     });
 
     app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+      if (isEnterpriseMode()) {
+        return res.status(403).json({ ok: false, code: 'enterprise_mode', error: TUNNEL_BLOCKED_ERROR });
+      }
+      if (!hasUiPassword) {
+        return res.status(403).json({ ok: false, code: 'ui_password_required', error: 'A UI password is required before starting a public tunnel. Restart OpenChamber with --ui-password.' });
+      }
       try {
         const settings = await readSettingsFromDiskMigrated();
         if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {

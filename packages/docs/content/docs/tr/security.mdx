@@ -36,6 +36,157 @@ Passkey'ler geçerli parolaya bağlıdır. Parolayı değiştirir ya da kaldır�
 - Bir genel URL gerekiyorsa, internete bir port açmak yerine bir [tunnel](/tunnels/) ya da özel ağ, örneğin VPN, kullanın.
 - OpenChamber'ı kendi HTTPS sunucunuzun arkasına koyuyorsanız [Reverse Proxy](/reverse-proxy/) sayfasına bakın.
 
+## Kurumsal mod
+
+Ekibiniz konuşma içeriğini yalnızca OpenCode'da yapılandırdığınız model sağlayıcılarına gönderebiliyorsa, kurumsal modu açın. Bunun iki yolu var ve biri yeterli.
+
+### Makinede bir politika dosyası
+
+Yönettiğiniz dizüstü bilgisayarlarda kullanmanız gereken yol budur. Yalnızca bir yöneticinin yazabildiği bir klasöre `policy.json` adlı bir dosya koyun:
+
+| Sistem | Yol |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+Yol, OpenChamber'ın nasıl kurulduğuna bağlı değildir. Masaüstü uygulaması, npm ile başlatılan web sunucusu, CLI ve VS Code eklentisi aynı dosyayı okur. Dosyayı cihaz yönetim aracınızla (Jamf, Intune ve benzerleri) dağıtabilirsiniz. Docker'daki bir sunucu için dosyayı Linux yoluna bağlayın.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Yalnızca `enterpriseMode` gereklidir. `organization`, Ayarlar'da "Acme tarafından yönetiliyor." olarak görünür; böylece kararı kimin verdiği bilinir. `relayUrl` ve `jev` kendi relay'inizi ve kendi Jev uç noktanızı sabitler, `allowNetworkAccess` diğer cihazların OpenChamber'a ağ üzerinden erişmesine izin verir, `allowedExtensions` ise güvendiğiniz eklenti depolarını listeler. Hepsi aşağıda anlatılıyor.
+
+- Bir kullanıcının Ayarlar'da ya da ortamda yaptığı hiçbir ayar, dosyanın açtığı şeyi kapatamaz.
+- Dosya kurumsal modu açtığında yalnızca dosya karar verir. Aşağıdaki relay, Jev ve ağ erişimi ortam değişkenleri yok sayılır, çünkü kullanıcı bunları kendisi ayarlayabilir.
+- Dosya varsa ama okunamıyorsa ya da geçerli bir JSON değilse, kurumsal mod açık kalır ve hiçbir şey sabitlenmez. Ayarlar, politikanın okunamadığını gösterir. Bozuk bir dosya korumayı asla sessizce kaldırmaz.
+- Değişiklikler yeniden başlatmadan uygulanır.
+- OpenChamber kullanıcı olarak çalışır, bu yüzden kullanıcı dosyayı okuyabilir. Dosyaya bir API anahtarı koymadan önce bunu göz önünde bulundurun.
+
+### Bir ortam değişkeni
+
+Ortamı sizin kontrol ettiğiniz bir sunucuda ya da container'da bu yeterlidir:
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+Dizüstü bilgisayarda bu daha zayıf bir kilittir: masaüstü uygulaması değişkeni oturum açma kabuğunun profilinden (örneğin `~/.zshrc`) okur ve kullanıcı bu dosyayı düzenleyebilir. Orada politika dosyasını kullanın.
+
+Değişkenle birlikte relay, Jev, ağ erişimi ve izin verilen eklentiler de kendi değişkenlerinden gelir: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (virgülle ayrılmış depo URL'leri) ve `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. Docker'da ağ erişimi değişkenine ihtiyacınız olacak, çünkü sunucunun container dışından gelen bağlantıları da dinlemesi gerekir.
+
+### OpenCode CLI'yi sabitlemek
+
+Makinelerinizde OpenCode zaten kuruluysa ve OpenChamber'ın bu kurulumu kullanmasını istiyorsanız, yolunu politika dosyasına yazın. Kurumsal mod açık olsun ya da olmasın çalışır.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber, OpenCode'u yalnızca bu yoldan başlatır. Ayarlar'daki yolu, `OPENCODE_BINARY` değişkenini ve masaüstü uygulamasıyla gelen kopyayı yok sayar; o kopya diskte kalır ama kullanılmaz.
+- Bu yolda çalıştırılabilir bir şey yoksa OpenChamber başka bir kopyaya geçmez. Yolu belirten bir hatayla durur.
+- Ayarlar yolu salt okunur gösterir ve yöneticinin belirlediğini not eder.
+- OpenChamber sabitlenmiş bir OpenCode'u kurmaz, güncellemez ve yeni sürümleri duyurmaz. Güncellemeler sizin dağıtımınızla gelir.
+- CLI, OpenCode 2.x olmalı ve en az OpenChamber'ın istediği sürümde bulunmalı. Daha eskiyse OpenChamber "OpenCode'u güncelle" ekranında kalır.
+- `opencode` (Windows'ta `opencode.exe`) içeren bir klasör de olur. Bunun için ortam değişkeni yok, çünkü kullanıcı bunları kendisi ayarlayabilir.
+
+### Örnekler
+
+Politika dosyasını bir Mac'e koymak için Terminal'de yönetici olarak şunu çalıştırın:
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+Linux'ta da aynısı geçerli, yalnızca klasör `/etc/openchamber` olur.
+
+Windows'ta PowerShell'i yönetici olarak çalıştırın. Son satır, klasöre yalnızca yöneticilerin ve sistemin yazabilmesini sağlar:
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+Docker'daki bir sunucu için bunu `docker-compose.yml` dosyasının `environment` bölümüne ekleyin. Container kendi dışından gelen bağlantıları da dinlediği için ağ erişimine izin verilmesi gerekir:
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+İşe yaradığını görmek için Ayarlar → Provider'lar sayfasını açın: en üstte kuruluşunuzun adıyla bir kurumsal mod bildirimi görünür.
+
+### Neler değişir
+
+- Model sağlayıcıları yalnızca OpenCode yapılandırmanızdan gelir. OpenChamber'da sağlayıcı bağlamak, bir sağlayıcıda oturum açmak, anahtar eklemek ya da özel sağlayıcı oluşturmak kapalıdır; var olan hesapları kaldırmak veya aralarında geçiş yapmak çalışmaya devam eder. Bu yalnızca uygulama üzerinden girişi kapatır; asıl kilit aşağıda anlatılan OpenCode politikasıdır. OpenCode yapılandırmanızdaki bir MCP sunucusunda oturum açmak çalışmaya devam eder, çünkü bu bir model sağlayıcısına değil o sunucuya ulaşır.
+- [Sınıflandırma sağlayıcıları (Jev)](/classification-providers/) kapalı kalır; birinin Ayarlar'a yazdığı özel bir uç nokta da buna dahildir. Güvenlik ağı ve Auto sunulmaz, oturumlar da yalnızca elle devam edenlere geçer. Jev'i kendi altyapınız üzerinden kullanmak için politika dosyasındaki `jev` ile ya da `OPENCHAMBER_JEV_URL` ile bir uç nokta sabitleyin (ayrıca `OPENCHAMBER_JEV_MODEL` ve gerekiyorsa `OPENCHAMBER_JEV_API_KEY`). Bu uç nokta varsayılan olur, yine de kapatılabilir ve başka bir şey seçilemez.
+- OpenAI üzerinden sesli okuma kapalıdır. Özel bir konuşma sentezi ya da transkripsiyon sunucusu aynı makinede çalışmalıdır. Yerel sesler ve yerel dikte modelleri çalışmaya devam eder.
+- Telefonlara ve tarayıcılara giden push bildirimleri yalnızca "Agent response is ready" gibi genel bir başlık taşır; mesaj metni ya da oturum adı içermez. Masaüstü bildirimleri makinenizde kalır ve metnin tamamını korur.
+- Güncelleme kontrolleri çalışmaya devam eder, böylece güvenlik düzeltmeleri size ulaşmaya devam eder; ama kullanım bilgisi asla bildirilmez, anonim kurulum kimliği bile gönderilmez.
+- [Harici tüneller](/tunnels/) (Cloudflare, ngrok) kapalıdır. Bir tünel sağlayıcısı trafiği kendi ucunda çözer ve her isteği düz metin olarak görür.
+- [Private Relay](/private-relay/) yalnızca kendi relay'iniz üzerinden çalışır. Bir [kendi barındırdığınız relay](https://github.com/openchamber/openchamber-relay) çalıştırın ve OpenChamber'ı politika dosyasındaki `relayUrl` ya da `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` ile ona yönlendirin. Ortak relay de uçtan uca şifreli olduğu için trafiğinizi okuyamaz, ama kendi relay'iniz bağlantı meta verilerini ve bu makineye giden yolu ağınızın içinde tutar. Kendi relay'iniz olmadan hiçbir cihaz eşleştirilemez.
+- OpenChamber yalnızca çalıştığı makinede dinler. Yerel ağdaki diğer cihazların uygulamayı açmasına izin veren masaüstü ayarı kapalıdır ve sunucu, ister CLI (`--host`, `--lan`) ister ortam üzerinden olsun, bir ağ adresinde başlamayı reddeder. Politika dosyası uygulama çalışırken ortaya çıkarsa, diğer makinelerden gelen bağlantılar bir sonraki başlatmaya kadar kesilir. Ağ erişimine politika dosyasında `"allowNetworkAccess": true` ile ya da kurumsal modu ortamın açtığı yerde `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` ile izin verin. Bağlantının şifrelenmemiş düz HTTP olduğunu unutmayın; paylaşılan bir ağda herkes onu okuyabilir. Başkalarının eriştiği bir sunucuyu [kendi HTTPS'inizin](/reverse-proxy/) arkasına koyun.
+- Makinenin dışına veri gönderebilen [eklentiler](/extensions/) (dış bir API ile konuşan, dış adreslerden yükleme yapan ya da arka planda bir servis çalıştıranlar) yalnızca `allowedExtensions` listesindeki bir Git deposundan kurulur. Bunların hiçbirini yapmayan eklentiler her zamanki gibi kurulur. Başka bir yerden kurulmuş bir eklenti kapalı kalır ve Ayarlar nedenini gösterir. Bir eklenti adını kendisi seçtiği için liste depo URL'lerini içerir. `https://github.com/acme/` gibi `/` ile biten bir giriş, altındaki tüm depolara izin verir. Eklenti geliştiren kişilerin makinelerinde `"allowLocalExtensions": true`, yerel bir klasörden kurmaya da izin verir. ZIP her durumda kapalı kalır.
+- VS Code eklentisinde sağlayıcı bağlamak kapalıdır ve güncelleme kontrolleri kullanım bilgisi bildirmez. Jev, relay, tüneller, push bildirimleri ve bulut tabanlı ses özellikleri zaten eklentide yoktur.
+
+Küçük model görevleri (oturum başlıkları, özetler, commit mesajları, değişikliklerin adım adım incelemesi) özel bir mod gerektirmez. Her zaman Ayarlar'da seçtiğiniz küçük modelde, çalıştığınız sağlayıcının küçük bir modelinde ya da OpenCode yapılandırmanızdaki varsayılan modelde çalışır. Sadece bağlı olduğu için başka bir sağlayıcıya asla geçmez.
+
+Hangi model sağlayıcılarının kullanılabileceğine OpenChamber değil, OpenCode karar verir. Bunu [OpenCode politikaları](https://opencode.ai/v2/docs/policies/) ile kilitleyin: tüm sağlayıcıları reddedin, sonra onayladıklarınıza izin verin.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+Reddedilen bir sağlayıcı, biri ona anahtar eklese bile görünmez. Politikaları bir projenin kaldıramayacağı genel `~/.config/opencode/opencode.jsonc` dosyasına koyun ya da son sözü söyleyen bir OpenCode Console çalışma alanından dağıtın. Kurumsal mod, OpenChamber'ın kendisinin bunun üzerine gönderdiklerini kapsar.
+
+Ajanın web aramaları ve sayfa getirmeleri de OpenCode üzerinden arama hizmetine ve sayfaların kendisine gider. Ağınızdan çıkmamaları gerekiyorsa, bunları aynı türden bir politikayla reddedin:
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## İlgili
 
 - [Cihaz bağlama](/connect-devices/) — tek seferlik eşleştirme ve cihaza özel belirteçler

@@ -1,0 +1,68 @@
+---
+title: Een apparaat verbinden
+description: Koppel uw telefoon, desktop of een andere browser met een eenmalige QR-code aan uw OpenChamber-server.
+---
+
+# Een apparaat verbinden
+
+Koppel een ander apparaat aan uw OpenChamber-server door een eenmalige QR-code te scannen. Dat kan de mobiele app, desktopapp of een browser op een andere computer zijn. Dit is de aanbevolen manier: u hoeft geen poorten open te zetten of adressen in te voeren.
+
+## Een apparaat koppelen
+
+1. Open op de computer waarop OpenChamber draait **Instellingen → Remote-instanties → Verbinden met deze server** en klik op **Apparaat toevoegen**.
+2. Geef het apparaat een herkenbare naam, bijvoorbeeld *Mijn iPhone*.
+3. Kies waar u het apparaat gaat gebruiken:
+   - **Alleen deze computer:** voor apps op dezelfde computer
+   - **Alleen thuisnetwerk:** rechtstreeks via uw wifi, niet bereikbaar buiten dat netwerk
+   - **Overal:** thuis en daarbuiten; buiten uw netwerk gaat het verkeer via de [Privérelay](/nl/private-relay/), een end-to-endversleutelde tunnel die geen inrichting vereist
+4. Klik op **QR-code maken**.
+5. Gebruik de code op het andere apparaat:
+   - **mobiele app:** tik op **QR-code scannen** op het verbindingsscherm of in de instantielijst
+   - **desktopapp:** kopieer in plaats daarvan de verbindingslink en plak die bij **Instellingen → Remote-instanties → Andere OpenChamber-servers → Link importeren**
+
+Het venster sluit vanzelf zodra het apparaat verbindt. Het apparaat verschijnt met een actuele status in de lijst. De koppeling is klaar.
+
+## Hoe blijft koppelen veilig?
+
+- **De QR-code is eenmalig.** Zodra een apparaat haar gebruikt, werkt ze niet meer. Een ongebruikte code verloopt vanzelf.
+- **Elk apparaat krijgt een eigen token.** Scannen onthult uw interfacewachtwoord niet. Het token van één apparaat kan niet worden gebruikt om zich als een ander apparaat voor te doen.
+- **U houdt de controle.** Elk gekoppeld apparaat staat met naam, platform en verbindingsstatus in de lijst. U kunt de toegang op elk moment intrekken.
+- **Verkeer buitenshuis is end-to-endversleuteld.** Bij **Overal** gaat verkeer buiten uw netwerk via de [Privérelay](/nl/private-relay/), die de inhoud niet kan lezen.
+
+## Gekoppelde apparaten beheren
+
+**Instellingen → Remote-instanties → Verbinden met deze server** toont alle apparaten die deze server kunnen bereiken. Een groene stip betekent online. U ziet ook of de verbinding via het lokale netwerk of de relay loopt.
+
+- **Intrekken** verbreekt de toegang onmiddellijk. Koppel het apparaat met een nieuwe QR-code als u het weer toegang wilt geven.
+- **Ingetrokken apparaten wissen** ruimt de lijst op.
+
+Hetzelfde fysieke apparaat behoudt één vermelding, ook als het zich later opnieuw aanmeldt. Er ontstaan dus geen dubbele vermeldingen.
+
+## Verbinden via de opdrachtregel
+
+Draait de server zonder geopende interface, maak dan een verbindingslink vanuit een terminal op die computer.
+
+Voor een apparaat op hetzelfde netwerk:
+
+```bash
+openchamber connect-url --port 3000 --qr
+```
+
+Voor een apparaat dat **overal** moet kunnen verbinden, gelijk aan de keuze **Overal** in het venster:
+
+```bash
+openchamber connect-url --relay --qr
+```
+
+Een link met `--relay` bevat beide routes. Het apparaat verbindt rechtstreeks via het lokale netwerk als het de server kan bereiken en valt buitenshuis terug op de [Privérelay](/nl/private-relay/). De relay start vanzelf: een draaiende instantie neemt de link binnen een minuut over, een gestopte instantie bij de volgende start.
+
+> De directe route werkt alleen als de server op uw netwerk luistert. Standaard luistert OpenChamber alleen op de eigen computer. Start met `--lan` om het via wifi bereikbaar te maken. De opdracht waarschuwt met `[LAN_UNREACHABLE]` als de directe route niet vanaf andere apparaten bruikbaar is. Een `--relay`-link werkt dan nog steeds, maar altijd via de relay.
+
+De getoonde link en QR-code werken net als die uit het instellingenvenster: eenmalig, met vervaltijd en intrekbaar.
+
+## Zie ook
+
+- [Privérelay](/nl/private-relay/) voor verbindingen via Overal en wat de relay wel en niet kan zien
+- [Mobiele apps](/nl/mobile/) om de iOS- of Android-app te installeren
+- [Remote-instanties](/nl/remote-instances/) om de desktopapp via SSH of links te verbinden
+- [Toegang op afstand](/nl/troubleshooting/remote-access/) als een apparaat niet verbindt

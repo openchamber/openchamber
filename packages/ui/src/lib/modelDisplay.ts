@@ -1,5 +1,7 @@
 export type DisplayModel = Record<string, unknown> & {
   id?: unknown;
+  /** v2 provider API name; equals `id` except for derived entries such as Fast models. */
+  modelID?: unknown;
   name?: unknown;
 };
 
@@ -254,7 +256,11 @@ const getProviderModel = (provider: DisplayProvider, modelId: string): DisplayMo
   }
 
   if (Array.isArray(models)) {
-    return models.find((model) => normalizeString(model.id) === modelId);
+    // Callers hold the catalog key a selection or assistant message reports,
+    // which v2 exposes as `id`; `modelID` is the provider API name and is
+    // shared by derived entries (`gpt-6-luna` and `gpt-6-luna-fast`).
+    return models.find((model) => normalizeString(model.id) === modelId)
+      ?? models.find((model) => normalizeString(model.modelID) === modelId);
   }
 
   return models[modelId];

@@ -117,6 +117,14 @@ export function GoToLineDialog({ open, onOpenChange, view, variant = 'overlay' }
     });
   }, [view]);
 
+  // Closed from outside (the toolbar button) without going to a line: put
+  // the cursor back, as Escape and an outside click do.
+  const wasOpenRef = React.useRef(open);
+  React.useEffect(() => {
+    if (wasOpenRef.current && !open) restoreInitialSelection();
+    wasOpenRef.current = open;
+  }, [open, restoreInitialSelection]);
+
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     if (!nextOpen) {
       restoreInitialSelection();
@@ -143,9 +151,12 @@ export function GoToLineDialog({ open, onOpenChange, view, variant = 'overlay' }
     const handlePointerDown = (event: PointerEvent) => {
       const panel = panelRef.current;
       const target = event.target;
-      if (!panel || !(target instanceof Node) || panel.contains(target)) {
+      if (!panel || !(target instanceof Element) || panel.contains(target)) {
         return;
       }
+      // The toolbar button closes the panel with its own click; closing here
+      // first would let that click open it again.
+      if (target.closest('[data-go-to-line-toggle]')) return;
       handleOpenChange(false);
     };
 
@@ -189,6 +200,7 @@ export function GoToLineDialog({ open, onOpenChange, view, variant = 'overlay' }
     return (
       <div
         ref={panelRef}
+        data-editor-overlay
         className="ml-1 flex h-6 items-center gap-1"
       >
         <Input
@@ -224,6 +236,7 @@ export function GoToLineDialog({ open, onOpenChange, view, variant = 'overlay' }
   return (
     <div
       ref={panelRef}
+      data-editor-overlay
       className={cn(
         'absolute left-3 top-3 z-40 w-[min(32rem,calc(100%-1.5rem))] rounded-xl border border-[var(--interactive-border)] bg-[color:color-mix(in_srgb,var(--surface-elevated)_94%,transparent)] p-2.5 shadow-lg backdrop-blur-sm transition-all',
         open ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0',

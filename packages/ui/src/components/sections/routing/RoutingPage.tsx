@@ -30,11 +30,27 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { RoutingCategory, RoutingConfig } from '@/lib/routing/routingApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { modelVariantNames } from '@/lib/modelVariants';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { useRoutingStore } from '@/stores/useRoutingStore';
+import { JevAccessNote } from '@/components/sections/classification/JevAccessNote';
 
 const DEFAULT_VARIANT_VALUE = '__default__';
 const SAVE_DEBOUNCE_MS = 500;
 
+
+/**
+ * Whether the server's copy is the draft as the server stores it. The server
+ * trims names and descriptions, so a mid-typing "- " or trailing newline comes
+ * back without it; adopting that copy would eat what the user just typed.
+ */
+const isStoredFormOf = (server: RoutingConfig, draft: RoutingConfig): boolean => {
+  const trimmed = (config: RoutingConfig) => JSON.stringify({
+    ...config,
+    categories: config.categories.map((category) => ({ ...category, name: category.name.trim(), description: category.description.trim() })),
+  });
+  return trimmed(server) === trimmed(draft);
+};
 
 const slugify = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
 
@@ -45,9 +61,18 @@ const useModelVariants = (providerID: string | null | undefined, modelID: string
     if (!providerID || !modelID) return [];
     const provider = providers.find((entry) => entry.id === providerID);
     const model = provider?.models.find((entry) => entry.id === modelID);
-    return model?.variants ? Object.keys(model.variants) : [];
+    return modelVariantNames(model);
   }, [modelID, providerID, providers]);
 };
+
+/**
+ * The saved level, or null when the model does not list it: list positions
+ * saved before #4133 run as the model's default on the server, so they read
+ * as Default here too. A model with no known levels keeps what was saved.
+ */
+const knownVariant = (value: string | null | undefined, variants: string[]): string | null => (
+  value && (variants.length === 0 || variants.includes(value)) ? value : null
+);
 
 const VariantSelect: React.FC<{
   providerID: string | null | undefined;
@@ -59,13 +84,14 @@ const VariantSelect: React.FC<{
 }> = ({ providerID, modelID, value, onChange, ariaLabel, className }) => {
   const { t } = useI18n();
   const variants = useModelVariants(providerID, modelID);
+  const selected = knownVariant(value, variants) ?? DEFAULT_VARIANT_VALUE;
   const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
     ? t('settings.routing.thinking.default')
     : variant.charAt(0).toUpperCase() + variant.slice(1));
   return (
-    <Select value={value ?? DEFAULT_VARIANT_VALUE} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
+    <Select value={selected} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
       <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, className)} aria-label={ariaLabel}>
-        <SelectValue>{label(value ?? DEFAULT_VARIANT_VALUE)}</SelectValue>
+        <SelectValue>{label(selected)}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={DEFAULT_VARIANT_VALUE}>{label(DEFAULT_VARIANT_VALUE)}</SelectItem>
@@ -88,8 +114,10 @@ const CategoryRow: React.FC<{
   onRemove: () => void;
 }> = ({ category, expanded, onToggle, onChange, onReset, onRemove }) => {
   const { t } = useI18n();
+  const variants = useModelVariants(category.model?.providerID, category.model?.modelID);
+  const shownVariant = knownVariant(category.variant, variants);
   const modelLabel = category.model
-    ? `${category.model.modelID}${category.variant ? ` / ${category.variant}` : ''}`
+    ? `${category.model.modelID}${shownVariant ? ` / ${shownVariant}` : ''}`
     : t('settings.routing.model.useFallback');
   const summary = [modelLabel, category.agent].filter(Boolean).join(' · ');
   return (
@@ -181,20 +209,14 @@ export const RoutingPage: React.FC = () => {
   const { t } = useI18n();
   const available = useRoutingStore((state) => state.available);
   const autoReady = useRoutingStore((state) => state.autoReady);
-  const tokenPresent = useRoutingStore((state) => state.tokenPresent);
   const serverConfig = useRoutingStore((state) => state.config);
   const builtins = useRoutingStore((state) => state.builtins);
   const loaded = useRoutingStore((state) => state.loaded);
   const loadError = useRoutingStore((state) => state.loadError);
   const load = useRoutingStore((state) => state.load);
   const saveConfig = useRoutingStore((state) => state.saveConfig);
-  const setToken = useRoutingStore((state) => state.setToken);
-  const clearToken = useRoutingStore((state) => state.clearToken);
 
   const [draft, setDraft] = React.useState<RoutingConfig | null>(serverConfig);
-  const [tokenInput, setTokenInput] = React.useState('');
-  const [tokenBusy, setTokenBusy] = React.useState(false);
-  const [tokenError, setTokenError] = React.useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = React.useState('');
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   // A pending edit remembers the server it was made against; a save that would
@@ -211,9 +233,11 @@ export const RoutingPage: React.FC = () => {
     void load();
   }, [load]);
 
-  // The server is authoritative; adopt its config whenever nothing is mid-edit.
+  // The server is authoritative; adopt its config whenever nothing is mid-edit,
+  // unless it is only the trimmed form of what is already on screen.
   React.useEffect(() => {
-    if (!pendingRef.current && savesInFlightRef.current === 0) setDraft(serverConfig);
+    if (pendingRef.current || savesInFlightRef.current > 0) return;
+    setDraft((current) => (current && serverConfig && isStoredFormOf(serverConfig, current) ? current : serverConfig));
   }, [serverConfig]);
 
   const flush = React.useCallback(() => {
@@ -254,7 +278,8 @@ export const RoutingPage: React.FC = () => {
   React.useEffect(() => {
     if (prefilledRef.current || !loaded || !serverConfig || serverConfig.fallback) return;
     const parsed = parseModelIdentifier(settingsDefaultModel);
-    if (!parsed) return;
+    // A default of Auto is what this fallback exists to resolve; nothing to prefill from it.
+    if (!parsed || isAutoModel(parsed.providerId, parsed.modelId)) return;
     prefilledRef.current = true;
     update((config) => (config.fallback ? config : {
       ...config,
@@ -278,33 +303,6 @@ export const RoutingPage: React.FC = () => {
   const updateCategory = React.useCallback((id: string, patch: Partial<RoutingCategory>) => {
     update((config) => ({ ...config, categories: config.categories.map((category) => (category.id === id ? { ...category, ...patch } : category)) }));
   }, [update]);
-
-  const handleSaveToken = async () => {
-    const token = tokenInput.trim();
-    if (!token) return;
-    setTokenBusy(true);
-    setTokenError(null);
-    try {
-      await setToken(token);
-      setTokenInput('');
-    } catch (error) {
-      setTokenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTokenBusy(false);
-    }
-  };
-
-  const handleClearToken = async () => {
-    setTokenBusy(true);
-    setTokenError(null);
-    try {
-      await clearToken();
-    } catch (error) {
-      setTokenError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setTokenBusy(false);
-    }
-  };
 
   const addCategory = () => {
     const name = newCategoryName.trim();
@@ -343,9 +341,7 @@ export const RoutingPage: React.FC = () => {
   const enabledCount = draft?.categories.filter((category) => category.enabled).length ?? 0;
   const removedBuiltins = builtins.filter((builtin) => !draft?.categories.some((category) => category.id === builtin.id));
 
-  const readinessText = !tokenPresent
-    ? t('settings.routing.status.noToken')
-    : !draft?.enabled
+  const readinessText = !draft?.enabled
       ? t('settings.routing.status.disabled')
       : !draft.fallback
         ? t('settings.routing.status.noFallback')
@@ -366,44 +362,9 @@ export const RoutingPage: React.FC = () => {
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.routing.unavailable')}</p>
       ) : (
         <>
-          <SettingsSection title={t('settings.routing.token.title')} divider={false}>
+          <SettingsSection title={t('settings.routing.auto.title')} divider={false}>
             <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <p className={SETTINGS_HELPER_CLASS}>
-                {tokenPresent ? t('settings.routing.token.present') : t('settings.routing.token.missing')}
-              </p>
-              <SettingsFieldRow
-                settingsItem="routing.token"
-                label={t('settings.routing.token.label')}
-                info={t('settings.routing.token.info')}
-              >
-                <div className="flex w-full min-w-0 items-center gap-2">
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={tokenInput}
-                    onChange={(event) => setTokenInput(event.target.value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') void handleSaveToken(); }}
-                    placeholder={tokenPresent ? t('settings.routing.token.replacePlaceholder') : t('settings.routing.token.placeholder')}
-                    aria-label={t('settings.routing.token.label')}
-                    className="h-8 rounded-md px-3 min-w-0 flex-1"
-                    disabled={tokenBusy}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => void handleSaveToken()} disabled={tokenBusy || tokenInput.trim().length === 0}>
-                    {t('settings.routing.token.save')}
-                  </Button>
-                  {tokenPresent ? (
-                    <Button size="sm" variant="ghost" onClick={() => void handleClearToken()} disabled={tokenBusy}>
-                      {t('settings.routing.token.remove')}
-                    </Button>
-                  ) : null}
-                </div>
-              </SettingsFieldRow>
-              {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
-            </div>
-          </SettingsSection>
-
-          <SettingsSection title={t('settings.routing.auto.title')}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
+              <JevAccessNote />
               <div className={SETTINGS_OPTION_STACK_CLASS}>
                 <SettingsCheckboxRow
                   settingsItem="routing.enabled"
@@ -487,22 +448,6 @@ export const RoutingPage: React.FC = () => {
               </SettingsFieldRow>
             </div>
           </SettingsSection>
-          <SettingsSection title={t('settings.routing.safety.title')}>
-            <div className={SETTINGS_FIELDS_STACK_CLASS}>
-              <p className={SETTINGS_HELPER_CLASS}>{t('settings.routing.safety.description')}</p>
-              <div className={SETTINGS_OPTION_STACK_CLASS}>
-                <SettingsCheckboxRow
-                  settingsItem="routing.safety-enabled"
-                  checked={draft.safetyNet.enabled}
-                  onChange={(checked) => update((config) => ({ ...config, safetyNet: { ...config.safetyNet, enabled: checked } }))}
-                  label={t('settings.routing.safety.enable')}
-                  ariaLabel={t('settings.routing.safety.enable')}
-                  info={t('settings.routing.safety.enableInfo')}
-                />
-              </div>
-            </div>
-          </SettingsSection>
-
         </>
       )}
     </SettingsPageLayout>

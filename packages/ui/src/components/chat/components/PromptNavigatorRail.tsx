@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';

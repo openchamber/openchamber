@@ -1,3 +1,4 @@
+import { carriesFileDiffs, isEditTool, isPatchTool, isWriteTool } from '@/lib/opencode/tools';
 import { parsePatchFiles } from '@pierre/diffs';
 
 import { isToolDiffPreviewOversized } from './toolDiffPreview';
@@ -148,24 +149,39 @@ export const getApplyPatchFilePath = (file: unknown): string | null => {
         return null;
     }
 
-    return typeof file.movePath === 'string'
-        ? file.movePath
-        : typeof file.filePath === 'string'
-            ? file.filePath
-            : typeof file.relativePath === 'string'
-                ? file.relativePath
-                : null;
+    // v2 reports `file` (FileDiff.Info); the other keys keep MCP and plugin
+    // tools that use the older naming working.
+    return typeof file.file === 'string'
+        ? file.file
+        : typeof file.movePath === 'string'
+            ? file.movePath
+            : typeof file.filePath === 'string'
+                ? file.filePath
+                : typeof file.relativePath === 'string'
+                    ? file.relativePath
+                    : null;
 };
+
+/** v2 file tools report `path`; the other keys cover MCP and plugin tools. */
+const readInputPath = (input: Record<string, unknown> | undefined): string | null => (
+    typeof input?.path === 'string'
+        ? input.path
+        : typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : null
+);
 
 export const getPrimaryToolPath = (
     toolName: string,
     input: Record<string, unknown> | undefined,
     metadata: Record<string, unknown> | undefined,
 ): string | null => {
-    if (toolName === 'apply_patch') {
+    if (isPatchTool(toolName)) {
         const files = Array.isArray(metadata?.files) ? metadata.files : [];
         for (const file of files) {
-            if (isRecord(file) && file.type !== 'delete') {
+            if (isRecord(file) && file.type !== 'delete' && file.status !== 'deleted') {
                 const filePath = getApplyPatchFilePath(file);
                 if (filePath) {
                     return filePath;
@@ -175,36 +191,22 @@ export const getPrimaryToolPath = (
         return null;
     }
 
-    if (toolName === 'edit' || toolName === 'multiedit') {
-        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
-        if (fileDiff && typeof fileDiff.file === 'string') {
-            return fileDiff.file;
-        }
-        return typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : null;
+    if (isEditTool(toolName)) {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        const first = files.find((file) => isRecord(file));
+        const fromMetadata = first ? getApplyPatchFilePath(first) : null;
+        return fromMetadata ?? readInputPath(input);
     }
 
-    if (toolName === 'write') {
-        return typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : null;
+    if (isWriteTool(toolName)) {
+        return readInputPath(input);
     }
 
     return null;
 };
 
-const supportsDiffMetadata = (toolName: string): boolean => (
-    toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch'
-);
+/** Only `edit` and `patch` results carry `metadata.files` with diffs in v2. */
+const supportsDiffMetadata = (toolName: string): boolean => carriesFileDiffs(toolName);
 
 const getMetadataFileForPath = (
     metadata: Record<string, unknown>,
@@ -218,7 +220,10 @@ const getMetadataFileForPath = (
 
     return files.find((file): file is Record<string, unknown> => (
         isRecord(file)
-        && (file.relativePath === preferredPath || file.filePath === preferredPath || file.movePath === preferredPath)
+        && (file.file === preferredPath
+            || file.relativePath === preferredPath
+            || file.filePath === preferredPath
+            || file.movePath === preferredPath)
     ));
 };
 

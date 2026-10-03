@@ -857,6 +857,20 @@ describe('actions, commands, and badge wire shapes', () => {
     expect(parseGuestMessage({ ...envelope, type: 'resolve-result', id: 'r-1', payload: { error: '' } })).toBeNull();
   });
 
+  test('accepts open-commit only with a hex commit id', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'open-commit', id: 'c-1', payload: { sha: 'abc1234' } })).toMatchObject({ payload: { sha: 'abc1234' } });
+    for (const sha of ['abc12', 'HEAD', '--output=x', 'abc1234 ', 'g'.repeat(40), 'a'.repeat(65)]) {
+      expect(parseGuestMessage({ ...envelope, type: 'open-commit', id: 'c-1', payload: { sha } })).toBeNull();
+    }
+  });
+
+  test('accepts resize heights in range and drops the rest', () => {
+    expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 180 } })).toMatchObject({ payload: { height: 180 } });
+    expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: -1 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 10_001 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'resize', id: 'h-1', payload: { height: 1.5 } })).toBeNull();
+  });
+
   test('accepts badge counts in range and drops the rest', () => {
     expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: 4 } })).toMatchObject({ payload: { count: 4 } });
     expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: null } })).toMatchObject({ payload: { count: null } });

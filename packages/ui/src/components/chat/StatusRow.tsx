@@ -1,6 +1,7 @@
 import React from "react";
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
+import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
 
 // The floating assistant-status chip that hovers above the composer while the
 // agent works ("Claude is working…"). ONLY that. The composer's
@@ -20,6 +21,8 @@ interface StatusRowProps {
   agentName?: string;
   modelName?: string | null;
   providerId?: string | null;
+  /** Set while the turn waits on work OpenCode can move to the background. */
+  onBackground?: () => void;
 }
 
 export const StatusRow: React.FC<StatusRowProps> = ({
@@ -32,6 +35,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   agentName,
   modelName,
   providerId,
+  onBackground,
 }) => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
@@ -54,7 +58,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       {/* The glass chip lives here, not on the container: the root above is
           an inline-size query container, whose width ignores its children —
           a shrink-to-fit wrapper around it always collapsed to zero. */}
-      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3 [backdrop-filter:none]! [-webkit-backdrop-filter:none]!">
+      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
         <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
@@ -70,6 +74,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             />
           ) : null}
         </div>
+        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-mr-2 h-6 w-6" /> : null}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
 import { loadGuestCatalog } from '@/lib/guests/load-catalog';
 import { useGuestsStore } from '@/lib/guests/store';
+import type { InstalledGuest } from '@/lib/guests/types';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
@@ -57,6 +58,22 @@ export const useGuestPages = () => {
   return React.useMemo(() => {
     if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return [];
     return guests.filter((guest) => guest.pageEntry && isGuestActive(guest));
+  }, [guests]);
+};
+
+const EMPTY_STATUS_SECTIONS: InstalledGuest[] = [];
+
+/**
+ * Active guests that contribute a Work Status section. Empty on VS Code and
+ * mobile, which never mount guests (the panel itself is web/desktop only).
+ * Reads the store only; the rail owns loading the catalog.
+ */
+export const useGuestStatusSections = (): InstalledGuest[] => {
+  const guests = useGuestsStore((state) => state.guests);
+  return React.useMemo(() => {
+    if (isVSCodeRuntime() || isMobileSurfaceRuntime()) return EMPTY_STATUS_SECTIONS;
+    const sections = guests.filter((guest) => guest.statusEntry && isGuestActive(guest));
+    return sections.length > 0 ? sections : EMPTY_STATUS_SECTIONS;
   }, [guests]);
 };
 

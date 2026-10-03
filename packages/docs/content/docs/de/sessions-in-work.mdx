@@ -1,0 +1,76 @@
+---
+title: Sitzungen in Arbeit
+description: Halte Sitzungen mit laufender Arbeit sichtbar in der Seitenleiste, bis du sie als erledigt markierst.
+---
+
+# Sitzungen in Arbeit
+
+Fragen, Recherchen und schnelle Experimente sammeln sich schnell an, und die Sitzung, in der du tatsächlich etwas reparierst, geht darin unter. Der Bereich **In Arbeit** hält solche Sitzungen an einer Stelle in der Seitenleiste. Eine Sitzung bleibt dort, bis du sagst, dass sie erledigt ist.
+
+Das ist der Unterschied zu „Kürzlich“. „Kürzlich“ zeigt alles, was sich in den letzten zwei Tagen geändert hat, und wechselt von selbst: Eine Sitzung, die du heute Morgen aus Neugier geöffnet hast, steht dort, ein Fix, den du am Montag pausiert hast, ist weg. „In Arbeit“ ist die Liste dessen, was du noch nicht fertig hast, egal wie lange du es nicht mehr geöffnet hast.
+
+## Wo du ihn findest
+
+Der Bereich **In Arbeit** liegt in der Seitenleiste unter den Chats und über „Kürzlich“ (oder über der Zeitleiste im Timeline-Modus). Auf dem Handy ist er an derselben Stelle in der Sitzungsliste.
+
+Eine Sitzung in Arbeit zieht zusammen mit ihren Untersitzungen dorthin um. Sie taucht kein zweites Mal in „Kürzlich“, in der Zeitleiste, in ihrem Projekt oder ihrem Ordner auf. Markierst du sie als erledigt, kehrt sie dorthin zurück, wo sie war.
+
+## Sitzungen von Hand verfolgen und abschließen
+
+- **Verfolgen:** Fahre mit der Maus über eine Sitzung und klicke auf das Auge, oder wähle **Als in Arbeit verfolgen** im Sitzungsmenü.
+- **Abschließen:** Fahre im Bereich mit der Maus über eine Sitzung und klicke auf das Häkchen, oder wähle **Als erledigt markieren** im Menü.
+
+Auf dem Handy wischst du über die Sitzungszeile, um dieselbe Aktion zu erreichen, oder nutzt das Sitzungsmenü.
+
+Jede Projektsitzung kann in Arbeit sein, auch Sitzungen in Worktrees. Untersitzungen kommen mit ihrer übergeordneten Sitzung mit. Chats nie: Das sind einfache Unterhaltungen, deshalb bekommen sie kein Auge.
+
+## Lass Jev Sitzungen für dich verschieben
+
+Mit einem eingerichteten [Klassifizierungsanbieter](/de/classification-providers/) musst du Sitzungen nicht selbst verfolgen. Jev liest jede Nachricht, die du sendest, und verschiebt die Sitzung in Arbeit, wenn du:
+
+- um eine Änderung bittest
+- einen Fehler meldest
+- eine konkrete Änderung besprichst, die du vorhast
+
+Fragen, Erklärungen und Recherchen zählen nicht. Jev schaut noch einmal hin, wenn der Agent einen Zug beendet, und erwischt so die Arbeit, die erst aus der Antwort klar wird.
+
+Jev verschiebt Sitzungen immer nur **in** Arbeit. Hast du eine Sitzung als erledigt markiert, holt sie nur eine neue Anfrage zurück, die du danach sendest.
+
+### „Diese Arbeit scheint erledigt.“
+
+Sieht ein Zug nach dem Ende der Arbeit aus (du hast dich bedankt, um einen Commit gebeten, bestätigt, dass es funktioniert), schließt Jev nichts, sondern hinterlässt einen Hinweis:
+
+- ein graues Häkchen an der Sitzungszeile in der Seitenleiste
+- einen Streifen über dem Eingabefeld: **Diese Arbeit scheint erledigt.** mit der Schaltfläche **Als erledigt markieren**
+
+Klicke auf **Als erledigt markieren**, wenn Jev recht hat. Wenn nicht, mach einfach weiter: Der Hinweis verschwindet mit deiner nächsten Nachricht.
+
+## Zusammenfassung und Vorschlag für die nächste Nachricht
+
+Wenn der Agent fertig ist und die Sitzung eine Minute ruhig bleibt, kann OpenChamber mit deinem kleinen Modell zwei Dinge schreiben (siehe [Anbieter, Modelle und Agenten](/de/providers/)):
+
+- **Zusammenfassung:** eine kurze Erinnerung, was erledigt wurde und wo die Sache steht, unter der letzten Antwort und im Tooltip der Sitzung in der Seitenleiste
+- **Vorschlag:** die Nachricht, die du wahrscheinlich als Nächstes senden würdest, als Zeile oben im Eingabefeld; ein Klick setzt den Text ins Eingabefeld, gesendet wird er nie von selbst
+
+Ist Jev verfügbar, fragt OpenChamber zuerst, ob der Zug sie braucht. Ein einfaches „danke, das war's“ nach echter Arbeit bekommt trotzdem eine Zusammenfassung, ein Vorschlag entfällt aber, wenn nichts mehr zu tun ist, und das kleine Modell wird gar nicht aufgerufen, wenn keins von beiden nützt. Ohne Jev entstehen beide nach jedem Zug, wie bisher.
+
+Ein- und ausschalten kannst du sie unter **Einstellungen → Chat → Sitzungshilfe**.
+
+## Einstellungen
+
+Öffne **Einstellungen → Sitzungen → Sitzungen in Arbeit**:
+
+- **Sitzungen in Arbeit anzeigen:** der Bereich selbst; ausgeschaltet bleiben Sitzungen, wo sie immer waren
+- **Sitzungen automatisch in Arbeit verschieben:** der Jev-Teil; ausschalten, um nur von Hand zu verfolgen
+
+Beide sind standardmäßig an.
+
+## Wo es funktioniert
+
+Der Bereich und das manuelle Verfolgen und Abschließen funktionieren überall, auch in VS Code. Das automatische Verschieben, der Hinweis „scheint erledigt“ und der Jev-Filter für Zusammenfassungen brauchen den OpenChamber-Server. Sie funktionieren also in der Desktop-App, in der Web-App und auf dem Handy, aber nicht in VS Code.
+
+## Verwandt
+
+- [Klassifizierungsanbieter (Jev)](/de/classification-providers/): automatisches Verfolgen einrichten
+- [Chats](/de/chats/): Unterhaltungen, die nicht in Arbeit kommen
+- [Sitzungsziele](/de/session-goals/): den Agenten bis zur Ziellinie arbeiten lassen

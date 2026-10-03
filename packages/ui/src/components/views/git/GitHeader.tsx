@@ -353,9 +353,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
         ? 'closed'
         : pullRequest.draft
           ? 'draft'
+          // A `blocked` merge state alone (usually a missing review) keeps
+          // the open colour; orange is for failed checks and conflicts.
           : prChecks?.state === 'failure'
             || pullRequest.mergeable === false
-            || pullRequest.mergeableState === 'blocked'
             || pullRequest.mergeableState === 'dirty'
             ? 'blocked'
             : 'open'

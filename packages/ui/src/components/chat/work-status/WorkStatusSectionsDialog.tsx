@@ -18,19 +18,32 @@ import {
 import {
   WORK_STATUS_SECTION_LABEL_KEYS,
   areAllWorkStatusSectionsHidden,
+  isExtensionSectionId,
   isWorkStatusSectionVisible,
-  sanitizeWorkStatusSectionOrder,
-  type WorkStatusSectionId,
+  resolveWorkStatusSectionOrder,
+  type WorkStatusPanelSectionId,
 } from './sections';
+import { useWorkStatusExtensionSections, type WorkStatusExtensionSections } from './useWorkStatusExtensionSections';
+
+/** Built-in sections are named by the host; an extension's by its own title. */
+const useSectionLabel = (extensions: WorkStatusExtensionSections) => {
+  const { t } = useI18n();
+  return React.useCallback((sectionId: WorkStatusPanelSectionId): string => {
+    if (!isExtensionSectionId(sectionId)) return t(WORK_STATUS_SECTION_LABEL_KEYS[sectionId]);
+    const guest = extensions.byId.get(sectionId);
+    return guest ? guest.statusTitle ?? guest.name : sectionId;
+  }, [extensions, t]);
+};
 
 const SortableSectionRow: React.FC<{
-  sectionId: WorkStatusSectionId;
+  sectionId: WorkStatusPanelSectionId;
+  label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
-}> = ({ sectionId, checked, onChange }) => {
+}> = ({ sectionId, label, checked, onChange }) => {
   const { t } = useI18n();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: sectionId });
-  const label = t(WORK_STATUS_SECTION_LABEL_KEYS[sectionId]);
+  const extension = isExtensionSectionId(sectionId);
   return (
     <div
       ref={setNodeRef}
@@ -49,13 +62,17 @@ const SortableSectionRow: React.FC<{
         <Icon name="draggable" className="size-4" />
       </Button>
       <SettingsCheckboxRow
-        settingsItem={`chat.work-status.section.${sectionId}`}
+        // Extension rows are dynamic entities, so they carry no search anchor.
+        settingsItem={extension ? undefined : `chat.work-status.section.${sectionId}`}
         checked={checked}
         onChange={onChange}
         label={label}
         ariaLabel={label}
         className="min-w-0 flex-1"
       />
+      {extension ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{t('chat.workStatus.sections.extensionBadge')}</span>
+      ) : null}
     </div>
   );
 };
@@ -71,7 +88,12 @@ export const WorkStatusSectionsDialog: React.FC<{
   const setHiddenSections = useUIStore((state) => state.setWorkStatusHiddenSections);
   const storedOrder = useUIStore((state) => state.workStatusSectionOrder);
   const setSectionOrder = useUIStore((state) => state.setWorkStatusSectionOrder);
-  const sectionOrder = React.useMemo(() => sanitizeWorkStatusSectionOrder(storedOrder), [storedOrder]);
+  const extensionSections = useWorkStatusExtensionSections();
+  const sectionLabel = useSectionLabel(extensionSections);
+  const sectionOrder = React.useMemo(
+    () => resolveWorkStatusSectionOrder(storedOrder, extensionSections.ids),
+    [extensionSections.ids, storedOrder],
+  );
   const dragging = React.useRef(false);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -84,14 +106,18 @@ export const WorkStatusSectionsDialog: React.FC<{
     const from = sectionOrder.findIndex((id) => id === active.id);
     const to = sectionOrder.findIndex((id) => id === over.id);
     if (from < 0 || to < 0) return;
-    setSectionOrder(arrayMove(sectionOrder, from, to));
+    // Sections of extensions that are paused or not loaded right now keep
+    // their saved slot at the end instead of being forgotten.
+    const next = arrayMove(sectionOrder, from, to);
+    const shown = new Set<string>(next);
+    setSectionOrder([...next, ...storedOrder.filter((id) => !shown.has(id))]);
   };
   const accessibility = React.useMemo(() => {
     const position = (activeId: string | number, overId: string | number = activeId) => {
       const section = sectionOrder.find((id) => id === activeId);
       if (!section) return undefined;
       return t('chat.workStatus.sections.position', {
-        label: t(WORK_STATUS_SECTION_LABEL_KEYS[section]),
+        label: sectionLabel(section),
         position: sectionOrder.findIndex((id) => id === overId) + 1,
         count: sectionOrder.length,
       });
@@ -106,10 +132,12 @@ export const WorkStatusSectionsDialog: React.FC<{
       screenReaderInstructions: { draggable: t('chat.workStatus.sections.dragInstructions') },
       announcements,
     };
-  }, [sectionOrder, t]);
+  }, [sectionLabel, sectionOrder, t]);
 
-  const allVisible = hidden.length === 0;
-  const noneVisible = areAllWorkStatusSectionsHidden(hidden);
+  // Measured against what the dialog lists: a hidden id of an extension that
+  // is not available here must not offer a "Show all" with nothing to show.
+  const allVisible = sectionOrder.every((id) => isWorkStatusSectionVisible(hidden, id));
+  const noneVisible = areAllWorkStatusSectionsHidden(hidden, extensionSections.ids);
 
   const handleShowAll = () => setHiddenSections([]);
 
@@ -142,6 +170,7 @@ export const WorkStatusSectionsDialog: React.FC<{
                 <SortableSectionRow
                   key={sectionId}
                   sectionId={sectionId}
+                  label={sectionLabel(sectionId)}
                   checked={isWorkStatusSectionVisible(hidden, sectionId)}
                   onChange={(checked) => setSectionVisible(sectionId, checked)}
                 />

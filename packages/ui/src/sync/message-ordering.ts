@@ -1,9 +1,17 @@
-import type { Message } from "@opencode-ai/sdk/v2/client"
+import type { Message } from "@/lib/opencode/model"
 
 const getCreatedAt = (message: Message): number => {
   const value = (message as { time?: { created?: unknown } }).time?.created
   return typeof value === "number" && Number.isFinite(value) ? value : 0
 }
+
+/**
+ * Within one millisecond a synthetic record goes first. Context attached to a
+ * prompt is written right before it and often shares its millisecond, while
+ * the prompt's id is minted earlier on the client, so the ID alone would put
+ * that context after the prompt it belongs to.
+ */
+const equalTimeRank = (message: Message): number => (message.role === "synthetic" ? 0 : 1)
 
 /**
  * Message IDs identify records; they are not chronology. OpenCode's sortable
@@ -14,6 +22,8 @@ const getCreatedAt = (message: Message): number => {
 export const compareMessagesChronologically = (left: Message, right: Message): number => {
   const createdAtDifference = getCreatedAt(left) - getCreatedAt(right)
   if (createdAtDifference !== 0) return createdAtDifference
+  const rankDifference = equalTimeRank(left) - equalTimeRank(right)
+  if (rankDifference !== 0) return rankDifference
   if (left.id < right.id) return -1
   if (left.id > right.id) return 1
   return 0

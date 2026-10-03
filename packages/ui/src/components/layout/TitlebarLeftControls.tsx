@@ -3,6 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -24,12 +25,19 @@ const ICON_BUTTON_CLASS =
  * so the header can reserve matching space when the sidebar is collapsed.
  */
 export const TitlebarLeftControls: React.FC = () => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
+  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
+  // Starting a session shares the titlebar row with the sidebar toggle, so it
+  // stays in one place whether the sidebar is open or collapsed.
+  const handleNewSession = React.useCallback(() => {
+    useUIStore.getState().closeMainSurfaces();
+    useSessionUIStore.getState().openNewSessionDraft();
+  }, []);
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -37,10 +45,11 @@ export const TitlebarLeftControls: React.FC = () => {
     void invokeDesktop('desktop_show_app_menu', {
       x: rect.left,
       y: rect.bottom,
+      locale,
     }).catch((error) => {
       console.warn('[titlebar] failed to open app menu', error);
     });
-  }, []);
+  }, [locale]);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
@@ -120,6 +129,35 @@ export const TitlebarLeftControls: React.FC = () => {
             <p>{t('header.actions.openSessionsWithShortcut', { shortcut: toggleShortcut })}</p>
           </TooltipContent>
         </Tooltip>
+
+        {/* Labelled while the sidebar is open; collapses to an icon with a
+            tooltip so the cluster stays compact over the header otherwise. */}
+        {isSidebarOpen ? (
+          <button
+            type="button"
+            onClick={handleNewSession}
+            className={cn(ICON_BUTTON_CLASS, '-ml-1 w-auto shrink-0 px-2 font-normal')}
+          >
+            <Icon name="chat-new" className="h-[18px] w-[18px]" />
+            <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
+          </button>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={handleNewSession}
+                aria-label={t('sessions.sidebar.header.actions.newSession')}
+                className={cn(ICON_BUTTON_CLASS, '-ml-1 shrink-0')}
+              >
+                <Icon name="chat-new" className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('sessions.sidebar.header.actions.newSession')}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

@@ -45,19 +45,21 @@ describe('opencode plugins data layer', () => {
     delete process.env.OPENCODE_CONFIG;
   });
 
-  test('parses raw plugin entries', () => {
+  test('parses v1 tuples and v2 objects into the same entry', () => {
     expect(plugins.parsePluginRaw('foo')).toEqual({ spec: 'foo' });
     expect(plugins.parsePluginRaw('foo@1.0.0')).toEqual({ spec: 'foo@1.0.0' });
     expect(plugins.parsePluginRaw(['foo', { a: 1 }])).toEqual({ spec: 'foo', options: { a: 1 } });
-    expect(plugins.parsePluginRaw(['foo', {}])).toEqual({ spec: 'foo', options: {} });
+    expect(plugins.parsePluginRaw(['foo', {}])).toEqual({ spec: 'foo' });
+    expect(plugins.parsePluginRaw({ package: 'foo', options: { a: 1 } })).toEqual({ spec: 'foo', options: { a: 1 } });
+    expect(plugins.parsePluginRaw({ package: 'foo' })).toEqual({ spec: 'foo' });
     expect(() => plugins.parsePluginRaw(123)).toThrow('Plugin spec');
   });
 
-  test('serializes plugin entries', () => {
+  test('serializes plugin entries in v2 shape, never a tuple', () => {
     expect(plugins.serializePluginEntry({ spec: 'foo' })).toBe('foo');
     expect(plugins.serializePluginEntry({ spec: 'foo', options: undefined })).toBe('foo');
     expect(plugins.serializePluginEntry({ spec: 'foo', options: {} })).toBe('foo');
-    expect(plugins.serializePluginEntry({ spec: 'foo', options: { a: 1 } })).toEqual(['foo', { a: 1 }]);
+    expect(plugins.serializePluginEntry({ spec: 'foo', options: { a: 1 } })).toEqual({ package: 'foo', options: { a: 1 } });
   });
 
   test('rejects invalid specs and file names', () => {
@@ -69,11 +71,12 @@ describe('opencode plugins data layer', () => {
     expect(() => plugins.writePluginDirFile({ fileName: 'foo.txt', content: '', scope: 'project' }, projectDir)).toThrow('Plugin file name');
   });
 
-  test('creates string and tuple entries with duplicate rejection', () => {
+  test('creates string and object entries with duplicate rejection', () => {
     plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir);
     plugins.createPluginEntry({ spec: 'tuple-plugin', options: { apiKey: 'x' }, scope: 'user' }, projectDir);
 
-    expect(readJson(userConfigPath).plugin).toEqual(['plain-plugin', ['tuple-plugin', { apiKey: 'x' }]]);
+    expect(readJson(userConfigPath).plugins).toEqual(['plain-plugin', { package: 'tuple-plugin', options: { apiKey: 'x' } }]);
+    expect(readJson(userConfigPath).plugin).toBeUndefined();
     expect(() => plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir)).toThrow('already exists');
     expect(thrownBy(() => plugins.createPluginEntry({ spec: 'plain-plugin', scope: 'user' }, projectDir))).toHaveProperty('code', 'ENTRY_EXISTS');
   });
@@ -82,8 +85,8 @@ describe('opencode plugins data layer', () => {
     plugins.createPluginEntry({ spec: 'user-plugin', scope: 'user' }, projectDir);
     plugins.createPluginEntry({ spec: 'project-plugin', scope: 'project' }, projectDir);
 
-    expect(readJson(userConfigPath).plugin).toEqual(['user-plugin']);
-    expect(readJson(path.join(projectDir, '.opencode', 'opencode.json')).plugin).toEqual(['project-plugin']);
+    expect(readJson(userConfigPath).plugins).toEqual(['user-plugin']);
+    expect(readJson(path.join(projectDir, '.opencode', 'opencode.json')).plugins).toEqual(['project-plugin']);
   });
 
   test('re-resolves custom config env between calls', () => {
@@ -98,24 +101,34 @@ describe('opencode plugins data layer', () => {
     plugins.createPluginEntry({ spec: 'second-plugin', scope: 'user' }, projectDir);
     plugins.writePluginDirFile({ fileName: 'second.js', content: 'two', scope: 'user' }, projectDir);
 
-    expect(readJson(firstConfigPath).plugin).toEqual(['first-plugin']);
-    expect(readJson(secondConfigPath).plugin).toEqual(['second-plugin']);
+    expect(readJson(firstConfigPath).plugins).toEqual(['first-plugin']);
+    expect(readJson(secondConfigPath).plugins).toEqual(['second-plugin']);
     expect(fs.existsSync(path.join(path.dirname(firstConfigPath), 'plugins', 'first.js'))).toBe(true);
     expect(fs.existsSync(path.join(path.dirname(secondConfigPath), 'plugins', 'second.js'))).toBe(true);
   });
 
-  test('updates entries in place and transitions between string and tuple', () => {
+  test('rewrites a v1 plugin array into v2 plugins when one entry is updated', () => {
     writeJson(userConfigPath, { plugin: ['first', ['second', { a: 1 }], 'third'] });
 
     plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:second'), { spec: 'second-new', options: {} }, projectDir);
-    expect(readJson(userConfigPath).plugin).toEqual(['first', 'second-new', 'third']);
+    const migrated = readJson(userConfigPath);
+    expect(migrated.plugin).toBeUndefined();
+    expect(migrated.plugins).toEqual(['first', 'second-new', 'third']);
 
     plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:first'), { spec: 'first-new', options: { b: 2 } }, projectDir);
-    expect(readJson(userConfigPath).plugin).toEqual([['first-new', { b: 2 }], 'second-new', 'third']);
+    expect(readJson(userConfigPath).plugins).toEqual([{ package: 'first-new', options: { b: 2 } }, 'second-new', 'third']);
   });
 
-  test('deletes entries and prunes empty plugin key', () => {
-    writeJson(userConfigPath, { plugin: ['only'] });
+  test('reads a v2 plugins array and updates it in place', () => {
+    writeJson(userConfigPath, { plugins: ['alpha', { package: 'beta', options: { a: 1 } }] });
+
+    expect(plugins.listPluginEntries(projectDir).map((entry) => entry.spec)).toEqual(['alpha', 'beta']);
+    plugins.updatePluginEntry(plugins.encodePluginId('config', 'user:beta'), { options: { a: 2 } }, projectDir);
+    expect(readJson(userConfigPath).plugins).toEqual(['alpha', { package: 'beta', options: { a: 2 } }]);
+  });
+
+  test('deletes entries and prunes the empty plugins key', () => {
+    writeJson(userConfigPath, { plugins: ['only'] });
 
     plugins.deletePluginEntry(plugins.encodePluginId('config', 'user:only'), projectDir);
     expect(readJson(userConfigPath)).toEqual({});

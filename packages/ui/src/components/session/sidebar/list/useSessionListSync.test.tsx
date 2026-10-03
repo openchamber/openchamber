@@ -111,13 +111,14 @@ describe('useSessionListSync', () => {
     dom.restore();
   });
 
-  test('leaves initial global refresh to the root poller while publishing complete demand', () => {
+  test('leaves initial global refresh to the root poller and demands only the current directory', () => {
     act(() => useSessionUIStore.setState({ availableWorktreesByProject: new Map([['/project', [worktree]]]) }));
     act(() => root.render(<LifecycleProbe isVSCode={false} />));
 
     expect(state.globalRefreshes).toBe(0);
     expect(state.demands).toHaveLength(1);
-    expect(state.demands[0]?.directories).toEqual(['/project', '/worktree']);
+    // The known worktree is topology, not demand: it is never bootstrapped by being known.
+    expect(state.demands[0]?.directories).toEqual(['/project']);
     expect(state.directoryRefreshes).toEqual([]);
     expect(state.subscriptions).toBe(1);
     expect(state.cleanupInputs.at(-1)).toEqual({ enabled: true, hasAuthoritativeGlobalSessions: true, sessionCount: 0, sessions: [] });

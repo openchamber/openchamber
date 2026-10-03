@@ -1,5 +1,6 @@
 import React from 'react';
-import type { Agent } from '@opencode-ai/sdk/v2';
+import type { Agent } from '@/lib/opencode/model';
+import { agentLabel } from '@/lib/agentLabel';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -45,6 +46,8 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
         if (Array.isArray(configAgents) && configAgents.length > 0) return configAgents;
         return Array.isArray(agentsStoreAgents) ? agentsStoreAgents : [];
     }, [configAgents, agentsStoreAgents, directory]);
+    const selectedAgent = rawAgents.find((agent) => agent.name === agentName);
+    const selectedAgentLabel = selectedAgent ? agentLabel(selectedAgent) : agentName;
     const agents = React.useMemo(() => {
         const visible = filterVisibleAgents(rawAgents);
         return filter ? visible.filter(filter) : visible;
@@ -114,7 +117,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 }}
                             >
                                 <div className="flex flex-col">
-                                    <span className="typography-meta font-medium">{agent.name}</span>
+                                    <span className="typography-meta font-medium">{agentLabel(agent)}</span>
                                     {agent.description && (
                                         <span className="typography-micro text-muted-foreground">
                                             {agent.description}
@@ -155,7 +158,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             <>
                                 <Icon name="robot-2" className="h-3.5 w-3.5 text-muted-foreground" />
                                 <span className="typography-meta font-medium text-foreground">
-                                    {agentName || t('settings.commands.agentSelector.selectAgentPlaceholder')}
+                                    {selectedAgentLabel || t('settings.commands.agentSelector.selectAgentPlaceholder')}
                                 </span>
                             </>
                         )}
@@ -201,7 +204,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 className="typography-meta"
                                 onSelect={() => handleAgentChange(agent.name)}
                             >
-                                <span className="font-medium">{agent.name}</span>
+                                <span className="font-medium">{agentLabel(agent)}</span>
                             </DropdownMenuItem>
                         ))}
                     </DropdownMenuContent>

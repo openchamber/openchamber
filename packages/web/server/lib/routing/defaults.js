@@ -14,15 +14,59 @@ import { z } from 'zod';
 const AUTO_PROVIDER_ID = 'openchamber';
 const AUTO_MODEL_ID = 'auto';
 
-const autoModelSchema = z.object({ providerID: z.literal(AUTO_PROVIDER_ID), modelID: z.literal(AUTO_MODEL_ID) });
-const autoModelStringSchema = z.literal(`${AUTO_PROVIDER_ID}/${AUTO_MODEL_ID}`);
+// v2 names a model `{ providerID, id }` (`Model.Ref`); OpenChamber's own stored
+// config and the message queue's send config name it `{ providerID, modelID }`.
+const autoModelSchema = z.object({ providerID: z.literal(AUTO_PROVIDER_ID), id: z.literal(AUTO_MODEL_ID) });
+const autoStoredModelSchema = z.object({ providerID: z.literal(AUTO_PROVIDER_ID), modelID: z.literal(AUTO_MODEL_ID) });
 
-/** The command route carries the model as `provider/model`; the prompt routes as an object. */
-export const isAutoModel = (model) => autoModelSchema.safeParse(model).success || autoModelStringSchema.safeParse(model).success;
+export const isAutoModel = (model) => autoModelSchema.safeParse(model).success
+  || autoStoredModelSchema.safeParse(model).success;
 
-export const JEV_API_ORIGIN = 'https://api.typesafe.ai';
-export const JEV_API_PATH = '/v1/systemone';
+/** The sentinel itself, in the v2 `Model.Ref` shape. */
+export const AUTO_MODEL_REF = { providerID: AUTO_PROVIDER_ID, id: AUTO_MODEL_ID };
+
+/** The user's own TypeSafe key: their quota, their account, the `jev-latest` alias. */
+export const JEV_API_URL = 'https://api.typesafe.ai/v1/systemone';
 export const JEV_MODEL = 'jev-latest';
+
+/**
+ * OpenCode Zen serves the same System One endpoint and answers without any
+ * credential while `jev-1.13-free` is free. Dax approved OpenChamber using it
+ * (Slack, 2026-09-22) on terms this module keeps: the UI tells the user it is a
+ * limited-time free model that will later need a Zen key, and every call names
+ * OpenChamber so zen can see or throttle us. Zen rejects the `jev-latest`
+ * alias, so the versioned free id is sent instead.
+ */
+export const ZEN_JEV_API_URL = 'https://opencode.ai/zen/v1/systemone';
+export const ZEN_JEV_MODEL = 'jev-1.13-free';
+export const ZEN_CLIENT_ID = 'openchamber';
+
+/**
+ * Whether the free promotion is still on. When OpenCode ends it, flip this and
+ * the promotion stops being offered; users keep Jev through a Zen or TypeSafe
+ * key, or lose the safety net and Auto until they add one.
+ */
+export const ZEN_JEV_PROMOTION_ACTIVE = true;
+
+/**
+ * The paid model behind a Zen API key, same endpoint. Not verified live: an
+ * OpenCode account sign-in (OAuth) is rejected there as "Invalid API key", so
+ * only a Zen API key saved in OpenCode is offered.
+ */
+export const ZEN_JEV_PAID_MODEL = 'jev-1.13';
+
+/**
+ * OpenRouter and Vercel AI Gateway serve TypeSafe's System One API under their
+ * own base URLs and bill the call to the account behind the key the user saved
+ * for that provider in OpenCode. OpenRouter maps the bare `jev-latest` onto its
+ * `~typesafe/jev-latest` alias; AI Gateway knows Jev only as `typesafe-ai/jev`.
+ * Both answer 401 without a key (checked 2026-09-27); a paid call is not
+ * verified live yet.
+ */
+export const OPENROUTER_JEV_API_URL = 'https://openrouter.ai/api/v1/systemone';
+export const OPENROUTER_JEV_MODEL = 'jev-latest';
+export const VERCEL_JEV_API_URL = 'https://ai-gateway.vercel.sh/typesafe/v1/systemone';
+export const VERCEL_JEV_MODEL = 'typesafe-ai/jev';
 
 /** Per-attempt timeout; the lab measured 250–700 ms warm, ~1 s on a cold TLS handshake. */
 export const JEV_TIMEOUT_MS = 4000;

@@ -2,19 +2,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseOpenCodeCliVersion, readPinnedOpenCodeCliVersion } from './opencode-cli-version.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
-const workspaceRoot = path.resolve(electronRoot, '../..');
-
-const readExpectedVersion = () => {
-  const pkg = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8'));
-  const version = pkg.dependencies?.['@opencode-ai/sdk'];
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
-    throw new Error(`Expected root @opencode-ai/sdk to be pinned to an exact version, got: ${version || '(missing)'}`);
-  }
-  return version;
-};
 
 const binaryName = () => process.platform === 'win32' ? 'opencode.exe' : 'opencode';
 
@@ -30,7 +21,7 @@ const runVersion = (binaryPath) => {
     const stdout = result.stdout ? `\n${result.stdout.trim()}` : '';
     throw new Error(`Failed to run bundled OpenCode CLI: ${binaryPath}${stderr}${stdout}`);
   }
-  return (result.stdout || '').trim().split(/\s+/)[0] || '';
+  return parseOpenCodeCliVersion(result.stdout);
 };
 
 const assertBinary = (binaryPath, expectedVersion) => {
@@ -84,7 +75,7 @@ const main = () => {
   const mode = process.argv[2];
   if (mode !== '--staged' && mode !== '--packaged') usage();
 
-  const expectedVersion = readExpectedVersion();
+  const expectedVersion = readPinnedOpenCodeCliVersion();
   if (mode === '--staged') {
     assertBinary(path.join(electronRoot, 'resources', 'opencode-cli', binaryName()), expectedVersion);
     return;

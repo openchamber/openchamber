@@ -3,6 +3,14 @@ import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summarization.js';
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
+
+// HTTP header values must be printable latin1; macOS voice names can be localized
+// (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
+// outright. Percent-encode so the X-Speech-Voice header is always safe.
+export function speechVoiceHeaderValue(voice) {
+  return encodeURIComponent(voice);
+}
 
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
@@ -18,6 +26,9 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       contentType: req.headers['content-type'] || null,
     });
     try {
+      if (isEnterpriseMode()) {
+        return res.status(403).json({ allowed: false, error: ENTERPRISE_MODE_ERROR });
+      }
       const openaiApiKey = process.env.OPENAI_API_KEY;
       console.log('[Voice] OpenAI API Key present:', !!openaiApiKey);
 
@@ -60,11 +71,17 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         return res.status(400).json({ error: 'Text is required' });
       }
 
+      // Without a custom server this is OpenAI's cloud; a custom one has
+      // already been held to this machine by the URL check above.
+      if (isEnterpriseMode() && !normalizedBaseURL) {
+        return res.status(403).json({ error: ENTERPRISE_MODE_ERROR });
+      }
+
       // Dynamically import the TTS service (ESM)
       const { ttsService } = await getTtsModule();
 
       // Check availability - server-configured key, client-provided key, or custom server URL
-      const hasServerKey = ttsService.isAvailable();
+      const hasServerKey = await ttsService.isAvailable();
       const hasClientKey = apiKey && typeof apiKey === 'string' && apiKey.trim().length > 0;
       const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
       
@@ -135,8 +152,10 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
   app.get('/api/tts/status', async (_req, res) => {
     try {
       const { ttsService } = await getTtsModule();
+      const enterpriseMode = isEnterpriseMode();
       res.json({
-        available: ttsService.isAvailable(),
+        available: !enterpriseMode && await ttsService.isAvailable(),
+        enterpriseMode,
         voices: [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
           'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
@@ -215,7 +234,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
-      res.setHeader('X-Speech-Voice', voice);
+      res.setHeader('X-Speech-Voice', speechVoiceHeaderValue(voice));
       if (resolvedLanguage) res.setHeader('X-Speech-Language', resolvedLanguage);
       res.setHeader('Content-Length', audioBuffer.length);
       res.send(audioBuffer);

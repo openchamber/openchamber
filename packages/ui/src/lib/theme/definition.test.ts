@@ -53,6 +53,135 @@ describe('compact theme definitions', () => {
   });
 });
 
+describe('Catppuccin built-in palettes', () => {
+  test('maps the dark variant to official Mocha roles', () => {
+    const theme = themes.find((item) => item.metadata.id === 'catppuccin-dark');
+    expect({
+      primary: theme?.colors.primary.base,
+      surface: {
+        background: theme?.colors.surface.background,
+        foreground: theme?.colors.surface.foreground,
+        muted: theme?.colors.surface.muted,
+        mutedForeground: theme?.colors.surface.mutedForeground,
+        elevated: theme?.colors.surface.elevated,
+      },
+      status: {
+        error: theme?.colors.status.error,
+        warning: theme?.colors.status.warning,
+        success: theme?.colors.status.success,
+        info: theme?.colors.status.info,
+      },
+      mergedPr: theme?.colors.pr?.merged,
+      inlineCodeBackground: theme?.colors.markdown?.inlineCodeBackground,
+      syntax: {
+        comment: theme?.colors.syntax.base.comment,
+        keyword: theme?.colors.syntax.base.keyword,
+        string: theme?.colors.syntax.base.string,
+        number: theme?.colors.syntax.base.number,
+        function: theme?.colors.syntax.base.function,
+        variable: theme?.colors.syntax.base.variable,
+        type: theme?.colors.syntax.base.type,
+        operator: theme?.colors.syntax.base.operator,
+      },
+    }).toEqual({
+      primary: '#cba6f7',
+      surface: {
+        background: '#1e1e2e',
+        foreground: '#cdd6f4',
+        muted: '#181825',
+        mutedForeground: '#a6adc8',
+        elevated: '#181825',
+      },
+      status: {
+        error: '#f38ba8',
+        warning: '#fab387',
+        success: '#a6e3a1',
+        info: '#89b4fa',
+      },
+      mergedPr: '#cba6f7',
+      inlineCodeBackground: '#313244',
+      syntax: {
+        comment: '#9399b2',
+        keyword: '#cba6f7',
+        string: '#a6e3a1',
+        number: '#fab387',
+        function: '#89b4fa',
+        variable: '#cdd6f4',
+        type: '#f9e2af',
+        operator: '#94e2d5',
+      },
+    });
+  });
+
+  test('maps the light variant to official Latte roles', () => {
+    const theme = themes.find((item) => item.metadata.id === 'catppuccin-light');
+    expect({
+      primary: theme?.colors.primary.base,
+      focus: theme?.colors.interactive.focus,
+      surface: {
+        background: theme?.colors.surface.background,
+        foreground: theme?.colors.surface.foreground,
+        muted: theme?.colors.surface.muted,
+        mutedForeground: theme?.colors.surface.mutedForeground,
+        elevated: theme?.colors.surface.elevated,
+      },
+      status: {
+        error: theme?.colors.status.error,
+        warning: theme?.colors.status.warning,
+        success: theme?.colors.status.success,
+        info: theme?.colors.status.info,
+      },
+      mergedPr: theme?.colors.pr?.merged,
+      inlineCodeBackground: theme?.colors.markdown?.inlineCodeBackground,
+      syntax: {
+        comment: theme?.colors.syntax.base.comment,
+        keyword: theme?.colors.syntax.base.keyword,
+        string: theme?.colors.syntax.base.string,
+        number: theme?.colors.syntax.base.number,
+        function: theme?.colors.syntax.base.function,
+        variable: theme?.colors.syntax.base.variable,
+        type: theme?.colors.syntax.base.type,
+        operator: theme?.colors.syntax.base.operator,
+      },
+    }).toEqual({
+      primary: '#7130c7',
+      focus: '#8839ef',
+      surface: {
+        background: '#eff1f5',
+        foreground: '#4c4f69',
+        muted: '#e6e9ef',
+        mutedForeground: '#5c5f77',
+        elevated: '#e6e9ef',
+      },
+      status: {
+        error: '#d20f39',
+        warning: '#fe640b',
+        success: '#40a02b',
+        info: '#1850c1',
+      },
+      mergedPr: '#8839ef',
+      inlineCodeBackground: '#ccd0da',
+      syntax: {
+        comment: '#7c7f93',
+        keyword: '#8839ef',
+        string: '#40a02b',
+        number: '#fe640b',
+        function: '#1e66f5',
+        variable: '#4c4f69',
+        type: '#df8e1d',
+        operator: '#179299',
+      },
+    });
+  });
+
+  test('registers exactly one Catppuccin theme per mode', () => {
+    expect(themes.filter((theme) => theme.metadata.name === 'Catppuccin').map((theme) => theme.metadata.id)).toEqual([
+      'catppuccin-dark',
+      'catppuccin-light',
+    ]);
+  });
+});
+
 describe('rendered theme color pairs', () => {
   test('keeps high-contrast VS Code fallbacks dark and its focus indicator opaque', () => {
     const theme = buildVSCodeThemeFromPalette({ kind: 'high-contrast', colors: { focusBorder: '#ffffff', 'statusBar.background': '#ff0000' } });

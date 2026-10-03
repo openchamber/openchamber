@@ -1,0 +1,30 @@
+{
+  "name": "@openchamber/example-browser-provider-stub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "contributes": {
+      "panel": {
+        "id": "browser-provider-stub",
+        "name": "Browser Provider Stub",
+        "icon": "window",
+        "entry": "panel/index.html",
+        "dock": "top",
+        "size": 40
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "provides": [
+          "browser"
+        ],
+        "surface": true
+      }
+    }
+  },
+  "dependencies": {
+    "@openchamber/sdk": "workspace:*"
+  }
+}

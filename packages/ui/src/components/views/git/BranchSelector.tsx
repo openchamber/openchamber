@@ -247,8 +247,9 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           onClose={() => setIsOpen(false)}
         >
           <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+            {/* No autofocus: on a phone it would raise the keyboard over the
+                list the user came here to scan; typing is the rarer path. */}
             <input
-              autoFocus
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t('gitView.branch.searchPlaceholder')}

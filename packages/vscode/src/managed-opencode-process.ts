@@ -47,9 +47,10 @@ export function spawnManagedOpenCodeProcess(
       const lines = stdout.split('\n');
       stdout = (lines.pop() ?? '').slice(-32 * 1024);
       for (const line of lines) {
-        if (!line.startsWith('opencode server listening')) continue;
-        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-        if (!match) { finish(startupError('Failed to parse server URL.')); return; }
+        // OpenCode 2.x prints `server listening on http://host:port`; 1.x
+        // prefixed the same line with `opencode `. Anything else is noise.
+        const match = line.match(/(?:^|\s)server listening on\s+(https?:\/\/[^\s]+)/);
+        if (!match) continue;
         url = match[1];
         finish();
         return;

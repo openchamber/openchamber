@@ -12,7 +12,7 @@ description: 自定义 OpenChamber 自动化流程背后的内置提示词。
 ## 编辑提示词
 
 1. 打开 **Settings → Magic Prompts**。
-2. 从侧边栏的分组中选择一个提示词 — Git、GitHub、Planning 和 Session。
+2. 从侧边栏的分组中选择一个提示词 — Git、Linear、Planning 和 Session。
 3. 编辑文本并保存。
 
 有些提示词有一个可见部分（你会看到的消息）和一个指令部分（对智能体隐藏的引导）。提示词可以包含 OpenChamber 会填入的 `{{placeholders}}`，比如 diff 或 issue 标题 — 请保留它们原样。
@@ -33,14 +33,6 @@ description: 自定义 OpenChamber 自动化流程背后的内置提示词。
 | PR 生成 | git 视图 PR 标签页中的创建 pull request 表单 | 你生成 PR 标题和正文时。会填入 base 和 head 分支、两者之间的提交和变更文件、你补充的附加上下文，以及仓库的 PR 模板（如果存在）。 |
 | merge/rebase 冲突解决 | git 视图中的冲突对话框，当 merge 或 rebase 因冲突停止时 | 你选择 "Resolve in current session" 或 "Resolve in new session"。智能体会阅读冲突文件，为每个文件提出解决策略，并等你确认后才编辑、暂存或继续操作。 |
 | cherry-pick 冲突解决 | worktree 会话的 "Re-integrate commits" 区域 | 把会话的提交迁移到目标分支时遇到冲突并交给智能体。智能体在临时 worktree 中解决冲突、暂存文件并继续 cherry-pick。 |
-
-### GitHub
-
-| 提示词 | 运行位置 | 触发时机 |
-| --- | --- | --- |
-| PR 审阅 | 输入框附件菜单中的 "Link GitHub PR" 选择器，以及新 worktree 对话框 | 两个触发点。把 PR 附为上下文时会渲染指令，并随你的下一条消息发出。从 PR 创建 worktree 会话时，该提示词成为会话的开场消息，并附上完整 PR 上下文。 |
-| issue 审阅 | 新 worktree 对话框，当你从 issue 创建 worktree 时 | 新会话的开场消息会审阅该 issue，并将其正文和评论附为上下文。 |
-| PR 失败检查 / PR 评论 / 单条 PR 评论 | — | 目前没有任何流程发送它们。PR 视图过去通过一键审阅操作触发这些提示词；现在失败的检查和评论会改为固定为聊天上下文草稿。保留它们是为了让已有的覆盖配置继续生效。 |
 
 ### Planning
 

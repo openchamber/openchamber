@@ -1,5 +1,5 @@
 import { afterAll, test } from 'vitest';
-import { closeDiffHunkWorkers, exerciseDiffHunkActions } from '@openchamber/ui/components/views/DiffView.hunks.fixture';
+import { closeDiffHunkWorkers, exerciseDiffHunkActions, exerciseTrailingContextExpansion } from '@openchamber/ui/components/views/DiffView.hunks.fixture';
 
 afterAll(closeDiffHunkWorkers);
 
@@ -10,3 +10,5 @@ test('full-context and action reads must describe the same file version', () => 
 test('cached action patches cannot be paired with a newer full-context display', () => exerciseDiffHunkActions('cached'));
 test('single-hunk inline actions require matching display and action versions too', () => exerciseDiffHunkActions('cold-single'));
 test('split-view hunk controls occupy the matching rendered annotation rows', () => exerciseDiffHunkActions(undefined, 'side-by-side'));
+test('patch-only diffs offer the lines after the last hunk and expand them from the full file', () => exerciseTrailingContextExpansion());
+test('split view puts the trailing row in the left column', () => exerciseTrailingContextExpansion('side-by-side'));

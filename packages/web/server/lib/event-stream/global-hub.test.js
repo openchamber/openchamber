@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createGlobalMessageStreamHub } from './global-hub.js';
 
 it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () => {
-  const blocks = Array.from({ length: 8 }, (_, i) => `id: e${i}\ndata: ${JSON.stringify({ type: 'message', properties: { text: '界'.repeat(40) } })}\n\n`);
+  // v2 carries the event id inside the payload; there are no `id:` SSE lines.
+  const blocks = Array.from({ length: 8 }, (_, i) => `data: ${JSON.stringify({ id: `e${i}`, type: 'message', properties: { text: '界'.repeat(40) } })}\n\n`);
   const received = [];
   const hub = createGlobalMessageStreamHub({
     buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
-    getOpenCodeAuthHeaders: () => ({}), replayLimit: 3, replayByteLimit: 550,
+    getOpenCodeAuthHeaders: () => ({}), replayLimit: 3, replayByteLimit: 600,
     upstreamReconnectDelayMs: 60_000,
     fetchImpl: async () => createSseResponse({ blocks }),
   });
@@ -19,8 +20,8 @@ it('bounds a contiguous replay suffix by UTF-8 bytes and event count', async () 
     expect(hub.replayAfter('e5')).toBeNull();
     const tail = hub.replayAfter('e6');
     expect(tail.map(entry => entry.eventId)).toEqual(['e7']);
-    expect(Buffer.byteLength(tail[0].serializedFrame) * 2).toBeLessThanOrEqual(550);
-    expect(Buffer.byteLength(tail[0].serializedFrame) * 3).toBeGreaterThan(550);
+    expect(Buffer.byteLength(tail[0].serializedFrame) * 2).toBeLessThanOrEqual(600);
+    expect(Buffer.byteLength(tail[0].serializedFrame) * 3).toBeGreaterThan(600);
   } finally { hub.stop(); }
 });
 
@@ -62,9 +63,9 @@ async function waitForAssertion(assertion) {
   throw lastError;
 }
 
-const deltaBlock = (id, text, partID = 'prt_a') => `id: ${id}\ndata: ${JSON.stringify({
-  id, type: 'message.part.delta',
-  properties: { sessionID: 'ses_1', messageID: 'msg_1', partID, field: 'text', delta: text },
+const deltaBlock = (id, text, ordinal = 1) => `id: ${id}\ndata: ${JSON.stringify({
+  id, type: 'session.text.delta',
+  data: { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal, delta: text },
 })}\n\n`;
 
 const createDeltaHub = ({ blocks, deltaCoalesceWindowMs }) => createGlobalMessageStreamHub({
@@ -75,15 +76,15 @@ const createDeltaHub = ({ blocks, deltaCoalesceWindowMs }) => createGlobalMessag
   fetchImpl: async () => createSseResponse({ blocks }),
 });
 
-// What a browser holds after applying frames in order: text per part, and the
-// text each part had when a snapshot barrier passed.
+// What a browser holds after applying frames in order: text per stream
+// ordinal, and the text each stream had when a snapshot barrier passed.
 const applyFrames = (frames) => {
   const text = {};
   const barriers = [];
   for (const frame of frames) {
     const payload = frame.payload;
-    if (payload.type === 'message.part.delta') {
-      text[payload.properties.partID] = (text[payload.properties.partID] ?? '') + payload.properties.delta;
+    if (payload.type === 'session.text.delta') {
+      text[payload.data.ordinal] = (text[payload.data.ordinal] ?? '') + payload.data.delta;
     } else {
       barriers.push({ id: payload.id, seen: { ...text } });
     }
@@ -99,7 +100,7 @@ describe('delta coalescing in the global hub', () => {
     hub.subscribeEvent((event) => received.push(event));
     try {
       hub.start();
-      await waitForAssertion(() => expect(applyFrames(received).text.prt_a).toBe(words.join('')));
+      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(words.join('')));
       expect(received.length).toBeLessThanOrEqual(3);
       expect(received.at(-1).eventId).toBe('e0119');
     } finally { hub.stop(); }
@@ -109,9 +110,9 @@ describe('delta coalescing in the global hub', () => {
     const blocks = [];
     let id = 0;
     const nextId = () => `e${String(id++).padStart(4, '0')}`;
-    for (let index = 0; index < 40; index += 1) blocks.push(deltaBlock(nextId(), `a${index}.`, index % 3 === 0 ? 'prt_b' : 'prt_a'));
+    for (let index = 0; index < 40; index += 1) blocks.push(deltaBlock(nextId(), `a${index}.`, index % 3 === 0 ? 2 : 1));
     const snapshotId = nextId();
-    blocks.push(`id: ${snapshotId}\ndata: ${JSON.stringify({ id: snapshotId, type: 'message.part.updated', properties: { part: { id: 'prt_a', messageID: 'msg_1' } } })}\n\n`);
+    blocks.push(`id: ${snapshotId}\ndata: ${JSON.stringify({ id: snapshotId, type: 'session.text.ended', data: { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal: 1, text: '' } })}\n\n`);
     for (let index = 0; index < 40; index += 1) blocks.push(deltaBlock(nextId(), `b${index}.`));
 
     const hub = createDeltaHub({ blocks });
@@ -121,13 +122,13 @@ describe('delta coalescing in the global hub', () => {
       hub.start();
       const expectedA = [...Array(40).keys()].filter((index) => index % 3 !== 0).map((index) => `a${index}.`).join('')
         + [...Array(40).keys()].map((index) => `b${index}.`).join('');
-      await waitForAssertion(() => expect(applyFrames(received).text.prt_a).toBe(expectedA));
+      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(expectedA));
       expect(received.length).toBeLessThan(blocks.length / 4);
 
       const complete = applyFrames(received);
       // The snapshot barrier saw exactly the text that arrived before it.
       expect(complete.barriers).toHaveLength(1);
-      expect(complete.barriers[0].seen.prt_a).toBe([...Array(40).keys()].filter((index) => index % 3 !== 0).map((index) => `a${index}.`).join(''));
+      expect(complete.barriers[0].seen[1]).toBe([...Array(40).keys()].filter((index) => index % 3 !== 0).map((index) => `a${index}.`).join(''));
 
       // A socket that drops after any frame reconnects with that frame's id.
       for (let cut = 0; cut < received.length; cut += 1) {
@@ -139,17 +140,17 @@ describe('delta coalescing in the global hub', () => {
     } finally { hub.stop(); }
   });
 
-  // OpenCode 1.18 sends no SSE ids at all. Before the hub numbered such events
+  // OpenCode sends no SSE ids at all. Before the hub numbered such events
   // itself the replay buffer stayed empty and every reconnect lost its gap.
   it('numbers id-less upstream events so a reconnect resumes from any cursor', async () => {
-    const idless = (type, properties) => `data: ${JSON.stringify({ type, properties })}\n\n`;
+    const idless = (type, data) => `data: ${JSON.stringify({ type, data })}\n\n`;
     const blocks = [];
     for (let index = 0; index < 30; index += 1) {
-      blocks.push(idless('message.part.delta', { sessionID: 'ses_1', messageID: 'msg_1', partID: 'prt_a', field: 'text', delta: `a${index}.` }));
+      blocks.push(idless('session.text.delta', { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal: 1, delta: `a${index}.` }));
     }
-    blocks.push(idless('message.part.updated', { part: { id: 'prt_a', messageID: 'msg_1' } }));
+    blocks.push(idless('session.text.ended', { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal: 1, text: '' }));
     for (let index = 0; index < 30; index += 1) {
-      blocks.push(idless('message.part.delta', { sessionID: 'ses_1', messageID: 'msg_1', partID: 'prt_a', field: 'text', delta: `b${index}.` }));
+      blocks.push(idless('session.text.delta', { sessionID: 'ses_1', assistantMessageID: 'msg_1', ordinal: 1, delta: `b${index}.` }));
     }
 
     const hub = createDeltaHub({ blocks });
@@ -158,7 +159,7 @@ describe('delta coalescing in the global hub', () => {
     try {
       hub.start();
       const expected = [...Array(30).keys()].map((index) => `a${index}.`).join('') + [...Array(30).keys()].map((index) => `b${index}.`).join('');
-      await waitForAssertion(() => expect(applyFrames(received).text.prt_a).toBe(expected));
+      await waitForAssertion(() => expect(applyFrames(received).text[1]).toBe(expected));
 
       const ids = received.map((event) => event.eventId);
       expect(ids.every((eventId) => typeof eventId === 'string' && eventId.length > 0)).toBe(true);
@@ -198,7 +199,7 @@ describe('delta coalescing in the global hub', () => {
     hub.stop();
 
     const tail = hub.replayAfter('e0').map((entry) => JSON.parse(entry.serializedFrame));
-    expect(applyFrames(tail).text.prt_a).toBe('two three');
+    expect(applyFrames(tail).text[1]).toBe('two three');
     expect(tail.at(-1).eventId).toBe('e2');
   });
 
@@ -216,7 +217,7 @@ describe('delta coalescing in the global hub', () => {
 
       hub.flushPending();
 
-      expect(applyFrames(received).text.prt_a).toBe('one two three');
+      expect(applyFrames(received).text[1]).toBe('one two three');
       expect(hub.replayAfter('e2')).toEqual([]);
     } finally { hub.stop(); }
   });
@@ -232,7 +233,7 @@ describe('createGlobalMessageStreamHub', () => {
       upstreamReconnectDelayMs: 100,
       fetchImpl: async () => createSseResponse({
         blocks: [
-          'id: evt-1\ndata: {"type":"session.updated","properties":{}}\n\n',
+          'data: {"id":"evt-1","type":"session.updated","properties":{}}\n\n',
         ],
       }),
     });
@@ -294,7 +295,7 @@ describe('createGlobalMessageStreamHub', () => {
       upstreamReconnectDelayMs: 100,
       fetchImpl: async () => createSseResponse({
         blocks: [
-          'id: evt-1\ndata: {"type":"session.updated","properties":{}}\n\n',
+          'data: {"id":"evt-1","type":"session.updated","properties":{}}\n\n',
         ],
       }),
     });
@@ -318,5 +319,40 @@ describe('createGlobalMessageStreamHub', () => {
       hub.stop();
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe('events of isolated spaces in the global hub', () => {
+  const makeHub = () => createGlobalMessageStreamHub({
+    buildOpenCodeUrl: path => `http://127.0.0.1:4096${path}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    deltaCoalesceWindowMs: 0,
+    fetchImpl: async () => createSseResponse({ blocks: [] }),
+  });
+
+  it('delivers an injected space event to subscribers that asked for spaces only, numbered and replayable like the host\'s', () => {
+    const hub = makeHub();
+    const plain = [];
+    const withSpaces = [];
+    hub.subscribeEvent(event => plain.push(event));
+    hub.subscribeEvent(event => withSpaces.push(event), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.execution.started', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(plain).toHaveLength(0);
+    expect(withSpaces).toHaveLength(1);
+    expect(withSpaces[0]).toMatchObject({ spaceId: 'a1b2c3d4e5f6', directory: '/spaces/a1b2c3d4e5f6/repo' });
+    expect(withSpaces[0].eventId).toMatch(/^oc-/);
+    expect(withSpaces[0].translated()).toEqual([expect.objectContaining({ type: 'session.status' })]);
+    expect(JSON.parse(withSpaces[0].serialize())).toMatchObject({ type: 'event', directory: '/spaces/a1b2c3d4e5f6/repo', payload: { type: 'session.execution.started' } });
+    hub.injectEvent({ payload: { type: 'session.execution.succeeded', data: { sessionID: 's1' } }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(hub.replayAfter(withSpaces[0].eventId).map(entry => entry.eventId)).toEqual([withSpaces[1].eventId]);
+  });
+
+  it('marks a host event with no space, so every subscriber sees it', () => {
+    const hub = makeHub();
+    const seen = [];
+    hub.subscribeEvent(event => seen.push(event.spaceId));
+    hub.subscribeEvent(event => seen.push(event.spaceId), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.execution.started', data: { sessionID: 's1' } }, directory: '/home/me', spaceId: null });
+    expect(seen).toEqual([null, null]);
   });
 });

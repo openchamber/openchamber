@@ -1,3 +1,4 @@
+import { isShellTool, isSubagentTool, isWriteTool } from '@/lib/opencode/tools';
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
@@ -12,8 +13,6 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import {
-    renderTodoOutput,
-    renderListOutput,
     renderGrepOutput,
     renderGlobOutput,
     renderWebSearchOutput,
@@ -978,26 +977,27 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                     <div className="tool-output-surface h-full max-h-[75vh] overflow-y-auto px-3 pr-4">
                         {popup.metadata?.input && typeof popup.metadata.input === 'object' &&
                             Object.keys(popup.metadata.input).length > 0 &&
-                            popup.metadata?.tool !== 'todowrite' &&
-                            popup.metadata?.tool !== 'todoread' &&
-                            popup.metadata?.tool !== 'apply_patch' ? (() => {
+                            popup.metadata?.tool !== 'patch' ? (() => {
                                 const meta = popup.metadata!;
+                                const metaTool = typeof meta.tool === 'string' ? meta.tool : undefined;
                                 const input = meta.input as Record<string, unknown>;
 
                                 const getInputValue = (key: string): string | null => {
                                   const val = input[key];
                                   return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : null);
                                 };
+                                // v2 file tools report `path`.
+                                const writeTarget = getInputValue('path') || getInputValue('filePath') || getInputValue('file_path') || '';
                                 return (
                                 <div className="border-b border-border/20 p-4 -mx-3">
                                     <div className="typography-markdown font-medium text-muted-foreground mb-2 px-3">
-                                        {meta.tool === 'bash'
+                                        {isShellTool(metaTool)
                                             ? 'Command:'
-                                            : meta.tool === 'task'
-                                                ? 'Task Details:'
+                                            : isSubagentTool(metaTool)
+                                                ? 'Subagent Details:'
                                                 : 'Input:'}
                                     </div>
-                                    {meta.tool === 'bash' && getInputValue('command') ? (
+                                    {isShellTool(metaTool) && getInputValue('command') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
                                             <WorkerHighlightedCode
                                                 language="bash"
@@ -1007,22 +1007,22 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                                 wrap
                                             />
                                         </div>
-                                    ) : meta.tool === 'task' && getInputValue('prompt') ? (
+                                    ) : isSubagentTool(metaTool) && getInputValue('prompt') ? (
                                         <div
                                             className="tool-input-surface bg-transparent rounded-xl border border-border/20 font-mono whitespace-pre-wrap text-foreground/90 mx-3"
                                             style={toolDisplayStyles.getPopupStyles()}
                                         >
                                             {getInputValue('description') ? `Task: ${getInputValue('description')}\n` : ''}
-                                            {getInputValue('subagent_type') ? `Agent Type: ${getInputValue('subagent_type')}\n` : ''}
+                                            {getInputValue('agent') ? `Agent: ${getInputValue('agent')}\n` : ''}
                                             {`Instructions:\n${getInputValue('prompt')}`}
                                         </div>
-                                    ) : meta.tool === 'write' && getInputValue('content') ? (
+                                    ) : isWriteTool(metaTool) && getInputValue('content') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
                                             <PierreFile
                                                 file={{
-                                                    name: getInputValue('filePath') || getInputValue('file_path') || 'new-file',
+                                                    name: writeTarget || 'new-file',
                                                     contents: getInputValue('content')!,
-                                                    lang: getLanguageFromExtension(getInputValue('filePath') || getInputValue('file_path') || '') || undefined,
+                                                    lang: getLanguageFromExtension(writeTarget) || undefined,
                                                 }}
                                                 options={{
                                                     disableFileHeader: true,
@@ -1054,37 +1054,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                         ) : popup.content ? (
                         <div className="p-4">
                             {(() => {
-                                const tool = popup.metadata?.tool;
-
-                                if (tool === 'todowrite' || tool === 'todoread') {
-                                    return (
-                                        renderTodoOutput(popup.content, {
-                                            total: t('chat.todo.total'),
-                                            inProgress: t('chat.todo.inProgress'),
-                                            pending: t('chat.todo.pending'),
-                                            completed: t('chat.todo.completed'),
-                                            cancelled: t('chat.todo.cancelled'),
-                                        }) || (
-                                            <WorkerHighlightedCode
-                                                language="json"
-                                                code={popup.content}
-                                                style={toolDisplayStyles.getPopupContainerStyles()}
-                                                codeStyle={DIALOG_CODE_TAG_PROPS.style}
-                                                wrap
-                                            />
-                                        )
-                                    );
-                                }
-
-                                if (tool === 'list') {
-                                    return (
-                                        renderListOutput(popup.content) || (
-                                            <pre className="typography-markdown bg-muted/30 p-2 rounded-xl border border-border/20 font-mono whitespace-pre-wrap">
-                                                {popup.content}
-                                            </pre>
-                                        )
-                                );
-                                }
+                                const tool = typeof popup.metadata?.tool === 'string' ? popup.metadata.tool : undefined;
 
                                 if (tool === 'grep') {
                                     return (
@@ -1106,7 +1076,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                     );
                                 }
 
-                                if (tool === 'task' || tool === 'reasoning') {
+                                if (isSubagentTool(tool) || tool === 'reasoning') {
                                     return (
                                         <div className={tool === 'reasoning' ? "text-muted-foreground/70" : ""}>
                                             <SimpleMarkdownRenderer content={popup.content} variant="tool" />

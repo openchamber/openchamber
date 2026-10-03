@@ -2,190 +2,136 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createContextObligatoryRuntime } from './runtime.js';
 
-const json = (body) => new Response(JSON.stringify(body), {
-  status: 200,
-  headers: { 'Content-Type': 'application/json' },
+/**
+ * Pinned messages and the compaction cursor live in OpenChamber's own session
+ * metadata store. `readSessionMetadata` and `persistContextCursor` are the
+ * seams; without both the runtime stays inert and says so once.
+ *
+ * `session.compacted` is the hub's translation of OpenCode 2's
+ * `session.compaction.ended`. The v2 compaction message carries only
+ * `time.created`, so the fake below has no `time.completed` on purpose.
+ */
+
+const runtimes = [];
+
+const makeRuntime = (overrides = {}) => {
+  const buildOpenCodeUrl = vi.fn((fetchPath) => `http://opencode.test${fetchPath}`);
+  const runtime = createContextObligatoryRuntime({
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders: () => ({}),
+    ...overrides,
+  });
+  runtimes.push(runtime);
+  return { runtime, buildOpenCodeUrl };
+};
+
+const compactionEvent = () => ({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
+
+const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+
+/** A v2 OpenCode holding one finished compaction and two pinned messages. */
+const fakeOpenCode = () => {
+  const synthetic = [];
+  const fetchMock = vi.fn(async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === '/api/session/ses_1') return json({ data: { id: 'ses_1' } });
+    if (path === '/api/session/ses_1/message') {
+      return json({
+        data: [
+          { id: 'msg_compact', type: 'compaction', status: 'completed', reason: 'auto', summary: 'S', recent: '', time: { created: 5 } },
+          { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'Old answer' }], time: { created: 2 } },
+        ],
+        cursor: {},
+      });
+    }
+    if (path === '/api/session/ses_1/message/msg_u') return json({ data: { id: 'msg_u', type: 'user', text: 'Keep this rule', time: { created: 1 } } });
+    if (path === '/api/session/ses_1/message/msg_a') {
+      return json({ data: { id: 'msg_a', type: 'assistant', content: [{ type: 'reasoning', text: 'x' }, { type: 'text', text: 'Old answer' }], time: { created: 2 } } });
+    }
+    if (path === '/api/session/ses_1/synthetic') {
+      synthetic.push(JSON.parse(init.body));
+      return json({ data: {} });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return { synthetic, fetchMock };
+};
+
+const pinnedMetadata = (extra = {}) => ({
+  openchamber: {
+    context_obligatory_messages: [
+      { id: 'msg_a', createdAt: 2, role: 'assistant' },
+      { id: 'msg_u', createdAt: 1, role: 'user' },
+    ],
+    ...extra,
+  },
+});
+
+afterEach(() => {
+  while (runtimes.length > 0) runtimes.pop().stop();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('context obligatory runtime', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
+  it('re-sends pinned messages after a finished compaction and records the cursor', async () => {
+    const { synthetic } = fakeOpenCode();
+    const persistContextCursor = vi.fn(async () => undefined);
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => pinnedMetadata(), persistContextCursor });
+
+    await runtime.processPayload(compactionEvent(), '/repo');
+
+    expect(synthetic).toHaveLength(1);
+    expect(synthetic[0].resume).toBe(false);
+    const text = synthetic[0].text;
+    expect(text.indexOf('Keep this rule')).toBeGreaterThan(-1);
+    expect(text.indexOf('Keep this rule')).toBeLessThan(text.indexOf('Old answer'));
+    expect(text).not.toContain('\nx\n');
+    expect(persistContextCursor).toHaveBeenCalledWith('ses_1', '/repo', {
+      openchamber: { context_obligatory_last_compaction_message_id: 'msg_compact' },
+    });
   });
 
-  it('injects pinned text in chronological order after compaction and records the summary cursor', async () => {
-    const requests = [];
-    let sessionReads = 0;
-    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body });
-      if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
-      if (url.pathname === '/session/ses_1') {
-        sessionReads += 1;
-        return json({
-          id: 'ses_1',
-          metadata: { openchamber: { context_obligatory_messages: [
-            { id: 'msg_2', createdAt: 20, role: 'assistant' },
-            { id: 'msg_1', createdAt: 10, role: 'user' },
-          ] } },
-        });
-      }
-      if (url.pathname === '/session/ses_1/message') return json([
-        { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model', agent: 'build' } },
-        { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
-      ]);
-      if (url.pathname === '/session/ses_1/message/msg_1') return json({ parts: [{ type: 'text', text: 'First' }] });
-      if (url.pathname === '/session/ses_1/message/msg_2') return json({ parts: [{ type: 'text', text: 'Second' }] });
-      if (url.pathname === '/session/ses_1/prompt_async') return json({});
-      throw new Error(`Unexpected ${url.pathname}`);
-    }));
-    const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
+  it('does not re-send for a compaction it already handled', async () => {
+    const { synthetic } = fakeOpenCode();
+    const { runtime } = makeRuntime({
+      readSessionMetadata: async () => pinnedMetadata({ context_obligatory_last_compaction_message_id: 'msg_compact' }),
+      persistContextCursor: vi.fn(async () => undefined),
     });
 
-    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
+    await runtime.processPayload(compactionEvent(), '/repo');
 
-    const prompt = requests.find((request) => request.path.endsWith('/prompt_async'));
-    const payload = JSON.parse(prompt.body);
-    expect(payload).toMatchObject({
-      model: { providerID: 'provider', modelID: 'model' },
-      agent: 'build',
-      parts: [{ type: 'text', synthetic: true }],
-    });
-    expect(payload.parts[0].text.indexOf('First')).toBeLessThan(payload.parts[0].text.indexOf('Second'));
-    expect(payload.parts[0].text).toContain('continuing the pre-compaction work');
-    expect(payload.parts[0].text).toContain('use it silently as background context');
-    expect(payload.parts[0].text).toContain('Only if no tasks or next steps remain');
-    expect(payload.parts[0].text).toContain('no more than one short paragraph');
-    const patch = requests.find((request) => request.method === 'PATCH');
-    expect(JSON.parse(patch.body).metadata.openchamber.context_obligatory_last_compaction_message_id).toBe('msg_summary');
-    expect(sessionReads).toBe(2);
+    expect(synthetic).toHaveLength(0);
+  });
+
+  it('needs both seams: a read alone leaves it inert', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime, buildOpenCodeUrl } = makeRuntime({ readSessionMetadata: async () => ({}) });
+
+    await runtime.processPayload(compactionEvent());
+
+    expect(buildOpenCodeUrl).not.toHaveBeenCalled();
+  });
+
+  it('explains itself once, not on every event', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime();
+
+    runtime.processPayload(compactionEvent());
+    runtime.processPayload({ type: 'session.idle', properties: { sessionID: 'ses_2' } });
+
+    const notices = log.mock.calls.filter(([line]) => String(line).includes('[context-obligatory] parked'));
+    expect(notices).toHaveLength(1);
+  });
+
+  it('ignores everything after stop', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { runtime } = makeRuntime();
+
     runtime.stop();
-  });
+    runtime.processPayload(compactionEvent());
 
-
-  it('restores project knowledge after compaction even with nothing pinned', async () => {
-    // Pinned messages are already in the conversation until compaction removes
-    // them; project knowledge was never there at all, so a session with no
-    // pinned messages still has something to get back.
-    const requests = [];
-    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body });
-      if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
-      if (url.pathname === '/session/ses_1') return json({
-        id: 'ses_1',
-        metadata: { openchamber: { knowledge_context_delivered: 'sig-before-compaction' } },
-      });
-      if (url.pathname === '/session/ses_1/message') return json([
-        { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model', agent: 'build' } },
-        { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
-      ]);
-      if (url.pathname === '/session/ses_1/prompt_async') return json({});
-      throw new Error(`Unexpected ${url.pathname}`);
-    }));
-    const resolvePending = vi.fn(async () => ({
-      text: '## Pinned notes\n\n- Remember this.',
-      signature: 'sig-1',
-    }));
-    const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      sessionKnowledgeRuntime: {
-        metadataKey: 'knowledge_context_delivered',
-        readPins: () => ({ notes: ['n1'], plans: [] }),
-        resolvePending,
-      },
-    });
-
-    await runtime.processPayload({
-      type: 'session.compacted',
-      properties: { sessionID: 'ses_1', directory: '/work/project' },
-    });
-
-    expect(resolvePending).toHaveBeenCalledWith(
-      '/work/project',
-      '',
-      { notes: ['n1'], plans: [] },
-    );
-    const prompt = requests.find((request) => request.path.endsWith('/prompt_async'));
-    expect(JSON.parse(prompt.body).parts[0].text).toContain('Remember this.');
-    const patch = requests.find((request) => request.method === 'PATCH');
-    // Recorded with the cursor, so the next ordinary send does not repeat it.
-    expect(JSON.parse(patch.body).metadata.openchamber.knowledge_context_delivered).toBe('sig-1');
-  });
-
-  it('sends pinned messages and project knowledge as one message', async () => {
-    const requests = [];
-    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body });
-      if (url.pathname === '/session/ses_1' && init.method === 'PATCH') return json({});
-      if (url.pathname === '/session/ses_1') return json({
-        id: 'ses_1',
-        metadata: { openchamber: { context_obligatory_messages: [{ id: 'msg_1', createdAt: 10, role: 'user' }] } },
-      });
-      if (url.pathname === '/session/ses_1/message') return json([
-        { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model', agent: 'build' } },
-        { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
-      ]);
-      if (url.pathname === '/session/ses_1/message/msg_1') return json({ parts: [{ type: 'text', text: 'Pinned message' }] });
-      if (url.pathname === '/session/ses_1/prompt_async') return json({});
-      throw new Error(`Unexpected ${url.pathname}`);
-    }));
-    const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      sessionKnowledgeRuntime: {
-        metadataKey: 'knowledge_context_delivered',
-        readPins: () => ({ notes: ['n1'], plans: [] }),
-        resolvePending: async () => ({ text: 'Pinned notes block', signature: 'sig-1' }),
-      },
-    });
-
-    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
-
-    // One turn, not two: back-to-back synthetic messages read as the agent
-    // being interrupted twice.
-    const prompts = requests.filter((request) => request.path.endsWith('/prompt_async'));
-    expect(prompts).toHaveLength(1);
-    const text = JSON.parse(prompts[0].body).parts[0].text;
-    expect(text).toContain('Pinned notes block');
-    expect(text).toContain('Pinned message');
-  });
-
-  it('does nothing when the session already carries the knowledge and has no pins', async () => {
-    const requests = [];
-    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
-      const url = new URL(typeof input === 'string' ? input : input.url);
-      requests.push({ path: url.pathname, method: init.method ?? 'GET' });
-      if (url.pathname === '/session/ses_1') return json({ id: 'ses_1', metadata: {} });
-      throw new Error(`Unexpected ${url.pathname}`);
-    }));
-    const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
-      sessionKnowledgeRuntime: {
-        metadataKey: 'knowledge_context_delivered',
-        readPins: () => ({ notes: [], plans: [] }),
-        resolvePending: async () => ({ text: '', signature: 'sig-1' }),
-      },
-    });
-
-    await runtime.processPayload({ type: 'session.compacted', properties: { sessionID: 'ses_1' } });
-
-    expect(requests.some((request) => request.path.endsWith('/prompt_async'))).toBe(false);
-  });
-
-  it('ignores ordinary idle events without making requests', async () => {
-    const fetchImpl = vi.fn();
-    vi.stubGlobal('fetch', fetchImpl);
-    const runtime = createContextObligatoryRuntime({
-      buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
-      getOpenCodeAuthHeaders: () => ({}),
-    });
-    await runtime.processPayload({ type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'idle' } } });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    runtime.stop();
+    expect(log).not.toHaveBeenCalled();
   });
 });

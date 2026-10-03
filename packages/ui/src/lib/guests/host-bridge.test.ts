@@ -44,6 +44,8 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   file: overrides.file ?? (async () => ({ ok: true, result: { written: true as const } })),
   generate: overrides.generate ?? (async () => ({ ok: true, result: { text: '' } })),
   setBadge: overrides.setBadge ?? (() => {}),
+  resize: overrides.resize ?? (() => {}),
+  openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
 });
 
@@ -589,6 +591,19 @@ describe('badge and resolve-result', () => {
     }, effects({ setBadge: (count) => { seen.push(count); } }));
     expect(seen).toEqual([4]);
     expect(reply).toMatchObject({ type: 'result', id: 'oc-9', ok: true });
+  });
+
+  test('resize hands the height to the pane and answers ok', async () => {
+    const seen: number[] = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'resize',
+      id: 'oc-10',
+      payload: { height: 180 },
+    }, effects({ resize: (height) => { seen.push(height); } }));
+    expect(seen).toEqual([180]);
+    expect(reply).toMatchObject({ type: 'result', id: 'oc-10', ok: true });
   });
 
   test('resolve-result hands the payload to the pane and sends nothing back', async () => {

@@ -4,14 +4,15 @@ import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 
 let nextFetchResponse = (): Response => new Response(null, { status: 500 });
 mock.module('./runtime-fetch', () => ({ runtimeFetch: async () => nextFetchResponse() }));
-mock.module('./runtime-url', () => ({ getRuntimeUrlResolver: () => ({ websocket: () => 'ws://example.test/terminal' }) }));
+const socketPaths: string[] = [];
+mock.module('./runtime-url', () => ({ getRuntimeUrlResolver: () => ({ websocket: (path: string) => { socketPaths.push(path); return 'ws://example.test/terminal'; } }) }));
 mock.module('./runtime-auth', () => ({
   clearRuntimeUrlAuthToken: () => undefined,
   refreshRuntimeUrlAuthToken: async () => undefined,
 }));
 mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
 
-const { createTerminalSession, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
+const { connectTerminalStream, createTerminalSession, disposeTerminalInputTransport, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -502,5 +503,24 @@ describe('terminal transport', () => {
       { t: 'write', v: 3, s: 'term-1', d: 'bun run dev\r' },
     ]);
     transport.dispose();
+  });
+});
+
+describe('one terminal socket per target', () => {
+  test('a terminal inside an isolated space is attached over that space\'s socket, a host terminal over the host\'s', async () => {
+    socketPaths.length = 0;
+    const SPACE = 'a1b2c3d4e5f6';
+    const errors: unknown[] = [];
+    const onError = (error: unknown) => { errors.push(error); };
+    const stopHost = connectTerminalStream('t-host', () => undefined, onError, '/home/me/app');
+    const stopSpace = connectTerminalStream('t-space', () => undefined, onError, `/spaces/${SPACE}/app`);
+    const stopSpaceAgain = connectTerminalStream('t-space-2', () => undefined, onError, `/spaces/${SPACE}/app/src`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The dial fails in this test, which is fine: the path is what is under test.
+    expect(socketPaths).toEqual(['/api/terminal/ws', `/api/spaces/${SPACE}/terminal/ws`]);
+    stopHost();
+    stopSpace();
+    stopSpaceAgain();
+    disposeTerminalInputTransport();
   });
 });

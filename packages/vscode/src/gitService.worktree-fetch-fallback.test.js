@@ -39,7 +39,7 @@ const createRepositoryWithRemote = () => {
   runGit(repository, ['remote', 'add', 'origin', remote]);
   runGit(repository, ['push', 'origin', 'HEAD:main']);
   runGit(repository, ['fetch', 'origin']);
-  return { repository };
+  return { remote, repository };
 };
 
 const canRunGit = () => {
@@ -106,6 +106,44 @@ describe('VS Code worktree create from a remote start ref', () => {
         worktreeName: 'never-fetched-wt',
         startRef: 'remotes/origin/main',
       })).rejects.toThrow(/does not appear to be a git repository|Could not read from remote repository/i);
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  }, 30_000);
+
+  it('starts a local base with nothing unpublished from its freshly fetched upstream', async () => {
+    if (!canRunGit()) return;
+
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+
+    try {
+      const { remote, repository } = createRepositoryWithRemote();
+      runGit(repository, ['branch', '--track', 'main', 'origin/main']);
+      const localMain = runGit(repository, ['rev-parse', 'main']).trim();
+      const teammate = createTempDir();
+      runGit(teammate, ['clone', remote, '.']);
+      runGit(teammate, ['config', 'user.email', 'teammate@example.com']);
+      runGit(teammate, ['config', 'user.name', 'Teammate']);
+      fs.writeFileSync(path.join(teammate, 'pushed.txt'), 'pushed\n');
+      runGit(teammate, ['add', 'pushed.txt']);
+      runGit(teammate, ['commit', '-m', 'pushed later']);
+      runGit(teammate, ['push', 'origin', 'HEAD:main']);
+      const pushedHead = runGit(teammate, ['rev-parse', 'HEAD']).trim();
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/fresh-base',
+        worktreeName: 'fresh-base',
+        startRef: 'main',
+      });
+
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(pushedHead);
+      expect(runGit(repository, ['rev-parse', 'main']).trim()).toBe(localMain);
     } finally {
       if (previousXdgDataHome === undefined) {
         delete process.env.XDG_DATA_HOME;

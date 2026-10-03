@@ -4,18 +4,44 @@ import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
+import { useBackgroundSessionWork } from '@/hooks/useBackgroundSessionWork';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
+import { BackgroundWorkButton } from './BackgroundWorkButton';
+
+/** The scroll action: the arrow, plus the status label while the session works. */
+const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }> = ({ onClick, children }) => {
+    const { t } = useI18n();
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            aria-label={t('chat.scrollToBottom.aria')}
+            className="inline-flex h-8 min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-left"
+        >
+            {/* flex-1 so the icon stays centred when the mobile
+                touch-target floor widens the bare button past 32px;
+                with the status label present it collapses back to
+                its 32px basis. */}
+            <span className="flex h-8 w-8 flex-1 shrink-0 basis-8 items-center justify-center text-muted-foreground">
+                <Icon name="arrow-down" className="h-4 w-4" />
+            </span>
+            {children}
+        </button>
+    );
+};
 
 /**
- * Compact one-line mirror of the status row for the pill: same label, none of
- * the status row's animation machinery (which does not survive being squeezed
- * into a 32px chip).
+ * Compact one-line mirror of the status row for the pill: same label and
+ * background action, none of the status row's animation machinery (which does
+ * not survive being squeezed into a 32px chip). The action is a sibling of the
+ * scroll button, never inside it.
  */
-const PillWorkingStatus: React.FC = () => {
+const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     const { t } = useI18n();
     const { activeModel, working } = useAssistantStatus();
     const providers = useConfigStore((state) => state.providers);
+    const backgroundWork = useBackgroundSessionWork();
 
     const modelName = React.useMemo(() => {
         if (!activeModel) return null;
@@ -23,16 +49,21 @@ const PillWorkingStatus: React.FC = () => {
         return getProviderModelDisplayName(provider, activeModel.modelId) || null;
     }, [activeModel, providers]);
 
-    if (!working.isWorking || !working.statusText) return null;
+    if (!working.isWorking || !working.statusText) return <ScrollAction onClick={onClick} />;
     const status = working.statusText;
     const label = modelName && modelName.trim().length > 0
         ? t('chat.statusRow.modelStatus', { model: modelName.trim(), status })
         : status.charAt(0).toUpperCase() + status.slice(1);
 
     return (
-        <span className="-ml-px min-w-0 truncate pr-3 text-sm text-muted-foreground">
-            {label}
-        </span>
+        <>
+            <ScrollAction onClick={onClick}>
+                <span className={cn('-ml-px min-w-0 truncate text-sm text-muted-foreground', working.canBackground ? 'pr-1' : 'pr-3')}>
+                    {label}
+                </span>
+            </ScrollAction>
+            {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className="mr-0.5 h-7 w-7" /> : null}
+        </>
     );
 };
 
@@ -45,7 +76,6 @@ interface ScrollToBottomButtonProps {
 }
 
 const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, working = false, onClick }) => {
-    const { t } = useI18n();
     return (
         <div
             className={cn(
@@ -58,30 +88,22 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
                 edge lines up exactly with the input frame. */}
             <div className="chat-input-column">
                 {/* The soft shadow lives on this wrapper, away from the glass
-                    button's backdrop-filter: sharing one element made the
+                    pill's backdrop-filter: sharing one element made the
                     shadow intermittently drop after hide/show cycles. */}
                 <div className="inline-flex max-w-full rounded-full shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.10)] dark:shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.35)]">
-                <button
-                    type="button"
-                    onClick={onClick}
-                    aria-label={t('chat.scrollToBottom.aria')}
+                <div
                     className={cn(
                         // Glass material with a hairline real border — much
                         // lighter than the oc-glass-floating stack.
-                        'oc-glass-popover inline-flex h-8 max-w-full items-center rounded-full [corner-shape:round] text-left',
+                        // min-h, not h: the mobile touch-target floor grows
+                        // the buttons inside to 36px, and the pill with them.
+                        'oc-glass-popover inline-flex min-h-8 max-w-full items-center rounded-full [corner-shape:round]',
                         'border border-black/[0.06] dark:border-white/[0.08]',
                         visible ? 'pointer-events-auto' : 'pointer-events-none',
                     )}
                 >
-                    {/* flex-1 so the icon stays centred when the mobile
-                        touch-target floor widens the bare button past 32px;
-                        with the status label present it collapses back to
-                        its 32px basis. */}
-                    <span className="flex h-8 w-8 flex-1 shrink-0 basis-8 items-center justify-center text-muted-foreground">
-                        <Icon name="arrow-down" className="h-4 w-4" />
-                    </span>
-                    {working && visible ? <PillWorkingStatus /> : null}
-                </button>
+                    {working && visible ? <WorkingPillBody onClick={onClick} /> : <ScrollAction onClick={onClick} />}
+                </div>
                 </div>
             </div>
         </div>

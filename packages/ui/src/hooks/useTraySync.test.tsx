@@ -2,15 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useTraySync } from './useTraySync';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useNotificationStore } from '@/sync/notification-store';
 
 const session = (id: string, parentID?: string): Session => ({
-  id, parentID, slug: id, projectID: 'project', directory: '/project',
-  title: id, version: '1', time: { created: 1, updated: 1 },
+  id, parentID, projectID: 'project', directory: '/project', title: id, cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, time: { created: 1, updated: 1 },
 });
 
 const Harness = () => {

@@ -5,6 +5,7 @@ const INTL_LOCALE_BY_LOCALE: Record<Locale, string> = {
   en: 'en-US',
   de: 'de-DE',
   fr: 'fr-FR',
+  nl: 'nl-NL',
   'zh-CN': 'zh-CN',
   'zh-TW': 'zh-TW',
   uk: 'uk-UA',

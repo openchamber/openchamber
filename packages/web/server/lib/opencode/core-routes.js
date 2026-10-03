@@ -94,6 +94,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
       'api.health.v1',
       'api.runtime-url.v1',
       'api.raw-file.v1',
+      'api.notifications.emit.v1',
       'realtime.sse.v1',
       'realtime.websocket.global-events.v1',
       'terminal.websocket.v1',
@@ -596,8 +597,15 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
   );
 
+  // An HTML preview runs in an opaque-origin sandbox and carries no session.
+  // The grant in its path is the capability; the fs route checks it.
+  const isFilePreviewRead = (req) => (
+    req.method === 'GET'
+    && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
+  );
+
   const requireApiAuth = async (req, res, next) => {
-    if (isGuestOauthCallback(req)) {
+    if (isGuestOauthCallback(req) || isFilePreviewRead(req)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
@@ -1074,10 +1082,15 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
 };
 
 export const registerCommonRequestMiddleware = (app, dependencies) => {
-  const { express, verboseRequestLogs = false } = dependencies;
+  // `skipBodyParsing(req)` names a request whose body must reach its route untouched: a
+  // request the isolated-spaces dispatcher streams into a space, where a parsed body would
+  // otherwise be consumed here and lost.
+  const { express, verboseRequestLogs = false, skipBodyParsing = () => false } = dependencies;
 
   app.use((req, res, next) => {
-    if (req.path === '/api/config/themes' || req.path.startsWith('/api/config/themes/')) {
+    if (skipBodyParsing(req)) {
+      next();
+    } else if (req.path === '/api/config/themes' || req.path.startsWith('/api/config/themes/')) {
       express.json({ limit: '1mb' })(req, res, next);
     } else if (req.path.startsWith('/api/behavior')) {
       const contentLength = parseInt(req.headers['content-length'] || '0', 10);
@@ -1093,6 +1106,8 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/config/skills') ||
       req.path.startsWith('/api/config/plugins') ||
+      req.path.startsWith('/api/config/websearch') ||
+      req.path.startsWith('/api/config/warming') ||
       req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
@@ -1100,6 +1115,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
       req.path.startsWith('/api/opencode') ||
+      req.path === '/api/openchamber/directory' ||
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/notifications') ||
       req.path.startsWith('/api/permission-auto-accept') ||
@@ -1112,7 +1128,8 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/text') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
-      req.path.startsWith('/api/openchamber/tunnel')
+      req.path.startsWith('/api/openchamber/tunnel') ||
+      req.path.startsWith('/api/openchamber/spaces')
     ) {
       express.json({ limit: '50mb' })(req, res, next);
     } else if (req.path.startsWith('/api')) {
@@ -1122,7 +1139,14 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
     }
   });
 
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  const urlencoded = express.urlencoded({ extended: true, limit: '50mb' });
+  app.use((req, res, next) => {
+    if (skipBodyParsing(req)) {
+      next();
+      return;
+    }
+    urlencoded(req, res, next);
+  });
 
   app.use((req, _res, next) => {
     if (verboseRequestLogs) {

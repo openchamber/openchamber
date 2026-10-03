@@ -47,6 +47,15 @@ describe('effectiveGrants', () => {
     expect(effectiveGrants(granted, approved, moreExec)).toEqual(['prompt', 'filesystem', 'network']);
   });
 
+  test('an origin added in an update is not approved until the user approves the new list', () => {
+    const approved = guestGrantScope({ origins: ['https://fonts.example.com'] });
+    expect(approved).toEqual({ origins: ['https://fonts.example.com'] });
+    expect(effectiveGrants(['origins'], approved, guestGrantScope({ origins: ['https://fonts.example.com'] }))).toEqual(['origins']);
+    const added = guestGrantScope({ origins: ['https://fonts.example.com', 'https://collect.example.net'] });
+    expect(effectiveGrants(['origins'], approved, added)).toEqual([]);
+    expect(effectiveGrants(['origins'], undefined, approved)).toEqual([]);
+  });
+
   test('never counts a scoped grant without a recorded scope', () => {
     expect(effectiveGrants(granted, undefined, guestGrantScope(guest))).toEqual(['prompt']);
   });

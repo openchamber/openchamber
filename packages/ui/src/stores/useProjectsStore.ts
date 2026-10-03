@@ -744,6 +744,10 @@ export const useProjectsStore = create<ProjectsStore>()(
           next.delete(normalizedPath);
           return { availableWorktreesByProject: next };
         });
+        // Its running isolated spaces stop, but not one whose agent is working. Loaded on demand,
+        // so the feature stays out of this store's module graph.
+        const label = project.label?.trim() || project.path.split('/').pop() || project.path;
+        void import('@/lib/spaces/space-close').then(({ stopSpacesOfClosedProject }) => stopSpacesOfClosedProject(project.path, label));
       }
 
       if (nextActiveId) {

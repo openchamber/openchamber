@@ -75,6 +75,7 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 | Generated asset | Regeneration check plus consumer build/test |
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |
 | Platform/runtime behavior | Relevant runtime build or manual/integration check; static checks are insufficient |
+| Desktop update or quit/install sequence | A real update run; read `references/updater-testing.md` first, because a run done the obvious way completes the update and reports success while testing nothing |
 
 Use a sufficiently long timeout for broad checks. Report exactly what ran and what did not.
 

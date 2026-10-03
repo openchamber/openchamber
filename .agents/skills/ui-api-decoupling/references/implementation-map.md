@@ -32,7 +32,7 @@ Explicit OpenChamber routes must register before the generic `/api/*` OpenCode p
 
 ## Runtime Switching
 
-`packages/ui/src/lib/runtime-switch.ts` updates endpoint/auth state and emits the runtime-change event. App roots reconnect SDK clients and reset runtime-scoped stores/transports.
+`packages/ui/src/lib/runtime-switch.ts` updates endpoint/auth state and emits the runtime-change event. `apps/runtimeEndpointReset.ts` reconnects SDK clients and resets runtime-scoped stores/transports. Web and desktop reset a change of runtime from `main.tsx`, outside the auth and compatibility gates, because those gates unmount `App` and a switch made from their host switcher must still reset. A same-runtime credential change (the login gate re-applying the endpoint with a new token) resets only through `App`, so signing in keeps the unlocked host's state. Mobile subscribes from `MobileApp`, which separates transport switches from runtime switches.
 
 Review every cache keyed only by session ID, directory, URL, or entity ID. Add runtime identity when local and remote runtimes can collide.
 

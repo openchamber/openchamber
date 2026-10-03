@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 import {
   DndContext,
   KeyboardSensor,
@@ -13,17 +14,19 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
 import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { requestDirectoryAccess } from '@/lib/desktop';
+import { isVSCodeRuntime, requestDirectoryAccess } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChildStoreManager } from '@/sync/sync-context';
-import type { ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import type { ProjectSortOrder, WorktreeSortOrder } from '@/stores/useSessionDisplayStore';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { Icon } from '@/components/icon/Icon';
 import { SessionSidebarFolderItem } from '../folders/SessionSidebarFolderItem';
 import { SessionTreeItem } from '../sessions/SessionTreeItem';
+import { RunSidebarRow } from '../sessions/RunSidebarRow';
 import { computeNodeStructureKey, nodeContainsSessionId } from '../sessions/sessionNodeItemUtils';
 import { DroppableFolderWrapper } from '../folders/sessionFolderDnd';
 import { FolderDeleteConfirmDialog, type DeleteFolderConfirmState } from '../shell/ConfirmDialogs';
@@ -55,10 +58,10 @@ type GroupProps = Pick<SessionGroupSectionProps,
   | 'collapsedGroups' | 'hideDirectoryControls' | 'mobileVariant' | 'alwaysShowActions'
   | 'activeProjectId' | 'notifyOnSubtasks' | 'expandedParents' | 'editTitle'
   | 'editingRowKey'
-  | 'copiedSessionId' | 'folderRename' | 'setFolderRenameDraft' | 'clearFolderRename'
+  | 'folderRename' | 'setFolderRenameDraft' | 'clearFolderRename'
   | 'setEditingId' | 'setEditingRowKey' | 'setEditTitle' | 'toggleParent' | 'allowReselect'
   | 'onSessionSelected' | 'resetSessionSearch' | 'deleteSessionConfirm'
-  | 'setDeleteSessionConfirm' | 'startFolderRename' | 'setCopiedSessionId'
+  | 'setDeleteSessionConfirm' | 'startFolderRename'
   | 'startSessionWorktreeMenuLoad'
 > & { pinnedSessionIds: Set<string>; sessionOrderIndex: Map<string, number> };
 
@@ -87,6 +90,8 @@ type View = {
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   projectSortOrder: ProjectSortOrder;
+  worktreeSortOrder: WorktreeSortOrder;
+  timelineView: boolean;
 };
 
 type Actions = {
@@ -94,7 +99,7 @@ type Actions = {
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
+  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null; preserveDirectoryOverride?: boolean; targetFolderId?: string; target?: 'chat' | 'project' }) => void;
   openNewWorktreeDialog: () => void;
   openWorktreesPage: (id: string) => void;
   openProjectEditDialog: (id: string) => void;
@@ -120,6 +125,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   const deleteFolder = useSessionFoldersStore((state) => state.deleteFolder);
   const addSessionToFolder = useSessionFoldersStore((state) => state.addSessionToFolder);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+  // A project's isolated spaces page: while the feature's switch is on, and never in VS Code (decision 16).
+  const spacesPageAvailable = useUIStore((state) => state.isolatedSpacesEnabled) && !isVSCodeRuntime();
   const [folderDeleteConfirm, setFolderDeleteConfirm] = React.useState<DeleteFolderConfirmState>(null);
   const [stickyIdentity, setStickyIdentity] = React.useState<string | null>(null);
   const [focusedRowKey, setFocusedRowKey] = React.useState<string | null>(null);
@@ -187,7 +194,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
 
   const renderStatus = React.useCallback((row: Extract<SessionSidebarRow, { kind: 'status' }>) => {
     const retry = () => {
-      if (!row.status.directory) return;
+      if (!row.status.directory) {
+        void refreshGlobalSessions();
+        return;
+      }
       childStores.requestBootstrap({ directory: row.status.directory, priority: 'expanded', reason: row.group.isMain ? 'project-expanded' : 'worktree-expanded', force: true });
     };
     const grant = async () => {
@@ -230,11 +240,26 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
-          onToggle={() => model.state.setCollapsedActivityKeys((current) => {
-            const next = new Set(current);
-            if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
-            return next;
-          })}
+          timelineView={view.timelineView}
+          onToggle={() => {
+            // Collapsing a zone forgets its Show more state: reopening it
+            // starts from the default reveal, like a group or project.
+            if (!row.collapsed) {
+              const containerKey = `activity:${row.activityKey}`;
+              actions.group.resetGroupSessionLimit(containerKey);
+              model.state.setVisibleActivityCountByKey((current) => {
+                if (!current.has(containerKey)) return current;
+                const next = new Map(current);
+                next.delete(containerKey);
+                return next;
+              });
+            }
+            model.state.setCollapsedActivityKeys((current) => {
+              const next = new Set(current);
+              if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
+              return next;
+            });
+          }}
           onNewChat={() => {
             useUIStore.getState().closeMainSurfaces();
             if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
@@ -282,13 +307,14 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           actions.openNewWorktreeDialog();
         }}
         onManageWorktrees={() => actions.openWorktreesPage(project.id)}
+        onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
         onClose={() => actions.removeProject(project.id)}
         showCreateButtons
       />;
     }
     if (row.kind === 'group-header') {
-      return <SortableGroupItem id={row.groupKey} disabled={row.forceExpanded || model.state.editingId !== null}>
+      return <SortableGroupItem id={row.groupKey} disabled={row.forceExpanded || model.state.editingId !== null || view.worktreeSortOrder !== 'manual'}>
         {(dragHandleProps) => <SessionGroupSection
           {...model.groupProps} {...actions.group}
           group={row.group} groupKey={row.groupKey} projectId={row.projectId}
@@ -352,13 +378,26 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           renderExtras={{
             subtreeContainsEditing,
             menuOpenSessionId: model.state.openSidebarMenuKey === `session-menu:${row.key}` || model.state.openSidebarMenuKey === `session-context:${row.key}` ? row.node.session.id : null,
-            nodeStructureKey: computeNodeStructureKey(row.node),
+            nodeStructureKey: row.blockingBadgeSessionScopes
+              ? `${computeNodeStructureKey(row.node)}:${JSON.stringify(row.blockingBadgeSessionScopes)}`
+              : computeNodeStructureKey(row.node),
+            blockingBadgeSessionScopes: row.blockingBadgeSessionScopes,
           }}
         />
       </div>;
     }
+    if (row.kind === 'run') {
+      return <RunSidebarRow
+        run={row.run} depth={row.depth} laneNodes={row.laneNodes} renderContext={row.renderContext}
+        projectId={row.projectId} projectLabel={row.projectLabel}
+        expansionKey={row.expansionKey} expanded={row.expanded} forceExpanded={row.forceExpanded}
+        notifyOnSubtasks={model.groupProps.notifyOnSubtasks} toggleParent={model.groupProps.toggleParent}
+      />;
+    }
     if (row.kind === 'show-control') {
-      return <button type="button" className="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline" onClick={() => {
+      // Timeline rows have no left gutter, so the control lines up with their
+      // text (10px) instead of the grouped view's gutter offset.
+      return <button type="button" className={cn('mt-0.5 flex items-center justify-start rounded-md pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline', view.timelineView ? 'pl-[10px]' : 'pl-[26px]')} onClick={() => {
         if (row.containerKey.startsWith('activity:')) {
           model.state.setVisibleActivityCountByKey((current) => {
             const next = new Map(current);
@@ -372,10 +411,23 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     if (row.kind === 'status') return renderStatus(row);
     if (row.emptyKind === 'sidebar') return model.emptyState;
     if (row.emptyKind === 'search') return model.searchEmptyState;
+    if (row.emptyKind === 'group' && row.group?.directory && !row.group.emptyMessage) {
+      const group = row.group;
+      return <Button variant="link" size="xs" className="w-full justify-start pl-[26px] text-left font-normal normal-case text-muted-foreground/70 underline-offset-auto hover:text-foreground hover:underline" onClick={() => {
+          prepareSessionProjectAction({
+            projectId: row.projectId ?? null,
+            mobileVariant: view.mobileVariant,
+            closeMobileSwitcher: true,
+            setActiveProjectIdOnly: actions.setActiveProjectIdOnly,
+            setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
+          });
+          actions.openNewSessionDraft({ selectedProjectId: row.projectId, directoryOverride: group.directory, target: group.draftTarget });
+        }}>{t('sessions.sidebar.group.empty.startSession')}</Button>;
+    }
     return <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
       {row.emptyKind === 'archived' ? t('sessions.sidebar.group.empty.noArchivedSessions') : row.group?.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
     </div>;
-  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, showDeletionDialog, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => row.kind === 'project-header' ? [row.section.project.id] : row.kind === 'group-header' ? [row.groupKey] : []), [model.rowModel.rows]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);
@@ -391,7 +443,9 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       scrollRef={scrollContainerRef}
     >
       <ScrollableOverlay
-        ref={setScrollContainer} useScrollShadow hideTopScrollShadow scrollShadowSize={96}
+        // Sticky zone headers replace the top shadow in the grouped view; the
+        // flat timeline has none, so it shows the shadow once there is content above.
+        ref={setScrollContainer} useScrollShadow hideTopScrollShadow={!view.timelineView} scrollShadowSize={40}
         outerClassName="flex-1 min-h-0" className="oc-sidebar-scroller pb-1 pl-2.5 pr-2 [overflow-anchor:none]"
       >
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => {

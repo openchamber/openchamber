@@ -15,6 +15,10 @@ const DEFAULT_LOCAL_BIND_HOST = '127.0.0.1';
 // prefix inside the user's home instead.
 const REMOTE_USER_PREFIX = '$HOME/.openchamber/npm-global';
 const REMOTE_BUN_CANDIDATE = '"${BUN_INSTALL:-$HOME/.bun}/bin/bun"';
+// nvm puts node on PATH only from an interactive ~/.bashrc, which the SSH
+// login shell never runs. Use its newest installed node; with no nvm the path
+// does not exist and every probe skips it.
+const REMOTE_NVM_BIN = '${NVM_DIR:-$HOME/.nvm}/versions/node/v$(ls -1 "${NVM_DIR:-$HOME/.nvm}/versions/node" 2>/dev/null | sed "s/^v//" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)/bin';
 // The opencode CLI usually installs into the user's home, which an SSH login
 // shell does not have on PATH. The remote server only looks at OPENCODE_BINARY
 // and PATH, so resolve the CLI here and hand it over explicitly.
@@ -24,8 +28,9 @@ const REMOTE_OPENCODE_CANDIDATES = [
   '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/opencode"',
   '"$HOME/.local/bin/opencode"',
   '"$HOME/.openchamber/npm-global/bin/opencode"',
+  `"${REMOTE_NVM_BIN}/opencode"`,
 ];
-const REMOTE_PATH_PREFIX = '$HOME/.opencode/bin:${BUN_INSTALL:-$HOME/.bun}/bin:${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin';
+const REMOTE_PATH_PREFIX = `$HOME/.opencode/bin:\${BUN_INSTALL:-$HOME/.bun}/bin:\${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin:$HOME/.local/bin:$HOME/.openchamber/npm-global/bin:${REMOTE_NVM_BIN}`;
 const REMOTE_BIN_CANDIDATES = [
   '"$HOME/.openchamber/npm-global/bin/openchamber"',
   '"${BUN_INSTALL:-$HOME/.bun}/bin/openchamber"',
@@ -534,13 +539,14 @@ export class ElectronSshManager {
     return stdout;
   }
 
-  async controlMasterOperation(parsed, controlPath, op) {
+  async controlMasterOperation(parsed, controlPath, op, opArgs = []) {
     return await this.runSshOutput(parsed, [
       '-o', 'ControlMaster=no',
       '-o', `ControlPath=${controlPath}`,
       '-o', 'BatchMode=yes',
       '-o', 'ConnectTimeout=3',
       '-O', op,
+      ...opArgs,
     ]);
   }
 
@@ -1069,13 +1075,14 @@ export class ElectronSshManager {
       REMOTE_BUN_CANDIDATE,
       '"${XDG_CACHE_HOME:-$HOME/.cache}/.bun/bin/bun"',
     ]);
-    const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm');
+    const npmPath = await this.resolveRemoteTool(parsed, controlPath, 'npm', [`"${REMOTE_NVM_BIN}/npm"`]);
 
     // bun's global install targets `~/.bun` or `${XDG_CACHE_HOME:-~/.cache}/.bun` (bun 1.3.x XDG-aware);
     // npm is pinned to a prefix in the user's home so it never touches the root-owned global directory.
     const bunCommand = bunPath ? `${shellQuote(bunPath)} add -g @openchamber/web@${version}` : null;
     const npmCommand = npmPath
-      ? `mkdir -p "${REMOTE_USER_PREFIX}" && ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" @openchamber/web@${version}`
+      // npm is a node script: an nvm npm finds its node only next to itself.
+      ? `mkdir -p "${REMOTE_USER_PREFIX}" && PATH="$(dirname ${shellQuote(npmPath)}):$PATH" ${shellQuote(npmPath)} install -g --prefix "${REMOTE_USER_PREFIX}" @openchamber/web@${version}`
       : null;
 
     const commands = [];
@@ -1104,6 +1111,12 @@ export class ElectronSshManager {
   }
 
   async probeRemoteSystemInfo(parsed, controlPath, port, openchamberPassword) {
+    return (await this.probeRemoteServer(parsed, controlPath, port, openchamberPassword)).info;
+  }
+
+  // `passwordAccepted` is reported on its own because /api/system/info is
+  // public: a server answers it whether or not the password fits.
+  async probeRemoteServer(parsed, controlPath, port, openchamberPassword) {
     const authPayload = openchamberPassword ? JSON.stringify({ password: openchamberPassword }) : '{}';
     const authEnabled = openchamberPassword ? '1' : '0';
     const script = `AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE="$(mktemp)"; COOKIE_FILE="$(mktemp)"; cleanup(){ rm -f "$BODY_FILE" "$COOKIE_FILE"; }; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ "${authEnabled}" = "1" ]; then AUTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -c "$COOKIE_FILE" -H 'content-type: application/json' --data ${shellQuote(authPayload)} http://127.0.0.1:${port}/auth/session || true)"; if [ "$AUTH_STATUS" = "200" ]; then INFO_STATUS="$(curl -sS --max-time 3 -b "$COOKIE_FILE" -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; else INFO_STATUS="$(curl -sS --max-time 3 -o "$BODY_FILE" -w '%{http_code}' http://127.0.0.1:${port}/api/system/info || true)"; fi; HEALTH_STATUS="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health || true)"; elif command -v wget >/dev/null 2>&1; then wget -qO "$BODY_FILE" http://127.0.0.1:${port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:${port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' "$INFO_STATUS" "$AUTH_STATUS" "$HEALTH_STATUS"; cat "$BODY_FILE" 2>/dev/null || true`;
@@ -1113,25 +1126,26 @@ export class ElectronSshManager {
     const authStatus = parseProbeStatusLine(lines[1], 'AUTH_STATUS=') || 0;
     const healthStatus = parseProbeStatusLine(lines[2], 'HEALTH_STATUS=') || 0;
     const body = lines.slice(3).join('\n');
+    const passwordAccepted = authStatus === 200;
 
     if (isLivenessHttpStatus(infoStatus)) {
       if (isAuthHttpStatus(infoStatus)) {
         if (openchamberPassword && authStatus !== 200) {
           throw new Error(`Remote OpenChamber requires UI authentication and configured password was rejected (auth status ${authStatus})`);
         }
-        if (isLivenessHttpStatus(healthStatus)) return {};
+        if (isLivenessHttpStatus(healthStatus)) return { info: {}, passwordAccepted, authStatus };
         throw new Error('Remote OpenChamber requires UI authentication on /api/system/info; configure OpenChamber UI password');
       }
     } else if (isLivenessHttpStatus(healthStatus)) {
-      return {};
+      return { info: {}, passwordAccepted, authStatus };
     } else {
       throw new Error(`Remote OpenChamber probe failed (info status ${infoStatus}, health status ${healthStatus})`);
     }
 
     try {
-      return JSON.parse(body);
+      return { info: JSON.parse(body), passwordAccepted, authStatus };
     } catch {
-      return {};
+      return { info: {}, passwordAccepted, authStatus };
     }
   }
 
@@ -1177,15 +1191,25 @@ export class ElectronSshManager {
     }
   }
 
+  // With a ControlMaster the master owns the listener: `-O forward` hands it
+  // over and its exit status says whether that worked. A `-N -L` client would
+  // instead open a remote login shell and exit with that shell's status, which
+  // is unrelated to the forward (#4132). Returns the child to monitor, or null
+  // when the master holds the forward.
   async spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort) {
-    const connectionArgs = this.usesControlMaster()
-      ? ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`]
-      : this.independentConnectionArgs();
+    const forwardSpec = `${bindHost}:${localPort}:127.0.0.1:${remotePort}`;
+    if (this.usesControlMaster()) {
+      const { code, stdout, stderr } = await this.controlMasterOperation(parsed, controlPath, 'forward', ['-L', forwardSpec]);
+      if (code !== 0) {
+        throw new Error((stderr || stdout).trim() || `Failed to start main port forward (status: ${code})`);
+      }
+      return null;
+    }
     return this.spawnSsh(parsed, [
-      ...connectionArgs,
+      ...this.independentConnectionArgs(),
       '-o', 'ExitOnForwardFailure=yes',
       '-N',
-      '-L', `${bindHost}:${localPort}:127.0.0.1:${remotePort}`,
+      '-L', forwardSpec,
     ], {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
@@ -1218,6 +1242,88 @@ export class ElectronSshManager {
     return null;
   }
 
+  // The remote CLI registry is the authority on which servers run there.
+  async listRemoteServers(parsed, controlPath, binPath) {
+    const output = await this.runRemoteCommand(parsed, controlPath, `${shellQuote(binPath)} status --json`);
+    const payload = JSON.parse(output.slice(output.indexOf('{')));
+    return payload.instances
+      .filter((entry) => entry.runtime === 'cli' && Number.isInteger(entry.port))
+      .map((entry) => ({
+        port: entry.port,
+        launchMode: entry.launchMode,
+        bindHost: entry.bindHost ?? null,
+        passwordProtected: entry.passwordProtected ?? null,
+      }));
+  }
+
+  // A managed server outlives the SSH session on purpose, so every connect has
+  // to look for it before starting another: each server also supervises its own
+  // opencode, and servers nobody reconnects to pile up until the host runs out
+  // of memory. Returns the server to reuse, or null when a new one is needed.
+  // `daemon` marks a server the remote CLI started in the background, the only
+  // kind this manager may stop.
+  async adoptRunningRemoteServer(instance, parsed, controlPath, binPath) {
+    const password = this.configuredOpenChamberPassword(instance);
+    const preferredPort = instance.remoteOpenchamber.preferredPort || null;
+    const wantsNetwork = instance.remoteOpenchamber.bindHost === '0.0.0.0';
+
+    let servers = [];
+    try {
+      servers = await this.listRemoteServers(parsed, controlPath, binPath);
+    } catch (error) {
+      // Not knowing what runs there is not the same as nothing running there.
+      this.appendLogWithLevel(instance.id, 'WARN', `Could not list OpenChamber servers on the remote host; an already running one will not be reused: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (preferredPort) {
+      // A pinned port is reused even when the registry does not know the server on it.
+      servers = [servers.find((server) => server.port === preferredPort) || { port: preferredPort, launchMode: null, bindHost: null, passwordProtected: null }];
+    }
+
+    for (const server of servers) {
+      let probe;
+      try {
+        probe = await this.probeRemoteServer(parsed, controlPath, server.port, password);
+      } catch (error) {
+        // The probe command carries the UI password, and a remote shell may echo it.
+        this.appendLogWithLevel(instance.id, 'INFO', `Not reusing the server on remote port ${server.port}: ${sanitizeProcessDiagnostic(error instanceof Error ? error.message : String(error), password)}`);
+        continue;
+      }
+      // A server that answers is not yet ours: it has to take this instance's
+      // password, or have none when the instance has none. Anything else belongs
+      // to someone else and is neither reused nor stopped.
+      const passwordFits = password ? probe.passwordAccepted : server.passwordProtected !== true;
+      if (!passwordFits) {
+        this.appendLogWithLevel(instance.id, 'INFO', `Not reusing the server on remote port ${server.port}: it does not take this instance's UI password (auth status ${probe.authStatus})`);
+        continue;
+      }
+      const { info } = probe;
+      const adopted = { port: server.port, daemon: server.launchMode === 'daemon' };
+      const runningVersion = parseVersionToken(info.openchamberVersion || '');
+      const otherVersion = Boolean(runningVersion) && runningVersion !== this.appVersion;
+      // Both directions count: a server left on 0.0.0.0 would keep an instance
+      // published after the user turned that off.
+      const bindFits = !server.bindHost || (wantsNetwork ? server.bindHost === '0.0.0.0' : ['127.0.0.1', '::1', 'localhost'].includes(server.bindHost));
+      if (!otherVersion && bindFits) {
+        return adopted;
+      }
+      // Only a daemon the CLI started is ours to replace; a foreground server
+      // belongs to the process manager that launched it.
+      if (!adopted.daemon) {
+        if (server.port === preferredPort) return adopted;
+        this.appendLogWithLevel(instance.id, 'INFO', `Not reusing the server on remote port ${server.port}: it runs in the foreground with another version or bind address and is left to its process manager`);
+        continue;
+      }
+      this.appendLogWithLevel(instance.id, 'INFO', `Replacing the managed server on remote port ${server.port}: ${otherVersion ? `it runs OpenChamber ${runningVersion}` : `it is bound to ${server.bindHost}`}`);
+      await this.stopRemoteServerBestEffort(parsed, controlPath, server.port, binPath);
+      if (await this.remoteServerRunning(parsed, controlPath, server.port, password)) {
+        this.appendLogWithLevel(instance.id, 'WARN', `The managed server on remote port ${server.port} did not stop and keeps running`);
+        // Nothing else can start on a pinned port while this one holds it.
+        if (server.port === preferredPort) return adopted;
+      }
+    }
+    return null;
+  }
+
   async ensureRemoteServer(instance, parsed, controlPath) {
     if (instance.remoteOpenchamber.mode === 'external') {
       if (!instance.remoteOpenchamber.preferredPort) {
@@ -1226,7 +1332,7 @@ export class ElectronSshManager {
       const port = instance.remoteOpenchamber.preferredPort;
       this.setStatus(instance.id, 'server_detecting', 'Probing external OpenChamber server', null, null, port, false, 0, false);
       await this.probeRemoteSystemInfo(parsed, controlPath, port, this.configuredOpenChamberPassword(instance));
-      return { remotePort: port, startedByUs: false, remoteBinPath: null };
+      return { remotePort: port, startedByUs: false, ownsRemoteServer: false, remoteBinPath: null };
     }
 
     this.setStatus(instance.id, 'remote_probe', 'Checking remote OpenChamber installation');
@@ -1250,11 +1356,9 @@ export class ElectronSshManager {
     }
 
     this.setStatus(instance.id, 'server_detecting', 'Detecting managed OpenChamber server');
-    let remotePort = instance.remoteOpenchamber.preferredPort || null;
+    const adopted = await this.adoptRunningRemoteServer(instance, parsed, controlPath, binary.binPath);
+    let remotePort = adopted?.port || null;
     let startedByUs = false;
-    if (remotePort && !(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
-      remotePort = null;
-    }
     if (!remotePort) {
       this.setStatus(instance.id, 'server_starting', 'Starting managed OpenChamber server');
       const desiredPort = instance.remoteOpenchamber.preferredPort || randomPortCandidate(instance.id);
@@ -1264,7 +1368,9 @@ export class ElectronSshManager {
     if (!(await this.remoteServerRunning(parsed, controlPath, remotePort, this.configuredOpenChamberPassword(instance)))) {
       throw new Error('Managed OpenChamber server failed to become reachable');
     }
-    return { remotePort, startedByUs, remoteBinPath: binary.binPath };
+    // An adopted daemon is as much this instance's server as one it just
+    // started: with keepRunning off, disconnecting stops either.
+    return { remotePort, startedByUs, ownsRemoteServer: startedByUs || adopted?.daemon === true, remoteBinPath: binary.binPath };
   }
 
   async disconnectInternal(id, reportIdle) {
@@ -1278,7 +1384,7 @@ export class ElectronSshManager {
     this.sessions.delete(id);
 
     if (session) {
-      if (session.startedByUs && session.remotePort && session.instance.remoteOpenchamber.mode === 'managed' && !session.instance.remoteOpenchamber.keepRunning) {
+      if (session.ownsRemoteServer && session.remotePort && session.instance.remoteOpenchamber.mode === 'managed' && !session.instance.remoteOpenchamber.keepRunning) {
         await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort, session.remoteBinPath);
       }
       await this.stopControlMasterBestEffort(session.parsed, session.controlPath);
@@ -1336,9 +1442,10 @@ export class ElectronSshManager {
       localPort: null,
       remotePort: null,
       startedByUs: false,
+      ownsRemoteServer: false,
       master: null,
+      // null while the ControlMaster holds the main forward.
       mainForward: null,
-      mainForwardDetached: false,
       extraForwards: [],
     };
     this.sessions.set(id, session);
@@ -1355,9 +1462,10 @@ export class ElectronSshManager {
       throw new Error(`Unsupported remote OS: ${remoteOs}`);
     }
 
-    const { remotePort, startedByUs, remoteBinPath } = await this.ensureRemoteServer(instance, parsed, controlPath);
+    const { remotePort, startedByUs, ownsRemoteServer, remoteBinPath } = await this.ensureRemoteServer(instance, parsed, controlPath);
     session.remotePort = remotePort;
     session.startedByUs = startedByUs;
+    session.ownsRemoteServer = ownsRemoteServer;
     session.remoteBinPath = remoteBinPath;
     this.setStatus(id, 'forwarding', 'Setting up port forwards', null, null, remotePort, startedByUs, 0, false);
 
@@ -1372,17 +1480,14 @@ export class ElectronSshManager {
 
     const mainForward = await this.spawnMainForward(parsed, controlPath, bindHost, localPort, remotePort);
     session.mainForward = mainForward;
-    let mainForwardDetached = false;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    if (typeof mainForward.exitCode === 'number' || childProcessDiagnostics.get(mainForward)?.error) {
-      if (this.usesControlMaster() && mainForward.exitCode === 0) {
-        mainForwardDetached = true;
-        this.appendLogWithLevel(id, 'INFO', 'Main tunnel helper exited after ControlMaster handoff');
-      } else {
+    if (mainForward) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (typeof mainForward.exitCode === 'number' || childProcessDiagnostics.get(mainForward)?.error) {
         throw new Error(this.processErrorDetail(mainForward, `Failed to start main port forward (status: ${mainForward.exitCode ?? 'spawn error'})`));
       }
+    } else {
+      this.appendLogWithLevel(id, 'INFO', 'Main tunnel forwarded through ControlMaster');
     }
-    session.mainForwardDetached = mainForwardDetached;
 
     const extraErrors = [];
     for (const forward of instance.portForwards.filter((item) => item.enabled)) {
@@ -1441,14 +1546,9 @@ export class ElectronSshManager {
       let droppedReason = null;
       let detachedNotice = null;
 
-      if (!session.mainForwardDetached) {
+      if (session.mainForward) {
         if (typeof session.mainForward.exitCode === 'number') {
-          if (this.usesControlMaster() && session.mainForward.exitCode === 0) {
-            session.mainForwardDetached = true;
-            detachedNotice = 'Main tunnel helper exited after ControlMaster handoff';
-          } else {
-            droppedReason = this.processErrorDetail(session.mainForward, `Main SSH forward exited (${session.mainForward.exitCode})`);
-          }
+          droppedReason = this.processErrorDetail(session.mainForward, `Main SSH forward exited (${session.mainForward.exitCode})`);
         } else if (childProcessDiagnostics.get(session.mainForward)?.error) {
           droppedReason = this.processErrorDetail(session.mainForward, 'Main SSH forward failed');
         }
@@ -1467,7 +1567,7 @@ export class ElectronSshManager {
       }
 
       if (!droppedReason) {
-        if (session.mainForwardDetached) {
+        if (!session.mainForward) {
           // Fast path: cheap TCP probe before expensive SSH subprocess
           if (await isLocalTunnelReachable(session.localPort)) {
             // Tunnel alive — skip SSH check

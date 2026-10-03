@@ -13,6 +13,7 @@ import {
 import { stopGuestService } from './service.js';
 import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl, publicAddressesOf } from './clone.js';
 import { isReservedBuiltInId } from './builtins.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { extractZipBuffer, unwrapGuestRoot } from './extract-zip.js';
 import {
   guestCopiesDir,
@@ -103,6 +104,11 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
     if (isReservedBuiltInId(inspected.guest.id)) {
       await removeDir(staging);
       return { ok: false, code: 'reserved-id' };
+    }
+    const blocked = enterpriseBlockedCapabilities(inspected.guest, { source, gitUrl: origin?.url });
+    if (blocked.length > 0) {
+      await removeDir(staging);
+      return { ok: false, code: 'enterprise-mode', capabilities: blocked };
     }
     const dest = path.join(copies, inspected.guest.id);
     const store = await readExtensionStore(persistPath);
@@ -305,6 +311,10 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
   const inspected = await inspectGuestPackage(root, { openchamberVersion });
   if (!inspected.ok) {
     return inspected;
+  }
+  const blocked = enterpriseBlockedCapabilities(inspected.guest, { source: 'path' });
+  if (blocked.length > 0) {
+    return { ok: false, code: 'enterprise-mode', capabilities: blocked };
   }
   return persistGuest(inspected.guest, root, 'path', persistPath, { replace });
 };

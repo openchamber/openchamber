@@ -9,6 +9,8 @@ description: Use when changing session synchronization, bootstrap or reconnect s
 
 Read `packages/ui/src/sync/DOCUMENTATION.md` and the nearest owning module documentation before editing. Context gathering is complete when every changed state has an identified owner, authority, scope, and lifecycle.
 
+Before editing behavior a user can reach, write the surface list from `ui-api-decoupling`, *Name The Surfaces Before Editing*: one line per runtime, including the ones this change appears to leave alone. State that reconciles differently per runtime is a parity decision, not an implementation detail.
+
 ## Sources Of Truth
 
 Classify every input before deriving state:
@@ -71,6 +73,7 @@ For streaming-frequency work, also load `performance-engineering`.
 
 - Preserve rich fields when lightweight polling omits them.
 - Use cheap change detection before heavy per-directory fetches.
+- Refresh only directories already running: the selected one and those an event names. Every OpenCode read of a directory starts it with its MCP servers (`opencode-v2`), so a refresh over every store is a fan-out.
 - Treat startup 502/503 as transient with bounded retry/recovery.
 - A retry loop requires a real failure signal; swallowed errors disable retries.
 - Preserve previous authoritative state during transient bootstrap/reconnect failures.

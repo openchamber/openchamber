@@ -62,7 +62,13 @@ describe('browser host updates', () => {
     const result = await waitForUpdateApplied({ owner: 'electron', version: '1.22.3' }, '1.22.2', {
       maxWaitMs: 20,
       fetchUpdate: async (_url, init) => new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new Error('Timed out')), { once: true });
+        // A real pending request keeps the event loop alive. AbortSignal.timeout does
+        // not, and Bun on Windows then never fires it, so hold the loop until abort.
+        const pending = setInterval(() => undefined, 1_000);
+        init?.signal?.addEventListener('abort', () => {
+          clearInterval(pending);
+          reject(new Error('Timed out'));
+        }, { once: true });
       }),
     });
     expect(result).toEqual({ status: 'timeout' });

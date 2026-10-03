@@ -16,3 +16,13 @@ export {
   parseGuestMessage,
   parseHostMessage,
 } from './protocol.ts';
+export { browserControlActionSchema, browserProviderResultSchema } from './service-provider-schemas.ts';
+export {
+  surfaceClipboardAnswerSchema,
+  surfaceControllerSchema,
+  surfaceHostMessageSchema,
+  surfaceInputEventSchema,
+  surfaceResizeAnswerSchema,
+  surfaceViewerMessageSchema,
+} from './service-surface-schemas.ts';
+export type { SurfaceHostMessage, SurfaceViewerMessage } from './service-surface-schemas.ts';

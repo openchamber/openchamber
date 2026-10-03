@@ -10,7 +10,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
-import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
@@ -29,8 +28,6 @@ type Props = {
   showRecentControls: boolean;
   handleOpenDirectoryDialog: () => void;
   onOpenScheduled: () => void;
-  onOpenMultiRun: () => void;
-  canOpenMultiRun: boolean;
   onOpenArchive: () => void;
   headerActionIconClass: string;
   headerActionButtonClass: string;
@@ -54,8 +51,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     showRecentControls,
     handleOpenDirectoryDialog,
     onOpenScheduled,
-    onOpenMultiRun,
-    canOpenMultiRun,
     onOpenArchive,
     headerActionIconClass,
     headerActionButtonClass,
@@ -77,13 +72,15 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
-  const sessionGroupingMode = useSessionDisplayStore((state) => state.sessionGroupingMode);
-  const setSessionGroupingMode = useSessionDisplayStore((state) => state.setSessionGroupingMode);
-  const stickyZoneHeaders = useSessionDisplayStore((state) => state.stickyZoneHeaders);
-  const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
+  const worktreeSortOrder = useSessionDisplayStore((state) => state.worktreeSortOrder);
+  const setWorktreeSortOrder = useSessionDisplayStore((state) => state.setWorktreeSortOrder);
+  const sidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
+  const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
   const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
+  // VS Code has no mode switch and always renders the projects view.
+  const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
 
   if (hideDirectoryControls) {
     return null;
@@ -93,10 +90,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     <div className="select-none flex-shrink-0 px-2.5 py-1">
       <div className="flex h-auto min-h-8 flex-col gap-1">
         <div className="flex h-8 items-center justify-between gap-2">
-          {/* Quiet toolbar under the New-session CTA: project/surface entry
+          {/* Quiet toolbar at the top of the list: project/surface entry
               points at left, list controls at right. ml-[3px] compensates the
-              icon inset inside the 24px buttons so the first glyph lines up
-              with the New-session icon above (16px from the sidebar edge). */}
+              icon inset inside the 24px buttons so the first glyph sits 16px
+              from the sidebar edge, in line with the titlebar controls. */}
           <div className="ml-[3px] flex items-center gap-1.5">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -124,21 +121,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onOpenMultiRun}
-                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                  aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
-                  disabled={!canOpenMultiRun}
-                >
-                  <ArrowsMerge className={headerActionIconClass} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.newMultiRun')}</p></TooltipContent>
             </Tooltip>
 
             <Tooltip>
@@ -223,6 +205,29 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
               </Tooltip>
               <DropdownMenuContent align="end" className="min-w-[180px]">
+                {showProjectDisplayControls ? (
+                  <>
+                    <DropdownMenuLabel>{t('sessions.sidebar.header.viewMode.label')}</DropdownMenuLabel>
+                    {([
+                      ['projects', 'sessions.sidebar.header.viewMode.projects'],
+                      ['timeline', 'sessions.sidebar.header.viewMode.timeline'],
+                    ] as const).map(([mode, labelKey]) => (
+                      <DropdownMenuItem
+                        key={mode}
+                        onClick={() => {
+                          setSidebarViewMode(mode);
+                          void updateDesktopSettings({ sidebarViewMode: mode });
+                        }}
+                        className="flex items-center justify-between"
+                      >
+                        <span>{t(labelKey)}</span>
+                        {sidebarViewMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                      </DropdownMenuItem>
+                    ))}
+                    {timelineView ? null : <DropdownMenuSeparator />}
+                  </>
+                ) : null}
+                {timelineView ? null : <>
                 <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
                 {([
                   ['manual', 'sessions.sidebar.header.projectSort.manual'],
@@ -244,6 +249,28 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
+                {/* VS Code groups by workspace only; it has no worktree groups to sort. */}
+                {showProjectDisplayControls ? <>
+                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortWorktrees')}</DropdownMenuLabel>
+                {([
+                  ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
+                  ['manual', 'sessions.sidebar.header.projectSort.manual'],
+                  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+                ] as const).map(([order, labelKey]) => (
+                  <DropdownMenuItem
+                    key={order}
+                    onClick={() => {
+                      setWorktreeSortOrder(order);
+                      void updateDesktopSettings({ sidebarWorktreeSortOrder: order });
+                    }}
+                    className="flex items-center justify-between"
+                  >
+                    <span>{t(labelKey)}</span>
+                    {worktreeSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                </> : null}
                 {showProjectDisplayControls ? (
                   <>
                     <DropdownMenuLabel>{t('sessions.sidebar.header.projectDisplay.label')}</DropdownMenuLabel>
@@ -266,25 +293,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
-                <DropdownMenuLabel>{t('sessions.sidebar.header.grouping.label')}</DropdownMenuLabel>
-                {([
-                  ['by-worktree', 'sessions.sidebar.header.grouping.byWorktree'],
-                  ['flat', 'sessions.sidebar.header.grouping.flat'],
-                ] as const).map(([mode, labelKey]) => (
-                  <DropdownMenuItem
-                    key={mode}
-                    onClick={() => {
-                      setSessionGroupingMode(mode);
-                      void updateDesktopSettings({ sidebarSessionGroupingMode: mode });
-                    }}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t(labelKey)}</span>
-                    {sessionGroupingMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                {showRecentControls && !isSingleProjectMode ? (
+                </>}
+                {!timelineView && showRecentControls && !isSingleProjectMode ? (
                   <DropdownMenuItem
                     onClick={() => {
                       toggleRecentSection();
@@ -296,14 +306,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuItem
-                  onClick={toggleStickyZoneHeaders}
-                  className="flex items-center justify-between"
-                >
-                  <span>{t('sessions.sidebar.header.displayMode.stickyHeaders')}</span>
-                  {stickyZoneHeaders ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-                {!isSingleProjectMode ? (
+                {!timelineView && !isSingleProjectMode ? (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
@@ -323,14 +326,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
         {isSessionSearchOpen ? (
           <div className="pb-1">
-            <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
-              {hasSessionSearchQuery ? (
-                <span>{searchMatchCount === 1
-                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-                  : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount })}</span>
-              ) : <span />}
-              <span>{t('sessions.sidebar.header.search.escapeHint')}</span>
-            </div>
             <SessionSearchInput
               inputRef={sessionSearchInputRef}
               value={sessionSearchQuery}
@@ -338,6 +333,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
               onClose={() => setIsSessionSearchOpen(false)}
               placeholder={t('sessions.sidebar.header.search.placeholder')}
               clearLabel={t('sessions.sidebar.header.search.clear')}
+              leadingHint={hasSessionSearchQuery
+                ? (searchMatchCount === 1
+                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+                  : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
+                : undefined}
+              trailingHint={t('sessions.sidebar.header.search.escapeHint')}
             />
           </div>
         ) : null}

@@ -16,10 +16,12 @@ describe('normalizeBrowserUrl', () => {
     expect(normalizeBrowserUrl('localhost:5173')).toBe('http://localhost:5173/');
     expect(normalizeBrowserUrl('127.0.0.1:3000/app')).toBe('http://127.0.0.1:3000/app');
     expect(normalizeBrowserUrl('localhost')).toBe('http://localhost/');
+    expect(normalizeBrowserUrl('openchamber-preview.localhost:52418')).toBe('http://openchamber-preview.localhost:52418/');
   });
 
   test('does not mistake a public host that merely starts with a loopback-looking label', () => {
     expect(normalizeBrowserUrl('localhost.example.com')).toBe('https://localhost.example.com/');
+    expect(normalizeBrowserUrl('openchamber-preview.localhost.example.com')).toBe('https://openchamber-preview.localhost.example.com/');
   });
 
   test('rejects non-http schemes rather than handing them to the browser', () => {
@@ -39,11 +41,14 @@ describe('isLoopbackUrl', () => {
   test('recognizes loopback hosts', () => {
     expect(isLoopbackUrl('http://localhost:5173/')).toBe(true);
     expect(isLoopbackUrl('http://127.0.0.1/')).toBe(true);
+    expect(isLoopbackUrl('http://openchamber-preview.localhost:52418/')).toBe(true);
   });
 
   test('rejects remote hosts and garbage', () => {
     expect(isLoopbackUrl('https://example.com/')).toBe(false);
     expect(isLoopbackUrl('nonsense')).toBe(false);
+    expect(isLoopbackUrl('http://openchamber-preview.localhost.example.com/')).toBe(false);
+    expect(isLoopbackUrl('https://auth.myapp.localhost/')).toBe(false);
   });
 });
 
@@ -62,6 +67,7 @@ describe('isStartingServerFailure', () => {
   test('retries a loopback connection refusal, the usual "server not up yet"', () => {
     expect(isStartingServerFailure(-102, 'http://localhost:3000/')).toBe(true);
     expect(isStartingServerFailure(-104, 'http://127.0.0.1:5173/')).toBe(true);
+    expect(isStartingServerFailure(-102, 'http://openchamber-preview.localhost:52418/')).toBe(true);
   });
 
   test('does not retry a public host that refused the connection', () => {

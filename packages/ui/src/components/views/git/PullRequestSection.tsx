@@ -27,6 +27,9 @@ import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthr
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import * as sessionActions from '@/sync/session-actions';
+import { buildLinkedIssue } from '@/lib/linkedIssues';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -79,6 +82,23 @@ const statusColor = (state: string | undefined | null): string => {
   }
 };
 
+// A PR opened here belongs to the session the user is working in, but only
+// when that session works in this directory: the Git view can show another
+// worktree than the open chat.
+const linkCreatedPrToCurrentSession = (directory: string, pr: GitHubPullRequest) => {
+  const { currentSessionId, getDirectoryForSession } = useSessionUIStore.getState();
+  const sessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : null;
+  if (!currentSessionId || !sessionDirectory || normalizePath(sessionDirectory) !== normalizePath(directory)) {
+    return;
+  }
+  void sessionActions.setLinkedIssue(
+    currentSessionId,
+    sessionDirectory,
+    buildLinkedIssue({ url: pr.url, number: pr.number, title: pr.title, kind: 'pull', linkedAt: Date.now() }),
+    true,
+  ).catch(() => undefined);
+};
+
 const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'open' | 'blocked' | 'merged' | 'closed' | null => {
   const pr = status?.pr;
   if (!pr) {
@@ -95,7 +115,9 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
   }
   const checksFailed = status?.checks?.state === 'failure';
   const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
+  // A `blocked` merge state alone (usually a missing review) keeps the open
+  // colour; orange is for failed checks and conflicts.
+  const notMergeable = pr.mergeable === false || mergeableState === 'dirty';
   if (checksFailed || notMergeable) {
     return 'blocked';
   }
@@ -1332,6 +1354,7 @@ export const PullRequestSection: React.FC<{
             }),
       });
       toast.success(t('gitView.pr.toast.prCreated'));
+      linkCreatedPrToCurrentSession(directory, pr);
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
       scheduleActionRefresh();
@@ -1778,8 +1801,9 @@ export const PullRequestSection: React.FC<{
                       pr.body?.trim() ? (
                         <SimpleMarkdownRenderer
                           content={pr.body}
-                          className="typography-markdown-body min-w-0 text-muted-foreground break-words"
+                          className="typography-markdown-body min-w-0 text-muted-foreground break-words [&_img]:h-auto [&_img]:max-w-full"
                           enableFileReferences={false}
+                          allowRawHtml
                         />
                       ) : (
                         <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words">
@@ -1981,6 +2005,7 @@ export const PullRequestSection: React.FC<{
                                       selfMentionHighlightClass,
                                     ].filter(Boolean).join(' ')}
                                     enableFileReferences={false}
+                                    allowRawHtml
                                   />
                                 </div>
                               </div>
@@ -2054,11 +2079,11 @@ export const PullRequestSection: React.FC<{
                   />
                 </label>
 
-                <label className="space-y-1">
+                <div className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.baseBranch')}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
-                      <SelectTrigger size="lg">
+                      <SelectTrigger size="lg" aria-label={t('gitView.pr.field.baseBranch')}>
                         <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
                       </SelectTrigger>
                       <SelectContent>
@@ -2072,9 +2097,10 @@ export const PullRequestSection: React.FC<{
                       value={targetBaseBranch}
                       onChange={(e) => setTargetBaseBranch(e.target.value)}
                       placeholder={t('gitView.pr.placeholder.main')}
+                      aria-label={t('gitView.pr.field.baseBranch')}
                     />
                   )}
-                </label>
+                </div>
 
                 <label className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.description')}</div>

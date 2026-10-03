@@ -1,5 +1,5 @@
-import type { SessionStatus, Message, Part } from "@opencode-ai/sdk/v2/client"
-import type { Session } from "@opencode-ai/sdk/v2"
+import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import { getLastConversationMessage, isIncompleteAssistantTurn } from "@/lib/opencode/model"
 import { getSessionMaterializationStatus } from "./materialization"
 
 type ReconnectMaterializationState = {
@@ -25,9 +25,7 @@ type BootstrapSessionRevisionOptions = {
   deletedRevision?: Record<string, number>
 }
 
-const getParentId = (session: Session): string | null | undefined => (
-  (session as Session & { parentID?: string | null }).parentID
-)
+const getParentId = (session: Session): string | undefined => session.parentID
 
 const includeAncestorSessions = (
   parentIds: string[],
@@ -106,12 +104,11 @@ export function getReconnectCandidateSessionIds(state: ReconnectMaterializationS
   }
 
   for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
-    const lastMessage = messages[messages.length - 1]
-    if (
-      lastMessage
-      && lastMessage.role === "assistant"
-      && lastMessage.time.completed == null
-    ) {
+    // Plumbing roles (synthetic, skill, shell, switches) can trail a still
+    // streaming assistant message, so recovery looks at the last
+    // conversation message rather than the last record.
+    const lastMessage = getLastConversationMessage(messages)
+    if (isIncompleteAssistantTurn(lastMessage)) {
       ids.add(sessionId)
     } else if (!getSessionMaterializationStatus({ message: state.message ?? {}, part: state.part ?? {} }, sessionId).renderable) {
       ids.add(sessionId)

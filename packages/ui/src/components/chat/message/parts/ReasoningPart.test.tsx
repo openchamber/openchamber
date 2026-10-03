@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { createOpencodeClient, type Part } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
+import type { Part } from '@/lib/opencode/model';
 import { SyncProvider } from '@/sync/sync-context';
 
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
@@ -36,9 +37,8 @@ const runtimeApis: RuntimeAPIs = {
   get settings() { return unavailable(); },
   get permissions() { return unavailable(); },
   get notifications() { return unavailable(); },
-  get tools() { return unavailable(); },
 };
-const sdk = createOpencodeClient({
+const sdk = OpenCode.make({
   baseUrl: 'http://localhost',
   fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }),
 });
@@ -177,6 +177,25 @@ describe('ReasoningTimelineBlock', () => {
     // Historical collapsed blocks do not mount the expanded body, avoiding a
     // first-frame flash when Activity reveals previously hidden rows.
     expect(markup).not.toContain('data-message-text-export-source');
+  });
+
+  test('opens a collapsed block with its body in the first render when search asks for it', () => {
+    const markup = renderToStaticMarkup(
+      <TestProviders>
+        <ReasoningTimelineBlock
+          text={LONG_REASONING}
+          variant="thinking"
+          blockId="reasoning-reveal"
+          showDuration={false}
+          revealRequest={1}
+          reasoningMessageId="msg_reveal"
+        />
+      </TestProviders>,
+    );
+
+    expect(markup).toContain('aria-expanded="true"');
+    expect(markup).toContain('data-message-text-export-source');
+    expect(markup).toContain('data-reasoning-message-id="msg_reveal"');
   });
 
   test('renders "Justification" label for justification variant when pre-expanded and not streaming', () => {

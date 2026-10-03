@@ -1,21 +1,33 @@
 import React, { act } from 'react';
 import { describe, expect, mock, test } from 'bun:test';
-import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
 
-type GitHubSelection = {
-  type: 'issue';
-  item: { number: number; title: string };
-};
+// React detects input-event support when its DOM renderer is first imported.
+// Give that probe a document, then restore the caller's globals immediately.
+const rendererWindow = new Window();
+const rendererGlobals = ['window', 'document'] as const;
+const previousRendererGlobals = rendererGlobals.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+Object.defineProperty(globalThis, 'window', { value: rendererWindow, configurable: true, writable: true });
+Object.defineProperty(globalThis, 'document', { value: rendererWindow.document, configurable: true, writable: true });
+const { createRoot } = await import('react-dom/client');
+for (const [name, descriptor] of previousRendererGlobals) {
+  if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+  else Reflect.deleteProperty(globalThis, name);
+}
+rendererWindow.close();
+
+type ReferenceConfirm = (selections: import('@/components/references/referencePickerItems').ReferencePickerSelection[]) => Promise<unknown>;
 
 const project = { id: 'project-a', path: '/workspace/project-a' };
-let selectGitHubItem: ((selection: GitHubSelection) => void) | null = null;
+let confirmReference: ReferenceConfirm | null = null;
 
 const projectStoreState = { getActiveProject: () => project };
 const githubAuthState = { status: { connected: true }, hasChecked: true };
 const linearAuthState = { status: null, hasChecked: true };
 const uiState = { isMobile: false };
 const gitState = { fetchBranches: async () => undefined };
+let worktreeCreations = 0;
+let lastSetupCommands: string[] | undefined;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectGitHubAuthState = <T,>(selector: (state: typeof githubAuthState) => T): T => selector(githubAuthState);
@@ -78,15 +90,18 @@ mock.module('@/components/ui/command', () => ({
   Command: passthrough,
   CommandEmpty: passthrough,
   CommandGroup: passthrough,
-  CommandInput: () => null,
+  CommandInput: ({ onValueChange, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { onValueChange?: (value: string) => void }) => (
+    <input {...props} onChange={(event) => onValueChange?.(event.target.value)} />
+  ),
   CommandItem: passthrough,
   CommandList: passthrough,
   CommandShortcut: passthrough,
   CommandSeparator: () => null,
 }));
 
-mock.module('@/components/ui/sortable-tabs-strip', () => ({ SortableTabsStrip: () => null }));
-mock.module('@/components/ui/MobileOverlayPanel', () => ({ MobileOverlayPanel: passthrough }));
+mock.module('@/components/ui/MobileOverlayPanel', () => ({
+  MobileOverlayPanel: ({ children, open }: React.PropsWithChildren<{ open: boolean }>) => open ? <div>{children}</div> : null,
+}));
 mock.module('@/components/icon/Icon', () => ({ Icon: () => null }));
 mock.module('@/components/ui/dropdown-trigger', () => ({ dropdownTriggerVariants: () => '' }));
 mock.module('@/lib/utils', () => ({ cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' ') }));
@@ -136,14 +151,19 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
   ...actualWorktreeManager,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
-mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async () => null }));
+mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[] }) => {
+  worktreeCreations += 1;
+  lastSetupCommands = args.setupCommands;
+  return null;
+} }));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
 mock.module('@/lib/openchamberConfig', () => ({
+  getProjectSetup: async () => ({ setupWorktree: ['bun install'] }),
   getWorktreeSetupCommands: async () => [],
   getWorktreeSetupWaitEnabled: async () => false,
 }))
 mock.module('@/lib/sharedTrustConfirmation', () => ({
-  resolveWorktreeSetupCommands: async () => [],
+  resolveWorktreeSetupCommands: async () => ['trusted-from-project'],
 }));
 mock.module('@/lib/worktrees/worktreeStatus', () => ({ getRootBranch: async () => 'main' }));
 mock.module('@/lib/git/branchNameGenerator', () => ({
@@ -151,13 +171,12 @@ mock.module('@/lib/git/branchNameGenerator', () => ({
   generateBranchSlug: () => 'draft-name',
 }));
 
-mock.module('./GitHubIntegrationDialog', () => ({
-  GitHubIntegrationDialog: ({ onSelect }: { onSelect: (selection: GitHubSelection) => void }) => {
-    selectGitHubItem = onSelect;
+mock.module('@/components/references/ReferencePickerDialog', () => ({
+  ReferencePickerDialog: ({ onConfirm }: { onConfirm: ReferenceConfirm }) => {
+    confirmReference = onConfirm;
     return null;
   },
 }));
-mock.module('./LinearIssuePickerDialog', () => ({ LinearIssuePickerDialog: () => null }));
 
 const { NewWorktreeDialog } = await import('./NewWorktreeDialog');
 const { I18nProvider } = await import('@/lib/i18n');
@@ -169,12 +188,21 @@ const DOM_GLOBAL_NAMES = [
   'Node',
   'Element',
   'HTMLElement',
+  'HTMLInputElement',
+  'KeyboardEvent',
+  'Event',
   'HTMLIFrameElement',
   'localStorage',
   'requestAnimationFrame',
   'cancelAnimationFrame',
   'IS_REACT_ACT_ENVIRONMENT',
 ] as const;
+
+const clickButton = async (container: HTMLElement, find: (button: HTMLElement) => boolean, what: string) => {
+  const button = [...container.querySelectorAll<HTMLElement>('button, [role="button"]')].find(find);
+  if (!button) throw new Error(`Missing ${what}`);
+  await act(async () => button.click());
+};
 
 const installDom = () => {
   const happyWindow = new Window({ url: 'http://localhost' });
@@ -188,6 +216,9 @@ const installDom = () => {
     Node: happyWindow.Node,
     Element: happyWindow.Element,
     HTMLElement: happyWindow.HTMLElement,
+    HTMLInputElement: happyWindow.HTMLInputElement,
+    KeyboardEvent: happyWindow.KeyboardEvent,
+    Event: happyWindow.Event,
     HTMLIFrameElement: happyWindow.HTMLIFrameElement,
     localStorage: happyWindow.localStorage,
     requestAnimationFrame: happyWindow.requestAnimationFrame.bind(happyWindow),
@@ -213,6 +244,78 @@ const installDom = () => {
 };
 
 describe('NewWorktreeDialog behavior', () => {
+  for (const isMobile of [false, true]) {
+    test(`${isMobile ? 'mobile' : 'desktop'} Enter in branch search does not create a worktree`, async () => {
+      const dom = installDom();
+      const root = createRoot(dom.container);
+      uiState.isMobile = isMobile;
+      worktreeCreations = 0;
+      try {
+        await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+        if (isMobile) {
+          const sourcePicker = [...dom.container.querySelectorAll('button')].find((button) => button.textContent === 'main');
+          if (!sourcePicker) throw new Error('Missing source branch picker');
+          await act(async () => sourcePicker.click());
+        }
+        const search = dom.container.querySelector<HTMLInputElement>('input[placeholder="Search branches..."]');
+        if (!search) throw new Error('Missing branch search input');
+        await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+        expect(worktreeCreations).toBe(0);
+      } finally {
+        await act(async () => root.unmount());
+        uiState.isMobile = false;
+        confirmReference = null;
+        dom.restore();
+      }
+    });
+    for (const placeholder of ['feature/my-awesome-feature', 'my-worktree-directory']) {
+      test(`${isMobile ? 'mobile' : 'desktop'} Enter in ${placeholder} creates once without reaching global shortcuts`, async () => {
+        const dom = installDom();
+        const root = createRoot(dom.container);
+        uiState.isMobile = isMobile;
+        worktreeCreations = 0;
+        let globalEnters = 0;
+        const globalShortcut = (event: KeyboardEvent) => { if (event.key === 'Enter') globalEnters += 1; };
+        window.addEventListener('keydown', globalShortcut);
+        try {
+          await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+            const input = dom.container.querySelector<HTMLInputElement>(`input[placeholder="${placeholder}"]`);
+          if (!input) throw new Error('Missing worktree form field');
+          const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+          if (!setValue) throw new Error('Missing input value setter');
+          await act(async () => {
+            setValue.call(input, '');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+          await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
+          expect(worktreeCreations).toBe(0);
+          expect(globalEnters).toBe(0);
+          await act(async () => {
+            setValue.call(input, 'edited-worktree');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+          for (const options of [{ isComposing: true }, { keyCode: 229 }]) {
+            await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...options })); });
+          }
+          expect(worktreeCreations).toBe(0);
+          globalEnters = 0;
+          const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+          await act(async () => { input.dispatchEvent(enter); });
+          expect(enter.defaultPrevented).toBe(true);
+          expect(worktreeCreations).toBe(1);
+          expect(globalEnters).toBe(0);
+          await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true })); });
+          expect(worktreeCreations).toBe(1);
+        } finally {
+          window.removeEventListener('keydown', globalShortcut);
+          await act(async () => root.unmount());
+          uiState.isMobile = false;
+          confirmReference = null;
+          dom.restore();
+        }
+      });
+    }
+  }
   test('preserves selected issue values when available worktree names change', async () => {
     const dom = installDom();
     const root = createRoot(dom.container);
@@ -224,14 +327,36 @@ describe('NewWorktreeDialog behavior', () => {
           <NewWorktreeDialog open onOpenChange={() => undefined} />
         </I18nProvider>,
       ));
-      if (!selectGitHubItem) throw new Error('Expected GitHub selection handler');
+      await clickButton(dom.container, (button) => button.getAttribute('role') === 'button' && Boolean(button.textContent?.startsWith('PR or issue')), 'PR or issue option');
+      const startFromGitHub = dom.container.querySelector<HTMLButtonElement>('button[aria-label="A GitHub issue or pull request"]');
+      if (!startFromGitHub) throw new Error('Missing start-from-GitHub button');
+      await act(async () => startFromGitHub.click());
+      if (!confirmReference) throw new Error('Expected the reference picker to open');
 
-      await act(async () => selectGitHubItem?.({
-        type: 'issue',
-        item: { number: 42, title: 'Keep the selected issue' },
-      }));
+      await act(async () => {
+        await confirmReference?.([{
+          source: 'github',
+          includeDiff: false,
+          reference: {
+            kind: 'issue',
+            number: 42,
+            title: 'Keep the selected issue',
+            url: 'https://github.com/acme/project/issues/42',
+            body: '',
+            bodyTruncated: false,
+            createdAt: null,
+            updatedAt: null,
+            author: null,
+            labels: [],
+            commentCount: 0,
+            sourceRepo: { owner: 'acme', repo: 'project', source: 'origin' },
+            state: 'open',
+          },
+        }]);
+      });
 
-      const [branchInput, worktreeInput] = dom.container.querySelectorAll<HTMLInputElement>('input');
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      const worktreeInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="my-worktree-directory"]');
       expect(branchInput?.value).toBe('issue-42-draft-name');
       expect(worktreeInput?.value).toBe('issue-42-draft-name');
       expect(dom.container.textContent).toContain('Keep the selected issue');
@@ -247,10 +372,49 @@ describe('NewWorktreeDialog behavior', () => {
       expect(branchInput?.value).toBe('issue-42-draft-name');
       expect(worktreeInput?.value).toBe('issue-42-draft-name');
       expect(dom.container.textContent).toContain('Keep the selected issue');
+
+      // Renaming the branch keeps the issue; only the unlink button drops it.
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!branchInput || !setValue) throw new Error('Missing branch input');
+      await act(async () => {
+        setValue.call(branchInput, 'my-own-name');
+        branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(dom.container.textContent).toContain('Keep the selected issue');
+      await clickButton(dom.container, (button) => button.getAttribute('aria-label') === 'Unlink', 'unlink button');
+      expect(dom.container.textContent).not.toContain('Keep the selected issue');
     } finally {
       await act(async () => root.unmount());
       actualSessionUIStore.useSessionUIStore.setState({ availableWorktreesByProject: new Map() });
-      selectGitHubItem = null;
+      confirmReference = null;
+      dom.restore();
+    }
+  });
+  test('runs the project setup through the trust path, or exactly what the user edited', async () => {
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    worktreeCreations = 0;
+    try {
+      await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      const setAreaValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      const setup = dom.container.querySelector<HTMLTextAreaElement>('textarea');
+      if (!setValue || !setAreaValue || !branchInput || !setup) throw new Error('Missing form fields');
+      expect(setup.value).toBe('bun install');
+      const enter = () => act(async () => { branchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+
+      await enter();
+      expect(lastSetupCommands).toEqual(['trusted-from-project']);
+
+      await act(async () => {
+        setAreaValue.call(setup, 'bun install\n  bun run build  \n');
+        setup.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await enter();
+      expect(lastSetupCommands).toEqual(['bun install', 'bun run build']);
+    } finally {
+      await act(async () => root.unmount());
       dom.restore();
     }
   });
