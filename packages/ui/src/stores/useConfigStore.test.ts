@@ -875,6 +875,24 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
   });
 
+  test('a model without a variants list reads as having no thinking levels', () => {
+    const withoutVariants = provider('openai', 'gpt-legacy');
+    // A stored snapshot or a live catalog can carry a model without `variants`.
+    Reflect.deleteProperty(withoutVariants.models[0], 'variants');
+    useConfigStore.setState({
+      providers: [withoutVariants],
+      currentProviderId: 'openai',
+      currentModelId: 'gpt-legacy',
+      currentVariant: 'high',
+      currentVariantSelection: { override: undefined, inherited: 'high' },
+      directoryScoped: {},
+    });
+
+    expect(useConfigStore.getState().getCurrentModelVariants()).toEqual([]);
+    // Cycling reads the same list; it must not throw on the missing field.
+    useConfigStore.getState().cycleCurrentVariant();
+  });
+
   test('cycleCurrentVariant reaches Default, low, and medium from inherited high', () => {
     useConfigStore.setState({
       providers: [provider('openai', 'gpt-5.6-sol', ['none', 'low', 'medium', 'high', 'xhigh', 'max'])],

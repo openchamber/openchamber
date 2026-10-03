@@ -1,4 +1,5 @@
 import React from 'react';
+import { modelVariantNames } from '@/lib/modelVariants';
 import { findCatalogModel, type Message, type Part } from '@/lib/opencode/model';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -270,7 +271,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         // v2 lists variants as records, not as a keyed map.
         const model = findCatalogModel(providers.find((provider) => provider.id === providerID)?.models, modelID);
-        return (model?.variants.length ?? 0) > 0;
+        return modelVariantNames(model).length > 0;
     }, [isUser, modelID, providerID, providers]);
 
     const displayAgentName = useStickyDisplayValue<string>(agentName);
