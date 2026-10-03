@@ -3290,6 +3290,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.workStatus.attention.revert': '正在还原',
   'chat.workStatus.attention.bisect': '正在二分查找',
   'chat.workStatus.subagent.done': '已完成',
+  'chat.workStatus.subagent.failed': '失败',
   'chat.workStatus.subagent.untitled': '子智能体',
   'chat.workStatus.mcp.toggle': '切换 {name}',
   'chat.workStatus.mcp.needsAuth': '登录',

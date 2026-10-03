@@ -3287,6 +3287,7 @@ export const dict = {
   'chat.workStatus.attention.revert': 'Revert läuft',
   'chat.workStatus.attention.bisect': 'Bisect läuft',
   'chat.workStatus.subagent.done': 'Fertig',
+  'chat.workStatus.subagent.failed': 'Fehlgeschlagen',
   'chat.workStatus.subagent.untitled': 'Subagent',
   'chat.workStatus.mcp.toggle': '{name} umschalten',
   'chat.workStatus.mcp.needsAuth': 'Anmelden',

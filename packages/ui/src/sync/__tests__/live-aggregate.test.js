@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
+  areSessionListsEquivalent,
   areStatusMapsEquivalent,
   findLiveSession,
   findLiveSessionStatus,
@@ -17,6 +18,17 @@ const session = (id, directory, updated, extra = {}) => ({
 })
 
 describe('live aggregate', () => {
+  it('detects model identity changes without a timestamp change', () => {
+    const original = session('ses-1', '/a', 10, { model: { providerID: 'openai', id: 'gpt-6-astra' } })
+    const withoutModel = session('ses-1', '/a', 10)
+
+    expect(areSessionListsEquivalent([original], [{ ...original, model: { ...original.model } }])).toBe(true)
+    expect(areSessionListsEquivalent([withoutModel], [original])).toBe(false)
+    expect(areSessionListsEquivalent([original], [withoutModel])).toBe(false)
+    expect(areSessionListsEquivalent([original], [{ ...original, model: { ...original.model, id: 'gpt-5.6-sol' } }])).toBe(false)
+    expect(areSessionListsEquivalent([original], [{ ...original, model: { ...original.model, providerID: 'custom' } }])).toBe(false)
+  })
+
   it('prefers the freshest live session snapshot across child stores', () => {
     const states = [
       {

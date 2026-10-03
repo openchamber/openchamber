@@ -3289,6 +3289,7 @@ export const dict = {
   'chat.workStatus.attention.revert': 'Revert bezig',
   'chat.workStatus.attention.bisect': 'Bisect bezig',
   'chat.workStatus.subagent.done': 'Klaar',
+  'chat.workStatus.subagent.failed': 'Mislukt',
   'chat.workStatus.subagent.untitled': 'Subagent',
   'chat.workStatus.mcp.toggle': '{name} in- of uitschakelen',
   'chat.workStatus.mcp.needsAuth': 'Inloggen',
