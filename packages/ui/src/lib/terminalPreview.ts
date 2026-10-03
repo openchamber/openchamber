@@ -199,6 +199,21 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
 };
 
 const ANY_URL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
+const PRIVATE_IPV4_PATTERN = /^(?:10\.\d+|172\.(?:1[6-9]|2\d|3[01])|192\.168|169\.254)\.\d+\.\d+$/;
+
+// A URL nobody announced is only a guess, and it opens in the system browser
+// by itself. The guess stays on this machine or the local network: an address
+// that merely appears in output (a docs link, a log line a dependency prints)
+// is never opened.
+const isLocalNetworkHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return LOOPBACK_HOSTS.has(host)
+    || host.endsWith('.localhost')
+    || host.endsWith('.local')
+    || PRIVATE_IPV4_PATTERN.test(host)
+    || /^f[cd][0-9a-f]{2}:/.test(host)
+    || host.startsWith('fe80:');
+};
 
 /**
  * Finds the URL a project action wants opened.
@@ -231,6 +246,7 @@ export const extractProjectActionUrl = (
     try {
       const parsed = new URL(trimUrlTrailingPunctuation(raw));
       const loopbackPort = portOf(parsed.toString());
+      if (!isLocalNetworkHost(parsed.hostname)) continue;
       if (parsed.port && !(loopbackPort !== null && proxiedPorts.includes(loopbackPort))) candidates.push(parsed);
     } catch {
       // Not a URL after trimming; nothing to score.

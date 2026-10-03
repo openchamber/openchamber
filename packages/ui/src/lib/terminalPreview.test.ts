@@ -76,6 +76,14 @@ describe('project action url', () => {
     expect(extractProjectActionUrl('server listening on http://0.0.0.0:4000/app'))
       .toBe('http://127.0.0.1:4000/app');
   });
+
+  test('guesses only addresses on this machine or the local network', () => {
+    // Nothing announced a server here; the URLs are just text in the output.
+    expect(extractProjectActionUrl('see https://evil.example.com:8443/landing for details')).toBeNull();
+    expect(extractProjectActionUrl('fetched http://203.0.113.9:8080/feed')).toBeNull();
+    expect(extractProjectActionUrl('preview at http://192.168.1.20:5173/')).toBe('http://192.168.1.20:5173/');
+    expect(extractProjectActionUrl('preview at http://myapp.localhost:1355/')).toBe('http://myapp.localhost:1355/');
+  });
 });
 
 describe('auto-discovery url', () => {
