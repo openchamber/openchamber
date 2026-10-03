@@ -56,7 +56,7 @@ import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
-import { createContextMenuLabels, menuLabel, normalizeMenuLocale } from './menu-locales.mjs';
+import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import {
   buildLinuxInstalledApps,
@@ -4714,6 +4714,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 const buildMacMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
+  const roleItem = (role, key) => roleMenuItem(locale, role, key);
   const handleCopyAction = () => {
     BrowserWindow.getFocusedWindow()?.webContents.copy();
     dispatchAction('copy');
@@ -4734,12 +4735,12 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('restart'), click: () => relaunchFromMenu() },
         { label: t('commandPalette'), accelerator: 'Cmd+P', click: () => dispatchAction('command-palette') },
         { type: 'separator' },
-        { role: 'services', label: t('services') },
+        roleItem('services', 'services'),
         { type: 'separator' },
-        { role: 'hide', label: t('hide') },
-        { role: 'hideOthers', label: t('hideOthers') },
+        roleItem('hide', 'hide'),
+        roleItem('hideOthers', 'hideOthers'),
         { type: 'separator' },
-        { role: 'quit', label: t('quit') },
+        roleItem('quit', 'quit'),
       ],
     },
     {
@@ -4755,20 +4756,20 @@ const buildMacMenu = (locale = 'en') => {
         { type: 'separator' },
         { label: t('addWorkspace'), click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
-        { role: 'close', label: t('close') },
+        roleItem('close', 'close'),
       ],
     },
     {
       label: t('edit'),
       submenu: [
-        { role: 'undo', label: t('undo') },
-        { role: 'redo', label: t('redo') },
+        roleItem('undo', 'undo'),
+        roleItem('redo', 'redo'),
         { type: 'separator' },
-        { role: 'cut', label: t('cut') },
+        roleItem('cut', 'cut'),
         { label: t('copy'), accelerator: 'Cmd+C', click: () => handleCopyAction() },
         { label: t('addSelectionToChat'), accelerator: 'Cmd+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
-        { role: 'paste', label: t('paste') },
-        { role: 'selectAll', label: t('selectAll') },
+        roleItem('paste', 'paste'),
+        roleItem('selectAll', 'selectAll'),
       ],
     },
     {
@@ -4788,20 +4789,20 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('toggleSessionSidebar'), accelerator: 'Cmd+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: t('toggleMemoryDebug'), accelerator: 'Cmd+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: t('toggleFullScreen') },
+        roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
     },
     {
       label: t('window'),
       submenu: [
-        { role: 'minimize', label: t('minimize') },
-        { role: 'zoom', label: t('zoom') },
+        roleItem('minimize', 'minimize'),
+        roleItem('zoom', 'zoom'),
         { type: 'separator' },
         { label: t('zoomIn'), accelerator: 'CmdOrCtrl+=', click: () => dispatchAction('zoom-in') },
         { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
         { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
-        { role: 'close', label: t('close') },
+        roleItem('close', 'close'),
       ],
     },
     {
@@ -4825,6 +4826,7 @@ const buildMacMenu = (locale = 'en') => {
 const buildAutoHiddenMenu = (locale = 'en') => {
   const dispatchAction = (action) => dispatchMenuAction(action);
   const t = (key) => menuLabel(locale, key);
+  const roleItem = (role, key) => roleMenuItem(locale, role, key);
   const handleCopyAction = () => {
     BrowserWindow.getFocusedWindow()?.webContents.copy();
     dispatchAction('copy');
@@ -4845,7 +4847,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('restart'), click: () => relaunchFromMenu() },
         { label: t('commandPalette'), accelerator: 'Ctrl+P', click: () => dispatchAction('command-palette') },
         { type: 'separator' },
-        { role: 'quit', label: t('quit') },
+        roleItem('quit', 'quit'),
       ],
     },
     {
@@ -4858,27 +4860,27 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { type: 'separator' },
         { label: t('addWorkspace'), click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
-        { role: 'quit', label: t('quit') },
+        roleItem('quit', 'quit'),
       ],
     },
     {
       label: t('edit'),
       submenu: [
-        { role: 'undo', label: t('undo') },
-        { role: 'redo', label: t('redo') },
+        roleItem('undo', 'undo'),
+        roleItem('redo', 'redo'),
         { type: 'separator' },
-        { role: 'cut', label: t('cut') },
+        roleItem('cut', 'cut'),
         { label: t('copy'), accelerator: 'Ctrl+C', click: () => handleCopyAction() },
         { label: t('addSelectionToChat'), accelerator: 'Ctrl+L', registerAccelerator: false, click: () => dispatchAddSelectionToChat() },
-        { role: 'paste', label: t('paste') },
-        { role: 'selectAll', label: t('selectAll') },
+        roleItem('paste', 'paste'),
+        roleItem('selectAll', 'selectAll'),
       ],
     },
     {
       label: t('view'),
       submenu: [
-        { role: 'reload', label: t('reload') },
-        { role: 'forceReload', label: t('forceReload') },
+        roleItem('reload', 'reload'),
+        roleItem('forceReload', 'forceReload'),
         { label: t('toggleDeveloperTools'), accelerator: 'Ctrl+Alt+I', click: () => openDevToolsForMenuTarget() },
         { type: 'separator' },
         { label: t('toggleRightSidebar'), accelerator: 'Ctrl+B', click: () => dispatchAction('toggle-right-sidebar') },
@@ -4895,7 +4897,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('toggleSessionSidebar'), accelerator: 'Ctrl+Alt+L', click: () => dispatchAction('toggle-sidebar') },
         { label: t('toggleMemoryDebug'), accelerator: 'Ctrl+Shift+D', click: () => dispatchAction('toggle-memory-debug') },
         { type: 'separator' },
-        { role: 'togglefullscreen', label: t('toggleFullScreen') },
+        roleItem('togglefullscreen', 'toggleFullScreen'),
       ],
     },
     {
@@ -4914,13 +4916,13 @@ const buildAutoHiddenMenu = (locale = 'en') => {
     {
       label: t('window'),
       submenu: [
-        { role: 'minimize', label: t('minimize') },
+        roleItem('minimize', 'minimize'),
         { label: t('zoomIn'), accelerator: 'Ctrl+=', click: () => dispatchAction('zoom-in') },
         { label: t('zoomOut'), accelerator: 'Ctrl+-', click: () => dispatchAction('zoom-out') },
         { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
-        { role: 'togglefullscreen', label: t('toggleFullScreen') },
+        roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
-        { role: 'close', label: t('close') },
+        roleItem('close', 'close'),
       ],
     },
     {

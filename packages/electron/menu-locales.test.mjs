@@ -7,6 +7,7 @@ import {
   createContextMenuLabels,
   menuLabel,
   normalizeMenuLocale,
+  roleMenuItem,
 } from './menu-locales.mjs';
 
 test('menuLabel returns proper English labels for en and other locales', () => {
@@ -66,4 +67,10 @@ test('createContextMenuLabels starts in English and applies locale dictionaries'
 
   apply('en');
   assert.equal(labels.copy, '&Copy');
+});
+
+test('roleMenuItem keeps Electron role labels in English and translates other locales', () => {
+  assert.deepEqual(roleMenuItem('en', 'quit', 'quit'), { role: 'quit' });
+  assert.deepEqual(roleMenuItem('de', 'hide', 'hide'), { role: 'hide' });
+  assert.deepEqual(roleMenuItem('zh-CN', 'quit', 'quit'), { role: 'quit', label: menuLabel('zh-CN', 'quit') });
 });
