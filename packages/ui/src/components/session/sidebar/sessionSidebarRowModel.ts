@@ -319,6 +319,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     renderContext: SessionSidebarRenderContext;
     secondaryMeta?: SessionSidebarActivityItem['secondaryMeta'];
     getSecondaryMeta?: SessionSidebarActivityItem['getSecondaryMeta'];
+    // Per-row badge scopes for containers whose top rows come from different
+    // activity items, such as the lanes of a multi-run.
+    getBlockingBadgeSessionScopes?: (sessionId: string) => readonly BlockingBadgeSessionScope[] | undefined;
     indexedNodes?: IndexedSessionNodes;
     selectionPoolOffset?: number;
     // Nesting level of the container's top rows: 1 inside a folder, so its
@@ -369,7 +372,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         key: rowKey,
         estimateSize: options.renderContext === 'timeline' ? TIMELINE_SESSION_ESTIMATE : SESSION_ESTIMATE,
         node: current.node,
-        blockingBadgeSessionScopes: current.depth === baseDepth ? options.blockingBadgeSessionScopes : undefined,
+        blockingBadgeSessionScopes: current.depth === baseDepth
+          ? options.getBlockingBadgeSessionScopes?.(current.node.session.id) ?? options.blockingBadgeSessionScopes
+          : undefined,
         depth: current.depth,
         projectId: options.projectId,
         groupDirectory: current.directory,
@@ -611,10 +616,13 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       item.node.session.id,
       item.getSecondaryMeta ? item.getSecondaryMeta(item.node.session.id) : item.secondaryMeta,
     ]));
+    const badgeScopesById = new Map(entry.items.map((item) => [item.node.session.id, item.blockingBadgeSessionScopes]));
     appendRun({ run: entry.run, lanes }, {
       nodes: lanes, containerKey, projectId: first.projectId, groupDirectory: first.groupDirectory,
       ownerKey, selectionScopeKey: scoped ? ownerKey : null, archived: false, renderContext,
-      getSecondaryMeta: (sessionId) => metaById.get(sessionId) ?? null, indexedNodes: indexed, selectionPoolOffset,
+      getSecondaryMeta: (sessionId) => metaById.get(sessionId) ?? null,
+      getBlockingBadgeSessionScopes: (sessionId) => badgeScopesById.get(sessionId),
+      indexedNodes: indexed, selectionPoolOffset,
     });
   };
 

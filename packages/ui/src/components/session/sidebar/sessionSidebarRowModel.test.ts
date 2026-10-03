@@ -511,6 +511,23 @@ describe('buildSessionSidebarRowModel', () => {
       expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(4);
     });
 
+    test('expanded activity lanes keep their own badge scopes', () => {
+      const input = args([]);
+      input.runIndex = runIndex;
+      input.workItems = [
+        timelineItem('lane-1', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-1', 'lane-1-child'] }] }),
+        timelineItem('lane-2', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-2'] }] }),
+      ];
+      input.workSessionIds = new Set(['lane-1', 'lane-2']);
+      input.expandedParents = new Set([runExpansionKey('recent', runKey)]);
+      const lanes = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session');
+
+      expect(lanes.map((row) => row.kind === 'session' && row.blockingBadgeSessionScopes?.[0]?.sessionIDs)).toEqual([
+        ['lane-1', 'lane-1-child'],
+        ['lane-2'],
+      ]);
+    });
+
     test('timeline items collapse into one run row', () => {
       const input = args([]);
       input.viewMode = 'timeline';
