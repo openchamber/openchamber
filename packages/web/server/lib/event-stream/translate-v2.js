@@ -13,7 +13,10 @@
  *
  * - v2 emits no `session.status` and no `session.idle` of its own. Live status
  *   comes from `session.execution.started|succeeded|interrupted|failed`, so
- *   those are what synthesize the status vocabulary here.
+ *   those are what synthesize the status vocabulary here, together with
+ *   `session.retry.scheduled` (status `retry` while a provider error waits for
+ *   the next attempt) and `session.step.started` (back to `busy` once that
+ *   attempt begins).
  * - a v2 turn is a sequence of steps. Each `session.step.ended` becomes an
  *   assistant `message.updated`; only the last one carries `finish: "stop"`,
  *   which is the same signal v1 gave once per turn.
