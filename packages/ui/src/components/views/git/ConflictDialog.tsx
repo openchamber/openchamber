@@ -24,6 +24,7 @@ interface ConflictDialogProps {
   operation: 'merge' | 'rebase';
   onAbort: () => void;
   onClearState?: () => void;
+  onNavigatedToChat?: () => void;
 }
 
 export const ConflictDialog: React.FC<ConflictDialogProps> = ({
@@ -34,6 +35,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   operation,
   onAbort,
   onClearState,
+  onNavigatedToChat,
 }) => {
   const { t } = useI18n();
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
@@ -137,6 +139,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
 
     onClearState?.();
     onOpenChange(false);
+    onNavigatedToChat?.();
   };
 
   const handleResolveInNewSession = async () => {
@@ -155,9 +158,9 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
         { text: context.payloadText, synthetic: true },
       ],
     });
-    // Navigate to chat tab so user sees the new session
     onClearState?.();
     onOpenChange(false);
+    onNavigatedToChat?.();
   };
 
   const operationLabel = operation === 'merge' ? t('gitView.operation.merge') : t('gitView.operation.rebase');

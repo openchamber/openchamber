@@ -95,7 +95,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="typography-micro min-w-0 flex-1 text-muted-foreground">
+          <p className="typography-micro min-w-[12rem] flex-1 text-muted-foreground">
             {hint}
           </p>
 

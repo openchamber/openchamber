@@ -249,6 +249,7 @@ export const MobileWorkspaceDrawer: React.FC<{
               <MobileChangesSurface
                 visible={open && tab === 'changes'}
                 initialDiff={pendingChangesDiff}
+                onNavigatedToChat={onClose}
               />
             </ErrorBoundary>
           </div>
