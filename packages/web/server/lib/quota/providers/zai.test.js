@@ -17,6 +17,16 @@ const mockResponse = (body) => ({
 });
 
 describe('Z.ai quota provider', () => {
+  it('reports a business failure sent inside an HTTP 200 body instead of an empty card', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({ code: 1001, msg: 'Token expired', success: false })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Token expired');
+  });
+
   it('surfaces 5-hour, weekly, and MCP quota windows', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       data: {

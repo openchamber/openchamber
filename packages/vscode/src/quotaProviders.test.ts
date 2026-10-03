@@ -757,6 +757,15 @@ describe('Z.ai quota provider (VS Code parity)', () => {
     assert.equal(windows['MCP Tools']!.resetAt, 1787128459979);
   });
 
+  test('reports a z.ai business failure sent inside an HTTP 200 body', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ code: 1001, msg: 'Token expired', success: false })));
+
+    const result = await fetchQuotaForProvider('zai-coding-plan');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Token expired');
+  });
+
   test('maps CREDIT_LIMIT entries to windows with credit value labels and plan level', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       code: 200,
