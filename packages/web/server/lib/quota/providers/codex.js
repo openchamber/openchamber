@@ -6,8 +6,7 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
-  resolveWindowLabel,
-  formatMoney
+  resolveWindowLabel
 } from '../utils/index.js';
 
 export const providerId = 'codex';
@@ -86,7 +85,7 @@ export const fetchQuota = async () => {
       const label = unlimited
         ? 'Unlimited'
         : balance !== null
-          ? `$${formatMoney(balance)}`
+          ? String(balance)
           : null;
       windows.credits_balance = toUsageWindow({
         usedPercent: null,

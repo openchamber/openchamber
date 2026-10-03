@@ -530,6 +530,39 @@ describe('ClinePass quota provider (VS Code parity)', () => {
 });
 
 describe('Codex quota provider (VS Code parity)', () => {
+  for (const { balance, unlimited, expected } of [
+    { balance: 62500, unlimited: false, expected: '62500' },
+    { balance: '62500.00', unlimited: false, expected: '62500' },
+    { balance: 12.3456, unlimited: false, expected: '12.3456' },
+    { balance: '12.3456', unlimited: false, expected: '12.3456' },
+    { balance: 0, unlimited: false, expected: '0' },
+    { balance: null, unlimited: true, expected: 'Unlimited' },
+    { balance: 62500, unlimited: true, expected: 'Unlimited' },
+    { balance: null, unlimited: false, expected: undefined },
+    { balance: 'invalid', unlimited: false, expected: undefined },
+  ]) {
+    test(`displays credit balance ${balance} with unlimited=${unlimited} as ${expected}`, async () => {
+      globalThis.fetch = async () => Response.json({ credits: { balance, unlimited } });
+
+      const result = await fetchQuotaForProvider('codex');
+
+      assert.equal(result.ok, true);
+      assert.ok(result.usage?.windows.credits_balance);
+      assert.equal(result.usage.windows.credits_balance.valueLabel, expected);
+      assert.equal(result.usage.windows.credits_balance.usedPercent, null);
+    });
+  }
+
+  test('omits the balance window when credits are absent', async () => {
+    globalThis.fetch = async () => Response.json({ rate_limit: null });
+
+    const result = await fetchQuotaForProvider('codex');
+
+    assert.equal(result.ok, true);
+    assert.ok(result.usage);
+    assert.equal(result.usage.windows.credits_balance, undefined);
+  });
+
   test('coalesces concurrent refreshes for the same provider', async () => {
     let resolveResponse: ((response: Response) => void) | undefined;
     let requestCount = 0;

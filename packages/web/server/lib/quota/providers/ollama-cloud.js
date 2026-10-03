@@ -52,7 +52,7 @@ export const parseOllamaSettingsHtml = (html) => {
   // "Extra usage" credits block (visible when credits/auto-reload is enabled):
   // a balance, not a percent. Anchor on "Balance remaining" — nearby "Add $5"
   // and auto-reload copy also contain dollar amounts. Surfaced with the
-  // credits_balance key and OpenAI-style plain money label (the UI renders
+  // credits_balance key and DeepSeek-style plain money label (the UI renders
   // it as "Credits Balance"); a $0 balance is omitted rather than shown.
   const balanceMatch = html.match(/Balance\s+remaining[\s\S]{0,200}?\$([0-9][0-9,.]*)/i);
   if (balanceMatch) {
