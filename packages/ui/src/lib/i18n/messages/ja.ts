@@ -2121,8 +2121,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.start.fromItemUnavailable': 'PR や issue から始めるには GitHub か Linear を接続してください。',
   'session.newWorktree.item.title': 'PR または issue',
   'session.newWorktree.baseBranchNotApplicable': 'この選択では使いません',
-  'session.newWorktree.setup.title': 'セットアップコマンド',
-  'session.newWorktree.setup.hint': '作成後に新しいワークツリーで実行します。1 行に 1 つ。プロジェクト設定から入力済みで、変更はこのワークツリーだけに適用されます。',
   'session.newWorktree.mode.fromItem': 'PR または issue',
   'session.newWorktree.error.attachLinkedFailed': '{item} を添付できませんでした',
   'session.newWorktree.error.noActiveProject': 'アクティブなプロジェクトがありません',

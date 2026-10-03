@@ -390,32 +390,20 @@ describe('NewWorktreeDialog behavior', () => {
       dom.restore();
     }
   });
-  test('runs the project setup through the trust path, or exactly what the user edited', async () => {
+  test('runs the project setup commands through the trust path', async () => {
     const dom = installDom();
     const root = createRoot(dom.container);
-    worktreeCreations = 0;
     try {
       await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
-      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      const setAreaValue = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
       const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
-      const setup = dom.container.querySelector<HTMLTextAreaElement>('textarea');
-      if (!setValue || !setAreaValue || !branchInput || !setup) throw new Error('Missing form fields');
-      expect(setup.value).toBe('bun install');
-      const enter = () => act(async () => { branchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
-
-      await enter();
+      if (!branchInput) throw new Error('Missing branch field');
+      expect(dom.container.querySelector('textarea')).toBeNull();
+      await act(async () => { branchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
       expect(lastSetupCommands).toEqual(['trusted-from-project']);
-
-      await act(async () => {
-        setAreaValue.call(setup, 'bun install\n  bun run build  \n');
-        setup.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      await enter();
-      expect(lastSetupCommands).toEqual(['bun install', 'bun run build']);
     } finally {
       await act(async () => root.unmount());
       dom.restore();
     }
   });
+
 });

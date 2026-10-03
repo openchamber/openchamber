@@ -2084,8 +2084,6 @@ export const dict = {
   'session.newWorktree.start.fromItemUnavailable': 'PR veya issue ile başlamak için GitHub ya da Linear bağlayın.',
   'session.newWorktree.item.title': 'PR veya issue',
   'session.newWorktree.baseBranchNotApplicable': 'Bu seçimde kullanılmaz',
-  'session.newWorktree.setup.title': 'Kurulum komutları',
-  'session.newWorktree.setup.hint': 'Oluşturulduktan sonra yeni worktree’de çalışır, satır başına bir komut. Proje ayarlarından doldurulur; değişiklikler yalnızca bu worktree için geçerlidir.',
   'session.newWorktree.mode.fromItem': 'PR veya issue',
   'session.newWorktree.error.attachLinkedFailed': '{item} eklenemedi',
   'session.newWorktree.error.noActiveProject': 'Etkin proje yok',

@@ -1932,8 +1932,6 @@ export const dict = {
   'session.newWorktree.start.fromItemUnavailable': 'Verbinde GitHub oder Linear, um von einem PR oder Issue zu starten.',
   'session.newWorktree.item.title': 'PR oder Issue',
   'session.newWorktree.baseBranchNotApplicable': 'Hier nicht verwendet',
-  'session.newWorktree.setup.title': 'Setup-Befehle',
-  'session.newWorktree.setup.hint': 'Laufen im neuen Worktree nach dem Erstellen, einer pro Zeile. Aus den Projekteinstellungen vorausgefüllt; Änderungen gelten nur für diesen Worktree.',
   'session.newWorktree.mode.fromItem': 'PR oder Issue',
   'session.newWorktree.error.attachLinkedFailed': '{item} konnte nicht angehängt werden',
   'session.newWorktree.error.noActiveProject': 'Kein aktives Projekt',

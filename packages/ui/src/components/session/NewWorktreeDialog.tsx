@@ -9,13 +9,11 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { GuestAttachDialog } from '@/components/layout/GuestAttachDialog';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useGuestAttachItems } from '@/hooks/useGuestSurfaces';
 import { guestWorktreeBranch } from '@/lib/guests/start-session';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -27,7 +25,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
-import { getProjectSetup } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { handleWorktreeCreateKeyDown } from './worktreeCreateKeyboard';
@@ -223,9 +220,6 @@ export function NewWorktreeDialog({
   const [linked, setLinked] = React.useState<LinkedItem | null>(null);
   const [existingBranch, setExistingBranch] = React.useState<ExistingBranchState>({ selectedBranch: '', worktreeName: '' });
   const [sourceBranch, setSourceBranch] = React.useState('');
-  // The project's setup commands, editable for this one worktree.
-  const [setupBaseline, setSetupBaseline] = React.useState('');
-  const [setupDraft, setSetupDraft] = React.useState('');
 
   // Use cached branches from Git store (instant if already fetched)
   const branches = useGitBranches(projectDirectory);
@@ -309,23 +303,6 @@ export function NewWorktreeDialog({
     };
   }, [open, branches?.all, projectDirectory, sourceBranch]);
 
-  // The setup commands a new worktree will run, shown so a slow creation is no surprise.
-  React.useEffect(() => {
-    if (!open || !projectRef) return;
-    let cancelled = false;
-    void getProjectSetup(projectRef)
-      .then((setup) => {
-        if (cancelled) return;
-        const commands = setup.setupWorktree.join('\n');
-        setSetupBaseline(commands);
-        setSetupDraft(commands);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [open, projectRef]);
-
   // Reset state on each open. Resetting on close would empty the form during
   // the close animation, causing visible flicker.
   React.useLayoutEffect(() => {
@@ -343,8 +320,6 @@ export function NewWorktreeDialog({
     setLinked(null);
     setExistingBranch({ selectedBranch: '', worktreeName: '' });
     setSourceBranch('');
-    setSetupBaseline('');
-    setSetupDraft('');
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
   }, [open, generateUniqueSlug]);
 
@@ -483,11 +458,7 @@ export function NewWorktreeDialog({
 
     try {
       const item = mode === 'from-item' ? linked : null;
-      // Untouched, the project's commands go through the usual trust prompt;
-      // edited, the user has written exactly what should run.
-      const resolvedSetupCommands = setupDraft === setupBaseline
-        ? await resolveWorktreeSetupCommands(projectRef)
-        : setupDraft.split('\n').map((line) => line.trim()).filter(Boolean);
+      const resolvedSetupCommands = await resolveWorktreeSetupCommands(projectRef);
 
       let sourceLabel = '';
       const args: CreateWorktreeArgs = (() => {
@@ -641,12 +612,9 @@ export function NewWorktreeDialog({
     });
   };
 
-  const fieldBlock = (title: string, control: React.ReactNode, hint?: string) => (
+  const fieldBlock = (title: string, control: React.ReactNode) => (
     <section className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-1 typography-meta font-semibold text-foreground">
-        {title}
-        {hint ? <SettingsInfoHint>{hint}</SettingsInfoHint> : null}
-      </h3>
+      <h3 className="typography-meta font-semibold text-foreground">{title}</h3>
       {control}
     </section>
   );
@@ -840,17 +808,6 @@ export function NewWorktreeDialog({
     </div>
   );
 
-  const setupBlock = fieldBlock(
-    t('session.newWorktree.setup.title'),
-    <Textarea
-      value={setupDraft}
-      onChange={(event) => setSetupDraft(event.target.value)}
-      placeholder="bun install"
-      className="h-[72px] min-h-[72px] resize-none font-mono typography-micro"
-    />,
-    t('session.newWorktree.setup.hint'),
-  );
-
   const choiceBlocks = (
     <>
       {fieldBlock(t('session.newWorktree.start.title'), startOptions)}
@@ -869,13 +826,11 @@ export function NewWorktreeDialog({
     <div className="flex min-w-0 flex-col gap-5">
       {choiceBlocks}
       {branchBlocks}
-      {setupBlock}
     </div>
   ) : (
     <div className="grid grid-cols-2 gap-x-10">
       <div className="flex min-w-0 flex-col gap-5">
         {choiceBlocks}
-        {setupBlock}
       </div>
       <div className="flex min-w-0 flex-col gap-5">{branchBlocks}</div>
     </div>

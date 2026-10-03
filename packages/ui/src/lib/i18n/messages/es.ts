@@ -2103,8 +2103,6 @@ export const dict: Record<I18nKey, string> = {
   "session.newWorktree.start.fromItemUnavailable": "Conecta GitHub o Linear para empezar desde un PR o issue.",
   "session.newWorktree.item.title": "PR o issue",
   "session.newWorktree.baseBranchNotApplicable": "No se usa en esta opción",
-  "session.newWorktree.setup.title": "Comandos de configuración",
-  "session.newWorktree.setup.hint": "Se ejecutan en el nuevo worktree después de crearlo, uno por línea. Vienen de la configuración del proyecto; los cambios solo afectan a este worktree.",
   "session.newWorktree.mode.fromItem": "PR o issue",
   "session.newWorktree.error.attachLinkedFailed": "No se pudo adjuntar {item}",
   "session.newWorktree.error.noActiveProject": "No hay ningún proyecto activo",
