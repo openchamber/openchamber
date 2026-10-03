@@ -1,5 +1,4 @@
 import type {
-  Agent,
   Config,
   FormRequest,
   Message,
@@ -37,11 +36,9 @@ export type ProjectMeta = {
 /** Per-directory store state */
 export type State = {
   status: "loading" | "partial" | "complete"
-  agent: Agent[]
   project: string
   projectMeta: ProjectMeta | undefined
   icon: string | undefined
-  provider: ProviderCatalog
   config: Config
   path: Path
   session: Session[]
@@ -127,11 +124,9 @@ export const INITIAL_STATE: State = {
   project: "",
   projectMeta: undefined,
   icon: undefined,
-  provider: EMPTY_PROVIDER_CATALOG,
   config: {},
   path: EMPTY_PATH,
   status: "loading",
-  agent: [],
   session: [],
   sessionTotal: 0,
   sessionListSource: "empty",

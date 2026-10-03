@@ -126,12 +126,12 @@ second time `PROVIDER_REREAD_AFTER_CREDENTIAL_MS` after a credential change.
 
 | Kind | Sync child stores | Settings/composer stores (`stores/catalogRefresh.ts`) |
 |---|---|---|
-| `agent` | `agent` per directory | agents store + config-store agents |
-| `command` | `command` per directory | commands store |
+| `agent` | — | agents store + config-store agents |
+| `command` | — | commands store |
 | `skill` | — | skills store + skills catalog |
 | `plugin` | — | plugins store |
-| `config` | `config` and `provider` per directory (plus `emitSyncConfigChanged`) | agents, commands, skills, MCP config, plugins, config-store providers |
-| `provider` / `model` / `credential` | `provider` per directory | config-store providers (model-metadata cache invalidated; the current list stays until the new one lands; `credential` reads twice) |
+| `config` | `config` per named directory (plus `emitSyncConfigChanged`) | agents, commands, skills, MCP config, plugins, config-store providers |
+| `provider` / `model` / `credential` | — | config-store providers (model-metadata cache invalidated; the current list stays until the new one lands; `credential` reads twice) |
 | `project` | global project list | — |
 
 ## Compaction records

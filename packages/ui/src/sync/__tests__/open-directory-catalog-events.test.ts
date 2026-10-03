@@ -13,14 +13,17 @@ import { useMcpStore } from "@/stores/useMcpStore"
 // Settings agent list.
 
 const agentUpdated: SyncEvent = { type: "catalog.updated", properties: { kind: "agent" } }
+const configUpdated: SyncEvent = { type: "catalog.updated", properties: { kind: "config" } }
 const CATALOG_SETTLE_MS = 400
 
 describe("catalog events for an open directory", () => {
   let childStores: ChildStoreManager
   let agentLoads = 0
   let directoryAgentReads: Array<string | null | undefined> = []
+  let directoryConfigReads: Array<string | null | undefined> = []
   const originalLoadAgents = useAgentsStore.getState().loadAgents
   const originalListAgents = opencodeClient.listAgents
+  const originalGetConfig = opencodeClient.getConfig
   const originalDirectory = opencodeClient.getDirectory()
 
   beforeEach(() => {
@@ -28,6 +31,7 @@ describe("catalog events for an open directory", () => {
     childStores.ensureChild("/open", { bootstrap: false })
     agentLoads = 0
     directoryAgentReads = []
+    directoryConfigReads = []
     useAgentsStore.setState({
       loadAgents: async () => {
         agentLoads += 1
@@ -38,12 +42,17 @@ describe("catalog events for an open directory", () => {
       directoryAgentReads.push(directory)
       return []
     }
+    opencodeClient.getConfig = async (directory) => {
+      directoryConfigReads.push(directory)
+      return {}
+    }
   })
 
   afterEach(() => {
     childStores.disposeAll()
     useAgentsStore.setState({ loadAgents: originalLoadAgents })
     opencodeClient.listAgents = originalListAgents
+    opencodeClient.getConfig = originalGetConfig
     opencodeClient.setDirectory(originalDirectory)
   })
 
@@ -53,6 +62,8 @@ describe("catalog events for an open directory", () => {
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
     expect(agentLoads).toBe(1)
+    // The agents store owns the list; no directory store keeps a copy.
+    expect(directoryAgentReads).toEqual([])
   })
 
   test("agent.updated in a directory without a store re-reads it too", async () => {
@@ -68,22 +79,22 @@ describe("catalog events for an open directory", () => {
   test("re-reads only the directory the event names, not every store", async () => {
     childStores.ensureChild("/sidebar-project", { bootstrap: false })
 
-    handleEvent("/open", agentUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
+    handleEvent("/open", configUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
 
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
-    expect(directoryAgentReads).toEqual(["/open"])
+    expect(directoryConfigReads).toEqual(["/open"])
   })
 
   test("an event without a location re-reads the current directory only", async () => {
     childStores.ensureChild("/sidebar-project", { bootstrap: false })
     opencodeClient.setDirectory("/open")
 
-    handleEvent("global", agentUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
+    handleEvent("global", configUpdated, childStores, createEventRoutingIndex(), getRuntimeKey())
 
     await new Promise((resolve) => setTimeout(resolve, CATALOG_SETTLE_MS))
 
-    expect(directoryAgentReads).toEqual(["/open"])
+    expect(directoryConfigReads).toEqual(["/open"])
   })
 })
 

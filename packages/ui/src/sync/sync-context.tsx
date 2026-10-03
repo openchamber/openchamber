@@ -1480,9 +1480,8 @@ async function resyncDirectoryAfterReconnect(
 /**
  * OpenCode reports a catalog change (`config.updated`, `agent.updated`, ...)
  * without saying what changed, so the affected slice is re-read rather than
- * patched. Agents, commands, config and providers resolve per directory, so
- * each directory the change was announced for refreshes its own copy;
- * projects are global.
+ * patched. Config resolves per directory, so each directory the change was
+ * announced for refreshes its own copy; projects are global.
  *
  * Only those directories: a directory-scoped read makes OpenCode start that
  * location, MCP servers included, so re-reading every directory with a store
@@ -1509,34 +1508,18 @@ async function reloadCatalog(
     if (projects) useGlobalSyncStore.getState().actions.set({ projects })
     return
   }
-  // No sync-store slice of their own: their consumers read them on demand.
-  if (kind === "skill" || kind === "plugin" || kind === "websearch") return
+  // Config is the only catalog the directory stores hold. Agents, commands,
+  // providers and the rest live in the stores their consumers read, which
+  // `refreshStoresForCatalogKind` re-reads for the same kind.
+  if (kind !== "config") return
 
   await Promise.all([...directories].map(async (directory) => {
     const store = childStores.getChild(directory)
     if (!store) return
     try {
-      if (kind === "agent") {
-        store.setState({ agent: await opencodeClient.listAgents(directory) })
-      } else if (kind !== "command") {
-        // Commands have no sync-store slice: `refreshStoresForCatalogKind`
-        // re-reads `useCommandsStore`, the only consumer, on demand.
-        if (kind === "config") {
-          const config = await opencodeClient.getConfig(directory)
-          store.setState({ config })
-          emitSyncConfigChanged(directory, config)
-        }
-        // The provider slice follows everything that can change it:
-        // `provider.updated` / `model.updated` (2.0.8's own announcements), a
-        // credential change, and the config (which can declare providers).
-        // Fresh: a read already in flight may predate the change.
-        const provider = await opencodeClient.getProvidersForConfig(directory, { fresh: true })
-        // Same catalog, same object: a re-read that changes nothing must not
-        // re-render every provider consumer.
-        if (JSON.stringify(store.getState().provider) !== JSON.stringify(provider)) {
-          store.setState({ provider })
-        }
-      }
+      const config = await opencodeClient.getConfig(directory)
+      store.setState({ config })
+      emitSyncConfigChanged(directory, config)
     } catch {
       // Best-effort: the next catalog event or bootstrap re-reads it.
     }
