@@ -87,6 +87,8 @@ export const createSettingsHelpers = (dependencies) => {
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
   const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
+  // Keep in sync with packages/ui/src/lib/i18n/runtime.ts LOCALES — a locale added there without this list silently fails server validation.
+  const LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
   const HIDDEN_MODELS_MAX = 1024;
@@ -1021,6 +1023,9 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_MODEL_MAX_LENGTH) {
         result.sttLocalModel = trimmed;
       }
+    }
+    if (typeof candidate.locale === 'string' && LOCALE_VALUES.has(candidate.locale)) {
+      result.locale = candidate.locale;
     }
     if (typeof candidate.sttLanguage === 'string') {
       const trimmed = candidate.sttLanguage.trim();

@@ -81,6 +81,14 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: 'bad' }).workStatusSectionOrder).toBeUndefined();
     expect(helpers.sanitizeSettingsUpdate({ workStatusSectionOrder: [] }).workStatusSectionOrder).toEqual([]);
   });
+  it('accepts shipped locales for the ui language and drops unknown values', () => {
+    const helpers = createTestHelpers();
+    for (const locale of ['en', 'de', 'pt-BR', 'zh-CN', 'tr']) {
+      expect(helpers.sanitizeSettingsUpdate({ locale }).locale).toBe(locale);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ locale: 'klingon' }).locale).toBeUndefined();
+    expect(helpers.sanitizeSettingsUpdate({ locale: 42 }).locale).toBeUndefined();
+  });
   it('round-trips telemetry opt-in with the hidden list and preserves it across unrelated writes', () => {
     const helpers = createTestHelpers();
     const legacy = helpers.sanitizeSettingsUpdate({ workStatusHiddenSections: [] });
@@ -810,7 +818,7 @@ describe('settings registry gate', () => {
     usageExpandedFamilies: { anthropic: ['f'] }, usageModelGroups: { anthropic: { customGroups: [{ id: 'g', label: 'G', models: ['claude'], order: 0 }] } },
     globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
-    inputBarOffset: 10,
+    inputBarOffset: 10, locale: 'de',
     customProviderIcons: { 'campus-llm': 'cloud' },
   };
 

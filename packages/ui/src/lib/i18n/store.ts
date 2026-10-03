@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { dict as enDict, type I18nKey } from './messages/en';
 import { DEFAULT_LOCALE, detectInitialLocale, type Locale, writeStoredLocale } from './runtime';
+import { updateDesktopSettings } from '@/lib/persistence';
 
 export type I18nParams = Record<string, string | number | boolean | null | undefined>;
 export type I18nDictionary = Record<I18nKey, string>;
@@ -11,6 +12,8 @@ type I18nState = {
   dictionary: I18nDictionary;
   loadingLocale: Locale | null;
   setLocale: (locale: Locale) => void;
+  /** Applies a locale that did not originate in this window (server adoption, bootstrap detection). Mirrors to localStorage but never queues a server write. */
+  adoptLocale: (locale: Locale) => void;
 };
 
 const dictionaries = new Map<Locale, I18nDictionary>([[DEFAULT_LOCALE, enDict]]);
@@ -59,7 +62,7 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
   locale: DEFAULT_LOCALE,
   dictionary: enDict,
   loadingLocale: null,
-  setLocale: (locale) => {
+  adoptLocale: (locale) => {
     const current = get();
     const cached = dictionaries.get(locale);
     if (current.locale === locale && current.loadingLocale !== locale && cached) {
@@ -90,10 +93,16 @@ export const useI18nStore = create<I18nState>()((set, get) => ({
       }
     });
   },
+  setLocale: (locale) => {
+    get().adoptLocale(locale);
+    void updateDesktopSettings({ locale });
+  },
 }));
 
 export function initializeLocale(): void {
-  useI18nStore.getState().setLocale(detectInitialLocale());
+  // Bootstrap detection is not user intent: the server snapshot restores the
+  // saved choice when it arrives, so detection must never push a locale.
+  useI18nStore.getState().adoptLocale(detectInitialLocale());
 }
 
 export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?: I18nParams): string {

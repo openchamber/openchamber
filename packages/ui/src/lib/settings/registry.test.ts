@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
+import { useI18nStore } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import {
   AUTO_SAVE_KEYS,
@@ -218,5 +219,26 @@ describe('settings registry', () => {
     expect(keys.length).toBe(SETTINGS_KEYS.length + LOCAL_DEVICE_KEYS.length + DESKTOP_SHELL_KEYS.length);
     for (const key of LOCAL_DEVICE_KEYS) expect(snapshot.fields[key]).toEqual({ scope: 'device', local: true });
     for (const key of DESKTOP_SHELL_KEYS) expect(snapshot.fields[key].owner).toBe('desktop-shell');
+  });
+});
+
+describe('locale persistence', () => {
+  test('parses a shipped locale and drops unknown values', () => {
+    expect(parseSettingsDocument({ locale: 'de' })).toEqual({ locale: 'de' });
+    expect(parseSettingsDocument({ locale: 'pt-BR' })).toEqual({ locale: 'pt-BR' });
+    expect(parseSettingsDocument({ locale: 'klingon' })).toEqual({});
+    expect(parseSettingsDocument({})).toEqual({});
+  });
+
+  test('applies a server locale into the i18n store', () => {
+    const previous = useI18nStore.getState().locale;
+    try {
+      const parsed = parseSettingsDocument({ locale: 'ja' });
+      expect(parsed).toEqual({ locale: 'ja' });
+      applySettingsToStores({ locale: 'ja' });
+      expect(useI18nStore.getState().locale).toBe('ja');
+    } finally {
+      useI18nStore.setState({ locale: previous, loadingLocale: null });
+    }
   });
 });
