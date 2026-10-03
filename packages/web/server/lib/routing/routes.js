@@ -106,9 +106,30 @@ export function registerRoutingPromptRewrite(app, runtime) {
     });
   };
 
+  // The UI SDK URI-encodes the directory header on every request and only
+  // marks the values that are not Latin-1, and OpenCode decodes the value once
+  // on its side — so read what OpenCode will read, the way requestedDirectories
+  // does for the space guards (../spaces/dispatcher.js). The runtime's own
+  // OpenCode calls encode once more, so an encoded value here would reach
+  // OpenCode double-encoded and fail its realPath.
+  const PERCENT_ESCAPE = /%[0-9a-fA-F]{2}/;
+  const safeDecode = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
   const directoryOf = (req) => {
     const url = new URL(req.url, 'http://localhost');
-    return url.searchParams.get('directory') || req.get('x-opencode-directory') || undefined;
+    // searchParams values arrive percent-decoded already.
+    const query = url.searchParams.get('directory');
+    if (query) return query;
+    const header = req.get('x-opencode-directory');
+    if (!header) return undefined;
+    const encoded = req.get('x-opencode-directory-encoding') === 'uri' || PERCENT_ESCAPE.test(header);
+    return encoded ? safeDecode(header) : header;
   };
 
   // Session creation is the other v2 request that carries a model: flows that

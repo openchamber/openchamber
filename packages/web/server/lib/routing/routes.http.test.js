@@ -96,6 +96,47 @@ describe('routing send rewrite', () => {
     expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: '/repo', body: { text: 'hi' } });
   });
 
+  it('decodes a URI-encoded directory header the way OpenCode reads it', async () => {
+    const { app, runtime } = createApp({ autoSessions: new Set(['s1']) });
+    await request(app)
+      .post('/api/session/s1/prompt')
+      .set('x-opencode-directory', '%2Frepo')
+      .send({ text: 'hi' })
+      .expect(204);
+    expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: '/repo', body: { text: 'hi' } });
+  });
+
+  it('decodes a directory header marked as URI-encoded', async () => {
+    const { app, runtime } = createApp();
+    await request(app)
+      .post('/api/session/s1/model')
+      .set('x-opencode-directory', '%2Frepo')
+      .set('x-opencode-directory-encoding', 'uri')
+      .send({ model: { providerID: 'openchamber', id: 'auto' } })
+      .expect(204);
+    expect(runtime.noteModelSelection).toHaveBeenCalledWith('s1', { providerID: 'openchamber', id: 'auto' }, '/repo');
+  });
+
+  it('forwards a directory header without percent-escapes untouched', async () => {
+    const { app, runtime } = createApp({ autoSessions: new Set(['s1']) });
+    await request(app)
+      .post('/api/session/s1/prompt')
+      .set('x-opencode-directory', '/repo')
+      .send({ text: 'hi' })
+      .expect(204);
+    expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: '/repo', body: { text: 'hi' } });
+  });
+
+  it('keeps a directory header with malformed escapes as it arrived', async () => {
+    const { app, runtime } = createApp({ autoSessions: new Set(['s1']) });
+    await request(app)
+      .post('/api/session/s1/prompt')
+      .set('x-opencode-directory', '%2Frepo%ZZ')
+      .send({ text: 'hi' })
+      .expect(204);
+    expect(runtime.routeSend).toHaveBeenCalledWith({ sessionId: 's1', directory: '%2Frepo%ZZ', body: { text: 'hi' } });
+  });
+
   it('leaves a send in a session that is not on Auto unread', async () => {
     const { app, runtime, forwarded } = createApp();
     await request(app).post('/api/session/s1/prompt').send({ text: 'hi' }).expect(204);
