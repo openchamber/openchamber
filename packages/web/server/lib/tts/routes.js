@@ -4,6 +4,7 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
+import { describeVoiceKeys, readVoiceKey, updateVoiceKeys } from './voice-keys.js';
 
 // HTTP header values must be printable latin1; macOS voice names can be localized
 // (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
@@ -20,6 +21,19 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
     }
     return ttsModulePromise;
   };
+
+  // Which voice keys are stored; the keys themselves never leave the server.
+  app.get('/api/voice/keys', (_req, res) => {
+    res.json(describeVoiceKeys());
+  });
+
+  app.put('/api/voice/keys', express.json({ limit: '16kb' }), (req, res) => {
+    try {
+      res.json(updateVoiceKeys(req.body));
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid voice keys' });
+    }
+  });
 
   app.post('/api/voice/token', async (req, res) => {
     console.log('[Voice] Token request received:', {
@@ -82,9 +96,13 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
       // Check availability - server-configured key, client-provided key, or custom server URL
       const hasServerKey = await ttsService.isAvailable();
-      const hasClientKey = apiKey && typeof apiKey === 'string' && apiKey.trim().length > 0;
       const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
-      
+      // The key stored for this kind of server; a key in the body is what
+      // clients from before the server kept them sent, and still wins.
+      const requestKey = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : undefined;
+      const clientKey = requestKey ?? readVoiceKey(hasCustomBaseURL ? 'openaiCompatible' : 'openai');
+      const hasClientKey = Boolean(clientKey);
+
       if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
         return res.status(503).json({ 
           error: 'TTS service not available. Please configure OpenAI in OpenCode, provide an API key, or set a custom server URL in settings.' 
@@ -102,7 +120,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
         model,
         speed,
         instructions,
-        apiKey: hasClientKey ? apiKey.trim() : undefined,
+        apiKey: clientKey,
         baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
       });
 
@@ -264,7 +282,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
           ? req.headers['x-language'].trim()
           : undefined;
         const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'].trim() : '';
-        const apiKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+        const apiKey = (authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined) || readVoiceKey('stt');
 
         if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
           return res.status(400).json({ error: 'Audio data is required' });

@@ -25,6 +25,7 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
@@ -1260,16 +1261,15 @@ interface ConfigStore {
     /** Local and macOS voices follow the language of the text being read. */
     ttsFollowTextLanguage: boolean;
     openaiVoice: string;
-    openaiApiKey: string;
+    /** Which voice API keys the server holds; the keys never reach the browser. */
+    voiceApiKeys: VoiceApiKeyState;
     openaiCompatibleUrl: string;
-    openaiCompatibleApiKey: string;
     openaiCompatibleVoice: string;
     openaiCompatibleTtsModel: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
     sttProvider: 'local' | 'openai-compatible';
     sttServerUrl: string;
-    sttApiKey: string;
     sttModel: string;
     sttLocalModel: string;
     sttLanguage: string;
@@ -1290,15 +1290,19 @@ interface ConfigStore {
     setLocalTtsModelId: (modelId: string) => void;
     setTtsFollowTextLanguage: (enabled: boolean) => void;
     setOpenaiVoice: (voice: string) => void;
-    setOpenaiApiKey: (apiKey: string) => void;
+    /** Store (string) or remove (null) one voice key on the server. Resolves false when the server refused. */
+    setVoiceApiKey: (kind: VoiceApiKeyKind, apiKey: string | null) => Promise<boolean>;
+    /**
+     * Read which keys the server holds, moving any a previous build left in
+     * the browser first. Once per runtime unless `force` (the Settings page).
+     */
+    refreshVoiceApiKeys: (options?: { force?: boolean }) => Promise<void>;
     setOpenaiCompatibleUrl: (url: string) => void;
-    setOpenaiCompatibleApiKey: (apiKey: string) => void;
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
     setSttProvider: (provider: 'local' | 'openai-compatible') => void;
     setSttServerUrl: (url: string) => void;
-    setSttApiKey: (apiKey: string) => void;
     setSttModel: (model: string) => void;
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
@@ -1469,6 +1473,9 @@ const isSameDefaults = (previous: { [key: string]: string }, next: { [key: strin
     return previousKeys.every((key) => previous[key] === next[key]);
 };
 
+/** The last read of which voice keys the server holds, per runtime (see refreshVoiceApiKeys). */
+let voiceApiKeysLoad: { runtimeKey: string; promise: Promise<void> } | null = null;
+
 export const useConfigStore = create<ConfigStore>()(
     devtools(
         persist(
@@ -1600,26 +1607,11 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 'nova';
                 })(),
-                // OpenAI API key for TTS - load from localStorage or default to empty
-                openaiApiKey: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('openaiApiKey');
-                        if (saved) return saved;
-                    }
-                    return '';
-                })(),
+                voiceApiKeys: EMPTY_VOICE_API_KEYS,
                 // OpenAI-compatible custom server URL
                 openaiCompatibleUrl: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('openaiCompatibleUrl');
-                        if (saved) return saved;
-                    }
-                    return '';
-                })(),
-                // OpenAI-compatible custom server API key
-                openaiCompatibleApiKey: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('openaiCompatibleApiKey');
                         if (saved) return saved;
                     }
                     return '';
@@ -1665,13 +1657,6 @@ export const useConfigStore = create<ConfigStore>()(
                         if (saved) return saved;
                     }
                     return 'http://localhost:8001/v1';
-                })(),
-                sttApiKey: (() => {
-                    if (typeof window !== 'undefined') {
-                        const saved = localStorage.getItem('sttApiKey');
-                        if (saved) return saved;
-                    }
-                    return '';
                 })(),
                 sttModel: (() => {
                     if (typeof window !== 'undefined') {
@@ -3577,11 +3562,37 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setOpenaiApiKey: (apiKey: string) => {
-                    set({ openaiApiKey: apiKey });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('openaiApiKey', apiKey);
+                setVoiceApiKey: async (kind, apiKey) => {
+                    try {
+                        set({ voiceApiKeys: await updateVoiceApiKeys({ [kind]: apiKey }) });
+                        return true;
+                    } catch (error) {
+                        console.warn('Failed to save voice API key:', error);
+                        return false;
                     }
+                },
+
+                refreshVoiceApiKeys: (options) => {
+                    // Every message's read-aloud button asks; one read per
+                    // runtime answers them all.
+                    const runtimeKey = getRuntimeKey();
+                    if (!options?.force && voiceApiKeysLoad?.runtimeKey === runtimeKey) {
+                        return voiceApiKeysLoad.promise;
+                    }
+                    const promise = (async () => {
+                        try {
+                            const migrated = await migrateLegacyVoiceApiKeys();
+                            const voiceApiKeys = migrated ?? await fetchVoiceApiKeys();
+                            if (getRuntimeKey() === runtimeKey) set({ voiceApiKeys });
+                        } catch (error) {
+                            // A runtime without the route (VS Code) or an offline
+                            // server: keys read as unset, which offers setting one.
+                            if (getRuntimeKey() === runtimeKey) set({ voiceApiKeys: EMPTY_VOICE_API_KEYS });
+                            console.warn('Failed to read voice API keys:', error);
+                        }
+                    })();
+                    voiceApiKeysLoad = { runtimeKey, promise };
+                    return promise;
                 },
 
                 setOpenaiCompatibleUrl: (url: string) => {
@@ -3591,12 +3602,6 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
-                setOpenaiCompatibleApiKey: (apiKey: string) => {
-                    set({ openaiCompatibleApiKey: apiKey });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('openaiCompatibleApiKey', apiKey);
-                    }
-                },
 
                 setOpenaiCompatibleVoice: (voice: string) => {
                     set({ openaiCompatibleVoice: voice });
@@ -3636,12 +3641,6 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ sttServerUrl: url }).catch(() => {});
                 },
 
-                setSttApiKey: (apiKey: string) => {
-                    set({ sttApiKey: apiKey });
-                    if (typeof window !== 'undefined') {
-                        localStorage.setItem('sttApiKey', apiKey);
-                    }
-                },
 
                 setSttModel: (model: string) => {
                     set({ sttModel: model });

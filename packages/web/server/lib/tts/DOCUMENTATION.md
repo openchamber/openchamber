@@ -10,6 +10,8 @@ This module provides server-side Text-to-Speech services using OpenAI's TTS API.
 - `packages/web/server/lib/tts/service.js`: TTS service implementation with OpenAI integration.
 - `packages/web/server/lib/text/summarization.js`: Shared text summarization stub and sanitization utilities. It performs no external Zen calls.
 - `packages/web/server/lib/tts/stt.js`: STT proxy for OpenAI-compatible transcription endpoints.
+- `packages/web/server/lib/tts/voice-keys.js`: the API keys typed in Voice settings (`openai`, `openaiCompatible`, `stt`), stored in `voice-keys.json` in the data dir, mode 0600. `GET /api/voice/keys` answers only which are set; `PUT /api/voice/keys` sets (string) or removes (null) them. `/api/tts/speak`, the STT route and dictation fill a request's key from here, so the UI never holds or sends one. A key in a request body still wins: older clients sent theirs that way. Keys earlier builds kept in the browser's localStorage are moved here by the UI on first read (`packages/ui/src/lib/voiceKeysApi.ts`).
+- The server's own `OPENAI_API_KEY` is used only for OpenAI itself, never sent to a custom server URL (`service.js`, `stt.js`).
 - `packages/web/server/lib/tts/base-url.js`: shared base URL validation and normalization for custom OpenAI-compatible endpoints.
 - `packages/web/server/lib/tts/language-detect.js`: dependency-free language detection for voice selection (`detectTextLanguage`, `pickVoiceForLanguage`, `languageOfLocale`). Used by the macOS `say` route (`language: 'auto'` switches to an installed voice whose locale matches the text; the response carries `X-Speech-Voice` — percent-encoded, because macOS voice names may be localized — and `X-Speech-Language`) and by the dictation module's local TTS model choice.
 

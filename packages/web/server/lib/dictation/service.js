@@ -1,3 +1,4 @@
+import { readVoiceKey } from '../tts/voice-keys.js';
 import { detectTextLanguage } from '../tts/language-detect.js';
 /**
  * Dictation service: resolves STT providers, tracks local model download
@@ -94,7 +95,9 @@ export function createDictationService({ modelsDir }) {
       const session = new OpenAICompatibleTranscriptionSession({
         baseURL: config.baseUrl,
         model: config.model,
-        apiKey: config.apiKey || undefined,
+        // The key stored in Settings; one sent with the request comes from a
+        // client older than the server-side store.
+        apiKey: config.apiKey || readVoiceKey('stt'),
         language: options.language || undefined,
       });
       try {

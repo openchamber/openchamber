@@ -34,6 +34,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
+import { toast } from '@/components/ui';
+import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
 
 const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated w-full h-7 rounded-lg border border-input bg-surface-elevated px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-interactive-border-focus';
 
@@ -552,6 +554,64 @@ const OPENAI_VOICE_OPTIONS = [
     { value: 'cedar', label: 'Cedar' },
 ];
 
+/**
+ * A voice API key is kept on the server, never in the browser. The field
+ * shows whether one is saved; typing a new key and pressing Enter (or leaving
+ * the field) replaces it, the cross removes it.
+ */
+const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
+    const { t } = useI18n();
+    const saved = useConfigStore((state) => state.voiceApiKeys[kind]);
+    const setVoiceApiKey = useConfigStore((state) => state.setVoiceApiKey);
+    const [draft, setDraft] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    const save = useCallback(async (value: string | null) => {
+        setIsSaving(true);
+        const ok = await setVoiceApiKey(kind, value);
+        setIsSaving(false);
+        if (ok) {
+            setDraft('');
+        } else {
+            toast.error(t('settings.voice.page.toast.apiKeySaveFailed'));
+        }
+    }, [kind, setVoiceApiKey, t]);
+
+    const commitDraft = useCallback(() => {
+        const value = draft.trim();
+        if (value) void save(value);
+    }, [draft, save]);
+
+    return (
+        <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
+            <input
+                type="password"
+                value={draft}
+                disabled={isSaving}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commitDraft}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitDraft();
+                }}
+                placeholder={saved ? t('settings.voice.page.field.apiKeySavedPlaceholder') : 'sk-...'}
+                className={VOICE_TEXT_INPUT_CLASS}
+                aria-label={t('settings.voice.page.field.apiKey')}
+            />
+            {saved && !draft && (
+                <button
+                    type="button"
+                    onClick={() => void save(null)}
+                    disabled={isSaving}
+                    aria-label={t('settings.voice.page.field.apiKeyRemove')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                    <Icon name="close" className="w-3.5 h-3.5" />
+                </button>
+            )}
+        </div>
+    );
+};
+
 export const VoiceSettings: React.FC = () => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
@@ -592,12 +652,10 @@ export const VoiceSettings: React.FC = () => {
     const setBrowserVoice = useConfigStore((state) => state.setBrowserVoice);
     const openaiVoice = useConfigStore((state) => state.openaiVoice);
     const setOpenaiVoice = useConfigStore((state) => state.setOpenaiVoice);
-    const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
-    const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
+    const hasOpenaiApiKey = useConfigStore((state) => state.voiceApiKeys.openai);
+    const refreshVoiceApiKeys = useConfigStore((state) => state.refreshVoiceApiKeys);
     const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
     const setOpenaiCompatibleUrl = useConfigStore((state) => state.setOpenaiCompatibleUrl);
-    const openaiCompatibleApiKey = useConfigStore((state) => state.openaiCompatibleApiKey);
-    const setOpenaiCompatibleApiKey = useConfigStore((state) => state.setOpenaiCompatibleApiKey);
     const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
     const setOpenaiCompatibleVoice = useConfigStore((state) => state.setOpenaiCompatibleVoice);
     const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
@@ -612,8 +670,6 @@ export const VoiceSettings: React.FC = () => {
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
     const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
-    const sttApiKey = useConfigStore((state) => state.sttApiKey);
-    const setSttApiKey = useConfigStore((state) => state.setSttApiKey);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
     const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
@@ -714,8 +770,12 @@ export const VoiceSettings: React.FC = () => {
     }, [isBrowserPreviewPlaying]);
 
     useEffect(() => {
+        void refreshVoiceApiKeys({ force: true });
+    }, [refreshVoiceApiKeys]);
+
+    useEffect(() => {
         if (!showMessageTTSButtons || (voiceProvider !== 'openai' && voiceProvider !== 'openai-compatible')) {
-            setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
+            setIsOpenAIAvailable(hasOpenaiApiKey);
             return;
         }
 
@@ -724,17 +784,17 @@ export const VoiceSettings: React.FC = () => {
                 const response = await runtimeFetch('/api/tts/status');
                 const data = await response.json();
                 const hasServerKey = data.available;
-                const hasSettingsKey = openaiApiKey.trim().length > 0;
+                const hasSettingsKey = hasOpenaiApiKey;
                 const enterpriseMode = data.enterpriseMode === true;
                 setVoiceEnterpriseMode(enterpriseMode);
                 setIsOpenAIAvailable(!enterpriseMode && (hasServerKey || hasSettingsKey));
             } catch {
-                setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
+                setIsOpenAIAvailable(hasOpenaiApiKey);
             }
         };
 
         checkOpenAIAvailability();
-    }, [openaiApiKey, showMessageTTSButtons, voiceProvider]);
+    }, [hasOpenaiApiKey, showMessageTTSButtons, voiceProvider]);
 
     useEffect(() => {
         if (!showMessageTTSButtons) {
@@ -833,7 +893,6 @@ export const VoiceSettings: React.FC = () => {
                     text: t('settings.voice.page.preview.voiceLine', { voiceName: openaiVoice }),
                     voice: openaiVoice,
                     speed: speechRate,
-                    apiKey: openaiApiKey || undefined,
                 }),
             });
 
@@ -865,7 +924,7 @@ export const VoiceSettings: React.FC = () => {
             setOpenaiPreviewAudio(null);
             setIsOpenAIPreviewPlaying(false);
         }
-    }, [openaiVoice, speechRate, openaiPreviewAudio, openaiApiKey, t]);
+    }, [openaiVoice, speechRate, openaiPreviewAudio, t]);
 
     useEffect(() => {
         return () => {
@@ -895,7 +954,6 @@ export const VoiceSettings: React.FC = () => {
                     model: openaiCompatibleTtsModel || undefined,
                     speed: speechRate,
                     baseURL: openaiCompatibleUrl,
-                    apiKey: openaiCompatibleApiKey || undefined,
                 }),
             });
 
@@ -927,7 +985,7 @@ export const VoiceSettings: React.FC = () => {
             setCompatiblePreviewAudio(null);
             setIsCompatiblePreviewPlaying(false);
         }
-    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, openaiCompatibleApiKey, speechRate, compatiblePreviewAudio, t]);
+    }, [openaiCompatibleUrl, openaiCompatibleVoice, openaiCompatibleTtsModel, speechRate, compatiblePreviewAudio, t]);
 
     useEffect(() => {
         return () => {
@@ -1002,30 +1060,13 @@ export const VoiceSettings: React.FC = () => {
                                         {t('settings.voice.page.field.apiKey')}
                                     </span>
                                     <span className={cn(SETTINGS_HELPER_CLASS, !isOpenAIAvailable && "text-[var(--status-error)]/80")}>
-                                        {isOpenAIAvailable && !openaiApiKey
+                                        {isOpenAIAvailable && !hasOpenaiApiKey
                                           ? t('settings.voice.page.field.apiKeyHintUsingConfig')
                                           : !isOpenAIAvailable
                                             ? t('settings.voice.page.field.apiKeyHintRequired')
                                             : t('settings.voice.page.field.apiKeyHintProvide')}
                                     </span>
-                                    <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
-                                        <input
-                                            type="password"
-                                            value={openaiApiKey}
-                                            onChange={(e) => setOpenaiApiKey(e.target.value)}
-                                            placeholder="sk-..."
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                        {openaiApiKey && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setOpenaiApiKey('')}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                <Icon name="close" className="w-3.5 h-3.5" />
-                                            </button>
-                                        )}
-                                    </div>
+                                    <VoiceApiKeyField kind="openai" />
                                 </div>
                             )}
 
@@ -1059,28 +1100,11 @@ export const VoiceSettings: React.FC = () => {
                                         </div>
                                     </div>
                                     <div className="space-y-1.5">
-                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>API Key</span>
+                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.apiKey')}</span>
                                         <span className={SETTINGS_HELPER_CLASS}>
-                                            Optional
+                                            {t('settings.voice.page.field.apiKeyOptional')}
                                         </span>
-                                        <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
-                                            <input
-                                                type="password"
-                                                value={openaiCompatibleApiKey}
-                                                onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
-                                                placeholder="sk-..."
-                                                className={VOICE_TEXT_INPUT_CLASS}
-                                            />
-                                            {openaiCompatibleApiKey && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setOpenaiCompatibleApiKey('')}
-                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                                >
-                                                    <Icon name="close" className="w-3.5 h-3.5" />
-                                                </button>
-                                            )}
-                                        </div>
+                                        <VoiceApiKeyField kind="openaiCompatible" />
                                     </div>
                                     <div className="space-y-1.5">
                                         <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>
@@ -1345,28 +1369,11 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                                 <div className="space-y-1.5">
-                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>API Key</span>
+                                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.apiKey')}</span>
                                     <span className={SETTINGS_HELPER_CLASS}>
-                                        Optional
+                                        {t('settings.voice.page.field.apiKeyOptional')}
                                     </span>
-                                    <div className={cn('relative', SETTINGS_CONTROL_CLUSTER_CLASS)}>
-                                        <input
-                                            type="password"
-                                            value={sttApiKey}
-                                            onChange={(e) => setSttApiKey(e.target.value)}
-                                            placeholder="sk-..."
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                        {sttApiKey && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setSttApiKey('')}
-                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                            >
-                                                <Icon name="close" className="w-3.5 h-3.5" />
-                                            </button>
-                                        )}
-                                    </div>
+                                    <VoiceApiKeyField kind="stt" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.model')}</span>

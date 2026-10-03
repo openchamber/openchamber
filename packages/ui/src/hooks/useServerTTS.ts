@@ -203,8 +203,6 @@ export function splitSentencesForTTS(text: string): string[] {
 interface TTSRequestConfig {
   currentProviderId: string;
   currentModelId: string;
-  openaiApiKey: string;
-  openaiCompatibleApiKey: string;
 }
 
 function buildTTSRequestBody(
@@ -222,10 +220,7 @@ function buildTTSRequestBody(
     // Use provided provider/model, or fall back to current chat model
     providerId: options?.providerId || config.currentProviderId || undefined,
     modelId: options?.modelId || config.currentModelId || undefined,
-    // Send API key from settings if available
-    apiKey: options?.baseURL
-      ? config.openaiCompatibleApiKey || undefined
-      : config.openaiApiKey || undefined,
+    // No key: the server adds the one stored for this kind of server.
     // Send custom base URL for OpenAI-compatible servers
     baseURL: options?.baseURL || undefined,
   };
@@ -412,12 +407,10 @@ export function useServerTTS(
   // Get current model and API settings from config store.
   const currentProviderId = useConfigStore((state) => state.currentProviderId);
   const currentModelId = useConfigStore((state) => state.currentModelId);
-  const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
+  const hasStoredOpenaiKey = useConfigStore((state) => state.voiceApiKeys.openai);
+  const refreshVoiceApiKeys = useConfigStore((state) => state.refreshVoiceApiKeys);
   const openaiCompatibleUrl = useConfigStore(
     (state) => state.openaiCompatibleUrl,
-  );
-  const openaiCompatibleApiKey = useConfigStore(
-    (state) => state.openaiCompatibleApiKey,
   );
   const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
 
@@ -428,9 +421,7 @@ export function useServerTTS(
       return false;
     }
 
-    const hasClientKey = Boolean(
-      openaiApiKey && openaiApiKey.trim().length > 0,
-    );
+    const hasClientKey = hasStoredOpenaiKey;
     const hasCustomUrl = Boolean(
       openaiCompatibleUrl && openaiCompatibleUrl.trim().length > 0,
     );
@@ -457,7 +448,12 @@ export function useServerTTS(
       setIsAvailable(false);
       return false;
     }
-  }, [availabilityMode, enabled, openaiApiKey, openaiCompatibleUrl]);
+  }, [availabilityMode, enabled, hasStoredOpenaiKey, openaiCompatibleUrl]);
+
+  // Which keys the server holds, read again when this runtime's reader mounts.
+  useEffect(() => {
+    if (enabled) void refreshVoiceApiKeys();
+  }, [enabled, refreshVoiceApiKeys]);
 
   // Check availability on mount and when API key changes
   useEffect(() => {
@@ -547,8 +543,6 @@ export function useServerTTS(
         const config = {
           currentProviderId,
           currentModelId,
-          openaiApiKey,
-          openaiCompatibleApiKey,
         };
         console.log(
           '[useServerTTS] Speaking with voice:',
@@ -666,8 +660,6 @@ export function useServerTTS(
       stop,
       currentProviderId,
       currentModelId,
-      openaiApiKey,
-      openaiCompatibleApiKey,
       ttsChunkedMode,
     ],
   );

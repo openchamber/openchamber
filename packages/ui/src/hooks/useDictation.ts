@@ -59,7 +59,6 @@ const getDictationStartOptions = (): DictationStartOptions => {
             openaiCompatible: {
                 baseUrl: state.sttServerUrl,
                 model: state.sttModel,
-                ...(state.sttApiKey ? { apiKey: state.sttApiKey } : {}),
             },
         };
     }
