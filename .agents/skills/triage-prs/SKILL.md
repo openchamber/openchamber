@@ -23,10 +23,10 @@ Bucket every non-draft PR:
 | Bucket | Condition | Action template |
 |---|---|---|
 | Dead | merge conflict AND no author commit in >30 days | close with **stale-close** |
-| Conflicted-active | merge conflict, author committed within 30 days | comment **rebase-request**, leave open |
+| Conflicted-active | merge conflict, author committed within 30 days | phase 3 review pool; a PR worth taking we rebase and finish ourselves (see *Landing a PR ourselves*). **rebase-request** only when the author has something to decide, or `maintainerCanModify` is false |
 | Waiting on author | the last substantive event is a request for changes — a maintainer review with `CHANGES_REQUESTED`, a maintainer push-back comment, or a bot `review:blocked` / `review:needs-evidence` — and the author has neither pushed nor replied since | one line in the report ("чекає автора: <what was asked>"); no re-review, no new comment — the ball is theirs |
 | Clean | mergeable and not waiting on the author | phase 3 review pool |
-| Draft | `isDraft` | untouched until marked ready |
+| Draft | `isDraft` | untouched while the author committed within 14 days, and always for the team's own drafts (`btriapitsyn`, `yulia-ivashko`, `deatheros`, `AlexKutas`); otherwise close with **stale-draft** |
 
 Then detect **duplicate clusters** across the survivors: pairs with high title-token overlap or high changed-file overlap. For each cluster recommend one keeper (prefer: mergeable over conflicted, references an issue, smaller diff, earlier author — a later near-identical body is likely a regenerated copy of the earlier PR, and the earlier author keeps the credit); the rest close with **duplicate-close**.
 
@@ -58,6 +58,17 @@ Consolidate into a single report grouped by verdict — MERGE, MERGE-THEN-FIX, P
 
 If a batch subagent skips a PR, notice (count outputs against inputs) and re-dispatch the gap.
 
+A PR whose verdict needs more than a review — deep investigation of a core path, a rework against code `main` has rewritten, or a live check — can go to its own session with the PR linked to it. Keep it the exception: most PRs, including fix-then-merge ones, are finished inside the triage session.
+
+### Landing a PR ourselves
+
+The default for a PR we want is fix-then-merge in the author's branch, with the author keeping the credit. `scripts/prep.sh <N>` puts the whole PR on current `main` as one staged change in a throwaway worktree (conflicts resolved once, not per commit); after fixing and validating there, `scripts/finish.sh <N> "<subject>" "<comment>" ["Closes #M"]` commits as the author, pushes to their branch, posts the comment and squash-merges.
+
+- **Take the essence.** When `main` has moved under a PR, or the PR bundles extras, land the part that fixes the problem and leave the rest: the 6-line fix out of 250 lines of instrumentation, the concurrency cap without the profiler scenario, the bug fix without the limit bump. A PR that mixes a fix with a change to how the app looks lands the fix; the look goes to the maintainer as a decision. The comment to the author names what was left out and why.
+- **A dropped concern is checked in the whole diff.** Conflict hunks are not the whole PR: auto-merged hunks of a concern you decided to leave out still land. Before finishing, grep the staged diff for that concern by its own terms.
+- **A red check is read before it is believed.** Find which check failed: the review bot's `automation` job failing means the bot did not run, and a test that fails on the PR but passes on current `main` is a stale run, not the PR.
+- **Renovate PRs that touch the same file conflict with each other once one lands.** Merge them one at a time; for the rest tick the rebase checkbox in the PR body (`gh pr edit --body-file`) and come back.
+
 ### Optional: decision rounds through the question tool
 
 When the batch holds more than a handful of verdicts, offer this alongside the consolidated report: "I can walk you through them as cards instead, a few at a time." Use it only if the maintainer says yes; a large report is otherwise read in one go.
@@ -65,20 +76,24 @@ When the batch holds more than a handful of verdicts, offer this alongside the c
 A round is one call to the question tool with 4–6 cards. Each card is one decision:
 
 - **Header**: `#N` plus two or three words naming the behavior (`#3640 Cmd+Enter`), within 30 characters.
-- **Body**: the PR number and a plain title on the first line, then 3–4 sentences about what the user sees in the app today, what changes after the PR, and what it costs (risk, a new surface, a dependency, a support burden). Describe behavior, never file names; spell out jargon the maintainer would not use.
+- **Body**: the PR as a markdown link (`[#N](https://github.com/openchamber/openchamber/pull/N)`; the cards render markdown) with a plain title on the first line, then 3–4 sentences about what the user sees in the app today, what changes after the PR, and what it costs (risk, a new surface, a dependency, a support burden). Describe behavior, never file names; spell out jargon the maintainer would not use.
 - **Options**: 2–3, the recommended one first with `(Recommended)`. Each option says its consequence ("Close: /btw stays a command"), not only a verb. When our own follow-up is part of the verdict, the option says so ("Merge, then we fix the 1px offset").
 
 Order the rounds by how much the maintainer is needed: product decisions first, then plain bug-fix merges, then fix-before-merge, then merge-then-fix, and last one card that confirms all mechanical closes (duplicates, superseded, stale) as a list. A group of trivial, uncontested merges (translations, one-line fixes) shares one card with a one-line description per PR.
 
 Between rounds:
 
-- A free-text answer is a question or a doubt, never a verdict. Answer it before moving on, and re-ask that PR in the next round with the corrected facts.
+- A free-text answer is read for what it is. When it states a decision (often with how to word the reply), act on it; when it asks or doubts, answer that before moving on and re-ask the PR in the next round with the corrected facts.
 - When the maintainer doubts a claim ("are you sure that's still broken?", "that sounds fragile"), check the code and the current `main` yourself before replying; a reviewer's verdict is a lead, not proof, and these checks have overturned verdicts (a merge that would have mislabeled squash-merged branches, a "bug" that was a deliberate style). Report what you found in plain words, then re-ask.
 - A product decision the maintainer states during the rounds is binding: record it where it will be found next time (memory, or the owning skill) as soon as it is given.
 
 When every card is answered, show one summary grouped by outcome, list what will need the maintainer's own hands (a live check on a device or a packaged app), and get one explicit go before any GitHub write. Comments to people the maintainer works with closely (team members, regular volunteers) are shown as drafts before posting; the rest go out in the maintainer's voice without a separate review.
 
-After the batch is merged, write a symptom map of what landed (area, PR, merge sha, which part we wrote) to `.opencode/plans/pr-triage-<date>-merged.md`, so a later regression can be traced to its PR quickly.
+After a batch of merges:
+
+1. Run the full type-check and every package's test suite on current `main`. `main` has no CI of its own, and PRs validated one by one were never validated together.
+2. Write a symptom map of what landed (area, PR, merge sha, which part we wrote) to `.opencode/plans/pr-triage-<date>-merged.md`, so a later regression can be traced to its PR quickly.
+3. Write the testing list for the maintainer to `.opencode/plans/pr-triage-<date>-what-changed.md`, in Ukrainian: grouped by area of the app, each entry a linked PR (or commit) and two or three sentences on what the user sees change, marking single-platform changes and the parts we rewrote.
 
 ## Message templates
 
@@ -89,6 +104,9 @@ Canonical texts — reuse verbatim, adjusting only bracketed parts. Tone rules: 
 
 **rebase-request**
 > Sorry for the review backlog — the queue is currently far beyond what a single maintainer can handle. This PR has merge conflicts with `main`, and I can only review PRs that merge cleanly. If you're still interested in landing this, please rebase — conflicted PRs without activity will eventually be closed as stale.
+
+**stale-draft**
+> Closing this as stale: it's been a draft with no new commits for a while, and `main` has moved on a lot since, so it would need redoing against the current code anyway. Thanks for the work on it.
 
 **duplicate-close**
 > Closing as a duplicate of #[N], which will be reviewed instead[: one-clause reason it was kept].
