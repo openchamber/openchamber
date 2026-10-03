@@ -1,0 +1,68 @@
+diff --git a/react-native.web.js b/react-native.web.js
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b35fb38d0 100644
+--- a/react-native.web.js
++++ b/react-native.web.js
+@@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+diff --git a/react-native.web.mjs b/react-native.web.mjs
+index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951ed4585b28 100644
+--- a/react-native.web.mjs
++++ b/react-native.web.mjs
+@@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+diff --git a/react.js b/react.js
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b35fb38d0 100644
+--- a/react.js
++++ b/react.js
+@@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;
+diff --git a/react.mjs b/react.mjs
+index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951ed4585b28 100644
+--- a/react.mjs
++++ b/react.mjs
+@@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
+   }
+ }
+ function roundSize(size) {
+-  return Math.floor(size * 8) / 8;
++  // Floor to the device pixel grid (LegendApp/legend-list#536). Eighth-pixel
++  // estimates gave rows fractional positions; the browser rounds scrollTop, so
++  // every prepend compensation lost the remainder and the anchor drifted.
++  const scale = typeof window !== "undefined" && window.devicePixelRatio || 1;
++  return Math.floor(size * scale) / scale;
+ }
+ function isNullOrUndefined(value) {
+   return value === null || value === void 0;

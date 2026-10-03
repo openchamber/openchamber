@@ -12,7 +12,7 @@ const bundles = ['react.js', 'react.mjs', 'react-native.web.js', 'react-native.w
 // Exercise the installed dependency's actual private ScrollAdjust controller.
 // Only its external hooks, DOM geometry and frame scheduler are supplied here.
 // Keeping the controller in the package (rather than copying it into a test)
-// makes a missing patch or a changed upstream implementation fail this check.
+// makes a regressed or changed upstream implementation fail this check.
 function controller(bundle, { horizontal = false, baseline = '' } = {}) {
     const source = readFileSync(join(packageDirectory, bundle), 'utf8');
     const start = source.indexOf('function ScrollAdjust() {');
@@ -45,7 +45,7 @@ function controller(bundle, { horizontal = false, baseline = '' } = {}) {
         scrollTop: 0, scrollLeft: 0, clientHeight: 300, clientWidth: 300,
         scrollBy({ left, top }) { this.scrollLeft += left; this.scrollTop += top; },
     };
-    const ctx = { state: { props: { horizontal }, scroll: 0, adjustingFromInitialMount: false } };
+    const ctx = { state: { props: { horizontal }, scroll: 0, adjustingFromInitialMount: false, refScroller: { current: null } } };
     const ScrollAdjust = runInNewContext(`(${source.slice(start, end).trim()})`, {
         React3: hooks,
         React3__namespace: hooks,

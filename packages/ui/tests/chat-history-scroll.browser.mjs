@@ -2,9 +2,10 @@
 // Uses production React and the installed LegendList in a real Chromium page.
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
     CdpClient, createPageTarget, evaluateValue, launchChrome, reservePort, resolveChrome, wait,
 } from '../../../scripts/perf/cdp.mjs';
@@ -16,6 +17,16 @@ const end = source.indexOf("TimelineList.displayName = 'TimelineList';", start);
 assert.ok(start >= 0 && end > start, 'Locate the production TimelineList component');
 const estimatedSize = source.match(/^const TIMELINE_ESTIMATED_ENTRY_SIZE = .+;$/m)?.[0];
 assert.ok(estimatedSize, 'Use the production row size estimate');
+// Resolve the list the UI package actually installs; a stale hoisted copy at
+// the repository root would otherwise be measured instead.
+const legendList = join(
+    dirname(createRequire(join(repo, 'packages/ui/package.json')).resolve('@legendapp/list/react')),
+    'react.mjs',
+);
+// Prepend compensation loses sub-pixel remainders when row estimates are
+// fractional, and whether they are depends on the measured average. One
+// height profile can pass by luck, so the scenarios run over several.
+const heightProfiles = [[5, 137], [7, 137], [3, 101], [6, 53], [4, 211]];
 
 // Exercise the actual list component and its prop wiring without mounting the
 // application or connecting to a user's backend. Only row content and the
@@ -23,7 +34,7 @@ assert.ok(estimatedSize, 'Use the production row size estimate');
 const fixture = `
 import React from ${JSON.stringify(join(repo, 'node_modules/react/index.js'))};
 import { createRoot } from ${JSON.stringify(join(repo, 'node_modules/react-dom/client.js'))};
-import { LegendList } from ${JSON.stringify(join(repo, 'node_modules/@legendapp/list/react.mjs'))};
+import { LegendList } from ${JSON.stringify(legendList)};
 ${estimatedSize}
 const TimelineRowContext = React.createContext(null);
 const useUIStore = () => true;
@@ -46,8 +57,11 @@ ${source.slice(start, end)}
 const frames = async count => {
     for (let i = 0; i < count; i++) await new Promise(requestAnimationFrame);
 };
+const params = new URLSearchParams(location.search);
+const heightPeriod = Number(params.get('period'));
+const heightStep = Number(params.get('step'));
 const rowsFrom = (from, count, older = false) => Array.from({ length: count }, (_, i) => ({
-    key: 'row-' + (from + i), kind: 'turn', height: 180 + ((from + i + 100) % 5) * 137, older,
+    key: 'row-' + (from + i), kind: 'turn', height: 180 + ((from + i + 100) % heightPeriod) * heightStep, older,
 }));
 const noop = () => {};
 let list;
@@ -160,9 +174,11 @@ try {
     await client.send('Page.enable');
     const exceptions = [];
     client.on('Runtime.exceptionThrown', event => exceptions.push(event.exceptionDetails));
-    for (const moveWhileLoading of [false, true]) {
+    for (const [period, step] of heightProfiles) for (const moveWhileLoading of [false, true]) {
         const loaded = client.once('Page.loadEventFired');
-        await client.send('Page.navigate', { url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}` });
+        await client.send('Page.navigate', {
+            url: `http://127.0.0.1:${server.port}/?moving=${moveWhileLoading}&period=${period}&step=${step}`,
+        });
         await loaded;
         let ready = false;
         for (let attempt = 0; attempt < 100; attempt++) {
@@ -172,7 +188,7 @@ try {
         }
         assert.ok(ready, 'The browser fixture mounted');
         const result = await evaluateValue(client, `window.runScenario(${moveWhileLoading})`);
-        console.log(JSON.stringify({ moveWhileLoading, ...result }));
+        console.log(JSON.stringify({ period, step, moveWhileLoading, ...result }));
         assert.deepEqual(exceptions, [], 'No browser runtime errors');
         assert.equal(result.dataCount, 81, 'The prepend and tail append actually committed');
         assert.equal(result.frameCount, 70);
