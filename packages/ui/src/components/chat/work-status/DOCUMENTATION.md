@@ -100,7 +100,7 @@ which requests only providers enabled for this panel.
 | Branch, ahead/behind, attention | `useGitStore` directory state | warmed via `runBackgroundNetworkTask(ensureStatus)` and refreshed from Git mutation hints |
 | Changed files | `useGitStore` status `files` + `diffStats` | working tree, not session-authored edits |
 | PR + checks | `useFreshestSourceControlVisualSummaryForBranch` | **read-only**; follows the freshest bound-identity entry for the branch |
-| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `useSubagentCostRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
+| Subagents | child sessions from `useAllLiveSessions` (`parentID`) + `useAllSessionStatuses`; per-row cost from `computeRollup`'s `perChildCost` (each child's own subtree total, so nested subagent-of-subagent cost rolls up under its immediate parent row) | |
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata | written by the flows that attach an issue or PR |
@@ -120,6 +120,13 @@ Running rows reuse `SessionActivityDuration` and its shared one-second ticker
 for the current turn's elapsed time, including retries and waiting within that
 turn. No timer is shown until the activity store has an observed start; blocked,
 settled, and collapsed rows do not mount a running counter.
+
+Rows are ordered newest first by creation time, never by last activity, which
+reshuffled them on every step and moved them under the pointer. Finished rows
+(done or failed, with no pending blocker) sink below unfinished ones and keep
+the same creation order, so a fully finished list reads as it did at launch.
+The section derives per-row cost with `computeRollup` over the live-session list
+it already holds instead of opening a second subscription through the hook.
 
 Hovering or focusing a row shows its session model's catalog display name,
 falling back to the formatted model ID. Missing model metadata produces no

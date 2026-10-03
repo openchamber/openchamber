@@ -15,7 +15,7 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
-import { useSubagentCostRollup } from './useSubagentCostRollup';
+import { computeRollup } from './useSubagentCostRollup';
 import type { State } from '@/sync/types';
 
 type Props = {
@@ -49,8 +49,9 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   // Each child's own subtree total (its cost plus every descendant of its
   // own), so nested subagent-of-subagent cost rolls up under the immediate
-  // child row shown here rather than disappearing.
-  const { perChildCost } = useSubagentCostRollup(sessionId);
+  // child row shown here rather than disappearing. Computed from the list
+  // already held: the hook would open a second live-session subscription.
+  const { perChildCost } = React.useMemo(() => computeRollup(liveSessions, sessionId), [liveSessions, sessionId]);
 
   // One subscription covers every child: per-session hooks would multiply
   // store subscriptions by the number of subagents.
@@ -103,10 +104,24 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
 
   if (children.length === 0) return null;
 
-  const busyChildren = children.filter((child) => {
+  const failedIds = new Set(failedChildIds.split('\n'));
+  const rows = children.map((child) => {
+    const blocked = (permissions[child.id]?.length ?? 0) > 0;
+    const asked = (forms[child.id]?.length ?? 0) > 0;
     const status = statuses[child.id]?.type;
-    return status === 'busy' || status === 'retry';
-  }).length;
+    const busy = status === 'busy' || status === 'retry';
+    const failed = !busy && failedIds.has(child.id);
+    const done = !failed && (status === 'idle' || (!status && statusReady && child.directory === directory));
+    return { child, blocked, asked, busy, failed, done, finished: !blocked && !asked && (done || failed) };
+  });
+  // Newest first by creation, never by last activity: an activity order
+  // reshuffled the rows on every step, moving them under the pointer. Finished
+  // rows sink below the unfinished ones but keep the same order among
+  // themselves, so a fully finished list reads exactly as it did at launch.
+  rows.sort((left, right) => (Number(left.finished) - Number(right.finished))
+    || ((right.child.time?.created ?? 0) - (left.child.time?.created ?? 0)));
+
+  const busyChildren = rows.filter((row) => row.busy).length;
 
   return (
     <WorkStatusCollapsibleSection
@@ -117,13 +132,7 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
       summary={busyChildren > 0 ? `${busyChildren}/${children.length}` : children.length}
     >
       <div className="max-h-56 overflow-y-auto">
-        {children.map((child) => {
-          const blocked = (permissions[child.id]?.length ?? 0) > 0;
-          const asked = (forms[child.id]?.length ?? 0) > 0;
-          const status = statuses[child.id]?.type;
-          const busy = status === 'busy' || status === 'retry';
-          const failed = !busy && failedChildIds.split('\n').includes(child.id);
-          const done = !failed && (status === 'idle' || (!status && statusReady && child.directory === directory));
+        {rows.map(({ child, blocked, asked, busy, failed, done }) => {
           const label = child.title?.trim() || t('chat.workStatus.subagent.untitled');
           let icon: IconName = 'time';
           let iconColor: string | undefined;
@@ -155,7 +164,14 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
               key={child.id}
               onClick={directory ? () => openChildSession(child.id, label) : undefined}
               ariaLabel={[t('chat.workStatus.action.openSubagent', { name: label }), statusLabel].filter(Boolean).join('. ')}
-              leading={<Icon name={icon} className="size-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />}
+              // The smaller status glyph sits centred in the panel's 16px icon
+              // slot, so it lines up under the section icon and the label
+              // starts where every other row's does.
+              leading={(
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  <Icon name={icon} className="size-3.5" style={iconColor ? { color: iconColor } : undefined} />
+                </span>
+              )}
               label={label}
               tooltip={modelName || undefined}
               value={(

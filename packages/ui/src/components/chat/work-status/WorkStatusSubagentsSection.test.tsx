@@ -127,6 +127,24 @@ describe('subagent status rows', () => {
     expect(rowContent().querySelector('span[title]')).not.toBeNull();
   });
 
+  test('orders rows newest first by creation and sinks finished ones', async () => {
+    const older: Session = { ...child, id: 'older', title: 'Older', time: { created: 2, updated: 50 } };
+    const newer: Session = { ...child, id: 'newer', title: 'Newer', time: { created: 3, updated: 10 } };
+    const titles = () => Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+      .map((button) => button.parentElement?.textContent?.replace(/\$.*$/, ''));
+    await publish({
+      session: [parent, older, newer],
+      sessionStatusReady: true,
+      session_status: { older: { type: 'busy' }, newer: { type: 'busy' } },
+    });
+    // Later activity on the older row does not lift it above the newer one.
+    expect(titles()).toEqual(['Newer', 'Older']);
+    await publish({ session_status: { older: { type: 'busy' }, newer: { type: 'idle' } } });
+    expect(titles()).toEqual(['Older', 'Newer']);
+    await publish({ session_status: { older: { type: 'idle' }, newer: { type: 'idle' } } });
+    expect(titles()).toEqual(['Newer', 'Older']);
+  });
+
   test('shows an observed current-turn duration only while running and expanded', async () => {
     await publish({ session_status: { child: { type: 'busy' } } });
     expect(rowContent().querySelector('span[title]')).toBeNull();
