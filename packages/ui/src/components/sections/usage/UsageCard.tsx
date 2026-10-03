@@ -1,9 +1,10 @@
-import type { UsageWindow } from '@/types';
+import type { QuotaProviderId, UsageWindow } from '@/types';
 import { formatQuotaValueLabel, formatQuotaResetLabel, formatWindowLabel } from '@/lib/quota';
 import { UsageProgressBar } from './UsageProgressBar';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
+import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 
 interface UsageCardProps {
   title: string;
@@ -12,6 +13,7 @@ interface UsageCardProps {
   showToggle?: boolean;
   toggleEnabled?: boolean;
   onToggle?: (enabled: boolean) => void;
+  providerId?: QuotaProviderId;
 }
 
 export const UsageCard: React.FC<UsageCardProps> = ({
@@ -21,6 +23,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   showToggle = false,
   toggleEnabled = false,
   onToggle,
+  providerId,
 }) => {
   const displayMode = useQuotaStore((state) => state.displayMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
@@ -54,8 +57,11 @@ export const UsageCard: React.FC<UsageCardProps> = ({
             )}
           </div>
         </div>
-        <div className="typography-ui-label text-foreground tabular-nums flex items-center justify-end">
-          {percentLabel === '-' ? '' : percentLabel}
+        <div className="flex items-center justify-end gap-1">
+          {providerId && <UsageGiftResetButton window={window} providerId={providerId} />}
+          <div className="typography-ui-label text-foreground tabular-nums">
+            {percentLabel === '-' ? '' : percentLabel}
+          </div>
         </div>
       </div>
 
