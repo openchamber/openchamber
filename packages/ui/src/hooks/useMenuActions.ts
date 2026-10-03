@@ -11,6 +11,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
+import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 
 const getActiveElementSelectedText = (): string => {
   if (typeof document === 'undefined') {
@@ -294,12 +295,14 @@ export const useMenuActions = (
           onToggleMemoryDebug?.();
           break;
 
+        // Same history as the Back/Forward shortcuts, which this menu's
+        // accelerators shadow on Windows and Linux.
         case 'go-back':
-          useDirectoryStore.getState().goBack();
+          navigateSessionHistory(-1);
           break;
 
         case 'go-forward':
-          useDirectoryStore.getState().goForward();
+          navigateSessionHistory(1);
           break;
 
         case 'previous-session':

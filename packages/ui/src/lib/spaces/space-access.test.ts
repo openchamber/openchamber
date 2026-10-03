@@ -11,6 +11,7 @@ const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: 'a1b2c3d4e5f6',
   name: 'Fix login',
   projectDirectory: '/home/me/app',
+  projectFolder: { path: '/home/me/app', found: true },
   directory: '/spaces/a1b2c3d4e5f6/app',
   state: 'running',
   stoppedIdle: false,

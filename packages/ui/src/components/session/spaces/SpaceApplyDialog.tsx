@@ -119,6 +119,8 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
     else if (applied.status === 'applied') {
       toast.success(applied.appliedPaths === 1 ? t('spaces.apply.done.changesSingle') : t('spaces.apply.done.changesPlural', { count: applied.appliedPaths }));
     }
+    // The work is applied, but the space asked to go stayed: its chats could not be saved.
+    if (result.outcome.kept) toast.warning(t('spaces.apply.keptChatsNotSaved', { name }));
     close();
   };
 

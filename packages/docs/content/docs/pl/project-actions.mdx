@@ -23,6 +23,8 @@ Akcje znajdują się w menu w nagłówku aplikacji. Kliknij jedną, a OpenChambe
 
 Włącz **auto-open URL** dla akcji, która uruchamia serwer. OpenChamber obserwuje wynik pod kątem adresu lokalnego i proponuje jego otwarcie — zobacz [Podgląd i serwery deweloperskie](/pl/preview/). Na komputerze możesz też przekierować go przez przekazywanie portu SSH.
 
+Jeśli serwer ma stały adres, wpisz go w pole URL akcji. `{worktree}` i `{branch}` wstawiają checkout, w którym działa akcja, więc jedna akcja działa w każdym worktree. Z [portless](https://github.com/vercel-labs/portless) adres `https://{worktree}.myapp.localhost` otwiera `https://auth.myapp.localhost` w worktree na gałęzi `feature/auth` i `https://myapp.localhost` w głównym checkoucie. Często pole w ogóle nie jest potrzebne: gdy portless wypisze swój adres, OpenChamber otworzy właśnie go, a nie port za nim. Na komputerze połączonym ze zdalną instancją otworzy zamiast tego port, bo przez tunel do zdalnej maszyny przechodzą tylko porty loopback.
+
 ## Powiązane
 
 - [Konfiguracja w repozytorium](/repository-config/) — trzymaj akcje i polecenia konfiguracji w repozytorium dla całego zespołu

@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
@@ -55,6 +56,8 @@ export const useAnnotationAttach = (directory: string) => {
     });
 
     toast.success(t('contextPanel.browser.annotate.attached'));
+    // Focus leaves the page for the composer so Enter sends the prompt.
+    requestAnimationFrame(focusChatInput);
   }, [addAttachedFile, addInlineCommentDraft, currentSessionId, directory, newSessionDraftOpen, t]);
 };
 

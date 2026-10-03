@@ -12,15 +12,13 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { normalizePath } from '@/lib/pathNormalization';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { PullRequestSection } from './git/PullRequestSection';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from './git/NestedRepoPicker';
 import { deriveBaseBranch } from './git/baseBranch';
-
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 // Remotes rarely change; remembering the last fetched list per directory lets
 // a remount pick the same PR-status key immediately instead of flashing

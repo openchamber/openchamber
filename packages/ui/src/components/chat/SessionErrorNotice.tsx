@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
 import { useI18n } from '@/lib/i18n';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { getLastConversationMessage, type Message, type Part, type Session } from '@/lib/opencode/model';
@@ -178,11 +179,13 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
   let title: string;
   let detail: string;
   let hasDetails = true;
+  let responseBody: string | null = null;
   if (reportedError) {
     title = t('chat.sessionError.title');
     hasDetails = Boolean(reportedError.error?.message);
     const message = reportedError.error?.message ?? t('chat.sessionError.noDetails');
     detail = reportedError.error?.name ? `${reportedError.error.name}: ${message}` : message;
+    responseBody = reportedError.error?.responseBody ?? null;
   } else if (storedFailureApplies) {
     title = storedFailure.outcome === 'interrupted' ? t('chat.sessionError.interrupted') : t('chat.sessionError.title');
     hasDetails = storedFailure.parentToolError !== null;
@@ -220,6 +223,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
             </Button>
           </div>
         ) : null}
+        {responseBody ? <ErrorResponseDetails body={responseBody} className="pl-[1.375rem]" /> : null}
       </div>
     </div>
   );

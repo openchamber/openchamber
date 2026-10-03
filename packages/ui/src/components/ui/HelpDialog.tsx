@@ -155,6 +155,11 @@ export const HelpDialog: React.FC = () => {
           icon: "close-circle",
           keys: '',
         },
+        {
+          id: 'background_session_work',
+          icon: 'arrow-up-double',
+          keys: '',
+        },
       ],
     },
     {

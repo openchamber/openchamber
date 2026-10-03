@@ -105,6 +105,64 @@ describe('annotation overlay script', () => {
     }
   });
 
+  /**
+   * happy-dom has no top layer, no `:modal` and no popovers, so these cover
+   * what it can: the host is a popover, clicks on the chrome stay out of the
+   * page's handlers, and an overlay someone removed is not brought back.
+   * Staying above a real modal dialog was verified in Chrome.
+   */
+  test('keeps clicks on its chrome away from the page it sits in', async () => {
+    const win = new Window({ url: 'http://annotation.test' });
+    const run = new Function('window', 'document', 'requestAnimationFrame', `return ${script}`);
+    try {
+      const completion = run(win, win.document, (callback: FrameRequestCallback) => callback(0));
+      const host = win.document.querySelector('[data-openchamber-annotation]');
+      expect(host?.getAttribute('popover')).toBe('manual');
+
+      let reachedPage = 0;
+      win.document.body.addEventListener('click', () => { reachedPage += 1; });
+      win.document.body.addEventListener('pointerdown', () => { reachedPage += 1; });
+      host?.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+      host?.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      expect(reachedPage).toBe(0);
+
+      win.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      expect(await completion).toBeNull();
+    } finally {
+      await win.happyDOM.close();
+    }
+  });
+
+  test('ends the session when the app cancels it, giving the page its clicks back', async () => {
+    const win = new Window({ url: 'http://annotation.test' });
+    const run = new Function('window', 'document', 'requestAnimationFrame', `return ${script}`);
+    const teardown = new Function('window', 'document', ANNOTATION_TEARDOWN_SCRIPT);
+    try {
+      const completion = run(win, win.document, (callback: FrameRequestCallback) => callback(0));
+      const button = win.document.createElement('button');
+      win.document.body.appendChild(button);
+      let pageClicks = 0;
+      button.addEventListener('click', () => { pageClicks += 1; });
+
+      button.click();
+      expect(pageClicks).toBe(0);
+
+      teardown(win, win.document);
+      expect(await completion).toBeNull();
+
+      // A page popover or dialog opening later must not bring the chrome back.
+      const toggle = new win.Event('toggle');
+      Object.defineProperty(toggle, 'newState', { value: 'open' });
+      button.dispatchEvent(toggle);
+      expect(win.document.querySelector('[data-openchamber-annotation]')).toBeNull();
+
+      button.click();
+      expect(pageClicks).toBe(1);
+    } finally {
+      await win.happyDOM.close();
+    }
+  });
+
   test('guards app-side annotation Escape before cancelling the session', () => {
     const source = readFileSync(new URL('../../components/browser/BrowserPane.tsx', import.meta.url), 'utf8');
     const start = source.indexOf('const handler = (event: KeyboardEvent)');

@@ -165,7 +165,7 @@ export function RunLaneCard({
           ) : (
             <span className="inline-flex items-center gap-1.5">
               {unread && status !== 'working' ? (
-                <SessionActivityIndicator state="unread" label={t('sessions.sidebar.session.status.unread')} />
+                <SessionActivityIndicator state="unread" />
               ) : null}
               <LaneStatusIcon status={status} />
             </span>

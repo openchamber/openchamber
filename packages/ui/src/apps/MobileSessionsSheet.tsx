@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSessionTurnActive } from '@/sync/global-session-status';
+import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { createPortal } from 'react-dom';
 import {
@@ -56,6 +56,7 @@ import {
   listProjectWorktrees,
   partitionWorktreesByRegisteredProject,
 } from '@/lib/worktrees/worktreeManager';
+import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -130,6 +131,7 @@ type MobileSessionsSheetProps = {
     instanceLabel: string | null;
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
+    onOpenScheduled: () => void;
     onOpenUsage: () => void;
     /** Present only while a server update is available (hosted web). */
     onOpenUpdate?: () => void;
@@ -229,6 +231,12 @@ const findExactWorktreeMatch = (project: ProjectMeta, normalizedDirectory: strin
 
 const sessionMatchesQuery = (session: Session, projectLabel: string, query: string): boolean =>
   matchesRankQuery([session.title, session.id, getSessionDirectory(session), projectLabel], query);
+
+// Worktree buckets render inside a map, so the removal subscription lives here.
+const WorktreeRemovalScope: React.FC<{
+  path: string | null;
+  children: (removing: boolean) => React.ReactNode;
+}> = ({ path, children }) => children(useWorktreeRemoving(path));
 
 const ActiveDot: React.FC<{ ariaLabel?: string }> = ({ ariaLabel }) => (
   <span
@@ -352,7 +360,8 @@ const SessionRow: React.FC<{
   // Live indicators, same conventions as the desktop sidebar: busy/retry →
   // spinner; unseen activity on a non-active row → attention dot.
   const unseenCount = useSessionUnseenCount(session.id);
-  const isStreaming = useSessionTurnActive(session.id);
+  const turnActivity = useSessionTurnActivity(session.id);
+  const isStreaming = turnActivity !== null;
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
@@ -391,8 +400,7 @@ const SessionRow: React.FC<{
             <Icon name="loader-4" className="size-3 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
           ) : isStreaming || showUnreadDot ? (
             <SessionActivityIndicator
-              state={isStreaming ? 'running' : 'unread'}
-              label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
+              state={turnActivity ?? 'unread'}
             />
           ) : (
             <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90')} />
@@ -446,8 +454,7 @@ const SessionRow: React.FC<{
               aiRename.pending
                 ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
                 : <SessionActivityIndicator
-                    state={isStreaming ? 'running' : 'unread'}
-                    label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
+                    state={turnActivity ?? 'unread'}
                   />
             ) : null}
             {showDoneHint ? (
@@ -2205,7 +2212,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                 const worktreeExpanded = isWorktreeExpanded(node, bucket);
                                 const isActiveWt = activeWorktreePath === bucket.path;
                                 return (
-                                  <div key={bucket.key}>
+                                  <WorktreeRemovalScope key={bucket.key} path={bucket.worktree?.path ?? null}>
+                                  {(removing) => (
+                                  <div className={cn(removing && 'opacity-60')} aria-busy={removing || undefined}>
                                     <MobileSwipeActionsRow
                                       // A space's swipe actions are its grant dialog and its actions sheet, where a worktree's is its deletion.
                                       actionsWidth={bucket.space ? 96 : 48}
@@ -2240,7 +2249,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                           <Icon name="more-2" className="size-[18px]" />
                                         </button>
                                         </>
-                                      ) : bucket.worktree ? (
+                                      ) : bucket.worktree && !removing ? (
                                         <button
                                           type="button"
                                           tabIndex={revealedRowId === `wt:${bucket.key}` ? 0 : -1}
@@ -2280,13 +2289,19 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                           branch label + git-branch icon, so
                                           worktree headers recede while plain-
                                           foreground session titles stand out. */}
-                                      <Icon
-                                        name={bucket.space ? 'box-3' : 'git-branch'}
-                                        className={cn(
-                                          'size-4 shrink-0',
-                                          isActiveWt ? 'text-primary' : 'text-muted-foreground',
-                                        )}
-                                      />
+                                      {removing ? (
+                                        <span className="inline-flex shrink-0 text-muted-foreground" role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
+                                          <Icon name="loader-4" className="size-4 animate-spin" />
+                                        </span>
+                                      ) : (
+                                        <Icon
+                                          name={bucket.space ? 'box-3' : 'git-branch'}
+                                          className={cn(
+                                            'size-4 shrink-0',
+                                            isActiveWt ? 'text-primary' : 'text-muted-foreground',
+                                          )}
+                                        />
+                                      )}
                                       <span
                                         className={cn(
                                           'block min-w-0 flex-1 truncate typography-ui-label font-bold',
@@ -2308,6 +2323,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                                       ? renderBucketSessions(`${node.project.id}::${bucket.key}`, bucket, PROJECT_SESSION_INDENT)
                                       : null}
                                   </div>
+                                  )}
+                                  </WorktreeRemovalScope>
                                 );
                               })}
                             </>
@@ -2367,6 +2384,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 variant="default"
                 size="lg"
                 className="w-10 px-0"
+                onClick={footer.onOpenScheduled}
+                aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
+                title={t('sessions.sidebar.header.actions.scheduledTasks')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="calendar-schedule" className="size-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
                 onClick={footer.onOpenUsage}
                 aria-label={t('usageStats.openAction')}
                 title={t('usageStats.openAction')}
@@ -2397,14 +2426,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             setNewWorktreeDialogOpen(value);
             if (!value) setWorktreeDialogProjectId(null);
           }}
-          onWorktreeCreated={(worktreePath, options) => {
-            if (options?.sessionId) void setCurrentSession(options.sessionId, worktreePath);
-            else
-              openNewSessionDraft({
-                selectedProjectId: worktreeDialogProjectId,
-                directoryOverride: worktreePath,
-                preserveDirectoryOverride: true,
-              });
+          project={(() => {
+            const project = projectsMeta.find((entry) => entry.id === worktreeDialogProjectId);
+            return project ? { id: project.id, path: project.path } : undefined;
+          })()}
+          onWorktreeCreated={(worktreePath) => {
+            openNewSessionDraft({
+              selectedProjectId: worktreeDialogProjectId,
+              directoryOverride: worktreePath,
+              preserveDirectoryOverride: true,
+            });
             onOpenChange(false);
           }}
         />

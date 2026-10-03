@@ -16,8 +16,9 @@ import { DirectoryExplorerDialog } from './DirectoryExplorerDialog';
 import { cn, formatPathForDisplay } from '@/lib/utils';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
+import { canDeleteWorktreeWithoutConfirm, getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
+import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -189,16 +190,6 @@ export const SessionDialogs: React.FC = () => {
             });
         }
     }, [deleteSession, deleteSessions, t]);
-
-    React.useEffect(() => {
-        return sessionEvents.onDeleteRequest((payload) => {
-            if (!showDeletionDialog && (payload.mode ?? 'session') === 'session') {
-                void deleteSessionsWithoutDialog(payload);
-                return;
-            }
-            openDeleteDialog(payload);
-        });
-    }, [openDeleteDialog, showDeletionDialog, deleteSessionsWithoutDialog]);
 
     React.useEffect(() => {
         return sessionEvents.onDirectoryRequest(() => {
@@ -378,10 +369,12 @@ export const SessionDialogs: React.FC = () => {
         worktree: WorktreeMetadata,
         sessionIds: string[],
         deleteLocalBranch: boolean
-    ): void => {
+    ): Promise<void> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
         const toastId = toast.loading(t('sessions.sidebar.sessionDialogs.worktree.removingTitle', { name: getWorktreeDisplayName(worktree) }));
-        void (async () => {
+        // The row shows it from here, through archiving the sessions too.
+        markWorktreeRemoving(worktree.path);
+        return (async () => {
             try {
                 if (sessionIds.length > 0) {
                     const { failedIds } = await archiveSessions(sessionIds);
@@ -412,9 +405,51 @@ export const SessionDialogs: React.FC = () => {
                     id: toastId,
                     description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
                 });
+            } finally {
+                clearWorktreeRemoval(worktree.path);
             }
         })();
     }, [archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t]);
+
+    // Paths whose quick delete is being checked or removed, so a repeated
+    // Shift+click cannot remove the same worktree twice.
+    const quickDeletePathsRef = React.useRef<Set<string>>(new Set());
+
+    const deleteWorktreeWithoutDialogIfSafe = React.useCallback(async (
+        worktree: WorktreeMetadata,
+        sessions: Session[],
+    ): Promise<void> => {
+        const pathKey = normalizeProjectDirectory(worktree.path);
+        if (quickDeletePathsRef.current.has(pathKey)) {
+            return;
+        }
+        quickDeletePathsRef.current.add(pathKey);
+        try {
+            // A failed check counts as unsafe: the dialog shows what it can.
+            const status = await getWorktreeStatus(worktree.path).catch(() => undefined);
+            if (!canDeleteWorktreeWithoutConfirm(status)) {
+                openDeleteDialog({ sessions, mode: 'worktree', worktree });
+                return;
+            }
+            await removeSelectedWorktreeInBackground(worktree, sessions.map((session) => session.id), true);
+        } finally {
+            quickDeletePathsRef.current.delete(pathKey);
+        }
+    }, [openDeleteDialog, removeSelectedWorktreeInBackground]);
+
+    React.useEffect(() => {
+        return sessionEvents.onDeleteRequest((payload) => {
+            if (!showDeletionDialog && (payload.mode ?? 'session') === 'session') {
+                void deleteSessionsWithoutDialog(payload);
+                return;
+            }
+            if (payload.mode === 'worktree' && payload.skipDialogIfSafe && payload.worktree) {
+                void deleteWorktreeWithoutDialogIfSafe(payload.worktree, payload.sessions);
+                return;
+            }
+            openDeleteDialog(payload);
+        });
+    }, [openDeleteDialog, showDeletionDialog, deleteSessionsWithoutDialog, deleteWorktreeWithoutDialogIfSafe]);
 
     const handleConfirmDelete = React.useCallback(async () => {
         if (!deleteDialog) {
@@ -428,7 +463,7 @@ export const SessionDialogs: React.FC = () => {
             const deleteLocalBranch = shouldArchive && deleteDialogShouldDeleteLocalBranch;
 
             if (isWorktreeDelete && deleteDialog.worktree) {
-                removeSelectedWorktreeInBackground(
+                void removeSelectedWorktreeInBackground(
                     deleteDialog.worktree,
                     deleteDialog.sessions.map((session) => session.id),
                     deleteLocalBranch,

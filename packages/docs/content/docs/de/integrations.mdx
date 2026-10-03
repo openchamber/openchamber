@@ -34,17 +34,17 @@ Sobald ein Workspace verbunden ist, erscheint das Panel **Linear** in der rechte
 
 - Öffne im Linear-Panel ein Issue und wähle **Start session**. Der Button bleibt in der Fußzeile, während das Issue scrollt.
 - Wähle im Chat **New Session From Linear Issue**, um eines aus der Liste zu wählen, mit **Create in worktree**, wenn du einen frischen Branch möchtest.
-- Wähle im Dialog **New Worktree** die Option **Start from Linear Issue**.
+- Wähle im Dialog **New Worktree** ein Linear-Issue. Die neue Session öffnet sich mit dem Issue im Nachrichtenfeld angehängt, und die erste Nachricht schreibst du selbst.
 
-Die Session öffnet sich im Projekt, das dem Team des Issues zugeordnet ist, mit dem Issue als erstem Prompt. Teams ordnest du in der Linear-Karte zu: **Default project** gilt für alle Teams, **Team projects** überschreibt es pro Team. Bei einem nicht zugeordneten Team wirst du zuerst um die Zuordnung gebeten. Die erste Nachricht entsteht aus dem Magic Prompt **Issue Review**, den du unter **Einstellungen → Magic Prompts → Linear** bearbeiten kannst.
+Aus dem Linear-Panel und dem Chat öffnet sich die Session im Projekt, das dem Team des Issues zugeordnet ist, mit dem Issue als erstem Prompt. Teams ordnest du in der Linear-Karte zu: **Default project** gilt für alle Teams, **Team projects** überschreibt es pro Team. Bei einem nicht zugeordneten Team wirst du zuerst um die Zuordnung gebeten. Die erste Nachricht entsteht aus dem Magic Prompt **Issue Review**, den du unter **Einstellungen → Magic Prompts → Linear** bearbeiten kannst.
 
 ### Issue an eine Nachricht hängen
 
-Wähle im Chat-Composer **Link Linear Issue**. Das Issue geht als Kontext mit deiner nächsten Nachricht mit, und das Arbeitsstatus-Panel der Session behält einen Link darauf.
+Öffne im Chat-Composer das Menü **+** und wähle **Linear**. Das Issue geht als Kontext mit deiner nächsten Nachricht mit, und das Arbeitsstatus-Panel der Session behält einen Link darauf.
 
 ### Session-Kommentare
 
-Schalte **Session comments** in der Linear-Karte ein, und eine aus einem Issue gestartete Session schreibt beim Start, beim Abschluss oder bei einem Fehler einen Kommentar auf das Issue, jeweils mit einem Link, der die Session öffnet. Kommentare werden nur gepostet, wenn dieser OpenChamber-Server eine öffentliche Adresse hat, damit der Link für alle am Issue funktioniert; bei einer lokalen oder privaten Adresse wird nichts gepostet.
+Schalte **Session comments** in der Linear-Karte ein, und eine Session, die aus einem Issue gestartet wurde oder deren erste Nachricht das Issue angehängt hat, schreibt beim Start, beim Abschluss oder bei einem Fehler einen Kommentar auf das Issue, jeweils mit einem Link, der die Session öffnet. Kommentare werden nur gepostet, wenn dieser OpenChamber-Server eine öffentliche Adresse hat, damit der Link für alle am Issue funktioniert; bei einer lokalen oder privaten Adresse wird nichts gepostet.
 
 ## Integration installieren
 

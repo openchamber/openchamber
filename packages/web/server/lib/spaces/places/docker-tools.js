@@ -182,5 +182,15 @@ export function createDockerTools({ engine, owner, toolsSource, image, now, wait
     }
   };
 
-  return { ensure, prune, removeIfUnlabelled };
+  /**
+   * This owner's tools resources, found by label and checked again on the inspect result, for the
+   * disk page: the volume of the current tools, the other volumes, and the one-shot containers.
+   */
+  const listOurs = async () => ({
+    current: volume,
+    volumes: await findOurs('volume', { role: ROLE_TOOLS }),
+    oneShots: [...(await findOurs('container', { role: ROLE_TOOLS_FILL })), ...(await findOurs('container', { role: ROLE_TOOLS_CHECK }))],
+  });
+
+  return { ensure, prune, removeIfUnlabelled, listOurs };
 }

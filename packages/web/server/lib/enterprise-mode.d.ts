@@ -16,9 +16,11 @@ export interface EnterprisePolicy {
   allowNetworkAccess: boolean;
   allowedExtensions: string[];
   allowLocalExtensions: boolean;
+  /** OpenCode CLI path pinned by the policy file; null when nothing is pinned. */
+  opencodeBinary: string | null;
 }
 
-export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError'> & { networkAccessBlocked: boolean };
+export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError' | 'opencodeBinary'> & { networkAccessBlocked: boolean };
 
 export function policyFilePaths(options?: Pick<EnterprisePolicyOptions, 'platform' | 'env'>): string[];
 export function readEnterprisePolicy(options?: EnterprisePolicyOptions): EnterprisePolicy;
@@ -28,3 +30,5 @@ export const NETWORK_ACCESS_BLOCKED_ERROR: string;
 export function publicEnterprisePolicy(options?: EnterprisePolicyOptions): PublicEnterprisePolicy;
 export function isProviderConnectRequest(method: string, requestPath: string): boolean;
 export const ENTERPRISE_MODE_ERROR: string;
+export function isCredentialListRequest(method: string, requestPath: string): boolean;
+export const CREDENTIAL_LIST_ERROR: string;

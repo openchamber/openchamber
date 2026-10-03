@@ -87,6 +87,23 @@ On a laptop it's a weaker lock: the desktop app reads it from the login shell pr
 
 With the variable, the relay, Jev, network access and allowed extensions come from their own variables too: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (repository URLs separated by commas) and `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. In Docker you'll need the network one, since the server has to listen beyond the container.
 
+### Pin the OpenCode CLI
+
+If your machines already have OpenCode installed and OpenChamber should use that install, put its path in the policy file. This works with or without enterprise mode.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber starts OpenCode only from that path. It ignores the path in Settings, `OPENCODE_BINARY`, and the copy bundled with the desktop app, which stays on disk unused.
+- If nothing runnable is at that path, OpenChamber doesn't fall back to another copy. It stops with an error that names the path.
+- Settings shows the path read-only, with a note that the administrator set it.
+- OpenChamber doesn't install or update a pinned OpenCode and doesn't announce new versions. Updates come with your rollout.
+- The CLI has to be OpenCode 2.x, at least the version OpenChamber asks for. With an older one, OpenChamber stops at the "update OpenCode" screen.
+- A folder works too, if it holds `opencode` (`opencode.exe` on Windows). There's no environment variable for this, since a user can set those themselves.
+
 ### Examples
 
 Put the policy file on a Mac. Run in Terminal as an administrator:
@@ -135,7 +152,7 @@ To check it worked, open Settings → Providers: an Enterprise mode notice with 
 
 ### What changes
 
-- Model providers come only from your OpenCode config. Connecting a provider, signing in to one, adding a key or creating a custom provider is turned off in OpenChamber; removing or switching accounts that already exist still works. This only closes the way in through the app; the lock itself is the OpenCode policy described below.
+- Model providers come only from your OpenCode config. Connecting a provider, signing in to one, adding a key or creating a custom provider is turned off in OpenChamber; removing or switching accounts that already exist still works. This only closes the way in through the app; the lock itself is the OpenCode policy described below. Signing in to an MCP server from your OpenCode config still works, since it reaches that server and not a model provider.
 - [Classification providers (Jev)](/classification-providers/) stay off, including a custom endpoint someone types in Settings. The safety net and Auto aren't offered, and sessions move into work only by hand. To use Jev through your own infrastructure, pin an endpoint with `jev` in the policy file, or with `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` and, if it needs one, `OPENCHAMBER_JEV_API_KEY`). It becomes the default, people can still turn it off, and nothing else can be picked.
 - Read-aloud through OpenAI is off. A custom speech or transcription server has to run on the same machine. Local voices and local dictation models keep working.
 - Push notifications to phones and browsers carry only a generic title like "Agent response is ready", with no message text or session name. Desktop notifications stay on your machine and keep the full text.

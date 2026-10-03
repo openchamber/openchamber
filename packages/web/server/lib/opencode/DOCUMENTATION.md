@@ -11,7 +11,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
 - `packages/web/server/lib/opencode/v1-migration-topup.js`: re-arms OpenCode's own V1 -> V2 session import for V1 sessions changed by 1.x after the last completed import; runs only before a managed spawn. See "v1-migration-topup.js" below.
-- `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). After readiness it warms the last-used directory only (first entry of the `getWarmupDirectories` dep, best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open. It warms no other projects: on OpenCode 2 the first directory-scoped read boots that location's whole MCP fleet.
+- `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring). After readiness it warms the last-used directory only (first entry of the `getWarmupDirectories` dep, best-effort) because OpenCode initializes each directory lazily on first request and that cost would otherwise be paid by the user's first interactive session open. It warms no other projects: on OpenCode 2 the first directory-scoped read boots that location's whole MCP fleet. The warmed directory (only directories that still exist are offered) is also `getDefaultOpenCodeDirectory()`, the scope for server-side reads that have no directory of their own (integrations in `auth.js`, the small model's model and provider lists, the agent check after a restart): v2 answers a location read without one for its own working directory, the user's home for a managed OpenCode, and would start an MCP fleet there.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
@@ -96,40 +96,45 @@ and OpenChamber resolves the directory itself.
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 
 ## Public exports (auth.js)
-`auth.js` is read-only. OpenCode 2.x imports `auth.json` once into its own
-database and never writes the file again; credentials live behind
-`/api/integration` and `/api/credential`, and no HTTP route hands a key back.
-OpenChamber needs the raw credential for provider quota lookups, voice keys and
-the GitHub and Linear helpers, so `readAuthFile()` answers from the database
-OpenCode actually uses (`credential-db.js`, below). A successful database read
-is authoritative, `{}` included: OpenCode never clears `auth.json` after the
-import and a credential removed in OpenCode vanishes only from the database,
-so the file is never merged over a readable database. The legacy file is the
-fallback only when the database cannot be read (no sqlite runtime, no file,
-unknown schema); a corrupt file then throws, but never blocks a healthy
-database. A write here would be invisible to the running OpenCode, so every
-write path is gone.
+`auth.js` is read-only. OpenCode 2.x owns every credential and, since 2.0.20,
+hands them back over `GET /api/credential`, secrets included. OpenChamber needs
+the raw credential for provider quota lookups, voice keys and routing, so
+`readOpenCodeCredentials()` asks the running OpenCode, through the connection
+`server/index.js` wires with `configureOpenCodeCredentials()`. Concurrent
+callers share one request; nothing is cached between calls. A failed read
+throws, so an unreachable OpenCode never reads as "no keys".
 
-- `readAuthFile()`: The credentials OpenCode uses, keyed by provider id, in the
-  legacy `auth.json` entry shape (`{ type: 'api', key }` /
+Clients never get that list. `GET /api/credential` (any spelling OpenCode
+routes the same way, matched by `isCredentialListRequest` in
+`../enterprise-mode.js`) answers 403 `credential_list_refused` before the
+generic proxy, in and out of enterprise mode: anyone signed in to the UI,
+over a tunnel or a paired phone too, would otherwise read every key. Renaming,
+switching and removing an account still reach OpenCode.
+
+Keys OpenCode takes from environment variables (`ZAI_API_KEY`, ...) are never
+stored and `/api/credential` does not list them; `GET /api/integration` names
+the variable behind each such connection, but not its value. For a managed
+OpenCode the lifecycle keeps the exact environment it launched the process
+with (`getManagedOpenCodeProcessEnv()`), and the reader takes the value from
+there, only for variables OpenCode itself reports. A stored credential wins
+over a variable, as in OpenCode. An external OpenCode runs with its own
+environment, so its variable keys stay unknown and are left out.
+`getProviderAuth()` answers stored credentials only: it asks whether a login
+exists in OpenCode's store.
+
+- `configureOpenCodeCredentials(source | null)`: wires the reader to a `{ list }` credential source; reads throw until it is wired.
+- `openCodeCredentialSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders, getLaunchEnvironment? })`: the running OpenCode as that source, URL and headers read per call; `getLaunchEnvironment` returns the managed launch environment or null.
+- `readOpenCodeCredentials()`: each integration's active credential, keyed by
+  integration id (the provider id for providers), in the legacy `auth.json`
+  entry shape (`{ type: 'api', key }` /
   `{ type: 'oauth', access, refresh, expires, accountId?, enterpriseUrl? }`).
-- `getProviderAuth(providerId)`: Returns auth for a specific provider or null.
-- `listProviderAuths()`: Returns list of provider IDs with configured auth.
-- `AUTH_FILE`: Legacy auth file path constant.
-- `OPENCODE_DATA_DIR`: OpenCode data directory path constant.
+- `getProviderAuth(providerId)`: that map's entry for one provider, or null.
+- `projectCredentialEntries(entries)`: the wire-to-legacy projection.
+- `projectEnvironmentKeys(integrations, environment)`: variable values for the env connections OpenCode reports, by integration id.
 
-### credential-db.js
-
-Reads `<data>/opencode.db` (or `OPENCODE_DB`), table `credential`, where
-OpenCode 2.x stores every credential as plain JSON. This is OpenCode's private
-schema, verified against v2.0.x `packages/core/src/credential/sql.ts`; the
-reader opens the file read-only, picks the `active` row per integration (else
-the newest), projects `{ type: 'key' }` / `{ type: 'oauth' }` values into the
-legacy entry shape, and answers `null` for anything it cannot do (no sqlite
-runtime, no file, a changed schema), so the caller can tell "no credentials"
-from "could not look" and fall back to the file. `node:sqlite` on Node 22.13+,
-`bun:sqlite` on Bun; no dependency is added. `packages/vscode/src/opencodeAuth.ts`
-is the extension-host mirror.
+The VS Code extension host uses this same module through
+`packages/vscode/src/opencodeAuth.ts`, which only builds the source from its
+OpenCode manager (`getManagedLaunchEnvironment()` there).
 
 ### v1-migration-topup.js
 
@@ -145,8 +150,8 @@ It runs from `lifecycle.js` immediately before the MANAGED OpenCode is spawned:
 never for an external, user-started OpenCode, and never while a managed one is
 running, because the write would race OpenCode's own loop. Failure is never
 fatal to startup. It opens `<data>/opencode.db` (or `OPENCODE_DB`) read-write
-with the same loader strategy as `credential-db.js` — `node:sqlite` on Node,
-`bun:sqlite` on Bun, skip silently on neither. It returns
+through `node:sqlite` on Node or `bun:sqlite` on Bun, and skips silently on
+neither. It returns
 `{ status: 'skipped' | 'scheduled' | 'unsafe' | 'unavailable', missing, revisited, reason? }`
 and logs one line; there is no HTTP route and no UI.
 
@@ -190,7 +195,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 ## Public exports (providers.js)
 - `getProviderSources(providerId, workingDirectory)`: Resolves which OpenCode config layers define a provider.
 - `listProviderConfigs(workingDirectory)`: Every provider a config layer defines, projected into the canonical v2 `ProviderEntity` shape, with `legacy` marking entries still stored under the v1 `provider` key.
-- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom provider block into the user/project/custom config layer. The payload may use the v2 spelling (`package`, `settings.baseURL`, `headers`) or the v1 spelling (`npm`, `options.baseURL`); what lands on disk is always a v2 `providers` entry with `package: "aisdk:<npm>"` and `settings.baseURL`. The adapter may be OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. Existing provider, option, and retained-model fields not managed by the form are preserved; omitted models, headers, and env credentials remain explicit removals. A model's `variants` (reasoning levels) are replaced when the payload carries the array, cleared when it carries an empty one, and kept when the key is absent. Updating an entry still stored under the legacy `provider` key rewrites it under `providers` in the same file, dropping the fields v2 accepts but ignores; unrelated legacy siblings are untouched. Does not store API keys. Requires `config.env` or `options.hasStoredAuth`. OpenCode 2 keeps credentials in its own store, so `PUT /api/provider` sets `hasStoredAuth` from the request's `hasCredential` (the form is about to store a key, or the edited provider keeps its credential) as well as a legacy `auth.json` entry. The key itself goes through `integration.connect.key` after this write, because OpenCode registers a custom provider's key method only once the provider is in config. Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
+- `upsertProviderConfig(providerId, config, workingDirectory, scope?, options?)`: Validates and writes a custom provider block into the user/project/custom config layer. The payload may use the v2 spelling (`package`, `settings.baseURL`, `headers`) or the v1 spelling (`npm`, `options.baseURL`); what lands on disk is always a v2 `providers` entry with `package: "aisdk:<npm>"` and `settings.baseURL`. The adapter may be OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages. Existing provider, option, and retained-model fields not managed by the form are preserved; omitted models, headers, and env credentials remain explicit removals. A model's `variants` (reasoning levels) are replaced when the payload carries the array, cleared when it carries an empty one, and kept when the key is absent. Updating an entry still stored under the legacy `provider` key rewrites it under `providers` in the same file, dropping the fields v2 accepts but ignores; unrelated legacy siblings are untouched. Does not store API keys. Requires `config.env` or `options.hasStoredAuth`. OpenCode 2 keeps credentials in its own store, so `PUT /api/provider` sets `hasStoredAuth` from the request's `hasCredential` (the form is about to store a key, or the edited provider keeps its credential) as well as a credential OpenCode already stores for the provider. The key itself goes through `integration.connect.key` after this write, because OpenCode registers a custom provider's key method only once the provider is in config. Edit flows must pass the provider's effective existing layer (`custom` > `project` > `user`) so updates do not create a global user override.
 - `validateCustomProviderConfig(providerId, config, options?)`: Structural validation for custom provider payloads (id format, adapter allowlist `@ai-sdk/openai-compatible`/`@ai-sdk/openai`/`@ai-sdk/anthropic`, http(s) base URL, models, credentials via `env` or `hasStoredAuth`). Accepts both spellings and returns the normalized v2 value.
 - `removeProviderConfig(providerId, workingDirectory, scope?)`: Removes a provider block from the selected config layer.
 
@@ -202,7 +207,7 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with layer merging (user, project, custom). `readConfigLayers` isolates `INVALID_JSONC` per layer: a broken file is omitted from the merge (`{}` for that layer only), recorded on `layerErrors`, and does not block valid sibling layers. Writes still refuse to overwrite the broken file.
 - `readConfigFile(filePath)`: Reads one config file. Missing, whitespace-only, and comment-only files return `{}`; a comment-only file is recognized by `ValueExpected` being the only parse error. A `jsonc-parser` error that produces a partial or non-object tree throws `INVALID_JSONC` — partial parse trees must never be treated as authoritative (avoids rewriting a `$schema`-only stub over a full config). Content that yields no JSON value for any other reason (YAML, plain text) also throws instead of reading as empty.
 - `readConfigLayer(filePath)`: Same parse as `readConfigFile`, but isolates `INVALID_JSONC` to `{ config: {}, error }` so plugin/MCP/agent readers can skip one broken layer without aborting valid siblings. Writes still refuse to overwrite the broken file.
-- `writeConfig(config, filePath)`: Writes config with automatic backup. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check.
+- `writeConfig(config, filePath)`: Writes config with automatic backup. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally instead of being re-serialized whole, so comments, formatting, and line endings outside the changed values survive; changed arrays are replaced whole, comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite (never an invalid file).
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
@@ -219,11 +224,10 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
   - `GET /api/config/opencode-resolution`
   - `POST /api/opencode/upgrade` (enforces the active runtime's upgrade capability, shares concurrent upgrade requests and runs the resolved CLI with `upgrade`; the existing Reload action restarts managed OpenCode afterwards)
   - `GET /api/opencode/upgrade-status` (returns version availability plus the authoritative `upgrade.supported`, `upgrade.manager`, and `upgrade.reason` capability)
-  - `POST /api/opencode/directory` (validates and activates an existing project directory; `{ create: true }` explicitly creates the requested project directory before activation, including outside the previously active workspace)
   - `GET /api/provider/:providerId/source`
   - `PUT /api/provider` (create/update custom OpenAI-compatible provider config in OpenCode user/project/custom layers via `scope`; secrets stay in auth via the OpenCode auth API)
   - `DELETE /api/provider/:providerId/auth`
-  - Enterprise mode (`../enterprise-mode.js`): `PUT /api/provider` and the OpenCode writes that would otherwise pass the generic proxy — every `POST` under `/api/integration/:id/connect` (key, OAuth start and complete, command) and `POST /api/experimental/integration/wellknown`, matched by `isProviderConnectRequest` — answer 403 `enterprise_mode`. The VS Code extension host refuses the same requests with the same matcher. Removing, activating or renaming an existing credential still reaches OpenCode. This closes the way in through the app; OpenCode's `provider.use` policy is the real lock.
+  - Enterprise mode (`../enterprise-mode.js`): `PUT /api/provider` and the OpenCode writes that would otherwise pass the generic proxy — every `POST` under `/api/integration/:id/connect` (key, OAuth start and complete, command), `POST /api/credential` (stores a key, OpenCode 2.0.20) and `POST /api/experimental/integration/wellknown`, matched by `isProviderConnectRequest` — answer 403 `enterprise_mode`. The matcher mirrors how OpenCode 2.0.18 to 2.0.20 route a path (any letter case, doubled slashes, `\` for `/`, percent escapes, anything after `;`), refuses a dot segment or a bad escape, and needs rechecking when OpenCode changes its router. Signing in to a remote MCP server (`POST /api/integration/mcp_<16 hex>/connect/oauth` and its `/:attempt/complete`) passes: it reaches a tool server from the OpenCode config, not a model provider. The VS Code extension host refuses the same requests with the same matcher. Removing, activating or renaming an existing credential still reaches OpenCode. This closes the way in through the app; OpenCode's `provider.use` policy is the real lock.
 - Owns lazy auth library loading for provider auth checks/removal.
 - Keeps route behavior independent from composition root; `index.js` now supplies dependencies only.
 
@@ -364,7 +368,7 @@ ConPTY or Console Window Host behavior.
 
 ## Public exports (env-runtime.js)
 - `createOpenCodeEnvRuntime(dependencies)`: creates runtime that owns OpenCode CLI environment and binary discovery state.
-- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery.
+- OpenCode CLI resolution order is persisted settings, environment overrides, bundled Desktop CLI when available, PATH, known install locations, then platform shell discovery. A path pinned by the administrator (`opencodeBinary` in the machine policy file, `../enterprise-mode.js`) comes before all of them and has no fallback: `applyOpencodeBinaryFromSettings()` and `ensureOpencodeCliEnv()` resolve only that path (source `policy`), an unusable pin fails strict start with `OPENCODE_BINARY_INVALID`, and a removed pin hands resolution back to the order above. While pinned, the install-v2 and upgrade capabilities report unsupported (`reason: 'policy'`) and upgrade status never announces a newer version.
 - Automatic bundled resolution under `OPENCHAMBER_RUNTIME=desktop` stays in runtime state and is returned to the managed launch function, including on OpenCode restart. It does not populate `process.env.OPENCODE_BINARY`: AppImage updater relaunch inherits that environment and would mistake the previous bundle path for an explicit override. Explicit settings/env selections and non-desktop or non-bundled resolution retain their existing environment behavior. This prevents future inheritance; it does not reinterpret overrides already inherited from older releases.
 - The login-shell snapshot (`$SHELL -lic 'echo __OPENCHAMBER_ENV__; env -0'`, parsed from after the last marker line so text an rc file prints to stdout never fuses with the first variable) is taken synchronously at import time, so it blocks whatever process embeds the server for as long as the user's shell startup files take. An embedding host that already probed the shell hands its result over before importing the server through `login-shell-env.js` (`provideLoginShellEnvSnapshot(snapshot | null)`); the runtime then uses that and never probes, `null` included. Desktop does this on macOS and Linux; on Windows the server keeps its own registry-based snapshot. The handoff is a module slot, never an environment variable: the snapshot is the user's whole shell environment and `process.env` reaches every child.
 - Returned API:
@@ -755,9 +759,6 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
   - `waitForOpenCodePort(timeoutMs?)`
   - `buildAugmentedPath()`
   - `parseSseDataPayload(block)`
-  - `fetchAgentsSnapshot()`
-  - `fetchProvidersSnapshot()`
-  - `fetchModelsSnapshot()`
   - `setupProxy(app)`
 
 ## Public exports (shutdown-runtime.js)
@@ -855,6 +856,7 @@ within a ten-minute overall deadline.
   - Skills config CRUD and metadata under `/api/config/skills*`
   - Skill rename via `PATCH /api/config/skills/:name` with `{ renameTo }` (directory rename preserves `SKILL.md` body and supporting files; restricted to managed skill roots under `.opencode/skills|skill`, `.claude/skills`, and `.agents/skills`)
   - Skill list responses include authoritative `renamable` derived from the same managed-root policy used by rename
+  - `disableModelInvocation` (detail `sources.md`, create/update body) is "run only when called": it writes both `disable-model-invocation: true` and `metadata.opencode/autoinvoke: false` so every supported OpenCode 2.x and Claude Code honour it, reads back the way OpenCode resolves the pair (`opencode/autoinvoke` wins), and clearing it removes both keys while keeping other `metadata`. The VS Code runtime mirrors this in `opencodeConfig.ts`
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes
   - Directory resolution prefers an explicit request directory, then soft-falls
@@ -899,7 +901,7 @@ The VS Code extension owns its separate Git and proxy implementation.
   - Translates each v2 wire event through `lib/event-stream/translate-v2.js` before handing it to notification/session side effects, so those consumers keep speaking the server's own event vocabulary.
 
 ## Storage and configuration
-- Provider auth: `~/.local/share/opencode/opencode.db` table `credential` (read-only), with `auth.json` as the legacy fallback; OpenCode 2.x owns credentials.
+- Provider auth: read from the running OpenCode over `GET /api/credential` (2.0.20+); OpenCode 2.x owns credentials.
 - Session archive state: `sessions-archive.json` under the OpenChamber data dir.
 - Session metadata (goal progress, the assist recap, the obligatory-context cursor, pinned notes) lives on the OpenCode session record, written with `PATCH /api/session/{id}` (OpenCode 2.0.15+, the minimum `compatibility.js` enforces). OpenCode replaces the whole object, so `sessionMetadataStore.setSessionMetadata` reads the record, applies the JSON Merge Patch and writes the result, one write per session at a time; a record that cannot be read stops the write. Every reader and writer (routes, goal loop, session assist, session knowledge, obligatory context, notifications) goes through `sessionMetadataStore.get` / `setSessionMetadata`. Older OpenChamber versions kept this state in `sessions-metadata.json` under the data dir. Its entries are the newest metadata their sessions have: the proxy lays them over OpenCode's records, a session's next write pushes its entry, and a sweep after OpenCode starts pushes the rest (a session OpenCode no longer knows is dropped, any other failure waits for the next write or start). The emptied file is renamed to `sessions-metadata.json.migrated`. Archive mutations still run one transaction at a time in the archive store.
 - User config: `<config dir>/opencode.json(c)` where the config dir is `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. The v1 `config.json` is not read.

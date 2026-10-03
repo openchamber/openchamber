@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
 
-import type { Session, SyntheticMessage } from "./model"
-import { isRunningSubagentRunMessage, readSubagentRun, runningSubagentRunMessage } from "./subagent-run"
+import type { AssistantMessage, Session, SyntheticMessage, ToolPart } from "./model"
+import {
+  findSubagentRun,
+  isRunningSubagentRunMessage,
+  readBackgroundSubagentChildID,
+  readSubagentRun,
+  runningSubagentRunMessage,
+  keepCommandSubagentReports,
+} from "./subagent-run"
 
 const report = (overrides: Partial<SyntheticMessage> = {}): SyntheticMessage => ({
   id: "msg_report",
@@ -22,6 +29,7 @@ describe("readSubagentRun", () => {
       state: "completed",
       description: "review changes",
       output: "## Findings\n\nNone.",
+      reportedAt: 20,
     })
   })
 
@@ -56,4 +64,51 @@ describe("runningSubagentRunMessage", () => {
     expect(isRunningSubagentRunMessage(message.id)).toBe(true)
     expect(isRunningSubagentRunMessage("msg_report")).toBe(false)
   })
+})
+
+describe("subagent calls that went to the background", () => {
+  const call = (metadata: Record<string, string>, status: "completed" | "running" = "completed"): ToolPart => ({
+    id: "prt_call",
+    sessionID: "ses_parent",
+    messageID: "msg_assistant",
+    type: "tool",
+    callID: "call_1",
+    tool: "subagent",
+    state: status === "completed"
+      ? { status, input: { agent: "general" }, output: "working in the background", metadata, time: { start: 1, end: 2 } }
+      : { status, input: { agent: "general" }, metadata, time: { start: 1 } },
+  })
+  const assistant: AssistantMessage = {
+    id: "msg_assistant", sessionID: "ses_parent", role: "assistant", time: { created: 5 },
+    agent: "build", providerID: "p", modelID: "m",
+  }
+
+  test("reads the child of a backgrounded call only", () => {
+    expect(readBackgroundSubagentChildID(call({ status: "running", sessionID: "ses_child" }))).toBe("ses_child")
+    expect(readBackgroundSubagentChildID(call({ status: "completed", sessionID: "ses_child" }))).toBeUndefined()
+    expect(readBackgroundSubagentChildID(call({ sessionID: "ses_child" }, "running"))).toBeUndefined()
+  })
+
+  test("finds the report of one child", () => {
+    expect(findSubagentRun([report()], "ses_child")?.reportedAt).toBe(20)
+    expect(findSubagentRun([report()], "ses_other")).toBeUndefined()
+  })
+
+  test("keeps only the reports of commands that started inside the loaded records", () => {
+    const records = [
+      { info: assistant, parts: [call({ status: "running", sessionID: "ses_child" })] },
+      { info: report(), parts: [] },
+      { info: report({ id: "msg_command", metadata: { source: "subagent", childID: "ses_command", state: "completed" } }), parts: [] },
+      { info: report({ id: "msg_earlier", metadata: { source: "subagent", childID: "ses_earlier", state: "completed" } }), parts: [] },
+      { info: report({ id: "msg_unknown", metadata: { source: "subagent", childID: "ses_unknown", state: "completed" } }), parts: [] },
+    ]
+    const startedAt = new Map([["ses_child", 6], ["ses_command", 7], ["ses_earlier", 1]])
+    const kept = keepCommandSubagentReports(records, (id) => startedAt.get(id))
+    expect(kept.map((record) => record.info.id)).toEqual(["msg_assistant", "msg_command"])
+  })
+
+  test("returns the same records when nothing is dropped", () => {
+    const records = [{ info: report(), parts: [] }]
+    expect(keepCommandSubagentReports(records, () => 20)).toBe(records)
+})
 })

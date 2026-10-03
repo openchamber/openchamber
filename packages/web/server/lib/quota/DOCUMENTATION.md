@@ -20,9 +20,13 @@ extension applies the same policy in its own process at activation.
 
 These provider IDs are currently dispatchable via `fetchQuotaForProvider(providerId)` in `packages/web/server/lib/quota/providers/index.js`.
 
-Where this table says "OpenCode `auth.json`", the credential is read through
-`../opencode/auth.js`, which answers from OpenCode 2.x's own credential
-database first and the legacy file second (see the opencode module docs).
+Where this table says "OpenCode `auth.json`", the credential is the one the
+running OpenCode uses (stored, or from an environment variable when
+OpenChamber launched OpenCode), read through `../opencode/auth.js` (`GET
+/api/credential`, see the opencode module docs); the name is the legacy shape
+the entries keep. The provider list reads it once and hands it to every
+`isConfigured(auth)`; each `fetchQuota` reads it again. When OpenCode cannot be
+asked, `/api/quota/providers` answers 500 instead of an empty list.
 
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
@@ -37,7 +41,7 @@ database first and the legacy file second (see the opencode module docs).
 | `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
-| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-for-coding`, `kimi` |
+| `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-code-plan-cn`, `kimi-for-coding`, `kimi`, `kimi-code-plan-global` (first match wins) |
 | `nano-gpt` | NanoGPT | `providers/nanogpt.js` | `nano-gpt`, `nanogpt`, `nano_gpt` |
 | `openrouter` | OpenRouter | `providers/openrouter.js` | `openrouter` |
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
@@ -122,6 +126,8 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 - The weekly `usage` block returns `used` (consumed) with no `remaining` field.
 - Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
 
+Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai, API base `api.kimi.ai`) stays last: it is not verified that a global key works at the `api.kimi.com` usage address, so it must not outrank a working pre-split key.
+
 The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
 ## Ollama Cloud settings-page shapes
@@ -149,7 +155,7 @@ snapshot carries `entitlement`, `remaining`, `unlimited`, and
 
 ## OpenRouter key semantics
 
-OpenRouter quota reads `GET https://openrouter.ai/api/v1/key`, which is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
+OpenRouter quota reads `GET <base>/key`, where `<base>` is the provider's configured `baseURL` (`settings.baseURL`, legacy `options.baseURL`, or legacy `api`, folded by `toProviderEntity`; the v2 `providers.openrouter` entry wins, and the v1 `provider.openrouter` entry is read when the v2 one sets no address) read from the merged opencode config layers; with nothing configured or a config read failure, `<base>` falls back to `https://openrouter.ai/api/v1`. A gateway user's key is only valid against that gateway, so the usage lookup must ride the same base as chat. The default endpoint `GET https://openrouter.ai/api/v1/key` is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
 
 The documented `limit`, `limit_remaining`, and `limit_reset` fields are present and null on unlimited keys; null means unlimited, never missing data. For a limited key, window usage is `limit - limit_remaining`, not `usage`: `usage` is all-time and measures a different axis from the current reset window. Pairing `usage` with the current limit produces a wrong number. `limit_remaining` is server-computed and already honors `include_byok_in_limit`, so `byok_*` fields are ignored.
 

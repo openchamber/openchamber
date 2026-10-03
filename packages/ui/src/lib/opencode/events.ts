@@ -28,10 +28,12 @@ import {
   type PermissionRuleset,
   type Session,
   type SessionStatus,
+  type SessionOutcome,
   type StructuredError,
   type TokenUsageInfo,
 } from "./model"
 import { projectUserParts, structuredErrorText, toolAttachments, toolOutputText } from "./projection"
+import { runningShellFromWire, type RunningShell } from "./background-shell"
 
 // ---------------------------------------------------------------------------
 // Event vocabulary
@@ -115,7 +117,11 @@ export type SyncEvent =
    */
   | { type: "session.revert.committed"; properties: { sessionID: string; to: string } }
   | { type: "session.status"; properties: { sessionID: string; status: SessionStatus } }
-  | { type: "session.idle"; properties: { sessionID: string } }
+  /**
+   * `outcome` is set when the event ends a turn (`session.execution.*`) and
+   * absent for a bare status change. Only `interrupted` is an explicit stop.
+   */
+  | { type: "session.idle"; properties: { sessionID: string; outcome?: SessionOutcome } }
   | { type: "session.error"; properties: { sessionID: string; error: StructuredError } }
   | { type: "message.updated"; properties: { info: Message } }
   | { type: "message.patched"; properties: { sessionID: string; messageID: string; patch: MessagePatch } }
@@ -130,6 +136,10 @@ export type SyncEvent =
   | { type: "permission.replied"; properties: { sessionID: string; requestID: string } }
   | { type: "form.created"; properties: { form: FormRequest } }
   | { type: "form.settled"; properties: { sessionID: string; formID: string } }
+  /** A session's shell command started; commands that belong to no session are not reported. */
+  | { type: "shell.started"; properties: { shell: RunningShell } }
+  /** A shell command exited or was removed. */
+  | { type: "shell.ended"; properties: { shellID: string } }
   | { type: "vcs.branch.updated"; properties: { branch?: string } }
   | { type: "mcp.status.changed"; properties: { server: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogKind } }
@@ -142,6 +152,8 @@ export type SyncEvent =
   | { type: "openchamber.notification"; properties: OpenchamberNotification }
   // `modes` is the policy; `sessions` is its on/off view for clients from before the modes.
   | { type: "openchamber.permission-auto-accept"; properties: { sessions: Record<string, boolean>; modes?: Record<string, "ask" | "safety" | "auto">; revision?: number } }
+  /** The server did not answer this request on the user's behalf: it waits for the user. */
+  | { type: "openchamber.permission-left-for-user"; properties: { permissionId: string; sessionId: string; directory: string | null } }
 
 /** Agent-completion / restart notices the OpenChamber server publishes for non-web runtimes. */
 export type OpenchamberNotification = {
@@ -330,7 +342,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "session.execution.succeeded":
       return [
         sessionEvent(event.data.sessionID, { outcome: "succeeded", time: { idle: event.created, updated: event.created } }),
-        { type: "session.idle", properties: { sessionID: event.data.sessionID } },
+        { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "succeeded" } },
       ]
     case "session.execution.interrupted":
       // `shutdown` is OpenCode itself going away mid-turn. It keeps the
@@ -342,7 +354,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       if (event.data.reason === "shutdown") return []
       return [
         sessionEvent(event.data.sessionID, { outcome: "interrupted", time: { idle: event.created, updated: event.created } }),
-        { type: "session.idle", properties: { sessionID: event.data.sessionID } },
+        { type: "session.idle", properties: { sessionID: event.data.sessionID, outcome: "interrupted" } },
       ]
     case "session.execution.failed":
       return [
@@ -415,6 +427,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
               time: { created: event.created },
               text: event.data.text,
               description: event.data.description,
+              metadata: event.data.metadata,
             }),
           },
         },
@@ -840,11 +853,20 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     case "worktree.updated":
     case "worktree.resolved":
       return []
-    // Free-standing shells and PTYs are the TUI's and the terminal panel's
-    // own transports; neither reads them from this stream.
-    case "shell.created":
-    case "shell.deleted":
+    // --- shell commands -------------------------------------------------------
+
+    // A session's running commands keep its turn open (background commands),
+    // so only commands tagged with a session are reported.
+    case "shell.created": {
+      const shell = runningShellFromWire(event.data.info)
+      return shell ? [{ type: "shell.started", properties: { shell } }] : []
+    }
     case "shell.exited":
+    case "shell.deleted":
+      return [{ type: "shell.ended", properties: { shellID: event.data.id } }]
+
+    // PTYs are the terminal panel's own transport; it does not read them from
+    // this stream.
     case "pty.created":
     case "pty.updated":
     case "pty.deleted":

@@ -389,6 +389,27 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['history limit', 'prompt recall', 'remember prompts', 'composer history', 'submitted prompts', 'trim history'],
   },
   {
+    id: 'chat.message-search',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.title',
+    keywords: ['search', 'find', 'index', 'messages', 'history', 'full text'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.message-search-enabled',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.field.enabled',
+    keywords: ['search', 'find', 'index', 'messages'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    id: 'chat.message-search-reasoning',
+    page: 'chat',
+    titleKey: 'settings.openchamber.messageSearch.field.reasoning',
+    keywords: ['search', 'reasoning', 'thinking', 'index'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.persist-drafts',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.persistDraftMessages',
@@ -504,6 +525,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.openchamber.sessionRetention.field.enableAutoCleanup',
     descriptionKey: 'settings.openchamber.sessionRetention.tooltip',
     keywords: ['retention', 'archive', 'delete'],
+  },
+  {
+    id: 'sessions.merged-worktree-cleanup',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.mergedWorktreeCleanup.field.enable',
+    descriptionKey: 'settings.openchamber.mergedWorktreeCleanup.field.enableDescription',
+    keywords: ['pr', 'pull request', 'merged', 'worktree', 'branch', 'archive', 'cleanup', 'remove'],
   },
   {
     id: 'sessions.retention-only-archived',
@@ -642,7 +670,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'general.isolated-spaces',
-    page: 'general',
+    page: 'isolated-spaces',
     titleKey: 'settings.openchamber.spaces.field.enabled',
     descriptionKey: 'settings.openchamber.spaces.field.enabledInfo',
     keywords: ['isolated', 'space', 'spaces', 'container', 'docker', 'sandbox', 'agent'],
@@ -652,7 +680,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'general.isolated-spaces-idle-stop',
-    page: 'general',
+    page: 'isolated-spaces',
     titleKey: 'settings.openchamber.spaces.idleStop.enabled',
     descriptionKey: 'settings.openchamber.spaces.idleStop.enabledInfo',
     keywords: ['idle', 'stop', 'space', 'spaces', 'container', 'hours', 'timeout', 'sleep'],
@@ -1068,7 +1096,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'skills.basic-information',
     page: 'skills.installed',
     titleKey: 'settings.skills.page.section.basicInformation',
-    keywords: ['name', 'location', 'description'],
+    keywords: ['name', 'location', 'description', 'manual', 'invocation', 'autoinvoke'],
   },
   {
     id: 'skills.instructions',

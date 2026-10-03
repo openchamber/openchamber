@@ -33,8 +33,6 @@ const requiredKeys = [
   'chat.chatInput.linked.guest.pr.number',
   'chat.workStatus.linkedIssues.openGuest',
   'session.newWorktree.actions.startFromGuest',
-  'session.newWorktree.fromGuest',
-  'session.newWorktree.error.sendGuestContextFailed',
   'contextPanel.plugin.actionDialog.description',
   'contextRail.surface.plugin.badgeAriaSingle',
   'contextRail.surface.plugin.badgeAriaPlural',

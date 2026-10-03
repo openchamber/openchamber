@@ -18,7 +18,9 @@ import {
 } from '@/lib/spaces/spaces-api';
 import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
-import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { refreshSpacesJourney, spacesWithoutProject, useSpacesJourneyRead, useSpacesStore } from '@/lib/spaces/spaces-store';
+import { SpaceRow } from '@/components/session/spaces/SpaceRow';
+import { SpacePlacesSettings } from './SpacePlacesSettings';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import {
@@ -132,6 +134,29 @@ type TurnOffNotice = { kind: 'stops'; count: number } | { kind: 'unknown' };
  * part of this. Never mounted in VS Code (decision 16), and nowhere until the feature is
  * released, see `lib/spaces/release.ts`.
  */
+/**
+ * The spaces whose project is no longer registered here (DESIGN.md, user journey step 9, and
+ * decision 12): removed from OpenChamber or added again under another path, so no project menu
+ * leads to them. Listed only when there are any, with the folder each was made for and the same
+ * actions as a space's group. A read that fails lists nothing here rather than saying there are
+ * none: this list is a way out, not the spaces' status.
+ */
+const SpacesWithoutProject: React.FC = () => {
+  const { t } = useI18n();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const { journey } = useSpacesJourneyRead();
+  // A space whose container is gone is listed under its place, with what it left behind.
+  const spaces = journey ? spacesWithoutProject(journey).filter((entry) => entry.state !== 'missing') : [];
+  if (spaces.length === 0) return null;
+  return (
+    <SettingsSection title={t('settings.openchamber.spaces.withoutProject.title')}>
+      <div className="space-y-1">
+        {spaces.map((entry) => <SpaceRow key={entry.id} entry={entry} actions={isMobile ? 'sheet' : 'menu'} showFolder />)}
+      </div>
+    </SettingsSection>
+  );
+};
+
 export const IsolatedSpacesSettings: React.FC = () => {
   const { t } = useI18n();
   const enabled = useUIStore((state) => state.isolatedSpacesEnabled);
@@ -198,34 +223,42 @@ export const IsolatedSpacesSettings: React.FC = () => {
       : t('settings.openchamber.spaces.turnOff.stopsPlural', { count: notice?.count ?? 0 });
 
   return (
-    <SettingsSection title={t('settings.openchamber.spaces.title')}>
-      <div className={SETTINGS_OPTION_STACK_CLASS}>
-        <SettingsCheckboxRow
-          settingsItem="general.isolated-spaces"
-          checked={enabled}
-          disabled={busy || notice !== null}
-          onChange={(next) => void handleChange(next)}
-          label={t('settings.openchamber.spaces.field.enabled')}
-          ariaLabel={t('settings.openchamber.spaces.field.enabledAria')}
-          info={t('settings.openchamber.spaces.field.enabledInfo')}
-        />
-        {notice ? (
-          <div className="space-y-2 pl-6" role="alert">
-            <p className="typography-ui-label text-[var(--status-warning)]">{noticeText}</p>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => setNotice(null)}>{t('settings.openchamber.spaces.turnOff.cancel')}</Button>
-              <Button size="sm" disabled={busy} onClick={() => void change(false)}>{t('settings.openchamber.spaces.turnOff.confirm')}</Button>
+    <>
+      <SettingsSection divider={false}>
+        <div className={SETTINGS_OPTION_STACK_CLASS}>
+          <SettingsCheckboxRow
+            settingsItem="general.isolated-spaces"
+            checked={enabled}
+            disabled={busy || notice !== null}
+            onChange={(next) => void handleChange(next)}
+            label={t('settings.openchamber.spaces.field.enabled')}
+            ariaLabel={t('settings.openchamber.spaces.field.enabledAria')}
+            info={t('settings.openchamber.spaces.field.enabledInfo')}
+          />
+          {notice ? (
+            <div className="space-y-2 pl-6" role="alert">
+              <p className="typography-ui-label text-[var(--status-warning)]">{noticeText}</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={busy} onClick={() => setNotice(null)}>{t('settings.openchamber.spaces.turnOff.cancel')}</Button>
+                <Button size="sm" disabled={busy} onClick={() => void change(false)}>{t('settings.openchamber.spaces.turnOff.confirm')}</Button>
+              </div>
             </div>
-          </div>
-        ) : null}
-        {outcome?.stillRunning.map((space) => (
-          <p key={space.id} className="pl-6 typography-ui-label text-[var(--status-warning)]">
-            {t('settings.openchamber.spaces.turnOff.stillRunning', { name: space.name, reason: spaceFailureText(t, space) })}
-          </p>
-        ))}
-        {error ? <p className="pl-6 typography-ui-label text-[var(--status-error)]">{error}</p> : null}
-        {enabled ? <SpaceIdleStopSettings /> : null}
-      </div>
-    </SettingsSection>
+          ) : null}
+          {outcome?.stillRunning.map((space) => (
+            <p key={space.id} className="pl-6 typography-ui-label text-[var(--status-warning)]">
+              {t('settings.openchamber.spaces.turnOff.stillRunning', { name: space.name, reason: spaceFailureText(t, space) })}
+            </p>
+          ))}
+          {error ? <p className="pl-6 typography-ui-label text-[var(--status-error)]">{error}</p> : null}
+          {enabled ? <SpaceIdleStopSettings /> : null}
+        </div>
+      </SettingsSection>
+      {enabled ? (
+        <SettingsSection title={t('settings.openchamber.spaces.places.title')}>
+          <SpacePlacesSettings />
+        </SettingsSection>
+      ) : null}
+      {enabled ? <SpacesWithoutProject /> : null}
+    </>
   );
 };

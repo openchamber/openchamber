@@ -32,6 +32,8 @@ import { z } from 'zod';
  *   signing in, adding a key or creating a custom provider through this
  *   server is refused (`opencode/routes.js`). OpenCode's `provider.use`
  *   policy is the real lock; this closes the way in through the app.
+ *   Signing in to a remote MCP server from the OpenCode config uses the same
+ *   routes and stays allowed.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).
@@ -51,6 +53,13 @@ import { z } from 'zod';
  *   listed (`allowedExtensions` / `OPENCHAMBER_ALLOWED_EXTENSIONS`), or from a
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
+ *
+ * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
+ * enterprise mode: managed OpenCode then starts only from that path, never
+ * falls back to the bundled CLI or PATH, ignores the user's binary setting,
+ * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`,
+ * `packages/vscode/src/opencode.ts`).
+ *
  * The VS Code extension host, which runs no OpenChamber server, reads the
  * same policy through this module for the parts it has (provider connection,
  * update checks).
@@ -89,6 +98,7 @@ const policyFileSchema = z.object({
   allowedExtensions: z.array(z.string().trim().min(1)).max(200).optional(),
   allowLocalExtensions: z.boolean().optional(),
   jev: z.object({ url: optionalText, model: optionalText, apiKey: optionalText }).optional(),
+  opencodeBinary: optionalText,
 }).refine((policy) => !policy.jev || policy.jev.url || (!policy.jev.model && !policy.jev.apiKey), {
   message: '"jev" needs a "url"',
   path: ['jev'],
@@ -109,7 +119,7 @@ const parsePolicyFile = (text) => {
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
-  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev } = parsed.data;
+  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary } = parsed.data;
   return {
     enterpriseMode: enterpriseMode === true,
     organization: organization ?? null,
@@ -118,6 +128,7 @@ const parsePolicyFile = (text) => {
     allowedExtensions,
     allowLocalExtensions,
     jev: jev?.url ? { url: jev.url, model: jev.model ?? null, apiKey: jev.apiKey ?? null } : undefined,
+    opencodeBinary: opencodeBinary ?? null,
   };
 };
 
@@ -187,6 +198,7 @@ export const readEnterprisePolicy = (options = {}) => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
     };
   }
 
@@ -218,6 +230,9 @@ export const readEnterprisePolicy = (options = {}) => {
     allowNetworkAccess,
     allowedExtensions,
     allowLocalExtensions,
+    // File only, in or out of enterprise mode: OPENCODE_BINARY already lets a
+    // user pick a binary, and a pin they could override would not be one.
+    opencodeBinary: fromFile?.opencodeBinary ?? null,
   };
 };
 
@@ -234,20 +249,93 @@ export const NETWORK_ACCESS_BLOCKED_ERROR = 'Enterprise mode keeps OpenChamber o
 
 /** What a client may know about the policy; pinned endpoints and keys stay on the server. */
 export const publicEnterprisePolicy = (options) => {
-  const { enterpriseMode, source, organization, policyError, allowNetworkAccess } = readEnterprisePolicy(options);
-  return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess };
+  const { enterpriseMode, source, organization, policyError, allowNetworkAccess, opencodeBinary } = readEnterprisePolicy(options);
+  return { enterpriseMode, source, organization, policyError, networkAccessBlocked: enterpriseMode && !allowNetworkAccess, opencodeBinary };
 };
 
-// OpenCode routes that connect a provider, sign in or add a key: every POST
-// under `/api/integration/:id/connect` (key, oauth start and complete,
-// command) and adding a well-known integration. Reads, cancelling an attempt
-// and removing or switching an existing account stay allowed: they only
-// narrow access.
-const PROVIDER_CONNECT_PATH = /^\/api\/(?:integration\/[^/?]+\/connect(?:\/[^?]*)?|experimental\/integration\/wellknown)\/?(?:\?|$)/;
+// OpenCode registers every remote MCP server with OAuth as an integration
+// whose id is `mcp_` plus 16 hex digits of a hash of its name and URL
+// (`packages/core/src/mcp/index.ts` upstream). Signing in to one reaches a
+// tool server from the OpenCode config, not a model provider.
+const MCP_INTEGRATION_ID = /^mcp_[0-9a-f]{16}$/;
+const ATTEMPT_ID = /^[A-Za-z0-9_-]+$/;
 
-/** Whether a request to OpenCode would add a way to reach a model provider. */
-export const isProviderConnectRequest = (method, requestPath) => (
-  String(method).toUpperCase() === 'POST' && PROVIDER_CONNECT_PATH.test(requestPath)
+/**
+ * The path segments as OpenCode 2.0.18 to 2.0.20 route them. Bun's URL parsing turns
+ * `\` into `/`; OpenCode's router (`effect/unstable/http` FindMyWay:
+ * case-insensitive, duplicate and trailing slashes ignored, `safeDecodeURI`)
+ * ends the path at `?`, `#` or `;` and decodes percent escapes. So `/API//integration\%6Fpenai/connect/key;x` reaches the same
+ * handler as `/api/integration/openai/connect/key`. Null when a segment cannot
+ * be decoded or is a dot segment: such a path is refused. Recheck this list
+ * when OpenCode changes its router.
+ */
+const routeSegments = (requestPath) => {
+  const pathOnly = String(requestPath).split(/[?#;]/, 1)[0];
+  const segments = [];
+  for (const raw of pathOnly.split(/[\\/]/)) {
+    if (!raw) continue;
+    let segment;
+    try {
+      segment = decodeURIComponent(raw);
+    } catch {
+      return null;
+    }
+    if (segment === '.' || segment === '..') return null;
+    segments.push(segment);
+  }
+  return segments;
+};
+
+// POST `connect/oauth` starts an MCP sign-in, `connect/oauth/:attempt/complete`
+// finishes it with a pasted code.
+const isMcpSignIn = (integrationId, rest) => (
+  MCP_INTEGRATION_ID.test(integrationId)
+  && rest[0]?.toLowerCase() === 'oauth'
+  && (rest.length === 1 || (rest.length === 3 && ATTEMPT_ID.test(rest[1]) && rest[2].toLowerCase() === 'complete'))
 );
 
+/**
+ * Whether a request to OpenCode would add a way to reach a model provider:
+ * every POST under `/api/integration/:id/connect` (key, oauth start and
+ * complete, command), storing a key with `POST /api/credential`, and adding a
+ * well-known integration. Signing in to a
+ * remote MCP server goes through the same routes and stays allowed. Reads,
+ * cancelling an attempt and removing or switching an existing account stay
+ * allowed too: they only narrow access. A path that cannot be read safely
+ * counts as a connect.
+ */
+export const isProviderConnectRequest = (method, requestPath) => {
+  if (String(method).toUpperCase() !== 'POST') return false;
+  const segments = routeSegments(requestPath);
+  if (segments === null) return true;
+  const [api, group, ...tail] = segments.map((segment) => segment.toLowerCase());
+  if (api !== 'api') return false;
+  // `POST /api/credential` stores a new key (OpenCode 2.0.20);
+  // `/api/credential/:id/activate` only switches between existing ones.
+  if (group === 'credential') return tail.length === 0;
+  if (group === 'experimental') return tail[0] === 'integration' && tail[1] === 'wellknown';
+  if (group !== 'integration' || tail[1] !== 'connect') return false;
+  return !isMcpSignIn(segments[2], segments.slice(4));
+};
+
 export const ENTERPRISE_MODE_ERROR = 'Not available in enterprise mode: this server keeps conversations with the model providers configured in OpenCode.';
+
+/**
+ * Whether a request asks OpenCode for every stored credential. Since 2.0.20
+ * `GET /api/credential` answers with the secrets themselves. This server and
+ * the VS Code extension host read it for themselves (`opencode/auth.js`); no
+ * client gets it, in or out of enterprise mode, because anyone signed in to
+ * the UI (over a tunnel or a paired phone too) would otherwise read every key.
+ * It lives here because it needs the same reading of an OpenCode path as the
+ * provider-connect check. A path under `/api` that cannot be read safely
+ * counts as a read; anything else never reaches OpenCode and is left alone.
+ */
+export const isCredentialListRequest = (method, requestPath) => {
+  const upper = String(method).toUpperCase();
+  if (upper !== 'GET' && upper !== 'HEAD') return false;
+  const segments = routeSegments(requestPath);
+  if (segments === null) return /^[\\/]*api(?:[\\/?#;]|$)/i.test(String(requestPath));
+  return segments.length === 2 && segments[0].toLowerCase() === 'api' && segments[1].toLowerCase() === 'credential';
+};
+
+export const CREDENTIAL_LIST_ERROR = 'OpenChamber does not hand stored provider keys to clients.';

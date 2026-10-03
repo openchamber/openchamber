@@ -74,6 +74,8 @@ interface SkillSources {
     name?: string;
     description?: string;
     instructions?: string;
+    /** The model only loads the skill when asked for it by name. */
+    disableModelInvocation?: boolean;
   };
   projectMd?: { exists: boolean; path: string | null };
   claudeMd?: { exists: boolean; path: string | null };
@@ -131,6 +133,7 @@ export interface SkillConfig {
   source?: SkillSource;
   targetPath?: string;
   supportingFiles?: Array<{ path: string; content: string }>;
+  disableModelInvocation?: boolean;
 }
 
 export interface PendingFile {
@@ -461,6 +464,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.scope) skillConfig.scope = config.scope;
             if (config.source) skillConfig.source = config.source;
             if (config.supportingFiles) skillConfig.supportingFiles = config.supportingFiles;
+            if (config.disableModelInvocation) skillConfig.disableModelInvocation = true;
 
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
@@ -514,6 +518,7 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.instructions !== undefined) skillConfig.instructions = config.instructions;
             if (config.supportingFiles !== undefined) skillConfig.supportingFiles = config.supportingFiles;
             if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
+            if (config.disableModelInvocation !== undefined) skillConfig.disableModelInvocation = config.disableModelInvocation;
 
             const directory = resolveDirectory(requestedDirectory);
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';

@@ -9,11 +9,12 @@ const createManager = (): OpenCodeManager => ({
   restart: async () => {},
   upgradeCli: async () => {},
   installV2: async () => {},
-  getCompatibility: async () => ({ state: 'compatible', version: '2.0.15', installation: 'managed', minimumVersion: '2.0.15', canInstall: false }),
+  getCompatibility: async () => ({ state: 'compatible', version: '2.0.15', installation: 'managed', binary: null, minimumVersion: '2.0.15', canInstall: false }),
   setWorkingDirectory: async (path) => ({ success: true, path }),
   getStatus: () => 'connected',
   getApiUrl: () => 'http://127.0.0.1:3902',
   getOpenCodeAuthHeaders: () => ({}),
+  getManagedLaunchEnvironment: () => null,
   getWorkingDirectory: () => '/workspace',
   isCliAvailable: () => true,
   getDebugInfo: () => ({

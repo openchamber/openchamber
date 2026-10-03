@@ -5,6 +5,7 @@ import {
   type DirectoryBootstrapContext,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
   subscribeDirectoryForm,
   subscribeDirectoryForms,
   subscribeDirectorySessionMessages,
@@ -15,6 +16,7 @@ import {
 } from './performance-diagnostics';
 import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES } from './types';
 import { FilesystemError } from '@/lib/api/files-errors';
+import type { PermissionRequest } from '@/lib/opencode/model';
 
 const deferred = () => {
   let resolve!: () => void;
@@ -147,6 +149,37 @@ describe('ChildStoreManager permission subscriptions', () => {
     expect(getSyncPerformanceDiagnostics()?.permissionChangeCallbacks).toBe(1);
     for (const unsubscribe of unsubscribers) unsubscribe();
     setSyncPerformanceDiagnosticsEnabled(false);
+    manager.disposeAll();
+  });
+
+  test('notifies only selected permission buckets across directory stores', () => {
+    const manager = new ChildStoreManager();
+    const parentStore = manager.ensureChild('/repo', { bootstrap: false });
+    const childStore = manager.ensureChild('/worktrees/feature', { bootstrap: false });
+    const request = (id: string, sessionID: string): PermissionRequest => ({ id, sessionID, action: 'bash', resources: [] });
+    let notifications = 0;
+    const notify = () => {
+      notifications += 1;
+    };
+    const unsubscribers = [
+      subscribeDirectoryPermissions(parentStore, ['parent'], notify),
+      subscribeDirectoryPermissions(childStore, ['child'], notify),
+    ];
+    childStore.setState({ permission: { child: [request('child-permission', 'child')] } });
+    expect(notifications).toBe(1);
+
+    childStore.setState({
+      permission: {
+        ...childStore.getState().permission,
+        unrelated: [request('unrelated-permission', 'unrelated')],
+      },
+    });
+    expect(notifications).toBe(1);
+
+    parentStore.setState({ permission: { parent: [request('parent-permission', 'parent')] } });
+    expect(notifications).toBe(2);
+
+    for (const unsubscribe of unsubscribers) unsubscribe();
     manager.disposeAll();
   });
 });

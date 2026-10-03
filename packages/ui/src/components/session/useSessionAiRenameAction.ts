@@ -37,7 +37,7 @@ export function useSessionAiRenameAction(sessionID: string, directory: string | 
       : noSmallModel ? t('sessions.aiRename.noSmallModel')
         : availability === 'checking' ? t('sessions.aiRename.checking')
           : availability === 'empty' ? t('sessions.aiRename.noCompletedTurns')
-            : t('sessions.aiRename.action');
+            : t('sessions.sidebar.session.menuHint.aiRename');
   const run = useCallback(() => {
     void rename().catch(() => toast.error(t('sessions.aiRename.failed')));
   }, [rename, t]);

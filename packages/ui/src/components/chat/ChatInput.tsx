@@ -24,8 +24,7 @@ import * as sessionActions from '@/sync/session-actions';
 // Guest surfaces load on demand: VS Code and mobile never mount them, and the
 // composer must not pay for the guest bridge before an extension is installed.
 const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
-import type { AttachIssueRequest, JsonValue } from '@openchamber/sdk';
+import type { AttachIssueRequest } from '@openchamber/sdk';
 import { getInlineCommentDraftKey, useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
@@ -77,9 +76,18 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
-import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
-import { LinearIssuePickerDialog } from '@/components/session/LinearIssuePickerDialog';
+import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
+import { useAttachReferences } from '@/components/references/useAttachReferences';
+import {
+    composerReferenceKey,
+    toContextReference,
+    toLinkedIssue,
+    withComposerReferences,
+    withoutComposerReference,
+    type ComposerReference,
+} from './composer/composerReferences';
+import { usePendingComposerReferences } from './composer/pendingComposerReferences';
+import { postLinearSessionStarted } from '@/lib/linearSessionStatus';
 import { Icon } from "@/components/icon/Icon";
 import { DraftPresetChips } from './DraftPresetChips';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
@@ -190,6 +198,7 @@ import {
     MobileDraftTargetTriggers,
 } from './composer/ui/DraftTargetSelectors';
 import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
+import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { isSpaceCreationRequest } from '@/lib/spaces/space-creation';
 import { spaceModelRefusal } from '@/lib/spaces/space-model-access';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -263,21 +272,8 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
     collectKnownTokenNames(text, '/', skillNames, 'exact');
 
-type LinkedReferenceAuthor = { login: string; avatarUrl?: string };
-type LinkedGitHubIssue = { number: number; title: string; url: string; contextText: string; author?: LinkedReferenceAuthor };
-type LinkedGitHubPr = {
-    number: number;
-    title: string;
-    url: string;
-    head: string;
-    base: string;
-    includeDiff: boolean;
-    instructionsText: string;
-    contextText: string;
-    author?: LinkedReferenceAuthor;
-};
-type LinkedLinearIssueRef = { identifier: string; title: string; url: string; contextText: string; author?: LinkedReferenceAuthor };
-type LinkedReferences = { issue: LinkedGitHubIssue | null; pr: LinkedGitHubPr | null; linear: LinkedLinearIssueRef | null };
+/** Which reference picker is open, and for GitHub on which tab. */
+type ReferencePickerState = { source: 'github'; kind?: 'issue' | 'pull' } | { source: 'linear' } | null;
 
 /**
  * Record what a session was pointed at, so the work-status panel can show it
@@ -288,43 +284,16 @@ type LinkedReferences = { issue: LinkedGitHubIssue | null; pr: LinkedGitHubPr | 
  */
 const recordLinkedReferences = (
     sessionId: string,
-    directory: Parameters<typeof sessionActions.setLinkedIssue>[1],
-    refs: LinkedReferences,
+    directory: Parameters<typeof sessionActions.addLinkedIssues>[1],
+    references: readonly ComposerReference[],
 ) => {
-    const attachedThread = refs.issue
-        ? { attachment: refs.issue, kind: 'issue' as const }
-        : refs.pr
-            ? { attachment: refs.pr, kind: 'pull' as const }
-            : null;
-    if (attachedThread) {
-        void sessionActions.setLinkedIssue(
-            sessionId,
-            directory,
-            buildLinkedIssue({
-                url: attachedThread.attachment.url,
-                number: attachedThread.attachment.number,
-                title: attachedThread.attachment.title,
-                kind: attachedThread.kind,
-                author: attachedThread.attachment.author,
-                linkedAt: Date.now(),
-            }),
-            true,
-        ).catch(() => undefined);
-    }
-    if (refs.linear) {
-        void sessionActions.setLinkedIssue(
-            sessionId,
-            directory,
-            buildLinkedLinearIssue({
-                identifier: refs.linear.identifier,
-                title: refs.linear.title,
-                url: refs.linear.url,
-                author: refs.linear.author,
-                linkedAt: Date.now(),
-            }),
-            true,
-        ).catch(() => undefined);
-    }
+    if (references.length === 0) return;
+    const linkedAt = Date.now();
+    void sessionActions.addLinkedIssues(
+        sessionId,
+        directory,
+        references.map((reference) => toLinkedIssue(reference, linkedAt)),
+    ).catch(() => undefined);
 };
 
 const hasUserMessages = (sessionId: string, directory?: string) => {
@@ -501,7 +470,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     );
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
-    const newSessionDraftAnnouncesDirtyState = newSessionDraftOpen && newSessionDraft?.openedAutomatically !== true;
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
@@ -530,6 +498,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const pendingInputText = useInputStore((s) => s.pendingInputText);
     const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
+    const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.references.length);
 
     React.useEffect(() => {
         if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
@@ -953,9 +922,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const prevWasAbortedRef = React.useRef(false);
 
     // Issue linking state
-    const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
-    const [prPickerOpen, setPrPickerOpen] = React.useState(false);
-    const [linearPickerOpen, setLinearPickerOpen] = React.useState(false);
+    const [referencePicker, setReferencePicker] = React.useState<ReferencePickerState>(null);
     // The paste-toast tap may need to reopen the collapsed mobile composer.
     const mobileShell = useMobileComposerShell({
         isMobile,
@@ -968,55 +935,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             controlsPanelOpen: Boolean(mobileControlsPanel),
             attachMenuOpen: mobileAttachMenuOpen,
             draftPickerOpen: mobileDraftPicker !== null,
-            issuePickerOpen,
-            prPickerOpen,
-            linearPickerOpen,
+            referencePickerOpen: referencePicker !== null,
             isDragging,
         },
     });
     const mobileComposerExpanded = mobileShell.expanded;
     const mobileTextareaFocused = mobileShell.focused;
-    const [linkedIssue, setLinkedIssue] = React.useState<{
-        number: number;
-        title: string;
-        url: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
-    const [linkedPr, setLinkedPr] = React.useState<{
-        number: number;
-        title: string;
-        url: string;
-        head: string;
-        base: string;
-        includeDiff: boolean;
-        instructionsText: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
-    const [linkedLinearIssue, setLinkedLinearIssue] = React.useState<{
-        identifier: string;
-        title: string;
-        url: string;
-        contextText: string;
-        author?: { login: string; avatarUrl?: string };
-    } | null>(null);
+    // Issues, PRs and tracker items on the composer, in attach order.
+    const [linkedReferences, setLinkedReferences] = React.useState<ComposerReference[]>([]);
     const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
     // The chip the attach dialog was opened from; null when opened from the + menu.
     const [attachDialogItem, setAttachDialogItem] = React.useState<AttachIssueRequest | null>(null);
-    const [linkedGuestIssue, setLinkedGuestIssue] = React.useState<{
-        providerId: string;
-        id: string;
-        title: string;
-        url: string;
-        contextText: string;
-        thread?: 'issue' | 'pull';
-        author?: string;
-        head?: string;
-        base?: string;
-        /** Opaque guest payload from `attach`; handed back on chip click, never shown. */
-        data?: JsonValue;
-    } | null>(null);
 
     // Message queue
     const parentMessageQueueTarget = currentSessionId
@@ -1271,8 +1200,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // A linked reference is attached context, not decoration: the submission
     // builder serializes it into the outgoing message, so a composer holding
     // only one of those chips is not empty and has to be sendable on its own.
-    // BTW sends strip every kind but the guest one, so the gate stays out of BTW.
-    const hasLinkedReferences = Boolean(linkedIssue || linkedPr || linkedLinearIssue || linkedGuestIssue);
+    // BTW sends strip every reference, so the gate stays out of BTW.
+    const hasLinkedReferences = linkedReferences.length > 0;
     const hasContent = message.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences);
     const hasQueuedMessages = !isBtwActive && queuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
@@ -1354,30 +1283,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const syntheticParts = consumePendingSyntheticParts() ?? [];
         const draftTarget = inlineDraftTarget;
         const drafts = draftTarget ? consumeDrafts(draftTarget) : [];
-        const linked: LinkedReferences = { issue: linkedIssue, pr: linkedPr, linear: linkedLinearIssue };
+        const linked = linkedReferences;
         const context = buildComposerContext({
             inlineComments: drafts,
             syntheticTexts: syntheticParts.map((part) => part.text),
-            linkedIssue: linked.issue
-                ? { number: linked.issue.number, title: linked.issue.title, url: linked.issue.url, contextText: linked.issue.contextText }
-                : null,
-            linkedPr: linked.pr
-                ? { number: linked.pr.number, title: linked.pr.title, url: linked.pr.url, instructions: linked.pr.instructionsText, context: linked.pr.contextText }
-                : null,
-            linkedLinearIssue: linked.linear
-                ? { identifier: linked.linear.identifier, title: linked.linear.title, url: linked.linear.url, contextText: linked.linear.contextText }
-                : null,
-            linkedGuestIssue: linkedGuestIssue
-                ? {
-                    providerId: linkedGuestIssue.providerId,
-                    id: linkedGuestIssue.id,
-                    title: linkedGuestIssue.title,
-                    url: linkedGuestIssue.url,
-                    contextText: linkedGuestIssue.contextText,
-                    thread: linkedGuestIssue.thread,
-                    data: linkedGuestIssue.data,
-                }
-                : null,
+            references: linked.map(toContextReference),
         }, skillInstruction);
         const attachmentsToQueue = [...composerAttachments, ...mentionAttachments];
 
@@ -1394,10 +1304,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (composerAttachments.length > 0) {
             clearAttachedFiles(chatDraftIdentity);
         }
-        setLinkedIssue(null);
-        setLinkedPr(null);
-        setLinkedLinearIssue(null);
-        setLinkedGuestIssue(null);
+        setLinkedReferences([]);
         if (!isMobile) {
             composerRef.current?.focus();
         }
@@ -1436,17 +1343,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (syntheticParts.length > 0) {
                 useInputStore.getState().setPendingSyntheticParts(syntheticParts);
             }
-            setLinkedIssue(linked.issue);
-            setLinkedPr(linked.pr);
-            setLinkedLinearIssue(linked.linear);
+            // Anything attached while the queue write was out stays, after these.
+            setLinkedReferences((current) => withComposerReferences(linked, current));
             return;
         }
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedIssue, linkedPr, linkedLinearIssue, linkedGuestIssue, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
         const synthetic: SyntheticContextPart[] = [];
+        const restored: ComposerReference[] = [];
         for (const part of context) {
             if (part.kind === 'synthetic') {
                 synthetic.push({ text: part.text, synthetic: true });
@@ -1456,33 +1363,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
             if (payload.kind === 'github-issue') {
-                setLinkedIssue({ number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
-                setLinkedPr(null);
-                setLinkedLinearIssue(null);
-                setLinkedGuestIssue(null);
+                restored.push({ kind: 'github-issue', number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
             } else if (payload.kind === 'github-pr') {
                 // The captured context is final: whatever diff it includes is
                 // already in the text, and the branches were not captured.
-                setLinkedPr({
+                restored.push({
+                    kind: 'github-pr',
                     number: payload.number,
                     title: payload.title,
                     url: payload.url,
                     head: '',
                     base: '',
                     includeDiff: false,
-                    instructionsText: part.instructions ?? '',
                     contextText: part.text,
                 });
-                setLinkedIssue(null);
-                setLinkedLinearIssue(null);
-                setLinkedGuestIssue(null);
             } else if (payload.kind === 'linear-issue') {
-                setLinkedLinearIssue({ identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
-                setLinkedIssue(null);
-                setLinkedPr(null);
-                setLinkedGuestIssue(null);
+                restored.push({ kind: 'linear-issue', identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
             } else if (payload.kind === 'guest-issue' || payload.kind === 'guest-pr') {
-                setLinkedGuestIssue({
+                restored.push({
+                    kind: 'guest',
                     providerId: payload.providerId,
                     id: payload.id,
                     title: payload.title,
@@ -1491,15 +1390,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     thread: payload.kind === 'guest-pr' ? 'pull' : 'issue',
                     data: payload.data,
                 });
-                setLinkedIssue(null);
-                setLinkedPr(null);
-                setLinkedLinearIssue(null);
             } else {
                 const draft = draftFromContextPayload(payload);
                 if (draft && inlineDraftTarget) {
                     useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft);
                 }
             }
+        }
+        if (restored.length > 0) {
+            setLinkedReferences((current) => withComposerReferences(current, restored));
         }
         if (synthetic.length > 0) {
             const pending = useInputStore.getState().pendingSyntheticParts ?? [];
@@ -1529,16 +1428,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setExpandedInput(!isExpandedInput);
     }, [isBtwActive, isExpandedInput, setExpandedInput]);
 
-    const openIssuePicker = React.useCallback(() => {
-        setIssuePickerOpen(true);
+    const openGitHubPicker = React.useCallback(() => {
+        setReferencePicker({ source: 'github' });
     }, []);
-
-    const openPrPicker = React.useCallback(() => {
-        setPrPickerOpen(true);
+    const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
+        setLinkedReferences((current) => withComposerReferences(current, references));
     }, []);
+    const attachReferences = useAttachReferences(referencePickerDirectory, addLinkedReferences);
 
     const openLinearPicker = React.useCallback(() => {
-        setLinearPickerOpen(true);
+        setReferencePicker({ source: 'linear' });
     }, []);
 
     const getSubmitErrorMessage = (error: unknown, fallback: string) => {
@@ -1906,26 +1806,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 ...buildBtwSyntheticTexts({ isBtwActive, isPromotedBtwSession }),
                 ...(syntheticParts?.map((part) => part.text) ?? []),
             ],
-            linkedIssue: !isBtwActive && linkedIssue
-                ? { number: linkedIssue.number, title: linkedIssue.title, url: linkedIssue.url, contextText: linkedIssue.contextText }
-                : null,
-            linkedPr: !isBtwActive && linkedPr
-                ? { number: linkedPr.number, title: linkedPr.title, url: linkedPr.url, instructions: linkedPr.instructionsText, context: linkedPr.contextText }
-                : null,
-            linkedLinearIssue: !isBtwActive && linkedLinearIssue
-                ? { identifier: linkedLinearIssue.identifier, title: linkedLinearIssue.title, url: linkedLinearIssue.url, contextText: linkedLinearIssue.contextText }
-                : null,
-            linkedGuestIssue: linkedGuestIssue
-                ? {
-                    providerId: linkedGuestIssue.providerId,
-                    id: linkedGuestIssue.id,
-                    title: linkedGuestIssue.title,
-                    url: linkedGuestIssue.url,
-                    contextText: linkedGuestIssue.contextText,
-                    thread: linkedGuestIssue.thread,
-                    data: linkedGuestIssue.data,
-                }
-                : null,
+            references: isBtwActive ? [] : linkedReferences.map(toContextReference),
         }, {
             parseAgentMention: (text) => {
                 if (isBtwActive) return { text };
@@ -2151,33 +2032,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     ?? (linkTargetSessionId ? sessionState.getDirectoryForSession(linkTargetSessionId) : null)
                     ?? currentDirectory;
             if (linkTargetSessionId) {
-                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, { issue: linkedIssue, pr: linkedPr, linear: linkedLinearIssue });
+                recordLinkedReferences(linkTargetSessionId, linkTargetDirectory, linkedReferences);
             }
-            if (linkedGuestIssue && linkTargetSessionId) {
-                void sessionActions.setLinkedIssue(
-                    linkTargetSessionId,
-                    linkTargetDirectory,
-                    buildLinkedGuestIssue({
-                        providerId: linkedGuestIssue.providerId,
-                        identifier: linkedGuestIssue.id,
-                        title: linkedGuestIssue.title,
-                        url: linkedGuestIssue.url,
-                        thread: linkedGuestIssue.thread,
-                        author: linkedGuestIssue.author,
-                        head: linkedGuestIssue.head,
-                        base: linkedGuestIssue.base,
-                        data: linkedGuestIssue.data,
-                        linkedAt: Date.now(),
-                    }),
-                    true,
-                ).catch(() => undefined);
+            // A session that starts with a Linear issue attached reports itself
+            // on that issue (the Linear card's Session comments), however it
+            // was started: a draft, a worktree made from the issue.
+            if (!currentSessionId && linkTargetSessionId) {
+                for (const reference of linkedReferences) {
+                    if (reference.kind !== 'linear-issue') continue;
+                    postLinearSessionStarted(runtimeLinear, { sessionId: linkTargetSessionId, issueIdentifier: reference.identifier });
+                }
             }
 
-            // Linked references were sent; clear them from the composer.
-            setLinkedIssue(null);
-            setLinkedPr(null);
-            setLinkedLinearIssue(null);
-            setLinkedGuestIssue(null);
+            // The sent references leave the composer; one attached while the
+            // send was out stays for the next message.
+            const sentKeys = new Set(linkedReferences.map(composerReferenceKey));
+            setLinkedReferences((current) => current.filter((reference) => !sentKeys.has(composerReferenceKey(reference))));
         }).catch((error: unknown) => {
             const rawMessage =
                 error instanceof Error
@@ -3389,21 +3259,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Clicking the guest chip reopens that guest with the chip as `ready.item`,
     // so it can show the item's details instead of its whole list. A panel
     // guest gets it through the rail hand-off store; a dialog guest as a prop.
-    const reopenGuestItem = React.useCallback(() => {
-        if (!linkedGuestIssue) return;
+    const reopenGuestItem = React.useCallback((reference: Extract<ComposerReference, { kind: 'guest' }>) => {
         const issue: AttachIssueRequest = {
-            providerId: linkedGuestIssue.providerId,
-            id: linkedGuestIssue.id,
-            title: linkedGuestIssue.title,
-            url: linkedGuestIssue.url,
-            text: linkedGuestIssue.contextText,
-            kind: linkedGuestIssue.thread ?? 'issue',
+            providerId: reference.providerId,
+            id: reference.id,
+            title: reference.title,
+            url: reference.url,
+            text: reference.contextText,
+            kind: reference.thread,
         };
-        if (linkedGuestIssue.author) issue.author = linkedGuestIssue.author;
-        if (linkedGuestIssue.head && linkedGuestIssue.base) {
-            issue.branches = { head: linkedGuestIssue.head, base: linkedGuestIssue.base };
+        if (reference.author) issue.author = reference.author;
+        if (reference.head && reference.base) {
+            issue.branches = { head: reference.head, base: reference.base };
         }
-        if (linkedGuestIssue.data !== undefined) issue.data = linkedGuestIssue.data;
+        if (reference.data !== undefined) issue.data = reference.data;
         // A chip can outlive the place it was attached in: the session may be
         // open on mobile or VS Code, where extensions never load, or the
         // extension may be paused or removed here. Say so instead of opening
@@ -3427,11 +3296,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         setAttachDialogItem(issue);
         setAttachDialogGuestId(issue.providerId);
-    }, [currentDirectory, guestAttachItems, linkedGuestIssue, t]);
+    }, [currentDirectory, guestAttachItems, t]);
     const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
         const contextText = issue.text
             ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
-        setLinkedGuestIssue({
+        const reference: ComposerReference = {
+            kind: 'guest',
             providerId: issue.providerId,
             id: issue.id,
             title: issue.title,
@@ -3442,10 +3312,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             head: issue.branches?.head,
             base: issue.branches?.base,
             data: issue.data,
-        });
-        setLinkedIssue(null);
-        setLinkedPr(null);
-        setLinkedLinearIssue(null);
+        };
+        setLinkedReferences((current) => withComposerReferences(current, [reference]));
         setAttachDialogGuestId(null);
         setAttachDialogItem(null);
         // A message or session action may have opened the guest in the
@@ -3461,6 +3329,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             handleGuestAttach(issue);
         }
     }, [consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
+    React.useEffect(() => {
+        if (pendingComposerReferenceCount === 0) return;
+        const references = usePendingComposerReferences.getState().consume();
+        if (references.length > 0) {
+            setLinkedReferences((current) => withComposerReferences(current, references));
+        }
+    }, [pendingComposerReferenceCount]);
     const showLinearPicker = Boolean(runtimeLinear) && !isVSCode;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
@@ -3498,6 +3373,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
         return () => setNewSpaceProject(project);
     }, [isVSCode, isolatedSpacesEnabled, selectedDraftProject]);
+
+    // The full New Worktree dialog for the draft's project, so a named worktree, an existing
+    // branch or a PR branch can be made where the sidebar has no project headers (Timeline).
+    const [newWorktreeProject, setNewWorktreeProject] = React.useState<{ id: string; path: string } | null>(null);
+    const handleCreateCustomWorktree = React.useMemo(() => {
+        if (!selectedDraftProject || selectedDraftProject.kind === 'chat') return undefined;
+        const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
+        return () => setNewWorktreeProject(project);
+    }, [selectedDraftProject]);
+    const handleCustomWorktreeCreated = React.useCallback((worktreePath: string) => {
+        const project = newWorktreeProject;
+        if (!project) return;
+        // Pin the draft to the new directory: until the worktree list refreshes,
+        // the draft's validity check would otherwise reset it to the project root.
+        const sessionStore = useSessionUIStore.getState();
+        if (sessionStore.newSessionDraft.open) {
+            sessionStore.overrideNewSessionDraftTarget({
+                projectId: project.id,
+                directoryOverride: worktreePath,
+                pendingWorktreeRequestId: null,
+                bootstrapPendingDirectory: worktreePath,
+                preserveDirectoryOverride: true,
+            });
+        } else {
+            sessionStore.openNewSessionDraft({
+                selectedProjectId: project.id,
+                directoryOverride: worktreePath,
+                bootstrapPendingDirectory: worktreePath,
+                preserveDirectoryOverride: true,
+            });
+        }
+        useDirectoryStore.getState().setDirectory(worktreePath, { showOverlay: false });
+    }, [newWorktreeProject]);
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
@@ -3555,60 +3463,74 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // composer box and inside the mobile pill.
     const linkedReferenceChips = !isVSCode && hasLinkedReferences ? (
         <div className="flex flex-wrap items-center gap-2 pt-2">
-            {linkedIssue && !isVSCode ? (
-                <LinkedReferenceRow
-                    numberLabel={`#${linkedIssue.number}`}
-                    title={linkedIssue.title}
-                    url={linkedIssue.url}
-                    author={linkedIssue.author}
-                    openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
-                    removeLabel={t('chat.chatInput.linked.issue.removeAria')}
-                    onReopenPicker={() => setIssuePickerOpen(true)}
-                    onRemove={() => setLinkedIssue(null)}
-                />
-            ) : null}
-            {linkedPr && !isVSCode ? (
-                <LinkedReferenceRow
-                    numberLabel={t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
-                    title={linkedPr.title}
-                    url={linkedPr.url}
-                    author={linkedPr.author}
-                    branches={linkedPr.head && linkedPr.base ? { head: linkedPr.head, base: linkedPr.base } : undefined}
-                    openInBrowserLabel={t('chat.chatInput.linked.pr.openInBrowserAria')}
-                    removeLabel={t('chat.chatInput.linked.pr.removeAria')}
-                    onReopenPicker={() => setPrPickerOpen(true)}
-                    onRemove={() => setLinkedPr(null)}
-                />
-            ) : null}
-            {linkedLinearIssue && !isVSCode ? (
-                <LinkedReferenceRow
-                    numberLabel={linkedLinearIssue.identifier}
-                    title={linkedLinearIssue.title}
-                    url={linkedLinearIssue.url}
-                    author={linkedLinearIssue.author}
-                    openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
-                    removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
-                    onReopenPicker={() => setLinearPickerOpen(true)}
-                    onRemove={() => setLinkedLinearIssue(null)}
-                />
-            ) : null}
-            {linkedGuestIssue && !isVSCode ? (
-                <LinkedReferenceRow
-                    numberLabel={linkedGuestIssue.thread === 'pull'
-                        ? t('chat.chatInput.linked.guest.pr.number', { id: linkedGuestIssue.id })
-                        : linkedGuestIssue.id}
-                    title={linkedGuestIssue.title}
-                    url={linkedGuestIssue.url}
-                    author={linkedGuestIssue.author ? { login: linkedGuestIssue.author } : undefined}
-                    branches={linkedGuestIssue.thread === 'pull' && linkedGuestIssue.head && linkedGuestIssue.base
-                        ? { head: linkedGuestIssue.head, base: linkedGuestIssue.base }
-                        : undefined}
-                    openInBrowserLabel={t('chat.chatInput.linked.guest.openInBrowserAria', { id: linkedGuestIssue.id })}
-                    removeLabel={t('chat.chatInput.linked.guest.removeAria', { id: linkedGuestIssue.id })}
-                    onReopenPicker={reopenGuestItem}
-                    onRemove={() => setLinkedGuestIssue(null)}
-                />
-            ) : null}
+            {linkedReferences.map((reference) => {
+                const key = composerReferenceKey(reference);
+                const remove = () => setLinkedReferences((current) => withoutComposerReference(current, key));
+                switch (reference.kind) {
+                    case 'github-issue':
+                        return (
+                            <LinkedReferenceRow
+                                key={key}
+                                numberLabel={`#${reference.number}`}
+                                title={reference.title}
+                                url={reference.url}
+                                author={reference.author}
+                                openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
+                                removeLabel={t('chat.chatInput.linked.issue.removeAria')}
+                                onReopenPicker={() => setReferencePicker({ source: 'github', kind: 'issue' })}
+                                onRemove={remove}
+                            />
+                        );
+                    case 'github-pr':
+                        return (
+                            <LinkedReferenceRow
+                                key={key}
+                                numberLabel={t('chat.chatInput.linked.pr.number', { number: reference.number })}
+                                title={reference.title}
+                                url={reference.url}
+                                author={reference.author}
+                                branches={reference.head && reference.base ? { head: reference.head, base: reference.base } : undefined}
+                                openInBrowserLabel={t('chat.chatInput.linked.pr.openInBrowserAria')}
+                                removeLabel={t('chat.chatInput.linked.pr.removeAria')}
+                                onReopenPicker={() => setReferencePicker({ source: 'github', kind: 'pull' })}
+                                onRemove={remove}
+                            />
+                        );
+                    case 'linear-issue':
+                        return (
+                            <LinkedReferenceRow
+                                key={key}
+                                numberLabel={reference.identifier}
+                                title={reference.title}
+                                url={reference.url}
+                                author={reference.author}
+                                openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
+                                removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
+                                onReopenPicker={() => setReferencePicker({ source: 'linear' })}
+                                onRemove={remove}
+                            />
+                        );
+                    case 'guest':
+                        return (
+                            <LinkedReferenceRow
+                                key={key}
+                                numberLabel={reference.thread === 'pull'
+                                    ? t('chat.chatInput.linked.guest.pr.number', { id: reference.id })
+                                    : reference.id}
+                                title={reference.title}
+                                url={reference.url}
+                                author={reference.author ? { login: reference.author } : undefined}
+                                branches={reference.thread === 'pull' && reference.head && reference.base
+                                    ? { head: reference.head, base: reference.base }
+                                    : undefined}
+                                openInBrowserLabel={t('chat.chatInput.linked.guest.openInBrowserAria', { id: reference.id })}
+                                removeLabel={t('chat.chatInput.linked.guest.removeAria', { id: reference.id })}
+                                onReopenPicker={() => reopenGuestItem(reference)}
+                                onRemove={remove}
+                            />
+                        );
+                }
+            })}
         </div>
     ) : null;
     // The suggested follow-up is the composer's own top row on every surface
@@ -3817,7 +3739,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             selectedBranchLabel={selectedDraftBranchLabel}
                             selectedBranchIsKnown={selectedDraftBranchIsKnown}
                             hasUncommittedChanges={selectedDraftDirectoryHasUncommittedChanges}
-                            announceDirtyState={newSessionDraftAnnouncesDirtyState}
                             projectRootBranchOption={projectRootBranchOption}
                             worktreeBranchOptions={worktreeBranchOptions}
                             branchItems={draftBranchItems}
@@ -3825,6 +3746,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             onProjectChange={handleDraftProjectChange}
                             onDirectoryChange={handleDraftDirectoryChange}
                             onCreateSpace={handleCreateSpace}
+                            onCreateCustomWorktree={handleCreateCustomWorktree}
                             theme={currentTheme}
                         />
                     </div>
@@ -3890,8 +3812,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={() => { void handleQueueMessage(); }}
                         onPickLocalFiles={handlePickLocalFiles}
-                        onOpenIssuePicker={openIssuePicker}
-                        onOpenPrPicker={openPrPicker}
+                        onOpenGitHubPicker={openGitHubPicker}
                         showLinearPicker={showLinearPicker}
                         onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
@@ -4091,8 +4012,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         dictationActive={mobileShell.dictationActive}
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}
-                        onOpenIssuePicker={openIssuePicker}
-                        onOpenPrPicker={openPrPicker}
+                        onOpenGitHubPicker={openGitHubPicker}
                         showLinearPicker={showLinearPicker}
                         onOpenLinearPicker={openLinearPicker}
                         attachGuests={isMobile ? [] : guestAttachItems}
@@ -4190,28 +4110,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} onExit={handleExitBtw} /> : null}
         </form>
 
-        {/* Issue Picker Dialog */}
-        <GitHubIssuePickerDialog
-            open={issuePickerOpen}
-            onOpenChange={setIssuePickerOpen}
-            mode="select"
-            onSelect={(issue) => {
-                setLinkedIssue(issue);
-                setLinkedPr(null);
-                setLinkedLinearIssue(null);
-                setLinkedGuestIssue(null);
-            }}
-        />
-        <GitHubPrPickerDialog
-            open={prPickerOpen}
-            onOpenChange={setPrPickerOpen}
-            onSelect={(pr) => {
-                setLinkedPr(pr);
-                setLinkedIssue(null);
-                setLinkedLinearIssue(null);
-                setLinkedGuestIssue(null);
-            }}
-        />
+        {referencePicker ? (
+            <ReferencePickerDialog
+                open
+                onOpenChange={(open) => {
+                    if (!open) setReferencePicker(null);
+                }}
+                source={referencePicker.source}
+                purpose="attach"
+                selection="multiple"
+                directory={referencePickerDirectory}
+                initialGitHubKind={referencePicker.source === 'github' ? referencePicker.kind : undefined}
+                onConfirm={attachReferences}
+            />
+        ) : null}
         {attachDialogGuestId && !isMobile ? (
             <React.Suspense fallback={null}>
                 <GuestAttachDialog
@@ -4226,17 +4138,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 />
             </React.Suspense>
         ) : null}
-        <LinearIssuePickerDialog
-            open={linearPickerOpen}
-            onOpenChange={setLinearPickerOpen}
-            mode="select"
-            onSelect={(issue) => {
-                setLinkedLinearIssue(issue);
-                setLinkedIssue(null);
-                setLinkedPr(null);
-                setLinkedGuestIssue(null);
-            }}
-        />
         <ReviewFlowDialog
             open={reviewDialogOpen}
             onOpenChange={setReviewDialogOpen}
@@ -4300,23 +4201,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             // keyboard under the overlay that opens next frame.
                             mobileShell.skipNextOverlayCloseRestore();
                             setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(openIssuePicker);
+                            requestAnimationFrame(openGitHubPicker);
                         }}
                     >
                         <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubIssue')}
-                    </button>
-                    <button
-                        type="button"
-                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-left typography-ui-label hover:bg-[var(--interactive-hover)]"
-                        onClick={() => {
-                            mobileShell.skipNextOverlayCloseRestore();
-                            setMobileAttachMenuOpen(false);
-                            requestAnimationFrame(openPrPicker);
-                        }}
-                    >
-                        <Icon name="git-pull-request" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithubPr')}
+                        {t('chat.chatInput.actions.linkGithub')}
                     </button>
                     {showLinearPicker ? (
                         <button
@@ -4346,7 +4235,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 selectedBranchLabel={selectedDraftBranchLabel}
                 selectedBranchIsKnown={selectedDraftBranchIsKnown}
                 hasUncommittedChanges={selectedDraftDirectoryHasUncommittedChanges}
-                            announceDirtyState={newSessionDraftAnnouncesDirtyState}
                 projectRootBranchOption={projectRootBranchOption}
                 worktreeBranchOptions={worktreeBranchOptions}
                 branchItems={draftBranchItems}
@@ -4354,6 +4242,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onProjectChange={handleDraftProjectChange}
                 onDirectoryChange={handleDraftDirectoryChange}
                 onCreateSpace={handleCreateSpace}
+                onCreateCustomWorktree={handleCreateCustomWorktree}
                 theme={currentTheme}
                 openPicker={mobileDraftPicker}
                 onOpenPickerChange={setMobileDraftPicker}
@@ -4361,6 +4250,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         ) : null}
         {newSpaceProject ? (
             <NewSpaceDialog open onOpenChange={(open) => { if (!open) setNewSpaceProject(null); }} project={newSpaceProject} />
+        ) : null}
+        {newWorktreeProject ? (
+            <NewWorktreeDialog
+                open
+                onOpenChange={(open) => { if (!open) setNewWorktreeProject(null); }}
+                project={newWorktreeProject}
+                onWorktreeCreated={handleCustomWorktreeCreated}
+            />
         ) : null}
         </>
     );

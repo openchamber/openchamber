@@ -34,17 +34,17 @@ Con un espacio de trabajo conectado, el panel **Linear** aparece en la barra de 
 
 - En el panel de Linear, abre una issue y elige **Start session**. El botón se queda en el pie mientras la issue se desplaza.
 - En el chat, elige **New Session From Linear Issue** para escoger una de la lista, con **Create in worktree** si quieres una rama nueva.
-- En el diálogo **New Worktree**, elige **Start from Linear Issue**.
+- En el diálogo **New Worktree**, elige una issue de Linear. La nueva sesión se abre con la issue adjunta en el cuadro de mensaje, y el primer mensaje lo escribes tú.
 
-La sesión se abre en el proyecto asignado al equipo de la issue, con la issue como primer prompt. Asigna equipos en la tarjeta de Linear: **Default project** cubre todos los equipos y **Team projects** lo sobrescribe por equipo. Un equipo sin asignar te pide asignarlo primero. El primer mensaje se construye con el magic prompt **Issue Review**, que puedes editar en **Ajustes → Magic Prompts → Linear**.
+Desde el panel de Linear y el chat, la sesión se abre en el proyecto asignado al equipo de la issue, con la issue como primer prompt. Asigna equipos en la tarjeta de Linear: **Default project** cubre todos los equipos y **Team projects** lo sobrescribe por equipo. Un equipo sin asignar te pide asignarlo primero. El primer mensaje se construye con el magic prompt **Issue Review**, que puedes editar en **Ajustes → Magic Prompts → Linear**.
 
 ### Vincula una issue a un mensaje
 
-En el compositor del chat, elige **Link Linear Issue**. La issue acompaña tu siguiente mensaje como contexto y el panel de estado de trabajo de la sesión conserva un enlace a ella.
+En el compositor del chat, abre el menú **+** y elige **Linear**. La issue acompaña tu siguiente mensaje como contexto y el panel de estado de trabajo de la sesión conserva un enlace a ella.
 
 ### Comentarios de sesión
 
-Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde una issue publica un comentario en esa issue al empezar, terminar o fallar, cada uno con un enlace que abre la sesión. Los comentarios solo se publican cuando este servidor de OpenChamber tiene una dirección pública, para que el enlace funcione para todos en la issue; en una dirección local o privada no se publica nada.
+Activa **Session comments** en la tarjeta de Linear y una sesión iniciada desde una issue, o cuyo primer mensaje lleva la issue adjunta, publica un comentario en esa issue al empezar, terminar o fallar, cada uno con un enlace que abre la sesión. Los comentarios solo se publican cuando este servidor de OpenChamber tiene una dirección pública, para que el enlace funcione para todos en la issue; en una dirección local o privada no se publica nada.
 
 ## Instalar una integración
 

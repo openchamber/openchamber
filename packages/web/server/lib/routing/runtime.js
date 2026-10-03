@@ -26,7 +26,7 @@ import {
   resolveClassifier,
 } from './classifier.js';
 import { loadRoutingHistory } from './history.js';
-import { readAuthFile } from '../opencode/auth.js';
+import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
@@ -54,6 +54,15 @@ export const requestTextOf = (body) => {
 };
 
 const agentBodySchema = z.object({ agent: z.string().trim().min(1) });
+
+// v2 serves one flat model catalogue; a model's thinking levels are `{ id }[]`.
+const catalogResponseSchema = z.object({
+  data: z.array(z.object({
+    providerID: z.string(),
+    modelID: z.string(),
+    variants: z.array(z.object({ id: z.string() })).default([]),
+  })),
+});
 
 const customEndpointInputSchema = z.object({
   url: z.string().trim().min(1).max(2000),
@@ -84,10 +93,10 @@ const envKeySchema = z.string().trim().min(1);
  */
 const PROVIDER_ENV_KEYS = { openrouter: 'OPENROUTER_API_KEY', vercel: 'AI_GATEWAY_API_KEY' };
 
-export const readOpenCodeKeys = ({ readAuth = readAuthFile, env = process.env } = {}) => {
+export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials, env = process.env } = {}) => {
   let auth = {};
   try {
-    auth = readAuth();
+    auth = await readAuth();
   } catch {
     // An unreadable credential store still leaves the environment.
   }
@@ -112,6 +121,7 @@ export function createRoutingRuntime({
   zenPromotionActive = ZEN_JEV_PROMOTION_ACTIVE,
   enterpriseMode = isEnterpriseMode,
   readPinnedEndpoint = readPinnedCustomEndpoint,
+  listCatalogModels = null,
   now = Date.now,
 }) {
   const permissionDecisions = new Map();
@@ -144,7 +154,7 @@ export function createRoutingRuntime({
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const keys = { typesafeKey, customEndpoint, ...readProviderKeys() };
+    const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.
@@ -237,6 +247,36 @@ export function createRoutingRuntime({
     };
   };
 
+  const readCatalog = listCatalogModels
+    ?? (async (directory) => catalogResponseSchema.parse(await openCodeClient(directory).model.list()).data);
+
+  /**
+   * Drops a variant the model does not list, so the reply runs on the model's
+   * default thinking instead of OpenCode refusing it. Routing settings from
+   * before #4133 saved list positions ("0", "1", "2") as variants. A catalog
+   * that cannot be read, or does not know the model yet, keeps the variant.
+   */
+  const withKnownVariant = async (selection, directory) => {
+    const variant = selection.model.variant;
+    if (!variant) return selection;
+    let models;
+    try {
+      models = await readCatalog(directory);
+    } catch (error) {
+      console.warn('[routing] model catalog unavailable, keeping the saved variant:', errorMessage(error));
+      return selection;
+    }
+    const { providerID, id } = selection.model;
+    const entry = models.find((model) => model.providerID === providerID && model.modelID === id);
+    if (!entry || entry.variants.some((known) => known.id === variant)) return selection;
+    console.warn(`[routing] ${providerID}/${id} has no "${variant}" thinking level; using its default`);
+    return {
+      ...selection,
+      model: { providerID, id },
+      decision: { ...selection.decision, variant: null },
+    };
+  };
+
   /**
    * Resolves one send that named the Auto sentinel. Returns the model and
    * agent the send must use, or null when a real model was selected.
@@ -284,6 +324,7 @@ export function createRoutingRuntime({
     } else {
       selection = chooseSelection(config, null, agent);
     }
+    selection = await withKnownVariant(selection, directory);
     Object.assign(decision, selection.decision);
     broadcast('openchamber:routing.decision', decision);
     return { model: selection.model, agent: selection.agent, decision };

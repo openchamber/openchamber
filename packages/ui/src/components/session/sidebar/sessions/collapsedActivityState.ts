@@ -3,6 +3,7 @@ import React from 'react';
 import type { SessionNode } from '../types';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
+import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useNotificationStore } from '@/sync/notification-store';
 
 // Ordered by how much the user is needed: a blocked turn outranks a running
@@ -90,6 +91,14 @@ export const useCollapsedSessionActivityState = ({
     }
     return null;
   }, [enabled, ids.active]));
+  // A session idling while its background command runs is still at work.
+  const waitingOnShell = useBackgroundShellsStore(React.useCallback((state): CollapsedActivityState => {
+    if (!enabled) return null;
+    for (const sessionId of ids.active) {
+      if (state.sessionIds.has(sessionId)) return 'active';
+    }
+    return null;
+  }, [enabled, ids.active]));
   const unread = useNotificationStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.unread) {
@@ -112,5 +121,5 @@ export const useCollapsedSessionActivityState = ({
     }
     return result;
   }, [enabled, ids.active]));
-  return blocked ?? active ?? unread;
+  return blocked ?? active ?? waitingOnShell ?? unread;
 };

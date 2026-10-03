@@ -13,10 +13,7 @@ import { cn } from '@/lib/utils';
 import { useGitStore, useGitBranches, useGitLoadingBranches, useGitLoadingStatus, useIsGitRepo } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
-import {
-  LAST_WORKTREE_SOURCE_BRANCH_KEY,
-  resolveWorktreeSourceBranchPreference,
-} from '@/lib/worktrees/worktreeSourceBranchPreference';
+import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useI18n } from '@/lib/i18n';
 
 export interface BranchSelectorProps {
@@ -129,20 +126,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
         const rootBranch = directory ? await getRootBranch(directory).catch(() => null) : null;
         if (cancelled) return;
 
-        const saved = localStorage.getItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-
-        const {
-          sourceBranch,
-          shouldClearSavedSourceBranch,
-        } = resolveWorktreeSourceBranchPreference({
-          branches: allBranches,
-          savedSourceBranch: saved,
-          rootBranch,
-        });
-
-        if (shouldClearSavedSourceBranch) {
-          localStorage.removeItem(LAST_WORKTREE_SOURCE_BRANCH_KEY);
-        }
+        const sourceBranch = resolveDefaultSourceBranch({ branches: allBranches, rootBranch });
 
         if (cancelled || (currentValue && allBranches.includes(currentValue))) return;
 

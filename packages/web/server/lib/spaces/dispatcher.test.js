@@ -184,14 +184,15 @@ describe('space routes and directories', () => {
     expect(classifySpacePath('/api/config/settings')).toBe('host_only');
     expect(classifySpacePath('/api/provider')).toBe('host_only');
     expect(classifySpacePath('/api/projects/abc/icon')).toBe('host_only');
-    expect(classifySpacePath('/api/fs/serve/index.html')).toBe('refused_across_boundary');
+    expect(classifySpacePath('/api/fs/preview/grant/index.html')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/preview/proxy/3000/')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/git/worktrees')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/git/integrate/merge')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/session/ses_1/move')).toBe('refused_across_boundary');
     // Express inside routes without regard to case.
     expect(classifySpacePath('/api/Config/Settings')).toBe('host_only');
-    expect(classifySpacePath('/api/FS/serve/x')).toBe('refused_across_boundary');
+    expect(classifySpacePath('/api/FS/Preview/x')).toBe('refused_across_boundary');
+    expect(classifySpacePath('/api/fs/serve/x')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/Session/ses_1/Move')).toBe('refused_across_boundary');
     expect(classifySpacePath('/api/session')).toBeNull();
     expect(classifySpacePath('/api/git/status')).toBeNull();
@@ -375,7 +376,7 @@ describe('space dispatcher', () => {
       ['/provider', 'host_only_route'],
       ['/github/repos', 'host_only_route'],
       ['/projects/p1/icon', 'host_only_route'],
-      ['/fs/serve/index.html', 'refused_across_boundary'],
+      ['/fs/preview/grant/index.html', 'refused_across_boundary'],
       ['/preview/proxy/3000/', 'refused_across_boundary'],
       ['/git/worktrees', 'refused_across_boundary'],
       ['/git/integrate/merge', 'refused_across_boundary'],

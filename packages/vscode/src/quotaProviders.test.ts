@@ -3,37 +3,40 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { CredentialEntry } from '@opencode/client';
+
+import { configureOpenCodeCredentials } from './opencodeAuth';
 
 const previousQuotaDataDirectory = process.env.OPENCHAMBER_DATA_DIR;
 const temporaryQuotaDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-quota-'));
 process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
-// OpenCode 2.x answers credentials from its database first. Point the reader
-// at a database that does not exist so the stubbed auth.json below is the only
-// source and the machine's real keys never reach these assertions.
-const previousOpenCodeDb = process.env.OPENCODE_DB;
-process.env.OPENCODE_DB = path.join(temporaryQuotaDataDirectory, 'no-such-opencode.db');
-
-// readAuthFile reads ~/.local/share/opencode/auth.json via fs.readFileSync.
-// Stub fs to serve a known auth entry so the providers treat themselves as
-// configured and proceed straight to fetch.
-const ORIGINAL_FS = { ...fs };
-const AUTH = JSON.stringify({
-  openai: { access: 'test-token' },
-  'cline-pass': { key: 'test-token' },
-  neuralwatt: { key: 'test-token' },
-  'opencode-go': { key: 'test-token' },
-  openrouter: { key: 'test-token' },
-  'zai-coding-plan': { key: 'test-token' },
-  'zhipuai-coding-plan': { key: 'test-token' },
-  deepseek: { key: 'test-token' },
-  hyper: { key: 'test-token' },
-  'github-copilot': { access: 'test-token' },
-  anthropic: { access: 'test-token', refresh: 'test-refresh' },
+// Credentials come from the running OpenCode; serve a fixed list so the
+// providers treat themselves as configured and go straight to fetch.
+const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
+const oauth = (integrationID: string): CredentialEntry => ({
+  id: `cred_${integrationID}`,
+  integrationID,
+  label: 'default',
+  active: true,
+  value: { type: 'oauth', methodID: 'test', access: 'test-token', refresh: 'test-refresh', expires: 0 },
 });
-((fs as unknown) as { existsSync: () => boolean }).existsSync = () => true;
-((fs as unknown) as { readFileSync: () => string }).readFileSync = () => AUTH;
+configureOpenCodeCredentials({
+  list: async () => [
+    oauth('openai'),
+    key('cline-pass'),
+    key('neuralwatt'),
+    key('opencode-go'),
+    key('openrouter'),
+    key('zai-coding-plan'),
+    key('zhipuai-coding-plan'),
+    key('deepseek'),
+    key('hyper'),
+    oauth('github-copilot'),
+    oauth('anthropic'),
+  ],
+});
 
-import { fetchClinePassQuota, fetchHyperQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
+import { fetchClinePassQuota, fetchHyperQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -41,8 +44,6 @@ type MockResponseInit = { ok?: boolean; status?: number };
 after(() => {
   if (previousQuotaDataDirectory === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
   else process.env.OPENCHAMBER_DATA_DIR = previousQuotaDataDirectory;
-  if (previousOpenCodeDb === undefined) delete process.env.OPENCODE_DB;
-  else process.env.OPENCODE_DB = previousOpenCodeDb;
   fs.rmSync(temporaryQuotaDataDirectory, { recursive: true, force: true });
 });
 
@@ -103,7 +104,7 @@ test('dispatches Charm Hyper through the generic quota API', async () => {
 });
 
 describe('OpenCode Go quota provider (VS Code parity)', () => {
-  test('uses the opencode-go key from auth.json', async () => {
+  test('uses the opencode-go key stored in OpenCode', async () => {
     let request: RequestInit | undefined;
     const legacyPath = path.join(temporaryQuotaDataDirectory, 'quota', 'opencode-go.json');
     fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
@@ -161,6 +162,121 @@ describe('OpenRouter quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.daily!.windowSeconds, 86400);
     assert.equal(result.usage!.windows.daily!.valueLabel, '$0.00 / $30.00');
     assert.ok(typeof result.usage!.windows.daily!.resetAt === 'number');
+  });
+
+  const withStubbedConfigFile = async (configJson: string, run: () => Promise<void>): Promise<void> => {
+    // SAFETY: the reassignments widen the bound fs functions to the signatures
+    // the config reader actually calls.
+    const configurableFs = fs as {
+      existsSync: (filePath: fs.PathLike) => boolean;
+      readFileSync: (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding) => string;
+    };
+    const realExists = configurableFs.existsSync;
+    const realRead = configurableFs.readFileSync;
+    // The config loader gates on existsSync before reading. Without this stub
+    // a machine that has no global opencode.json (a clean CI runner) never
+    // reaches the stubbed read, so the provider falls back to its default
+    // endpoint and the configured-baseURL assertions fail there while passing
+    // on any developer machine that happens to have a config.
+    configurableFs.existsSync = (filePath: fs.PathLike): boolean => (
+      String(filePath).includes('opencode.json') ? true : realExists(filePath)
+    );
+    configurableFs.readFileSync = (filePath: fs.PathOrFileDescriptor, options?: BufferEncoding): string => (
+      String(filePath).includes('opencode.json') ? configJson : realRead(filePath, options)
+    );
+    try {
+      await run();
+    } finally {
+      configurableFs.readFileSync = realRead;
+      configurableFs.existsSync = realExists;
+    }
+  };
+
+  const stubFetchCapturingUrl = (payload: Response, requested: { url: string }): void => {
+    // SAFETY: per-test fetch stub; the cast only fits the capturing closure
+    // into the global fetch slot for the duration of one test.
+    globalThis.fetch = (async (url: string) => {
+      requested.url = url;
+      return payload;
+    }) as typeof fetch;
+  };
+
+  test('reads the key endpoint from the configured v2 provider baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        providers: {
+          openrouter: { settings: { baseURL: 'https://gateway.example.com/v1' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://gateway.example.com/v1/key');
+  });
+
+  test('reads the key endpoint from the legacy provider options baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        provider: {
+          openrouter: { options: { baseURL: 'https://legacy.example.com/v1' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://legacy.example.com/v1/key');
+  });
+
+  test('reads the key endpoint from the legacy provider api field', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        provider: {
+          openrouter: { api: 'https://legacy-api.example.com/v1' },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://legacy-api.example.com/v1/key');
+  });
+
+  test('strips trailing slashes from the configured baseURL', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile(
+      JSON.stringify({
+        providers: {
+          openrouter: { settings: { baseURL: 'https://gateway.example.com/v1/' } },
+        },
+      }),
+      async () => {
+        stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+        await fetchQuotaForProvider('openrouter');
+      },
+    );
+
+    assert.equal(requested.url, 'https://gateway.example.com/v1/key');
+  });
+
+  test('keeps the default key endpoint when the config cannot be parsed', async () => {
+    const requested = { url: '' };
+    await withStubbedConfigFile('{ not json', async () => {
+      stubFetchCapturingUrl(mockResponse(documentedPayload), requested);
+      await fetchQuotaForProvider('openrouter');
+    });
+
+    assert.equal(requested.url, 'https://openrouter.ai/api/v1/key');
   });
 
   test('maps an unlimited null-limit key to a monthly spent window', async () => {
@@ -425,7 +541,9 @@ describe('Codex quota provider (VS Code parity)', () => {
 
     const first = fetchQuotaForProvider('codex');
     const second = fetchQuotaForProvider('codex');
-    resolveResponse?.(mockResponse({ rate_limit: null }));
+    // The request goes out once the credential read settles.
+    while (!resolveResponse) await new Promise((resolve) => setImmediate(resolve));
+    resolveResponse(mockResponse({ rate_limit: null }));
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
 
@@ -1001,22 +1119,9 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(result.error, 'No quota data in response');
     assert.equal(result.usage, null);
   });
-
-  // Restore fs so other test files (which use the real auth file) are unaffected.
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
-  });
 });
 
 describe('DeepSeek quota provider (VS Code parity)', () => {
-  beforeEach(() => {
-    const fsMock = fs as unknown as { existsSync: () => boolean; readFileSync: () => string };
-    fsMock.existsSync = () => true;
-    fsMock.readFileSync = () => AUTH;
-  });
-
   test('builds credits_balance window from documented USD payload (string balance)', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       is_available: true,
@@ -1047,6 +1152,36 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
+  });
+
+  test('selects CNY entry when USD balance is zero and CNY balance is positive', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
+  });
+
+  test('prefers USD entry when both USD and CNY have positive balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '3.55', granted_balance: '0.00', topped_up_balance: '3.55' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$3.55');
   });
 
   test('maps 401 to session-expired', async () => {
@@ -1091,12 +1226,6 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$0.00');
-  });
-
-  test('teardown: restore fs', () => {
-    const fsMock = fs as unknown as { existsSync: unknown; readFileSync: unknown };
-    fsMock.existsSync = ORIGINAL_FS.existsSync;
-    fsMock.readFileSync = ORIGINAL_FS.readFileSync;
   });
 });
 
@@ -1323,4 +1452,51 @@ describe('Charm Hyper quota provider (VS Code parity)', () => {
       assert.equal(result.usage, null);
     });
   }
+});
+
+describe('Kimi for Coding credential lookup (VS Code parity)', () => {
+  const sentKey = async (auth: Record<string, { type?: string; key: string; token?: string }>) => {
+    let authorization: string | undefined;
+    const result = await fetchKimiQuota({
+      readAuth: () => auth,
+      fetchImpl: async (_url, init) => {
+        authorization = new Headers(init.headers).get('Authorization') ?? undefined;
+        return Response.json({ usage: null, limits: [] });
+      },
+    });
+    return { result, authorization };
+  };
+
+  test('finds a China plan credential stored under kimi-code-plan-cn', async () => {
+    const { result, authorization } = await sentKey({ 'kimi-code-plan-cn': { type: 'api', key: 'cn-key' } });
+    assert.equal(result.ok, true);
+    assert.equal(authorization, 'Bearer cn-key');
+  });
+
+  test('prefers the China plan credential over a leftover pre-split kimi-for-coding key', async () => {
+    const { authorization } = await sentKey({
+      'kimi-for-coding': { type: 'api', key: 'stale-key' },
+      kimi: { type: 'api', key: 'older-key' },
+      'kimi-code-plan-cn': { type: 'api', key: 'cn-key' },
+    });
+    assert.equal(authorization, 'Bearer cn-key');
+  });
+
+  test('still reads the global plan and the pre-split ids when they are the only credential', async () => {
+    assert.equal((await sentKey({ 'kimi-code-plan-global': { key: 'global-key' } })).authorization, 'Bearer global-key');
+    assert.equal((await sentKey({ 'kimi-for-coding': { key: 'legacy-key' } })).authorization, 'Bearer legacy-key');
+  });
+
+  test('skips a blank key and uses the token next to it', async () => {
+    const { authorization } = await sentKey({ 'kimi-code-plan-cn': { key: '  ', token: 'cn-token' } });
+    assert.equal(authorization, 'Bearer cn-token');
+  });
+
+  test('keeps a pre-split key ahead of the global plan, as before', async () => {
+    const { authorization } = await sentKey({
+      'kimi-code-plan-global': { key: 'global-key' },
+      'kimi-for-coding': { key: 'legacy-key' },
+    });
+    assert.equal(authorization, 'Bearer legacy-key');
+  });
 });

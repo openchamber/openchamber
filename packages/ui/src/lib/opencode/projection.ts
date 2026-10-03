@@ -38,6 +38,7 @@ import {
   type UserMessage,
   type Vcs,
 } from "./model"
+import { formatModelSelection, parseModelSelection } from "../modelIdentifier"
 
 /** One item of an assistant message's ordered content. */
 export type AssistantContentItem = SessionMessageAssistant["content"][number]
@@ -504,6 +505,29 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
 
 function isPlainRecord(value: Config[keyof Config]): value is Record<string, JsonValue> {
   return Object.prototype.toString.call(value) === "[object Object]"
+}
+
+/** A JSON representation probe, mirroring `isPlainRecord`; `typeof` is banned by the anti-slop rule. */
+const isStringValue = (value: Config["model"]): value is string =>
+  Object.prototype.toString.call(value) === "[object String]"
+
+/**
+ * Config `model` arrives as `provider/model[#variant]` or the explicit
+ * `{ providerID, model, variant }` form OpenCode 2 decodes it into. Fold both
+ * to the identifier spelling the stores parse.
+ */
+export function configModelIdentifier(value: Config["model"]): string | undefined {
+  if (isStringValue(value)) {
+    return formatModelSelection(parseModelSelection(value)) ?? undefined
+  }
+  if (!value) {
+    return undefined
+  }
+  return formatModelSelection({
+    providerID: value.providerID,
+    modelID: value.model,
+    variant: value.variant,
+  }) ?? undefined
 }
 
 /** See `Agent` in `./model`: the wire `name` is display-only; `id` is the key the server expects back. */

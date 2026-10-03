@@ -38,6 +38,22 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).not.toContain('const x = 1  \nconst y = 2');
     });
 
+    test('escapes a message that is only a list marker so the sign shows', () => {
+        for (const textContent of ['+', '-', '*', '  +  ', '\n-\n', '*\n']) {
+            const content = prepareUserMarkdownContent({ textContent, skillNames: new Set() });
+            expect(content).toBe(`\\${textContent.trim()}`);
+        }
+    });
+
+    test('leaves real lists and longer messages with a lone marker line alone', () => {
+        const prepare = (textContent: string) => prepareUserMarkdownContent({ textContent, skillNames: new Set() });
+
+        expect(prepare('- item')).toBe('- item');
+        expect(prepare('++')).toBe('++');
+        expect(prepare('--')).toBe('--');
+        expect(prepare('looks good\n+')).toBe('looks good  \n+');
+    });
+
     test('preserves mention conversion', () => {
         const content = prepareUserMarkdownContent({
             textContent: '@agent hello\n/skill-name',

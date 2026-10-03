@@ -379,10 +379,13 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
             <span className="flex w-4 shrink-0 items-center justify-center">
               <Icon name="arrow-right-s" className={cn('size-3.5 transition-transform', isExpanded && 'rotate-90')} />
             </span>
-            <span className="min-w-0 flex-1 truncate typography-ui-label" title={directory.path}>
+            <span className="min-w-0 truncate typography-ui-label" title={directory.path}>
               {label}
             </span>
-            <span className="ml-auto shrink-0 typography-micro text-muted-foreground/70">{directory.files.length}</span>
+            {/* Like the group header's count; an expanded directory shows its files instead. */}
+            {isExpanded ? null : (
+              <span className="shrink-0 typography-micro tabular-nums text-muted-foreground/70">{directory.files.length}</span>
+            )}
           </button>
           {/* Revealed on hover so the tree reads as a tree; always shown on
               narrow (touch) layouts, which have no hover. */}

@@ -459,6 +459,25 @@ describe('terminal runtime', () => {
     }
   });
 
+  it('removes the AppImage launcher entries from the PTY environment', async () => {
+    const previous = { APPDIR: process.env.APPDIR, LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH };
+    process.env.APPDIR = '/tmp/.mount_OpenChAbC123';
+    process.env.LD_LIBRARY_PATH = '/tmp/.mount_OpenChAbC123/usr/lib:/opt/cuda/lib64:';
+    const harness = createHarness();
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-ld-path', cwd: '/repo', cols: 80, rows: 24 } }, response);
+      expect(response.statusCode).toBe(200);
+      expect(harness.processes[0].options.env.LD_LIBRARY_PATH).toBe('/opt/cuda/lib64');
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await harness.runtime.shutdown();
+    }
+  });
+
   it('lists available shells and uses the selected shell for create and restart', async () => {
     const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
     const harness = createHarness({
@@ -696,6 +715,35 @@ describe('terminal runtime', () => {
       await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, createResponse());
       expect(harness.processes[0].kills).toEqual(['SIGTERM', 'SIGKILL']);
     } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('refuses a sandboxed page (Origin: null) even when the UI has no password', async () => {
+    const server = http.createServer();
+    const refused = [];
+    const runtime = createRuntime(server, {
+      rejectWebSocketUpgrade(socket, status) {
+        refused.push(status);
+        socket.write(`HTTP/1.1 ${status} Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+        socket.destroy();
+      },
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const socketUrl = `ws://127.0.0.1:${server.address().port}/api/terminal/ws`;
+    const handshake = (headers) => new Promise((resolve) => {
+      const socket = new WebSocket(socketUrl, { headers });
+      socket.once('open', () => { socket.close(); resolve('open'); });
+      socket.once('unexpected-response', (_req, res) => resolve(res.statusCode));
+      socket.once('error', () => resolve('error'));
+    });
+    try {
+      expect(await handshake({ Origin: 'null' })).toBe(403);
+      expect(refused).toEqual([403]);
+      // Native clients send no Origin and keep working without a password.
+      expect(await handshake({})).toBe('open');
+    } finally {
+      await runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it('runs snapshot-first attach, scoped I/O, replay, reconnect, and close over a real websocket', async () => {

@@ -24,7 +24,7 @@ const json = (value: unknown, status = 200) =>
 const noContent = () => new Response(null, { status: 204 })
 
 const runtimeFetchMock = mock<RuntimeFetch>(async (input, init) => {
-  const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
+  const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url, "http://runtime.test")
   const request: CapturedRequest = {
     url,
     method: String(init?.method ?? "GET").toUpperCase(),
@@ -102,6 +102,24 @@ beforeEach(() => {
 })
 
 describe("request fidelity", () => {
+  test("project creation uses the OpenChamber directory route", async () => {
+    responses.push(json({ success: true, restarted: false, path: "/repo/new" }))
+    expect(await opencodeClient.createDirectory("/repo/new", { asProject: true }))
+      .toEqual({ success: true, path: "/repo/new" })
+    expect(requests[0].url.pathname).toBe("/api/openchamber/directory")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].body).toEqual({ path: "/repo/new", create: true })
+  })
+
+  test("project activation uses the OpenChamber directory route without creation", async () => {
+    const result = { success: true, restarted: false, path: "/repo/existing" }
+    responses.push(json(result))
+    expect(await opencodeClient.setOpenCodeWorkingDirectory("/repo/existing")).toEqual(result)
+    expect(requests[0].url.pathname).toBe("/api/openchamber/directory")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].body).toEqual({ path: "/repo/existing" })
+  })
+
   test("a directory-scoped call carries the encoded directory header and lists that directory", async () => {
     responses.push(json({ data: [sessionInfo], cursor: { next: "c2" } }))
     const page = await opencodeClient.listSessionsPage({ directory: "/repo/app dir" })
@@ -605,6 +623,27 @@ describe("messages and config", () => {
     expect(catalog.providers).toEqual([{ id: "openai", name: "OpenAI" }])
     expect(catalog.models).toHaveLength(1)
     expect(catalog.default).toEqual({ id: "x", providerID: "openai" })
+  })
+
+  test("a fresh provider read waits out the one in flight and reads again", async () => {
+    const answer = (request: CapturedRequest) =>
+      request.url.pathname === "/api/provider"
+        ? json({ location: {}, data: [{ id: "openai", name: "OpenAI" }] })
+        : request.url.pathname === "/api/model"
+          ? json({ location: {}, data: [{ id: "openai/x", modelID: "x", providerID: "openai" }] })
+          : json({ location: {}, data: { id: "openai/x", modelID: "x", providerID: "openai" } })
+    responses.push(answer, answer, answer, answer, answer, answer)
+    const before = requests.length
+
+    const first = opencodeClient.getProvidersForConfig("/repo/app")
+    const joined = opencodeClient.getProvidersForConfig("/repo/app")
+    const fresh = opencodeClient.getProvidersForConfig("/repo/app", { fresh: true })
+    const [firstCatalog, joinedCatalog, freshCatalog] = await Promise.all([first, joined, fresh])
+
+    // One catalog read is three requests: the joined call adds none, the fresh one three more.
+    expect(requests.length - before).toBe(6)
+    expect(joinedCatalog).toBe(firstCatalog)
+    expect(freshCatalog).not.toBe(firstCatalog)
   })
 })
 

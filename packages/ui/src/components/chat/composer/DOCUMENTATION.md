@@ -95,6 +95,19 @@ bottom of the transcript (`ChatContainer`), and the input box is glass
 in flow. A `ResizeObserver` on the slot writes its height into the chat
 column's `--chat-composer-inset`; the timeline's tail spacer reads that
 variable plus a fixed gap, so the last row always ends above the composer.
+The transcript's end fade reads the same variable (plus the floating-panel
+clearance) through `--scroll-shadow-end-inset` in `index.css`, so a row that
+does reach the composer, as the newest lines of a live reply do while the
+follow glide is still catching up, dissolves above the box instead of being
+cut in half by its top edge. That inset applies only while a reply streams
+and the view follows it (`data-live-tail` on the chat column, set by
+`ChatContainer` from the timeline's `isFollowingProgrammatically`: no
+scroll-to-bottom pill and no reader gesture); at rest and while the reader scrolls history the rows slide
+under the composer's glass, which is what makes the composer read as
+floating. There the end fade is longer instead (`--scroll-shadow-end-size`):
+it starts just above the box and runs to the scroller's bottom edge, so rows
+under the glass and beside a box narrower than the transcript (wide layout)
+thin out gradually instead of running into the window's edge.
 The variable is written straight to the DOM, so composer growth never
 re-renders the timeline: the list's own footer observer extends the content
 and the scroll hook's pinned-end observer keeps a reader on the end. The
@@ -129,7 +142,7 @@ does not hide its entry actions behind the chat header.
 | `comment/` | Mobile comment mode: quoted-selection state, its scope ownership, and the shell that replaces the composer while a comment is written |
 | `submit/` | Turning what the user has into what gets sent. `guestCommands.ts` routes an extension's slash command (`contributes.commands`) before anything is sent: `/name args` never reaches the model, the extension resolves it into a chip |
 | `attachments/` | Files: paths, drop payloads |
-| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub, Linear, then guests with `contributes.attach`. `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
+| `ui/` | Presentation. `ComposerAttachmentControls` lists files, GitHub (issues and PRs in one picker), Linear, then guests with `contributes.attach`; each source is one row. The GitHub and Linear picker is `components/references/` (see its `DOCUMENTATION.md`). `"panel"` opens the rail. `"dialog"` opens `GuestAttachDialog` with that guest iframe and `ready.surface: "dialog"` (loading `attachEntry` when the manifest declared one). `host.attach` writes the composer chip. Clicking that chip reopens the guest with the chip as `ready.item`: dialog guests get it as a prop, panel guests through `lib/guests/item-store.ts` and the rail. Message and session actions (`contributes.actions`) travel the same two roads with a `GuestMessageItem` / `GuestSessionItem` (`lib/guests/dialog-store.ts` `openGuestWithItem`); the dialog they open lives in `layout/GuestHosts.tsx`, not here, and an `attach` from it closes it through `handleGuestAttach`. The chip keeps the guest's opaque `data` (also on the `guest-issue` / `guest-pr` context part metadata and the session `LinkedGuestIssue` snapshot) so it comes back byte-identical; it is never part of the context text. VS Code and mobile skip that list. |
 | `parallel/` | "Run in parallel": the launch state of a new-session draft (prompt variants, models per variant, worktrees, setup, auto-fusion) and the strip that renders it above the editor |
 | `text.ts` | How inserted text meets the text already there |
 | `largeTextPaste.ts` | Detect large plain-text pastes and build virtual `.txt` files |
@@ -285,9 +298,16 @@ and the send path reading the same grammar.
   context drafts and linked references into OpenCode's one-primary-plus-parts
   shape. The oldest queued message becomes primary. **Every attached context
   item (inline comments, terminal selections, browser annotations, PR context,
-  linked issue/PR) becomes its own synthetic text part carrying structured
+  each linked issue, PR or guest item) becomes its own synthetic text part carrying structured
   metadata** built by `lib/messages/contextParts.ts`; the timeline reads that
-  metadata back to render context blocks. PR instructions precede the PR diff.
+  metadata back to render context blocks. An attached item is context only:
+  no instructions guess what the user wants from it (the PR review
+  instructions were removed); a queued message captured before that still
+  delivers its `instructions` part first. A flow outside the composer hands
+  references to the next draft through `pendingComposerReferences.ts`
+  (New Worktree does), which `ChatInput` consumes into its chips; a draft's
+  first send with a Linear issue attached posts Linear's session-started
+  status.
   The same module's `buildComposerContext` captures that context when a message
   is **queued** instead of sent: the chips leave the composer with the message
   (as `QueuedContextPart`s on the queue item), the server or the VS Code
@@ -378,7 +398,12 @@ and the send path reading the same grammar.
   through the existing project-change flow only on explicit activation.
   Filtering changes the result area below the anchored input without moving
   the search field. The worktree picker remains a Select; mobile keeps its
-  bottom sheets. `ProjectPickerSheet` shares the mobile project list and
+  bottom sheets. Both end with the two ways to make a worktree: **Quick
+  worktree** (`createWorktreeDraft`, auto-named, at once) and **New worktree…**,
+  which opens `NewWorktreeDialog` for the draft's own project. `ChatInput` hosts
+  that dialog, like the isolated-space one, because Timeline has no project
+  headers to open it from; a plain worktree pins the draft to the new
+  directory, one made for an issue or PR opens its session. `ProjectPickerSheet` shares the mobile project list and
   transient search state with the Settings selector. Settings passes its own
   directory selection callback, so choosing a project there leaves chat in
   place. Both callers use the same ranked label/path search and project icons.

@@ -22,18 +22,15 @@ describe("v2 status and cancellation HTTP boundary", () => {
       return Response.json({ data: [] })
     })
     try {
-      const options = { directories: ["C:/Tree with spaces"], includeGlobal: false }
+      const options = { directories: ["C:/Tree with spaces"] }
       expect(await opencodeClient.listPendingForms(options)).toEqual([])
       expect(await opencodeClient.listPendingPermissions(options)).toEqual([])
+      // Never a list without a directory: v2 answers it for its own working
+      // directory and starts that location, MCP servers included.
       expect(requests).toEqual([
         { path: "/api/form", directory: encodeURIComponent("C:/Tree with spaces") },
         { path: "/api/permission/request", directory: encodeURIComponent("C:/Tree with spaces") },
       ])
-      requests.length = 0
-      await opencodeClient.listPendingForms({ directories: options.directories })
-      expect(requests).toHaveLength(2)
-      expect(requests[0].directory).toBeNull()
-      expect(requests[1].directory).toBe(encodeURIComponent("C:/Tree with spaces"))
     } finally {
       fetch.mockRestore()
     }

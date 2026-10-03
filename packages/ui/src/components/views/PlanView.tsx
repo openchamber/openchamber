@@ -905,11 +905,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
                       }
                     }}
                   >
-                    {isTTSPlaying ? (
-                      <Icon name="stop" className="h-4 w-4 text-[color:var(--status-success)]" />
-                    ) : (
-                      <Icon name="volume-up" className="h-4 w-4" />
-                    )}
+                    <Icon name="volume-up" className={isTTSPlaying ? 'h-4 w-4 animate-pulse text-[var(--primary-text)]' : 'h-4 w-4'} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8}>

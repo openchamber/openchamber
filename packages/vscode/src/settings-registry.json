@@ -122,6 +122,22 @@
         "mobile"
       ]
     },
+    "messageSearchEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
+    "messageSearchReasoningEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "web",
+        "desktop",
+        "mobile"
+      ]
+    },
     "agentControlToolEnabled": {
       "scope": "instance"
     },
@@ -167,6 +183,9 @@
       "scope": "instance"
     },
     "sessionRetentionAction": {
+      "scope": "instance"
+    },
+    "mergedWorktreeCleanupEnabled": {
       "scope": "instance"
     },
     "terminalShell": {

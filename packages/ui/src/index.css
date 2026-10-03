@@ -33,6 +33,16 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Hover-revealed row actions cross-fade over a row's right end instead of
+   re-laying the row out: the text they cover fades away under them. The
+   masked element sits --oc-actions-inset from its nearest @container's left
+   edge; the actions reach --oc-actions-reserve in from that container's right
+   edge. */
+@utility oc-actions-mask {
+  --oc-actions-edge: calc(100cqw - var(--oc-actions-inset, 0px) - var(--oc-actions-reserve, 0px));
+  mask-image: linear-gradient(to right, #000 calc(var(--oc-actions-edge) - 14px), transparent calc(var(--oc-actions-edge) - 2px));
+}
+
 /* Buttons should never look selectable. */
 button,
 [role="button"] {
@@ -131,6 +141,17 @@ button,
 ::highlight(oc-chat-quote),
 ::highlight(oc-chat-quote-focus) {
   background-color: var(--oc-text-selection);
+}
+
+/* In-conversation search (chat/search): every occurrence tinted, the current
+   message's painted solid so the eye lands on it. */
+::highlight(oc-chat-search) {
+  background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+::highlight(oc-chat-search-current) {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
 }
 
 .pierre-diff-wrapper {
@@ -298,6 +319,30 @@ div[data-chat-input-footer="true"] {
      variable inline (the hook-based chat scroller). Inline styles from the
      ScrollShadow component still override this. */
   --scroll-shadow-size: 48px;
+  /* The band at the scroller's end that floating chrome covers. The end fade
+     sits above it, so content dissolves before it reaches that chrome. */
+  --scroll-shadow-end-inset: 0px;
+}
+
+/* The chat composer floats over the transcript's tail (plus any panel docked
+   above it), and the working row sits in the gap the tail spacer leaves. While
+   a live reply outruns the follow glide, its newest lines land in that gap;
+   fading them out above the composer keeps the composer's top edge from
+   cutting a line in half. Only then (`data-live-tail`: a reply streams and the
+   view follows it): at rest and while reading history the rows slide under
+   the composer's glass, which is what makes it read as floating; there the
+   end fade starts just above the composer and runs to the scroller's edge,
+   so rows thin out under the glass and beside a composer narrower than the
+   transcript (wide layout) instead of meeting the window's edge at full
+   strength. In flow (draft, expanded editor) the inset is unset and the
+   fade stays at the scroller's edge. */
+.chat-scroll {
+  --scroll-shadow-end-size: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + var(--scroll-shadow-size));
+}
+
+[data-live-tail="true"] .chat-scroll {
+  --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px));
+  --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -315,16 +360,16 @@ div[data-chat-input-footer="true"] {
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 
@@ -365,14 +410,14 @@ div[data-chat-input-footer="true"] {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 
@@ -789,6 +834,54 @@ html:not(.dark) .chat-scroll {
 
 .pierre-diff-wrapper diffs-container {
   display: block;
+}
+
+/* Row below the last hunk of a patch-only diff (PierreDiffViewer). Pierre
+   draws no separator there, so this mirrors its on-demand separators. */
+.pierre-diff-wrapper [data-oc-trailing-expand] {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  height: 24px;
+  padding: 0 0 0 1ch;
+  border: none;
+  background: transparent;
+  color: var(--diffs-fg-number, var(--surface-muted-foreground));
+  font-family: var(--diffs-header-font-family, var(--font-sans));
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]::before {
+  content: '\2193';
+  display: block;
+  flex-shrink: 0;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]:hover {
+  color: var(--diffs-fg, var(--surface-foreground));
+}
+
+/* Full file requested: same spinner and dimming as the separators. */
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand] {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand]::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: oc-trailing-expand-spin 0.8s linear infinite;
+}
+
+@keyframes oc-trailing-expand-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Header tab responsiveness */
@@ -1240,6 +1333,22 @@ html:not(.dark) .chat-scroll {
 .markdown-content h5,
 .markdown-content h6 {
   font-size: 0.875rem;
+}
+
+/* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
+   heading keeps its size but sits on the chevron's line without margins. */
+.markdown-content details[data-md-details] > summary > span:last-child > :is(h1, h2, h3, h4, h5, h6, p) {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) {
+  align-items: center;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) > [data-md-disclosure-icon] {
+  align-self: center;
+  margin-top: 0;
 }
 
 /* Code font */

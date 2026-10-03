@@ -4,7 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
-import { getProviderAuth, readAuthFile } from './opencodeAuth';
+import { readOpenCodeCredentials } from './opencodeAuth';
+import { readConfig } from './opencodeConfig';
+import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
 import { fetchOllamaUsage } from './ollamaQuota';
 
@@ -456,8 +458,8 @@ const buildResult = (data: {
   return result;
 };
 
-const resolveXaiAuth = (): XaiAuthEntry | null => {
-  const entry = getProviderAuth('xai');
+const resolveXaiAuth = (auth: AuthFile): XaiAuthEntry | null => {
+  const entry = auth.xai;
   if (!entry || typeof entry !== 'object' || entry.type !== 'oauth') return null;
 
   const access = asNonEmptyString(entry.access);
@@ -775,13 +777,25 @@ const durationToSeconds = (duration?: number, unit?: string) => {
   return null;
 };
 
-export const listConfiguredQuotaProviders = () => {
-  let auth: AuthFile = {};
-  try {
-    auth = readAuthFile();
-  } catch {
-    // Managed credentials remain enumerable; unreadable auth cannot establish xAI configuration.
-  }
+// OpenCode stores the Kimi For Coding plans as `kimi-code-plan-cn` (kimi.com)
+// and `kimi-code-plan-global` (kimi.ai). The China plan comes first: its key
+// works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
+// key left behind with a dead credential must not shadow it. The global plan
+// stays last, as before, since its key is not known to work at that address.
+const KIMI_AUTH_ALIASES = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
+
+const getKimiApiKey = (auth: AuthFile) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, KIMI_AUTH_ALIASES));
+  return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
+};
+
+/**
+ * Providers with a usable credential. Throws when OpenCode's credentials
+ * cannot be read, so a transient failure does not look like "nothing
+ * configured".
+ */
+export const listConfiguredQuotaProviders = async () => {
+  const auth = await readOpenCodeCredentials();
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
@@ -813,8 +827,7 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('zhipuai-coding-plan');
   }
 
-  const kimiAuth = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global']));
-  if (kimiAuth && ((kimiAuth as Record<string, unknown>).key || (kimiAuth as Record<string, unknown>).token)) {
+  if (getKimiApiKey(auth)) {
     configured.add('kimi-for-coding');
   }
 
@@ -869,13 +882,7 @@ export const listConfiguredQuotaProviders = () => {
     configured.add('hyper');
   }
 
-  let xaiAuth: XaiAuthEntry | null = null;
-  try {
-    xaiAuth = resolveXaiAuth();
-  } catch {
-    xaiAuth = null;
-  }
-  if (xaiAuth) {
+  if (resolveXaiAuth(auth)) {
     configured.add('xai');
   }
 
@@ -883,7 +890,7 @@ export const listConfiguredQuotaProviders = () => {
 };
 
 const fetchCodexQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openai', 'codex', 'chatgpt'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
   const accountId = entry?.accountId as string | undefined;
@@ -1052,8 +1059,7 @@ const resolveAntigravityAuth = (): GoogleAuthSource | null => {
   return null;
 };
 
-const resolveGoogleAuthSources = (): GoogleAuthSource[] => {
-  const auth = readAuthFile();
+const resolveGoogleAuthSources = (auth: AuthFile): GoogleAuthSource[] => {
   const sources: GoogleAuthSource[] = [];
 
   const geminiAuth = resolveGeminiCliAuth(auth);
@@ -1166,7 +1172,7 @@ const fetchGoogleModels = async (accessToken: string, projectId?: string) => {
 };
 
 const fetchGoogleQuota = async (): Promise<ProviderResult> => {
-  const authSources = resolveGoogleAuthSources();
+  const authSources = resolveGoogleAuthSources(await readOpenCodeCredentials());
   if (!authSources.length) {
     return buildResult({
       providerId: 'google',
@@ -1400,7 +1406,7 @@ const buildClaudeUsage = (payload: Record<string, unknown>): ProviderUsage => {
 };
 
 const fetchClaudeQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -1528,7 +1534,7 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
 };
 
 const fetchCopilotQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -1583,7 +1589,7 @@ const fetchCopilotQuota = async (): Promise<ProviderResult> => {
 };
 
 const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -1655,10 +1661,13 @@ const computeKimiUsedPercent = (
   return null;
 };
 
-const fetchKimiQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi', 'kimi-code-plan-global'])) as Record<string, unknown> | null;
-  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+type KimiQuotaDependencies = {
+  readAuth?: () => AuthFile | Promise<AuthFile>;
+  fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
+};
+
+export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getKimiApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -1671,7 +1680,7 @@ const fetchKimiQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
-    const response = await fetch('https://api.kimi.com/coding/v1/usages', {
+    const response = await fetchImpl('https://api.kimi.com/coding/v1/usages', {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -1746,7 +1755,7 @@ const fetchMiniMaxQuota = async (data: {
   endpoint: string;
   usageFieldsAreRemaining: boolean;
 }): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, [data.providerId])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -1966,8 +1975,36 @@ const isOpenRouterPeriod = (value: unknown): value is OpenRouterPeriod => (
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERIOD_SECONDS, value)
 );
 
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
+// The stored key is valid for whichever gateway the configured baseURL points
+// at, so the usage lookup must ride the same base as chat. The endpoint shape
+// stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+// OpenCode takes the address from `settings.baseURL`, legacy `options.baseURL`
+// or legacy `api`, and toProviderEntity folds all three. Each section is read
+// on its own so a v2 entry without an address cannot hide a v1 address that
+// another config file sets.
+// Mirrors packages/web/server/lib/quota/providers/openrouter.js (kept in sync
+// per the quota DOCUMENTATION.md parity note).
+const resolveOpenRouterConfigBase = (): string | null => {
+  try {
+    const config = readConfig();
+    const readBaseURL = (sectionKey: 'providers' | 'provider'): string | null => {
+      const section = config[sectionKey];
+      return isRecord(section) ? asNonEmptyString(toProviderEntity(section.openrouter).settings?.baseURL) : null;
+    };
+    const base = (
+      readBaseURL('providers') ?? readBaseURL('provider')
+    )?.replace(/\/+$/, '');
+    return base || null;
+  } catch {
+    // A config read failure must not take the default-endpoint lookup down.
+    return null;
+  }
+};
+
 const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['openrouter'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -1984,7 +2021,7 @@ const fetchOpenRouterQuota = async (): Promise<ProviderResult> => {
   const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/key', {
+    const response = await fetch(`${resolveOpenRouterConfigBase() ?? OPENROUTER_API_BASE}/key`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -2140,7 +2177,7 @@ const resolveWindowLabel = (windowSeconds: number | null) => {
 };
 
 const fetchZaiQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zai-coding-plan', 'zai', 'z.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2221,7 +2258,7 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
 };
 
 const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['zhipuai-coding-plan'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2324,7 +2361,7 @@ const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
 const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['nano-gpt', 'nanogpt', 'nano_gpt'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2430,7 +2467,7 @@ const WAFER_QUOTA_URL = 'https://pass.wafer.ai/v1/inference/quota';
 const WAFER_WINDOW_SECONDS = 5 * 3600;
 
 const fetchWaferQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['wafer', 'wafer-ai', 'wafer_ai', 'wafer.ai'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2550,7 +2587,7 @@ const neuralwattWindowSeconds = (period: string | null | undefined): number | nu
 };
 
 const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['neuralwatt'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2704,12 +2741,12 @@ const CLINE_WINDOW_KINDS = new Map<string, ClineWindowKind>([
 ]);
 
 type ClineQuotaDependencies = {
-  readAuth?: () => AuthFile;
+  readAuth?: () => AuthFile | Promise<AuthFile>;
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
-export const fetchClinePassQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch }: ClineQuotaDependencies = {}): Promise<ProviderResult> => {
-  const auth = readAuth();
+export const fetchClinePassQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: ClineQuotaDependencies = {}): Promise<ProviderResult> => {
+  const auth = await readAuth();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['cline-pass']));
   const apiKey = asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 
@@ -2807,7 +2844,7 @@ export const fetchClinePassQuota = async ({ readAuth = readAuthFile, fetchImpl =
 const DEEPSEEK_QUOTA_URL = 'https://api.deepseek.com/user/balance';
 
 const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek'])) as Record<string, unknown> | null;
   const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
 
@@ -2847,8 +2884,16 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
 
     const payload = await response.json() as DeepseekPayload;
     const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
-    const balanceInfo = balanceInfos.find((info) => info?.currency === 'USD')
+    const positiveBalances = balanceInfos.filter((info) => {
+      const num = toNumber(info?.total_balance);
+      return typeof num === 'number' && num > 0;
+    });
+    const balanceInfo = positiveBalances.find((info) => info?.currency === 'USD')
+      ?? positiveBalances.find((info) => info?.currency === 'CNY')
+      ?? positiveBalances[0]
+      ?? balanceInfos.find((info) => info?.currency === 'USD')
       ?? balanceInfos.find((info) => info?.currency === 'CNY')
+      ?? balanceInfos[0]
       ?? null;
     const rawBalance = balanceInfo?.total_balance;
     const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))
@@ -2910,12 +2955,12 @@ const getHyperApiKey = (auth: AuthFile) => {
 };
 
 type HyperQuotaDependencies = {
-  readAuth?: () => AuthFile;
+  readAuth?: () => AuthFile | Promise<AuthFile>;
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
-export const fetchHyperQuota = async ({ readAuth = readAuthFile, fetchImpl = fetch }: HyperQuotaDependencies = {}): Promise<ProviderResult> => {
-  const apiKey = getHyperApiKey(readAuth());
+export const fetchHyperQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: HyperQuotaDependencies = {}): Promise<ProviderResult> => {
+  const apiKey = getHyperApiKey(await readAuth());
 
   if (!apiKey) {
     return buildResult({
@@ -3010,7 +3055,7 @@ export const fetchHyperQuota = async ({ readAuth = readAuthFile, fetchImpl = fet
 
 const fetchXaiQuota = async (): Promise<ProviderResult> => {
   try {
-    const entry = resolveXaiAuth();
+    const entry = resolveXaiAuth(await readOpenCodeCredentials());
     if (!entry) {
       return buildResult({
         providerId: 'xai',
@@ -3115,7 +3160,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
     case 'opencode-go': {
       try {
         deleteLegacyOpenCodeGoCredential();
-        const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), ['opencode-go']));
+        const entry = normalizeAuthEntry(getAuthEntry(await readOpenCodeCredentials(), ['opencode-go']));
         const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
         if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });

@@ -16,7 +16,7 @@
  *
  * `data.level` is the plan tier (for example "lite") and becomes `planLabel`.
  */
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { readConfigLayers } from '../../opencode/shared.js';
 import {
   getAuthEntry,
@@ -70,8 +70,7 @@ const envelopeError = (payload) => {
   return msg ?? `API error: ${code ?? 'unknown'}`;
 };
 
-function getApiKey() {
-  const auth = readAuthFile();
+function getApiKey(auth) {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKeyFromAuth = entry?.key ?? entry?.token;
 
@@ -95,12 +94,12 @@ function getApiKey() {
   return null;
 }
 
-export const isConfigured = () => {
-  return Boolean(getApiKey());
+export const isConfigured = (auth) => {
+  return Boolean(getApiKey(auth));
 };
 
 export const fetchQuota = async () => {
-  const apiKey = getApiKey();
+  const apiKey = getApiKey(await readOpenCodeCredentials());
 
   if (!apiKey) {
     return buildResult({

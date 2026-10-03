@@ -76,3 +76,28 @@ test('archive search uses exact IDs and preserves title search and archive membe
   expect(await search('releaze')).toEqual(['Release notes']);
   expect(await search('')).toHaveLength(2);
 });
+
+test('the chats of a deleted space are grouped under its name and cannot be restored', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(async () => new Response(JSON.stringify({
+    archives: [{ spaceId: 'a1b2c3d4e5f6', name: 'Fix login', directory: '/data/spaces/archive/a1b2c3d4e5f6' }],
+  }), { status: 200 }), originalFetch);
+  try {
+    useGlobalSessionsStore.setState({
+      archivedSessions: [
+        { ...session('ses_space1', 'Agent chat'), directory: '/data/spaces/archive/a1b2c3d4e5f6' },
+        session('ses_mine1', 'My chat'),
+      ],
+      activeSessions: [],
+    });
+    await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const groups = [...document.querySelectorAll('.group\\/dir button[title]')].map((button) => button.textContent);
+    expect(groups.some((label) => label?.startsWith('Fix login'))).toBe(true);
+    expect(document.querySelector('[aria-label="Restore Agent chat"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Restore My chat"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Delete Agent chat"]')).not.toBeNull();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -289,6 +289,32 @@ describe('skill-routes directory soft fallback', () => {
       stubServer.close();
     }
   });
+  it('hides a curated source\'s excluded skills from its catalog listing', async () => {
+    projectRoot = createTempProject();
+    const scanItem = (skillName) => ({ repoSource: 'acme/skills', skillDir: `skills/${skillName}`, skillName, installable: true });
+    appHandle = startSkillsApp({
+      projectRoot,
+      overrides: {
+        getCuratedSkillsSources: () => [
+          { id: 'acme', label: 'Acme', source: 'acme/skills', defaultSubpath: 'skills', excludedSkills: ['docx'] },
+        ],
+        parseSkillRepoSource: () => ({ ok: true, host: 'github.com', normalizedRepo: 'acme/skills' }),
+        scanSkillsRepository: async () => ({ ok: true, items: [scanItem('docx'), scanItem('frontend-design')] }),
+      },
+    });
+
+    const sourceResponse = await fetch(
+      `${appHandle.baseUrl}/api/config/skills/catalog/source?sourceId=acme&directory=${encodeURIComponent(projectRoot)}`,
+    );
+    expect(sourceResponse.status).toBe(200);
+    const sourcePayload = await sourceResponse.json();
+    expect(sourcePayload.items.map((item) => item.skillName)).toEqual(['frontend-design']);
+
+    const catalogResponse = await fetch(`${appHandle.baseUrl}/api/config/skills/catalog`);
+    const catalogPayload = await catalogResponse.json();
+    expect(catalogPayload.sources[0]).not.toHaveProperty('excludedSkills');
+  });
+
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {
     projectRoot = createTempProject();
     fs.mkdirSync(path.join(projectRoot, '.agents', 'skills', 'disk-skill'), { recursive: true });

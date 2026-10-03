@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { I18nKey } from '@/lib/i18n';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { collectSessionSubtreeIds, runSessionSubtreeAction, type SessionSubtreeStore } from './sessionSubtreeActions';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import {
+  collectSessionSubtreeIds,
+  runSessionSubtreeAction,
+  undoArchive,
+  type SessionSubtreeStore,
+} from './sessionSubtreeActions';
 
 const session = (id: string): Session => ({
   id,
@@ -156,5 +163,53 @@ describe('collectSessionSubtreeIds', () => {
     useGlobalSessionsStore.getState().upsertSessions([linked('root', null), linked('cached-child', 'root')]);
 
     expect(collectSessionSubtreeIds('root', ['live-child', 'cached-child'], false)).toEqual(['live-child', 'cached-child']);
+  });
+});
+
+describe('undoArchive', () => {
+  const original = useSessionUIStore.getState();
+  const restored: string[][] = [];
+  const opened: Array<{ id: string | null; directory: string | null | undefined }> = [];
+
+  beforeEach(() => {
+    restored.length = 0;
+    opened.length = 0;
+    useGlobalSessionsStore.getState().upsertSessions([session('root')]);
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      unarchiveSessions: async (ids) => {
+        restored.push(ids);
+        return { restoredIds: ids, failedIds: [] };
+      },
+      setCurrentSession: (id, directory) => {
+        opened.push({ id, directory });
+      },
+    });
+  });
+
+  afterEach(() => {
+    useSessionUIStore.setState({
+      currentSessionId: original.currentSessionId,
+      unarchiveSessions: original.unarchiveSessions,
+      setCurrentSession: original.setCurrentSession,
+    });
+  });
+
+  const undo = (reopenId: string | null) => undoArchive(['root', 'child'], reopenId, getRuntimeKey(), t);
+
+  test('restores exactly the archived sessions and reopens the session the archive closed', async () => {
+    await undo('root');
+
+    expect(restored).toEqual([['root', 'child']]);
+    expect(opened).toEqual([{ id: 'root', directory: '/workspace' }]);
+  });
+
+  test('does not take the user away from a session opened after the archive', async () => {
+    useSessionUIStore.setState({ currentSessionId: 'other' });
+
+    await undo('root');
+
+    expect(restored).toEqual([['root', 'child']]);
+    expect(opened).toEqual([]);
   });
 });

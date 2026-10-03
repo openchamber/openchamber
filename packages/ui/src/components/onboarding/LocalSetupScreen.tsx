@@ -8,6 +8,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
 const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
@@ -70,6 +71,8 @@ export function LocalSetupScreen({
   const [isChecking, setIsChecking] = React.useState(false);
   const [checkError, setCheckError] = React.useState<string | null>(null);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
+  // The server ignores the user's path while the administrator pins one.
+  const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
 
   React.useEffect(() => {
@@ -300,29 +303,35 @@ export function LocalSetupScreen({
             <div className="text-sm text-muted-foreground">{t('onboarding.localSetup.field.alreadyInstalled')}</div>
             <div className="flex gap-2">
               <Input
-                value={opencodeBinary}
+                value={pinnedBinary ?? opencodeBinary}
                 onChange={(e) => setOpencodeBinary(e.target.value)}
                 placeholder={binaryPlaceholder}
-                disabled={isRetrying}
+                disabled={isRetrying || pinnedBinary !== null}
                 className="flex-1 font-mono text-xs"
               />
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={handleBrowse}
-                disabled={isRetrying || !isDesktopApp}
-              >
-                {t('onboarding.localSetup.actions.browse')}
-              </Button>
-              <Button
-                type="button"
-                onClick={handleApplyPath}
-                disabled={isRetrying}
-              >
-                {t('onboarding.localSetup.actions.apply')}
-              </Button>
+              {pinnedBinary === null && (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleBrowse}
+                    disabled={isRetrying || !isDesktopApp}
+                  >
+                    {t('onboarding.localSetup.actions.browse')}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleApplyPath}
+                    disabled={isRetrying}
+                  >
+                    {t('onboarding.localSetup.actions.apply')}
+                  </Button>
+                </>
+              )}
             </div>
-            <div className="text-xs text-muted-foreground/70">{t('onboarding.localSetup.helper.saveAndReload')}</div>
+            <div className="text-xs text-muted-foreground/70">
+              {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
+            </div>
           </div>
         </div>
 

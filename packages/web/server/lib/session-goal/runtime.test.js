@@ -258,12 +258,43 @@ describe('session goal tick and subagents', () => {
       active: { ses_child_2: { status: 'running' } },
       childPages: [[child('ses_child_1')], [child('ses_child_2')]],
     });
-    const { runtime } = makeRuntime({ ...wired({ openchamber: { goal: activeGoal() } }), getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    const { runtime } = makeRuntime({
+      ...wired({ openchamber: { goal: activeGoal() } }),
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      idleQuietMs: 1_000,
+    });
     await runTick(runtime);
     const listCalls = server.calls.filter((call) => call.path === '/api/session');
     expect(listCalls.map((call) => call.query.parentID ?? call.query.cursor)).toEqual([SESSION_ID, 'page-1']);
     expect(server.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a working subagent and audits after it finishes without another parent event', async () => {
+    quiet();
+    const active = { ses_child_1: { status: 'running' } };
+    const server = v2OpenCode({
+      messages: [assistantRecord()],
+      active,
+      childPages: [[child('ses_child_1')]],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: '{"verdict":"complete","note":"done"}' }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      idleQuietMs: 5,
+    });
+
+    await runtime.notifyGoalChanged(SESSION_ID, '/repo', { openchamber: { goal: activeGoal() } });
+    await vi.waitFor(() => {
+      expect(server.calls.some((call) => call.path === '/api/session' && call.query.parentID === SESSION_ID)).toBe(true);
+    });
+    expect(generate).not.toHaveBeenCalled();
+
+    delete active.ses_child_1;
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'complete', note: 'done' });
   });
 
   it('audits once every subagent is idle', async () => {
@@ -290,7 +321,11 @@ describe('session goal tick and subagents', () => {
     const generate = vi.fn();
     const server = v2OpenCode({ messages: [assistantRecord()], childrenStatus: 500 });
     const seam = wired({ openchamber: { goal: activeGoal() } });
-    const { runtime } = makeRuntime({ ...seam, getSmallModelService: async () => ({ generateSmallModelText: generate }) });
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      idleQuietMs: 1_000,
+    });
     await runTick(runtime);
     expect(server.calls.some((call) => call.path === '/api/session')).toBe(true);
     expect(server.calls.some((call) => call.path.endsWith('/message'))).toBe(false);

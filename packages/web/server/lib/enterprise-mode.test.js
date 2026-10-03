@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  isCredentialListRequest,
   isEnterpriseMode,
   isNetworkAccessBlocked,
   isProviderConnectRequest,
@@ -39,6 +40,7 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
     });
   });
 
@@ -67,6 +69,32 @@ describe('enterprise policy', () => {
       allowNetworkAccess: false,
       allowedExtensions: [],
       allowLocalExtensions: false,
+      opencodeBinary: null,
+    });
+  });
+
+  describe('pinned OpenCode binary', () => {
+    const env = { OPENCODE_BINARY: '/home/me/opencode' };
+
+    it('comes from the file with or without enterprise mode', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "/opt/acme/opencode"}' }, { env })))
+        .toMatchObject({ enterpriseMode: false, opencodeBinary: '/opt/acme/opencode' });
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"enterpriseMode": true, "opencodeBinary": " /opt/acme/opencode "}' })).opencodeBinary)
+        .toBe('/opt/acme/opencode');
+    });
+
+    it('is never taken from the environment', () => {
+      expect(readEnterprisePolicy(machine({}, { env: { ...env, OPENCHAMBER_ENTERPRISE_MODE: '1' } })).opencodeBinary).toBeNull();
+    });
+
+    it('pins nothing when blank or when the file is broken', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "  "}' })).opencodeBinary).toBeNull();
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": 42}' })).opencodeBinary).toBeNull();
+    });
+
+    it('is shown to clients', () => {
+      expect(publicEnterprisePolicy(machine({ [LINUX_POLICY]: '{"opencodeBinary": "/opt/acme/opencode"}' })).opencodeBinary)
+        .toBe('/opt/acme/opencode');
     });
   });
 
@@ -190,7 +218,7 @@ describe('enterprise policy', () => {
     const policy = publicEnterprisePolicy(machine({
       [LINUX_POLICY]: '{"enterpriseMode": true, "organization": "Acme", "jev": {"url": "https://x.test", "apiKey": "secret"}}',
     }));
-    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true });
+    expect(policy).toEqual({ enterpriseMode: true, source: 'policy-file', organization: 'Acme', policyError: null, networkAccessBlocked: true, opencodeBinary: null });
   });
 
   describe('file location', () => {
@@ -230,7 +258,61 @@ describe('enterprise policy', () => {
       '/api/integration/anthropic/connect/oauth/att_1/complete',
       '/api/integration/github-copilot/connect/command',
       '/api/experimental/integration/wellknown',
+      '/api/integration/openai/connect',
+      '/api/integration/openai/connect/key/',
+      '/api/credential',
+      '/api/credential/',
+      '/API//credential;x',
     ])('refuses POST %s', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    // OpenCode routes all of these to the provider connect handlers.
+    it.each([
+      '/API/integration/openai/connect/key',
+      '/api/Integration/openai/Connect/Key',
+      '/api//integration/openai/connect/key',
+      '/api/integration//openai/connect/key',
+      '/api/integration/openai/%63onnect/key',
+      '/api/%65xperimental/integration/wellknown',
+      '/api/integration/%6Dcp_0123456789abcdef/connect/key',
+      '/api/integration\\openai\\connect\\key',
+      '/api/integration/openai\\connect/key',
+      '/api/Experimental/integration\\wellknown',
+      '/api/experimental/integration/wellknown;x',
+      '/api/integration/openai/connect/key;x',
+    ])('refuses POST %s written another way', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/integration/openai/connect/../connect/key',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/../../../openai/connect/key',
+      '/api/integration/openai/connect/%E0%A4%A',
+    ])('refuses POST %s, which cannot be read safely', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/integration/mcp_0123456789abcdef/connect/oauth',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth?location=%2Fp',
+      '/api/integration/mcp_0123456789abcdef/connect/OAuth/',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att_1/complete',
+      '/api/integration\\mcp_0123456789abcdef\\connect\\oauth',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth;/../../../openai/connect/key',
+    ])('lets POST %s sign in to an MCP server', (requestPath) => {
+      expect(isProviderConnectRequest('POST', requestPath)).toBe(false);
+    });
+
+    it.each([
+      '/api/integration/mcp_0123456789abcdef/connect/key',
+      '/api/integration/mcp_0123456789abcdef/connect/command',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att_1/complete/extra',
+      '/api/integration/mcp_0123456789abcdef/connect/oauth/att%2F1/complete',
+      '/api/integration/MCP_0123456789ABCDEF/connect/oauth',
+      '/api/integration/mcp_evil/connect/oauth',
+      '/api/integration/mcp_0123456789abcdef%2F..%2Fopenai/connect/oauth',
+    ])('refuses POST %s, which is not an MCP sign-in', (requestPath) => {
       expect(isProviderConnectRequest('POST', requestPath)).toBe(true);
     });
 
@@ -239,9 +321,69 @@ describe('enterprise policy', () => {
       ['DELETE', '/api/integration/anthropic/connect/oauth/att_1'],
       ['GET', '/api/integration'],
       ['POST', '/api/session'],
+      ['POST', '/api/integration/openai/connectors'],
+      ['POST', '/health'],
       ['DELETE', '/api/credential/cred_1'],
+      ['POST', '/api/credential/cred_1/activate'],
+      ['PATCH', '/api/credential/cred_1'],
+      ['GET', '/api/credential'],
     ])('leaves %s %s alone', (method, requestPath) => {
       expect(isProviderConnectRequest(method, requestPath)).toBe(false);
+    });
+  });
+
+  describe('credential list requests', () => {
+    // OpenCode routes all of these to the handler that returns every key.
+    it.each([
+      ['GET', '/api/credential'],
+      ['GET', '/api/credential/'],
+      ['GET', '/api/credential?directory=%2Fp'],
+      ['HEAD', '/api/credential'],
+      ['get', '/API/Credential'],
+      ['GET', '//api//credential'],
+      ['GET', '/api\\credential'],
+      ['GET', '/api/%63redential'],
+      ['GET', '/api/credential;x'],
+    ])('refuses %s %s', (method, requestPath) => {
+      expect(isCredentialListRequest(method, requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/api/x/../credential',
+      '/api/%E0%A4%A',
+      '/API/%zz',
+    ])('refuses GET %s, which cannot be read safely', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(true);
+    });
+
+    it.each([
+      '/assets/a%zz.js',
+      '/docs/../index.html',
+      '/apikeys/%zz',
+    ])('leaves GET %s alone, which never reaches OpenCode', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(false);
+    });
+
+    // OpenCode 2.0.20 matches before decoding a separator: these reach its web
+    // app page (200 HTML), 404 or 405, never the credential handler.
+    it.each([
+      '/api%2fcredential',
+      '/api%2Fcredential',
+      '/api%5ccredential',
+    ])('leaves GET %s alone, which OpenCode does not route to the list', (requestPath) => {
+      expect(isCredentialListRequest('GET', requestPath)).toBe(false);
+    });
+
+    it.each([
+      ['POST', '/api/credential'],
+      ['PATCH', '/api/credential/cred_1'],
+      ['DELETE', '/api/credential/cred_1'],
+      ['POST', '/api/credential/cred_1/activate'],
+      ['GET', '/api/credentials'],
+      ['GET', '/api/integration'],
+      ['GET', '/credential'],
+    ])('leaves %s %s alone', (method, requestPath) => {
+      expect(isCredentialListRequest(method, requestPath)).toBe(false);
     });
   });
 });

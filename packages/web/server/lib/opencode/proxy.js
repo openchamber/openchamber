@@ -459,6 +459,9 @@ export const registerOpenCodeProxy = (app, deps) => {
   const replayParsedBody = (proxyReq, req) => {
     const body = serializeParsedBody(req, proxyReq);
     if (!body) return;
+    // http-proxy copies the incoming headers, so a chunked request would reach
+    // OpenCode with both framing headers and be rejected as ambiguous.
+    proxyReq.removeHeader('transfer-encoding');
     proxyReq.setHeader('content-length', String(body.length));
     proxyReq.write(body);
   };

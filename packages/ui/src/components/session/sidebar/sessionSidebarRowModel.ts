@@ -5,7 +5,7 @@ import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildGroupRenderDescriptors } from './projects/sessionProjectRender';
-import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes } from './sessions/sessionNodeItemUtils';
+import { normalizeFolderRoots, selectFolderIdsForProjection, selectFolderRootNodes, type BlockingBadgeSessionScope } from './sessions/sessionNodeItemUtils';
 import { getSessionFolderIdentityKey, getSessionFolderOwnerKey, getSessionFolderScopes, isArchivedFolderScope } from './sessions/sessionFolderIdentity';
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
@@ -13,6 +13,7 @@ import { EMPTY_MULTI_RUN_INDEX, type MultiRunIndex, type MultiRunSummary } from 
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
+  blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   projectId: string | null;
   groupDirectory: string | null;
   secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
@@ -50,11 +51,11 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; allSessions: readonly Session[] })
   | (RowBase & { kind: 'folder-header'; group: SessionGroup; folder: SessionFolder; displayName: string; scopeKey: string; scopeDirectory: string | null; ownerKey: string | null; nodes: readonly SessionNode[]; activityNodes: readonly SessionNode[]; projectId: string | null; archived: boolean; collapsed: boolean; forceExpanded: boolean; deleteSessions: readonly Session[]; subFolderCount: number; dropEnabled: boolean })
-  | (RowBase & { kind: 'session'; node: SessionNode; depth: number; projectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta'] })
+  | (RowBase & { kind: 'session'; node: SessionNode; blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[]; depth: number; projectId: string | null; groupDirectory: string | null; ownerKey: string | null; selectionScopeKey: string | null; archived: boolean; renderContext: SessionSidebarRenderContext; secondaryMeta: SessionSidebarActivityItem['secondaryMeta'] })
   // A multi-run: one derived parent row over its member sessions. It is not a
   // session, so it never enters selection, and its lanes render as session
   // rows one level deeper when it is expanded.
-  | (RowBase & { kind: 'run'; run: MultiRunSummary; laneNodes: readonly SessionNode[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'group' | 'archived'; group?: SessionGroup; projectId?: string | null })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number });
@@ -305,6 +306,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
   type AppendOptions = {
     nodes: readonly SessionNode[];
+    blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
     containerKey: string;
     projectId: string | null;
     groupDirectory: string | null;
@@ -316,6 +318,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     getSecondaryMeta?: SessionSidebarActivityItem['getSecondaryMeta'];
     indexedNodes?: IndexedSessionNodes;
     selectionPoolOffset?: number;
+    // Nesting level of the container's top rows: 1 inside a folder, so its
+    // sessions indent under the folder header like subagent children do.
+    baseDepth?: number;
   };
   const runIndex = args.runIndex ?? EMPTY_MULTI_RUN_INDEX;
   const appendRun = (entry: RunEntry, options: AppendOptions): void => {
@@ -329,6 +334,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       key: keyFor(`${options.containerKey}:run:${entry.run.key}`),
       estimateSize: options.renderContext === 'timeline' ? TIMELINE_SESSION_ESTIMATE : SESSION_ESTIMATE,
       run: entry.run,
+      depth: options.baseDepth ?? 0,
       laneNodes: Object.freeze([...entry.lanes]),
       projectId: options.projectId,
       projectLabel: meta?.projectLabel ?? null,
@@ -339,12 +345,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       forceExpanded: search,
     });
     if (!expanded) return;
-    appendTrees(entry.lanes, 1, options);
+    appendTrees(entry.lanes, (options.baseDepth ?? 0) + 1, options);
   };
   const appendSessions = (options: AppendOptions): void => {
     for (const entry of collapseRunEntries(options.nodes, runIndex, options.archived)) {
       if (isRunEntry(entry)) appendRun(entry, options);
-      else appendTrees([entry], 0, options);
+      else appendTrees([entry], options.baseDepth ?? 0, options);
     }
   };
   const appendTrees = (nodes: readonly SessionNode[], baseDepth: number, options: AppendOptions): void => {
@@ -360,6 +366,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         key: rowKey,
         estimateSize: options.renderContext === 'timeline' ? TIMELINE_SESSION_ESTIMATE : SESSION_ESTIMATE,
         node: current.node,
+        blockingBadgeSessionScopes: current.depth === baseDepth ? options.blockingBadgeSessionScopes : undefined,
         depth: current.depth,
         projectId: options.projectId,
         groupDirectory: current.directory,
@@ -516,7 +523,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       });
       if (ownerKey) folderDropTargets.push(Object.freeze({ rowKey: folderKey, scopeKey: entry.scopeKey, folderId: entry.folder.id, ownerKey, enabled: dropEnabled }));
       if (folderCollapsed) return;
-      appendSessions({ nodes: entry.nodes, containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset });
+      appendSessions({ nodes: entry.nodes, containerKey: folderKey, projectId, groupDirectory: entry.scopeDirectory ?? group.directory, ownerKey, selectionScopeKey: ownerKey, archived: group.isArchivedBucket === true, renderContext: 'project', indexedNodes: indexed, selectionPoolOffset, baseDepth: 1 });
       for (const child of childFolders.get(identity) ?? []) appendFolder(child, displayName);
     };
     for (const folder of roots) appendFolder(folder, '');
@@ -630,6 +637,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
         nodes: [item.node], containerKey, projectId: item.projectId, groupDirectory: item.groupDirectory,
         // A list spanning projects carries no selection scope.
         ownerKey, selectionScopeKey: scoped ? ownerKey : null, archived: false, renderContext,
+        blockingBadgeSessionScopes: item.blockingBadgeSessionScopes,
         secondaryMeta: item.secondaryMeta, getSecondaryMeta: item.getSecondaryMeta, indexedNodes: indexed, selectionPoolOffset,
       });
       if (search) searchMatchCount += countMatches(item);

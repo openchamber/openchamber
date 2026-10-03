@@ -40,6 +40,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import {
+  addSelectionToChat,
   dismissActiveSelectionToolbar,
   getActiveSelectionToolbarVersion,
   hasActiveSelectionToolbar,
@@ -183,6 +184,8 @@ export const useKeyboardShortcuts = () => {
       if (!isVSCodeRuntime() && useUIStore.getState().sessionTabsEnabled && activateAdjacentSessionTab(1)) return;
       return navigateSessionHistory(1) ? undefined : false;
     },
+    session_history_back: (event) => navigateSessionHistoryByShortcut(event, -1),
+    session_history_forward: (event) => navigateSessionHistoryByShortcut(event, 1),
     close_session_tab: () => {
       if (isVSCodeRuntime() || !useUIStore.getState().sessionTabsEnabled) return false;
       if (currentSessionId) {
@@ -220,7 +223,7 @@ export const useKeyboardShortcuts = () => {
       const state = useUIStore.getState();
       state.setSettingsDialogOpen(!state.isSettingsDialogOpen);
     },
-    add_selection_to_chat: invokeActiveSelectionAddToChat,
+    add_selection_to_chat: () => addSelectionToChat({ focusWhenEmpty: false }),
     toggle_sidebar: () => {
       const state = useUIStore.getState();
       if (state.isMobile) state.setSessionSwitcherOpen(!state.isSessionSwitcherOpen);
@@ -319,6 +322,13 @@ export const useKeyboardShortcuts = () => {
       void sessionActions.abortCurrentOperation(currentSessionId);
     },
   });
+
+  function navigateSessionHistoryByShortcut(event: KeyboardEvent, delta: -1 | 1): boolean | void {
+    // An editor that already handled the chord (CodeMirror outdent/indent)
+    // keeps it.
+    if (event.defaultPrevented) return false;
+    return navigateSessionHistory(delta) ? undefined : false;
+  }
 
   function cycleFavoriteModel(delta: number): boolean | void {
     if (hasActiveBtwComposer()) return false;

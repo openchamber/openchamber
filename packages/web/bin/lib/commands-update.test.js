@@ -41,7 +41,36 @@ describe('update command', () => {
       try {
         await updateCommand({ json: true });
 
-        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true });
+        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true, targetVersion: '9.9.9' });
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+    });
+  });
+
+  it('surfaces the installed-version verification failure', async () => {
+    await withTempOpenChamberDataDir(async () => {
+      const originalWrite = process.stdout.write;
+      process.stdout.write = vi.fn(() => true);
+      const executeUpdate = vi.fn(() => ({
+        success: false,
+        exitCode: 0,
+        error: 'Installed @openchamber/web version 1.0.0 does not match target 9.9.9.',
+      }));
+      const updateCommand = createUpdateCommand({
+        packageManagerPath: '/fake/package-manager.js',
+        serveCommand: vi.fn(),
+        importFromFilePath: vi.fn(async () => ({
+          checkForUpdates: vi.fn(async () => ({ available: true, version: '9.9.9' })),
+          detectPackageManager: vi.fn(() => 'npm'),
+          executeUpdate,
+          getCurrentVersion: vi.fn(() => '1.0.0'),
+        })),
+      });
+
+      try {
+        await expect(updateCommand({ json: true })).rejects.toThrow(/does not match target 9\.9\.9/);
+        expect(executeUpdate).toHaveBeenCalledWith('npm', { silent: true, targetVersion: '9.9.9' });
       } finally {
         process.stdout.write = originalWrite;
       }

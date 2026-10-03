@@ -87,6 +87,23 @@ En un portátil es un bloqueo más débil: la app de escritorio la lee del perfi
 
 Con la variable, el relay, Jev, el acceso de red y las extensiones permitidas también salen de sus propias variables: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (URL de repositorios separadas por comas) y `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. En Docker vas a necesitar la del acceso de red, porque el servidor tiene que escuchar más allá del contenedor.
 
+### Fijar la CLI de OpenCode
+
+Si tus equipos ya tienen OpenCode instalado y OpenChamber debe usar esa instalación, pon su ruta en el archivo de políticas. Funciona con o sin el modo empresa.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber inicia OpenCode solo desde esa ruta. Ignora la ruta de Ajustes, `OPENCODE_BINARY` y la copia incluida en la app de escritorio, que se queda en el disco sin usarse.
+- Si en esa ruta no hay nada ejecutable, OpenChamber no recurre a otra copia. Se detiene con un error que indica la ruta.
+- Ajustes muestra la ruta en solo lectura, con una nota de que la fijó el administrador.
+- OpenChamber no instala ni actualiza un OpenCode fijado y no anuncia versiones nuevas. Las actualizaciones llegan con tu despliegue.
+- La CLI tiene que ser OpenCode 2.x, como mínimo la versión que pide OpenChamber. Con una más antigua, OpenChamber se queda en la pantalla de "actualizar OpenCode".
+- También sirve una carpeta, si contiene `opencode` (`opencode.exe` en Windows). No hay variable de entorno para esto, porque un usuario puede definirlas por su cuenta.
+
 ### Ejemplos
 
 Para poner el archivo de políticas en un Mac, ejecuta en Terminal como administrador:
@@ -135,7 +152,7 @@ Para comprobar que funcionó, abre Configuración → Proveedores: arriba aparec
 
 ### Qué cambia
 
-- Los proveedores de modelos salen solo de tu configuración de OpenCode. Conectar un proveedor, iniciar sesión en uno, añadir una clave o crear un proveedor personalizado está desactivado en OpenChamber; quitar o cambiar las cuentas que ya existen sigue funcionando. Esto solo cierra la entrada a través de la app; el bloqueo en sí es la política de OpenCode que se describe más abajo.
+- Los proveedores de modelos salen solo de tu configuración de OpenCode. Conectar un proveedor, iniciar sesión en uno, añadir una clave o crear un proveedor personalizado está desactivado en OpenChamber; quitar o cambiar las cuentas que ya existen sigue funcionando. Esto solo cierra la entrada a través de la app; el bloqueo en sí es la política de OpenCode que se describe más abajo. Iniciar sesión en un servidor MCP de tu configuración de OpenCode sigue funcionando, porque llega a ese servidor y no a un proveedor de modelos.
 - Los [Proveedores de clasificación (Jev)](/es/classification-providers/) se quedan desactivados, incluido un endpoint personalizado que alguien escriba en Configuración. La red de seguridad y Auto no se ofrecen, y las sesiones solo pasan a en curso a mano. Para usar Jev a través de tu propia infraestructura, fija un endpoint con `jev` en el archivo de políticas o con `OPENCHAMBER_JEV_URL` (más `OPENCHAMBER_JEV_MODEL` y, si lo necesita, `OPENCHAMBER_JEV_API_KEY`). Pasa a ser el predeterminado, se puede seguir desactivando y no se puede elegir nada más.
 - La lectura en voz alta a través de OpenAI está desactivada. Un servidor propio de voz o de transcripción tiene que ejecutarse en la misma máquina. Las voces locales y los modelos de dictado locales siguen funcionando.
 - Las notificaciones push a teléfonos y navegadores solo llevan un título genérico como "Agent response is ready", sin el texto del mensaje ni el nombre de la sesión. Las notificaciones de escritorio se quedan en tu máquina y conservan el texto completo.

@@ -87,6 +87,23 @@ Dizüstü bilgisayarda bu daha zayıf bir kilittir: masaüstü uygulaması deği
 
 Değişkenle birlikte relay, Jev, ağ erişimi ve izin verilen eklentiler de kendi değişkenlerinden gelir: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (virgülle ayrılmış depo URL'leri) ve `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. Docker'da ağ erişimi değişkenine ihtiyacınız olacak, çünkü sunucunun container dışından gelen bağlantıları da dinlemesi gerekir.
 
+### OpenCode CLI'yi sabitlemek
+
+Makinelerinizde OpenCode zaten kuruluysa ve OpenChamber'ın bu kurulumu kullanmasını istiyorsanız, yolunu politika dosyasına yazın. Kurumsal mod açık olsun ya da olmasın çalışır.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber, OpenCode'u yalnızca bu yoldan başlatır. Ayarlar'daki yolu, `OPENCODE_BINARY` değişkenini ve masaüstü uygulamasıyla gelen kopyayı yok sayar; o kopya diskte kalır ama kullanılmaz.
+- Bu yolda çalıştırılabilir bir şey yoksa OpenChamber başka bir kopyaya geçmez. Yolu belirten bir hatayla durur.
+- Ayarlar yolu salt okunur gösterir ve yöneticinin belirlediğini not eder.
+- OpenChamber sabitlenmiş bir OpenCode'u kurmaz, güncellemez ve yeni sürümleri duyurmaz. Güncellemeler sizin dağıtımınızla gelir.
+- CLI, OpenCode 2.x olmalı ve en az OpenChamber'ın istediği sürümde bulunmalı. Daha eskiyse OpenChamber "OpenCode'u güncelle" ekranında kalır.
+- `opencode` (Windows'ta `opencode.exe`) içeren bir klasör de olur. Bunun için ortam değişkeni yok, çünkü kullanıcı bunları kendisi ayarlayabilir.
+
 ### Örnekler
 
 Politika dosyasını bir Mac'e koymak için Terminal'de yönetici olarak şunu çalıştırın:
@@ -135,7 +152,7 @@ environment:
 
 ### Neler değişir
 
-- Model sağlayıcıları yalnızca OpenCode yapılandırmanızdan gelir. OpenChamber'da sağlayıcı bağlamak, bir sağlayıcıda oturum açmak, anahtar eklemek ya da özel sağlayıcı oluşturmak kapalıdır; var olan hesapları kaldırmak veya aralarında geçiş yapmak çalışmaya devam eder. Bu yalnızca uygulama üzerinden girişi kapatır; asıl kilit aşağıda anlatılan OpenCode politikasıdır.
+- Model sağlayıcıları yalnızca OpenCode yapılandırmanızdan gelir. OpenChamber'da sağlayıcı bağlamak, bir sağlayıcıda oturum açmak, anahtar eklemek ya da özel sağlayıcı oluşturmak kapalıdır; var olan hesapları kaldırmak veya aralarında geçiş yapmak çalışmaya devam eder. Bu yalnızca uygulama üzerinden girişi kapatır; asıl kilit aşağıda anlatılan OpenCode politikasıdır. OpenCode yapılandırmanızdaki bir MCP sunucusunda oturum açmak çalışmaya devam eder, çünkü bu bir model sağlayıcısına değil o sunucuya ulaşır.
 - [Sınıflandırma sağlayıcıları (Jev)](/classification-providers/) kapalı kalır; birinin Ayarlar'a yazdığı özel bir uç nokta da buna dahildir. Güvenlik ağı ve Auto sunulmaz, oturumlar da yalnızca elle devam edenlere geçer. Jev'i kendi altyapınız üzerinden kullanmak için politika dosyasındaki `jev` ile ya da `OPENCHAMBER_JEV_URL` ile bir uç nokta sabitleyin (ayrıca `OPENCHAMBER_JEV_MODEL` ve gerekiyorsa `OPENCHAMBER_JEV_API_KEY`). Bu uç nokta varsayılan olur, yine de kapatılabilir ve başka bir şey seçilemez.
 - OpenAI üzerinden sesli okuma kapalıdır. Özel bir konuşma sentezi ya da transkripsiyon sunucusu aynı makinede çalışmalıdır. Yerel sesler ve yerel dikte modelleri çalışmaya devam eder.
 - Telefonlara ve tarayıcılara giden push bildirimleri yalnızca "Agent response is ready" gibi genel bir başlık taşır; mesaj metni ya da oturum adı içermez. Masaüstü bildirimleri makinenizde kalır ve metnin tamamını korur.

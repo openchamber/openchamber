@@ -101,6 +101,10 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren> = ({ c
             <span className="text-foreground">{outdated ? `${minimum}+` : '2.x'}</span>
           </div>
         )}
+        {/* With several installs, the path tells which one OpenChamber runs. */}
+        {compatibility.binary && (
+          <p className="mt-2 max-w-full break-all font-mono text-xs text-muted-foreground select-text">{compatibility.binary}</p>
+        )}
         {failed && <p role="alert" className="mt-5 rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]">{t('opencodeCompatibility.failed')}</p>}
         <div className="app-region-no-drag mt-7 flex flex-wrap items-center justify-center gap-2">
           {compatibility.canInstall && (

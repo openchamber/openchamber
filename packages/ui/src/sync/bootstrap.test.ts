@@ -188,7 +188,7 @@ describe("bootstrapDirectory", () => {
       expect(await bootstrap.sessions).toBe("complete")
       expect(await bootstrap.environment).toBe("complete")
       for (const spy of [location, config, vcs]) expect(spy.mock.calls).toEqual([[directory]])
-      for (const spy of [forms, permissions]) expect(spy.mock.calls).toEqual([[{ directories: [directory], includeGlobal: false }]])
+      for (const spy of [forms, permissions]) expect(spy.mock.calls).toEqual([[{ directories: [directory] }]])
       // The directory travels with the read; the client keeps the host's snapshot global and
       // asks a directory inside an isolated space for its own.
       expect(statuses.mock.calls).toEqual([[directory]])

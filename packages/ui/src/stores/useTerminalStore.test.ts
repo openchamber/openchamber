@@ -545,6 +545,18 @@ describe('default terminal tab labels', () => {
 
     expect(labels()).toEqual(['build', 'Terminal']);
   });
+
+  test('moves a tab into the slot of the tab it was dropped on', () => {
+    const first = setup();
+    useTerminalStore.getState().createTab('/repo');
+    const third = useTerminalStore.getState().createTab('/repo');
+
+    useTerminalStore.getState().moveTab('/repo', third, first);
+    expect(labels()).toEqual(['Terminal 3', 'Terminal', 'Terminal 2']);
+
+    useTerminalStore.getState().moveTab('/repo', third, 'missing');
+    expect(labels()).toEqual(['Terminal 3', 'Terminal', 'Terminal 2']);
+  });
 });
 
 describe('directoryMayHaveActiveProjectAction', () => {

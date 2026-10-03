@@ -42,9 +42,14 @@ type Props = {
   doneHint?: React.ReactNode;
   /** Provider of the session's model; its logo closes the third line. */
   providerId?: string | null;
-  /** Reserves room for the action buttons that share the first line. */
+  /** Reserves room for permanently shown action buttons on the first line. */
   metaPaddingClass?: string;
   hideMetaOnHoverClass: string;
+  /** Sets how far hover-revealed actions reach into the first line
+      (`--oc-actions-reserve`). */
+  actionsReserveClass?: string;
+  /** Fades the first line's text away under hover-revealed actions. */
+  actionsMaskClass?: string;
 };
 
 // Only rows whose project carries a custom image pay for the theme
@@ -99,6 +104,8 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   providerId,
   metaPaddingClass,
   hideMetaOnHoverClass,
+  actionsReserveClass,
+  actionsMaskClass,
 }) => {
   const hasThirdLine = !compact && (Boolean(branchLabel) || Boolean(thirdLineLead) || Boolean(prBadge) || Boolean(zombieIndicator) || Boolean(goal) || Boolean(badges) || Boolean(providerId));
   // Compact rows have no third line, so their badges ride in the meta
@@ -114,18 +121,19 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     <span className="typography-micro leading-none text-muted-foreground/50 tabular-nums">{timeSlot}</span>
   </span>;
   if (compact) {
-    return <div className="relative flex w-full min-w-0 items-center gap-1">
-      <div className={cn('min-w-0 flex-1 truncate typography-ui-label font-normal', titleClassName)}>{title}</div>
+    return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>
+      <div className={cn('min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
       {meta}
     </div>;
   }
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px first line: the hover actions are positioned against the
         row from outside and rely on this height to sit exactly on it. */}
-    <div className="relative flex h-5 w-full min-w-0 items-center gap-1">
+    <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       <TimelineProjectIcon project={project} />
       {projectLabel ? (
-        <span className="min-w-0 truncate typography-micro text-muted-foreground/85">{projectLabel}</span>
+        // Starts past the 14px project icon and the 4px gap.
+        <span className={cn('min-w-0 truncate typography-micro text-muted-foreground/85 [--oc-actions-inset:18px]', actionsMaskClass)}>{projectLabel}</span>
       ) : null}
       {meta}
     </div>

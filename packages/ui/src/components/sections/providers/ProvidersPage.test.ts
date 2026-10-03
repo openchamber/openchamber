@@ -239,6 +239,11 @@ describe('getProviderCardStatus', () => {
     expect(status([integration()])).toEqual({ kind: 'signInNeeded' });
   });
 
+  test('a connection OpenCode flagged for a new sign-in outranks every other status', () => {
+    const expired: ConnectionInfo = { ...second, status: { status: 'needs_auth', message: 'Signed out of OpenCode Console.' } };
+    expect(status([integration({ connections: [credential, expired] })])).toEqual({ kind: 'reauthNeeded' });
+  });
+
   test('a provider with no integration gets no status instead of a false warning', () => {
     expect(status([integration({ id: 'openai' })])).toBe(null);
   });

@@ -33,6 +33,36 @@ the 2.x code, not from memory of 1.x.
   `<dataDir>/opencode.managed.json` (`OPENCODE_CONFIG`), so a settings change
   applies without a restart. Only the binary, port and external toggle restart.
 
+## Every directory-scoped read starts a location
+
+On 2.x a read through the location middleware builds that directory's
+location, and the build starts every configured local MCP server for it. The
+location then lives until an hour without session events. So each read names
+a directory, and only one the user is working in:
+
+- **Which routes:** agent, plugin, model, provider, integration, mcp, project,
+  form, permission request list, fs, command, skill, rpc, pty, shell,
+  reference, vcs, websearch, config, location (`protocol/src/api.ts` lists the
+  groups with `locationMiddleware`). Session routes resolve the session's own
+  location; `GET /api/session`, `/api/session/active` and `/api/credential`
+  are global and start nothing.
+- **How the directory travels:** the `x-opencode-directory` header,
+  percent-encoded, or a `location[directory]` query. A `?directory=` query is
+  ignored.
+- **A read without one** answers for OpenCode's own working directory, the
+  user's home for a managed OpenCode, and starts a fleet there. The UI reads
+  through `opencodeClient` with the current directory; server code with no
+  directory of its own uses the lifecycle's `getDefaultOpenCodeDirectory()`,
+  the last-used directory it warmed at startup.
+- **Fan-out is the failure:** a loop over every project, worktree or store
+  directory starts one fleet each. A refresh after a catalog event re-reads
+  only the directories the events named; they are already running.
+
+A report of processes multiplying, memory climbing with MCP servers enabled,
+or MCP servers starting in projects nobody opened: reproduce it with
+[references/mcp-spawn-probe.md](references/mcp-spawn-probe.md) before reading
+code.
+
 ## Workarounds for what 2.x cannot do
 
 Each exists because 2.x has no route for it. When a tag adds the route,
@@ -42,10 +72,8 @@ the workaround goes and the record comes from OpenCode.
   keeps it per data dir and the proxy folds it into session reads.
   Session metadata is not a workaround since 2.0.15: it lives on the OpenCode
   record, written by merge-then-PATCH in `session-metadata-store.js`, which
-  also migrates the old `sessions-metadata.json`.
-- **Provider credentials**: not readable over HTTP. `credential-db.js` reads
-  OpenCode's own SQLite `credential` table read-only, `auth.json` as legacy
-  fallback. Private schema: re-verify on every bump.
+  also migrates the old `sessions-metadata.json`. Provider credentials are
+  not one either since 2.0.20: `opencode/auth.js` reads `GET /api/credential`.
 - **1.x sessions created after the one-shot migration**:
   `v1-migration-topup.js` rewinds the migration cursor before a managed start,
   only when no revisited session has 2.x activity.
@@ -53,8 +81,8 @@ the workaround goes and the record comes from OpenCode.
   route does not declare, so session update/delete/archive report the status
   without OpenCode's message or log `ref`.
 
-Open asks upstream (OpenCode Slack): credential read over HTTP, declaring 500
-bodies on session mutations. Dropped: an import route for missing 1.x
+Open asks upstream (OpenCode Slack): declaring 500 bodies on session
+mutations. Dropped: an import route for missing 1.x
 sessions (the top-up workaround is enough). Check the newest tag before re-asking.
 
 ## Sources of truth

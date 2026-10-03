@@ -30,6 +30,57 @@ export function stripAppImageArgv0Leak(env) {
 }
 
 /**
+ * Entries the AppImage launcher (electron-builder's AppRun) adds to list
+ * variables before starting the app, given the mount point `appDir`.
+ * `dropEmpty` marks lists where the launcher leaves an empty entry (a trailing
+ * `:`) when the user had not set the variable; PATH is always set, so its
+ * empty entries are the user's and are kept.
+ */
+const APPIMAGE_LAUNCHER_ENTRIES = Object.freeze({
+  PATH: { entries: (appDir) => [appDir, `${appDir}/usr/sbin`], dropEmpty: false },
+  LD_LIBRARY_PATH: { entries: (appDir) => [`${appDir}/usr/lib`], dropEmpty: true },
+  GSETTINGS_SCHEMA_DIR: { entries: (appDir) => [`${appDir}/usr/share/glib-2.0/schemas`], dropEmpty: true },
+  XDG_DATA_DIRS: { entries: (appDir) => [`${appDir}/usr/share`, './share'], dropEmpty: true },
+});
+
+const withoutTrailingSlashes = (entry) => (entry.length > 1 ? entry.replace(/\/+$/, '') : entry);
+
+/**
+ * Remove what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`,
+ * `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` in a mutable child env object.
+ *
+ * Left in place, user tools load the app's bundled libraries and data, and an
+ * empty `LD_LIBRARY_PATH` entry makes the dynamic linker search the current
+ * directory (#4177). Runs only when `APPDIR` says we are inside an AppImage.
+ * The user's own non-empty entries are kept in order (empty ones are dropped
+ * from the lists marked `dropEmpty`), entries the app adds itself (the bundled
+ * OpenCode CLI directory) are kept, and a variable left with no entries is
+ * removed. `XDG_DATA_DIRS` keeps the system directories the launcher wraps
+ * around the user's value: they are the spec's defaults, not the app's files.
+ *
+ * @param {NodeJS.ProcessEnv | Record<string, string | undefined> | null | undefined} env
+ * @returns {typeof env}
+ */
+export function stripAppImageLauncherEnv(env) {
+  const appDir = env?.APPDIR ? withoutTrailingSlashes(env.APPDIR) : '';
+  if (!appDir) return env;
+  for (const [name, launcher] of Object.entries(APPIMAGE_LAUNCHER_ENTRIES)) {
+    const value = env[name];
+    if (value === undefined) continue;
+    const added = new Set(launcher.entries(appDir));
+    const kept = value
+      .split(':')
+      .filter((entry) => !(launcher.dropEmpty && entry === '') && !added.has(withoutTrailingSlashes(entry)));
+    if (kept.length > 0) {
+      env[name] = kept.join(':');
+    } else {
+      delete env[name];
+    }
+  }
+  return env;
+}
+
+/**
  * Clear AppImage `ARGV0` from this process.
  *
  * Bun keeps a native environ that `bun-pty` inherits even after

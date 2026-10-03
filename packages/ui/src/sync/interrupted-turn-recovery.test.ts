@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import type { MessagePage } from "@/lib/opencode/client"
-import type { Message, Part } from "@/lib/opencode/model"
+import type { SyncEvent } from "@/lib/opencode/events"
+import type { Message, Part, SessionOutcome } from "@/lib/opencode/model"
+import { getRuntimeKey } from "@/lib/runtime-switch"
 import { ChildStoreManager } from "./child-store"
-import { SessionMessageLoader, setImperativeSessionMessageLoader } from "./session-message-loader"
-import { recoverInterruptedTurnAfterMessageLoad } from "./sync-context"
+import { createEventRoutingIndex, handleEvent, markRecordedInterruptedTurn } from "./sync-context"
 
 const cleanups: Array<() => void> = []
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup() })
@@ -13,53 +13,101 @@ const openAssistant: Message = {
   id: "msg_a", sessionID: "ses_1", role: "assistant", time: { created: 2 },
   modelID: "m", providerID: "p", agent: "build",
 }
-const text: Part = { id: "prt_a", messageID: "msg_a", sessionID: "ses_1", type: "text", text: "4" }
+const runningTool: Part = {
+  id: "prt_t", messageID: "msg_a", sessionID: "ses_1", type: "tool", tool: "bash", callID: "c",
+  state: { status: "running", input: {}, time: { start: 2 } },
+}
+const idle = (outcome: SessionOutcome, id = "msg_i"): Message => (
+  { id, sessionID: "ses_1", role: "idle", time: { created: 3 }, outcome }
+)
 
-function setup(serverRecords: () => Array<{ info: Message; parts: Part[] }>) {
+function setup(messages: Message[]) {
   const childStores = new ChildStoreManager()
   const store = childStores.ensureChild("/repo", { bootstrap: false })
-  store.setState({
-    session: [],
-    message: { ses_1: [user, openAssistant] },
-    part: { msg_a: [text] },
-    session_status: { ses_1: { type: "idle" } },
-  })
-  let reads = 0
-  const sdk = {
-    getSessionMessages: async (): Promise<MessagePage> => {
-      reads += 1
-      return { items: serverRecords(), cursor: {} }
-    },
-  }
-  const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: "recovery-test" })
-  setImperativeSessionMessageLoader(loader)
-  cleanups.push(() => { setImperativeSessionMessageLoader(null); childStores.disposeAll() })
-  return { store, reads: () => reads }
+  const routingIndex = createEventRoutingIndex()
+  const receive = (event: SyncEvent) => handleEvent("/repo", event, childStores, routingIndex, getRuntimeKey())
+  store.setState({ session: [], message: { ses_1: messages }, part: { msg_a: [runningTool] } })
+  cleanups.push(() => childStores.disposeAll())
+  return { store, receive }
 }
 
-describe("recoverInterruptedTurnAfterMessageLoad", () => {
-  test("re-reads the tail under an idle status before calling the turn interrupted", async () => {
-    // The messages were read while the turn was still running; the status was
-    // read after it finished. The server now has the completed message.
-    const completed: Message = { ...openAssistant, time: { created: 2, completed: 3 }, finish: "stop" }
-    const { store, reads } = setup(() => [{ info: user, parts: [] }, { info: completed, parts: [text] }])
+const isStopped = (message: Message | undefined) => (
+  message?.role === "assistant" && message.time.completed !== undefined && message.error?.type === "aborted"
+)
 
-    await recoverInterruptedTurnAfterMessageLoad("/repo", store, "ses_1")
+describe("markRecordedInterruptedTurn", () => {
+  for (const outcome of ["interrupted", "failed"] as const) {
+    test(`marks the turn OpenCode recorded as ${outcome}`, () => {
+      const { store } = setup([user, openAssistant, idle(outcome)])
 
-    expect(reads()).toBe(1)
-    const assistant = store.getState().message.ses_1.find((message) => message.id === "msg_a")
-    expect(assistant).toMatchObject({ time: { completed: 3 }, finish: "stop" })
-    expect(assistant !== undefined && "error" in assistant).toBe(false)
+      markRecordedInterruptedTurn(store, "ses_1")
+
+      expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+      const tool = store.getState().part.msg_a[0]
+      expect(tool?.type === "tool" && tool.state.status).toBe("error")
+    })
+  }
+
+  test("leaves an unfinished turn with no record open (#4156)", () => {
+    // Another OpenCode process on the same database (the TUI) is running it.
+    const { store } = setup([user, openAssistant])
+
+    markRecordedInterruptedTurn(store, "ses_1")
+
+    expect(store.getState().message.ses_1[1]).toBe(openAssistant)
+    expect(store.getState().part.msg_a[0]).toBe(runningTool)
   })
 
-  test("marks the turn interrupted when the settled server still has it open", async () => {
-    const { store, reads } = setup(() => [{ info: user, parts: [] }, { info: openAssistant, parts: [text] }])
+  test("a succeeded record is not a stop", () => {
+    const { store } = setup([user, openAssistant, idle("succeeded")])
 
-    await recoverInterruptedTurnAfterMessageLoad("/repo", store, "ses_1")
+    markRecordedInterruptedTurn(store, "ses_1")
 
-    expect(reads()).toBe(1)
-    const assistant = store.getState().message.ses_1.find((message) => message.id === "msg_a")
-    expect(assistant).toMatchObject({ error: { type: "aborted" } })
-    expect(assistant?.role === "assistant" && assistant.time.completed !== undefined).toBe(true)
+    expect(store.getState().message.ses_1[1]).toBe(openAssistant)
   })
+
+  test("a record from an earlier turn does not stop a later one", () => {
+    const earlier: Message = { ...openAssistant, id: "msg_0", time: { created: 0, completed: 1 } }
+    const { store } = setup([earlier, idle("interrupted", "msg_i0"), user, openAssistant])
+
+    markRecordedInterruptedTurn(store, "ses_1")
+
+    expect(store.getState().message.ses_1.at(-1)).toBe(openAssistant)
+  })
+
+  test("the newest record decides", () => {
+    const { store } = setup([user, openAssistant, idle("interrupted", "msg_i0"), idle("succeeded")])
+
+    markRecordedInterruptedTurn(store, "ses_1")
+
+    expect(store.getState().message.ses_1[1]).toBe(openAssistant)
+  })
+})
+
+describe("settle events", () => {
+  test("an interrupted outcome marks the open turn", () => {
+    const { store, receive } = setup([user, openAssistant])
+
+    receive({ type: "session.idle", properties: { sessionID: "ses_1", outcome: "interrupted" } })
+
+    expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+  })
+
+  test("a failed turn marks the open turn", () => {
+    const { store, receive } = setup([user, openAssistant])
+
+    receive({ type: "session.error", properties: { sessionID: "ses_1", error: { type: "unknown", message: "boom" } } })
+
+    expect(isStopped(store.getState().message.ses_1[1])).toBe(true)
+  })
+
+  for (const outcome of [undefined, "succeeded"] as const) {
+    test(`an idle event with ${outcome ?? "no"} outcome leaves the turn as stored`, () => {
+      const { store, receive } = setup([user, openAssistant])
+
+      receive({ type: "session.idle", properties: { sessionID: "ses_1", outcome } })
+
+      expect(store.getState().message.ses_1[1]).toBe(openAssistant)
+    })
+  }
 })

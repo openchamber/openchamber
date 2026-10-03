@@ -289,6 +289,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (isPermissionMode(candidate.permissionDefaultMode)) {
       result.permissionDefaultMode = candidate.permissionDefaultMode;
     }
+    if (typeof candidate.messageSearchEnabled === 'boolean') {
+      result.messageSearchEnabled = candidate.messageSearchEnabled;
+    }
+    if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
+      result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
+    }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
     }
@@ -500,6 +506,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
       result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
+    if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
+      result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
     }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;

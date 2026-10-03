@@ -1073,6 +1073,20 @@ export async function setLinkedIssue(
 }
 
 /**
+ * Link several items in one metadata write. Each write replaces the whole
+ * link list, so separate concurrent `setLinkedIssue` calls would keep only
+ * the last one's item.
+ */
+export async function addLinkedIssues(
+  sessionId: string,
+  directory: string | null | undefined,
+  issues: readonly LinkedIssue[],
+): Promise<Session> {
+  return patchSessionMetadata(sessionId, directory, (metadata) =>
+    issues.reduce((current, issue) => withLinkedIssue(current, issue, true), metadata))
+}
+
+/**
  * The user tracks a session as in work (`open`) or marks its work done.
  * Bound to the server it was clicked on: when the runtime switches while the
  * change is in flight, nothing reaches the new server or its cache, and the
@@ -1734,6 +1748,14 @@ export async function unarchiveSession(sessionId: string, expectedRuntimeKey = g
           }
         })
       }
+    }
+    // Its worktree may have been removed while it sat in the archive; such a
+    // session moves to its project root so it can be written to again. Loaded
+    // lazily: the relocation module builds on this one.
+    if (!isStaleRuntime(expectedRuntimeKey)) {
+      void import("@/lib/worktrees/relocateRestoredSession")
+        .then((module) => module.relocateRestoredSessionWithNotice(sessionId))
+        .catch((error: unknown) => console.warn("[session-actions] restored session relocation failed", error))
     }
     return true
   } catch (error) {

@@ -66,6 +66,8 @@ const journeyOf = (overrides = {}) => {
     changeIdleStop: record('changeIdleStop', { enabled: false, hours: 8 }),
     runSetup: record('runSetup', { id: ID, state: 'running', setup: { state: 'running', index: 0, total: 1, command: 'npm ci' } }),
     readSetup: record('readSetup', { setup: null, output: null }),
+    readDisk: record('readDisk', { imageBytes: null, toolsBytes: 0, spacesBytes: 0, freeBytes: 0, freesImage: false }),
+    cleanUpDisk: record('cleanUpDisk', { freedBytes: 0, kept: [], disk: null }),
     ...overrides,
   };
 };
@@ -73,7 +75,7 @@ const journeyOf = (overrides = {}) => {
 describe('space routes', () => {
   it('answers every journey route with 404 and isolated_spaces_off while the feature is off, and the switch still works', async () => {
     const { call, calls } = await serve({ journey: null, switchState: { enabled: false } });
-    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/restart`], ['POST', `/${ID}/restart-opencode`], ['POST', `/${ID}/grants`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`], ['GET', '/idle-stop'], ['PUT', '/idle-stop'], ['POST', `/${ID}/setup`], ['GET', `/${ID}/setup`]]) {
+    for (const [method, path] of [['GET', ''], ['POST', ''], ['GET', '/places'], ['POST', `/${ID}/start`], ['POST', `/${ID}/stop`], ['POST', `/${ID}/restart`], ['POST', `/${ID}/restart-opencode`], ['POST', `/${ID}/grants`], ['DELETE', `/${ID}`], ['GET', `/${ID}/journal`], ['GET', `/${ID}/apply`], ['POST', `/${ID}/apply`], ['GET', '/idle-stop'], ['PUT', '/idle-stop'], ['POST', `/${ID}/setup`], ['GET', `/${ID}/setup`], ['GET', '/places/docker/disk'], ['POST', '/places/docker/clean-up']]) {
       expect(await call(method, `${SPACES_ROUTE}${path}`, method === 'GET' || method === 'DELETE' ? undefined : {}), `${method} ${path}`).toEqual({ status: 404, body: { code: 'isolated_spaces_off', message: 'Isolated spaces are turned off.', details: null } });
     }
     expect(await call('GET', `${SPACES_ROUTE}/switch`)).toEqual({ status: 200, body: { enabled: false, spaces: [] } });
@@ -103,6 +105,8 @@ describe('space routes', () => {
     const { call } = await serve({ journey, places });
     expect(await call('GET', `${SPACES_ROUTE}/places`)).toEqual({ status: 200, body: { places: [{ id: 'docker', available: true, version: '29.2.1', hostIsolation: true }] } });
     expect(await call('GET', SPACES_ROUTE)).toEqual({ status: 200, body: { spaces: [{ id: ID, name: 'One', state: 'running' }] } });
+    expect(await call('GET', `${SPACES_ROUTE}/places/docker/disk`)).toEqual({ status: 200, body: { imageBytes: null, toolsBytes: 0, spacesBytes: 0, freeBytes: 0, freesImage: false } });
+    expect(await call('POST', `${SPACES_ROUTE}/places/docker/clean-up`)).toEqual({ status: 200, body: { freedBytes: 0, kept: [], disk: null } });
     const request = { projectDirectory: '/home/me/project', name: 'One', start: 'clean', network: { mode: 'open' } };
     expect(await call('POST', SPACES_ROUTE, request)).toEqual({ status: 202, body: { id: ID, state: 'preparing' } });
     expect(await call('POST', `${SPACES_ROUTE}/${ID}/start`)).toEqual({ status: 200, body: { id: ID, state: 'running' } });
@@ -118,7 +122,7 @@ describe('space routes', () => {
     expect(await call('GET', `${SPACES_ROUTE}/${ID}/setup`)).toEqual({ status: 200, body: { setup: null, output: null } });
     expect(await call('DELETE', `${SPACES_ROUTE}/${ID}`)).toEqual({ status: 200, body: { id: ID, removed: true } });
     expect(journey.calls).toEqual([
-      ['listSpaces', { access: true }], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID],
+      ['listSpaces', { access: true }], ['readDisk', 'docker'], ['cleanUpDisk', 'docker'], ['createSpace', request], ['startSpace', ID], ['stopSpace', ID], ['restartSpace', ID], ['restartOpenCode', ID], ['grantAccess', ID, { kind: 'domain', upstream: 'https://registry.example.com/' }], ['openDomain', ID, { domain: 'registry.npmjs.org' }], ['readJournal', ID], ['previewApply', ID], ['applySpace', ID, { as: 'branch', branch: 'b' }], ['runSetup', ID, { commands: ['npm ci'] }], ['readSetup', ID], ['removeSpace', ID, { allowUnsaved: false }],
     ]);
   });
 

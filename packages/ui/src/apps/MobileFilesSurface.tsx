@@ -23,6 +23,7 @@ import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 
 // The full desktop file editor, loaded on demand — it's a heavy chunk and only
 // needed once a file is actually opened.
@@ -34,7 +35,7 @@ type MobileFilesRoute =
   | { type: 'browser'; directory: string }
   | { type: 'file'; path: string; returnDirectory: string };
 
-const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const getNameFromPath = (path: string): string => {
   const normalized = normalizePath(path);
@@ -181,15 +182,16 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
 
   // Chat tool rows (read/skill/edit) stage a pending file focus/navigation in
   // the UI store — the same channel desktop's context panel consumes. Route
-  // straight to the editor for targets inside this workspace; the editor
-  // itself consumes pendingFileNavigation to jump to the requested line.
+  // straight to the editor for any requested target, inside or outside this
+  // workspace: a skill or an agent output under /tmp is a real file the user
+  // asked to read, and the editor reads it through allowOutsideWorkspace. The
+  // browser tree itself stays rooted at `root`.
   const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
   const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
   React.useEffect(() => {
     const target = normalizePath(pendingFileNavigation?.path ?? pendingFileFocusPath ?? '');
     if (!target || !root) return;
-    if (target !== root && !target.startsWith(`${root}/`)) return;
-    setSelectedPath(root, target);
+    setSelectedPath(root, target, { allowOutsideRoot: true });
     setRoute({ type: 'file', path: target, returnDirectory: root });
     if (pendingFileFocusPath) useUIStore.getState().setPendingFileFocusPath(null);
   }, [pendingFileFocusPath, pendingFileNavigation, root, setSelectedPath]);

@@ -386,3 +386,51 @@ describe("routing helpers", () => {
     expect(messageIdFromEvent("evt_abc")).toBe("msg_abc")
   })
 })
+
+describe("shell commands", () => {
+  const info = {
+    id: "sh_1",
+    status: "running" as const,
+    command: "sleep 300",
+    cwd: "/repo",
+    shell: "/bin/zsh",
+    file: "/tmp/sh_1.out",
+    metadata: { sessionID: "ses_1" },
+    time: { started: 1000 },
+  }
+
+  test("a command started for a session is reported with its session", () => {
+    expect(translateWireEvent({ ...base, type: "shell.created", data: { info } })).toEqual([
+      {
+        type: "shell.started",
+        properties: { shell: { id: "sh_1", sessionID: "ses_1", command: "sleep 300", file: "/tmp/sh_1.out", startedAt: 1000 } },
+      },
+    ])
+  })
+
+  test("a command that belongs to no session is not reported", () => {
+    expect(translateWireEvent({ ...base, type: "shell.created", data: { info: { ...info, metadata: {} } } })).toEqual([])
+  })
+
+  test("exit and removal both end the command", () => {
+    expect(translateWireEvent({ ...base, type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } })).toEqual([
+      { type: "shell.ended", properties: { shellID: "sh_1" } },
+    ])
+    expect(translateWireEvent({ ...base, type: "shell.deleted", data: { id: "sh_1" } })).toEqual([
+      { type: "shell.ended", properties: { shellID: "sh_1" } },
+    ])
+  })
+
+  test("a live synthetic message keeps its metadata, like the persisted one", () => {
+    const [event] = translateWireEvent({
+      ...base,
+      type: "session.synthetic",
+      durable,
+      data: { sessionID: "ses_1", text: "Continue", description: "Continuing after restart", metadata: { notice: "restart" } },
+    })
+    expect(event.type === "message.updated" ? event.properties.info : undefined).toMatchObject({
+      role: "synthetic",
+      metadata: { notice: "restart" },
+    })
+  })
+})

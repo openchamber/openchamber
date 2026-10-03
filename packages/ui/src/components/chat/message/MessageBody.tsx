@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ErrorResponseDetails } from '@/components/chat/ErrorResponseDetails';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
 import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -80,13 +80,15 @@ const getDisplayFileName = (file: string): string => {
     return segments.at(-1) ?? file;
 };
 
+const CHANGED_FILE_CHIP_CLASS_NAME = 'inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-xs text-muted-foreground';
+const CHANGED_FILE_CHIP_HOVER_CLASS_NAME = 'transition-colors hover:border-border/60 hover:bg-interactive-hover';
+const CHANGED_FILE_CHIP_STYLE = { lineHeight: 'round(1.35em, 1px)' };
+const CHANGED_FILE_CHIP_BUTTON_CLASS_NAME = 'inline-flex h-8 max-w-full cursor-pointer items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]';
+
 const TurnChangedFileChipContent = React.memo(({ file, interactive = false }: { file: TurnChangedFile; interactive?: boolean }) => (
     <span
-        className={cn(
-            'inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-xs text-muted-foreground',
-            interactive && 'transition-colors hover:border-border/60 hover:bg-interactive-hover'
-        )}
-        style={{ lineHeight: 'round(1.35em, 1px)' }}
+        className={cn(CHANGED_FILE_CHIP_CLASS_NAME, interactive && CHANGED_FILE_CHIP_HOVER_CLASS_NAME)}
+        style={CHANGED_FILE_CHIP_STYLE}
     >
         <FileTypeIcon filePath={file.file} className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="max-w-52 truncate text-foreground/80" title={file.file}>{getDisplayFileName(file.file)}</span>
@@ -111,7 +113,7 @@ const TurnChangedFilePillButton = React.memo(({
     return (
         <button
             type="button"
-            className="inline-flex h-8 max-w-full cursor-pointer items-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+            className={CHANGED_FILE_CHIP_BUTTON_CLASS_NAME}
             aria-label={t('chat.changedFiles.actions.openFileTitle', { path: file.file })}
             title={file.file}
             onClick={(event) => {
@@ -164,56 +166,67 @@ const InteractiveTurnChangedFilePills = React.memo(({ files }: { files: TurnChan
     );
 });
 
+const CHANGED_FILE_CHIP_LIMIT = 4;
+
+/**
+ * Past the limit one more chip reveals the rest in the row; while they show,
+ * the same chip at the row's end hides them again.
+ */
 const TurnChangedFilePills = React.memo(({ files, isInteractive }: { files?: TurnChangedFile[]; isInteractive: boolean }) => {
     const { t } = useI18n();
     const [expanded, setExpanded] = React.useState(false);
-    const triggerRef = React.useRef<HTMLButtonElement>(null);
+    const toggleRef = React.useRef<HTMLButtonElement>(null);
     React.useLayoutEffect(() => {
-        const trigger = triggerRef.current;
-        if (!expanded && trigger && trigger.ownerDocument.activeElement === trigger) {
+        const toggle = toggleRef.current;
+        if (!expanded && toggle && toggle.ownerDocument.activeElement === toggle) {
             // Keep the focused control visible after a long list shrinks.
-            trigger.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            toggle.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         }
     }, [expanded]);
     if (!files || files.length === 0) return null;
 
     const Pills = isInteractive ? InteractiveTurnChangedFilePills : StaticTurnChangedFilePills;
-    const visibleLimit = 4;
-    if (files.length <= visibleLimit) return <Pills files={files} />;
+    const hiddenCount = files.length - CHANGED_FILE_CHIP_LIMIT;
+    if (hiddenCount <= 0) return <Pills files={files} />;
 
+    const label = expanded
+        ? t('chat.changedFiles.actions.showFewer')
+        : t('chat.changedFiles.actions.otherFiles', { count: hiddenCount });
     return (
-        <Collapsible
-            className="contents"
-            open={expanded}
-            onOpenChange={(open) => {
-                if (!open) triggerRef.current?.focus({ preventScroll: true });
-                setExpanded(open);
-            }}
-        >
-            <Pills files={files.slice(0, visibleLimit)} />
-            <CollapsibleContent className={expanded ? 'contents transition-none' : 'hidden transition-none'}>
-                {expanded && <Pills files={files.slice(visibleLimit)} />}
-            </CollapsibleContent>
-            <CollapsibleTrigger
-                ref={triggerRef}
-                render={<Button variant="ghost" size="sm" />}
-                className="w-auto text-muted-foreground"
+        <>
+            <Pills files={expanded ? files : files.slice(0, CHANGED_FILE_CHIP_LIMIT)} />
+            <button
+                ref={toggleRef}
+                type="button"
+                className={CHANGED_FILE_CHIP_BUTTON_CLASS_NAME}
+                aria-expanded={expanded}
+                aria-label={label}
+                title={label}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    setExpanded((value) => !value);
+                }}
             >
-                {expanded
-                    ? t('chat.changedFiles.actions.collapse')
-                    : t('chat.changedFiles.actions.showMore', { count: files.length - visibleLimit })}
-            </CollapsibleTrigger>
-        </Collapsible>
+                <span className={cn(CHANGED_FILE_CHIP_CLASS_NAME, CHANGED_FILE_CHIP_HOVER_CLASS_NAME)} style={CHANGED_FILE_CHIP_STYLE}>
+                    {expanded ? (
+                        // A text line tall, so the icon-only chip matches the file chips.
+                        <span className="inline-flex h-[round(1.35em,1px)] items-center">
+                            <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                        </span>
+                    ) : `+${hiddenCount}`}
+                </span>
+            </button>
+        </>
     );
 });
 
 const formatTurnDuration = (durationMs: number): string => {
-    const totalSeconds = durationMs / 1000;
-    if (totalSeconds < 60) {
-        return `${totalSeconds.toFixed(1)}s`;
+    if (durationMs < 60_000) {
+        return `${(durationMs / 1000).toFixed(1)}s`;
     }
+    const totalSeconds = Math.round(durationMs / 1000);
     const minutes = Math.floor(totalSeconds / 60);
-    const seconds = Math.round(totalSeconds % 60);
+    const seconds = totalSeconds % 60;
     return `${minutes}m ${seconds}s`;
 };
 
@@ -242,12 +255,16 @@ interface MessageBodyProps {
     hasTextContent?: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
+    /** Copies a link to this message; absent where the surface has no message links. */
+    onCopyLink?: () => void;
     showReasoningTraces?: boolean;
     agentMention?: AgentMentionInfo;
     turnGroupingContext?: TurnGroupingContext;
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
+    /** Raw provider response behind `errorMessage`, shown as collapsed details. */
+    errorResponseBody?: string;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
     reviewTransferDirection?: ReviewTransferDirection | null;
@@ -331,7 +348,34 @@ const MessageExtraActionButtons: React.FC<{ actions?: MessageExtraAction[] }> = 
     );
 };
 
-const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true, extraActions }: {
+/** Copies a link to the message; the toast confirms, as the link is not visible. */
+const CopyMessageLinkButton: React.FC<{ onCopyLink: () => void }> = ({ onCopyLink }) => {
+    const { t } = useI18n();
+    return (
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={t('chat.messageBody.actions.copyLink')}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        event.preventDefault();
+                        onCopyLink();
+                    }}
+                >
+                    <Icon name="link" className="h-3 w-3" />
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.copyLink')}</TooltipContent>
+        </Tooltip>
+    );
+};
+
+const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onCopyLink, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true, extraActions }: {
     messageId: string;
     parts: Part[];
     messageCreatedAt?: number | null;
@@ -341,6 +385,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     hasTextContent?: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
     copiedMessage?: boolean;
+    onCopyLink?: () => void;
     onShowPopup: (content: ToolPopupContent) => void;
     agentMention?: AgentMentionInfo;
     onRevert?: () => void;
@@ -455,6 +500,14 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                 },
             });
         }
+        if (onCopyLink) {
+            actions.push({
+                id: 'copy-link',
+                label: t('chat.messageBody.actions.copyLink'),
+                icon: <Icon name="link" className="h-4 w-4" />,
+                onSelect: onCopyLink,
+            });
+        }
         if (onToggleContextPin && hasCopyableText) {
             actions.push({
                 id: 'pin-context',
@@ -484,7 +537,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
             actions.push({ id: extra.id, label: extra.label, icon: extra.icon, onSelect: extra.onSelect });
         }
         return actions;
-    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyMessage, onRevert, onToggleContextPin, t]);
+    }, [canCopyMessage, contextPinPending, contextPinned, effectiveOnFork, extraActions, hasCopyableText, onCopyLink, onCopyMessage, onRevert, onToggleContextPin, t]);
     const timestamp = React.useMemo(() => {
         void locale;
         if (typeof messageCreatedAt !== 'number' || messageCreatedAt <= 0) return null;
@@ -492,7 +545,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
         return formatted.length > 0 ? formatted : null;
     }, [locale, messageCreatedAt, timeFormatPreference]);
     const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
-    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) && showUserActions ? (
+    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onCopyLink || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -652,6 +705,7 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                             <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                         </Tooltip>
                     )}
+                    {onCopyLink && <CopyMessageLinkButton onCopyLink={onCopyLink} />}
                     {canCopyMessage && hasCopyableText && (
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -754,6 +808,7 @@ interface AssistantMessageActionButtonsProps {
     hasCopyableText: boolean;
     isTouchContext: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
+    onCopyLink?: () => void;
     reviewTransferAction?: {
         ariaLabel: string;
         tooltip: string;
@@ -761,6 +816,8 @@ interface AssistantMessageActionButtonsProps {
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
     ttsText: string;
+    // Shared with the message's other reading controls; see useMessageTTS.
+    ttsReadingKey?: string;
     extraActions?: MessageExtraAction[];
 }
 
@@ -768,14 +825,16 @@ const AssistantMessageActionButtons = React.memo(({
     hasCopyableText,
     isTouchContext,
     onCopyMessage,
+    onCopyLink,
     reviewTransferAction,
     onShareImage,
     ttsText,
+    ttsReadingKey,
     extraActions,
 }: AssistantMessageActionButtonsProps) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
-    const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
+    const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS(ttsReadingKey);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
@@ -928,6 +987,7 @@ const AssistantMessageActionButtons = React.memo(({
 
     return (
         <>
+            {onCopyLink && <CopyMessageLinkButton onCopyLink={onCopyLink} />}
             {onCopyMessage && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -1036,11 +1096,7 @@ const AssistantMessageActionButtons = React.memo(({
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={handleTTSClick}
                         >
-                            {isTTSPlaying ? (
-                                <Icon name="stop" className="h-3 w-3" />
-                            ) : (
-                                <Icon name="volume-up" className="h-3 w-3" />
-                            )}
+                            <Icon name="volume-up" className={cn('h-3 w-3', isTTSPlaying && 'animate-pulse')} />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={6}>{readAloudTooltip}</TooltipContent>
@@ -1070,9 +1126,11 @@ const AssistantMessageBody = React.memo(({
     allowAnimation: _allowAnimation,
     hasTextContent = false,
     onCopyMessage,
+    onCopyLink,
     showReasoningTraces = false,
     turnGroupingContext,
     errorMessage,
+    errorResponseBody,
     reviewTransferDirection = null,
     contextPinned,
     contextPinPending,
@@ -1639,12 +1697,14 @@ const AssistantMessageBody = React.memo(({
             hasCopyableText={hasCopyableText}
             isTouchContext={isTouchContext}
             onCopyMessage={onCopyMessage}
+            onCopyLink={onCopyLink}
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
+            ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
             extraActions={extraActions}
         />
-    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
     // The turn footer appends its own buttons (fork, multi-run) after this
     // group, so extension actions are rendered there separately, last.
@@ -1653,11 +1713,13 @@ const AssistantMessageBody = React.memo(({
             hasCopyableText={hasCopyableText}
             isTouchContext={isTouchContext}
             onCopyMessage={onCopyMessage}
+            onCopyLink={onCopyLink}
             onShareImage={shareMessageAsImage}
             ttsText={assistantPlanText}
+            ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
         />
-    ), [assistantPlanText, hasCopyableText, isTouchContext, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareMessageAsImage]);
 
     const renderJustificationActions = React.useCallback((activity: NonNullable<TurnGroupingContext['activityParts']>[number]) => {
         if (!showSplitAssistantMessageActions || !isSortedRenderMode) {
@@ -2050,7 +2112,7 @@ const AssistantMessageBody = React.memo(({
     const [actionSheetOpen, setActionSheetOpen] = React.useState(false);
     const footerFactsRef = React.useRef<HTMLDivElement>(null);
     useFactsFit(footerFactsRef);
-    const { isPlaying: isFooterTTSPlaying, play: playFooterTTS, stop: stopFooterTTS } = useMessageTTS();
+    const { isPlaying: isFooterTTSPlaying, play: playFooterTTS, stop: stopFooterTTS } = useMessageTTS(messageId);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const canOpenMessagePreview = !isMiniChatSurface && !isMobile && !isVSCode;
 
@@ -2070,6 +2132,14 @@ const AssistantMessageBody = React.memo(({
                         if (copied !== false) toast.success(t('chat.messageBody.toast.copied'));
                     })();
                 },
+            });
+        }
+        if (onCopyLink) {
+            actions.push({
+                id: 'copy-link',
+                label: t('chat.messageBody.actions.copyLink'),
+                icon: <Icon name="link" className="h-4 w-4" />,
+                onSelect: onCopyLink,
             });
         }
         if (reviewTransferAction && !isMiniChatSurface) {
@@ -2094,7 +2164,7 @@ const AssistantMessageBody = React.memo(({
             actions.push({
                 id: 'tts',
                 label: isFooterTTSPlaying ? t('chat.messageBody.tts.stopSpeaking') : t('chat.messageBody.tts.readAloud'),
-                icon: <Icon name={isFooterTTSPlaying ? 'stop' : 'volume-up'} className="h-4 w-4" />,
+                icon: <Icon name="volume-up" className={cn('h-4 w-4', isFooterTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />,
                 onSelect: () => {
                     if (isFooterTTSPlaying) {
                         stopFooterTTS();
@@ -2142,7 +2212,7 @@ const AssistantMessageBody = React.memo(({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyLink, onCopyMessage, onToggleContextPin, playFooterTTS, reviewTransferAction, shareMessageAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const finalTurnActionButtons = (
         <>
@@ -2280,7 +2350,11 @@ const AssistantMessageBody = React.memo(({
              )}
               style={CONTAIN_LAYOUT_STYLE}
           >
-              <TextSelectionMenu containerRef={messageContentRef} />
+              <TextSelectionMenu
+                  containerRef={messageContentRef}
+                  readingKey={messageId}
+                  canReadAloud={!isMiniChatSurface && showMessageTTSButtons}
+              />
              {canUseProjectPlanActions ? (
                  <SaveProjectPlanDialog
                      open={isPlanDialogOpen}
@@ -2325,6 +2399,7 @@ const AssistantMessageBody = React.memo(({
                                         </LongErrorText>
                                     </div>
                                 </div>
+                                {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 pl-7" /> : null}
                             </div>
                         </FadeInOnReveal>
                     )}
@@ -2502,6 +2577,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 hasTextContent={props.hasTextContent}
                 onCopyMessage={props.onCopyMessage}
                 copiedMessage={props.copiedMessage}
+                onCopyLink={props.onCopyLink}
                 onShowPopup={props.onShowPopup}
                 agentMention={props.agentMention}
                 onRevert={props.onRevert}

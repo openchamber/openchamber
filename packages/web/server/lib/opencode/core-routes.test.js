@@ -243,6 +243,45 @@ describe('core-routes', () => {
     }
   });
 
+  it('lets only GET html-preview file reads past API auth; the grant in the path is checked by the fs route', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(),
+        handleSessionCreate: vi.fn(),
+        handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(),
+        handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(),
+        handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(),
+        handlePasskeyRevoke: vi.fn(),
+        handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    app.get(/^\/api\/fs\/preview\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post('/api/fs/preview', (_req, res) => res.json({ reached: true }));
+    app.get('/api/fs/read', (_req, res) => res.json({ reached: true }));
+
+    await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
+    await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
+    await request(app).get('/api/fs/preview/grant-1').expect(401);
+    await request(app).get('/api/fs/read?path=/repo/index.html').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(3);
+  });
+
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {
     const app = express();
     const originalFetch = globalThis.fetch;

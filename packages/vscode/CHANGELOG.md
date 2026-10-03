@@ -1,3 +1,23 @@
+## [2.1.0] - 2026-10-01
+
+### New
+
+- Chat: shell steps have a Copy output button.
+- Chat: a failed reply has Show response details with what the provider answered.
+
+### Improvements
+
+- Chat: copying selected text from a reply copies it as markdown.
+- Chat: more than four changed files under an answer fold into a +N chip (thanks to @yulia-ivashko).
+- Chat: very long error messages are collapsed (thanks to @yulia-ivashko).
+
+### Fixes
+
+- Chat: very large messages open without freezing, and long answers full of code or logs stream without slowing down (thanks to @yulia-ivashko).
+- Chat: the row with the time and buttons under a message you just sent shows in full (thanks to @yulia-ivashko).
+- Chat: the end of a reply that is still streaming fades out above the message box (thanks to @yulia-ivashko).
+- Model picker: the list stays in place when you star a model (thanks to @yulia-ivashko).
+
 ## [2.0.4] - 2026-09-28
 
 ### New

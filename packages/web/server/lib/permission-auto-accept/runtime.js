@@ -274,6 +274,15 @@ export function createPermissionAutoAcceptRuntime({
       return 'failed';
     })();
     rememberOutcome(key, outcome);
+    // A client hides a `safety` or `auto` session's request until it hears
+    // here that the request was not answered for the user.
+    void outcome.then((result) => {
+      if (result !== 'held' && result !== 'failed') return;
+      broadcastGlobalUiEvent?.({
+        type: 'openchamber:permission-auto-accept.left-for-user',
+        properties: { permissionId: key, sessionId: permission.sessionID, directory: directory ?? null },
+      });
+    });
     const task = outcome.then((result) => result !== 'ignored' && result !== 'failed').finally(() => inFlight.delete(key));
     inFlight.set(key, task);
     return task;
@@ -291,6 +300,18 @@ export function createPermissionAutoAcceptRuntime({
     return outcome ? (await outcome) === 'replied' : false;
   };
 
+  // A pending request belongs to a turn that is still running, so the
+  // directories worth asking are those of running sessions, which OpenCode
+  // already has started. A list without a directory would answer for
+  // OpenCode's own working directory only, and start it, MCP servers included.
+  const runningSessionDirectories = async () => {
+    const payload = await request('/api/session/active');
+    const sessionIds = Object.keys(payload?.data ?? {});
+    const directories = await Promise.all(sessionIds.map((sessionId) =>
+      getSession(sessionId).then((session) => session?.directory ?? null, () => null)));
+    return directories.filter((directory) => directory);
+  };
+
   async function reconcilePending({ directories = [] } = {}) {
     const normalizedDirectories = Array.from(new Set(
       directories.filter((directory) => typeof directory === 'string' && directory.trim()).map((directory) => directory.trim()),
@@ -300,7 +321,9 @@ export function createPermissionAutoAcceptRuntime({
     if (existing) return existing;
     const task = (async () => {
       await load();
-      const scopes = [undefined, ...normalizedDirectories];
+      const scopes = normalizedDirectories.length > 0
+        ? normalizedDirectories
+        : Array.from(new Set(await runningSessionDirectories().catch(() => [])));
       const pendingById = new Map();
       for (const directory of scopes) {
         let payload;

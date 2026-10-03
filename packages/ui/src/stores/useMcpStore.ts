@@ -75,6 +75,12 @@ interface McpStore {
    * that remounts on every session switch does not refetch on every switch.
    */
   ensureFresh: (options: RefreshOptions & { maxAgeMs: number }) => Promise<void>;
+  /**
+   * Re-read a directory whose status is already held, after OpenCode announced
+   * a change there. A directory nobody asked about is left alone: reading it
+   * would make OpenCode start it, MCP servers included.
+   */
+  refreshIfHeld: (directory: string) => Promise<void>;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
@@ -171,6 +177,12 @@ export const useMcpStore = create<McpStore>()(
       });
       ensureFreshInFlight.set(key, request);
       return request;
+    },
+
+    refreshIfHeld: async (directory) => {
+      const normalized = normalizeDirectory(directory);
+      if (!normalized || !get().byDirectory[toKey(normalized)]) return;
+      await get().refresh({ directory: normalized, silent: true });
     },
 
     connect: async (name, directory) => {

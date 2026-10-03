@@ -13,6 +13,7 @@ const entry: SpaceEntry = {
   id: ID,
   name: 'Fix login',
   projectDirectory: '/home/me/app',
+  projectFolder: { path: '/home/me/app', found: true },
   directory: `/spaces/${ID}/app`,
   state: 'running',
   stoppedIdle: false,

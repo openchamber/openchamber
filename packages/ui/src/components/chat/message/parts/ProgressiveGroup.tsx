@@ -7,6 +7,7 @@ import type { Metadata, ToolInput, ToolPart as ToolPartType } from '@/lib/openco
 import type { StreamPhase } from '../types';
 import type { ToolPopupContent } from '../types';
 import ToolPart from './ToolPart';
+import { BlockLine } from './BlockLine';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -851,11 +852,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                 </button>
                 {shouldShowRowsContainer ? (
                     <div className="relative ml-2 pl-3">
-                        <span
-                            aria-hidden="true"
-                            className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
-                            style={{ backgroundColor: 'var(--tools-border)' }}
-                        />
+                        <BlockLine onToggle={onToggle} topOffset={1} />
                         {previewHiddenCount > 0 ? (
                             <button
                                 type="button"

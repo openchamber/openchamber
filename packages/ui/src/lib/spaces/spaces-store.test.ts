@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { getSpaceMark, hasIsolatedSpaces, refreshSpacesJourney, spaceMarkSchema, useSpacesStore, type SpaceMark } from './spaces-store';
+import { getSpaceMark, hasIsolatedSpaces, refreshSpacesJourney, spaceMarkSchema, spacesOfProject, spacesWithoutProject, useSpacesStore, type SpaceMark } from './spaces-store';
 import type { SpaceEntry } from './spaces-api';
 
 const ID = 'a1b2c3d4e5f6';
@@ -49,6 +49,7 @@ describe('the journey list and creation progress', () => {
     id: ID,
     name: 'One',
     projectDirectory: '/home/me/app',
+    projectFolder: { path: '/home/me/app', found: true },
     directory: `/spaces/${ID}/app`,
     state: 'preparing',
     stoppedIdle: false,
@@ -137,7 +138,7 @@ describe('the grant dialog and access given through it', () => {
   test('a grant just given survives a read of the list that began before it', () => {
     const grant = { kind: 'model' as const, id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', source: { kind: 'typed' as const }, url: 'http://gatekeeper:8080/model/openai' };
     const running: SpaceEntry = {
-      id: ID, name: 'One', projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, state: 'running', stoppedIdle: false, step: null,
+      id: ID, name: 'One', projectDirectory: '/home/me/app', directory: `/spaces/${ID}/app`, projectFolder: { path: '/home/me/app', found: true }, state: 'running', stoppedIdle: false, step: null,
       failure: null, network: { mode: 'allowlist', domains: [] }, grants: [], access: 'needs_access', needsAccess: ['openai'], damage: null, setup: null,
     };
     useSpacesStore.getState().applyJourney([running], 0);
@@ -159,5 +160,30 @@ describe('the grant dialog and access given through it', () => {
     expect(useSpacesStore.getState().accessDialog).toEqual({ spaceId: ID, providerId: null });
     useSpacesStore.getState().resetForRuntimeSwitch();
     expect(useSpacesStore.getState().accessDialog).toBeNull();
+  });
+});
+
+describe('the lists of spaces', () => {
+  const space = (id: string, projectDirectory: string | null): SpaceEntry => ({
+    id, name: id, projectDirectory, directory: projectDirectory ? `/spaces/${id}/app` : null, projectFolder: { path: projectDirectory ?? '/home/me/old', found: true },
+    state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], damage: null, setup: null,
+  });
+  const journey = new Map([
+    ['aaaaaaaaaaaa', space('aaaaaaaaaaaa', '/home/me/app')],
+    ['bbbbbbbbbbbb', space('bbbbbbbbbbbb', '/home/me/other')],
+    ['cccccccccccc', space('cccccccccccc', null)],
+    ['dddddddddddd', space('dddddddddddd', '/home/me/app/')],
+  ]);
+
+  test('a project lists its own spaces in the host\'s order, whatever the path\'s trailing slash', () => {
+    expect(spacesOfProject(journey, '/home/me/app').map((entry) => entry.id)).toEqual(['aaaaaaaaaaaa', 'dddddddddddd']);
+    expect(spacesOfProject(journey, '/home/me/app/').map((entry) => entry.id)).toEqual(['aaaaaaaaaaaa', 'dddddddddddd']);
+    expect(spacesOfProject(journey, '/home/me/none')).toEqual([]);
+    // A space with no project is no project's, not the one whose path is empty.
+    expect(spacesOfProject(journey, '')).toEqual([]);
+  });
+
+  test('the spaces without a project are the ones the host resolved to none', () => {
+    expect(spacesWithoutProject(journey).map((entry) => entry.id)).toEqual(['cccccccccccc']);
   });
 });

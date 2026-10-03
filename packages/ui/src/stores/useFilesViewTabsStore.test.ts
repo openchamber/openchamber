@@ -18,6 +18,17 @@ describe('useFilesViewTabsStore', () => {
     expect(useFilesViewTabsStore.getState().byRoot).toEqual({});
   });
 
+  test('selects an outside path only when allowOutsideRoot is set', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.setSelectedPath(root, '/tmp/agent-output.txt', { allowOutsideRoot: true });
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.selectedPath).toBe('/tmp/agent-output.txt');
+    expect(state?.openPaths).toEqual(['/tmp/agent-output.txt']);
+  });
+
   test('filters expanded path batches to the requested root', () => {
     const root = '/repo';
 

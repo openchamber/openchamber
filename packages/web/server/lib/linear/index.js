@@ -38,6 +38,8 @@ export {
   listLinearIssues,
   getLinearIssue,
   listLinearIssueStates,
+  getLinearIssueSummaries,
+  MAX_SUMMARY_IDENTIFIERS,
   updateLinearIssue,
 } from './issues.js';
 

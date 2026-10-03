@@ -258,6 +258,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // The goal record lives in OpenChamber's metadata store (OpenCode 2.x takes
     // session metadata only at create time); without it goal mode cannot run.
     persistSessionGoal = null,
+    // Chats scope (see chats-scope.js): scheduled like a project, but each run
+    // opens a new chat directory and loop files are not discovered for it.
+    chatsScope = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -379,13 +382,23 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
+  const isChatsScope = (projectID) => Boolean(chatsScope) && projectID === chatsScope.id;
+
+  const listScopes = async () => {
+    const projects = await listProjects();
+    if (!chatsScope || projects.some((project) => project?.id === chatsScope.id)) {
+      return projects;
+    }
+    return [...projects, { id: chatsScope.id, path: chatsScope.root }];
+  };
+
   const ensureProjectPath = async (projectID) => {
     if (projectPathByID.has(projectID)) {
       return projectPathByID.get(projectID) || null;
     }
 
     try {
-      const projects = await listProjects();
+      const projects = await listScopes();
       const project = projects.find((item) => item?.id === projectID && item?.path);
       if (project?.path) {
         projectPathByID.set(projectID, project.path);
@@ -402,7 +415,9 @@ export const createScheduledTasksRuntime = (deps) => {
     const projectPath = projectPathByID.get(projectID) || null;
 
     let tasks;
-    if (projectPath) {
+    // The chats root is not a repository: user-scope loops already run once
+    // per project, and discovering them here would add one more run each.
+    if (projectPath && !isChatsScope(projectID)) {
       // Reconcile `.agents/loops` definitions with the persisted task list:
       // loop files are authoritative while present, removed files unschedule
       // their task, and runtime state is preserved (see loops.js).
@@ -422,7 +437,7 @@ export const createScheduledTasksRuntime = (deps) => {
   };
 
   const syncAllProjects = async () => {
-    const projects = await listProjects();
+    const projects = await listScopes();
     const activeProjectIDs = new Set();
     projectPathByID.clear();
     for (const project of projects) {
@@ -566,25 +581,39 @@ export const createScheduledTasksRuntime = (deps) => {
       await waitForOpenCodeReady(10_000, 250);
     }
 
+    // A chats-scope run is a new chat, so it gets its own directory the way a
+    // chat started from the UI does; a project run works in the project.
+    const directory = isChatsScope(projectID)
+      ? await chatsScope.createChatDirectory(new Date(startedAt))
+      : projectPath;
+
     const baseUrl = openCodeOrigin();
     const authHeaders = getOpenCodeAuthHeaders();
-    const client = createScopedClient(projectPath);
+    const client = createScopedClient(directory);
 
     // Agent, model and variant belong to the session in v2: a scheduled run
     // fixes them here instead of repeating them on every prompt.
-    const session = await client.session.create({
-      title,
-      location: { directory: projectPath },
-      model: {
-        providerID: task.execution.providerID,
-        id: task.execution.modelID,
-        ...(task.execution.variant ? { variant: task.execution.variant } : {}),
-      },
-      ...(task.execution.agent ? { agent: task.execution.agent } : {}),
-    });
-    const sessionID = session?.id;
-    if (!sessionID) {
-      throw new Error('failed to create session');
+    let sessionID;
+    try {
+      const session = await client.session.create({
+        title,
+        location: { directory },
+        model: {
+          providerID: task.execution.providerID,
+          id: task.execution.modelID,
+          ...(task.execution.variant ? { variant: task.execution.variant } : {}),
+        },
+        ...(task.execution.agent ? { agent: task.execution.agent } : {}),
+      });
+      sessionID = session?.id;
+      if (!sessionID) {
+        throw new Error('failed to create session');
+      }
+    } catch (error) {
+      if (directory !== projectPath) {
+        await chatsScope.discardChatDirectory(directory);
+      }
+      throw error;
     }
 
     try {
@@ -603,13 +632,13 @@ export const createScheduledTasksRuntime = (deps) => {
       // is already auto-approved. Enrollment failure must not kill the run —
       // the task still executes, permissions just wait for the user.
       try {
-        await setSessionAutoAccept(sessionID, true, projectPath);
+        await setSessionAutoAccept(sessionID, true, directory);
       } catch (error) {
         logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
       }
     }
 
-    const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
+    const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
 
     if (task.execution.goalEnabled) {
       const commandObjective = scheduledCommand
@@ -620,8 +649,8 @@ export const createScheduledTasksRuntime = (deps) => {
         authHeaders,
         persistSessionGoal,
         sessionID,
-        directory: projectPath,
-        objective: commandObjective ?? expandSnippets(task.execution.prompt, projectPath),
+        directory,
+        objective: commandObjective ?? expandSnippets(task.execution.prompt, directory),
         tokenBudget: task.execution.goalTokenBudget,
         providerID: task.execution.providerID,
         modelID: task.execution.modelID,
@@ -630,14 +659,15 @@ export const createScheduledTasksRuntime = (deps) => {
     }
 
     if (scheduledCommand) {
-      await runScheduledCommand({ client, sessionID, projectPath, command: scheduledCommand });
+      await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
     } else {
-      await runPrompt({ client, sessionID, projectPath, task });
+      await runPrompt({ client, sessionID, projectPath: directory, task });
     }
 
     const finishedAt = Date.now();
     return {
       sessionID,
+      directory,
       durationMs: Math.max(0, finishedAt - startedAt),
       reason,
       startedAt,
@@ -864,6 +894,7 @@ export const createScheduledTasksRuntime = (deps) => {
 
       let status = 'success';
       let sessionID;
+      let sessionDirectory;
       let durationMs = 0;
       let errorMessage;
 
@@ -882,6 +913,7 @@ export const createScheduledTasksRuntime = (deps) => {
           }
         });
         sessionID = result.sessionID;
+        sessionDirectory = result.directory;
         durationMs = result.durationMs;
         status = 'success';
         logger.info?.(
@@ -1000,6 +1032,7 @@ export const createScheduledTasksRuntime = (deps) => {
           ok: status === 'success',
           status,
           sessionID,
+          directory: sessionDirectory,
           task: stateResult.task || recoveredTask,
           error: status === 'error' ? errorMessage : undefined,
           persistError: message,
@@ -1022,6 +1055,7 @@ export const createScheduledTasksRuntime = (deps) => {
         ok: status === 'success',
         status,
         sessionID,
+        directory: sessionDirectory,
         task: stateResult.task || null,
         error: errorMessage,
       };

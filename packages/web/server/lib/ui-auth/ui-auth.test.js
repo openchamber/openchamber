@@ -182,30 +182,11 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
-    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
-    const serveRes = createResponse();
-    let serveCalled = false;
-    await auth.requireAuth(serveReq, serveRes, () => {
-      serveCalled = true;
-    });
-    expect(serveCalled).toBe(true);
-
-    // A served page's own images carry no token; the page URL in the Referer
-    // stands in, but only between two paths under /api/fs/serve/.
-    const pageUrl = `http://127.0.0.1:3001/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`;
-    const subresourceReq = { method: 'GET', path: '/api/fs/serve/tmp/images/photo.png', url: '/api/fs/serve/tmp/images/photo.png', headers: { referer: pageUrl } };
-    const subresourceRes = createResponse();
-    let subresourceCalled = false;
-    await auth.requireAuth(subresourceReq, subresourceRes, () => {
-      subresourceCalled = true;
-    });
-    expect(subresourceCalled).toBe(true);
-
+    // The session URL token no longer opens file previews: a preview page can
+    // read its own URL, so it gets a narrow fs grant instead (see fs routes).
     for (const denied of [
-      // The same referer must not open anything outside the served tree.
-      { method: 'GET', path: '/api/fs/raw', url: '/api/fs/raw?path=%2Ftmp%2Fsecret.png', headers: { referer: pageUrl } },
-      // A referer that is not a served page opens nothing.
-      { method: 'GET', path: '/api/fs/serve/tmp/images/photo.png', url: '/api/fs/serve/tmp/images/photo.png', headers: { referer: `http://127.0.0.1:3001/?oc_url_token=${encodeURIComponent(urlToken)}` } },
+      { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} },
+      { method: 'GET', path: '/api/fs/preview/grant/tmp/index.html', url: `/api/fs/preview/grant/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} },
     ]) {
       const deniedRes = createResponse();
       let deniedCalled = false;
@@ -216,28 +197,20 @@ describe('ui auth client credential seam', () => {
       expect(deniedRes.statusCode).toBe(401);
     }
 
-    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
-    const absoluteServeRes = createResponse();
-    let absoluteServeCalled = false;
-    await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
-      absoluteServeCalled = true;
-    });
-    expect(absoluteServeCalled).toBe(true);
-
-    const mountedServeReq = {
+    const mountedRawReq = {
       method: 'GET',
       baseUrl: '/api',
-      path: '/fs/serve/Users/test/project/preview-test.html',
-      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
-      url: `/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      path: '/fs/raw',
+      originalUrl: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: {},
     };
-    const mountedServeRes = createResponse();
-    let mountedServeCalled = false;
-    await auth.requireAuth(mountedServeReq, mountedServeRes, () => {
-      mountedServeCalled = true;
+    const mountedRawRes = createResponse();
+    let mountedRawCalled = false;
+    await auth.requireAuth(mountedRawReq, mountedRawRes, () => {
+      mountedRawCalled = true;
     });
-    expect(mountedServeCalled).toBe(true);
+    expect(mountedRawCalled).toBe(true);
 
     const guestReq = { method: 'GET', path: '/api/guests/hello/panel/index.html', url: `/api/guests/hello/panel/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const guestRes = createResponse();

@@ -1040,6 +1040,37 @@ export type GitHubPullRequestStatus = {
   resolvedRemoteName?: string | null;
 };
 
+export type GitHubPullRequestRef = GitHubRepoSelector & { number: number };
+
+/** Live fields of a known PR, refreshed in batches for list surfaces. */
+export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
+  state: GitHubPullRequest['state'];
+  draft: boolean;
+  title: string;
+  headSha?: string;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  /** Null for closed/merged PRs, whose checks are not actionable. */
+  checks: GitHubChecksSummary | null;
+};
+
+/** Live state of a known issue; a closed one says whether it was done or dropped. */
+export type GitHubIssueLiveSummary = GitHubPullRequestRef & {
+  title: string;
+  state: 'open' | 'completed' | 'not_planned';
+};
+
+export type GitHubPullRequestSummariesResult =
+  | { connected: false }
+  | {
+      connected: true;
+      /** Server-side stamp of when GitHub was asked (ms epoch). */
+      fetchedAt: number;
+      /** PRs and issues GitHub could not resolve are absent: unknown, not closed. */
+      summaries: GitHubPullRequestLiveSummary[];
+      issueSummaries: GitHubIssueLiveSummary[];
+    };
+
 export type GitHubPullRequestCreateInput = {
   directory: string;
   title: string;
@@ -1082,7 +1113,7 @@ export type GitHubPullRequestMergeResult = {
   message?: string;
 };
 
-type GitHubIssueLabel = {
+export type GitHubIssueLabel = {
   name: string;
   color?: string;
 };
@@ -1118,13 +1149,96 @@ export type GitHubIssueComment = {
   updatedAt?: string;
 };
 
-export type GitHubIssuesListResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  issues?: GitHubIssueSummary[];
-  page?: number;
-  hasMore?: boolean;
+export type GitHubReferenceKind = 'issue' | 'pull';
+
+/** Which slice of open items the picker lists; `reviewRequested` is for PRs. */
+export type GitHubReferenceFilter = 'open' | 'assigned' | 'created' | 'reviewRequested';
+
+export type GitHubReferencesOptions = {
+  kind: GitHubReferenceKind;
+  filter?: GitHubReferenceFilter;
+  /** Search text, or a pasted link or number, which names one item of either kind. */
+  query?: string;
+  cursor?: string | null;
 };
+
+type GitHubReferenceCommon = {
+  number: number;
+  title: string;
+  url: string;
+  /** The description as the preview shows it, cut at 20 000 characters. */
+  body: string;
+  bodyTruncated: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  author: { login: string; avatarUrl?: string } | null;
+  labels: GitHubIssueLabel[];
+  commentCount: number;
+  sourceRepo: GitHubRepoSelector & { source: string };
+};
+
+export type GitHubIssueReference = GitHubReferenceCommon & {
+  kind: 'issue';
+  state: GitHubIssueLiveSummary['state'];
+};
+
+export type GitHubPullReference = GitHubReferenceCommon & {
+  kind: 'pull';
+  state: GitHubPullRequest['state'];
+  draft: boolean;
+  head: string;
+  base: string;
+  headSha: string;
+  headRepo: GitHubPullRequestHeadRepo | null;
+};
+
+/** A comment as the picker preview shows it; review entries carry their verdict or file and line. */
+export type GitHubReferenceComment = {
+  author: { login: string; avatarUrl?: string } | null;
+  body: string;
+  createdAt: string | null;
+  url: string;
+  path: string | null;
+  line: number | null;
+  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
+};
+
+/** What the preview adds for one item; too slow to ask for a whole page. */
+export type GitHubReferenceDetail = {
+  number: number;
+  /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
+  comments: GitHubReferenceComment[];
+  /** How many conversation comments the item has in all. */
+  commentTotal: number;
+  /** Null for an issue. */
+  pull: {
+    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
+    additions: number;
+    deletions: number;
+    changedFiles: number;
+    /** Null for closed and merged PRs. */
+    checks: GitHubChecksSummary | null;
+  } | null;
+};
+
+export type GitHubReferenceDetailResult =
+  | { connected: false }
+  | { connected: true; detail: GitHubReferenceDetail | null };
+
+/** An issue or PR as the reference picker lists and previews it. */
+export type GitHubReference = GitHubIssueReference | GitHubPullReference;
+
+export type GitHubReferencesResult =
+  | { connected: false }
+  | {
+      connected: true;
+      /** Null when the project has no GitHub remote. */
+      repo: GitHubRepoRef | null;
+      items: GitHubReference[];
+      cursor: string | null;
+      hasMore: boolean;
+      total: number;
+    };
 
 export type GitHubRepoUpstreamResult = {
   connected: boolean;
@@ -1261,6 +1375,7 @@ export type LinearIssueSummary = {
   team?: LinearIssueTeam | null;
   priority?: LinearIssuePriority | null;
   labels?: LinearIssueLabel[];
+  updatedAt?: string | null;
 };
 
 export type LinearIssueComment = {
@@ -1299,6 +1414,21 @@ export type LinearIssueGetResult = {
   connected: boolean;
   issue?: LinearIssue | null;
 };
+
+/** Linear's workflow category; team-specific state names map onto these. */
+export type LinearStateType = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
+
+/** Live state of a linked Linear issue, refreshed in batches for list surfaces. */
+export type LinearIssueLiveSummary = {
+  identifier: string;
+  title: string;
+  state: { name: string; type: LinearStateType };
+};
+
+/** Issues the current workspace does not have are left out. */
+export type LinearIssueSummariesResult =
+  | { connected: false }
+  | { connected: true; issues: LinearIssueLiveSummary[] };
 
 export type LinearIssueStatesResult = {
   connected: boolean;
@@ -1363,6 +1493,8 @@ export interface LinearAPI {
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
   issueGet(id: string): Promise<LinearIssueGetResult>;
+  /** At most 50 identifiers. Throws on failure; disconnected is `{ connected: false }`. */
+  issueSummaries(identifiers: string[]): Promise<LinearIssueSummariesResult>;
   issueStates(teamId: string): Promise<LinearIssueStatesResult>;
   issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
   mappingGet(): Promise<LinearMappingResult>;
@@ -1382,6 +1514,7 @@ export interface GitHubAPI {
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
+  prSummaries(refs: GitHubPullRequestRef[], issueRefs?: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
@@ -1394,7 +1527,10 @@ export interface GitHubAPI {
     options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
-  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
+  /** One page of issues or PRs for the reference picker. Throws on failure. */
+  references(directory: string, options: GitHubReferencesOptions): Promise<GitHubReferencesResult>;
+  /** Comments of one item the picker previews, and a PR's size, review and checks. Throws on failure. */
+  referenceDetail(directory: string, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;

@@ -5,6 +5,13 @@ import { summarizeText, sanitizeForTTS, sanitizeForNote } from '../text/summariz
 import { detectTextLanguage, languageOfLocale, pickVoiceForLanguage } from './language-detect.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
+// HTTP header values must be printable latin1; macOS voice names can be localized
+// (e.g. "Milena (Русский (Россия))") and Node rejects non-latin1 header content
+// outright. Percent-encode so the X-Speech-Voice header is always safe.
+export function speechVoiceHeaderValue(voice) {
+  return encodeURIComponent(voice);
+}
+
 export function registerTtsRoutes(app, { sayTTSCapability }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
@@ -74,7 +81,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const { ttsService } = await getTtsModule();
 
       // Check availability - server-configured key, client-provided key, or custom server URL
-      const hasServerKey = ttsService.isAvailable();
+      const hasServerKey = await ttsService.isAvailable();
       const hasClientKey = apiKey && typeof apiKey === 'string' && apiKey.trim().length > 0;
       const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
       
@@ -147,7 +154,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       const { ttsService } = await getTtsModule();
       const enterpriseMode = isEnterpriseMode();
       res.json({
-        available: !enterpriseMode && ttsService.isAvailable(),
+        available: !enterpriseMode && await ttsService.isAvailable(),
         enterpriseMode,
         voices: [
           'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
@@ -227,7 +234,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
       
       // Send audio response
       res.setHeader('Content-Type', 'audio/mp4');
-      res.setHeader('X-Speech-Voice', voice);
+      res.setHeader('X-Speech-Voice', speechVoiceHeaderValue(voice));
       if (resolvedLanguage) res.setHeader('X-Speech-Language', resolvedLanguage);
       res.setHeader('Content-Length', audioBuffer.length);
       res.send(audioBuffer);

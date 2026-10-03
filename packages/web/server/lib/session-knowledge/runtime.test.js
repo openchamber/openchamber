@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildKnowledgeSignature, buildKnowledgeText, createSessionKnowledgeRuntime } from './runtime.js';
+import { SESSION_LINK_GUIDANCE, buildKnowledgeSignature, buildKnowledgeText, createSessionKnowledgeRuntime } from './runtime.js';
 
 const DIRECTORY = '/work/project';
 const PROJECT_ID = 'path_project';
@@ -30,6 +30,7 @@ const createRuntime = (overrides = {}) => createSessionKnowledgeRuntime({
   ...('readSessionMetadata' in overrides ? { readSessionMetadata: overrides.readSessionMetadata } : {}),
   ...('persistSessionMetadata' in overrides ? { persistSessionMetadata: overrides.persistSessionMetadata } : {}),
   ...('isAgentMemoryEnabled' in overrides ? { isAgentMemoryEnabled: overrides.isAgentMemoryEnabled } : {}),
+  ...('isSessionLinkingAvailable' in overrides ? { isSessionLinkingAvailable: overrides.isSessionLinkingAvailable } : {}),
 });
 
 /** An in-memory stand-in for `session-metadata-store.js`. */
@@ -46,6 +47,32 @@ const createMetadataStub = (initial = {}) => {
     },
   };
 };
+
+describe('when to link', () => {
+  const empty = { notes: [], plans: [], memory: { global: [], project: [], enabled: false, complete: false } };
+
+  test('is told in a session whose agent has the tool, even with nothing else to tell', async () => {
+    const runtime = createRuntime({
+      isSessionLinkingAvailable: async () => true,
+      isAgentMemoryEnabled: async () => false,
+      projectContextRuntime: { readContext: async () => ({ notes: [], todos: [], plans: [] }) },
+    });
+    const { text, signature } = await runtime.resolvePending(DIRECTORY, '', { notes: [], plans: [] });
+
+    expect(text).toBe(SESSION_LINK_GUIDANCE);
+    expect(signature).toBe('l:on');
+    expect((await runtime.resolvePending(DIRECTORY, signature, { notes: [], plans: [] })).text).toBe('');
+  });
+
+  test('is left out without the tool, or when the check fails', async () => {
+    for (const isSessionLinkingAvailable of [async () => false, async () => { throw new Error('settings unreadable'); }]) {
+      const { text } = await createRuntime({ isSessionLinkingAvailable }).resolvePending(DIRECTORY, '', PINS);
+      expect(text).not.toContain(SESSION_LINK_GUIDANCE);
+    }
+    expect(buildKnowledgeText(empty)).toBe('');
+    expect(buildKnowledgeSignature(empty)).toBe('');
+  });
+});
 
 describe('what the session is owed', () => {
   test('carries pinned notes, pinned plan bodies, and the memory index', async () => {

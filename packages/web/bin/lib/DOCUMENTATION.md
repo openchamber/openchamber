@@ -59,6 +59,7 @@ Command modules implement user-facing commands and preserve output contracts acr
 - `commands-update.js`
   - Implements `openchamber update`.
   - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
+  - Installs the exact version returned by the update check and verifies the globally installed version after the package manager exits; a zero exit status without the target version is a loud failure, not a success report (#3083).
 
 - `commands-tunnel.js`
   - Implements `openchamber tunnel` and its subcommands: `profile`, `providers`, `ready`, `doctor`, `status`, `start`, `stop`, and `completion`.

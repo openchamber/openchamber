@@ -42,6 +42,20 @@ describe('OpenCode upgrade capability', () => {
     });
   });
 
+  it('leaves a binary pinned by the policy file to the administrator', () => {
+    expect(resolveOpenCodeUpgradeCapability({
+      isExternal: false,
+      hasManagedProcess: true,
+      activeBinary: '/opt/acme/opencode',
+      isBundledBinary: () => false,
+      pinnedByPolicy: true,
+    })).toEqual({
+      supported: false,
+      manager: 'administrator',
+      reason: 'policy',
+    });
+  });
+
   it('offers CLI upgrades for a managed non-bundled binary', () => {
     expect(resolveOpenCodeUpgradeCapability({
       isExternal: false,

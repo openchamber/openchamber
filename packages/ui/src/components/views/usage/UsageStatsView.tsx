@@ -254,9 +254,9 @@ function UsageReport({ stats, formats, tools }: { stats: UsageStats; formats: Fo
 
       <TokenComposition stats={stats} formats={formats} />
 
-      <ModelUsage models={stats.models} formats={formats} />
-
       <EfficiencyTiles stats={stats} formats={formats} />
+
+      <ModelUsage models={stats.models} formats={formats} />
 
       <ToolsSection state={tools} formats={formats} />
     </>

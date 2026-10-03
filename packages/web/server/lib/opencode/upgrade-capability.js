@@ -3,12 +3,22 @@ export const resolveOpenCodeUpgradeCapability = ({
   hasManagedProcess,
   activeBinary,
   isBundledBinary,
+  pinnedByPolicy = false,
 }) => {
   if (isExternal) {
     return {
       supported: false,
       manager: 'external',
       reason: 'external',
+    };
+  }
+
+  // The administrator pinned the CLI in the policy file and owns its updates.
+  if (pinnedByPolicy) {
+    return {
+      supported: false,
+      manager: 'administrator',
+      reason: 'policy',
     };
   }
 

@@ -8,10 +8,11 @@ const infoSchema = z.object({ version: versionSchema });
 const legacyHealthSchema = z.object({ version: versionSchema, healthy: z.boolean() });
 
 /**
- * Oldest OpenCode OpenChamber runs against. 2.0.15 added `PATCH /api/session`
- * metadata, which now holds every OpenChamber per-session record.
+ * Oldest OpenCode OpenChamber runs against. 2.0.20 added `GET /api/credential`,
+ * the only way to read the provider keys quota lookups, voice and routing use
+ * (2.0.15 before it added `PATCH /api/session` metadata).
  */
-const MINIMUM_OPENCODE_VERSION = '2.0.15';
+const MINIMUM_OPENCODE_VERSION = '2.0.20';
 
 const releaseParts = (version) => version.split(/[-+]/, 1)[0].split('.').map(Number);
 
@@ -80,10 +81,13 @@ export const readExternalOpenCodeVersion = async (baseUrl, headers, fetchImpl = 
   return parsed.success && parsed.data.version.startsWith('1.') ? parsed.data.version : null;
 };
 
-export const describeOpenCodeCompatibility = (version, installation, canInstall) => ({
+// `binary` is the local CLI that was checked, so a user with several installs
+// can see which one OpenChamber runs; external servers have none.
+export const describeOpenCodeCompatibility = (version, installation, canInstall, binary = null) => ({
   state: version === null ? 'unavailable' : isSupportedOpenCodeVersion(version) ? 'compatible' : 'incompatible',
   version,
   installation,
+  binary,
   minimumVersion: MINIMUM_OPENCODE_VERSION,
   // The installer fetches the latest release, which clears both a 1.x CLI and
   // a 2.x one older than the minimum.

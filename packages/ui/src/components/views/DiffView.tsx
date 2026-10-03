@@ -17,6 +17,7 @@ import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
 import { coerceDiffScope, isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKeyedCache, useBoundedDirectoryRetry } from './branchDiffScope';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
+import { normalizePath } from '@/lib/pathNormalization';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
 import { GitPathUnavailableError, type GitPathUnavailableReason } from '@/lib/api/git-path-diff';
 import { SubmoduleDiffSummary } from './SubmoduleDiffSummary';
@@ -178,9 +179,6 @@ const isWorkingStatusFile = (file: GitStatus['files'][number]): boolean => {
 const toAbsolutePath = (directory: string, filePath: string): string => {
     return toAbsoluteFilePath(directory, filePath);
 };
-
-const normalizePath = (value?: string | null): string =>
-    (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 const getFirstChangedModifiedLine = (original: string, modified: string): number => {
     const originalLines = original.split('\n');
@@ -2094,6 +2092,16 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const treeSelectedFile = isTreeMode
         ? (treeFileOrder.find((file) => file.path === displayFile) ?? treeFileOrder[0] ?? null)
         : null;
+    const treeSelectedPath = treeSelectedFile?.path ?? null;
+
+    // Tree mode renders its file open whether or not it is in the expanded
+    // set, but branch/commit/PR diffs are fetched only for expanded paths:
+    // the default first file would otherwise wait on a diff nobody requests.
+    React.useEffect(() => {
+        if (treeSelectedPath && !expandedFiles.has(treeSelectedPath)) {
+            expandStackedFile(treeSelectedPath);
+        }
+    }, [expandStackedFile, expandedFiles, treeSelectedPath]);
 
     const handleSelectFileAndScroll = React.useCallback((value: string) => {
         cancelPendingScrollAlignment();

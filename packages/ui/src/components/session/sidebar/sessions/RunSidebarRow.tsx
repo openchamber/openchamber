@@ -16,11 +16,13 @@ import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 // Mirrors the session row gutter in SessionNodeItem so the run row's title
 // lines up with session titles and its chevron with their chevrons.
 const ROW_GUTTER_LEFT_PX = 6;
+const ROW_DEPTH_STEP_PX = 14;
 const ROW_TEXT_LEFT_PX = ROW_GUTTER_LEFT_PX + 14 + 6;
 const MAX_LOGOS = 4;
 
 type Props = {
   run: MultiRunSummary;
+  depth: number;
   laneNodes: readonly SessionNode[];
   renderContext: SessionSidebarRenderContext;
   projectId: string | null;
@@ -46,6 +48,7 @@ function ProviderLogos({ providerIDs, ringClass }: { providerIDs: readonly strin
 
 function RunSidebarRowComponent({
   run,
+  depth,
   laneNodes,
   renderContext,
   projectId,
@@ -122,7 +125,7 @@ function RunSidebarRowComponent({
       data-run-row={run.key}
       aria-current={isActive ? 'page' : undefined}
       onClick={openOverview}
-      style={{ paddingLeft: ROW_TEXT_LEFT_PX }}
+      style={{ paddingLeft: ROW_TEXT_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
       className={cn(
         'group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-2.5',
         isActive ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
@@ -137,7 +140,7 @@ function RunSidebarRowComponent({
             toggle(event);
           }
         }}
-        style={{ left: ROW_GUTTER_LEFT_PX }}
+        style={{ left: ROW_GUTTER_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
         className="absolute top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-expanded={expanded}
         aria-label={expanded ? t('sessions.sidebar.run.collapse') : t('sessions.sidebar.run.expand')}

@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const credential = vi.fn();
 
 vi.mock('./auth.js', () => ({
-  loadClaudeCredential: () => credential(),
+  findClaudeCredential: () => credential(),
+  loadClaudeCredential: async () => credential(),
 }));
 
 import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
@@ -50,7 +51,7 @@ describe('Claude quota provider', () => {
   it('reports not configured when no credential source has a token', async () => {
     credential.mockReturnValue(null);
 
-    expect(isConfigured()).toBe(false);
+    expect(isConfigured({})).toBe(false);
     const result = await fetchQuota();
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);

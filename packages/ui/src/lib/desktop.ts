@@ -394,6 +394,32 @@ export const canRequestNativeDirectoryAccess = (): boolean => (
   isDesktopShell() && hasDesktopInvoke() && isDesktopLocalOriginActive()
 );
 
+const pendingSessionLinksSchema = z.array(z.object({
+  sessionId: z.string().min(1),
+  messageId: z.string().min(1).optional(),
+}));
+
+type PendingDesktopSessionLink = { sessionId: string; messageId: string | null };
+
+/**
+ * Session links (`openchamber://session/...`) that reached the desktop app
+ * before this window could listen for them — the link that launched the app,
+ * or "open in main window" from a closed main window. Taking them removes
+ * them; outside the desktop local page there are none.
+ */
+export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSessionLink[]> => {
+  if (!isDesktopShell() || !isDesktopLocalOriginActive()) return [];
+  try {
+    const parsed = pendingSessionLinksSchema.safeParse(await invokeDesktop('desktop_take_pending_session_links'));
+    return parsed.success
+      ? parsed.data.map((link) => ({ sessionId: link.sessionId, messageId: link.messageId ?? null }))
+      : [];
+  } catch (error) {
+    console.warn('Failed to read pending session links', error);
+    return [];
+  }
+};
+
 /**
  * On-disk path of a File dropped from the OS onto the desktop app.
  * Null outside the desktop local origin (browser drops carry no usable path).

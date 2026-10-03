@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -25,14 +25,13 @@ const periodToWindowSeconds = (period) => {
   return null;
 };
 
-export const isConfigured = () => {
-  const auth = readAuthFile();
+export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.key || entry?.token);
 };
 
 export const fetchQuota = async () => {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const apiKey = entry?.key ?? entry?.token;
 

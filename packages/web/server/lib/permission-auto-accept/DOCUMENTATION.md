@@ -22,7 +22,7 @@ Policies written before the modes stored booleans. The first read converts them 
 
 ## Runtime
 
-`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI.
+`createPermissionAutoAcceptRuntime` loads and serializes policy writes, subscribes to the global OpenCode event hub, caches session lineage, retries transient replies, and reconciles pending permissions after startup, reconnect, and when a session moves to `safety` or `auto`. It keeps handling requests without a connected UI. Startup and reconnect ask the pending list of each running session's directory (`/api/session/active`, then each session's record), never a list without a directory: OpenCode 2 answers that one for its own working directory only and starts that location, MCP servers included.
 
 Unknown lineage and failed policy loads fail closed (`ask`). A failed pending-permission fetch is distinct from an empty successful response and never clears policy state.
 
@@ -31,6 +31,8 @@ Unknown lineage and failed policy loads fail closed (`ask`). A failed pending-pe
 `evaluatePermission` (the routing runtime) is consulted in `safety` sessions only, before the reply. Only `accept` replies; anything else counts the request as handled without replying, so it stays on screen. A `permission.replied` event is passed to `onPermissionReplied` so the routing runtime forgets its cached decision.
 
 Each request's outcome (`replied`, `held`, `ignored`, `failed`) is kept for a bounded while. `isPermissionAutoAnswered` lets notifications skip only a request that was actually answered: a held one still notifies.
+
+A `held` or `failed` outcome is broadcast as `openchamber:permission-auto-accept.left-for-user` (`permissionId`, `sessionId`, `directory`). Clients keep a `safety` or `auto` session's request out of sight until this arrives or the request is answered, so an accepted request never flashes a card; the broadcast is what puts a held one on screen. Reconnect reconciliation broadcasts again for a request still held, which a client that already shows it ignores.
 
 ## Routes
 

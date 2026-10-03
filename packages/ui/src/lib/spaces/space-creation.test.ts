@@ -16,6 +16,7 @@ const entry: SpaceEntry = {
   id: ID,
   name: 'Fix login',
   projectDirectory: PROJECT,
+  projectFolder: { path: PROJECT, found: null },
   directory: DIRECTORY,
   state: 'preparing',
   stoppedIdle: false,

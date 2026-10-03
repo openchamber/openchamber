@@ -3,7 +3,7 @@
  *
  * A single send can carry more than what the user just typed: messages queued
  * while the previous turn ran, inline review comments, `@file` references
- * resolved to attachments, a linked GitHub issue or PR, synthetic parts from
+ * resolved to attachments, linked issues and PRs, synthetic parts from
  * conflict resolution, and the skills mentioned inline.
  *
  * OpenCode takes one primary message plus additional parts, so all of that has
@@ -56,16 +56,13 @@ export interface QueuedInput {
     context?: readonly QueuedContextPart[];
 }
 
-/** What the composer has attached besides text and files. */
-export interface ComposerContextInput {
-    /** Context drafts (code comments, terminal selections, annotations, PR context). */
-    inlineComments: readonly InlineCommentDraft[];
-    /** Synthetic context produced elsewhere (conflict resolution, and such). */
-    syntheticTexts: readonly string[];
-    linkedIssue: { number: number; title: string; url: string; contextText: string } | null;
-    linkedPr: { number: number; title: string; url: string; instructions: string; context: string } | null;
-    linkedLinearIssue: { identifier: string; title: string; url: string; contextText: string } | null;
-    linkedGuestIssue: {
+/** An issue, PR or tracker item attached to the composer, as it is sent. */
+export type ComposerContextReference =
+    | { kind: 'github-issue'; number: number; title: string; url: string; contextText: string }
+    | { kind: 'github-pr'; number: number; title: string; url: string; context: string }
+    | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
+    | {
+        kind: 'guest';
         providerId: string;
         id: string;
         title: string;
@@ -74,7 +71,16 @@ export interface ComposerContextInput {
         thread?: 'issue' | 'pull';
         /** Opaque guest payload; rides the context part metadata, not its text. */
         data?: JsonValue;
-    } | null;
+    };
+
+/** What the composer has attached besides text and files. */
+export interface ComposerContextInput {
+    /** Context drafts (code comments, terminal selections, annotations, PR context). */
+    inlineComments: readonly InlineCommentDraft[];
+    /** Synthetic context produced elsewhere (conflict resolution, and such). */
+    syntheticTexts: readonly string[];
+    /** Attached issues, PRs and tracker items, in the order they were attached. */
+    references: readonly ComposerContextReference[];
 }
 
 export interface OutgoingMessageInput extends ComposerContextInput {
@@ -191,10 +197,10 @@ export function buildComposerContext(
     skillInstruction: string | null,
 ): QueuedContextPart[] {
     const context: QueuedContextPart[] = [];
-    const attach = (part: { text: string; metadata: ContextPartMetadata }, instructions?: string) => {
-        const entry: QueuedContextPart = { kind: 'context', text: part.text, metadata: part.metadata };
-        if (instructions) entry.instructions = instructions;
-        context.push(entry);
+    // An attached item is context only: no instructions guess what the user
+    // wants from it; their message says that.
+    const attach = (part: { text: string; metadata: ContextPartMetadata }) => {
+        context.push({ kind: 'context', text: part.text, metadata: part.metadata });
     };
 
     for (const draft of input.inlineComments) {
@@ -205,36 +211,39 @@ export function buildComposerContext(
         context.push({ kind: 'synthetic', text });
     }
 
-    if (input.linkedIssue) {
-        const { number, title, url, contextText } = input.linkedIssue;
-        attach(createContextPart({ kind: 'github-issue', number, title, url }, contextText));
-    }
-
-    if (input.linkedPr) {
-        // Instructions before context: the model is told how to read the diff
-        // before it is given the diff.
-        const { number, title, url, instructions, context: prContext } = input.linkedPr;
-        attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext), instructions);
-    }
-
-    if (input.linkedLinearIssue) {
-        const { identifier, title, url, contextText } = input.linkedLinearIssue;
-        attach(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
-    }
-
-    if (input.linkedGuestIssue) {
-        const { providerId, id, title, url, contextText, thread, data } = input.linkedGuestIssue;
-        const payload: Extract<ContextPartPayload, { kind: 'guest-issue' | 'guest-pr' }> = {
-            kind: thread === 'pull' ? 'guest-pr' : 'guest-issue',
-            providerId,
-            id,
-            title,
-            url,
-        };
-        if (data !== undefined) {
-            payload.data = data;
+    for (const reference of input.references) {
+        switch (reference.kind) {
+            case 'github-issue': {
+                const { number, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'github-issue', number, title, url }, contextText));
+                break;
+            }
+            case 'github-pr': {
+                const { number, title, url, context: prContext } = reference;
+                attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext));
+                break;
+            }
+            case 'linear-issue': {
+                const { identifier, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'linear-issue', identifier, title, url }, contextText));
+                break;
+            }
+            case 'guest': {
+                const { providerId, id, title, url, contextText, thread, data } = reference;
+                const payload: Extract<ContextPartPayload, { kind: 'guest-issue' | 'guest-pr' }> = {
+                    kind: thread === 'pull' ? 'guest-pr' : 'guest-issue',
+                    providerId,
+                    id,
+                    title,
+                    url,
+                };
+                if (data !== undefined) {
+                    payload.data = data;
+                }
+                attach(createContextPart(payload, contextText));
+                break;
+            }
         }
-        attach(createContextPart(payload, contextText));
     }
 
     if (skillInstruction) {

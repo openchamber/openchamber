@@ -254,6 +254,21 @@ export const SETTINGS_REGISTRY = {
     parse: fromSchema(z.enum(['ask', 'safety', 'auto'])),
     ui: uiStore('permissionDefaultMode', (v) => useUIStore.getState().setPermissionDefaultMode(v)),
   }),
+  // The server keeps the message search index only while this is on; VS Code
+  // has no OpenChamber server to keep one.
+  messageSearchEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('messageSearchEnabled', (v) => useUIStore.getState().setMessageSearchEnabled(v)),
+  }),
+  // Agent reasoning in the same index; the server re-reads agent records when it turns on.
+  messageSearchReasoningEnabled: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: parseBoolean,
+    ui: uiStore('messageSearchReasoningEnabled', (v) => useUIStore.getState().setMessageSearchReasoningEnabled(v)),
+  }),
   agentControlToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentControlToolEnabled', (v) => useUIStore.getState().setAgentControlToolEnabled(v)) }),
   agentWebToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentWebToolEnabled', (v) => useUIStore.getState().setAgentWebToolEnabled(v)) }),
   // `builtin` or an installed extension id; the server falls back to `builtin` when that extension cannot serve.
@@ -289,6 +304,7 @@ export const SETTINGS_REGISTRY = {
   // Apply scope before action so leaving archived-only mode can restore an incoming archive choice.
   sessionRetentionOnlyArchived: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('sessionRetentionOnlyArchived', (v) => useUIStore.getState().setSessionRetentionOnlyArchived(v)) }),
   sessionRetentionAction: field({ scope: 'instance', parse: parseOneOf(['archive', 'delete']), ui: uiStore('sessionRetentionAction', (v) => useUIStore.getState().setSessionRetentionAction(v)) }),
+  mergedWorktreeCleanupEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('mergedWorktreeCleanupEnabled', (v) => useUIStore.getState().setMergedWorktreeCleanupEnabled(v)) }),
   terminalShell: field({ scope: 'instance', parse: parseTerminalShell, ui: uiStore('terminalShell', (v) => useUIStore.getState().setTerminalShell(v)) }),
   terminalLoginShells: field({ scope: 'instance', parse: parseTerminalShells(isTerminalShell), ui: uiStore('terminalLoginShells', (v) => useUIStore.getState().setTerminalLoginShells(v)) }),
   openInAppId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),

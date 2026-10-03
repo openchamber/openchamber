@@ -87,6 +87,23 @@ Auf einem Laptop ist das die schwächere Sperre: Die Desktop-App liest die Varia
 
 Mit der Variable kommen auch Relay, Jev, Netzwerkzugriff und erlaubte Erweiterungen aus eigenen Variablen: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (Repository-URLs, durch Kommas getrennt) und `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. In Docker brauchen Sie die für den Netzwerkzugriff, weil der Server über den Container hinaus lauschen muss.
 
+### Die OpenCode-CLI festlegen
+
+Wenn OpenCode auf deinen Rechnern schon installiert ist und OpenChamber genau diese Installation nutzen soll, trag ihren Pfad in die Richtliniendatei ein. Das funktioniert mit und ohne Enterprise-Modus.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber startet OpenCode nur von diesem Pfad. Der Pfad aus den Einstellungen, `OPENCODE_BINARY` und die mit der Desktop-App gelieferte Kopie werden ignoriert; die Kopie bleibt ungenutzt auf der Festplatte.
+- Liegt unter dem Pfad nichts Ausführbares, weicht OpenChamber nicht auf eine andere Kopie aus. Es stoppt mit einer Fehlermeldung, die den Pfad nennt.
+- Die Einstellungen zeigen den Pfad schreibgeschützt, mit dem Hinweis, dass der Administrator ihn festgelegt hat.
+- OpenChamber installiert oder aktualisiert ein festgelegtes OpenCode nicht und meldet keine neuen Versionen. Updates kommen mit deinem Rollout.
+- Die CLI muss OpenCode 2.x sein, mindestens die Version, die OpenChamber verlangt. Mit einer älteren bleibt OpenChamber beim Bildschirm „OpenCode aktualisieren“ stehen.
+- Ein Ordner geht auch, wenn er `opencode` enthält (`opencode.exe` unter Windows). Eine Umgebungsvariable dafür gibt es nicht, weil Nutzer diese selbst setzen können.
+
 ### Beispiele
 
 Die Richtliniendatei auf einem Mac ablegen. Führen Sie im Terminal als Administrator aus:
@@ -135,7 +152,7 @@ Zur Kontrolle öffnen Sie Einstellungen → Anbieter: Oben erscheint ein Hinweis
 
 ### Was sich ändert
 
-- Modellanbieter kommen nur aus Ihrer OpenCode-Konfiguration. Einen Anbieter verbinden, sich bei einem anmelden, einen Schlüssel hinzufügen oder einen eigenen Anbieter anlegen ist in OpenChamber ausgeschaltet; bestehende Konten entfernen oder wechseln funktioniert weiter. Das schließt nur den Weg über die App; die eigentliche Sperre ist die unten beschriebene OpenCode-Richtlinie.
+- Modellanbieter kommen nur aus Ihrer OpenCode-Konfiguration. Einen Anbieter verbinden, sich bei einem anmelden, einen Schlüssel hinzufügen oder einen eigenen Anbieter anlegen ist in OpenChamber ausgeschaltet; bestehende Konten entfernen oder wechseln funktioniert weiter. Das schließt nur den Weg über die App; die eigentliche Sperre ist die unten beschriebene OpenCode-Richtlinie. Die Anmeldung bei einem MCP-Server aus Ihrer OpenCode-Konfiguration funktioniert weiter, denn sie erreicht diesen Server und keinen Modellanbieter.
 - [Klassifizierungsanbieter (Jev)](/classification-providers/) bleiben aus, auch ein eigener Endpunkt, den jemand in den Einstellungen einträgt. Sicherheitsnetz und Auto werden nicht angeboten, und Sitzungen kommen nur von Hand in Arbeit. Um Jev über Ihre eigene Infrastruktur zu nutzen, legen Sie einen Endpunkt mit `jev` in der Richtliniendatei oder mit `OPENCHAMBER_JEV_URL` fest (dazu `OPENCHAMBER_JEV_MODEL` und, falls er einen braucht, `OPENCHAMBER_JEV_API_KEY`). Er wird zur Voreinstellung, lässt sich weiterhin ausschalten, und etwas anderes kann nicht gewählt werden.
 - Vorlesen über OpenAI ist aus. Ein eigener Server für Sprachausgabe oder Transkription muss auf demselben Rechner laufen. Lokale Stimmen und lokale Diktiermodelle funktionieren weiter.
 - Push-Benachrichtigungen an Telefone und Browser enthalten nur einen allgemeinen Titel wie „Agent response is ready“, ohne Nachrichtentext oder Sitzungsnamen. Desktop-Benachrichtigungen bleiben auf Ihrem Rechner und behalten den vollständigen Text.

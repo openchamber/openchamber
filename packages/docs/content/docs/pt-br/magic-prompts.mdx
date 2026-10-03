@@ -12,7 +12,7 @@ Você não precisa desta página para o uso normal. Recorra a ela quando quiser 
 ## Editar um prompt
 
 1. Abra **Settings → Magic Prompts**.
-2. Escolha um prompt entre os grupos na barra lateral — Git, GitHub, Planning e Session.
+2. Escolha um prompt entre os grupos na barra lateral — Git, Linear, Planning e Session.
 3. Edite o texto e salve.
 
 Alguns prompts têm uma parte visível (a mensagem que você veria) e uma parte de instruções (orientação oculta para o agente). Os prompts podem incluir `{{placeholders}}` que o OpenChamber preenche, como o diff ou o título da issue — mantenha-os no lugar.
@@ -33,14 +33,6 @@ Cada prompt nas tabelas abaixo indica onde ele roda e o que o dispara. Confira o
 | Geração de PR | O formulário de criação de pull request na aba PR da vista git | Você gera título e corpo de um PR. São preenchidos os branches base e head, os commits e arquivos alterados entre eles, o contexto adicional que você escreveu e o template de PR do repositório, quando existe. |
 | Resolução de conflito de merge/rebase | O diálogo de conflitos na vista git, quando um merge ou rebase para em conflitos | Você escolhe "Resolve in current session" ou "Resolve in new session". O agente lê os arquivos em conflito, propõe uma estratégia por arquivo e aguarda sua confirmação antes de editar, fazer stage ou continuar a operação. |
 | Resolução de conflito de cherry-pick | A seção "Re-integrate commits" de uma sessão em worktree | Mover os commits da sessão para o branch de destino esbarra em um conflito e você passa para o agente. O agente resolve dentro do worktree temporário, faz stage dos arquivos e continua o cherry-pick. |
-
-### GitHub
-
-| Prompt | Onde roda | Quando dispara |
-| --- | --- | --- |
-| Revisão de PR | O seletor "Link GitHub PR" no menu de anexos do composer, e o diálogo de novo worktree | Dois gatilhos. Anexar um PR como contexto renderiza as instruções, que saem com a sua próxima mensagem. Criar uma sessão de worktree a partir de um PR usa o prompt como primeira mensagem dessa sessão, com o contexto completo do PR anexado. |
-| Revisão de issue | O diálogo de novo worktree, quando o worktree parte de uma issue | A primeira mensagem da nova sessão revisa a issue, com o corpo e os comentários anexados como contexto. |
-| Revisão de checks falhos / comentários de PR / comentário único de PR | — | Hoje nenhum fluxo os envia. A vista de PR antes os disparava com ações de revisão de um clique; agora checks falhos e comentários são fixados como rascunhos de contexto do chat. Continuam editáveis para que overrides existentes mantenham efeito. |
 
 ### Planning
 

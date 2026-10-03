@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSessionTurnActive } from '@/sync/global-session-status';
+import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 
@@ -33,7 +33,8 @@ const SwitcherRow: React.FC<{
 }> = ({ session, meta, active, onSelect }) => {
   const { t } = useI18n();
   const unseenCount = useSessionUnseenCount(session.id);
-  const isStreaming = useSessionTurnActive(session.id);
+  const turnActivity = useSessionTurnActivity(session.id);
+  const isStreaming = turnActivity !== null;
   const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
@@ -60,8 +61,7 @@ const SwitcherRow: React.FC<{
       {/* Activity sits on the right, before the time — no reserved left gutter. */}
       {isStreaming || showUnreadDot ? (
         <SessionActivityIndicator
-          state={isStreaming ? 'running' : 'unread'}
-          label={isStreaming ? t('sessions.sidebar.session.status.active') : t('sessions.sidebar.session.status.unread')}
+          state={turnActivity ?? 'unread'}
         />
       ) : null}
       {/* The elapsed turn takes the time slot while it matters, then hands it

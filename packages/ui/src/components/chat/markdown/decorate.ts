@@ -4,6 +4,8 @@ import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/d
 import type { IconName } from '@/components/icon/icons';
 import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { getMermaidViewerController } from './mermaidViewer';
+import { getMarkdownCodeText } from './codeText';
+import { getMarkdownSelectionText } from './selectionMarkdown';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -197,12 +199,7 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
   code.toggleAttribute('data-md-code-trailing-newline', hasTrailingNewline);
 };
 
-export const getMarkdownCodeText = (code: HTMLElement): string => {
-  const lineContents = Array.from(code.querySelectorAll<HTMLElement>('[data-md-code-line-content]'));
-  if (lineContents.length === 0) return code.textContent ?? '';
-  const text = lineContents.map((line) => line.textContent ?? '').join('\n');
-  return code.hasAttribute('data-md-code-trailing-newline') ? `${text}\n` : text;
-};
+export { getMarkdownCodeText };
 
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
@@ -305,14 +302,48 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 // Tables: wrapper + copy/download toolbars
 // ---------------------------------------------------------------------------
 
-const extractTableData = (table: HTMLTableElement): { headers: string[]; rows: string[][] } => {
+// Double literal backslashes and escape pipes so they stay inside a Markdown table cell.
+const escapeMarkdownCellText = (text: string): string => text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
+const tableCellText = (cell: Element, markdown: boolean): string => {
+  const serialize = (node: Node): string => {
+    if (!(node instanceof Element)) {
+      const text = node.textContent ?? '';
+      return markdown ? escapeMarkdownCellText(text) : text;
+    }
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href');
+      if (href) {
+        const url = href.replace(/ /g, '%20');
+        // Keep URLs bare in CSV/TSV so spreadsheet apps can recognize link-only cells.
+        if (!markdown) return url;
+        // Escape opening and closing square brackets in the link label.
+        const escapedLabel = escapeMarkdownCellText(node.textContent ?? '').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+        // Encode pipes in URLs so the table parser does not split the cell.
+        const destinationUrl = url.replace(/\|/g, '%7C');
+        // Parentheses require an angle-bracket destination; encode literal angle brackets inside it.
+        const destination = /[()]/.test(destinationUrl) ? `<${destinationUrl.replace(/</g, '%3C').replace(/>/g, '%3E')}>` : destinationUrl;
+        return `[${escapedLabel}](${destination})`;
+      }
+    }
+    return Array.from(node.childNodes).map(serialize).join('');
+  };
+  return Array.from(cell.childNodes).map(serialize).join('');
+};
+
+const extractTableData = (
+  table: HTMLTableElement,
+  format: string,
+) => {
+  const markdown = format === 'markdown';
+  const cellText = (cell: Element): string => tableCellText(cell, markdown).trim();
   const headers: string[] = [];
   const rows: string[][] = [];
   const headerCells = table.querySelectorAll('thead th');
-  for (const cell of Array.from(headerCells)) headers.push((cell.textContent ?? '').trim());
+  for (const cell of Array.from(headerCells)) headers.push(cellText(cell));
   const bodyRows = table.querySelectorAll('tbody tr');
   for (const row of Array.from(bodyRows)) {
-    const cells = Array.from(row.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
+    const cells = Array.from(row.querySelectorAll('td')).map(cellText);
     if (cells.length > 0) rows.push(cells);
   }
   return { headers, rows };
@@ -708,27 +739,38 @@ type MarkdownCopyState = {
 
 const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
 
+// Copying a selection inside rendered markdown writes its source form: code
+// as the exact code text, anything else as Markdown. The markdown path keeps
+// the selected HTML too, so rich editors still paste formatted text.
 const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
   let state = markdownCopyStates.get(doc);
   if (!state) {
-    const getSelectedText = (): string | null => {
+    const getSelectedCopy = (): { text: string; html: string | null } | null => {
       const selection = doc.getSelection();
       if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-      return getMarkdownCodeSelectionText(selection.getRangeAt(0));
+      const range = selection.getRangeAt(0);
+      const code = getMarkdownCodeSelectionText(range);
+      if (code !== null) return { text: code, html: null };
+      const markdown = getMarkdownSelectionText(range);
+      if (markdown === null) return null;
+      const holder = doc.createElement('div');
+      holder.appendChild(range.cloneContents());
+      return { text: markdown, html: holder.innerHTML };
     };
     const handler = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
       event.stopPropagation();
-      event.clipboardData.setData('text/plain', text);
+      event.clipboardData.setData('text/plain', copy.text);
+      if (copy.html) event.clipboardData.setData('text/html', copy.html);
     };
     const menuHandler = (event: Event) => {
-      const text = getSelectedText();
-      if (text === null) return;
+      const copy = getSelectedCopy();
+      if (copy === null) return;
       event.preventDefault();
-      void copyTextToClipboard(text);
+      void copyTextToClipboard(copy.text);
     };
     state = { registrations: 0, handler, menuHandler };
     markdownCopyStates.set(doc, state);
@@ -803,7 +845,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-copy-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : format === 'tsv' ? tableToTSV(data) : tableToMarkdown(data);
         void copyTextToClipboard(content);
       }
@@ -816,7 +858,7 @@ export const attachMarkdownInteractions = (
       const format = action.replace('table-download-', '');
       const table = actionEl.closest('[data-markdown="table-wrapper"]')?.querySelector('table');
       if (table instanceof HTMLTableElement) {
-        const data = extractTableData(table);
+        const data = extractTableData(table, format);
         const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
         downloadBlob(format === 'csv' ? 'table.csv' : 'table.md', content, format === 'csv' ? 'text/csv' : 'text/markdown');
       }

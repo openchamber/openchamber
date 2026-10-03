@@ -1186,9 +1186,9 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
-  if (pathname.startsWith('/api/opencode/directory')) {
+  if (pathname === '/api/openchamber/directory') {
     const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessage('api:opencode/directory', { path: body.path });
+    const result = await sendBridgeMessage('api:openchamber/directory', { path: body.path });
     return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 

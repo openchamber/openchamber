@@ -26,8 +26,13 @@
 //
 // Setup commands, since 5d-4 (DESIGN.md, "Code in and out"): the project's worktree setup commands
 // run inside the space once its code arrived, in the background, and again when the user asks.
+//
+// The chat archive, since 5e-2 (decision 9, journey step 7): a delete takes the space's chats to
+// the host's archive first, starting a stopped space for it, and deletes nothing when they cannot
+// all be saved, unless the user said to delete anyway. See `space-archive.js`.
 
 import crypto from 'node:crypto';
+import fsPromises from 'node:fs/promises';
 
 import { z } from 'zod';
 
@@ -111,6 +116,10 @@ const failureOf = (error) => ({
  * starts, and `restartOpenCodeInside(spaceId)` asks the server inside to restart its OpenCode.
  * `readIdleStop()` and `saveIdleStop(setting)` read and keep the user's idle stop setting, and
  * `serverInside.writeIdleStop(spaceId, setting)` tells it to the server inside.
+ * `archiveChats({ spaceId, name, projectDirectory, running, allowUnsaved })` saves a space's chats
+ * to the host's archive before it goes, see `space-archive.js`; without it the chats go with it.
+ * `folderExists(directory)` says whether the project folder a space was made for is still a
+ * folder on the host, for the list.
  */
 export function createSpaceJourney({
   manager,
@@ -123,9 +132,11 @@ export function createSpaceJourney({
   serverInside,
   restartOpenCodeInside,
   listProjectDirectories,
+  archiveChats = null,
   readHostSecret = () => undefined,
   readIdleStop = async () => ({ ...DEFAULT_IDLE_STOP }),
   saveIdleStop = async () => {},
+  folderExists = async (directory) => (await fsPromises.stat(directory).catch(() => null))?.isDirectory() === true,
   announce = () => {},
   onSpacesChanged = () => {},
   logger = console,
@@ -207,7 +218,13 @@ export function createSpaceJourney({
         outcome.refsRemoved = true;
       } catch (error) {
         outcome.refsRemoved = false;
-        outcome.failures.push(failureOf(error));
+        // A project folder that is gone, moved or deleted, took its refs with it: they cannot be
+        // found from here, and nothing of the space is left to remove, so the delete went through.
+        if (error instanceof SpaceError && error.code === 'project_folder_missing') {
+          logger.warn?.(`[spaces] the service refs of space ${spaceId} stay in its project folder, which is no longer at its path`);
+        } else {
+          outcome.failures.push(failureOf(error));
+        }
       }
     }
     records.remove(spaceId);
@@ -412,6 +429,7 @@ export function createSpaceJourney({
     placeId: entry.placeId,
     projectDirectory: entry.projectDirectory,
     directory: entry.directory,
+    projectFolder: { path: entry.projectDirectory, found: null },
     created: entry.created,
     state: entry.state,
     stoppedIdle: false,
@@ -436,6 +454,10 @@ export function createSpaceJourney({
    * which the UI must show as "unknown" and never as "open". With `access` each running space
    * with grants is asked what its gatekeeper holds, one request per such space, so the list can
    * say "needs access"; without it `access` stays null.
+   *
+   * `projectFolder` names the folder the space was made for, from the record, so a space whose
+   * project is no longer registered can still say where it came from; `found` says whether that
+   * folder is there now, and is null while a creation is under way or when nothing names it.
    */
   const listSpaces = async ({ access = false } = {}) => {
     const [spaces, projects] = await Promise.all([manager.listSpaces({ placeId: place.id }), registeredProjects()]);
@@ -443,12 +465,14 @@ export function createSpaceJourney({
       const projectDirectory = projects.get(space.project) ?? null;
       const { record } = records.read(space.id);
       const grants = record?.grants ?? [];
+      const projectPath = record?.repository ?? projectDirectory;
       return {
         id: space.id,
         name: space.name,
         placeId: space.placeId,
         projectDirectory,
         directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
+        projectFolder: { path: projectPath, found: projectPath === null ? null : await folderExists(projectPath) },
         created: space.created,
         state: space.state,
         stoppedIdle: space.stoppedIdle === true,
@@ -668,11 +692,44 @@ export function createSpaceJourney({
   });
 
   /**
+   * Saves the space's chats to the archive, starting a stopped one for it; a space that does not
+   * start has no chats to give, which the archive reports as not saved. A space started only for
+   * this, whose chats could not be saved, is stopped again, so the refused delete leaves it as it
+   * was. Its gatekeeper allows nothing meanwhile: the network is not said again for a delete.
+   * Null without an archive.
+   */
+  const saveChatsOf = async (space, allowUnsaved) => {
+    if (!archiveChats) return null;
+    let running = space.state === 'running';
+    let started = false;
+    if (!running && space.state === 'exited') {
+      try {
+        await manager.startSpace({ placeId: place.id, spaceId: space.id });
+        running = true;
+        started = true;
+      } catch (error) {
+        logger.warn?.(`[spaces] space ${space.id} did not start to give its chats: ${error?.code ?? error?.message ?? error}`);
+      }
+    }
+    try {
+      return await archiveChats({ spaceId: space.id, name: space.name, projectDirectory: space.projectDirectory ?? null, running, allowUnsaved });
+    } catch (error) {
+      if (started) {
+        await manager.stopSpace({ placeId: place.id, spaceId: space.id }).catch((stopError) => {
+          logger.warn?.(`[spaces] space ${space.id} started for its chats is still running: ${stopError?.code ?? stopError?.message ?? stopError}`);
+        });
+      }
+      throw error;
+    }
+  };
+
+  /**
    * Removes a space and everything the host kept for it: the containers, networks and volumes,
    * the service refs in the user's repository and the record. A failed creation is forgotten here.
-   * The chat archive of decision 9 is a later stage; today the sessions go with the space.
+   * Its chats go to the archive first (decision 9); when they cannot all be saved the space stays
+   * and the answer is `chats_not_saved`, unless `allowUnsaved` says to save what can be and go on.
    */
-  const removeUnlocked = async (spaceId) => {
+  const removeUnlocked = async (spaceId, { allowUnsaved = false } = {}) => {
     const waiting = pending.get(spaceId);
     if (waiting) {
       if (waiting.state !== 'failed') throw new SpaceError('space_preparing', 'This space is still being made. Wait for it, then remove it.');
@@ -680,16 +737,17 @@ export function createSpaceJourney({
       // A failed creation whose clean-up failed still has containers; those go now, or the space
       // comes back in the list as damaged. One that was cleaned up has nothing left to remove.
       const still = (await manager.listSpaces({ placeId: place.id })).some((space) => space.id === spaceId);
-      if (!still) return { id: spaceId, removed: true, refsRemoved: null, failures: [] };
-      return { id: spaceId, ...(await removeEverything(spaceId, waiting.projectDirectory)) };
+      if (!still) return { id: spaceId, removed: true, refsRemoved: null, failures: [], chats: null };
+      return { id: spaceId, ...(await removeEverything(spaceId, waiting.projectDirectory)), chats: null };
     }
     const space = await requireListed(spaceId);
+    const chats = await saveChatsOf(space, allowUnsaved);
     const { record } = records.read(spaceId);
     const outcome = await removeEverything(spaceId, record?.repository ?? space.projectDirectory);
     onSpacesChanged();
-    return { id: spaceId, ...outcome };
+    return { id: spaceId, ...outcome, chats };
   };
-  const removeSpace = (spaceId) => exclusive(spaceId, () => removeUnlocked(spaceId));
+  const removeSpace = (spaceId, options) => exclusive(spaceId, () => removeUnlocked(spaceId, options));
 
   /**
    * Stops every running space, for the switch being turned off. Each space is tried on its own:
@@ -751,6 +809,35 @@ export function createSpaceJourney({
     return change;
   };
 
+  const requirePlace = (placeId) => {
+    if (placeId !== place.id) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
+  };
+
+  /** The disk the spaces take on a place, and what a clean-up would free now (journey step 9). */
+  const readDisk = async (placeId) => {
+    requirePlace(placeId);
+    return place.readDisk();
+  };
+
+  /**
+   * Removes what OpenChamber can make again on a place, see `places/docker-disk.js`; Docker keeps
+   * whatever is in use. Refused while a space is being made, which pulls the image and fills the
+   * tools before any container holds them. Answers what was freed, what Docker kept, and the disk after.
+   */
+  const cleanUpDisk = async (placeId) => {
+    requirePlace(placeId);
+    if (Array.from(pending.values()).some((entry) => entry.state === 'preparing')) {
+      throw new SpaceError('space_preparing', 'A space is being made. Clean up when it is ready.');
+    }
+    const { freedBytes, kept, machine } = await place.cleanUpDisk();
+    for (const item of kept.filter((entry) => entry.reason === 'failed')) {
+      logger.warn?.(`[spaces] clean-up could not remove ${item.kind} ${item.name}: ${item.message}`);
+    }
+    if (machine.state === 'failed') logger.warn?.(`[spaces] the Colima machine did not trim its disk: ${machine.message}`);
+    if (machine.state === 'trimmed') logger.info?.('[spaces] the Colima machine trimmed its disk after a clean-up');
+    return { freedBytes, kept: kept.map(({ kind, reason }) => ({ kind, reason })), disk: await place.readDisk() };
+  };
+
   /** For a turn-off that did not go through after the spaces were stopped: creations are taken again. */
   const reopen = () => { closing = false; };
 
@@ -786,7 +873,8 @@ export function createSpaceJourney({
   /**
    * Brings the work out once more and applies it as a branch or as uncommitted changes. What is
    * applied is what this call fetched, whatever a preview showed. With `removeAfterwards` the
-   * space goes once the apply went through, and only then.
+   * space goes once the apply went through, and only then; when its chats cannot all be saved it
+   * stays, and `kept` says why, because the work is applied either way.
    */
   const applySpace = (spaceId, request) => exclusive(spaceId, async () => {
     const parsed = applyRequestSchema.safeParse(request ?? {});
@@ -798,9 +886,18 @@ export function createSpaceJourney({
     const applied = as === 'branch'
       ? { status: 'applied', ...(await codeOut.applyAsBranch({ repository, spaceId, branch })) }
       : await codeOut.applyAsChanges({ repository, spaceId });
-    const removal = removeAfterwards && applied.status === 'applied' ? await removeUnlocked(spaceId) : null;
-    return { brought, applied, removal };
+    let removal = null;
+    let kept = null;
+    if (removeAfterwards && applied.status === 'applied') {
+      try {
+        removal = await removeUnlocked(spaceId);
+      } catch (error) {
+        if (error?.code !== 'chats_not_saved') throw error;
+        kept = failureOf(error);
+      }
+    }
+    return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
 }

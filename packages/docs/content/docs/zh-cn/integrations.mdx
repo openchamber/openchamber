@@ -34,17 +34,17 @@ description: 连接 OpenChamber 所使用的服务和订阅。
 
 - 在 Linear 面板中打开 issue 并选择 **Start session**。滚动 issue 时按钮始终停留在底部。
 - 在聊天中选择 **New Session From Linear Issue** 从列表中挑选；需要新分支时选择 **Create in worktree**。
-- 在 **New Worktree** 对话框中选择 **Start from Linear Issue**。
+- 在 **New Worktree** 对话框中选择一个 Linear issue。新会话打开时该 issue 已附加在消息框中，第一条消息由你自己来写。
 
-会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
+从 Linear 面板和聊天开始时，会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
 
 ### 将 issue 关联到消息
 
-在聊天输入框中选择 **Link Linear Issue**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
+在聊天输入框中打开 **+** 菜单并选择 **Linear**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
 
 ### 会话评论
 
-在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
+在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话，或第一条消息附加了该 issue 的会话，会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
 
 ## 安装集成
 

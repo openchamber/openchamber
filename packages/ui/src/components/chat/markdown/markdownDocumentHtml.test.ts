@@ -34,7 +34,7 @@ describe('document raw HTML', () => {
   test('renders GitHub-style README markup: pictures, badges and aligned blocks', () => {
     const html = renderDocument(README_HEAD);
 
-    expect(html).toContain('<h1><picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg"><img src="docs/logo-light.svg" width="32" height="32" align="absmiddle" style="height:32px"></picture> OpenChamber</h1>');
+    expect(html).toContain('<h1><picture><source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg"><img src="docs/logo-light.svg" width="32" height="32" align="absmiddle" style="aspect-ratio:32/32"></picture> OpenChamber</h1>');
     expect(html).toContain('<img src="https://img.shields.io/github/stars/openchamber/openchamber?style=flat" alt="GitHub stars"></a>');
     expect(html).toContain('<a href="https://www.blacksmith.sh/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/blacksmith-dark.svg"><img src="docs/blacksmith-light.svg" height="28" alt="CI powered by Blacksmith" style="height:28px"></picture></a>');
     expect(html).toContain('<p align="center"><sub>small</sub> <kbd>Ctrl</kbd></p>');
@@ -58,6 +58,13 @@ describe('document raw HTML', () => {
       expect(forbidden.test(renderDocument(markdown))).toBe(false);
     });
   }
+
+  test('scales a GitHub screenshot with both sizes by its ratio, and drops HTML comments', () => {
+    const html = renderDocument('<!-- template hint -->\n\n<img width="1920" height="906" alt="before" src="https://github.com/user-attachments/assets/1" />');
+
+    expect(html).toContain('<img width="1920" height="906" alt="before" src="https://github.com/user-attachments/assets/1" style="aspect-ratio:1920/906">');
+    expect(html).not.toContain('template hint');
+  });
 
   test('keeps the task-list checkbox marked renders, disabled', () => {
     const html = renderDocument('- [x] done');

@@ -4,7 +4,9 @@
  * after a confirmation, which offers to apply first. The
  * desktop has them in a menu on the space's group; the phone opens the same list as a sheet from
  * the group's swipe actions. Delete never runs from the list itself: it opens the confirmation,
- * which says what goes with the space.
+ * which says what goes with the space. The space's chats go to the Archive page first (decision 9);
+ * when they cannot all be saved the space stays and the confirmation opens again with "Delete
+ * anyway", and once they went, a notice says where they are, with "Open".
  *
  * The sheet and the confirmation are mounted once by the main layout and the mobile app, behind
  * the switch; never in VS Code (decision 16).
@@ -24,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { isSpaceActionUnavailable, isSpaceApplicable, runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
 import { useSpacesStore, type SpaceAction } from '@/lib/spaces/spaces-store';
@@ -149,18 +152,49 @@ export const SpaceActionsSheet: React.FC = () => {
   );
 };
 
+/**
+ * Says once that a deleted space's chats are on the Archive page, with the way there. The phone's
+ * layout has no Archive page, so there the notice has no "Open" that would lead nowhere.
+ */
+const useArchivedNotice = () => {
+  const { t } = useI18n();
+  const name = useSpacesStore((state) => state.archivedNotice);
+  const isMobile = useUIStore((state) => state.isMobile);
+  React.useEffect(() => {
+    if (name === null) return;
+    useSpacesStore.getState().noteChatsArchived(null);
+    const text = t('spaces.archive.notice', { name });
+    if (isMobile) {
+      toast.success(text);
+      return;
+    }
+    toast.success(text, {
+      // A space deleted from Settings: the Archive page would open behind its window.
+      action: {
+        label: t('spaces.archive.noticeOpen'),
+        onClick: () => {
+          useUIStore.getState().setSettingsDialogOpen(false);
+          useUIStore.getState().setArchivePageOpen(true);
+        },
+      },
+    });
+  }, [isMobile, name, t]);
+};
+
 /** The confirmation before a space is deleted; the deletion's progress and failure show on the group. */
 export const SpaceDeleteDialog: React.FC = () => {
   const { t } = useI18n();
+  useArchivedNotice();
   const isMobile = useUIStore((state) => state.isMobile);
   const spaceId = useSpacesStore((state) => state.deleteDialog);
+  const unsaved = useSpacesStore((state) => state.deleteUnsaved);
   const name = useSpacesStore((state) => (spaceId ? state.journey?.get(spaceId)?.name ?? '' : ''));
   const applicable = useSpacesStore((state) => isSpaceApplicable(spaceId ? state.journey?.get(spaceId) : undefined));
   const close = () => useSpacesStore.getState().closeDeleteDialog();
   const confirm = () => {
     if (!spaceId) return;
     close();
-    void runSpaceAction(spaceId, 'remove');
+    void runSpaceAction(spaceId, 'remove', { deleteUnsavedChats: unsaved !== null });
   };
   const applyFirst = () => {
     if (!spaceId) return;
@@ -172,14 +206,24 @@ export const SpaceDeleteDialog: React.FC = () => {
     <div className="flex w-full justify-end gap-2">
       {applicable ? <Button variant="outline" size="sm" className="mr-auto" onClick={applyFirst}>{t('spaces.delete.applyFirst')}</Button> : null}
       <Button variant="outline" size="sm" onClick={close}>{t('spaces.delete.cancel')}</Button>
-      <Button variant="destructive" size="sm" onClick={confirm}>{t('spaces.delete.confirm')}</Button>
+      <Button variant="destructive" size="sm" onClick={confirm}>{unsaved ? t('spaces.delete.deleteAnyway') : t('spaces.delete.confirm')}</Button>
     </div>
   );
+  // After chats could not be saved: a line for the whole when anything but size failed, and one
+  // per chat too large to save, named by its title from the space, shown as text.
+  const lines = unsaved
+    ? [
+      ...(unsaved.failed > 0 || unsaved.tooLarge.length === 0 ? [t('spaces.delete.chatsNotSaved', { name })] : []),
+      ...unsaved.tooLarge.map((chatTitle) => t('spaces.delete.chatTooLarge', { title: chatTitle })),
+    ]
+    : [t('spaces.delete.body')];
 
   if (isMobile) {
     return (
       <MobileOverlayPanel open={spaceId !== null} title={title} onClose={close} footer={buttons}>
-        <p className="px-3 pb-4 pt-1 typography-meta text-muted-foreground">{t('spaces.delete.body')}</p>
+        <div className="flex flex-col gap-1 px-3 pb-4 pt-1">
+          {lines.map((line, index) => <p key={index} className="typography-meta text-muted-foreground">{line}</p>)}
+        </div>
       </MobileOverlayPanel>
     );
   }
@@ -188,7 +232,9 @@ export const SpaceDeleteDialog: React.FC = () => {
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{t('spaces.delete.body')}</DialogDescription>
+          <DialogDescription className="flex flex-col gap-1">
+            {lines.map((line, index) => <span key={index}>{line}</span>)}
+          </DialogDescription>
         </DialogHeader>
         <DialogFooter>{buttons}</DialogFooter>
       </DialogContent>

@@ -15,6 +15,7 @@ import { checkOpenCodeVersionOutput } from './opencodeVersion';
 import { isSameOpenCodeServer } from './opencodeServiceUrl';
 import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade.js';
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
+import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 
 const t = vscode.l10n.t;
 
@@ -78,6 +79,8 @@ export interface OpenCodeManager {
   getStatus(): ConnectionStatus;
   getApiUrl(): string | null;
   getOpenCodeAuthHeaders(): Record<string, string>;
+  /** The managed server's launch environment; null while none runs (external URL, stopped). */
+  getManagedLaunchEnvironment(): NodeJS.ProcessEnv | null;
   getWorkingDirectory(): string;
   isCliAvailable(): boolean;
   getDebugInfo(): OpenCodeDebugInfo;
@@ -292,7 +295,34 @@ function createConfiguredOpencodeBinaryError(raw: string, normalized: string): E
   }
 }
 
+/**
+ * The OpenCode CLI the administrator pinned in the machine policy file, the
+ * same `opencodeBinary` the web server honours. It wins over
+ * `openchamber.opencodeBinary`, the shared settings and the environment, and
+ * an unusable pin never falls back to them. `null` when nothing is pinned.
+ */
+function readPinnedOpencodeBinary(): { raw: string; binary: string | null } | null {
+  const raw = readEnterprisePolicy().opencodeBinary;
+  if (!raw) {
+    return null;
+  }
+  const normalized = normalizeConfiguredOpencodeBinary(raw);
+  const usable = normalized !== null && isExecutable(normalized) && !isKnownOpenCodeDesktopAppPath(normalized);
+  return { raw: normalized || raw, binary: usable ? normalized : null };
+}
+
 function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
+  const pinned = readPinnedOpencodeBinary();
+  if (pinned) {
+    if (pinned.binary) {
+      return pinned.binary;
+    }
+    throw new Error(
+      `The OpenCode CLI pinned by your administrator (opencodeBinary in the OpenChamber policy file) is missing or not executable: ${pinned.raw}. `
+      + 'Ask your administrator to install the standalone opencode CLI at that path or update the policy.'
+    );
+  }
+
   const candidates: string[] = [];
   try {
     const config = vscode.workspace.getConfiguration('openchamber');
@@ -332,6 +362,11 @@ function validateConfiguredOpencodeBinaryForManagedStart(): string | null {
 }
 
 function resolveOpencodeCliPath(): string | null {
+  const pinned = readPinnedOpencodeBinary();
+  if (pinned) {
+    return pinned.binary;
+  }
+
   const configured = (() => {
     try {
       const config = vscode.workspace.getConfiguration('openchamber');
@@ -737,13 +772,14 @@ function spawnManagedOpenCodeServer(
   port: number,
   timeoutMs: number,
   signal: AbortSignal,
+  env: NodeJS.ProcessEnv,
 ) {
   const binary = stripWrappingQuotes(process.env.OPENCODE_BINARY || 'opencode') || 'opencode';
   assertSupportedOpenCodeBinary(binary);
   const launch = resolveWindowsLaunchSpec(binary, ['serve', '--hostname', '127.0.0.1', '--port', String(port)]);
   return spawnManagedOpenCodeProcess(launch.binary, launch.args, {
     cwd: workingDirectory,
-    env: applyProviderEnvAliases({ ...process.env }),
+    env,
     port, timeoutMs, signal, sourceBinary: binary,
     appBundleHint: isMacOpenCodeAppBundlePath(binary)
       ? ' The configured binary points at the macOS desktop app bundle; OpenChamber needs the standalone opencode CLI.'
@@ -777,6 +813,9 @@ async function allocateManagedOpenCodePort(): Promise<number> {
 
 export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCodeManager {
   let server: ReturnType<typeof spawnManagedOpenCodeServer> | null = null;
+  // The environment the managed server was launched with: the only place the
+  // values of the variables OpenCode takes provider keys from can be read back.
+  let serverEnv: NodeJS.ProcessEnv | null = null;
   let startupAbort: AbortController | null = null;
   let lifecycleRevision = 0;
   let reapedOrphansOnce = false;
@@ -981,7 +1020,8 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       fs.mkdirSync(serverCwd, { recursive: true });
       const port = await allocateManagedOpenCodePort();
       startup.signal.throwIfAborted();
-      server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal);
+      serverEnv = applyProviderEnvAliases({ ...process.env });
+      server = spawnManagedOpenCodeServer(serverCwd, port, READY_CHECK_TIMEOUT_MS, startup.signal, serverEnv);
       await server.ready;
 
       if (server && server.url) {
@@ -1125,14 +1165,15 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
       }
       const binary = cliPath || resolveOpencodeCliPath();
       const detected = binary ? await readOpenCodeCliVersion(resolveWindowsLaunchSpec(binary, []), { env: process.env }).catch(() => null) : null;
-      return describeOpenCodeCompatibility(detected, 'managed', supportsOpenCodeV2Install());
+      // A CLI pinned by the administrator is theirs to replace, never ours.
+      return describeOpenCodeCompatibility(detected, 'managed', supportsOpenCodeV2Install() && !readPinnedOpencodeBinary(), binary || null);
     },
     installV2: () => {
       if (installInFlight) return installInFlight;
       const revision = lifecycleRevision;
       installInFlight = enqueueOperation(async () => {
         if (revision !== lifecycleRevision) throw new Error('OpenCode installation was cancelled.');
-        if (useConfiguredUrl || !supportsOpenCodeV2Install()) throw new Error('Automatic OpenCode v2 installation is unavailable for this runtime.');
+        if (useConfiguredUrl || !supportsOpenCodeV2Install() || readPinnedOpencodeBinary()) throw new Error('Automatic OpenCode v2 installation is unavailable for this runtime.');
         const previousBinary = cliPath || resolveOpencodeCliPath();
         const previousVersion = previousBinary
           ? await readOpenCodeCliVersion(resolveWindowsLaunchSpec(previousBinary, []), { env: process.env })
@@ -1171,6 +1212,7 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     getStatus: () => status,
     getApiUrl,
     getOpenCodeAuthHeaders,
+    getManagedLaunchEnvironment: () => (server ? serverEnv : null),
     getWorkingDirectory: () => workingDirectory,
     isCliAvailable: () => !cliMissing || Boolean(cliPath || resolveOpencodeCliPath()),
     getDebugInfo: () => {

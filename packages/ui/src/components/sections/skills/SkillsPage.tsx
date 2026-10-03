@@ -21,6 +21,7 @@ import {
   SettingsSection,
   SettingsFieldRow,
   SettingsStackedField,
+  SettingsCheckboxRow,
   SETTINGS_FIELD_LABEL_CLASS,
   SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
@@ -162,6 +163,7 @@ const SkillsInstalledPage: React.FC = () => {
   const [draftSource, setDraftSource] = React.useState<'opencode' | 'agents'>('opencode');
   const [description, setDescription] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
+  const [disableModelInvocation, setDisableModelInvocation] = React.useState(false);
   const [skillMarkdown, setSkillMarkdown] = React.useState(() => buildSkillMarkdown('', ''));
   const [skillEditorMode, setSkillEditorMode] = React.useState<'edit' | 'preview'>('edit');
   const [supportingFiles, setSupportingFiles] = React.useState<SupportingFile[]>([]);
@@ -171,6 +173,7 @@ const SkillsInstalledPage: React.FC = () => {
   
   const [originalDescription, setOriginalDescription] = React.useState('');
   const [originalInstructions, setOriginalInstructions] = React.useState('');
+  const [originalDisableModelInvocation, setOriginalDisableModelInvocation] = React.useState(false);
   
   const [isFileDialogOpen, setIsFileDialogOpen] = React.useState(false);
   const [newFileName, setNewFileName] = React.useState('');
@@ -221,23 +224,30 @@ const SkillsInstalledPage: React.FC = () => {
 
   const skillEditorKey = JSON.stringify([settingsDirectory, selectedSkillName, selectedSkill?.path, isNewSkill]);
   const hydratedSkill = React.useRef<string | null>(null);
-  const currentEditor = React.useRef({ key: skillEditorKey, markdown: skillMarkdown });
-  currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown };
+  const currentEditor = React.useRef({ key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation });
+  currentEditor.current = { key: skillEditorKey, markdown: skillMarkdown, disableModelInvocation };
   const savedMarkdown = React.useRef('');
+  const savedDisableModelInvocation = React.useRef(false);
 
   React.useEffect(() => {
     let cancelled = false;
-    const hydrateText = (nextDescription: string, nextInstructions: string) => {
+    const hydrateText = (nextDescription: string, nextInstructions: string, nextDisableModelInvocation: boolean) => {
       if (currentEditor.current.key !== skillEditorKey) return;
       const markdown = buildSkillMarkdown(nextDescription, nextInstructions);
-      const dirty = hydratedSkill.current === skillEditorKey
-        && currentEditor.current.markdown !== savedMarkdown.current;
+      const isHydrated = hydratedSkill.current === skillEditorKey;
+      const textDirty = isHydrated && currentEditor.current.markdown !== savedMarkdown.current;
+      const invocationDirty = isHydrated
+        && currentEditor.current.disableModelInvocation !== savedDisableModelInvocation.current;
       hydratedSkill.current = skillEditorKey;
       savedMarkdown.current = markdown;
-      if (!dirty) {
+      savedDisableModelInvocation.current = nextDisableModelInvocation;
+      if (!textDirty) {
         setDescription(nextDescription);
         setInstructions(nextInstructions);
         setSkillMarkdown(markdown);
+      }
+      if (!invocationDirty) {
+        setDisableModelInvocation(nextDisableModelInvocation);
       }
     };
     const loadSkillDetails = async () => {
@@ -248,9 +258,10 @@ const SkillsInstalledPage: React.FC = () => {
         setDraftName(skillDraft.name || '');
         setDraftScope(skillDraft.scope || 'user');
         setDraftSource(skillDraft.source === 'agents' ? 'agents' : 'opencode');
-        hydrateText(nextDescription, nextInstructions);
+        hydrateText(nextDescription, nextInstructions, false);
         setOriginalDescription('');
         setOriginalInstructions('');
+        setOriginalDisableModelInvocation(false);
         setSupportingFiles([]);
         setPendingFiles(skillDraft.pendingFiles || []);
       } else if (selectedSkillName && selectedSkill) {
@@ -261,9 +272,11 @@ const SkillsInstalledPage: React.FC = () => {
             const md = detail.sources.md;
             const nextDescription = md.description || '';
             const nextInstructions = md.instructions || '';
-            hydrateText(nextDescription, nextInstructions);
+            const nextDisableModelInvocation = md.disableModelInvocation === true;
+            hydrateText(nextDescription, nextInstructions, nextDisableModelInvocation);
             setOriginalDescription(nextDescription);
             setOriginalInstructions(nextInstructions);
+            setOriginalDisableModelInvocation(nextDisableModelInvocation);
             setSupportingFiles(md.supportingFiles || []);
           }
         } catch (error) {
@@ -336,7 +349,11 @@ const SkillsInstalledPage: React.FC = () => {
   const save = React.useCallback(async (): Promise<AutosaveResult> => {
     const skillName = selectedSkillName?.trim();
     if (isNewSkill || isReadOnlySkill || !skillName) return AUTOSAVE_UNCHANGED;
-    if (description === originalDescription && instructions === originalInstructions) {
+    if (
+      description === originalDescription
+      && instructions === originalInstructions
+      && disableModelInvocation === originalDisableModelInvocation
+    ) {
       return AUTOSAVE_UNCHANGED;
     }
     if (!description.trim()) {
@@ -348,6 +365,7 @@ const SkillsInstalledPage: React.FC = () => {
       description: description.trim(),
       instructions: instructions.trim() || undefined,
       targetPath: selectedSkill?.path,
+      disableModelInvocation,
     }, settingsDirectory);
     if (!success) {
       return autosaveFailed(t('settings.skills.page.toast.updateSkillFailed'));
@@ -355,17 +373,21 @@ const SkillsInstalledPage: React.FC = () => {
 
     if (currentEditor.current.key === skillEditorKey) {
       savedMarkdown.current = buildSkillMarkdown(description, instructions);
+      savedDisableModelInvocation.current = disableModelInvocation;
       setOriginalDescription(description);
       setOriginalInstructions(instructions);
+      setOriginalDisableModelInvocation(disableModelInvocation);
     }
     return AUTOSAVE_SAVED;
   }, [
     description,
     instructions,
+    disableModelInvocation,
     isNewSkill,
     isReadOnlySkill,
     originalDescription,
     originalInstructions,
+    originalDisableModelInvocation,
     selectedSkill?.path,
     selectedSkillName,
     settingsDirectory,
@@ -375,6 +397,12 @@ const SkillsInstalledPage: React.FC = () => {
   ]);
 
   const autosave = useAutosave(save);
+
+  const handleDisableModelInvocationChange = (next: boolean) => {
+    setDisableModelInvocation(next);
+    // A new skill is written once, on Create.
+    if (!isNewSkill) autosave.requestSave();
+  };
 
   const handleCreate = async () => {
     const skillName = draftName.trim().replace(/\s+/g, '-').toLowerCase();
@@ -401,6 +429,7 @@ const SkillsInstalledPage: React.FC = () => {
         scope: draftScope,
         source: draftSource,
         supportingFiles: pendingFiles.length > 0 ? pendingFiles : undefined,
+        disableModelInvocation,
       };
       const success = await createSkill(config, settingsDirectory);
       if (success) {
@@ -657,6 +686,15 @@ const SkillsInstalledPage: React.FC = () => {
                 disabled={isReadOnlySkill}
               />
             </SettingsStackedField>
+
+            <SettingsCheckboxRow
+              checked={disableModelInvocation}
+              onChange={handleDisableModelInvocationChange}
+              label={t('settings.skills.page.field.disableModelInvocation')}
+              info={t('settings.skills.page.field.disableModelInvocationHint')}
+              disabled={isReadOnlySkill}
+              className="pt-2"
+            />
 
         </SettingsSection>
 

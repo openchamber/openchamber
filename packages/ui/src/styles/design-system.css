@@ -356,6 +356,22 @@
     0 6px 6px -3px rgb(0 0 0 / 0.16);
 }
 
+/* A modal window (dialogs, the command palette, Settings) lifts off the
+   dimmed page: a wide soft shadow plus a tighter one under the edge. */
+.oc-modal-shadow {
+  box-shadow:
+    0 2px 6px -1px rgb(0 0 0 / 0.08),
+    0 12px 28px -6px rgb(0 0 0 / 0.16),
+    0 32px 72px -12px rgb(0 0 0 / 0.24);
+}
+
+.dark .oc-modal-shadow {
+  box-shadow:
+    0 2px 6px -1px rgb(0 0 0 / 0.3),
+    0 12px 28px -6px rgb(0 0 0 / 0.45),
+    0 32px 72px -12px rgb(0 0 0 / 0.6);
+}
+
 /* Voice overlay. Glass inside glass is not glass: a nested backdrop-filter
    blurs the parent's own content (placeholder, footer icons), not the
    transcript, so that content read through the overlay. While the overlay is

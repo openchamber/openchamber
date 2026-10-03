@@ -18,6 +18,8 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import {
@@ -67,6 +69,22 @@ const useCurrentMermaidTheme = () => {
       : fallbackLight);
 };
 
+// Addresses that serve the instance this chat belongs to: the page itself
+// (web), and the instance the app is connected to, which the desktop page,
+// living on its own scheme, does not share an origin with. A link to either
+// opens in place; one to another instance leaves the chat as before.
+const resolveOwnOrigins = (): string[] => {
+  if (typeof window === 'undefined') return [];
+  const origins = [window.location.origin];
+  try {
+    const apiOrigin = new URL(getRuntimeApiBaseUrl() || window.location.href, window.location.href).origin;
+    if (!origins.includes(apiOrigin)) origins.push(apiOrigin);
+  } catch {
+    // An unparseable runtime address adds nothing.
+  }
+  return origins;
+};
+
 const useLinkInteractions = ({
   containerRef,
   enabled,
@@ -80,10 +98,16 @@ const useLinkInteractions = ({
       return;
     }
 
+    // VS Code keeps session links inert: its sessions live on its own OpenCode.
+    const opensSessionLinks = !isVSCodeRuntime();
     return attachAppLinkInteractions(container, {
       allowExternalHttp: enabled !== false,
       openAppLink: (href) => void openAppLinkWithConfirmation(href),
       openExternalHttp: (href) => void openExternalUrl(href),
+      openSessionLink: opensSessionLinks
+        ? (target) => void openSessionLink(target.sessionId, target.messageId)
+        : undefined,
+      ownOrigins: resolveOwnOrigins(),
     });
   }, [containerRef, enabled]);
 };

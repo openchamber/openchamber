@@ -10,6 +10,7 @@ import type {
   Part,
   PermissionRequest,
   Session,
+  SessionOutcome,
   SessionStatus,
   StructuredError,
 } from "@/lib/opencode/model"
@@ -23,6 +24,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
   subscribeDirectoryForms,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
@@ -70,15 +72,16 @@ import {
   processVSCodePermissionAutoAccept,
   processVSCodeReconciledPermissionAutoAccept,
 } from "./vscode-permission-auto-accept"
-import { useConfigStore } from "@/stores/useConfigStore"
+import { markConfigCatalogStale, useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
+import { useMcpStore } from "@/stores/useMcpStore"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
 import { toast } from "@/components/ui"
 import { appendNotification } from "./notification-store"
-import { recordSessionError, summarizeOpenCodeError } from "./session-error-log"
+import { recordSessionError, responseBodyOf, summarizeOpenCodeError } from "./session-error-log"
 import {
   applyGlobalSessionStatusEvent,
   applyGlobalSessionStatusEvents,
@@ -88,6 +91,7 @@ import {
   useGlobalSessionStatusStore,
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
+import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
 import type { State } from "./types"
 import {
   getSessionMaterializationRequestKey,
@@ -253,6 +257,9 @@ const getDirectoryEventState = (
 const publishDirectoryEventBatch = (batch: DirectoryEventBatch): void => {
   applySessionEventsToGlobalSessions(batch.globalSessionEvents)
   for (const [directory, events] of batch.globalStatusEventsByDirectory) {
+    // Before statuses: an idle that follows a command's start in the same
+    // flush must see the command.
+    applyBackgroundShellEvents(directory, events)
     applyGlobalSessionStatusEvents(directory, events)
     applyGlobalBlockingRequestEvents(directory, events)
   }
@@ -483,7 +490,7 @@ async function materializeSessionFromServer(
     await resyncDirectorySessionStatuses(directory, store, [sessionID], "authoritative", isStale)
   }
   if (!isStale()) {
-    await recoverInterruptedTurnAfterMessageLoad(directory, store, sessionID, isStale)
+    markRecordedInterruptedTurn(store, sessionID)
   }
 }
 
@@ -720,8 +727,7 @@ export function applySessionStatusSnapshot(
 
       const existing = current[sessionId]
       // Keep the successful snapshot distinguishable from "status has never
-      // been observed". Interrupted-turn recovery requires this explicit
-      // settle marker after a cold reload.
+      // been observed".
       if (!existing || existing.type !== "idle") {
         draft()[sessionId] = { type: "idle" }
         changed = true
@@ -758,15 +764,6 @@ async function resyncDirectorySessionStatuses(
   if (mode === "authoritative") {
     store.setState({ sessionStatusReady: true })
     applyGlobalSessionStatusSnapshot(directory, nextStatuses, getDirectoryOwnedSessionIds(directory, store.getState().session))
-    // An authoritative snapshot that settles sessions previously observed
-    // busy/retry can leave their trailing assistant message and tool parts
-    // unfinished (managed process died mid-turn, #2577): finalize them now.
-    // The snapshot write above already lowered their status to explicit idle,
-    // which is the gate the helper requires — a session the snapshot reports
-    // busy stays untouched.
-    for (const sessionId of candidateSessionIds) {
-      applyInterruptedTurnReconciliation(store, sessionId)
-    }
   }
   return nextStatuses
 }
@@ -1450,8 +1447,7 @@ async function resyncDirectoryAfterReconnect(
       loader?.refreshTail({ directory, sessionID: sessionId }, RECONNECT_MESSAGE_LIMIT) ?? Promise.resolve(),
     ])
     if (isStale()) return
-    await recoverInterruptedTurnAfterMessageLoad(directory, store, sessionId, isStale)
-    if (isStale()) return
+    markRecordedInterruptedTurn(store, sessionId)
     if (!session) return
 
     const nextSession = stripSessionDiffSnapshots(session)
@@ -1485,13 +1481,23 @@ async function resyncDirectoryAfterReconnect(
  * OpenCode reports a catalog change (`config.updated`, `agent.updated`, ...)
  * without saying what changed, so the affected slice is re-read rather than
  * patched. Agents, commands, config and providers resolve per directory, so
- * every open directory refreshes its own copy; projects are global.
+ * each directory the change was announced for refreshes its own copy;
+ * projects are global.
+ *
+ * Only those directories: a directory-scoped read makes OpenCode start that
+ * location, MCP servers included, so re-reading every directory with a store
+ * started every project in the sidebar the first time one of them announced
+ * its catalog. A directory OpenCode names in an event is already running.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
  * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
  * for the same kind.
  */
-async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager): Promise<void> {
+async function reloadCatalog(
+  kind: CatalogKind,
+  childStores: ChildStoreManager,
+  directories: ReadonlySet<string>,
+): Promise<void> {
   // Before anything re-reads: a fresh GET must not be served the config the
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
@@ -1506,7 +1512,9 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
   // No sync-store slice of their own: their consumers read them on demand.
   if (kind === "skill" || kind === "plugin" || kind === "websearch") return
 
-  await Promise.all([...childStores.children.entries()].map(async ([directory, store]) => {
+  await Promise.all([...directories].map(async (directory) => {
+    const store = childStores.getChild(directory)
+    if (!store) return
     try {
       if (kind === "agent") {
         store.setState({ agent: await opencodeClient.listAgents(directory) })
@@ -1521,7 +1529,8 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
         // The provider slice follows everything that can change it:
         // `provider.updated` / `model.updated` (2.0.8's own announcements), a
         // credential change, and the config (which can declare providers).
-        const provider = await opencodeClient.getProvidersForConfig(directory)
+        // Fresh: a read already in flight may predate the change.
+        const provider = await opencodeClient.getProvidersForConfig(directory, { fresh: true })
         // Same catalog, same object: a re-read that changes nothing must not
         // re-render every provider consumer.
         if (JSON.stringify(store.getState().provider) !== JSON.stringify(provider)) {
@@ -1536,23 +1545,54 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
 
 /**
  * One saved file makes v2 rebuild several catalogs, so the events arrive in a
- * burst. Collect the kinds and re-read each one once the burst settles; the
- * lists are whole-slice reads, so a later event supersedes an earlier one of
- * the same kind anyway.
+ * burst. Collect the kinds and the directories they name, and re-read once the
+ * burst settles; the lists are whole-slice reads, so a later event supersedes
+ * an earlier one of the same kind anyway. An event without a location (a
+ * credential change) re-reads the current directory.
  */
 const CATALOG_RELOAD_DEBOUNCE_MS = 250
 const pendingCatalogKinds = new Set<CatalogKind>()
+const pendingCatalogDirectories = new Set<string>()
+let pendingCatalogCurrentDirectory = false
 let catalogReloadTimer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager): void {
+function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager, directory: string | null): void {
+  // The reload re-reads the active directory's lists only; the directory the
+  // event names loses its fresh mark now, so switching to it re-reads.
+  markConfigCatalogStale(kind, directory)
   pendingCatalogKinds.add(kind)
+  if (directory) pendingCatalogDirectories.add(directory)
+  else pendingCatalogCurrentDirectory = true
   if (catalogReloadTimer) clearTimeout(catalogReloadTimer)
   catalogReloadTimer = setTimeout(() => {
     catalogReloadTimer = null
     const kinds = [...pendingCatalogKinds]
+    const directories = new Set(pendingCatalogDirectories)
+    const currentDirectory = opencodeClient.getDirectory()
+    if (pendingCatalogCurrentDirectory && currentDirectory) directories.add(currentDirectory)
     pendingCatalogKinds.clear()
-    for (const pending of kinds) void reloadCatalog(pending, childStores)
+    pendingCatalogDirectories.clear()
+    pendingCatalogCurrentDirectory = false
+    for (const pending of kinds) void reloadCatalog(pending, childStores, directories)
   }, CATALOG_RELOAD_DEBOUNCE_MS)
+}
+
+/**
+ * OpenCode starts a location's MCP servers asynchronously and announces each
+ * server's status as it settles, in the location it runs in. A status read
+ * moments after the location started holds `pending` until that announcement
+ * re-reads it. One re-read per directory once the burst settles.
+ */
+const MCP_STATUS_REFRESH_DEBOUNCE_MS = 250
+const mcpStatusRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function scheduleMcpStatusRefresh(directory: string): void {
+  const pending = mcpStatusRefreshTimers.get(directory)
+  if (pending) clearTimeout(pending)
+  mcpStatusRefreshTimers.set(directory, setTimeout(() => {
+    mcpStatusRefreshTimers.delete(directory)
+    void useMcpStore.getState().refreshIfHeld(directory)
+  }, MCP_STATUS_REFRESH_DEBOUNCE_MS))
 }
 
 // Only top-level sessions raise notifications. The directory store knows the
@@ -1582,20 +1622,62 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
 
 /**
  * Whether the server answers this session's requests without the user: `auto`
- * always, `safety` while the safety net can run. Those raise no toast when
- * asked; a request the safety net holds is announced when it is held
- * (`notifyHeldPermission`).
+ * always, `safety` while the safety net can run.
  */
 const isAnsweredWithoutUser = (sessionID: string): boolean => {
   const mode = usePermissionStore.getState().getSessionMode(sessionID)
   return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
 }
 
-/** The toast an `ask` session's request would have raised, for one the safety net left to the user. */
-export const notifyHeldPermission = (permissionID: string, sessionID: string, directory: string | null): void => {
-  if (!directory || isVSCodeRuntime()) return
-  const permission = getDirectoryState(directory)?.permission[sessionID]?.find((entry) => entry.id === permissionID)
-  if (permission) notifyPermissionAsked(permission, directory)
+// A request the server may answer on its own stays out of sight: no card, no
+// badge, no toast, so an accepted one never flashes. It is replayed as an
+// `ask` request when the server reports it left the request for the user
+// (`openchamber.permission-left-for-user`: the safety net held it, Jev failed,
+// or the reply did not go through), and dropped when it is answered.
+const MAX_EARLY_LEFT_FOR_USER = 100
+const permissionsAwaitingAutoAnswer = new Map<string, () => void>()
+// Reports that arrived before their request: the request is shown at once.
+const leftForUserBeforeAsked = new Set<string>()
+
+/** Whether `permission.asked` is held back until the server rules on it. */
+const holdBackUntilAutoAnswered = (permission: PermissionRequest, replayAsAsk: () => void): boolean => {
+  if (leftForUserBeforeAsked.delete(permission.id)) return false
+  if (isVSCodeRuntime() || !isAnsweredWithoutUser(permission.sessionID)) return false
+  permissionsAwaitingAutoAnswer.set(permission.id, replayAsAsk)
+  return true
+}
+
+const showPermissionLeftForUser = (
+  { permissionId, sessionId, directory }: Extract<SyncEvent, { type: "openchamber.permission-left-for-user" }>["properties"],
+): void => {
+  const replayAsAsk = permissionsAwaitingAutoAnswer.get(permissionId)
+  if (replayAsAsk) {
+    permissionsAwaitingAutoAnswer.delete(permissionId)
+    replayAsAsk()
+    return
+  }
+  // Already on screen: shown as an `ask` request, or loaded by a resync.
+  if (directory && getDirectoryState(directory)?.permission[sessionId]?.some((entry) => entry.id === permissionId)) return
+  leftForUserBeforeAsked.add(permissionId)
+  const oldest = leftForUserBeforeAsked.values().next()
+  if (leftForUserBeforeAsked.size > MAX_EARLY_LEFT_FOR_USER && !oldest.done) leftForUserBeforeAsked.delete(oldest.value)
+}
+
+const permissionReplayAsAsk = (
+  rawDirectory: string,
+  payload: SyncEvent,
+  childStores: ChildStoreManager,
+  routingIndex: EventRoutingIndex,
+  expectedRuntimeKey: string,
+  streamingDirectory: string | undefined,
+) => () => {
+  if (expectedRuntimeKey !== getRuntimeKey()) return
+  handleEvent(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, true, streamingDirectory, undefined, true)
+}
+
+const forgetAutoAnswerWait = (permissionID: string): void => {
+  permissionsAwaitingAutoAnswer.delete(permissionID)
+  leftForUserBeforeAsked.delete(permissionID)
 }
 
 const notifyFormCreated = (form: FormRequest, directory: string): void => {
@@ -1614,11 +1696,11 @@ const notifyFormCreated = (form: FormRequest, directory: string): void => {
 // toast: the sidebar row and tray approvals need the directory store, but the
 // toast only needs the request and where to open it. VS Code keeps its
 // extension-host auto-accept path, which runs on the store branch only.
-const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string): void => {
+const notifyBlockingRequestWithoutStore = (payload: SyncEvent, directory: string, replayAsAsk: (() => void) | null): void => {
   if (isVSCodeRuntime()) return
   if (payload.type === "permission.asked") {
     const permission = payload.properties
-    if (isAnsweredWithoutUser(permission.sessionID)) return
+    if (replayAsAsk && holdBackUntilAutoAnswered(permission, replayAsAsk)) return
     notifyPermissionAsked(permission, directory)
     return
   }
@@ -1636,6 +1718,7 @@ const recordTurnOutcomeNotification = (
   const { sessionID } = payload.properties
   if (!sessionID) return
   const errorSummary = payload.type === "session.error" ? summarizeOpenCodeError(payload.properties.error) : null
+  const responseBody = payload.type === "session.error" ? responseBodyOf(payload.properties.error) : null
   if (errorSummary) {
     recordSessionError({ sessionId: sessionID, directory, ...errorSummary })
   }
@@ -1646,7 +1729,7 @@ const recordTurnOutcomeNotification = (
     time: Date.now(),
     viewed: isViewedInCurrentSession(directory, sessionID),
     ...(errorSummary
-      ? { type: "error" as const, error: errorSummary }
+      ? { type: "error" as const, error: { ...errorSummary, responseBody } }
       : { type: "turn-complete" as const }),
   })
 }
@@ -1657,13 +1740,20 @@ export function handleEvent(
   childStores: ChildStoreManager,
   routingIndex: EventRoutingIndex,
   expectedRuntimeKey: string,
-  skipVSCodeAutoAccept = false,
+  // A `permission.asked` replayed because nothing answered it automatically:
+  // VS Code's extension host declined it, or the server left it for the user.
+  autoAnswerDeclined = false,
   streamingDirectory?: string,
   batch?: DirectoryEventBatch,
   globalEffectsAlreadyApplied = false,
 ) {
   if (payload.type === "openchamber.notification") {
     handleUiNotificationEvent(payload.properties, normalizeEventDirectory(rawDirectory))
+    return
+  }
+
+  if (payload.type === "openchamber.permission-left-for-user") {
+    showPermissionLeftForUser(payload.properties)
     return
   }
 
@@ -1743,6 +1833,7 @@ export function handleEvent(
       applySessionEventToGlobalSessions(payload)
       // Child stores remain the primary source for synced directories; these
       // indexes cover unopened directories and list/status races.
+      applyBackgroundShellEvents(directory, [payload])
       applyGlobalSessionStatusEvent(directory, payload)
       applyGlobalBlockingRequestEvents(directory, [payload])
     }
@@ -1766,7 +1857,7 @@ export function handleEvent(
         useGlobalSyncStore.setState({ reload: "pending" })
       }
     } else if (result.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
+      scheduleCatalogReload(result.kind, childStores, null)
     }
     // On server.connected, re-bootstrap all directories
     // but only if not during recent boot
@@ -1782,6 +1873,13 @@ export function handleEvent(
               force: true,
             })
           }
+        }
+        // Bootstrap re-reads the commands of open directories; a command in
+        // any other directory may have exited during the gap.
+        for (const dir of directoriesWithRunningShells()) {
+          if (childStores.getChild(dir)) continue
+          void runBackgroundNetworkTask(() => refreshBackgroundShells(dir, (target) => opencodeClient.listRunningShells(target)))
+            .catch(() => undefined)
         }
       }
     }
@@ -1806,17 +1904,25 @@ export function handleEvent(
     }
   }
 
+  if (payload.type === "permission.replied" && payload.properties.requestID) {
+    forgetAutoAnswerWait(payload.properties.requestID)
+  }
+
   if (!store) {
     if (payload.type === "session.revert.committed") {
       getImperativeSessionMessageLoader()?.invalidateSession({ directory: resolvedDirectory, sessionID: payload.properties.sessionID })
     }
-    notifyBlockingRequestWithoutStore(payload, directory)
+    const replayAsAsk = payload.type === "permission.asked" && !autoAnswerDeclined
+      ? permissionReplayAsAsk(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, streamingDirectory)
+      : null
+    notifyBlockingRequestWithoutStore(payload, directory, replayAsAsk)
+    if (payload.type === "mcp.status.changed") scheduleMcpStatusRefresh(directory)
     // Try as global event for unknown directories
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
       useGlobalSyncStore.setState({ reload: "pending" })
     } else if (result?.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
+      scheduleCatalogReload(result.kind, childStores, directory)
     }
     return
   }
@@ -1825,7 +1931,7 @@ export function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission: PermissionRequest = payload.properties
-    if (isVSCodeRuntime() && !skipVSCodeAutoAccept) {
+    if (isVSCodeRuntime() && !autoAnswerDeclined) {
       const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, permission.sessionID, permission.id)
       const eventToken = Symbol(eventKey ?? permission.id)
       if (eventKey) pendingVSCodePermissionEvents.set(eventKey, eventToken)
@@ -1852,7 +1958,10 @@ export function handleEvent(
       )
       return
     }
-    if (!isVSCodeRuntime() && isAnsweredWithoutUser(permission.sessionID)) {
+    if (!autoAnswerDeclined && holdBackUntilAutoAnswered(
+      permission,
+      permissionReplayAsAsk(rawDirectory, payload, childStores, routingIndex, expectedRuntimeKey, streamingDirectory),
+    )) {
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
       return
     }
@@ -1980,7 +2089,8 @@ export function handleEvent(
   // A catalog event names the location it was rebuilt in; for an open
   // directory it lands here rather than in the global branch above.
   const reducerResult = applyDirectoryEvent(draft, payload, {
-    onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores),
+    onCatalogUpdated: (kind) => scheduleCatalogReload(kind, childStores, resolvedDirectory),
+    onLoadMcp: () => scheduleMcpStatusRefresh(resolvedDirectory),
   })
   const reducerChanged = typeof reducerResult === "boolean" ? reducerResult : reducerResult.changed
   const materializationResult = typeof reducerResult === "boolean" ? undefined : reducerResult.materialization
@@ -2092,9 +2202,11 @@ export function handleEvent(
         messageID,
       })
     }
-    // The reducer already wrote the idle/error status into `draft`; finalize
-    // the interrupted message and orphaned tools through the same batch.
-    if (sessionID) {
+    // OpenCode said the turn stopped or failed: finalize the open message and
+    // orphaned tools through the same batch. A plain idle says nothing about
+    // how the turn ended, so it leaves the message as OpenCode stored it.
+    const stopped = payload.type === "session.error" || payload.properties.outcome === "interrupted"
+    if (sessionID && stopped) {
       const interrupted = interruptedTurnToolParts(state, sessionID)
       if (interrupted) {
         cloneField("message", (value) => ({ ...value }))
@@ -2129,24 +2241,21 @@ export function handleEvent(
 // ---------------------------------------------------------------------------
 // Interrupted-turn reconciliation
 //
-// A managed OpenCode process can die mid-turn (crash, health-check restart).
-// The persisted turn then never settles: the trailing assistant message has
-// no `time.completed`, and any tool parts can stay `pending`/`running`
-// forever — the server never finalizes them (anomalyco/opencode#19023). The
-// settle-triggered tail refresh above refetches the same stale records, so
-// the UI would keep the assistant message unfinished and any tool timers and
-// "working" styling active indefinitely (#2577).
+// When OpenCode stops or fails a turn it says so: the live
+// `session.execution.interrupted`/`failed` event, and the `idle` record it
+// appends to the session's history with the same outcome. That explicit
+// record is the only thing that marks a turn stopped here. The server does
+// not always finalize the trailing assistant message and its tool parts
+// before the record (anomalyco/opencode#19023), so the record's turn is
+// completed locally with an aborted error and its orphaned tools become
+// `error`/`Interrupted` with an end time — the same shape OpenCode itself
+// writes for cancelled tools. A later terminal event can supersede the mark;
+// a stale refresh cannot regress the locally final state.
 //
-// OpenCode keeps a turn's session busy while it is genuinely alive —
-// including while waiting for a form/permission reply — so once a
-// session is AUTHORITATIVELY settled (a `session.idle`/`session.error`
-// event, or an authoritative status snapshot that lowers a previously busy
-// session) and the trailing assistant message is still unfinished with
-// no pending form/permission, the turn is definitively interrupted.
-// Complete the assistant message locally with an aborted error and finalize
-// any orphaned parts as `error`/`Interrupted` with an end time — the same shape
-// OpenCode itself writes for cancelled tools. A later terminal event can
-// supersede the mark; a stale refresh cannot regress the locally final state.
+// An idle status, a status snapshot that no longer lists a session, or an
+// unfinished message alone never marks a turn: a turn run by another
+// OpenCode process on the same database (the TUI, `opencode run`) looks
+// exactly like that while it is still going (#4156).
 export function interruptedTurnToolParts(
   state: DirectoryStore,
   sessionID: string,
@@ -2154,14 +2263,9 @@ export function interruptedTurnToolParts(
 ): { messageID: string; messages: Message[]; parts?: Part[] } | null {
   if ((state.form?.[sessionID] ?? []).length > 0) return null
   if ((state.permission?.[sessionID] ?? []).length > 0) return null
-
+  // A session that is running again belongs to its new turn.
   const status = state.session_status?.[sessionID]
-  if (!status || status.type !== "idle") {
-    // Absent status is "unknown", not settled (the reducer maps both
-    // session.idle and session.error to {type:"idle"}): never judge an
-    // interrupted turn without an authoritative settle signal.
-    return null
-  }
+  if (status && status.type !== "idle") return null
 
   const messages = state.message[sessionID] ?? []
   let messageIndex = -1
@@ -2218,86 +2322,47 @@ export function interruptedTurnToolParts(
   }
 }
 
-function hasUnfinishedAssistantTurn(state: DirectoryStore, sessionID: string): boolean {
+/**
+ * The outcome OpenCode recorded for the trailing assistant turn: the newest
+ * `idle` record after that turn's assistant message, or undefined while no
+ * process has recorded its end.
+ */
+function recordedTurnOutcome(state: DirectoryStore, sessionID: string): SessionOutcome | undefined {
   const messages = state.message[sessionID] ?? []
+  let outcome: SessionOutcome | undefined
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message.role === "user") return false
-    if (message.role !== "assistant") continue
-    return message.time.completed === undefined
+    if (message.role === "user") return undefined
+    if (message.role === "assistant") return outcome
+    if (message.role === "idle") outcome ??= message.outcome
   }
-  return false
+  return undefined
 }
 
-function applyInterruptedTurnReconciliation(store: StoreApi<DirectoryStore>, sessionID: string): void {
-  const interrupted = interruptedTurnToolParts(store.getState(), sessionID)
+/**
+ * Marks the trailing turn of a freshly loaded session stopped when its history
+ * records that OpenCode interrupted or failed it. Any other history, including
+ * an unfinished answer with no record after it, is left as OpenCode stored it.
+ */
+export function markRecordedInterruptedTurn(store: StoreApi<DirectoryStore>, sessionID: string): void {
+  const state = store.getState()
+  const outcome = recordedTurnOutcome(state, sessionID)
+  if (outcome !== "interrupted" && outcome !== "failed") return
+  const interrupted = interruptedTurnToolParts(state, sessionID)
   if (!interrupted) return
 
   const interruptedParts = interrupted.parts
   if (!interruptedParts) {
-    store.setState((state) => ({
-      message: { ...state.message, [sessionID]: interrupted.messages },
+    store.setState((current) => ({
+      message: { ...current.message, [sessionID]: interrupted.messages },
     }))
     return
   }
 
-  store.setState((state) => ({
-    message: { ...state.message, [sessionID]: interrupted.messages },
-    part: { ...state.part, [interrupted.messageID]: interruptedParts },
+  store.setState((current) => ({
+    message: { ...current.message, [sessionID]: interrupted.messages },
+    part: { ...current.part, [interrupted.messageID]: interruptedParts },
   }))
-}
-
-/**
- * Re-checks a hydrated session whose trailing assistant turn is unfinished.
- * A cold reload can hydrate messages after the initial status snapshot, so the
- * settle decision must be repeated after the message records are available.
- * If no per-session status exists yet, fetch one authoritative snapshot first;
- * a successful snapshot that omits the session establishes it as idle.
- */
-export async function recoverInterruptedTurnAfterMessageLoad(
-  directory: string,
-  store: StoreApi<DirectoryStore>,
-  sessionID: string,
-  isStale?: () => boolean,
-): Promise<void> {
-  if (isStale?.()) return
-  const runtimeKey = getRuntimeKey()
-  const sdk = opencodeClient.getSdkClient()
-  const initial = store.getState()
-  if (!hasUnfinishedAssistantTurn(initial, sessionID)) return
-  if ((initial.form?.[sessionID] ?? []).length > 0) return
-  if ((initial.permission?.[sessionID] ?? []).length > 0) return
-
-  if (!initial.session_status?.[sessionID]) {
-    const snapshot = await opencodeClient.getActiveSessionStatuses(directory)
-    if (snapshot === null || isStale?.()
-      || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
-
-    // Do not overwrite a live status event that arrived while the snapshot was
-    // in flight. The snapshot only fills the previously unknown state.
-    if (!store.getState().session_status?.[sessionID]) {
-      applySessionStatusSnapshot(store, snapshot, [sessionID], "authoritative")
-      applyGlobalSessionStatusSnapshot(directory, snapshot, [sessionID])
-    }
-  }
-
-  // The messages were read before the status. A turn that finished between
-  // the two reads leaves an open assistant message beside an idle status,
-  // which is exactly what an interrupted turn looks like, while the completion
-  // event may still sit in the pipeline's flush frame. Re-read the tail once
-  // under the settled status before judging the turn.
-  if (
-    store.getState().session_status?.[sessionID]?.type === "idle"
-    && hasUnfinishedAssistantTurn(store.getState(), sessionID)
-  ) {
-    const loader = getImperativeSessionMessageLoader()
-    if (loader) {
-      await loader.refreshTail({ directory, sessionID }, SESSION_MATERIALIZATION_MESSAGE_LIMIT)
-      if (isStale?.() || getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== sdk) return
-    }
-  }
-
-  applyInterruptedTurnReconciliation(store, sessionID)
 }
 
 // ---------------------------------------------------------------------------
@@ -3157,19 +3222,27 @@ export function useSessionForms(sessionID: string, directory?: string) {
   )
 }
 
+type SessionBlockingRequestCounts = {
+  permissionCount: number
+  formCount: number
+}
+
+const EMPTY_SESSION_BLOCKING_REQUEST_COUNTS: SessionBlockingRequestCounts = {
+  permissionCount: 0,
+  formCount: 0,
+}
+
 /**
- * Total number of pending forms across the given session scopes. Each
- * scope names a directory store plus the session IDs to count inside it, so
- * collapsed subtree rows can roll up pending forms of hidden descendants
- * from their owning directory stores without bootstrapping them.
- *
- * Subscribes through the per-session form sidecar channel, so unrelated
- * streaming or session activity does not re-render rows.
+ * Count pending permissions and forms across exact session buckets grouped
+ * by owning directory. This lets collapsed rows cover hidden descendants
+ * without bootstrapping their stores or subscribing to unrelated updates.
  */
-export function useSessionFormCount(scopes: readonly { directory: string; sessionIDs: readonly string[] }[]) {
+export function useSessionBlockingRequestCounts(
+  scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
+): SessionBlockingRequestCounts {
   // Runtime only: the current directory is not an input here, and reading the
   // directory-bearing context would re-render every sidebar row that counts
-  // forms whenever the user switches projects.
+  // blocking requests whenever the user switches projects.
   const { childStores } = useSyncRuntime()
   const scopedStores = React.useMemo(() => scopes.map((scope) => ({
     sessionIDs: scope.sessionIDs,
@@ -3181,18 +3254,30 @@ export function useSessionFormCount(scopes: readonly { directory: string; sessio
       for (const scope of scopes) childStores.unpin(scope.directory)
     }
   }, [childStores, scopes])
+  const snapshotRef = useRef(EMPTY_SESSION_BLOCKING_REQUEST_COUNTS)
   const getSnapshot = React.useCallback(() => {
-    let count = 0
+    let permissionCount = 0
+    let formCount = 0
     for (const { sessionIDs, store } of scopedStores) {
-      const forms = store.getState().form
-      for (const sessionID of sessionIDs) count += forms[sessionID]?.length ?? 0
+      const { permission: permissions, form: forms } = store.getState()
+      for (const sessionID of sessionIDs) {
+        permissionCount += permissions[sessionID]?.length ?? 0
+        formCount += forms[sessionID]?.length ?? 0
+      }
     }
-    return count
+    const previous = snapshotRef.current
+    if (previous.permissionCount === permissionCount && previous.formCount === formCount) {
+      return previous
+    }
+    const next = { permissionCount, formCount }
+    snapshotRef.current = next
+    return next
   }, [scopedStores])
   const subscribe = React.useCallback((notify: () => void) => {
-    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
-      subscribeDirectoryForms(store, sessionIDs, notify)
-    ))
+    const unsubscribers = scopedStores.flatMap(({ sessionIDs, store }) => [
+      subscribeDirectoryPermissions(store, sessionIDs, notify),
+      subscribeDirectoryForms(store, sessionIDs, notify),
+    ])
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
     }

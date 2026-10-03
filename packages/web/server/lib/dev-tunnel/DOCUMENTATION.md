@@ -52,8 +52,18 @@ and what made it fragile per framework.
   - Through the E2EE relay, the trusted renderer mints a short-lived URL token
     and includes it in the virtual WebSocket URL. The relay host and URL-token
     allowlists accept exactly `/api/dev-tunnel`, not subpaths.
+- The host dials `127.0.0.1` and falls back to `::1` when nothing answers
+  there. Discovery offers ports bound to either loopback family, and a dev
+  server started with `localhost` defaults often listens on IPv6 only.
+- Every refused upgrade and every failed dial is logged on the host with its
+  reason. The desktop only sees its local connection close, which the panel
+  cannot tell apart from a dev server that is still starting.
 - Concurrency is capped per host, not per page, because one page load opens
   many sockets.
+- Desktop forwards previews through `openchamber-preview.localhost`, bypassing
+  proxies for that exact hostname. Listeners still bind `127.0.0.1`, and only
+  that API host keeps the bundled connection-limit exemption. Address bars and
+  saved tabs retain the original URL; cookies and storage use the new origin.
 - A connection that cannot be established fails the socket rather than holding
   it open; a stalled connect is bounded by an explicit timeout, and so is the
   WebSocket handshake. While it is pending the local socket is paused and its

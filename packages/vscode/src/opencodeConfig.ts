@@ -3,7 +3,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
-import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import {
+  applyEdits,
+  createScanner,
+  findNodeAtLocation,
+  modify,
+  parse as parseJsonc,
+  parseTree,
+  printParseErrorCode,
+  type Edit,
+  type JSONPath,
+  type ParseError,
+} from 'jsonc-parser';
 import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
 import {
   toAgentEntity,
@@ -43,7 +54,6 @@ import {
   type SectionKind,
   type WebSearchSelection,
 } from './opencode-config-v2';
-
 
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
@@ -632,17 +642,22 @@ const isCommentOnlyParse = (parsed: unknown, errors: ParseError[]): boolean =>
   parsed === undefined
   && errors.every((entry) => printParseErrorCode(entry.error) === 'ValueExpected');
 
-const parseConfigObject = (content: string, filePath: string): Record<string, unknown> => {
+type ConfigParseResult = { config: Record<string, unknown>; value: JsonValue; commentOnly: boolean };
+
+const parseConfigResult = (content: string, filePath: string): ConfigParseResult => {
   const errors: ParseError[] = [];
-  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  const parsed: JsonValue | undefined = parseJsonc(content, errors, { allowTrailingComma: true });
   if (isCommentOnlyParse(parsed, errors)) {
-    return {};
+    return { config: {}, value: {}, commentOnly: true };
   }
-  if (errors.length > 0 || !parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (errors.length > 0 || !isPlainObject(parsed)) {
     throw codedError(formatJsoncParseError(filePath, errors), INVALID_JSONC);
   }
-  return parsed as Record<string, unknown>;
+  return { config: parsed, value: parsed, commentOnly: false };
 };
+
+const parseConfigObject = (content: string, filePath: string): Record<string, unknown> =>
+  parseConfigResult(content, filePath).config;
 
 const readConfigFile = (filePath?: string | null): Record<string, unknown> => {
   if (!filePath || !fs.existsSync(filePath)) return {};
@@ -721,7 +736,7 @@ const readConfigLayers = (workingDirectory?: string) => {
   };
 };
 
-const readConfig = (workingDirectory?: string): Record<string, unknown> =>
+export const readConfig = (workingDirectory?: string): Record<string, unknown> =>
   readConfigLayers(workingDirectory).mergedConfig;
 
 const getAncestors = (startDir?: string, stopDir?: string): string[] => {
@@ -826,12 +841,181 @@ const getConfigForPath = (layers: ReturnType<typeof readConfigLayers>, targetPat
   return layers.userConfig;
 };
 
+const isJsonObject = (value: JsonValue): value is JsonObject => isPlainObject(value);
+
+type ConfigEdit =
+  | { type: 'set'; path: JSONPath; value: unknown }
+  | { type: 'remove'; path: JSONPath };
+
+// jsonc-parser's SyntaxKind is an ambient const enum, which cannot be imported
+// as a value under verbatimModuleSyntax; mirror the token code used below.
+const JSONC_COMMA_TOKEN = 5;
+
+const deepEqualJsonValue = (a: JsonValue, b: JsonValue): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => deepEqualJsonValue(item, b[index]));
+  }
+  if (isJsonObject(a) && isJsonObject(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length
+      && keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqualJsonValue(a[key], b[key]));
+  }
+  return false;
+};
+
+// Structural diff between the parsed on-disk config and the desired config.
+// Object keys are compared per key (order-insensitive); arrays and scalars are
+// replaced whole. The desired config must already be JSON-normalized (no
+// `undefined` values), so absent keys are the only removal signal.
+const collectConfigEdits = (
+  current: JsonValue,
+  next: JsonValue,
+  basePath: JSONPath,
+  edits: ConfigEdit[],
+): void => {
+  if (!isJsonObject(current) || !isJsonObject(next)) {
+    if (!deepEqualJsonValue(current, next)) {
+      edits.push({ type: 'set', path: basePath, value: next });
+    }
+    return;
+  }
+
+  for (const key of Object.keys(current)) {
+    if (!Object.prototype.hasOwnProperty.call(next, key)) {
+      edits.push({ type: 'remove', path: [...basePath, key] });
+    }
+  }
+  for (const [key, nextValue] of Object.entries(next)) {
+    const keyPath: JSONPath = [...basePath, key];
+    if (!Object.prototype.hasOwnProperty.call(current, key)) {
+      edits.push({ type: 'set', path: keyPath, value: nextValue });
+      continue;
+    }
+    collectConfigEdits(current[key], nextValue, keyPath, edits);
+  }
+};
+
+const findSeparatorComma = (text: string, start: number, end: number): number => {
+  if (end <= start) return -1;
+  const scanner = createScanner(text, true);
+  scanner.setPosition(start);
+  const token = scanner.scan();
+  const offset = scanner.getTokenOffset();
+  if (token === JSONC_COMMA_TOKEN && offset < end) {
+    return offset;
+  }
+  return -1;
+};
+
+// Removes exactly the property node plus one adjacent separator comma. The
+// scanner-based comma lookup keeps comments in the surrounding gaps (including
+// commas inside comments), and avoids jsonc-parser's own removal leaving a
+// stray comma when the last property of an object is deleted.
+const removePropertyEdits = (text: string, propertyPath: JSONPath): Edit[] => {
+  const root = parseTree(text, [], { allowTrailingComma: true });
+  const valueNode = root ? findNodeAtLocation(root, propertyPath) : undefined;
+  const propertyNode = valueNode?.parent;
+  const objectNode = propertyNode?.parent;
+  if (
+    !valueNode
+    || !propertyNode
+    || !objectNode
+    || objectNode.type !== 'object'
+    || !Array.isArray(objectNode.children)
+    || !objectNode.children.includes(propertyNode)
+  ) {
+    throw new Error('Failed to locate config property for removal');
+  }
+
+  const siblings = objectNode.children;
+  const index = siblings.indexOf(propertyNode);
+  const propStart = propertyNode.offset;
+  const propEnd = propertyNode.offset + propertyNode.length;
+  const edits: Edit[] = [{ offset: propStart, length: propEnd - propStart, content: '' }];
+
+  const objectEnd = objectNode.offset + objectNode.length;
+  const nextSibling = index < siblings.length - 1 ? siblings[index + 1] : null;
+  const afterGapEnd = nextSibling ? nextSibling.offset : objectEnd - 1;
+  let commaOffset = findSeparatorComma(text, propEnd, afterGapEnd);
+  if (commaOffset === -1) {
+    const previousSibling = index > 0 ? siblings[index - 1] : null;
+    const beforeGapStart = previousSibling
+      ? previousSibling.offset + previousSibling.length
+      : objectNode.offset + 1;
+    commaOffset = findSeparatorComma(text, beforeGapStart, propStart);
+  }
+  if (commaOffset !== -1) {
+    edits.push({ offset: commaOffset, length: 1, content: '' });
+  }
+  return edits;
+};
+
+const applyConfigEdits = (existingText: string, edits: ConfigEdit[]): string => {
+  const formattingOptions = {
+    tabSize: 2,
+    insertSpaces: true,
+    eol: existingText.includes('\r\n') ? '\r\n' : '\n',
+  };
+  let text = existingText;
+  for (const edit of edits) {
+    if (edit.type === 'remove') {
+      text = applyEdits(text, removePropertyEdits(text, edit.path));
+    } else {
+      text = applyEdits(text, modify(text, edit.path, edit.value, { formattingOptions }));
+    }
+  }
+  return text;
+};
+
+const parsedConfigEquals = (text: string, desired: JsonValue): boolean => {
+  const content = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const errors: ParseError[] = [];
+  const parsed = parseJsonc(content, errors, { allowTrailingComma: true });
+  if (errors.length > 0 || !isJsonObject(parsed)) {
+    return false;
+  }
+  return deepEqualJsonValue(parsed, desired);
+};
+
+const buildConfigFileContent = (
+  desired: JsonValue,
+  existingRaw: string,
+  existingParse: ConfigParseResult | null,
+): string => {
+  if (!existingRaw.trim()) {
+    return JSON.stringify(desired, null, 2);
+  }
+  if (!existingParse || existingParse.commentOnly) {
+    // A comment-only file has no root object to merge into: keep the user's
+    // comments and append the serialized config below them.
+    return `${existingRaw.trimEnd()}\n${JSON.stringify(desired, null, 2)}`;
+  }
+  if (!isJsonObject(desired)) {
+    return JSON.stringify(desired, null, 2);
+  }
+
+  const edits: ConfigEdit[] = [];
+  collectConfigEdits(existingParse.value, desired, [], edits);
+  if (edits.length === 0) {
+    return existingRaw;
+  }
+  const rewritten = applyConfigEdits(existingRaw, edits);
+  if (parsedConfigEquals(rewritten, desired)) {
+    return rewritten;
+  }
+  console.warn('Comment-preserving config edit did not round-trip; writing a normalized config instead');
+  return JSON.stringify(desired, null, 2);
+};
+
 const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_FILE) => {
+  let existingRaw = '';
+  let existingParse: ConfigParseResult | null = null;
   if (fs.existsSync(filePath)) {
     // Defense in depth: never overwrite a file we cannot fully parse.
-    const existing = fs.readFileSync(filePath, 'utf8').trim();
-    if (existing) {
-      parseConfigObject(existing, filePath);
+    existingRaw = fs.readFileSync(filePath, 'utf8');
+    if (existingRaw.trim()) {
+      existingParse = parseConfigResult(existingRaw.trim(), filePath);
     }
     const backupFile = `${filePath}.openchamber.backup`;
     try {
@@ -841,7 +1025,10 @@ const writeConfig = (config: Record<string, unknown>, filePath: string = CONFIG_
     }
   }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+  // A JSON round-trip normalizes the config at the write boundary: it drops
+  // `undefined` values exactly like the serialized write would.
+  const desired: JsonValue = JSON.parse(JSON.stringify(config));
+  fs.writeFileSync(filePath, buildConfigFileContent(desired, existingRaw, existingParse), 'utf8');
 };
 
 const codedError = (message: string, code: string): Error & { code: string } => {
@@ -2208,6 +2395,8 @@ const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
   '@ai-sdk/anthropic',
 ]);
 
+export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
+export type JsonObject = { [key: string]: JsonValue };
 type NormalizedCustomProviderConfig = {
   package: string;
   name: string;
@@ -2513,6 +2702,7 @@ export type SkillConfigSources = {
     name?: string;
     description?: string;
     instructions?: string;
+    disableModelInvocation: boolean;
   };
   projectMd?: { exists: boolean; path: string | null };
   claudeMd?: { exists: boolean; path: string | null };
@@ -2786,6 +2976,52 @@ export const discoverSkills = (workingDirectory?: string): DiscoveredSkill[] => 
   return Array.from(skills.values());
 };
 
+// "Only when asked" is written as two frontmatter keys: the portable
+// `disable-model-invocation` (Claude Code, OpenCode 2.0.23+) and OpenCode's own
+// `metadata.opencode/autoinvoke`, which every supported OpenCode 2.x reads and
+// which wins when both are present.
+const DISABLE_MODEL_INVOCATION_KEY = 'disable-model-invocation';
+const AUTOINVOKE_METADATA_KEY = 'opencode/autoinvoke';
+
+type SkillFrontmatter = ReturnType<typeof parseMdFile>['frontmatter'];
+
+// Same spellings OpenCode accepts for these frontmatter booleans; YAML true,
+// 1 and "yes" all reach it as the same text.
+const FRONTMATTER_BOOLEANS = new Map<string, boolean>([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
+const parseFrontmatterBoolean = (value: SkillFrontmatter[string]): boolean | undefined => {
+  if (value == null || isPlainObject(value) || Array.isArray(value)) return undefined;
+  return FRONTMATTER_BOOLEANS.get(String(value).trim().toLowerCase());
+};
+
+const isModelInvocationDisabled = (frontmatter: SkillFrontmatter): boolean => {
+  const autoinvoke = isPlainObject(frontmatter.metadata)
+    ? parseFrontmatterBoolean(frontmatter.metadata[AUTOINVOKE_METADATA_KEY])
+    : undefined;
+  if (autoinvoke !== undefined) return !autoinvoke;
+  return parseFrontmatterBoolean(frontmatter[DISABLE_MODEL_INVOCATION_KEY]) === true;
+};
+
+const applyModelInvocation = (frontmatter: SkillFrontmatter, disabled: boolean): void => {
+  const metadata = isPlainObject(frontmatter.metadata) ? { ...frontmatter.metadata } : null;
+  if (disabled) {
+    frontmatter[DISABLE_MODEL_INVOCATION_KEY] = true;
+    frontmatter.metadata = { ...metadata, [AUTOINVOKE_METADATA_KEY]: false };
+    return;
+  }
+  delete frontmatter[DISABLE_MODEL_INVOCATION_KEY];
+  if (!metadata) return;
+  delete metadata[AUTOINVOKE_METADATA_KEY];
+  if (Object.keys(metadata).length > 0) {
+    frontmatter.metadata = metadata;
+  } else {
+    delete frontmatter.metadata;
+  }
+};
+
 export const getSkillSources = (
   skillName: string,
   workingDirectory?: string,
@@ -2856,11 +3092,13 @@ export const getSkillSources = (
   let supportingFiles: SupportingFile[] = [];
   let mdDescription = typeof matchedDiscovered?.description === 'string' ? matchedDiscovered.description : '';
   let mdInstructions = isBuiltInDiscovered && typeof matchedDiscovered?.content === 'string' ? matchedDiscovered.content : '';
+  let mdDisableModelInvocation = false;
   
   if (mdExists && mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
     mdFields = Object.keys(frontmatter);
     mdDescription = typeof frontmatter.description === 'string' ? frontmatter.description : '';
+    mdDisableModelInvocation = isModelInvocationDisabled(frontmatter);
     if (body) mdFields.push('instructions');
     mdInstructions = body || '';
     if (mdDir) {
@@ -2880,6 +3118,7 @@ export const getSkillSources = (
       name: matchedDiscovered?.name || skillName,
       description: mdDescription,
       instructions: mdInstructions,
+      disableModelInvocation: mdDisableModelInvocation,
     },
     projectMd: { exists: projectExists, path: projectPath },
     claudeMd: { exists: claudeExists, path: claudePath },
@@ -2957,11 +3196,19 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   const targetPath = path.join(targetDir, 'SKILL.md');
   
   // Extract fields
-  const { instructions, scope: _ignored, source: _sourceIgnored, supportingFiles: supportingFilesData, ...frontmatter } = config as Record<string, unknown> & { 
+  const {
+    instructions,
+    scope: _ignored,
+    source: _sourceIgnored,
+    supportingFiles: supportingFilesData,
+    disableModelInvocation,
+    ...frontmatter
+  } = config as Record<string, unknown> & { 
     instructions?: unknown; 
     scope?: unknown; 
     source?: unknown;
     supportingFiles?: Array<{ path: string; content: string }>;
+    disableModelInvocation?: unknown;
   };
   void _ignored;
   void _sourceIgnored;
@@ -2972,6 +3219,9 @@ export const createSkill = (skillName: string, config: Record<string, unknown>, 
   }
   if (!frontmatter.description) {
     throw new Error('Skill description is required');
+  }
+  if (disableModelInvocation === true) {
+    applyModelInvocation(frontmatter, true);
   }
   
   writeMdFile(targetPath, frontmatter, typeof instructions === 'string' ? instructions : '');
@@ -3014,6 +3264,14 @@ export const updateSkill = (skillName: string, updates: Record<string, unknown>,
         } else if (file.path && file.content !== undefined) {
           writeSkillSupportingFile(mdDir, file.path, file.content);
         }
+      }
+      continue;
+    }
+
+    if (field === 'disableModelInvocation') {
+      if (value === true || value === false) {
+        applyModelInvocation(mdData.frontmatter, value);
+        mdModified = true;
       }
       continue;
     }

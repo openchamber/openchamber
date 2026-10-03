@@ -87,6 +87,23 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 
 이 변수를 쓸 때는 릴레이, Jev, 네트워크 접근, 허용된 확장도 각자의 변수 `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS`(쉼표로 구분한 저장소 URL), `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`로 정합니다. Docker에서는 서버가 컨테이너 밖에서 오는 연결도 받아야 하므로 네트워크 접근 변수가 필요합니다.
 
+### OpenCode CLI 고정하기
+
+컴퓨터에 이미 OpenCode가 설치되어 있고 OpenChamber가 그 설치본을 쓰게 하려면, 정책 파일에 경로를 넣으세요. 엔터프라이즈 모드와 상관없이 동작합니다.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber는 이 경로에서만 OpenCode를 시작합니다. 설정의 경로, `OPENCODE_BINARY`, 데스크톱 앱에 포함된 사본은 무시합니다. 포함된 사본은 디스크에 남지만 쓰이지 않습니다.
+- 이 경로에 실행할 수 있는 파일이 없으면 OpenChamber는 다른 사본으로 넘어가지 않습니다. 경로를 알려 주는 오류와 함께 멈춥니다.
+- 설정에는 경로가 읽기 전용으로 표시되고, 관리자가 지정했다는 안내가 붙습니다.
+- OpenChamber는 고정된 OpenCode를 설치하거나 업데이트하지 않고, 새 버전도 알리지 않습니다. 업데이트는 관리자의 배포로 이뤄집니다.
+- CLI는 OpenCode 2.x이고, OpenChamber가 요구하는 버전 이상이어야 합니다. 더 오래된 버전이면 OpenChamber는 "OpenCode 업데이트" 화면에서 멈춥니다.
+- `opencode`(Windows에서는 `opencode.exe`)가 들어 있는 폴더를 지정해도 됩니다. 사용자가 직접 설정할 수 있기 때문에 이를 위한 환경 변수는 없습니다.
+
 ### 예시
 
 Mac에 정책 파일을 두려면 터미널에서 관리자 권한으로 다음을 실행하세요.
@@ -135,7 +152,7 @@ environment:
 
 ### 달라지는 점
 
-- 모델 제공자는 OpenCode 설정에서만 가져옵니다. OpenChamber에서 제공자 연결, 로그인, 키 추가, 사용자 지정 제공자 만들기는 꺼집니다. 이미 있는 계정을 삭제하거나 전환하는 것은 계속 됩니다. 이것은 앱을 통한 입구만 닫을 뿐이고, 실제 잠금은 아래에서 설명하는 OpenCode 정책입니다.
+- 모델 제공자는 OpenCode 설정에서만 가져옵니다. OpenChamber에서 제공자 연결, 로그인, 키 추가, 사용자 지정 제공자 만들기는 꺼집니다. 이미 있는 계정을 삭제하거나 전환하는 것은 계속 됩니다. 이것은 앱을 통한 입구만 닫을 뿐이고, 실제 잠금은 아래에서 설명하는 OpenCode 정책입니다. OpenCode 설정에 있는 MCP 서버 로그인은 계속 됩니다. 연결되는 곳은 그 서버이지 모델 제공자가 아닙니다.
 - [분류 제공자 (Jev)](/ko/classification-providers/)는 꺼진 채로 있으며, 누군가 설정에 입력한 사용자 지정 엔드포인트도 마찬가지입니다. 안전망과 Auto는 제공되지 않으며, 세션은 직접 옮길 때만 작업 중이 됩니다. 자체 인프라를 통해 Jev를 쓰려면 정책 파일의 `jev`나 `OPENCHAMBER_JEV_URL`(그리고 `OPENCHAMBER_JEV_MODEL`, 필요하면 `OPENCHAMBER_JEV_API_KEY`)로 엔드포인트를 고정하세요. 그 엔드포인트가 기본값이 되고, 여전히 끌 수는 있지만 다른 것은 고를 수 없습니다.
 - OpenAI를 통한 소리내어 읽기는 꺼집니다. 사용자 지정 음성 합성 또는 전사 서버는 같은 컴퓨터에서 실행되어야 합니다. 로컬 음성과 로컬 받아쓰기 모델은 계속 동작합니다.
 - 휴대폰과 브라우저로 가는 푸시 알림에는 "Agent response is ready" 같은 일반 제목만 담기고, 메시지 본문이나 세션 이름은 들어가지 않습니다. 데스크톱 알림은 사용자의 컴퓨터 안에 머물며 전체 텍스트를 유지합니다.

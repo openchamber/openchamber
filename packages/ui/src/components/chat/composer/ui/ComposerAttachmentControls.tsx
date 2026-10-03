@@ -26,8 +26,7 @@ type ComposerAttachmentControlsProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
-    openIssuePicker: () => void;
-    openPrPicker: () => void;
+    openGitHubPicker: () => void;
     showLinearPicker?: boolean;
     openLinearPicker?: () => void;
     onOpenSettings?: () => void;
@@ -50,8 +49,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         footerIconButtonClass,
         iconSizeClass,
         handlePickLocalFiles,
-        openIssuePicker,
-        openPrPicker,
+        openGitHubPicker,
         showLinearPicker,
         openLinearPicker,
         onOpenSettings,
@@ -116,19 +114,11 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
-                                    requestAnimationFrame(openIssuePicker);
+                                    requestAnimationFrame(openGitHubPicker);
                                 }}
                             >
                                 <Icon name="github"/>
-                                {t('chat.chatInput.actions.linkGithubIssue')}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(openPrPicker);
-                                }}
-                            >
-                                <Icon name="git-pull-request"/>
-                                {t('chat.chatInput.actions.linkGithubPr')}
+                                {t('chat.chatInput.actions.linkGithub')}
                             </DropdownMenuItem>
                             {showLinearPicker && openLinearPicker ? (
                                 <DropdownMenuItem

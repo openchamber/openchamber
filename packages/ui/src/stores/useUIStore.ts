@@ -139,6 +139,10 @@ type ContextPanelTab = {
   readOnly: boolean;
   stagedDiff: boolean;
   diffScope: PendingDiffScope | null;
+  /** A file tab opened by a single click in the files tree. The next such
+      click replaces it; opening the file any other way, editing it, or
+      double-clicking keeps it. */
+  preview: boolean;
   touchedAt: number;
 };
 
@@ -154,6 +158,7 @@ type ContextPanelTabDescriptor = {
   readOnly?: boolean;
   stagedDiff?: boolean;
   diffScope?: PendingDiffScope | null;
+  preview?: boolean;
 };
 
 type ContextPanelDirectoryState = {
@@ -377,6 +382,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     readOnly: descriptor.readOnly === true,
     stagedDiff: descriptor.stagedDiff === true,
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
+    preview: descriptor.mode === 'file' && descriptor.preview === true,
     touchedAt: Date.now(),
   };
 };
@@ -439,6 +445,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly?: unknown;
       stagedDiff?: unknown;
       diffScope?: unknown;
+      preview?: unknown;
       touchedAt?: unknown;
     };
 
@@ -496,6 +503,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       readOnly: candidate.readOnly === true,
       stagedDiff: candidate.stagedDiff === true,
       diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
+      preview: candidate.mode === 'file' && candidate.preview === true,
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -573,7 +581,13 @@ const upsertContextPanelTab = (
     ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
-  const tabs = existingIndex === -1
+  // A new preview takes the slot of the current preview tab, if any.
+  const replacedPreviewIndex = existingIndex === -1 && nextTab.preview
+    ? baseTabs.findIndex((tab) => tab.preview)
+    : -1;
+  const tabs = replacedPreviewIndex !== -1
+    ? baseTabs.map((tab, index) => (index === replacedPreviewIndex ? nextTab : tab))
+    : existingIndex === -1
     ? [...baseTabs, nextTab]
     : baseTabs.map((tab, index) => (index === existingIndex
       ? {
@@ -589,6 +603,8 @@ const upsertContextPanelTab = (
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,
           readOnly: nextTab.readOnly,
+          // Reopening a preview as a preview keeps it one; any other open pins it.
+          preview: tab.preview && nextTab.preview,
           touchedAt: Date.now(),
         }
       : tab));
@@ -878,6 +894,8 @@ interface UIStore {
   isUsageStatsPageOpen: boolean;
   openGuestPageId: string | null;
   worktreesPageProjectId: string | null;
+  /** The project whose isolated spaces fill the main area, opened from its menu in the sidebar. */
+  spacesPageProjectId: string | null;
   isSettingsDialogOpen: boolean;
   isNewWorktreeDialogOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -935,6 +953,8 @@ interface UIStore {
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
+  /** Archive a worktree's sessions and remove it once its PR is merged. Off by default. */
+  mergedWorktreeCleanupEnabled: boolean;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
   fontSize: number;
@@ -1021,6 +1041,10 @@ interface UIStore {
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
   agentWebToolEnabled: boolean;
+  /** Full-text message search (server index). Opt-in: off keeps every part of it idle. */
+  messageSearchEnabled: boolean;
+  /** Also index the agent's reasoning. Opt-in: it can make the index much bigger. */
+  messageSearchReasoningEnabled: boolean;
   /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
@@ -1087,7 +1111,10 @@ interface UIStore {
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
   openContextPanelTab: (directory: string, tab: ContextPanelTabDescriptor, options?: { reveal?: boolean }) => void;
   openContextDiff: (directory: string, filePath: string, staged?: boolean, scope?: PendingDiffScope | null) => void;
-  openContextFile: (directory: string, filePath: string) => void;
+  /** `preview` opens it as the replaceable preview tab (a files-tree click). */
+  openContextFile: (directory: string, filePath: string, options?: { preview?: boolean }) => void;
+  /** Turns a preview file tab into a regular one. */
+  pinContextPanelTab: (directory: string, tabID: string) => void;
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
   openContextPreview: (directory: string, url: string) => void;
@@ -1137,7 +1164,8 @@ interface UIStore {
   setUsageStatsPageOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
-  /** Close every full-page surface (Scheduled, Archive, Usage, Worktrees, Multi-run). */
+  setSpacesPageProjectId: (projectId: string | null) => void;
+  /** Close every full-page surface (Scheduled, Archive, Usage, Worktrees, Spaces, Multi-run). */
   closeMainSurfaces: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
@@ -1169,6 +1197,7 @@ interface UIStore {
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
+  setMergedWorktreeCleanupEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
@@ -1250,6 +1279,8 @@ interface UIStore {
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentWebToolEnabled: (value: boolean) => void;
+  setMessageSearchEnabled: (value: boolean) => void;
+  setMessageSearchReasoningEnabled: (value: boolean) => void;
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
@@ -1342,6 +1373,7 @@ export const useUIStore = create<UIStore>()(
         isUsageStatsPageOpen: false,
         openGuestPageId: null,
         worktreesPageProjectId: null,
+        spacesPageProjectId: null,
         isSettingsDialogOpen: false,
         isNewWorktreeDialogOpen: false,
         isModelSelectorOpen: false,
@@ -1376,6 +1408,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
+        mergedWorktreeCleanupEnabled: false,
         autoDeleteLastRunAt: null,
         messageLimit: 200,
         fontSize: 100,
@@ -1443,6 +1476,8 @@ export const useUIStore = create<UIStore>()(
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
         agentWebToolEnabled: true,
+        messageSearchEnabled: false,
+        messageSearchReasoningEnabled: false,
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
@@ -1635,14 +1670,26 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        openContextFile: (directory, filePath) => {
+        openContextFile: (directory, filePath, options) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedFilePath = normalizeContextTargetPath(filePath);
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
 
-          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          const preview = options?.preview === true;
+          // The preview this open replaces leaves the editor's open files too,
+          // like any closed tab.
+          const replacedPreviewPath = preview
+            ? get().contextPanelByDirectory[normalizedDirectory]?.tabs
+              .find((tab) => tab.preview && tab.targetPath !== normalizedFilePath)?.targetPath ?? null
+            : null;
+          const alreadyOpen = get().contextPanelByDirectory[normalizedDirectory]?.tabs
+            .some((tab) => tab.mode === 'file' && tab.targetPath === normalizedFilePath) ?? false;
+          get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath, preview });
+          if (replacedPreviewPath && !alreadyOpen) {
+            useFilesViewTabsStore.getState().removeOpenPath(normalizedDirectory, replacedPreviewPath);
+          }
           get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
@@ -1818,6 +1865,24 @@ export const useUIStore = create<UIStore>()(
             };
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
+          });
+        },
+
+        pinContextPanelTab: (directory, tabID) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) return;
+          set((state) => {
+            const current = state.contextPanelByDirectory[normalizedDirectory];
+            if (!current?.tabs.some((tab) => tab.id === tabID && tab.preview)) return state;
+            return {
+              contextPanelByDirectory: {
+                ...state.contextPanelByDirectory,
+                [normalizedDirectory]: {
+                  ...current,
+                  tabs: current.tabs.map((tab) => (tab.id === tabID ? { ...tab, preview: false } : tab)),
+                },
+              },
+            };
           });
         },
 
@@ -2112,36 +2177,42 @@ export const useUIStore = create<UIStore>()(
 
         setScheduledTasksDialogOpen: (open) => {
           set(open
-            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isScheduledTasksDialogOpen: false });
         },
 
         setArchivePageOpen: (open) => {
           set(open
-            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
         },
 
         setUsageStatsPageOpen: (open) => {
           set(open
-            ? { isUsageStatsPageOpen: true, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isUsageStatsPageOpen: true, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isUsageStatsPageOpen: false });
         },
 
         setWorktreesPageProjectId: (projectId) => {
           set(projectId
-            ? { worktreesPageProjectId: projectId, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, runOverviewKey: null, openGuestPageId: null }
+            ? { worktreesPageProjectId: projectId, spacesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, runOverviewKey: null, openGuestPageId: null }
             : { worktreesPageProjectId: null });
         },
 
+        setSpacesPageProjectId: (projectId) => {
+          set(projectId
+            ? { spacesPageProjectId: projectId, worktreesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, runOverviewKey: null, openGuestPageId: null }
+            : { spacesPageProjectId: null });
+        },
+
         setOpenGuestPage: (id) => {
-          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, runOverviewKey: null }
+          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
             : { openGuestPageId: null });
         },
 
         closeMainSurfaces: () => {
           const state = get();
-          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.worktreesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
+          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.worktreesPageProjectId && !state.spacesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
             return;
           }
           set({
@@ -2149,6 +2220,7 @@ export const useUIStore = create<UIStore>()(
             isArchivePageOpen: false,
             isUsageStatsPageOpen: false,
             worktreesPageProjectId: null,
+            spacesPageProjectId: null,
             runOverviewKey: null,
             openGuestPageId: null,
           });
@@ -2276,6 +2348,10 @@ export const useUIStore = create<UIStore>()(
 
         setAutoDeleteEnabled: (value) => {
           set({ autoDeleteEnabled: value });
+        },
+
+        setMergedWorktreeCleanupEnabled: (value) => {
+          set({ mergedWorktreeCleanupEnabled: value });
         },
 
         setAutoSaveEnabled: (value) => {
@@ -2729,7 +2805,7 @@ export const useUIStore = create<UIStore>()(
         // opening it closes the other surfaces and vice versa.
         setRunOverviewKey: (runKey) => {
           set(runKey
-            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, openGuestPageId: null }
+            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
             : { runOverviewKey: null });
         },
 
@@ -2813,6 +2889,12 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentWebToolEnabled: (value) => {
           set({ agentWebToolEnabled: value });
+        },
+        setMessageSearchEnabled: (value) => {
+          set({ messageSearchEnabled: value });
+        },
+        setMessageSearchReasoningEnabled: (value) => {
+          set({ messageSearchReasoningEnabled: value });
         },
         setBrowserProvider: (value) => {
           set({ browserProvider: value });
@@ -3256,6 +3338,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,
+          mergedWorktreeCleanupEnabled: state.mergedWorktreeCleanupEnabled,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
@@ -3305,6 +3388,8 @@ export const useUIStore = create<UIStore>()(
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
           agentWebToolEnabled: state.agentWebToolEnabled,
+          messageSearchEnabled: state.messageSearchEnabled,
+          messageSearchReasoningEnabled: state.messageSearchReasoningEnabled,
           browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
           agentNotifyToolEnabled: state.agentNotifyToolEnabled,

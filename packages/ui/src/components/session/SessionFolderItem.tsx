@@ -171,7 +171,7 @@ const SessionFolderItemBase = <TSessionNode,>({
           : t('sessions.sidebar.folderItem.collapseAria', { folderName: folder.name })}
       >
         <div className={cn(
-          'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1 transition-[padding]',
+          'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1',
           archivedBucket
             ? (alwaysShowActions ? 'pr-7' : 'group-hover/folder:pr-7 group-focus-within/folder:pr-7')
             // Actions overlay on hover (new session, rename, delete = three

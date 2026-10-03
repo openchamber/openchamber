@@ -350,6 +350,57 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(Number(data.contentLength)).toBeGreaterThan(0);
   });
 
+  it('replays parsed chunked JSON bodies with a single framing header', async () => {
+    const upstream = express();
+    upstream.post('/api/session/abc/model', express.json(), (req, res) => {
+      res.json({
+        body: req.body,
+        transferEncoding: req.headers['transfer-encoding'] ?? null,
+        contentLength: req.headers['content-length'],
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    app.use('/api', express.json());
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    // A stream body has no known length, so fetch sends it chunked, the way a
+    // reverse proxy such as a tunnel forwards a browser request.
+    const payload = { model: { providerID: 'anthropic', id: 'claude-sonnet-5' } };
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/model`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new Blob([JSON.stringify(payload)]).stream(),
+      duplex: 'half',
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.body).toEqual(payload);
+    expect(data.transferEncoding).toBeNull();
+    expect(Number(data.contentLength)).toBe(JSON.stringify(payload).length);
+  });
+
   it.each([
     ['win32', ''],
     ['win32', '&directory=%2Flink%2Frepo'],

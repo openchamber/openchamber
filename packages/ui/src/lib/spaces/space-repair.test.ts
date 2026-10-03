@@ -14,6 +14,7 @@ const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: ID,
   name: 'Fix login',
   projectDirectory: '/home/me/app',
+  projectFolder: { path: '/home/me/app', found: true },
   directory: `/spaces/${ID}/app`,
   state: 'running',
   stoppedIdle: false,
@@ -37,6 +38,10 @@ describe('whether a space\'s work can be applied', () => {
     expect(isSpaceApplicable(entry({ state: 'exited', damage: 'gatekeeper_gone' }))).toBe(false);
     for (const state of ['preparing', 'failed', 'missing'] as const) expect(isSpaceApplicable(entry({ state }))).toBe(false);
     expect(isSpaceApplicable(undefined)).toBe(false);
+    // The folder the space was made for is gone from the host: the work has nowhere to go.
+    expect(isSpaceApplicable(entry({ projectDirectory: null, projectFolder: { path: '/home/me/app', found: false } }))).toBe(false);
+    // Not looked at, or a host before 5e-3 that names none: the apply dialog decides.
+    expect(isSpaceApplicable(entry({ projectDirectory: null, projectFolder: { path: null, found: null } }))).toBe(true);
   });
 });
 
@@ -173,6 +178,32 @@ describe('the actions of a space', () => {
       expect(useSpacesStore.getState().actions.has(ID)).toBe(false);
       expect(useSpacesStore.getState().accessDialog).toBeNull();
       expect(reloads).toBe(1);
+    });
+
+    test('a delete whose chats could not be saved opens the confirmation again; "Delete anyway" says so, and saved chats are announced', async () => {
+      useGlobalSessionsStore.setState({ loadSessions: async () => ({ activeSessions: [], archivedSessions: [] }) });
+      useSpacesStore.getState().applyJourney([entry({ name: 'Fix login' })], 0);
+      const asked: string[] = [];
+      host((path) => {
+        if (!path.endsWith(ID)) return listAnswer([entry({ name: 'Fix login' })]);
+        return new Response(JSON.stringify({ code: 'chats_not_saved', message: 'not saved', details: { tooLarge: ['Big one'], failed: 0 } }), { status: 409 });
+      });
+      await runSpaceAction(ID, 'remove');
+      expect(useSpacesStore.getState().actions.has(ID)).toBe(false);
+      expect(useSpacesStore.getState().deleteDialog).toBe(ID);
+      expect(useSpacesStore.getState().deleteUnsaved).toEqual({ tooLarge: ['Big one'], failed: 0 });
+
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://host');
+        asked.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
+        return url.pathname.endsWith(ID)
+          ? new Response(JSON.stringify({ id: ID, removed: true, failures: [], chats: { saved: 1 } }), { status: 200 })
+          : listAnswer([]);
+      }, originalFetch);
+      useSpacesStore.getState().closeDeleteDialog();
+      await runSpaceAction(ID, 'remove', { deleteUnsavedChats: true });
+      expect(asked[0]).toBe(`DELETE /api/openchamber/spaces/${ID}?unsavedChats=delete`);
+      expect(useSpacesStore.getState().archivedNotice).toBe('Fix login');
     });
 
     // The project's setup as the host's project route answers it: personal commands only, so no trust prompt.

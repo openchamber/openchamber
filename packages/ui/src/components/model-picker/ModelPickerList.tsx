@@ -553,6 +553,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const selectionStore = selectionStoreRef.current;
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const scrollRef = React.useRef<HTMLElement | null>(null);
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
   const virtualSectionsRef = React.useRef<Map<string, VirtualSectionHandle>>(new Map());
   const stickyFadeSizeRef = React.useRef(0);
   const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -690,6 +691,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>,
   ) => {
     if ((event.target as Element).closest('[data-overlay-scrollbar-thumb], [data-model-picker-sticky-header]')) return;
+    // Enter or Space on a focused button clicks with no pointer position (detail 0,
+    // coordinates 0), which would otherwise read as a click on the fade.
+    if (event.type === 'click' && event.detail === 0) return;
     const eventY = event.clientY - event.currentTarget.getBoundingClientRect().top;
     if (eventY >= stickyFadeSizeRef.current) return;
     event.preventDefault();
@@ -728,12 +732,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     filteredFavorites.map((entry) => [`${entry.providerID}:${entry.modelID}`, entry] as const),
   ), [filteredFavorites]);
 
-  const initialSelectionIndex = searchQuery.trim() || !selectedModel ? 0 : Math.max(0,
-    flatModelList.findIndex((item) => {
-      const entry = entryOf(item);
-      return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
-    }),
-  );
+  const selectedModelIndex = searchQuery.trim() || !selectedModel ? 0 : flatModelList.findIndex((item) => {
+    const entry = entryOf(item);
+    return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
+  });
+  const initialSelectionIndex = Math.max(0, selectedModelIndex);
+  // Scrolling to the current model answers opening the list, a new query, or a
+  // new selection, once the model has a row. A star or a collapsed section only
+  // shifts rows around the pointer, so it must not scroll again.
+  const revealRequest = `${searchQuery}\n${selectedModel?.providerID ?? ''}\n${selectedModel?.modelID ?? ''}`;
+  const revealedRequestRef = React.useRef<string | null>(null);
 
   // A row inside a virtualized section may not be mounted yet: scroll its
   // section there first, then align it once it renders.
@@ -756,8 +764,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     // Opening or scrolling the list must not let a stationary pointer replace the current model.
     keyboardOwnsSelectionRef.current = true;
     lastMousePositionRef.current = null;
-    revealIndex(initialSelectionIndex);
-  }, [initialSelectionIndex, revealIndex, searchQuery, selectedModel?.providerID, selectedModel?.modelID, selectionStore]);
+    if (revealedRequestRef.current === revealRequest) return;
+    // Models can load after the list opens: keep the request until the current
+    // model's row exists. Until then there is nothing to scroll to.
+    if (selectedModelIndex < 0) return;
+    revealedRequestRef.current = revealRequest;
+    revealIndex(selectedModelIndex);
+  }, [initialSelectionIndex, revealIndex, revealRequest, selectedModelIndex, selectionStore]);
 
   const selectIndex = React.useCallback((index: number) => {
     selectionStore.set(index);
@@ -889,7 +902,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               tabIndex={-1}
               onClick={() => { if (!disabled) onSelect(entry); }}
               onKeyDown={(event) => {
-                if (disabled) return;
+                // Keys pressed on a control inside the row (the star, the drag handle)
+                // belong to that control, not to choosing the model.
+                if (disabled || event.target !== event.currentTarget) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onSelect(entry);
@@ -914,7 +929,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
               {renderRowEnd?.(entry, { isHighlighted, isSelected })}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit flex-shrink-0" /> : null}
               {onToggleFavorite && keyPrefix !== 'leading' ? (
-                <button type="button" disabled={disabled} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onToggleFavorite(entry); }} className={cn('model-favorite-button flex h-4 w-4 items-center justify-center hover:text-primary/80 flex-shrink-0 disabled:pointer-events-none', favorite ? 'text-primary' : 'text-muted-foreground')} aria-label={favorite ? labels.unfavorite : labels.favorite} title={favorite ? labels.unfavorite : labels.favorite}>
+                // Unstarring can remove this row. A focused star would take focus with it,
+                // and the popup would hand focus to its last button, scrolling the list to
+                // the bottom; focus stays in, or returns to, the search field instead.
+                <button type="button" disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (event.currentTarget === document.activeElement) searchInputRef.current?.focus(); onToggleFavorite(entry); }} className={cn('model-favorite-button flex h-4 w-4 items-center justify-center hover:text-primary/80 flex-shrink-0 disabled:pointer-events-none', favorite ? 'text-primary' : 'text-muted-foreground')} aria-label={favorite ? labels.unfavorite : labels.favorite} title={favorite ? labels.unfavorite : labels.favorite}>
                   <Icon name={favorite ? 'star-fill' : 'star'} className="h-3.5 w-3.5" />
                 </button>
               ) : null}
@@ -1086,6 +1104,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
         <div className="relative">
           <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
+            ref={searchInputRef}
             type="text"
             placeholder={labels.searchPlaceholder}
             value={searchQuery}

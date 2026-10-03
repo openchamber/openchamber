@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
@@ -143,10 +144,19 @@ export const syncScheduledTaskLoops = async (projectID: string): Promise<void> =
   await fetchScheduledTasks(projectID);
 };
 
+// A malformed field is dropped on its own; the rest of the answer still counts.
+// `directory` is where the run's session lives: a chats-scope run opens a new
+// chat directory, a project run reports the project path.
+const RunNowResponseSchema = z.object({
+  sessionId: z.string().min(1).optional().catch(undefined),
+  directory: z.string().min(1).optional().catch(undefined),
+  persistError: z.string().trim().min(1).optional().catch(undefined),
+});
+
 export const runScheduledTaskNow = async (
   projectID: string,
   taskID: string,
-): Promise<{ sessionId?: string; persistError?: string }> => {
+): Promise<{ sessionId?: string; directory?: string; persistError?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
   const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
@@ -158,11 +168,6 @@ export const runScheduledTaskNow = async (
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));
   }
-  const parsed = await response.json().catch(() => null);
-  return {
-    sessionId: typeof parsed?.sessionId === 'string' && parsed.sessionId.length > 0 ? parsed.sessionId : undefined,
-    persistError: typeof parsed?.persistError === 'string' && parsed.persistError.trim().length > 0
-      ? parsed.persistError.trim()
-      : undefined,
-  };
+  const parsed = RunNowResponseSchema.safeParse(await response.json().catch(() => null));
+  return parsed.success ? parsed.data : {};
 };

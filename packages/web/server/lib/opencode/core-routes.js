@@ -597,8 +597,15 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
   );
 
+  // An HTML preview runs in an opaque-origin sandbox and carries no session.
+  // The grant in its path is the capability; the fs route checks it.
+  const isFilePreviewRead = (req) => (
+    req.method === 'GET'
+    && /^\/fs\/preview\/[^/]+\/./.test(req.path || '')
+  );
+
   const requireApiAuth = async (req, res, next) => {
-    if (isGuestOauthCallback(req)) {
+    if (isGuestOauthCallback(req) || isFilePreviewRead(req)) {
       return next();
     }
     const requestScope = tunnelAuthController.classifyRequestScope(req);
@@ -1108,6 +1115,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
       req.path.startsWith('/api/opencode') ||
+      req.path === '/api/openchamber/directory' ||
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/notifications') ||
       req.path.startsWith('/api/permission-auto-accept') ||
