@@ -138,6 +138,10 @@ fast, so such a value means the measured window is broken: a tool that runs
 for nearly the whole step leaves a residual of a millisecond, and a text
 interval can be equally short. The row is omitted rather than shown wrong.
 
+Elapsed time is wall-clock time from the first user message in the turn through
+the final assistant completion. It includes model waits, tool execution,
+compaction, and other gaps; it is not used as a throughput denominator.
+
 Metric labels stay short. Every row is a single hover and keyboard-focus target
 for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
 scroller. Tooltips explain the measurement in every locale. The token row uses

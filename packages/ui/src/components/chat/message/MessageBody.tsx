@@ -221,12 +221,12 @@ const TurnChangedFilePills = React.memo(({ files, isInteractive }: { files?: Tur
 });
 
 const formatTurnDuration = (durationMs: number): string => {
-    const totalSeconds = durationMs / 1000;
-    if (totalSeconds < 60) {
-        return `${totalSeconds.toFixed(1)}s`;
+    if (durationMs < 60_000) {
+        return `${(durationMs / 1000).toFixed(1)}s`;
     }
+    const totalSeconds = Math.round(durationMs / 1000);
     const minutes = Math.floor(totalSeconds / 60);
-    const seconds = Math.round(totalSeconds % 60);
+    const seconds = totalSeconds % 60;
     return `${minutes}m ${seconds}s`;
 };
 

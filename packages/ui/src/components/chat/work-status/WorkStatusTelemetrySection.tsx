@@ -107,6 +107,13 @@ export const WorkStatusTelemetrySection: React.FC<Props> = ({ sessionId, directo
               value={<WorkStatusValue>{formatThroughputRate(stats.tokensPerSecond)}</WorkStatusValue>}
             />
           ) : null}
+          {stats.elapsedDurationMs !== null ? (
+            <TelemetryRow
+              label={t('chat.workStatus.telemetry.elapsed')}
+              description={t('chat.workStatus.telemetry.elapsedDescription')}
+              value={<WorkStatusValue>{formatTelemetryDuration(stats.elapsedDurationMs)}</WorkStatusValue>}
+            />
+          ) : null}
 
           {stats.totalLlmDurationMs !== null ? (
             <TelemetryRow
