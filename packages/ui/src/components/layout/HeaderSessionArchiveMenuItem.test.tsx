@@ -130,3 +130,13 @@ test('waits for confirmation and leaves a failed restore available for retry', a
   expect(useGlobalSessionsStore.getState().entityById.get('target')?.time.archived).toBe(2);
   expect(button.textContent).toBe('Restore');
 });
+
+test('offers no restore for an archived subsession, which comes back only with its parent', async () => {
+  useGlobalSessionsStore.getState().upsertSession({ ...session('target', 2), parentID: 'parent' });
+  await act(async () => root.render(
+    <I18nProvider>
+      <HeaderSessionArchiveMenuItem sessionId="target" Item={Item} onArchive={() => { archiveRequests += 1; }} />
+    </I18nProvider>,
+  ));
+  expect(document.querySelector('button')).toBeNull();
+});

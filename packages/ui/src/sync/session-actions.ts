@@ -1711,8 +1711,60 @@ function commitArchivedSessions(stamps: SessionArchiveStamp[], directory: string
  * previous runtime cannot mutate the current runtime's state. Archive state is
  * OpenChamber's own (OpenCode has no route for it), so this goes to the
  * OpenChamber unarchive route rather than the OpenCode client.
+ *
+ * A subsession is the agent's, not the user's: it is never restored on its
+ * own. Restoring a top-level session brings its archived subsessions back with
+ * it, so the agent runs it holds are whole again.
  */
 export async function unarchiveSession(sessionId: string, expectedRuntimeKey = getRuntimeKey()): Promise<boolean> {
+  const { restoredIds } = await restoreSessionTree(sessionId, expectedRuntimeKey)
+  return restoredIds.includes(sessionId)
+}
+
+/** Archived subsessions under a session, each parent before its children. */
+function archivedSubsessionIds(rootId: string): string[] {
+  const childrenByParentId = new Map<string, string[]>()
+  for (const session of useGlobalSessionsStore.getState().archivedSessions) {
+    if (!session.parentID) continue
+    const siblings = childrenByParentId.get(session.parentID) ?? []
+    siblings.push(session.id)
+    childrenByParentId.set(session.parentID, siblings)
+  }
+  const ids: string[] = []
+  const seen = new Set([rootId])
+  const queue = [rootId]
+  for (let index = 0; index < queue.length; index += 1) {
+    for (const childId of childrenByParentId.get(queue[index]) ?? []) {
+      if (seen.has(childId)) continue
+      seen.add(childId)
+      ids.push(childId)
+      queue.push(childId)
+    }
+  }
+  return ids
+}
+
+async function restoreSessionTree(
+  rootId: string,
+  expectedRuntimeKey: string,
+): Promise<{ restoredIds: string[]; failedIds: string[] }> {
+  if (useGlobalSessionsStore.getState().entityById.get(rootId)?.parentID) {
+    recordSessionActionFailure(rootId, new Error("a subsession is restored with its parent"))
+    return { restoredIds: [], failedIds: [rootId] }
+  }
+  // Read before the root changes state: the walk follows the archived records.
+  const subsessionIds = archivedSubsessionIds(rootId)
+  if (!await restoreArchivedSession(rootId, expectedRuntimeKey)) return { restoredIds: [], failedIds: [rootId] }
+  const restoredIds = [rootId]
+  const failedIds: string[] = []
+  for (const id of subsessionIds) {
+    if (await restoreArchivedSession(id, expectedRuntimeKey)) restoredIds.push(id)
+    else failedIds.push(id)
+  }
+  return { restoredIds, failedIds }
+}
+
+async function restoreArchivedSession(sessionId: string, expectedRuntimeKey: string): Promise<boolean> {
   if (isStaleRuntime(expectedRuntimeKey)) return false
   const sessionDirectory = getSessionDirectory(sessionId)
   try {
@@ -1771,6 +1823,12 @@ export type UnarchiveSessionsOptions = {
    * stops as soon as the active runtime differs.
    */
   expectedRuntimeKey?: string
+  /**
+   * Undo of an archive that just happened: put back exactly the sessions it
+   * moved, subsessions included. Without it a subsession is only restored
+   * with its parent.
+   */
+  undo?: boolean
 }
 
 /**
@@ -1790,14 +1848,32 @@ export async function unarchiveSessions(
   const restoredIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  const settled = new Set<string>()
+  // Parents first, so a subsession listed next to its parent comes back with
+  // it instead of being refused on its own.
+  const entityById = useGlobalSessionsStore.getState().entityById
+  const ordered = options?.undo
+    ? ids
+    : [...ids.filter((id) => !entityById.get(id)?.parentID), ...ids.filter((id) => entityById.get(id)?.parentID)]
 
-  for (const [index, id] of ids.entries()) {
+  for (const [index, id] of ordered.entries()) {
     if (isStaleRuntime(expectedRuntimeKey)) {
-      failedIds.push(...ids.slice(index))
+      failedIds.push(...ordered.slice(index).filter((pending) => !settled.has(pending)))
       break
     }
-    if (await unarchiveSession(id, expectedRuntimeKey)) restoredIds.push(id)
-    else failedIds.push(id)
+    if (settled.has(id)) continue
+    if (options?.undo) {
+      if (await restoreArchivedSession(id, expectedRuntimeKey)) restoredIds.push(id)
+      else failedIds.push(id)
+      settled.add(id)
+      continue
+    }
+    // A parent listed in the batch brings its subsessions back with it.
+    const outcome = await restoreSessionTree(id, expectedRuntimeKey)
+    for (const restored of outcome.restoredIds) settled.add(restored)
+    for (const failed of outcome.failedIds) settled.add(failed)
+    restoredIds.push(...outcome.restoredIds)
+    failedIds.push(...outcome.failedIds)
   }
 
   return { restoredIds, failedIds }

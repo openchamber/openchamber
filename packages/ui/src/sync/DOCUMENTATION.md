@@ -634,7 +634,7 @@ Examples of global-store updates performed in `session-actions.ts`:
 - `updateSessionTitle()` -> `upsertSession(result.data)`
 - `shareSession()` / `unshareSession()` -> `upsertSession(result.data)`
 - `archiveSession()` / `archiveSessions()` -> wait for server confirmation, then upsert each archived session
-- `unarchiveSession()` / `unarchiveSessions()` -> wait for server confirmation, then upsert each restored session
+- `unarchiveSession()` / `unarchiveSessions()` -> wait for server confirmation, then upsert each restored session. A subsession is never restored on its own: restoring a top-level session brings its archived subsessions back with it, and a subsession id alone fails. The one exception is `undo`, which puts back exactly what an archive just moved.
 - `deleteSession()` / `deleteSessions()` -> wait for server confirmation or `404`, then remove the session and its persisted state
 - `moveSessionToDirectory()` -> move the session between directory stores and update the global directory index
 

@@ -104,7 +104,8 @@ export const useSessionGrouping = (args: Args) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
+        // Only active subsessions nest; the archive shows top-level sessions.
+        if (!parentSession || isArchivedSession(parentSession) || isArchivedSession(session)) {
           return;
         }
         const collection = childrenMap.get(parentID) ?? [];
@@ -146,12 +147,22 @@ export const useSessionGrouping = (args: Args) => {
         return { session, children: childNodes, worktree: getSessionWorktree(session) };
       };
 
-      const rootCandidates = sortedProjectSessions.filter((session) => {
-        const parentID = (session as Session & { parentID?: string | null }).parentID;
-        if (!parentID) return true;
+      // A subsession is shown only nested under its active parent. Under an
+      // archived parent, or archived itself, it is hidden rather than promoted
+      // to a row of its own: subsessions are the agent's, restored with their
+      // parent. One whose parent is not loaded yet stays visible as a root.
+      const isHiddenSubsession = (session: Session): boolean => {
+        const parentID = session.parentID;
+        if (!parentID) return false;
+        if (isArchivedSession(session)) return true;
         const parentSession = sessionMap.get(parentID);
-        if (!parentSession) return true;
-        return isArchivedSession(parentSession) !== isArchivedSession(session);
+        return Boolean(parentSession && isArchivedSession(parentSession));
+      };
+
+      const rootCandidates = sortedProjectSessions.filter((session) => {
+        const parentID = session.parentID;
+        if (!parentID) return true;
+        return !sessionMap.has(parentID) && !isHiddenSubsession(session);
       });
 
       // A malformed cycle has no structural root. Start with normal roots,
@@ -162,7 +173,9 @@ export const useSessionGrouping = (args: Args) => {
         roots.push(buildProjectNode(session));
       };
       rootCandidates.forEach(addRoot);
-      sortedProjectSessions.forEach(addRoot);
+      sortedProjectSessions.forEach((session) => {
+        if (!isHiddenSubsession(session)) addRoot(session);
+      });
 
       const groupedNodes = new Map<string, SessionNode[]>();
       const archivedKey = '__archived__';

@@ -80,7 +80,7 @@ export const undoArchive = async (
   t: Translate,
 ): Promise<void> => {
   const { restoredIds, failedIds } = await useSessionUIStore.getState()
-    .unarchiveSessions([...archivedIds], { expectedRuntimeKey: runtimeKey });
+    .unarchiveSessions([...archivedIds], { expectedRuntimeKey: runtimeKey, undo: true });
   if (failedIds.length > 0) {
     toast.error(t('sessions.sidebar.session.restore.error'), failureDescription(failedIds, t));
   }

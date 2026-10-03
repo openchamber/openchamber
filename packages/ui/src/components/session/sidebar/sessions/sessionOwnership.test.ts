@@ -274,4 +274,19 @@ describe('createSessionOwnershipIndex', () => {
     // VS Code never has spaces.
     expect(createSessionOwnershipIndex(sessions, projects, new Map(), true, [], [], spaces).bySessionId.has('in-space')).toBe(false);
   });
+
+  test('lists only top-level sessions as archived', () => {
+    const archivedParent = ownershipSession('archived-parent');
+    const archivedChild: SessionOwnershipRecord = { ...ownershipSession('archived-child'), parentID: 'archived-parent' };
+    const ownership = createSessionOwnershipIndex(
+      [],
+      [{ id: 'workspace', normalizedPath: '/workspace' }],
+      new Map(),
+      false,
+      [archivedParent, archivedChild],
+    );
+
+    expect(ownership.archivedSessionsByProject.get('workspace')?.map((session) => session.id)).toEqual(['archived-parent']);
+  });
 });
+

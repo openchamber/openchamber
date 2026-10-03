@@ -254,6 +254,7 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     getState: () => ({
       activeSessions: globalActiveSessions,
       archivedSessions: globalArchivedSessions,
+      entityById: new Map([...globalActiveSessions, ...globalArchivedSessions].map((session) => [session.id, session])),
       hasLoaded: globalHasLoaded,
       upsertSession: (session: unknown) => {
         globalUpsertedSessions.push(session)
@@ -1034,6 +1035,43 @@ describe("session restore (unarchive)", () => {
     const { useSessionOrderingStore } = await import("./session-ordering")
     const rank = useSessionOrderingStore.getState().rankById.get("session-a")
     expect(rank ?? 0).toBeGreaterThan(0)
+  })
+
+  test("restores a parent together with its archived subsessions", async () => {
+    const parent = restored("parent", "/test/project")
+    globalArchivedSessions.push(
+      { ...sessionFixture("child"), directory: "/test/project", parentID: "parent", time: { created: 1, updated: 1, archived: 5 } } as unknown as Session,
+      { ...sessionFixture("grandchild"), directory: "/test/project", parentID: "child", time: { created: 1, updated: 1, archived: 5 } } as unknown as Session,
+    )
+    beforeArchiveRouteResolve = (path) => {
+      if (!path.endsWith("/unarchive")) return
+      const ids = openchamberRouteRequests.at(-1)?.body.ids
+      const id = Array.isArray(ids) ? String(ids[0]) : ""
+      unarchiveBatchResponse = { status: 200, body: { restored: [id === "parent" ? parent : { id, archivedAt: null }], failedIds: [] } }
+    }
+    const source = createStore({}, { session: [] })
+    const { unarchiveSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("parent")).toBe(true)
+    expect(openchamberRouteRequests.map((request) => request.body.ids)).toEqual([["parent"], ["child"], ["grandchild"]])
+  })
+
+  test("never restores a subsession on its own", async () => {
+    globalArchivedSessions.push(
+      { ...sessionFixture("child"), directory: "/test/project", parentID: "parent", time: { created: 1, updated: 1, archived: 5 } } as unknown as Session,
+    )
+    unarchiveBatchResponse = { status: 200, body: { restored: [{ id: "child", archivedAt: null }], failedIds: [] } }
+    const source = createStore({}, { session: [] })
+    const { unarchiveSession, unarchiveSessions, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    expect(await unarchiveSession("child")).toBe(false)
+    expect(await unarchiveSessions(["child"])).toEqual({ restoredIds: [], failedIds: ["child"] })
+    expect(openchamberRouteRequests).toEqual([])
+
+    // Undo puts back exactly what an archive just moved, subsessions included.
+    expect(await unarchiveSessions(["child"], { undo: true })).toEqual({ restoredIds: ["child"], failedIds: [] })
   })
 
   test("archive then immediately restore recovers the running status instead of treating an old snapshot as idle", async () => {
