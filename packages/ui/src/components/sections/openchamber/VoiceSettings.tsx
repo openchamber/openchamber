@@ -457,13 +457,14 @@ const LocalTtsModelStatus = ({ models, requestingId, request }: ReturnType<typeo
         return null;
     }
 
-    // Installed models plus anything currently downloading or in an error state
-    // stay inline where the user expects them; the rest of the catalog sits
-    // behind a collapse so the panel does not flood with 14 rows.
+    // Installed models, anything downloading or in an error state, and the
+    // default English model stay inline where the user expects them; the rest
+    // of the catalog sits behind a collapse so the panel does not flood with
+    // 14 rows.
     const inline: DictationModelState[] = [];
     const available: DictationModelState[] = [];
     for (const model of models) {
-        if (model.installed || model.downloading || model.downloadError) {
+        if (model.id === LOCAL_TTS_MODEL_ID || model.installed || model.downloading || model.downloadError) {
             inline.push(model);
         } else {
             available.push(model);
