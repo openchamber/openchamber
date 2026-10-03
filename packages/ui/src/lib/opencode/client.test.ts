@@ -676,6 +676,41 @@ describe("messages and config", () => {
     expect(catalog.default).toEqual({ id: "x", providerID: "openai" })
   })
 
+  for (const { label, variants } of [
+    { label: "missing", variants: undefined },
+    { label: "null", variants: null },
+    { label: "keyed object", variants: { default: {} } },
+  ]) {
+    test(`a live model catalog with ${label} variants can be read by the chat renderer`, async () => {
+      const model = { id: "opencode-go/glm-5.3-flash", modelID: "glm-5.3-flash", providerID: "opencode-go", variants }
+      const answer = (request: CapturedRequest) =>
+        request.url.pathname === "/api/provider"
+          ? json({ location: {}, data: [{ id: "opencode-go", name: "OpenCode Go" }] })
+          : request.url.pathname === "/api/model"
+            ? json({ location: {}, data: [model] })
+            : json({ location: {}, data: model })
+      responses.push(answer, answer, answer)
+
+      const catalog = await opencodeClient.getProvidersForConfig("/repo/app")
+      expect(catalog.models[0]?.variants.map((variant: { id: string }) => variant.id) ?? []).toEqual([])
+      expect(catalog.models[0]).toEqual({ ...model, variants: [] })
+    })
+  }
+
+  test("a live model catalog keeps variant ids and settings from valid arrays", async () => {
+    const variants = [{ id: "high", settings: { reasoningEffort: "high" } }, { id: "low", settings: {} }]
+    const model = { id: "opencode-go/glm-5.3-flash", modelID: "glm-5.3-flash", providerID: "opencode-go", variants }
+    responses.push(
+      json({ location: {}, data: [] }),
+      json({ location: {}, data: [model] }),
+      json({ location: {}, data: model }),
+    )
+
+    const catalog = await opencodeClient.getProvidersForConfig("/repo/app")
+    expect(catalog.models[0]?.variants.map((variant: { id: string }) => variant.id)).toEqual(["high", "low"])
+    expect(catalog.models[0]).toEqual(model)
+  })
+
   test("a fresh provider read waits out the one in flight and reads again", async () => {
     const answer = (request: CapturedRequest) =>
       request.url.pathname === "/api/provider"

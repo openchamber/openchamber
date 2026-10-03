@@ -1,4 +1,5 @@
 import React from 'react';
+import { modelVariantNames } from '@/lib/modelVariants';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
@@ -59,7 +60,7 @@ const getVariantOptionsForModel = (
 
   const provider = providers.find((item) => item.id === parsedModel.providerId);
   const model = findCatalogModel(provider?.models, parsedModel.modelId);
-  return model?.variants.map((variant) => variant.id) ?? [];
+  return modelVariantNames(model);
 };
 /** Everything the page writes into the agent's config file. */
 interface FormState {

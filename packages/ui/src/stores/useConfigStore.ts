@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -214,7 +215,7 @@ const findProviderModel = (
 
 /** v2 lists model variants as records with an `id`, not as a keyed map. */
 const modelHasVariant = (model: Model | undefined, variant: string | null | undefined): boolean => (
-    typeof variant === "string" && (model?.variants.some((entry) => entry.id === variant) ?? false)
+    typeof variant === "string" && listModelVariantIds(model?.variants).includes(variant)
 );
 
 const hasProviderModel = (
@@ -569,7 +570,7 @@ const buildModelMetadataKey = (providerId: string, modelId: string) => {
  */
 const deriveModelMetadata = (providerId: string, model: ProviderModel): ModelMetadata => {
     const baseCost = model.cost.find((entry) => !entry.tier) ?? model.cost[0];
-    const hasReasoningSignal = model.variants.length > 0
+    const hasReasoningSignal = modelVariantNames(model).length > 0
         || model.compatibility?.reasoningField !== undefined
         || model.compatibility?.requireReasoning === true;
     return {
@@ -2370,7 +2371,7 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 getCurrentModelVariants: () => {
-                    return get().getCurrentModel()?.variants.map((variant) => variant.id) ?? [];
+                    return modelVariantNames(get().getCurrentModel());
                 },
 
                 cycleCurrentVariant: () => {
@@ -3044,7 +3045,7 @@ export const useConfigStore = create<ConfigStore>()(
                             agentVariant?: string,
                         ): CurrentVariantSelection => {
                             const model = findProviderModel(providers, providerId, modelId);
-                            if (model && model.variants.length === 0) return { override: undefined, inherited: undefined };
+                            if (model && modelVariantNames(model).length === 0) return { override: undefined, inherited: undefined };
 
                             // A model the catalog does not list (Auto, or a stale
                             // selection) cannot rule a variant out, so inherited

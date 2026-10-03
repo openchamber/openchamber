@@ -1684,7 +1684,9 @@ class OpencodeService {
       ])
       return compact({
         providers,
-        models,
+        models: models.map((model) => (
+          Array.isArray(model.variants) ? model : { ...model, variants: [] }
+        )),
         default: fallback ? { id: fallback.modelID, providerID: fallback.providerID } : undefined,
       })
     })()
