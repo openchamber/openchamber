@@ -160,6 +160,27 @@ describe('GhosttyTerminalCore', () => {
     expect(core.encodePaste('hello')).toBe('\x1b[200~hello\x1b[201~');
   });
 
+  test('confirms only unprotected line breaks and does not append Enter', async () => {
+    const core = await createCore();
+    let confirmations = 0;
+    const deny = () => { confirmations += 1; return false; };
+    expect(core.encodePaste('echo hello', deny)).toBe('echo hello');
+    expect(core.encodePaste('', deny)).toBe('');
+    expect(confirmations).toBe(0);
+    for (const text of ['echo hello\n', 'echo hello\r', 'echo one\r\necho two']) {
+      expect(core.encodePaste(text, deny)).toBe('');
+    }
+    expect(confirmations).toBe(3);
+    const text = 'printf "one\\ntwo"\n# keep this comment\nprintf done';
+    expect(core.encodePaste(text, () => true)).toBe(core.encodePaste(text));
+    core.write('\x1b[?2004h');
+    expect(core.encodePaste(text, deny)).toBe(`\x1b[200~${text}\x1b[201~`);
+    expect(confirmations).toBe(3);
+    core.write('\x1b[?2004l');
+    expect(core.encodePaste(text, deny)).toBe('');
+    expect(confirmations).toBe(4);
+  });
+
   test('maps macOS Option word editing to legacy shell commands, including key repeats', async () => {
     const core = await createCore();
     for (const repeat of [false, true]) {

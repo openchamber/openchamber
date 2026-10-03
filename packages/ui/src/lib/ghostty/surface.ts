@@ -972,6 +972,7 @@ export class GhosttyTerminalSurface {
   async pasteFromClipboard(
     readText: () => Promise<string>,
     isCurrent: () => boolean = () => true,
+    confirmUnprotectedMultiline?: () => boolean,
   ): Promise<void> {
     const token = ++this.pasteShortcutToken;
     const text = await readText();
@@ -980,8 +981,10 @@ export class GhosttyTerminalSurface {
     // still in flight cannot land after this text reaches the shell.
     this.pasteShortcutToken += 1;
     if (text.length === 0) return;
-    const encoded = this.core.encodePaste(text);
-    if (encoded.length > 0) this.options.onData(encoded);
+    const encoded = this.core.encodePaste(text, confirmUnprotectedMultiline);
+    if (!this.disposed && this.pasteShortcutToken === token + 1 && isCurrent() && encoded.length > 0) {
+      this.options.onData(encoded);
+    }
   }
 
   hasSelection(): boolean {

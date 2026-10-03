@@ -590,16 +590,19 @@ export class GhosttyTerminalCore {
     return encoded;
   }
 
-  encodePaste(data: string): string {
+  encodePaste(data: string, confirmUnprotectedMultiline?: () => boolean): string {
     this.ensureActive();
     const input = encoder.encode(data);
     if (input.length === 0) return '';
-    const inputPointer = this.runtime.alloc(input.length);
-    this.runtime.bytes(inputPointer, input.length).set(input);
     this.runtime.bytes(this.scratch, 1)[0] = 0;
     const bracketed =
       this.runtime.call('ghostty_terminal_mode_get', this.terminal, 2004, this.scratch) ===
         GHOSTTY_SUCCESS && this.runtime.bytes(this.scratch, 1)[0] !== 0;
+    if (!bracketed && /[\r\n]/.test(data) && confirmUnprotectedMultiline && !confirmUnprotectedMultiline()) {
+      return '';
+    }
+    const inputPointer = this.runtime.alloc(input.length);
+    this.runtime.bytes(inputPointer, input.length).set(input);
     const written = this.runtime.call('ghostty_wasm_alloc_usize');
     let encoded = '';
     const sizeResult = this.runtime.call(

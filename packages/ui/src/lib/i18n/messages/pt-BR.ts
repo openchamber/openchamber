@@ -79,6 +79,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': 'Falha ao copiar',
   'terminalView.actions.copy': 'Copiar',
   'terminalView.actions.paste': 'Colar',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Este terminal não ativou a colagem protegida. Colar quebras de linha pode executar comandos imediatamente. Colar mesmo assim?',
   'terminalView.toast.pasteFailed': 'Não foi possível ler a área de transferência. Use o atalho de teclado para colar.',
   'terminalView.actions.restart': 'Reiniciar terminal',
   'chat.message.terminalContext': '{terminal}, linhas {start}-{end}',

@@ -291,6 +291,30 @@ describe('TerminalView project action tab indicator', () => {
     expect(host.querySelectorAll('[data-icon="loader-4"]').length).toBe(1);
   });
 
+  test('places an accessible Paste action beside Copy and disables it until the active terminal connects', async () => {
+    await act(async () => {
+      root.render(React.createElement(TerminalView, { visible: false }));
+    });
+    const pasteButton = host.querySelector<HTMLButtonElement>('[aria-label="terminalView.actions.paste"]');
+    expect(pasteButton).not.toBeNull();
+    expect(pasteButton?.disabled).toBe(true);
+    expect(pasteButton?.title).toBe('terminalView.actions.paste');
+    expect(pasteButton?.querySelector('[data-icon]')?.getAttribute('data-icon')).toBe('clipboard');
+    expect(pasteButton?.previousElementSibling?.getAttribute('aria-label')).toBe('terminalView.actions.copySelection');
+
+    const state = useTerminalStore.getState().getDirectoryState('/repo');
+    if (!state?.activeTabId) throw new Error('active terminal tab missing');
+    const activeTabId = state.activeTabId;
+    await act(async () => {
+      useTerminalStore.getState().setTabSessionId('/repo', activeTabId, 'connected-terminal');
+    });
+    expect(pasteButton?.disabled).toBe(false);
+    await act(async () => {
+      useTerminalStore.getState().setConnecting('/repo', activeTabId, true);
+    });
+    expect(pasteButton?.disabled).toBe(true);
+  });
+
   test('uses the explicit terminal directory for terminal tabs and session creation while preview ownership stays on the host directory', async () => {
     effectiveDirectory = '/repo-worktree';
     useTerminalStore.getState().ensureDirectory('/repo-worktree');

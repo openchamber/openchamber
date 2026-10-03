@@ -79,6 +79,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': 'コピーに失敗しました',
   'terminalView.actions.copy': 'コピー',
   'terminalView.actions.paste': '貼り付け',
+  'terminalView.confirm.unprotectedMultilinePaste': 'このターミナルでは保護された貼り付けが有効になっていません。改行を貼り付けると、コマンドがすぐに実行される可能性があります。それでも貼り付けますか？',
   'terminalView.toast.pasteFailed': 'クリップボードを読み取れませんでした。貼り付けのキーボードショートカットを使用してください。',
   'terminalView.actions.restart': 'ターミナルを再起動',
   'chat.message.terminalContext': '{terminal}、{start}〜{end}行',

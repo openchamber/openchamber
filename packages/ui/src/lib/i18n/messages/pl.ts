@@ -79,6 +79,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': 'Kopiowanie nie powiodło się',
   'terminalView.actions.copy': 'Kopiuj',
   'terminalView.actions.paste': 'Wklej',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Ten terminal nie ma włączonego chronionego wklejania. Wklejenie znaków nowej linii może natychmiast uruchomić polecenia. Wkleić mimo to?',
   'terminalView.toast.pasteFailed': 'Nie udało się odczytać schowka. Użyj skrótu klawiaturowego do wklejania.',
   'terminalView.actions.restart': 'Uruchom terminal ponownie',
   'chat.message.terminalContext': '{terminal}, wiersze {start}-{end}',
