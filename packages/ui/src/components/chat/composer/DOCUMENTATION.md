@@ -71,7 +71,9 @@ also hides suggestion; new-session drafts hide form, queue and suggestion.
 Hiding the queue does not pause its delivery.
 
 `BackgroundShellsStrip` shares that top-row slot, above the "looks done" hint
-and the suggestion: the background commands of the session and of its
+and the suggestion: the commands that went to the background (not the ones
+a turn is waiting for, see `background` in `sync/background-shells.ts`) of
+the session and of its
 subagents at any depth (`sessionsInTree` over the global sessions store, a
 subagent missing from it keeps its commands out), each with its command,
 elapsed time and Stop through `opencodeClient.stopBackgroundShell`, the same

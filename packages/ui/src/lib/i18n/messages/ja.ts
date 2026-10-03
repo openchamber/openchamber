@@ -583,8 +583,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.work.doneHint.action': '完了にする',
   'chat.backgroundShells.aria': 'バックグラウンドコマンド',
   'chat.backgroundShells.count': 'バックグラウンドコマンド: {count}',
-  'chat.backgroundShells.expand': 'バックグラウンドコマンドを表示',
-  'chat.backgroundShells.collapse': 'バックグラウンドコマンドを隠す',
   'chat.backgroundShells.subagent': 'サブエージェント',
   'chat.backgroundShells.stop': '停止',
   'chat.backgroundShells.stopAria': '{command} を停止',

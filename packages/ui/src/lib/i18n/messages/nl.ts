@@ -582,8 +582,6 @@ export const dict = {
   'chat.work.doneHint.action': 'Markeer als afgerond',
   'chat.backgroundShells.aria': 'Achtergrondopdrachten',
   'chat.backgroundShells.count': 'Achtergrondopdrachten: {count}',
-  'chat.backgroundShells.expand': 'Achtergrondopdrachten tonen',
-  'chat.backgroundShells.collapse': 'Achtergrondopdrachten verbergen',
   'chat.backgroundShells.subagent': 'subagent',
   'chat.backgroundShells.stop': 'Stoppen',
   'chat.backgroundShells.stopAria': '{command} stoppen',

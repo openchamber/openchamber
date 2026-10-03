@@ -420,8 +420,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.work.doneHint.action': 'Oznacz jako gotowe',
   'chat.backgroundShells.aria': 'Polecenia w tle',
   'chat.backgroundShells.count': 'Polecenia w tle: {count}',
-  'chat.backgroundShells.expand': 'Pokaż polecenia w tle',
-  'chat.backgroundShells.collapse': 'Ukryj polecenia w tle',
   'chat.backgroundShells.subagent': 'subagent',
   'chat.backgroundShells.stop': 'Zatrzymaj',
   'chat.backgroundShells.stopAria': 'Zatrzymaj {command}',

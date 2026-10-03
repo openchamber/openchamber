@@ -50,7 +50,16 @@ const callMetadataSchema = z.object({
  */
 export function readBackgroundShellID(part: ToolPart): string | undefined {
   if (part.state.status !== "completed") return undefined
-  const parsed = callMetadataSchema.safeParse(part.state.metadata ?? {})
+  return readBackgroundShellIDFromMetadata(part.state.metadata)
+}
+
+/**
+ * The shell id in the metadata a call settles with when its command went to
+ * the background. A call that waits for its command settles only after the
+ * command ended, without this marker.
+ */
+export function readBackgroundShellIDFromMetadata(metadata: Metadata | undefined): string | undefined {
+  const parsed = callMetadataSchema.safeParse(metadata ?? {})
   return parsed.success ? parsed.data.shellID : undefined
 }
 

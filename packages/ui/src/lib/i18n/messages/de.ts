@@ -512,8 +512,6 @@ export const dict = {
   'chat.work.doneHint.action': 'Als erledigt markieren',
   'chat.backgroundShells.aria': 'Hintergrundbefehle',
   'chat.backgroundShells.count': 'Hintergrundbefehle: {count}',
-  'chat.backgroundShells.expand': 'Hintergrundbefehle anzeigen',
-  'chat.backgroundShells.collapse': 'Hintergrundbefehle ausblenden',
   'chat.backgroundShells.subagent': 'Subagent',
   'chat.backgroundShells.stop': 'Stoppen',
   'chat.backgroundShells.stopAria': '{command} stoppen',

@@ -563,8 +563,6 @@ export const dict = {
   'chat.work.doneHint.action': 'Tamamlandı olarak işaretle',
   'chat.backgroundShells.aria': 'Arka plan komutları',
   'chat.backgroundShells.count': 'Arka plan komutları: {count}',
-  'chat.backgroundShells.expand': 'Arka plan komutlarını göster',
-  'chat.backgroundShells.collapse': 'Arka plan komutlarını gizle',
   'chat.backgroundShells.subagent': 'alt ajan',
   'chat.backgroundShells.stop': 'Durdur',
   'chat.backgroundShells.stopAria': '{command} komutunu durdur',

@@ -9,7 +9,7 @@ import {
   replaceDirectoryShells,
   resetBackgroundShells,
   sessionsInTree,
-  shellsOfSessions,
+  backgroundShellsOfSessions,
   useBackgroundShellsStore,
 } from './background-shells';
 
@@ -23,6 +23,17 @@ const shell = (id: string, sessionID = 'ses_1'): RunningShell => ({
 
 const started = (value: RunningShell): SyncEvent => ({ type: 'shell.started', properties: { shell: value } });
 const ended = (shellID: string): SyncEvent => ({ type: 'shell.ended', properties: { shellID } });
+// The call that started a command settles while it runs: it went to the background.
+const settledInBackground = (shellID: string): SyncEvent => ({
+  type: 'message.tool.transition',
+  properties: {
+    sessionID: 'ses_1',
+    messageID: 'msg_1',
+    partID: `call_${shellID}`,
+    transition: { kind: 'success', output: '', metadata: { status: 'running', shellID }, executed: true, end: 2000 },
+  },
+});
+const isBackground = (shellID: string) => useBackgroundShellsStore.getState().byId.get(shellID)?.background;
 
 const ids = () => [...useBackgroundShellsStore.getState().byId.keys()].sort();
 const sessions = () => [...useBackgroundShellsStore.getState().sessionIds].sort();
@@ -107,13 +118,62 @@ describe('commands of a session tree', () => {
     expect(sessionsInTree(['ses_loop_a'], 'ses_root', parentOf)).toEqual([]);
   });
 
-  test('commands of the chosen sessions, oldest first', () => {
+  test('background commands of the chosen sessions, oldest first', () => {
     applyBackgroundShellEvents('/repo', [
       started({ ...shell('sh_late', 'ses_child'), startedAt: 3000 }),
       started({ ...shell('sh_early', 'ses_root'), startedAt: 1000 }),
       started({ ...shell('sh_foreign', 'ses_other'), startedAt: 2000 }),
+      started({ ...shell('sh_waited', 'ses_root'), startedAt: 1500 }),
+      settledInBackground('sh_late'),
+      settledInBackground('sh_early'),
+      settledInBackground('sh_foreign'),
     ]);
-    const picked = shellsOfSessions(useBackgroundShellsStore.getState().byId, new Set(['ses_root', 'ses_child']));
+    const picked = backgroundShellsOfSessions(useBackgroundShellsStore.getState().byId, new Set(['ses_root', 'ses_child']));
     expect(picked.map((item) => item.id)).toEqual(['sh_early', 'sh_late']);
+  });
+});
+
+describe('background or waited for', () => {
+  test('a command the turn waits for is tracked, but not as background', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    expect(isBackground('sh_1')).toBe(false);
+    // The turn still counts it as running work.
+    expect(sessions()).toEqual(['ses_1']);
+  });
+
+  test('its call settling while it runs moves it to the background, once', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    applyBackgroundShellEvents('/repo', [settledInBackground('sh_1')]);
+    expect(isBackground('sh_1')).toBe(true);
+    const before = useBackgroundShellsStore.getState();
+    applyBackgroundShellEvents('/repo', [settledInBackground('sh_1'), started(shell('sh_1'))]);
+    expect(useBackgroundShellsStore.getState()).toBe(before);
+  });
+
+  test('a call that settles with its result does not', () => {
+    applyBackgroundShellEvents('/repo', [
+      started(shell('sh_1')),
+      {
+        type: 'message.tool.transition',
+        properties: {
+          sessionID: 'ses_1', messageID: 'msg_1', partID: 'call_1',
+          transition: { kind: 'success', output: 'done', metadata: { shellID: 'sh_1', exit: 0 }, executed: true, end: 2000 },
+        },
+      },
+    ]);
+    expect(isBackground('sh_1')).toBe(false);
+  });
+
+  test('a settlement that arrives before the start still counts', () => {
+    applyBackgroundShellEvents('/repo', [settledInBackground('sh_1')]);
+    applyBackgroundShellEvents('/repo', [started(shell('sh_1'))]);
+    expect(isBackground('sh_1')).toBe(true);
+  });
+
+  test('a command first seen in a list counts as background; a known one keeps what its events said', () => {
+    applyBackgroundShellEvents('/repo', [started(shell('sh_waited'))]);
+    replaceDirectoryShells('/repo', [shell('sh_waited'), shell('sh_listed')], backgroundShellRevision());
+    expect(isBackground('sh_listed')).toBe(true);
+    expect(isBackground('sh_waited')).toBe(false);
   });
 });

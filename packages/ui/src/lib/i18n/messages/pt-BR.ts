@@ -583,8 +583,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.work.doneHint.action": "Marcar como concluído",
   "chat.backgroundShells.aria": "Comandos em segundo plano",
   "chat.backgroundShells.count": "Comandos em segundo plano: {count}",
-  "chat.backgroundShells.expand": "Mostrar comandos em segundo plano",
-  "chat.backgroundShells.collapse": "Ocultar comandos em segundo plano",
   "chat.backgroundShells.subagent": "subagente",
   "chat.backgroundShells.stop": "Parar",
   "chat.backgroundShells.stopAria": "Parar {command}",

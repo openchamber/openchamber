@@ -583,8 +583,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.work.doneHint.action': '标记为完成',
   'chat.backgroundShells.aria': '后台命令',
   'chat.backgroundShells.count': '后台命令：{count}',
-  'chat.backgroundShells.expand': '显示后台命令',
-  'chat.backgroundShells.collapse': '隐藏后台命令',
   'chat.backgroundShells.subagent': '子代理',
   'chat.backgroundShells.stop': '停止',
   'chat.backgroundShells.stopAria': '停止 {command}',

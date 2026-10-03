@@ -11,7 +11,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import {
   sessionsInTree,
-  shellsOfSessions,
+  backgroundShellsOfSessions,
   useBackgroundShellsStore,
   type TrackedShell,
 } from '@/sync/background-shells';
@@ -38,7 +38,7 @@ const useSessionTreeShells = (sessionId: string): TrackedShell[] => {
   ), [sessionId, shellSessionIds]));
   const treeIds = React.useMemo(() => new Set(treeKey ? treeKey.split('\n') : []), [treeKey]);
   return useBackgroundShellsStore(useShallow(React.useCallback((state) => (
-    treeIds.size === 0 ? [] : shellsOfSessions(state.byId, treeIds)
+    treeIds.size === 0 ? [] : backgroundShellsOfSessions(state.byId, treeIds)
   ), [treeIds])));
 };
 
@@ -127,6 +127,7 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   const { t } = useI18n();
   const shells = useSessionTreeShells(sessionId ?? '');
   const [expanded, setExpanded] = React.useState(false);
+  const listId = React.useId();
 
   if (!sessionId || shells.length === 0) return null;
 
@@ -138,31 +139,34 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
     );
   }
 
-  const toggleLabel = expanded ? t('chat.backgroundShells.collapse') : t('chat.backgroundShells.expand');
+  // The whole header toggles the list, as the queue header does.
   return (
     <div role="group" className="border-b border-border/60" aria-label={t('chat.backgroundShells.aria')}>
-      <div className="flex h-10 items-center gap-2 pl-3 pr-1.5">
-        <Icon name="terminal-box" className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-          {t('chat.backgroundShells.count', { count: shells.length })}
-        </span>
+      <div className="flex h-10 items-center pl-3 pr-3">
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          size="sm"
           onClick={() => setExpanded((value) => !value)}
           onMouseDown={(event) => event.preventDefault()}
           aria-expanded={expanded}
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+          aria-controls={expanded ? listId : undefined}
+          className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
         >
-          <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4" />
+          <Icon name="terminal-box" className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            {t('chat.backgroundShells.count', { count: shells.length })}
+          </span>
+          <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
         </Button>
       </div>
-      {expanded ? shells.map((shell) => (
-        <ShellRow key={shell.id} shell={shell} rootSessionId={sessionId} rootDirectory={directory} />
-      )) : null}
+      {expanded ? (
+        <div id={listId}>
+          {shells.map((shell) => (
+            <ShellRow key={shell.id} shell={shell} rootSessionId={sessionId} rootDirectory={directory} />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 });

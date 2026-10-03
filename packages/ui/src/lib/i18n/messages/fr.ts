@@ -406,8 +406,6 @@ export const dict = {
   'chat.work.doneHint.action': 'Marquer comme terminé',
   'chat.backgroundShells.aria': 'Commandes en arrière-plan',
   'chat.backgroundShells.count': 'Commandes en arrière-plan : {count}',
-  'chat.backgroundShells.expand': 'Afficher les commandes en arrière-plan',
-  'chat.backgroundShells.collapse': 'Masquer les commandes en arrière-plan',
   'chat.backgroundShells.subagent': 'sous-agent',
   'chat.backgroundShells.stop': 'Arrêter',
   'chat.backgroundShells.stopAria': 'Arrêter {command}',

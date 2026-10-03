@@ -583,8 +583,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.work.doneHint.action": "Позначити готовим",
   "chat.backgroundShells.aria": "Фонові команди",
   "chat.backgroundShells.count": "Фонові команди: {count}",
-  "chat.backgroundShells.expand": "Показати фонові команди",
-  "chat.backgroundShells.collapse": "Сховати фонові команди",
   "chat.backgroundShells.subagent": "субагент",
   "chat.backgroundShells.stop": "Зупинити",
   "chat.backgroundShells.stopAria": "Зупинити {command}",

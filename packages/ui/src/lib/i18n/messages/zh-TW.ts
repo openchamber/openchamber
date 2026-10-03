@@ -596,8 +596,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.work.doneHint.action': '標記為完成',
   'chat.backgroundShells.aria': '背景指令',
   'chat.backgroundShells.count': '背景指令：{count}',
-  'chat.backgroundShells.expand': '顯示背景指令',
-  'chat.backgroundShells.collapse': '隱藏背景指令',
   'chat.backgroundShells.subagent': '子代理',
   'chat.backgroundShells.stop': '停止',
   'chat.backgroundShells.stopAria': '停止 {command}',

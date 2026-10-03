@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
-import type { RunningShell } from '@/lib/opencode/background-shell';
+import { readBackgroundShellIDFromMetadata, type RunningShell } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 
@@ -16,8 +16,20 @@ import { normalizeProjectPath } from '@/lib/projectResolution';
 // read when the directory bootstraps and after the stream reconnects, which
 // clears commands whose exit fell into a stream gap. Nothing here streams, so
 // consumers subscribe per session or per command without cost.
+//
+// OpenCode runs every shell call as such a command, including one the turn is
+// still waiting for. `background` tells them apart: a call that went to the
+// background settles at once with the command's id in its metadata (see
+// `readBackgroundShellIDFromMetadata`), while a call the turn waits for
+// settles only after its command ended. A command first seen in a list (after
+// a reload or reconnect) has no event to tell, and counts as background: a
+// command the turn waits for is short-lived next to one left running.
 
-export type TrackedShell = RunningShell & { directory: string };
+export type TrackedShell = RunningShell & {
+  directory: string;
+  /** Went to the background; false while the turn that started it waits for it. */
+  background: boolean;
+};
 
 type BackgroundShellsState = {
   byId: ReadonlyMap<string, TrackedShell>;
@@ -56,6 +68,26 @@ const touch = (shellID: string): void => {
 
 const touchedSince = (shellID: string, since: number): boolean => (touchedAt.get(shellID) ?? 0) > since;
 
+// A call's background settlement normally follows its command's start; this
+// remembers one that arrived first, until the start does.
+const settledInBackground = new Set<string>();
+
+const rememberSettledInBackground = (shellID: string): void => {
+  settledInBackground.add(shellID);
+  if (settledInBackground.size > MAX_TOUCHED) {
+    const oldest = settledInBackground.values().next().value;
+    if (oldest !== undefined) settledInBackground.delete(oldest);
+  }
+};
+
+/** The command a tool call went to the background with, or undefined for any other event. */
+const backgroundedShellID = (payload: SyncEvent): string | undefined => {
+  if (payload.type !== 'message.tool.transition') return undefined;
+  const { transition } = payload.properties;
+  if (transition.kind !== 'success' || transition.metadata?.shellID === undefined) return undefined;
+  return readBackgroundShellIDFromMetadata(transition.metadata);
+};
+
 const sessionIdsOf = (byId: ReadonlyMap<string, TrackedShell>, previous: ReadonlySet<string>): ReadonlySet<string> => {
   const next = new Set<string>();
   for (const shell of byId.values()) next.add(shell.sessionID);
@@ -75,6 +107,7 @@ const sameShell = (left: TrackedShell | undefined, right: TrackedShell): boolean
   && left.command === right.command
   && left.file === right.file
   && left.startedAt === right.startedAt
+  && left.background === right.background
 );
 
 /** Applies shell lifecycle events for one directory. Other event types are ignored cheaply. */
@@ -83,7 +116,9 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
   const current = (): ReadonlyMap<string, TrackedShell> => draft ?? useBackgroundShellsStore.getState().byId;
   for (const payload of payloads) {
     if (payload.type === 'shell.started') {
-      const shell: TrackedShell = { ...payload.properties.shell, directory: normalizeDirectory(rawDirectory) };
+      const { id } = payload.properties.shell;
+      const background = current().get(id)?.background ?? settledInBackground.has(id);
+      const shell: TrackedShell = { ...payload.properties.shell, directory: normalizeDirectory(rawDirectory), background };
       touch(shell.id);
       if (sameShell(current().get(shell.id), shell)) continue;
       draft ??= new Map(current());
@@ -93,10 +128,22 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     if (payload.type === 'shell.ended') {
       const { shellID } = payload.properties;
       touch(shellID);
+      settledInBackground.delete(shellID);
       if (!current().has(shellID)) continue;
       draft ??= new Map(current());
       draft.delete(shellID);
+      continue;
     }
+    const backgroundedID = backgroundedShellID(payload);
+    if (backgroundedID === undefined) continue;
+    const tracked = current().get(backgroundedID);
+    if (!tracked) {
+      rememberSettledInBackground(backgroundedID);
+      continue;
+    }
+    if (tracked.background) continue;
+    draft ??= new Map(current());
+    draft.set(backgroundedID, { ...tracked, background: true });
   }
   if (draft) publish(draft);
 };
@@ -117,7 +164,7 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
   }
   for (const listedShell of shells) {
     if (touchedSince(listedShell.id, since)) continue;
-    const shell: TrackedShell = { ...listedShell, directory };
+    const shell: TrackedShell = { ...listedShell, directory, background: state.byId.get(listedShell.id)?.background ?? true };
     if (sameShell(state.byId.get(shell.id), shell)) continue;
     draft ??= new Map(state.byId);
     draft.set(shell.id, shell);
@@ -158,6 +205,7 @@ export const resetBackgroundShells = (): void => {
   generation += 1;
   revision = 0;
   touchedAt.clear();
+  settledInBackground.clear();
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS });
 };
 
@@ -187,14 +235,14 @@ export const sessionsInTree = (
   return inTree.sort();
 };
 
-/** Running commands of the given sessions, oldest first. */
-export const shellsOfSessions = (
+/** Commands of the given sessions that went to the background, oldest first. */
+export const backgroundShellsOfSessions = (
   byId: ReadonlyMap<string, TrackedShell>,
   sessionIds: ReadonlySet<string>,
 ): TrackedShell[] => {
   const shells: TrackedShell[] = [];
   for (const shell of byId.values()) {
-    if (sessionIds.has(shell.sessionID)) shells.push(shell);
+    if (shell.background && sessionIds.has(shell.sessionID)) shells.push(shell);
   }
   return shells.sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
 };

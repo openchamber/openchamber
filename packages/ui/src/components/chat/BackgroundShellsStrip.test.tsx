@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
 import type { RunningShell } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
+import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyBackgroundShellEvents, resetBackgroundShells } from '@/sync/background-shells';
@@ -21,8 +22,22 @@ const shell = (id: string, sessionID: string, command: string, startedAt = Date.
   id, sessionID, command, file: `/tmp/${id}.out`, startedAt,
 });
 
+const startEvent = (value: RunningShell): SyncEvent => ({ type: 'shell.started', properties: { shell: value } });
+
+/** Starts commands whose calls went to the background. */
 const start = (...shells: RunningShell[]) => act(async () => {
-  applyBackgroundShellEvents('/repo', shells.map((value) => ({ type: 'shell.started', properties: { shell: value } })));
+  applyBackgroundShellEvents('/repo', shells.flatMap((value): SyncEvent[] => [
+    startEvent(value),
+    {
+      type: 'message.tool.transition',
+      properties: {
+        sessionID: value.sessionID,
+        messageID: 'msg_1',
+        partID: `call_${value.id}`,
+        transition: { kind: 'success', output: '', metadata: { status: 'running', shellID: value.id }, executed: true, end: value.startedAt },
+      },
+    },
+  ]));
 });
 
 describe('BackgroundShellsStrip', () => {
@@ -74,6 +89,13 @@ describe('BackgroundShellsStrip', () => {
     expect(host.innerHTML).toBe('');
   });
 
+  test('a command the turn is still waiting for stays out', async () => {
+    await act(async () => {
+      applyBackgroundShellEvents('/repo', [startEvent(shell('sh_waited', 'ses_root', 'bun run type-check'))]);
+    });
+    expect(host.innerHTML).toBe('');
+  });
+
   test('one command is its own row with a stop action', async () => {
     await start(shell('sh_1', 'ses_root', 'bun run dev --port 5391', Date.now() - 65_000));
     expect(host.textContent).toContain('bun run dev --port 5391');
@@ -86,7 +108,10 @@ describe('BackgroundShellsStrip', () => {
     expect(host.textContent).toContain('Background commands: 2');
     expect(host.textContent).not.toContain('bun run dev');
 
-    await act(async () => button('Show background commands')?.click());
+    const header = buttons().find((item) => item.textContent === 'Background commands: 2');
+    expect(header?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => header?.click());
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
     expect(host.textContent).toContain('bun run dev');
     expect(host.textContent).toContain('python -m http.server');
     expect(host.textContent).toContain('subagent');

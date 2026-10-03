@@ -582,8 +582,6 @@ export const dict = {
   'chat.work.doneHint.action': 'Mark done',
   'chat.backgroundShells.aria': 'Background commands',
   'chat.backgroundShells.count': 'Background commands: {count}',
-  'chat.backgroundShells.expand': 'Show background commands',
-  'chat.backgroundShells.collapse': 'Hide background commands',
   'chat.backgroundShells.subagent': 'subagent',
   'chat.backgroundShells.stop': 'Stop',
   'chat.backgroundShells.stopAria': 'Stop {command}',
