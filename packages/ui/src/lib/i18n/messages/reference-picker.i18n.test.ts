@@ -7,11 +7,11 @@ const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 
 // Words these languages use as is, so the translation is the English word.
 const sameAsEnglish = {
   de: ['references.picker.tab.issues', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels'],
-  fr: ['references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.labels'],
-  nl: ['references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.filter.open', 'references.picker.state.open', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels'],
-  es: ['references.picker.tab.issues', 'references.picker.tab.pulls'],
-  'pt-BR': ['references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.branch'],
-  uk: ['references.picker.tab.issues', 'references.picker.tab.pulls'],
+  fr: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.labels'],
+  nl: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.filter.open', 'references.picker.state.open', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels'],
+  es: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls'],
+  'pt-BR': ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.branch'],
+  uk: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls'],
   pl: ['references.picker.tab.issues', 'references.picker.preview.review'],
 } satisfies Partial<Record<(typeof locales)[number], readonly string[]>>;
 

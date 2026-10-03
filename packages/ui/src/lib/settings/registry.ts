@@ -237,6 +237,7 @@ export const SETTINGS_REGISTRY = {
   desktopLanAccessBlockedReason: field({ scope: 'instance', computed: true, surfaces: ['desktop'], parse: parseTrimmedString }),
   githubClientId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   githubScopes: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
+  gitlabClientId: field({ scope: 'instance', parse: parseNonEmptyTrimmedString }),
   skillCatalogs: field<SkillCatalogConfig[]>({ scope: 'instance', parse: parseSkillCatalogs }),
   defaultGitIdentityId: field({ scope: 'instance', parse: parseTrimmedString }),
   // Per-session permission modes; booleans are policies from before the modes,

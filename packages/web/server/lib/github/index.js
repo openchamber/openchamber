@@ -1,12 +1,16 @@
 export {
   getGitHubAuth,
   getGitHubAuthAccounts,
+  getGitHubAuthByAccountId,
   setGitHubAuth,
   activateGitHubAuth,
-  clearGitHubAuth,
+  markGitHubAuthAccountInvalid,
+  removeGitHubAuthAccount,
   getGitHubClientId,
   getGitHubScopes,
   GH_CLI_ACCOUNT_ID,
+  githubAccountId,
+  githubCliAccountId,
   isGhCliDisabled,
   isGhCliActive,
   setGhCliActive,
@@ -21,6 +25,8 @@ export {
 
 export {
   getOctokitOrNull,
+  getOctokitForAccountId,
+  getOctokitCacheIdentity,
   createOctokit,
 } from './octokit.js';
 

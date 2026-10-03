@@ -1,3 +1,4 @@
+import { isCompleteIdentity } from '@/lib/api/git-identity';
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 
@@ -15,12 +16,26 @@ import { isBranchScopeAvailable, isBranchScopeDefinitelyUnavailable, useRangeKey
 import { CommitSection } from '@/components/views/git/CommitSection';
 import { ConflictDialog } from '@/components/views/git/ConflictDialog';
 import { DirtyBranchSwitchDialog } from '@/components/views/git/DirtyBranchSwitchDialog';
-import { describePulledFiles, pullUpstreamChanges, pushCommittedChanges } from '@/components/views/git/commitAndPush';
-import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { SyncActions } from '@/components/views/git/SyncActions';
+import { ContributorDestinationDialog } from '@/components/views/git/ContributorDestinationDialog';
+import { useContributorDestinationChooser } from '@/components/views/git/contributorDestination';
+import { RepositoryConfigurationDialog } from '@/components/sections/openchamber/SourceControlBindingSettings';
+import { IdentityDropdown } from '@/components/views/git/GitHeader';
+import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { applyIdentityToRepository, identityApplicability } from '@/lib/source-control/applyIdentity';
+import { remoteTraits,
+  selectableIdentities,
+  identityDisplayName,
+  identityAccountConnected,
+  activeIdentityFor,
+} from '@/lib/source-control/identity';
+import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import type { GitIdentityProfile } from '@/lib/api/types';
+import { InProgressOperationBanner } from '@/components/views/git/InProgressOperationBanner';
 import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/components/views/git/changeStatus';
 import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
@@ -31,7 +46,6 @@ import { useGitComparison, type GitComparisonFile, type GitComparisonSource } fr
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
-import { mapWithConcurrency } from '@/lib/concurrency';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import type { GitStatus, GitSubmoduleState } from '@/lib/api/types';
 import { GitPathUnavailableError } from '@/lib/api/git-path-diff';
@@ -42,6 +56,7 @@ import type { GitRemote } from '@/lib/gitApi';
 import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import {
   useGitStore,
+  useGitIdentity,
   useGitStatus,
   useGitBranches,
   useIsGitRepo,
@@ -50,9 +65,16 @@ import {
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation } from '@/lib/boundGitNetworkOperation';
+import { useGitOperationRecovery } from '@/components/views/git/useGitOperationRecovery';
+import { GitOperationStatus } from '@/components/views/git/GitOperationStatus';
+import { PendingGitOperationError } from '@/lib/source-control/git-operation-recovery';
+import { useGitPublishChooser } from '@/components/views/git/useGitPublishChooser';
+import { PublishDialog } from '@/components/views/git/PublishDialog';
+import { settleGitFileReverts } from './mobileChangesOperations';
 import { normalizePath } from '@/lib/pathNormalization';
 
-type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
+type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 
 type ChangesMode = 'working' | 'branch' | 'commit' | 'pr';
@@ -125,13 +147,53 @@ interface MobileChangesPaneProps extends MobileChangesSurfaceProps {
 /** Repository-scoped navigation and actions, separate from session directory resolution. */
 export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirectory, repository, onClose, initialDiff, visible = true, onNavigatedToChat }) => {
   const { t } = useI18n();
-  const { git } = useRuntimeAPIs();
+  const { git, sourceControl } = useRuntimeAPIs();
   // When the root is not itself a repository, changes come from the resolved
   // nested repository instead.
   const { rootIsGitRepo, gitDirectory, nestedRepos } = repository;
   const currentDirectory = gitDirectory ?? rootDirectory;
   const status = useGitStatus(currentDirectory || null);
   const branches = useGitBranches(currentDirectory || null);
+  const currentIdentity = useGitIdentity(currentDirectory || null);
+  const [isRepositoryConfigurationOpen, setRepositoryConfigurationOpen] = React.useState(false);
+  const [isApplyingIdentity, setIsApplyingIdentity] = React.useState(false);
+  const gitIdentityProfiles = useGitIdentitiesStore((state) => state.profiles);
+  const globalGitIdentity = useGitIdentitiesStore((state) => state.globalIdentity);
+  const loadGitIdentityProfiles = useGitIdentitiesStore((state) => state.loadProfiles);
+  const loadGlobalGitIdentity = useGitIdentitiesStore((state) => state.loadGlobalIdentity);
+  React.useEffect(() => {
+    void loadGitIdentityProfiles();
+    void loadGlobalGitIdentity();
+  }, [loadGitIdentityProfiles, loadGlobalGitIdentity]);
+  const connectedAccountIds = useConnectedAccountIds();
+  const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
+  const availableIdentities = React.useMemo(
+    () => selectableIdentities(gitIdentityProfiles, globalGitIdentity,
+      (identity) => isCompleteIdentity(identity)
+        && identityAccountConnected(identity, connectedAccountIds)),
+    [gitIdentityProfiles, globalGitIdentity, connectedAccountIds],
+  );
+
+  /**
+   * Switching identity here writes the same three answers the add and clone
+   * screens write. System Git is the exception: trusting whatever the machine
+   * holds is confirmed in the repository configuration, not by a menu pick.
+   */
+  const handleApplyIdentity = async (profile: GitIdentityProfile) => {
+    if (!currentDirectory || isApplyingIdentity) return;
+    setIsApplyingIdentity(true);
+    try {
+      const outcome = await applyIdentityToRepository(
+        { directory: currentDirectory, identity: profile, remoteName: bindingRemoteName || null },
+        { git, sourceControl },
+      );
+      if (outcome.status === 'failed') toast.error(t('gitView.toast.applyIdentityFailed'));
+      else toast.success(t('gitView.toast.appliedIdentity', { name: identityDisplayName(profile, t) }));
+    } finally {
+      setIsApplyingIdentity(false);
+    }
+  };
+
   const isGitRepo = useIsGitRepo(currentDirectory || null);
   const isLoadingStatus = useGitLoadingStatus(currentDirectory || null);
   const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
@@ -188,12 +250,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const [generatedHighlights, setGeneratedHighlights] = React.useState<string[]>([]);
   const [visibleChangePaths, setVisibleChangePaths] = React.useState<string[]>([]);
   const [remotes, setRemotes] = React.useState<GitRemote[]>([]);
-  const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
   // The route path whose diff the server declined for a reason the detail
   // view explains instead of showing an error.
   const [unavailablePath, setUnavailablePath] = React.useState<{ key: string; reason: 'nested_repository' | 'untracked_directory' } | null>(null);
   const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
+  const contributorDestination = useContributorDestinationChooser();
+  const publishChooser = useGitPublishChooser({ directory: currentDirectory, branch: status?.current, chooseContributor: contributorDestination.choose });
+  const operationRecovery = useGitOperationRecovery(currentDirectory, git, sourceControl);
   const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
   const [conflictDialogOpen, setConflictDialogOpen] = React.useState(false);
   const [conflictFiles, setConflictFiles] = React.useState<string[]>([]);
@@ -214,7 +278,32 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const branchComparison = useBranchComparisonBase(currentDirectory || null, currentBranch, visible && mode === 'branch' && showBranchOption);
   const commitComparison = useCommitComparison(currentDirectory || null, currentBranch, visible && mode === 'commit' && isGitRepo === true);
   const selectedCommitHash = commitComparison.selectedCommit?.hash ?? null;
-  const prComparison = usePullRequestComparison(currentDirectory || null, currentBranch, visible && mode === 'pr' && isGitRepo === true);
+  const binding = useRepositoryBinding(currentDirectory || null, sourceControl);
+  // The remote an identity is judged against and applied to: the bound
+  // primary remote, resolved the way the desktop Git view resolves it.
+  const bindingRemoteName = binding.read?.binding?.remotes[0]?.name
+    ?? binding.read?.repository.remotes.find((remote) => remote.name === 'origin')?.name
+    ?? binding.read?.repository.remotes[0]?.name
+    ?? '';
+  const boundAccountId = binding.read
+    ? binding.read.binding?.providers.find((provider) => provider.readiness === 'ready')?.accountId ?? null
+    : undefined;
+  const activeIdentityProfile = React.useMemo(
+    () => activeIdentityFor(gitIdentityProfiles, globalGitIdentity, currentIdentity, (author) => ({
+      id: 'local-config', name: author.userName, ...author, color: 'info', icon: 'user',
+    }), boundAccountId),
+    [boundAccountId, currentIdentity, gitIdentityProfiles, globalGitIdentity],
+  );
+  // The same answer the desktop chip gives: a binding that stopped matching
+  // its repository, most often a remote added after the identity was applied.
+  const identityAttention = React.useMemo(() => {
+    const read = binding.read;
+    if (!read?.binding || binding.status !== 'ready' || read.binding.state === 'bound') return null;
+    return read.binding.configRevision !== read.repository.configRevision
+      ? t('gitView.identity.configChanged')
+      : t('gitView.context.needsAttention');
+  }, [binding.read, binding.status, t]);
+  const prComparison = usePullRequestComparison(currentDirectory || null, currentBranch, binding.contexts[0] ?? null, visible && mode === 'pr' && isGitRepo === true);
   const selectedPr = prComparison.selectedSource;
   const comparisonSource = React.useMemo<GitComparisonSource | null>(() => {
     if (mode === 'pr') return selectedPr;
@@ -223,7 +312,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return null;
   }, [branchComparison.base, currentBranch, mode, selectedCommitHash, selectedPr]);
   const comparisonRevision = mode === 'branch' ? branchComparison.revision : '';
-  const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision);
+  const comparison = useGitComparison(currentDirectory || null, comparisonSource, visible && isGitRepo === true, comparisonRevision, prComparison.readContext);
   const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
   const comparisonFiles = React.useMemo(() => comparison.files ? [...comparison.files].sort((a, b) => a.path.localeCompare(b.path)) : null, [comparison.files]);
   const activeComparisonPath = route.type === 'comparison' && route.sourceKey === comparison.key ? route.path : null;
@@ -313,14 +402,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     [changeEntries],
   );
 
-  const effectiveRemotes = React.useMemo<GitRemote[]>(() => {
-    if (remotes.length > 0) return remotes;
-    const trackingRemote = status?.tracking?.includes('/') ? status.tracking.split('/')[0] : null;
-    if (trackingRemote || remoteUrl) {
-      return [{ name: trackingRemote || 'origin', fetchUrl: remoteUrl ?? '', pushUrl: remoteUrl ?? '' }];
-    }
-    return [];
-  }, [remoteUrl, remotes, status?.tracking]);
+  const effectiveRemotes = remotes;
 
   const selectedDiff = useGitStore(React.useCallback((state) => {
     if (!currentDirectory || route.type !== 'diff') return null;
@@ -380,14 +462,13 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     void performCheckout(normalized);
   }, [performCheckout, status?.files]);
 
-  const handleCreateBranch = React.useCallback(async (branch: string, remote?: GitRemote) => {
+  // Creating a branch does not publish it: pushing is an explicit planned
+  // operation, so it never rides along with a local branch creation.
+  const handleCreateBranch = React.useCallback(async (branch: string) => {
     if (!currentDirectory) return;
     try {
       await git.createBranch(currentDirectory, branch, currentBranch ?? 'HEAD');
       await git.checkoutBranch(currentDirectory, branch);
-      if (remote) {
-        await git.gitPush(currentDirectory, { remote: remote.name, branch, options: ['--set-upstream'] });
-      }
       await refreshStatusAndBranches();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('gitView.toast.createBranchFailed'));
@@ -398,19 +479,13 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   const refreshRemotes = React.useCallback(async () => {
     if (!currentDirectory) {
       setRemotes([]);
-      setRemoteUrl(null);
       return;
     }
     try {
-      const [remoteList, url] = await Promise.all([
-        git.getRemotes(currentDirectory).catch(() => []),
-        git.getRemoteUrl ? git.getRemoteUrl(currentDirectory).catch(() => null) : Promise.resolve(null),
-      ]);
+      const remoteList = await git.getRemotes(currentDirectory);
       setRemotes(remoteList);
-      setRemoteUrl(url);
     } catch {
       setRemotes([]);
-      setRemoteUrl(null);
     }
   }, [currentDirectory, git]);
 
@@ -485,52 +560,67 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     };
   }, [currentDirectory, diffRetryNonce, fetchStatus, getDiff, git, route, setDiff, visible]);
 
-  const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote) => {
+  const handleSyncAction = async (action: Exclude<SyncAction, null>, remote?: GitRemote, forceChoose = false) => {
     if (!currentDirectory) return;
+    const recovery = operationRecovery.start();
+    if (!recovery) return;
     setSyncAction(action);
+    const actionLabel = t(action === 'fetch' ? 'gitView.sync.fetch' : action === 'pull' ? 'gitView.sync.pull' : action === 'publish' ? 'gitView.publish.title' : 'gitView.sync.syncChanges');
     try {
-      if (action === 'fetch') {
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        await git.gitFetch(currentDirectory, { remote: remote.name });
-        toast.success(t('gitView.toast.fetchedFromRemote', { name: remote.name }));
-      } else if (action === 'pull') {
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        const result = await pullUpstreamChanges(git, currentDirectory, remote, status?.tracking ?? null);
-        if (result.conflict) {
-          openConflictDialog(result.conflictFiles ?? [], 'rebase');
-        } else {
-          const pulled = describePulledFiles(result.files.length, remote.name);
-          toast.success(t(pulled.key, pulled.params));
-        }
-      } else if (action === 'sync') {
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        let pulledFileCount = 0;
-        const result = await pushCommittedChanges({
-          git,
-          directory: currentDirectory,
-          remote,
-          dirtyWorktreeError: t('gitView.toast.commitOrStashBeforeSync'),
-          onPulled: (pullResult) => { pulledFileCount = pullResult.files.length; },
-          onConflict: (conflictFiles) => openConflictDialog(conflictFiles, 'rebase'),
+      if (action === 'sync' || action === 'publish') {
+        const execute = await publishChooser.prepare(action === 'publish' ? 'push' : 'sync', { forceChoose, onOperation: recovery.onOperation });
+        await execute();
+      } else if (remote && status) {
+        await runBoundGitNetworkOperation({
+          action, directory: currentDirectory, remoteName: remote.name, status, sourceControl, git, onOperation: recovery.onOperation,
         });
-        if (result) {
-          if (pulledFileCount > 0) {
-            const pulled = describePulledFiles(pulledFileCount, remote.name);
-            toast.success(t(pulled.key, pulled.params));
-          }
-          if (result.pushed.length > 0) {
-            toast.success(t('gitView.toast.pushedToUpstream', { name: result.pushed[0].remote }));
-          } else if (pulledFileCount === 0) {
-            toast.success(t('gitView.toast.alreadyUpToDate'));
-          }
-        }
+      } else {
+        throw new BoundGitNetworkOperationError('tracking-required');
+      }
+
+      if (!recovery.isCurrent()) return;
+      if (action === 'fetch' && remote) {
+        toast.success(t('gitView.toast.fetchedFromRemote', { name: remote.name }));
+      } else if (action === 'pull' && remote) {
+        toast.success(t('gitView.toast.pulledFromRemote', { name: remote.name }));
+      } else if (action === 'sync') {
+        toast.success(t('gitView.toast.syncedChanges'));
+      } else if (action === 'publish') {
+        toast.success(t('gitView.publish.succeeded'));
       }
       await refreshStatusAndBranches(false);
       await refreshRemotes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') }));
+      if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
+        if (recovery.isCurrent()) await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+        if (recovery.isCurrent() && error instanceof GitOperationResultError && error.read.availability === 'available'
+          && error.read.operation.state === 'conflicted' && error.read.operation.error.code === 'CONFLICT') {
+          // A pull merges the fetched commits, so its conflicts leave a merge in progress.
+          const afterConflict = await git.getGitStatus(currentDirectory).catch(() => null);
+          const files = (afterConflict?.files ?? []).filter(isConflictedStatusFile).map((file) => file.path);
+          if (files.length > 0) openConflictDialog(files, 'merge');
+        }
+        return;
+      }
+      if (error instanceof BoundGitNetworkOperationError && error.code === 'stale-runtime') return;
+      if (error instanceof BoundGitNetworkOperationError && publishChooser.errorMessage(error)) {
+        toast.info(publishChooser.errorMessage(error));
+        return;
+      }
+      await Promise.allSettled([
+        refreshStatusAndBranches(false),
+        refreshRemotes(),
+      ]);
+      toast.error(error instanceof BoundGitNetworkOperationError
+        ? error.code === 'contributor-publish-cancelled-after-update'
+          ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
+          : error.code === 'contributor-publish-cancelled'
+            ? t('gitView.toast.contributorPublishCancelled')
+            : t('gitView.toast.syncActionFailed', { action: actionLabel })
+        : error instanceof Error ? error.message : t('gitView.toast.syncActionFailed', { action: actionLabel }));
     } finally {
-      setSyncAction(null);
+      recovery.finish();
+      if (recovery.isCurrent()) setSyncAction(null);
     }
   };
 
@@ -580,12 +670,24 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     setIsRevertingAll(true);
     setRevertingPaths(new Set(uniquePaths));
     try {
-      await mapWithConcurrency(uniquePaths, REVERT_PATHS_CONCURRENCY, (filePath) =>
-        git.revertGitFile(currentDirectory, filePath));
+      const result = await settleGitFileReverts(
+        uniquePaths,
+        (filePath) => git.revertGitFile(currentDirectory, filePath),
+        REVERT_PATHS_CONCURRENCY,
+      );
       await refreshStatusAndBranches(false);
-      toast.success(uniquePaths.length === 1
-        ? t('gitView.toast.revertedFilesSingle', { count: uniquePaths.length })
-        : t('gitView.toast.revertedFilesPlural', { count: uniquePaths.length }));
+      if (result.failures.length === 0) {
+        toast.success(uniquePaths.length === 1
+          ? t('gitView.toast.revertedFilesSingle', { count: uniquePaths.length })
+          : t('gitView.toast.revertedFilesPlural', { count: uniquePaths.length }));
+      } else if (result.failures.length === uniquePaths.length) {
+        toast.error(result.failures[0]?.error?.message ?? t('gitView.toast.revertFailed'));
+      } else {
+        const successCount = uniquePaths.length - result.failures.length;
+        toast.warning(successCount === 1
+          ? t('gitView.toast.revertedSomeSingle', { success: successCount, failed: result.failures.length })
+          : t('gitView.toast.revertedSomePlural', { success: successCount, failed: result.failures.length }));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('gitView.toast.revertFailed'));
     } finally {
@@ -636,27 +738,28 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     }
 
     setCommitAction(options.pushAfter ? 'commitAndPush' : 'commit');
+    let recovery: ReturnType<typeof operationRecovery.start> = null;
+    let commitOutcome: 'pending' | 'local' | 'published' = 'pending';
     try {
       await git.createGitCommit(currentDirectory, commitMessage.trim(), { files: filesToCommit });
+      commitOutcome = 'local';
       toast.success(t('gitView.toast.commitCreated'));
       setCommitMessage('');
       setGeneratedHighlights([]);
 
       if (options.pushAfter) {
-        const trackingRemoteName = status?.tracking?.split('/')[0];
-        const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
-        if (!remote) throw new Error(t('mobile.changes.noRemote'));
-        setSyncAction('sync');
-        await pushCommittedChanges({
-          git,
-          directory: currentDirectory,
-          remote,
-          dirtyWorktreeError: t('gitView.toast.commitOrStashBeforeSync'),
-          onConflict: (conflictFiles) => openConflictDialog(conflictFiles, 'rebase'),
-          onPushed: (result) => {
-            toast.success(t('gitView.toast.pushedToUpstream', { name: result.pushed[0].remote }));
-          },
-        });
+        recovery = operationRecovery.start();
+        if (!recovery) {
+          toast.warning(t('gitView.publish.commitKept'));
+          await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+          return;
+        }
+        recovery.commitCreated();
+        const executePush = await publishChooser.prepare('push', { onOperation: recovery.onOperation });
+        setSyncAction('publish');
+        await executePush();
+        commitOutcome = 'published';
+        toast.success(t('gitView.publish.succeeded'));
 
         await refreshStatusAndBranches(false);
         await refreshRemotes();
@@ -664,8 +767,31 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         await refreshStatusAndBranches(false);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
+      if (options.pushAfter && commitOutcome === 'local') toast.warning(t('gitView.publish.commitKept'));
+      if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
+        await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+        return;
+      }
+      if (error instanceof BoundGitNetworkOperationError && error.code === 'stale-runtime') return;
+      if (error instanceof BoundGitNetworkOperationError && publishChooser.errorMessage(error)) {
+        toast.info(publishChooser.errorMessage(error));
+        return;
+      }
+      if (options.pushAfter) {
+        await Promise.allSettled([
+          refreshStatusAndBranches(false),
+          refreshRemotes(),
+        ]);
+      }
+      toast.error(error instanceof BoundGitNetworkOperationError
+        ? error.code === 'contributor-publish-cancelled-after-update'
+          ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
+          : error.code === 'contributor-publish-cancelled'
+            ? t('gitView.toast.contributorPublishCancelled')
+            : t('gitView.toast.syncActionFailed', { action: t('gitView.sync.syncChanges') })
+        : error instanceof Error ? error.message : t('gitView.toast.createCommitFailed'));
     } finally {
+      recovery?.finish();
       setCommitAction(null);
       if (options.pushAfter) setSyncAction(null);
     }
@@ -764,8 +890,17 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     return groups;
   }, [handleRevertFile, handleViewChangeDiff, moveChangePaths, stagedChangeEntries, t, unstagedChangeEntries]);
 
+  const networkDialogs = (
+    <>
+      {publishChooser.context ? <PublishDialog context={publishChooser.context} onSelect={publishChooser.settle} /> : null}
+      {publishChooser.confirmDialog}
+      <ContributorDestinationDialog candidates={contributorDestination.candidates} onSelect={contributorDestination.settle} />
+    </>
+  );
+
   const renderListState = (state: React.ReactNode) => (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+      {networkDialogs}
       <header className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 px-3 text-foreground">
         {onClose ? (
           <button
@@ -903,6 +1038,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
+      {networkDialogs}
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
         {onClose ? (
           <button
@@ -961,19 +1097,42 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               currentBranchAhead={status?.ahead}
               onCheckout={(branch) => void handleCheckoutBranch(branch)}
               onCreate={handleCreateBranch}
-              remotes={effectiveRemotes}
               disabled={isLoadingStatus}
               directory={currentDirectory}
               switchBlockedNotice={(status?.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           </div>
+          {/* The identity names the whole configuration this repository acts as,
+              and is the way into what it does not carry. */}
+          <IdentityDropdown
+            activeProfile={activeIdentityProfile}
+            identities={availableIdentities}
+            attention={identityAttention}
+            // On a phone the branch, the identity and the sync action cannot all
+            // carry text: a name truncated to "system i…" tells nobody anything,
+            // so below the small breakpoint the identity keeps its icon and the
+            // branch keeps its name. The menu names it in full either way.
+            triggerClassName="max-w-[10rem] shrink [&_.git-identity-label]:hidden sm:[&_.git-identity-label]:inline"
+            onOpen={() => void refreshIdentityAccounts(sourceControl, gitIdentityProfiles.map((profile) => profile.account))}
+            onSelect={(profile) => void handleApplyIdentity(profile)}
+            isApplying={isApplyingIdentity}
+            onConfigure={() => setRepositoryConfigurationOpen(true)}
+            applicability={(identity) => {
+              const remote = binding.read?.repository.remotes.find((entry) => entry.name === bindingRemoteName);
+              return remote ? identityApplicability(identity, remoteTraits(remote.fetch.displayUrl)) : { applicable: true };
+            }}
+          />
           <SyncActions
-            syncAction={syncAction}
+            syncAction={operationRecovery.entry?.executing ? syncAction : null}
             remotes={effectiveRemotes}
             onFetch={(remote) => void handleSyncAction('fetch', remote)}
             onPull={(remote) => void handleSyncAction('pull', remote)}
             onSync={(remote) => void handleSyncAction('sync', remote)}
-            disabled={commitAction !== null || isLoadingStatus}
+            onPublish={() => void handleSyncAction('publish')}
+            onChooseSyncTargets={() => void handleSyncAction('sync', undefined, true)}
+            currentBranch={status?.current}
+            hasTracking={Boolean(status?.tracking)}
+            disabled={isLoadingStatus || operationRecovery.blocked}
             aheadCount={status?.ahead ?? 0}
             behindCount={status?.behind ?? 0}
             trackingRemoteName={status?.tracking?.split('/')[0]}
@@ -982,6 +1141,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           />
         </div>
       )}
+      <RepositoryConfigurationDialog
+        open={isRepositoryConfigurationOpen}
+        onOpenChange={setRepositoryConfigurationOpen}
+        directory={currentDirectory}
+      />
+      <GitOperationStatus className="mx-3 mt-3" entry={operationRecovery.entry} onRefresh={() => void operationRecovery.refresh()} onCancel={() => void operationRecovery.cancel()} />
       {mode === 'working' && (
         <InProgressOperationBanner
           mergeInProgress={status?.mergeInProgress}
@@ -1021,6 +1186,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
               onCommit={() => void handleCommit({ pushAfter: false })}
               onCommitAndPush={() => void handleCommit({ pushAfter: true })}
               commitAction={commitAction}
+              networkOperationBlocked={operationRecovery.blocked}
               gitmojiEnabled={false}
               onOpenGitmojiPicker={() => {}}
             />
@@ -1052,16 +1218,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
           if (!branch || !currentDirectory) return;
           const sourceBranch = status?.current ?? null;
           await git.createGitCommit(currentDirectory, message, { addAll: true });
-          let pushedRemoteName: string | null = null;
           if (pushAfter) {
-            const trackingRemoteName = status?.tracking?.split('/')[0];
-            const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
             try {
-              if (!remote) throw new Error(t('mobile.changes.noRemote'));
-              await git.gitPush(currentDirectory, status?.tracking
-                ? { remote: remote.name }
-                : { remote: remote.name, branch: sourceBranch ?? undefined, options: ['--set-upstream'] });
-              pushedRemoteName = remote.name;
+              const executePush = await publishChooser.prepare('push');
+              await executePush();
             } catch {
               toast.error(t('gitView.dirtySwitch.pushFailed'));
               await refreshStatusAndBranches();
@@ -1070,8 +1230,8 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
             }
           }
           toast.success(sourceBranch
-            ? pushedRemoteName
-              ? t('gitView.toast.pushedToUpstream', { name: pushedRemoteName })
+            ? pushAfter
+              ? t('gitView.publish.succeeded')
               : t('gitView.dirtySwitch.committedNotPushed', { branch: sourceBranch })
             : t('gitView.toast.commitCreated'));
           await refreshStatusAndBranches();

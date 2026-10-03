@@ -1,14 +1,17 @@
 /**
  * Issues, pull requests and tracker tickets attached to the composer.
  *
- * A message may carry any number of them, from any source: GitHub issues and
- * PRs, Linear issues, and items extensions hand over through `attach`. Each
+ * A message may carry any number of them, from any source: repository issues
+ * and change requests (GitHub, or GitLab on a message restored from the
+ * queue), Linear issues, and items extensions hand over through `attach`. Each
  * one becomes its own context part on send, in the order it was attached.
  * Attaching an item that is already on the composer replaces it in place,
  * so reopening the picker to toggle a PR's diff never duplicates the chip.
  */
 
 import type { JsonValue } from '@openchamber/sdk';
+
+import type { SourceControlProvider } from '@/lib/api/types';
 
 import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue, type LinkedIssue } from '@/lib/linkedIssues';
 
@@ -18,7 +21,7 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 
 export type ComposerReference =
     | {
-        kind: 'github-issue';
+        kind: 'repository-issue';
         number: number;
         title: string;
         url: string;
@@ -26,7 +29,8 @@ export type ComposerReference =
         author?: ComposerReferenceAuthor;
     }
     | {
-        kind: 'github-pr';
+        kind: 'change-request';
+        provider: SourceControlProvider;
         number: number;
         title: string;
         url: string;
@@ -63,9 +67,9 @@ export type ComposerReference =
 /** One key per item, whichever way it reached the composer. */
 export const composerReferenceKey = (reference: ComposerReference): string => {
     switch (reference.kind) {
-        case 'github-issue':
-        case 'github-pr':
-            return `github:${reference.url.toLowerCase()}`;
+        case 'repository-issue':
+        case 'change-request':
+            return `repository:${reference.url.toLowerCase()}`;
         case 'linear-issue':
             return `linear:${reference.identifier.toUpperCase()}`;
         case 'guest':
@@ -97,13 +101,13 @@ export const withoutComposerReference = (current: readonly ComposerReference[], 
 /** The session snapshot a sent reference leaves behind (see `linkedIssues.ts`). */
 export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): LinkedIssue => {
     switch (reference.kind) {
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
             return buildLinkedIssue({
                 url: reference.url,
                 number: reference.number,
                 title: reference.title,
-                kind: reference.kind === 'github-pr' ? 'pull' : 'issue',
+                kind: reference.kind === 'change-request' ? 'pull' : 'issue',
                 author: reference.author,
                 linkedAt,
             });
@@ -134,11 +138,12 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
 /** What the submission builder needs from a reference: text and identity, not chip details. */
 export const toContextReference = (reference: ComposerReference): ComposerContextReference => {
     switch (reference.kind) {
-        case 'github-issue':
-            return { kind: 'github-issue', number: reference.number, title: reference.title, url: reference.url, contextText: reference.contextText };
-        case 'github-pr':
+        case 'repository-issue':
+            return { kind: 'repository-issue', number: reference.number, title: reference.title, url: reference.url, contextText: reference.contextText };
+        case 'change-request':
             return {
-                kind: 'github-pr',
+                kind: 'change-request',
+                provider: reference.provider,
                 number: reference.number,
                 title: reference.title,
                 url: reference.url,

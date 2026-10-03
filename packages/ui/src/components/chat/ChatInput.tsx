@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -78,6 +79,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ReferencePickerDialog } from '@/components/references/ReferencePickerDialog';
 import { useAttachReferences } from '@/components/references/useAttachReferences';
+import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import {
     composerReferenceKey,
     toContextReference,
@@ -1394,13 +1396,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             // An instruction is derived from the text, and derived again on send.
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
-            if (payload.kind === 'github-issue') {
-                restored.push({ kind: 'github-issue', number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
-            } else if (payload.kind === 'github-pr') {
+            if (payload.kind === 'repository-issue') {
+                restored.push({ kind: 'repository-issue', number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
+            } else if (payload.kind === 'change-request') {
                 // The captured context is final: whatever diff it includes is
                 // already in the text, and the branches were not captured.
+                // Messages written before providers other than GitHub existed
+                // carry no provider, so the reference reads as GitHub's.
                 restored.push({
-                    kind: 'github-pr',
+                    kind: 'change-request',
+                    provider: payload.provider ?? 'github',
                     number: payload.number,
                     title: payload.title,
                     url: payload.url,
@@ -1464,6 +1469,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         setReferencePicker({ source: 'github' });
     }, []);
     const referencePickerDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? null;
+    const repositoryProvider = useRepositoryReferenceProvider(isVSCodeRuntime() ? null : referencePickerDirectory);
     const addLinkedReferences = React.useCallback((references: ComposerReference[]) => {
         setLinkedReferences((current) => withComposerReferences(current, references));
     }, []);
@@ -3581,7 +3587,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 const key = composerReferenceKey(reference);
                 const remove = () => setLinkedReferences((current) => withoutComposerReference(current, key));
                 switch (reference.kind) {
-                    case 'github-issue':
+                    case 'repository-issue':
                         return (
                             <LinkedReferenceRow
                                 key={key}
@@ -3595,11 +3601,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 onRemove={remove}
                             />
                         );
-                    case 'github-pr':
+                    case 'change-request':
                         return (
                             <LinkedReferenceRow
                                 key={key}
-                                numberLabel={t('chat.chatInput.linked.pr.number', { number: reference.number })}
+                                numberLabel={reference.provider === 'github'
+                                    ? t('chat.chatInput.linked.pr.number', { number: reference.number })
+                                    : formatChangeRequestReference(reference.provider, reference.number)}
                                 title={reference.title}
                                 url={reference.url}
                                 author={reference.author}
@@ -3939,6 +3947,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onQueueMessage={() => { void handleQueueMessage(); }}
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenGitHubPicker={openGitHubPicker}
+                        repositoryProvider={repositoryProvider}
                         showLinearPicker={showLinearPicker}
                         onOpenLinearPicker={openLinearPicker}
                         onOpenAttachSheet={openMobileAttachSheet}
@@ -4144,6 +4153,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}
                         onOpenGitHubPicker={openGitHubPicker}
+                        repositoryProvider={repositoryProvider}
                         showLinearPicker={showLinearPicker}
                         onOpenLinearPicker={openLinearPicker}
                         attachGuests={isMobile ? [] : guestAttachItems}
@@ -4337,8 +4347,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                             requestAnimationFrame(openGitHubPicker);
                         }}
                     >
-                        <Icon name="github" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
-                        {t('chat.chatInput.actions.linkGithub')}
+                        <Icon name={repositoryProvider === 'gitlab' ? 'gitlab' : 'github'} className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t(repositoryProvider === 'gitlab' ? 'chat.chatInput.actions.linkGitlab' : 'chat.chatInput.actions.linkGithub')}
                     </button>
                     {showLinearPicker ? (
                         <button

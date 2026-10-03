@@ -42,7 +42,7 @@ export const getToolIcon = (toolName: string, presentation?: GuestToolRule | nul
     if (tool === 'execute') {
         return <Icon name="braces" className={iconClass} />;
     }
-    if (tool === 'shell' || tool === 'bash' || tool === 'cmd' || tool === 'terminal') {
+    if (tool === 'shell' || tool === 'bash' || tool === 'cmd' || tool === 'terminal' || tool === 'shell_command') {
         return <Icon name="terminal-box" className={iconClass} />;
     }
     if (tool === 'ls' || tool === 'dir' || tool === 'list_files') {

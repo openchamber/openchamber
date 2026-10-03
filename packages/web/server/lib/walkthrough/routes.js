@@ -10,9 +10,15 @@ const providerIdSchema = z.string().trim().min(1).max(200).optional().catch(unde
 // client is still there.
 const clientIsGone = (res) => res.writableEnded || res.destroyed;
 
-export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
+export function registerWalkthroughRoutes(app, { getWalkthroughService, validateReadContext }) {
   const respondWithError = (res, error, fallback) => {
-    const statusCode = Number(error?.statusCode) || 500;
+    let bindingStatus = 0;
+    if (error?.code === 'INVALID_SOURCE_CONTROL_BINDING' || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT') {
+      bindingStatus = 400;
+    } else if (error?.code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') {
+      bindingStatus = 422;
+    }
+    const statusCode = Number(error?.statusCode ?? error?.status) || bindingStatus || 500;
     if (statusCode >= 500) {
       console.error(`${fallback}:`, error);
     }
@@ -34,21 +40,50 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
     }
   };
 
+  const validatePullRequestContext = async (source, input, directory) => {
+    if (source?.kind !== 'pr') return undefined;
+    if (!validateReadContext) {
+      throw Object.assign(new Error('Bound source control reads are unavailable'), {
+        statusCode: 501,
+        code: 'SOURCE_CONTROL_BINDING_UNAVAILABLE',
+      });
+    }
+    const readContext = await validateReadContext({
+      directory,
+      repositoryId: input?.repositoryId,
+      provider: input?.provider,
+      instance: input?.instance,
+      accountId: input?.accountId,
+      bindingRevision: Number(input?.bindingRevision),
+      primaryRemote: input?.primaryRemote,
+    });
+    if (readContext.provider !== 'github') {
+      throw Object.assign(new Error('Pull request walkthroughs currently support GitHub only'), {
+        statusCode: 422,
+        code: 'UNSUPPORTED_WALKTHROUGH_PROVIDER',
+      });
+    }
+    return readContext;
+  };
+
   app.get('/api/walkthrough', async (req, res) => {
     try {
-      const { getWalkthrough, getPullRequestDiff } = await getWalkthroughService();
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
+      const source = readSource(req.query.source);
+      const readContext = await validatePullRequestContext(source, req.query, directory);
+      const { getWalkthrough, getPullRequestDiff } = await getWalkthroughService();
       const result = await getWalkthrough(
         {
-          directory,
-          source: readSource(req.query.source),
+          directory: readContext?.directory ?? directory,
+          source,
           model: typeof req.query.model === 'string' ? req.query.model : undefined,
           providerID: providerIdSchema.parse(req.query.providerID),
           language: typeof req.query.language === 'string' ? req.query.language : undefined,
+          readContext,
         },
         { getPullRequestDiff },
       );
@@ -67,8 +102,15 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
       if (!directory) return res.status(400).json({ error: 'directory parameter is required' });
       const source = parseSource(readSource(query.get('source')));
       if (source.kind !== 'pr') return res.status(400).json({ error: 'A pull request source is required' });
+      // Same exact binding authority as the walkthrough routes: the repository
+      // and account come from the checkout's binding, and a named source
+      // repository is only checked against it.
+      const readContext = await validatePullRequestContext(source, Object.fromEntries(query), directory);
       const { getPullRequestDiff } = await getWalkthroughService();
-      const { patch } = await getPullRequestDiff(directory, source.number, source.sourceRepo, { allowEmpty: true });
+      const { patch } = await getPullRequestDiff(readContext?.directory ?? directory, source.number, readContext, {
+        allowEmpty: true,
+        sourceRepo: source.sourceRepo ?? null,
+      });
       res.type('text/plain').send(patch);
     } catch (error) {
       respondWithError(res, error, 'Failed to load pull request diff');
@@ -88,8 +130,14 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
       if (!path) return res.status(400).json({ error: 'path parameter is required' });
       const previousPath = query.get('previousPath')?.trim() || undefined;
       const status = query.get('status') ?? 'M';
+      const readContext = await validatePullRequestContext(source, Object.fromEntries(query), directory);
       const { getPullRequestFileContents } = await getWalkthroughService();
-      res.json(await getPullRequestFileContents(directory, source.number, source.sourceRepo, { path, previousPath, status }));
+      res.json(await getPullRequestFileContents(readContext?.directory ?? directory, source.number, readContext, {
+        path,
+        previousPath,
+        status,
+        sourceRepo: source.sourceRepo ?? null,
+      }));
     } catch (error) {
       respondWithError(res, error, 'Failed to load pull request file');
     }
@@ -101,20 +149,22 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
   // request below.
   app.post('/api/walkthrough/generate', async (req, res) => {
     try {
-      const { generateWalkthrough, getPullRequestDiff } = await getWalkthroughService();
       const { directory, source, force, model, providerID, language } = req.body || {};
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory is required' });
       }
 
+      const readContext = await validatePullRequestContext(source, req.body, directory);
+      const { generateWalkthrough, getPullRequestDiff } = await getWalkthroughService();
       const result = await generateWalkthrough(
         {
-          directory,
+          directory: readContext?.directory ?? directory,
           source,
           force: force === true,
           model: typeof model === 'string' ? model : undefined,
           providerID: providerIdSchema.parse(providerID),
           language: typeof language === 'string' ? language : undefined,
+          readContext,
         },
         { getPullRequestDiff },
       );
@@ -130,14 +180,18 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
   // re-runs the whole git pipeline and must not be used for this.
   app.get('/api/walkthrough/progress', async (req, res) => {
     try {
-      const { getGenerationStage, getRepositoryRootFor } = await getWalkthroughService();
       const directory = typeof req.query.directory === 'string' ? req.query.directory : '';
       if (!directory) {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
 
-      const { repoRoot, sourceKey } = await getRepositoryRootFor(directory, readSource(req.query.source));
-      res.json({ stage: getGenerationStage(repoRoot, sourceKey) });
+      const source = readSource(req.query.source);
+      const readContext = await validatePullRequestContext(source, req.query, directory);
+      const { getGenerationStage, getRepositoryRootFor } = await getWalkthroughService();
+      const { repoRoot, sourceKey } = await getRepositoryRootFor(readContext?.directory ?? directory, source, readContext);
+      const result = { stage: getGenerationStage(repoRoot, sourceKey, readContext) };
+      if (readContext) result.readContext = readContext;
+      res.json(result);
     } catch (error) {
       respondWithError(res, error, 'Failed to read walkthrough progress');
     }
@@ -145,13 +199,14 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService }) {
 
   app.post('/api/walkthrough/cancel', async (req, res) => {
     try {
-      const { cancelWalkthroughGeneration } = await getWalkthroughService();
       const { directory, source } = req.body || {};
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory is required' });
       }
 
-      res.json(await cancelWalkthroughGeneration({ directory, source }));
+      const readContext = await validatePullRequestContext(source, req.body, directory);
+      const { cancelWalkthroughGeneration } = await getWalkthroughService();
+      res.json(await cancelWalkthroughGeneration({ directory: readContext?.directory ?? directory, source, readContext }));
     } catch (error) {
       respondWithError(res, error, 'Failed to cancel walkthrough generation');
     }

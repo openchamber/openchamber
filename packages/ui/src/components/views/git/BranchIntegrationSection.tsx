@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { useI18n } from '@/lib/i18n';
+import type { BranchIntegrationRemoteBranch, BranchIntegrationTarget } from './branchIntegration';
 
 type OperationType = 'merge' | 'rebase';
 
@@ -40,9 +41,9 @@ export interface OperationLogEntry {
 interface BranchIntegrationSectionProps {
   currentBranch: string | null | undefined;
   localBranches: string[];
-  remoteBranches: string[];
-  onMerge: (branch: string) => void;
-  onRebase: (branch: string) => void;
+  remoteBranches: BranchIntegrationRemoteBranch[];
+  onMerge: (target: BranchIntegrationTarget) => void;
+  onRebase: (target: BranchIntegrationTarget) => void;
   disabled?: boolean;
   isOperating?: boolean;
   operationLogs?: OperationLogEntry[];
@@ -72,7 +73,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [operation, setOperation] = React.useState<OperationType>('merge');
-  const [selectedBranch, setSelectedBranch] = React.useState<string | null>(null);
+  const [selectedBranch, setSelectedBranch] = React.useState<BranchIntegrationTarget | null>(null);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const [branchSearch, setBranchSearch] = React.useState('');
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -95,24 +96,22 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
 
   // Filter branches based on search
   const filteredLocal = React.useMemo(() => {
-    const remoteBranchNames = new Set(
-      remoteBranches
-        .map((branch) => branch.slice(branch.indexOf('/') + 1))
-        .filter(Boolean)
-    );
-    const candidates = localBranches.filter((branch) => branch !== currentBranch && !remoteBranchNames.has(branch));
+    const candidates = localBranches.filter((branch) => branch !== currentBranch);
     return rankByQuery(candidates, branchSearch, (branch) => [branch]);
-  }, [branchSearch, localBranches, currentBranch, remoteBranches]);
+  }, [branchSearch, localBranches, currentBranch]);
 
   const filteredRemote = React.useMemo(
-    () => rankByQuery(remoteBranches, branchSearch, (branch) => [branch]),
+    () => rankByQuery(remoteBranches, branchSearch, (branch) => [branch.label, branch.branch, branch.remote]),
     [branchSearch, remoteBranches]
   );
 
   const resolveDefaultBranch = React.useCallback(() => {
     if (!defaultTargetBranch) return null;
-    if (remoteBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
-    if (localBranches.includes(defaultTargetBranch)) return defaultTargetBranch;
+    const remote = remoteBranches.find((branch) => branch.label === defaultTargetBranch);
+    if (remote) return remote;
+    if (localBranches.includes(defaultTargetBranch)) {
+      return { kind: 'local', branch: defaultTargetBranch, label: defaultTargetBranch } as const;
+    }
     return null;
   }, [defaultTargetBranch, localBranches, remoteBranches]);
 
@@ -123,8 +122,8 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
     setBranchSearch('');
   };
 
-  const handleSelectBranch = (branch: string) => {
-    setSelectedBranch(branch);
+  const handleSelectBranch = (target: BranchIntegrationTarget) => {
+    setSelectedBranch(target);
     setBranchDropdownOpen(false);
     setBranchSearch('');
   };
@@ -309,7 +308,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
               className={cn(dropdownTriggerVariants({ size: 'default' }), 'w-full')}
             >
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
-                {selectedBranch || t('gitView.branch.selectBranch')}
+                {selectedBranch?.label || t('gitView.branch.selectBranch')}
               </span>
               <Icon name="arrow-down-s" className="size-4 opacity-60 shrink-0" />
             </button>
@@ -334,7 +333,10 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                 {filteredLocal.length > 0 && (
                   <CommandGroup heading={t('gitView.branch.localBranches')}>
                     {filteredLocal.map((branch) => (
-                      <CommandItem key={`local-${branch}`} onSelect={() => handleSelectBranch(branch)}>
+                      <CommandItem
+                        key={`local-${branch}`}
+                        onSelect={() => handleSelectBranch({ kind: 'local', branch, label: branch })}
+                      >
                         <span className="typography-ui-label text-foreground truncate">{branch}</span>
                       </CommandItem>
                     ))}
@@ -346,8 +348,8 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
                 {filteredRemote.length > 0 && (
                   <CommandGroup heading={t('gitView.branch.remoteBranches')}>
                     {filteredRemote.map((branch) => (
-                      <CommandItem key={`remote-${branch}`} onSelect={() => handleSelectBranch(branch)}>
-                        <span className="typography-ui-label text-foreground truncate">{branch}</span>
+                      <CommandItem key={`remote-${branch.label}`} onSelect={() => handleSelectBranch(branch)}>
+                        <span className="typography-ui-label text-foreground truncate">{branch.label}</span>
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -364,11 +366,11 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           <p className="typography-meta text-muted-foreground">
             {operation === 'merge' ? (
               <>
-                {t('gitView.branch.summaryMergePrefix')} <span className="font-mono text-foreground">{selectedBranch}</span> {t('gitView.branch.summaryMergeInfix')} <span className="font-mono text-foreground">{targetBranchLabel}</span>
+                {t('gitView.branch.summaryMergePrefix')} <span className="font-mono text-foreground">{selectedBranch.label}</span> {t('gitView.branch.summaryMergeInfix')} <span className="font-mono text-foreground">{targetBranchLabel}</span>
               </>
             ) : (
               <>
-                {t('gitView.branch.summaryRebasePrefix')} <span className="font-mono text-foreground">{targetBranchLabel}</span> {t('gitView.branch.summaryRebaseInfix')} <span className="font-mono text-foreground">{selectedBranch}</span>
+                {t('gitView.branch.summaryRebasePrefix')} <span className="font-mono text-foreground">{targetBranchLabel}</span> {t('gitView.branch.summaryRebaseInfix')} <span className="font-mono text-foreground">{selectedBranch.label}</span>
               </>
             )}
           </p>

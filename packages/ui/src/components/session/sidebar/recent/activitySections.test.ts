@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { getGitHubPrStatusKey } from '@/stores/useGitHubPrStatusStore';
-import { resolveSessionPrLookupKey } from '../sessions/sessionNodeItemUtils';
+import { resolveSessionPrLookup } from '../sessions/sessionNodeItemUtils';
 import { deriveRecentActivitySections, deriveRecentSessions, sessionTreeMatchesSidebarQuery } from './activitySections';
 import { resolveSidebarSessionLocations } from './sessionLocation';
 import type { SessionNode } from '../types';
@@ -121,8 +120,8 @@ describe('deriveRecentActivitySections', () => {
 
     const node = sections[0].items[0]?.node;
     expect(node?.worktree).toBe(worktree);
-    expect(resolveSessionPrLookupKey(node?.worktree, false))
-      .toBe(getGitHubPrStatusKey('/worktrees/feature', 'feature-1'));
+    expect(resolveSessionPrLookup(node?.worktree, false))
+      .toEqual({ directory: '/worktrees/feature', branch: 'feature-1' });
   });
 
   test('keeps the node unchanged when no location resolved a worktree', () => {
@@ -173,10 +172,10 @@ describe('deriveRecentActivitySections', () => {
     });
     const projected = sections[0].items[0].node;
     expect(projected.worktree).toBeNull();
-    expect(resolveSessionPrLookupKey(projected.children[0].worktree, false))
-      .toBe(getGitHubPrStatusKey('/worktrees/feature', 'feature'));
-    expect(resolveSessionPrLookupKey(projected.children[0].children[0].worktree, false))
-      .toBe(getGitHubPrStatusKey('/worktrees/other', 'other'));
+    expect(resolveSessionPrLookup(projected.children[0].worktree, false))
+      .toEqual({ directory: '/worktrees/feature', branch: 'feature' });
+    expect(resolveSessionPrLookup(projected.children[0].children[0].worktree, false))
+      .toEqual({ directory: '/worktrees/other', branch: 'other' });
     expect(projected.children[1]).toBe(missingNode);
     expect(projected.children.map((node) => node.session.id)).toEqual(['child', 'missing']);
     expect(projected.children[0].children[0].session).toBe(grandchild);

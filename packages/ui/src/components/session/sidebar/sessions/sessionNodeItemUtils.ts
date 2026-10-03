@@ -5,7 +5,6 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
-import { getGitHubPrStatusKey } from '@/stores/useGitHubPrStatusStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionNode } from '../types';
 
@@ -379,17 +378,17 @@ export const resolveTooltipBranchLabel = (
 );
 
 /**
- * GitHub PR lookup key for a row. The row's worktree is the only source of
- * the directory/branch pair; VS Code renders no PR badges.
+ * The worktree directory and branch whose change request a row shows. The
+ * row's worktree is the only source of the pair; VS Code renders no PR badges.
  */
-export const resolveSessionPrLookupKey = (
+export const resolveSessionPrLookup = (
   worktree: WorktreeMetadata | null | undefined,
   isVSCode: boolean,
-): string | null => {
+): { directory: string; branch: string } | null => {
   if (isVSCode) return null;
   const branch = worktree?.branch?.trim();
   const directory = normalizePath(worktree?.path ?? null);
-  return branch && directory ? getGitHubPrStatusKey(directory, branch) : null;
+  return branch && directory ? { directory, branch } : null;
 };
 
 /**

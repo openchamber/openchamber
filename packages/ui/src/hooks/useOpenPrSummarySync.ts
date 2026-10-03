@@ -1,5 +1,5 @@
 import React from 'react';
-import type { GitHubAPI, GitHubPullRequestRef } from '@/lib/api/types';
+import type { GitHubPullRequestRef, SourceControlAPI } from '@/lib/api/types';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 
 // How often a shown open PR is re-asked, and the floor when the user comes
@@ -24,7 +24,7 @@ export function useOpenPrSummarySync(
   keys: string[],
   linkedRefs: GitHubPullRequestRef[],
   linkedIssueRefs: GitHubPullRequestRef[],
-  github: GitHubAPI | undefined,
+  sourceControl: Pick<SourceControlAPI, 'githubSummaries'> | undefined,
   enabled: boolean,
 ) {
   const syncOpenPrSummaries = useGitHubPrStatusStore((state) => state.syncOpenPrSummaries);
@@ -33,15 +33,15 @@ export function useOpenPrSummarySync(
   const linkedIssueRefsRef = React.useRef(linkedIssueRefs);
 
   const sync = React.useCallback((minAgeMs: number) => {
-    if (!enabled || !github || !isDocumentVisible()) {
+    if (!enabled || !sourceControl || !isDocumentVisible()) {
       return;
     }
-    void syncOpenPrSummaries(keysRef.current, github, {
+    void syncOpenPrSummaries(keysRef.current, sourceControl, {
       minAgeMs,
       linkedRefs: linkedRefsRef.current,
       linkedIssueRefs: linkedIssueRefsRef.current,
     });
-  }, [enabled, github, syncOpenPrSummaries]);
+  }, [enabled, sourceControl, syncOpenPrSummaries]);
 
   // New keys and links (a project expanded, a PR just linked, a reload
   // restored cached open PRs) are asked about right away; ones seen recently
@@ -54,7 +54,7 @@ export function useOpenPrSummarySync(
   }, [keys, linkedIssueRefs, linkedRefs, sync]);
 
   React.useEffect(() => {
-    if (!enabled || !github) {
+    if (!enabled || !sourceControl) {
       return;
     }
     const timer = window.setInterval(() => sync(OPEN_PR_SUMMARY_DUE_AGE_MS), OPEN_PR_SUMMARY_INTERVAL_MS);
@@ -70,5 +70,5 @@ export function useOpenPrSummarySync(
       document.removeEventListener('visibilitychange', onReturn);
       window.removeEventListener('focus', onReturn);
     };
-  }, [enabled, github, sync]);
+  }, [enabled, sourceControl, sync]);
 }

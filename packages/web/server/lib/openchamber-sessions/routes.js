@@ -391,6 +391,8 @@ export const createOpenChamberSessionService = (dependencies) => {
     broadcastGlobalUiEvent,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    worktreeBootstrapStore,
+    hydrateWorktreeCheckout,
     dataDir = null,
     archiveStore: injectedArchiveStore = null,
     sessionMetadataStore: injectedSessionMetadataStore = null,
@@ -428,10 +430,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     directory,
   });
 
-  const waitForWorktreeBootstrapReady = async ({ directory }) => {
+  const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }) => {
     const deadline = Date.now() + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
     for (;;) {
-      const status = await getWorktreeBootstrapStatus(directory);
+      const status = await getWorktreeBootstrapStatus(directory, { bootstrapStore });
       if (status?.status === 'failed') {
         throw new OpenChamberControlError(`Worktree bootstrap failed: ${status.error || 'unknown error'}`, 500);
       }
@@ -800,9 +802,25 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
 
     if (worktreeInput) {
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput);
+      if (!(hydrateWorktreeCheckout instanceof Function)
+        || !(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
+      }
+      const hydrateCheckout = ({ directory, parentRemoteName }) => hydrateWorktreeCheckout({
+        directory,
+        parentDirectory: resolvedDirectory.directory,
+        parentRemoteName,
+      });
+      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, {
+        bootstrapStore: worktreeBootstrapStore,
+        hydrateCheckout,
+      });
       sessionDirectory = worktree.path;
-      await waitForWorktreeBootstrapReady({ directory: sessionDirectory });
+      await waitForWorktreeBootstrapReady({
+        directory: sessionDirectory,
+        bootstrapStore: worktreeBootstrapStore,
+      });
     }
 
     const baseUrl = openCodeBaseUrl();

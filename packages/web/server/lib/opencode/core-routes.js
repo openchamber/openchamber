@@ -611,6 +611,19 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     res.status(statusCode).json({ error: 'Invalid or expired pairing session' });
   };
 
+  /**
+   * Endpoints that carry their own authority instead of a UI session.
+   *
+   * The repository credential helper runs from Git itself, in a terminal or
+   * the agent's shell, wherever a repository names it in `.git/config`. It
+   * authenticates with the secret the server writes beside its endpoint file,
+   * rotated every start, and the route refuses any peer that is not this
+   * machine. It has no UI session and cannot obtain one, so leaving it behind
+   * the session guard would make a repository's account silently unusable on
+   * every instance that sets a UI password, which Docker requires.
+   */
+  const selfAuthenticatedApiPaths = new Set(['/api/git/repository-credential']);
+
   const isGuestOauthCallback = (req) => (
     req.method === 'GET'
     && /^\/guests\/[a-z][a-z0-9-]*\/oauth\/callback$/.test(req.path || '')
@@ -624,6 +637,8 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
   );
 
   const requireApiAuth = async (req, res, next) => {
+    const pathname = (req.originalUrl || '').split('?')[0];
+    if (selfAuthenticatedApiPaths.has(pathname)) return next();
     if (isGuestOauthCallback(req) || isFilePreviewRead(req)) {
       return next();
     }
@@ -1117,6 +1132,8 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
         return res.status(413).json({ error: 'Content exceeds maximum size of 1048576 bytes' });
       }
       express.json({ limit: '1mb' })(req, res, next);
+    } else if (req.path.startsWith('/api/source-control')) {
+      express.json({ limit: '256kb' })(req, res, next);
     } else if (
       req.path.startsWith('/api/config/agents') ||
       req.path.startsWith('/api/config/commands') ||

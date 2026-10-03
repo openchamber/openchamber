@@ -22,7 +22,23 @@ const pull = (number) => ({
 
 const response = (data, status = 200) => Response.json(data, { status });
 
-describe('GET /api/github/pulls/list free-text search', () => {
+// Canonical routes read with the account the repository's binding names; the
+// binding service is stubbed to accept the context the client sends.
+let accountId = '';
+const readContext = (directory) => ({
+  provider: 'github',
+  instance: 'github.com',
+  accountId,
+  repositoryId: 'repo-1',
+  bindingRevision: '1',
+  primaryRemote: 'origin',
+  directory,
+});
+const routeOptions = () => ({
+  validateReadContext: vi.fn(async (context) => ({ ...context, bindingRevision: Number(context.bindingRevision) })),
+});
+
+describe('GET /api/source-control/github/pulls/list free-text search', () => {
   let app;
 
   beforeAll(async () => {
@@ -32,9 +48,9 @@ describe('GET /api/github/pulls/list free-text search', () => {
     execFileSync('git', ['-C', repository, 'remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
     setGhCliDisabled(true);
-    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
     app = express();
-    registerGitHubRoutes(app);
+    registerGitHubRoutes(app, routeOptions());
   });
 
   afterEach(() => {
@@ -48,12 +64,13 @@ describe('GET /api/github/pulls/list free-text search', () => {
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 
-  const search = () => request(app).get('/api/github/pulls/list').query({ directory: repository, query: 'fix' });
+  const search = () => request(app).get('/api/source-control/github/pulls/list')
+    .query({ ...readContext(repository), query: 'fix' });
 
   const serveGitHub = ({ numbers = [1, 2], failPulls = [], failSearch = false, networkFailure = false } = {}) => {
     const fetch = vi.fn(async (url) => {
       const endpoint = new URL(url);
-      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project' });
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
       if (endpoint.pathname === '/search/issues') {
         if (failSearch) return response({ message: 'GitHub search unavailable' }, 503);
         return response({ total_count: numbers.length, items: numbers.map(issue) });
@@ -111,7 +128,7 @@ describe('GET /api/github/pulls/list free-text search', () => {
   });
 });
 
-describe('GET /api/github/references', () => {
+describe('GET /api/source-control/github/references', () => {
   let app;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-references-'));
   const project = path.join(dataDir, 'project');
@@ -123,9 +140,9 @@ describe('GET /api/github/references', () => {
     execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.com/example/project.git']);
     const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
     setGhCliDisabled(true);
-    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
     app = express();
-    registerGitHubRoutes(app);
+    registerGitHubRoutes(app, routeOptions());
   });
 
   afterEach(() => {
@@ -159,7 +176,7 @@ describe('GET /api/github/references', () => {
   const serveGitHub = (graphql) => {
     const fetch = vi.fn(async (url, init) => {
       const endpoint = new URL(url);
-      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project' });
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
       if (endpoint.pathname === '/graphql') return graphql(JSON.parse(init.body));
       throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
     });
@@ -168,7 +185,7 @@ describe('GET /api/github/references', () => {
   };
 
   it('requires a directory and a kind', async () => {
-    await request(app).get('/api/github/references').query({ directory: project }).expect(400);
+    await request(app).get('/api/source-control/github/references').query(readContext(project)).expect(400);
   });
 
   it('answers a page with one search document', async () => {
@@ -177,8 +194,8 @@ describe('GET /api/github/references', () => {
       return response({ data: { search: { issueCount: 31, pageInfo: { hasNextPage: true, endCursor: 'c1' }, nodes: [issueNode(4), issueNode(2)] } } });
     });
 
-    const res = await request(app).get('/api/github/references')
-      .query({ directory: project, kind: 'issue', filter: 'created', query: 'crash' })
+    const res = await request(app).get('/api/source-control/github/references')
+      .query({ ...readContext(project), kind: 'issue', filter: 'created', query: 'crash' })
       .expect(200);
 
     expect(res.body).toMatchObject({ connected: true, cursor: 'c1', hasMore: true, total: 31 });
@@ -193,8 +210,8 @@ describe('GET /api/github/references', () => {
       return response({ data: { a0: { issueOrPullRequest: issueNode(4) } } });
     });
 
-    const res = await request(app).get('/api/github/references')
-      .query({ directory: project, kind: 'pull', query: '#4' })
+    const res = await request(app).get('/api/source-control/github/references')
+      .query({ ...readContext(project), kind: 'pull', query: '#4' })
       .expect(200);
 
     expect(res.body.items).toEqual([expect.objectContaining({ kind: 'issue', number: 4 })]);
@@ -215,8 +232,8 @@ describe('GET /api/github/references', () => {
       commits: { nodes: [] },
     } } } }));
 
-    const detail = await request(app).get('/api/github/references/detail')
-      .query({ directory: project, owner: 'example', repo: 'project', number: '4' })
+    const detail = await request(app).get('/api/source-control/github/references/detail')
+      .query({ ...readContext(project), owner: 'example', repo: 'project', number: '4' })
       .expect(200);
     expect(detail.body).toEqual({
       connected: true,
@@ -225,8 +242,8 @@ describe('GET /api/github/references', () => {
 
     const graphqlCalls = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql')).length;
     const before = graphqlCalls();
-    await request(app).get('/api/github/references/detail')
-      .query({ directory: project, owner: 'someone', repo: 'else', number: '4' })
+    await request(app).get('/api/source-control/github/references/detail')
+      .query({ ...readContext(project), owner: 'someone', repo: 'else', number: '4' })
       .expect(400);
     expect(graphqlCalls()).toBe(before);
   });
@@ -235,15 +252,15 @@ describe('GET /api/github/references', () => {
     serveGitHub(() => response({ message: 'Server Error' }, 502));
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const res = await request(app).get('/api/github/references')
-      .query({ directory: project, kind: 'issue' })
+    const res = await request(app).get('/api/source-control/github/references')
+      .query({ ...readContext(project), kind: 'issue' })
       .expect(500);
 
     expect(res.body).not.toHaveProperty('items');
   });
 });
 
-describe('POST /api/github/pr/summaries', () => {
+describe('POST /api/source-control/github/pr/summaries', () => {
   let app;
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-summaries-'));
 
@@ -251,10 +268,10 @@ describe('POST /api/github/pr/summaries', () => {
     process.env.OPENCHAMBER_DATA_DIR = dataDir;
     const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
     setGhCliDisabled(true);
-    setGitHubAuth({ accessToken: 'fake-test-token', accountId: 'test' });
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
     app = express();
     app.use(express.json());
-    registerGitHubRoutes(app);
+    registerGitHubRoutes(app, routeOptions());
   });
 
   afterEach(() => {
@@ -268,7 +285,7 @@ describe('POST /api/github/pr/summaries', () => {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
-  const summaries = (refs) => request(app).post('/api/github/pr/summaries').send({ refs });
+  const summaries = (refs) => request(app).post('/api/source-control/github/pr/summaries').send({ refs });
 
   const serveGraphql = (body) => {
     const fetch = vi.fn(async () => response(body));
@@ -295,7 +312,7 @@ describe('POST /api/github/pr/summaries', () => {
       errors: [{ type: 'NOT_FOUND', path: ['a1'], message: 'Could not resolve to a Repository' }],
     });
 
-    const res = await request(app).post('/api/github/pr/summaries').send({
+    const res = await request(app).post('/api/source-control/github/pr/summaries').send({
       refs: [{ owner: 'example', repo: 'project', number: 7 }, { owner: 'example', repo: 'gone', number: 8 }],
       issueRefs: [{ owner: 'example', repo: 'project', number: 3 }],
     });

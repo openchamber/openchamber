@@ -4,14 +4,13 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { getGitHubPrStatusKey } from '@/stores/useGitHubPrStatusStore';
 import { getPinnedSessionKey } from '@/stores/useSessionPinnedStore';
 import {
   computeNodeStructureKey,
   canShowSessionWorktreeMenu,
   getSessionWorktreeMenuDisabled,
   nodeHasPinnedMembershipChange,
-  resolveSessionPrLookupKey,
+  resolveSessionPrLookup,
   resolveTooltipBranchLabel,
   selectFolderRootNodes,
   selectBlockingBadgeSessionScopes,
@@ -275,20 +274,20 @@ describe('resolveTooltipBranchLabel', () => {
   });
 });
 
-describe('resolveSessionPrLookupKey', () => {
+describe('resolveSessionPrLookup', () => {
   const worktree = (path: string, branch: string): WorktreeMetadata => ({
     path, projectDirectory: '/repo', branch, label: branch,
   });
 
-  test('derives the PR key from the row worktree directory and branch', () => {
-    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', 'feature-1'), false))
-      .toBe(getGitHubPrStatusKey('/worktrees/feature', 'feature-1'));
+  test('takes the row worktree directory and branch', () => {
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', 'feature-1'), false))
+      .toEqual({ directory: '/worktrees/feature', branch: 'feature-1' });
   });
 
   test('rejects rows with no worktree, no branch, or a VS Code runtime', () => {
-    expect(resolveSessionPrLookupKey(null, false)).toBeNull();
-    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', '   '), false)).toBeNull();
-    expect(resolveSessionPrLookupKey(worktree('/worktrees/feature', 'feature-1'), true)).toBeNull();
+    expect(resolveSessionPrLookup(null, false)).toBeNull();
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', '   '), false)).toBeNull();
+    expect(resolveSessionPrLookup(worktree('/worktrees/feature', 'feature-1'), true)).toBeNull();
   });
 });
 

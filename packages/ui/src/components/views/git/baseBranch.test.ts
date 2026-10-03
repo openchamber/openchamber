@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveBaseBranch, hasResolvableBaseBranch } from './baseBranch';
+import { deriveBaseBranch, hasResolvableBaseBranch, qualifyBaseRef } from './baseBranch';
 
 describe('deriveBaseBranch', () => {
   test('prefers the repository default branch over conventional fallbacks', () => {
@@ -45,6 +45,37 @@ describe('deriveBaseBranch', () => {
       localBranches: ['master', 'next'],
     })).toBe('master');
   });
+
+  test('does not guess a conventional base when authoritative selection is required', () => {
+    expect(deriveBaseBranch({
+      remoteNames: new Set(['upstream']),
+      localBranches: ['main', 'next'],
+      headBranch: 'next',
+      fallbackToConventional: false,
+    })).toBe('');
+  });
+
+  test('rejects an unbound remote from an authoritative branch hint', () => {
+    expect(deriveBaseBranch({
+      remoteNames: new Set(['upstream']),
+      knownRemoteNames: new Set(['origin', 'upstream']),
+      localBranches: ['feature'],
+      rootBranchHint: 'origin/main',
+      headBranch: 'feature',
+      fallbackToConventional: false,
+    })).toBe('');
+  });
+
+  test('keeps a slash-containing local branch that is not a remote ref', () => {
+    expect(deriveBaseBranch({
+      remoteNames: new Set(['upstream']),
+      knownRemoteNames: new Set(['origin', 'upstream']),
+      localBranches: ['feature', 'release/2.0'],
+      rootBranchHint: 'release/2.0',
+      headBranch: 'feature',
+      fallbackToConventional: false,
+    })).toBe('release/2.0');
+  });
 });
 
 describe('hasResolvableBaseBranch', () => {
@@ -80,5 +111,40 @@ describe('hasResolvableBaseBranch', () => {
       localBranches: ['next'],
       remoteBranches: ['origin/release/2.0'],
     })).toBe(true);
+  });
+});
+
+describe('qualifyBaseRef', () => {
+  const repository = {
+    localBranches: ['feature', 'main'],
+    remoteBranches: ['origin/main', 'origin/release/2.0', 'upstream/main'],
+    remoteNames: new Set(['origin', 'upstream']),
+    primaryRemote: 'origin',
+  };
+
+  test('names a local branch as a local ref, so no remote is substituted for it', () => {
+    expect(qualifyBaseRef('main', repository)).toBe('refs/heads/main');
+    expect(qualifyBaseRef('refs/heads/main', repository)).toBe('refs/heads/main');
+  });
+
+  test('keeps a remote-tracking base on the remote the repository is bound to', () => {
+    const remote = { ...repository, localBranches: ['feature'] };
+    expect(qualifyBaseRef('main', remote)).toBe('origin/main');
+    expect(qualifyBaseRef('origin/main', remote)).toBe('origin/main');
+    expect(qualifyBaseRef('remotes/origin/release/2.0', remote)).toBe('origin/release/2.0');
+  });
+
+  test('refuses a base on another remote, however familiar its name', () => {
+    // upstream/main is a different project's branch; comparing against it
+    // would report changes this repository never made.
+    expect(qualifyBaseRef('upstream/main', { ...repository, localBranches: ['feature'] })).toBeNull();
+  });
+
+  test('refuses what no ref answers', () => {
+    expect(qualifyBaseRef(null, repository)).toBeNull();
+    expect(qualifyBaseRef('   ', repository)).toBeNull();
+    expect(qualifyBaseRef('never-fetched', { ...repository, localBranches: ['feature'] })).toBeNull();
+    // Without a binding there is no remote authorized to supply a base.
+    expect(qualifyBaseRef('main', { ...repository, localBranches: ['feature'], primaryRemote: null })).toBeNull();
   });
 });

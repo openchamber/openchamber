@@ -9,13 +9,19 @@ describe('repository-qualified PR sources', () => {
     expect(sourceKey(upstream)).not.toBe(sourceKey(fork));
   });
 
-  it('hands the selected repository to the walkthrough diff loader', async () => {
+  it('hands the selected repository to the walkthrough diff loader beside the read context', async () => {
     const source = parseSource({ kind: 'pr', number: 42, sourceRepo: { owner: 'upstream', repo: 'project' } });
+    const readContext = { provider: 'github', accountId: 'github.com#7', primaryRemote: 'origin' };
     let received;
-    await loadSourceSections('/repo', source, { getPullRequestDiff: async (...args) => {
-      received = args;
-      return { patch: 'published patch', meta: {} };
-    } });
-    expect(received).toEqual(['/repo', 42, source.sourceRepo]);
+    await loadSourceSections('/repo', source, {
+      readContext,
+      getPullRequestDiff: async (...args) => {
+        received = args;
+        return { patch: 'published patch', meta: {} };
+      },
+    });
+    // The read context carries the authority; the named repository rides along
+    // only so the loader can check it against the bound one.
+    expect(received).toEqual(['/repo', 42, readContext, { sourceRepo: source.sourceRepo }]);
   });
 });

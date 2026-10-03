@@ -406,7 +406,7 @@ export async function exerciseMobileComparisonContextExpansion() {
   directories.set('/repo', {
     ...previous, status, isGitRepo: true,
     branches: { all: ['feature', 'main'], current: 'feature', branches: {}, defaultBranches: { origin: 'main' } },
-    log: { all: commits, latest: commits[0], total: 1 }, identity: { userName: 'Test Author', userEmail: 'test@example.com', sshCommand: null },
+    log: { all: commits, latest: commits[0], total: 1 }, identity: { userName: 'Test Author', userEmail: 'test@example.com' },
     lastStatusFetch: now, lastBranchesFetch: now, lastLogFetch: now, lastIdentityFetch: now, lastRepoCheckAt: now,
   });
   useGitStore.setState({ directories });

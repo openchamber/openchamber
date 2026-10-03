@@ -65,8 +65,7 @@ import {
 } from '@/lib/settings/metadata';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
 
-// UI Kit: fixed settings navigation width
-const SETTINGS_NAV_WIDTH = 256;
+// UI Kit: fixed split-page sidebar width
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
 /** How long (in frames, ~0.5 s) a search result or a link waits for its item to render. */
@@ -77,6 +76,15 @@ type SettingsDetailHistoryEntry = {
   page: SettingsPageSlug;
   stage: 'page-content';
 };
+
+interface SettingsDetailHistoryCandidate {
+  page?: string | null;
+  stage?: 'page-content' | null;
+}
+
+interface SettingsHistoryState {
+  [SETTINGS_DETAIL_HISTORY_KEY]?: SettingsDetailHistoryCandidate | null;
+}
 
 interface SettingsViewProps {
   onClose?: () => void;
@@ -142,10 +150,6 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function nextUniqueName(baseName: string, existingNames: Iterable<string>): string {
   const existing = new Set(existingNames);
   let name = baseName;
@@ -157,31 +161,18 @@ function nextUniqueName(baseName: string, existingNames: Iterable<string>): stri
   return name;
 }
 
-function getSettingsDetailHistoryEntry(state: unknown): SettingsDetailHistoryEntry | null {
-  if (!isObjectRecord(state)) {
+function getSettingsDetailHistoryEntry(state: SettingsHistoryState | null): SettingsDetailHistoryEntry | null {
+  const detail = state?.[SETTINGS_DETAIL_HISTORY_KEY];
+  if (detail?.page == null || detail.stage !== 'page-content') {
     return null;
   }
 
-  const detail = state[SETTINGS_DETAIL_HISTORY_KEY];
-  if (!isObjectRecord(detail)) {
-    return null;
-  }
-
-  const page = detail.page;
-  const stage = detail.stage;
-  if (typeof page !== 'string' || stage !== 'page-content') {
-    return null;
-  }
-
-  const resolvedPage = resolveSettingsSlug(page);
-  return { page: resolvedPage, stage };
+  return { page: resolveSettingsSlug(detail.page), stage: detail.stage };
 }
 
-function getCurrentHistoryState(): Record<string, unknown> {
-  if (typeof window === 'undefined' || !isObjectRecord(window.history.state)) {
-    return {};
-  }
-  return window.history.state;
+function getCurrentHistoryState(): SettingsHistoryState {
+  const state: SettingsHistoryState | null = window.history.state;
+  return state ?? {};
 }
 
 
@@ -228,16 +219,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return isDesktopShell() && isDesktopLocalOriginActive();
   }, []);
   const isMac = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'darwin';
+    return isDesktopShell() && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
   }, []);
   const isWindows = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'win32';
+    return isDesktopShell() && window.__OPENCHAMBER_PLATFORM__ === 'win32';
   }, []);
   const isLinux = React.useMemo(() => {
-    return isDesktopShell() && typeof window !== 'undefined'
-      && (window as unknown as { __OPENCHAMBER_PLATFORM__?: string }).__OPENCHAMBER_PLATFORM__ === 'linux';
+    return isDesktopShell() && window.__OPENCHAMBER_PLATFORM__ === 'linux';
   }, []);
 
   // keep platform check available for future window chrome tweaks
@@ -529,7 +517,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (isMobile) {
       setMobileStage('page-content');
     }
-    if (result.id === 'plugins.create' && typeof window !== 'undefined') {
+    if (result.id === 'plugins.create') {
       window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent('openchamber:settings-open-plugin-add'));
       }, 50);
@@ -605,8 +593,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       if (cancelled) {
         return;
       }
-      const escapedId = typeof CSS !== 'undefined' && CSS.escape
-        ? CSS.escape(targetId)
+      const escapedId = globalThis.CSS?.escape
+        ? globalThis.CSS.escape(targetId)
         : targetId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
       const target = containerRef.current?.querySelector<HTMLElement>(`[data-settings-item="${escapedId}"]`);
       if (!target) {
@@ -773,7 +761,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     : t('settings.view.actions.closeSettings');
 
   const pushMobileSplitDetailHistory = React.useCallback((slug: SettingsPageSlug) => {
-    if (typeof window === 'undefined' || runtimeCtx.isVSCode) {
+    if (runtimeCtx.isVSCode) {
       return;
     }
 
@@ -817,9 +805,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const handleBack = React.useCallback(() => {
     if (backButtonTargetsPageSidebar) {
-      const currentDetail = typeof window !== 'undefined'
-        ? getSettingsDetailHistoryEntry(window.history.state)
-        : null;
+      const currentDetail = getSettingsDetailHistoryEntry(window.history.state);
       if (currentDetail?.page === settingsSlug && !runtimeCtx.isVSCode) {
         window.history.back();
         return;
@@ -1173,7 +1159,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           <>
             <div
               className={cn(
-                'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
+                'relative flex h-full min-h-0 w-36 min-w-36 flex-col overflow-hidden border-r sm:w-64 sm:min-w-64',
                 isDesktopApp
                   ? 'bg-sidebar'
                   : runtimeCtx.isVSCode
@@ -1181,8 +1167,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                     : 'bg-sidebar',
               )}
               style={{
-                width: `${SETTINGS_NAV_WIDTH}px`,
-                minWidth: `${SETTINGS_NAV_WIDTH}px`,
                 borderColor: 'var(--interactive-border)',
               }}
             >

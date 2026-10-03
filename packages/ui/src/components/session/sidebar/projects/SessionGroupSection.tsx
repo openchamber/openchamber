@@ -31,9 +31,10 @@ import {
   selectFolderRootNodes,
 } from '../sessions/sessionNodeItemUtils';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
-import { getGitHubPrStatusKey, useLinkedIssueStates, usePrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useLinkedIssueStates } from '@/stores/useGitHubPrStatusStore';
 import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
 import { openExternalUrl } from '@/lib/url';
@@ -370,13 +371,13 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
   const worktreeRemoving = useWorktreeRemoving(!group.isMain && group.worktree ? group.worktree.path : null);
   // PR state for the worktree sub-header (grouped display mode).
-  const groupPrKey = React.useMemo(() => {
-    if (group.isMain || group.isArchivedBucket || hideGroupLabel) return null;
-    const directory = normalizePath(group.directory ?? null);
-    const branch = group.branch?.trim();
-    return directory && branch ? getGitHubPrStatusKey(directory, branch) : null;
-  }, [group.branch, group.directory, group.isArchivedBucket, group.isMain, hideGroupLabel]);
-  const groupPrSummary = usePrVisualSummary(groupPrKey);
+  const groupPrDirectory = group.isMain || group.isArchivedBucket || hideGroupLabel
+    ? null
+    : normalizePath(group.directory ?? null);
+  const groupPrBranch = group.isMain || group.isArchivedBucket || hideGroupLabel
+    ? null
+    : group.branch?.trim() || null;
+  const groupPrSummary = useFreshestSourceControlVisualSummaryForBranch(groupPrDirectory, groupPrBranch);
   const groupPrColor = groupPrSummary ? `var(--pr-${groupPrSummary.visualState})` : undefined;
   const groupPrStatusLabel = getPrStatusLabel(groupPrSummary, t);
   const groupPrLabel = groupPrSummary

@@ -66,7 +66,7 @@ const serverItem = (id: string, content: string, extra: Partial<ServerItem> = {}
   ...extra,
 })
 
-const issueMetadata = { openchamberContext: { kind: "github-issue" as const, number: 3, title: "Bug", url: "https://x/issues/3" } }
+const issueMetadata = { openchamberContext: { kind: "repository-issue" as const, number: 3, title: "Bug", url: "https://x/issues/3" } }
 
 const session = (items: ServerItem[], sendingId: string | null = null): ServerSession => ({
   sessionId: "session-1",

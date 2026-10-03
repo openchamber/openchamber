@@ -68,7 +68,7 @@ export function LinkedReferenceRow(props: LinkedReferenceRowProps) {
                 </span>
                 <span className="text-foreground truncate max-w-[240px]">{title}</span>
                 {branches ? (
-                    <span className="text-muted-foreground flex-shrink-0">
+                    <span className="min-w-0 truncate text-muted-foreground">
                         {branches.head} → {branches.base}
                     </span>
                 ) : null}

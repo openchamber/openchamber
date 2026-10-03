@@ -220,8 +220,8 @@ const UserContextPart: React.FC<{
                 />
             );
         }
-        case 'github-issue':
-        case 'github-pr':
+        case 'repository-issue':
+        case 'change-request':
         case 'linear-issue':
         case 'guest-issue':
         case 'guest-pr':

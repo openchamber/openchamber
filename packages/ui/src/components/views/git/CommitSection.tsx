@@ -19,6 +19,7 @@ interface CommitSectionProps {
   onCommit: () => void;
   onCommitAndPush: () => void;
   commitAction: CommitAction;
+  networkOperationBlocked?: boolean;
   hasPendingIndexMutation?: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
@@ -35,6 +36,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   onCommit,
   onCommitAndPush,
   commitAction,
+  networkOperationBlocked = false,
   hasPendingIndexMutation = false,
   gitmojiEnabled,
   onOpenGitmojiPicker,
@@ -143,7 +145,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
                   variant="default"
                   size="sm"
                   onClick={() => onCommitAndPush()}
-                  disabled={!canCommit || isGeneratingMessage}
+                  disabled={!canCommit || isGeneratingMessage || networkOperationBlocked}
                   className="h-7 w-7 p-0"
                   aria-label={t('gitView.commit.pushAria')}
                 >
@@ -163,7 +165,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
               size="sm"
               variant="default"
               onClick={() => onCommitAndPush()}
-              disabled={!canCommit || isGeneratingMessage}
+              disabled={!canCommit || isGeneratingMessage || networkOperationBlocked}
               className="commit-actions__btn"
               aria-label={t('gitView.commit.pushAria')}
             >

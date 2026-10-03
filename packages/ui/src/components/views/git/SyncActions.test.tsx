@@ -6,7 +6,7 @@ import type { GitRemote } from '@/lib/gitApi';
 const origin: GitRemote = { name: 'origin', fetchUrl: 'git@example.com:me/project.git', pushUrl: 'git@example.com:me/project.git' };
 const upstream: GitRemote = { name: 'upstream', fetchUrl: 'git@example.com:them/project.git', pushUrl: 'git@example.com:them/project.git' };
 
-test('the sync menu offers a rebase pull from the tracking remote and blocks it over tracked changes', async () => {
+test('the sync menu offers a pull from the tracking remote and blocks it over tracked changes', async () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -35,6 +35,10 @@ test('the sync menu offers a rebase pull from the tracking remote and blocks it 
         onFetch={(remote) => calls.push(`fetch:${remote.name}`)}
         onPull={(remote) => calls.push(`pull:${remote.name}`)}
         onSync={(remote) => calls.push(`sync:${remote.name}`)}
+        onPublish={() => calls.push('publish')}
+        onChooseSyncTargets={() => calls.push('choose')}
+        currentBranch="main"
+        hasTracking
         disabled={false}
         aheadCount={1}
         behindCount={2}
@@ -48,7 +52,7 @@ test('the sync menu offers a rebase pull from the tracking remote and blocks it 
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More sync actions"]');
     if (!trigger) throw new Error('Missing menu trigger');
     await act(async () => { trigger.click(); });
-    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.includes('Pull (rebase)'));
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.startsWith('Pull'));
     if (!item) throw new Error('Missing pull item');
     return item;
   };

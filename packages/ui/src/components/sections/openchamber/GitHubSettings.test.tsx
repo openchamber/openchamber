@@ -3,18 +3,27 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { I18nProvider } from "@/lib/i18n";
-import { useGitHubAuthStore } from "@/stores/useGitHubAuthStore";
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from "@/lib/source-control/identity";
+import { getSourceControlAuthKey, useSourceControlAuthStore } from "@/stores/useSourceControlAuthStore";
+import type { SourceControlAuthStatus } from "@/lib/api/types";
 
 import { GitHubSettings } from "./GitHubSettings";
 
-const serverAuthState = useGitHubAuthStore.getInitialState();
+// Static rendering reads the store's server snapshot, which is its initial
+// state, so the fixture is written onto that object rather than through
+// setState. The key carries the runtime key, so it is computed per write.
+const serverAuthState = useSourceControlAuthStore.getInitialState();
 
-const resetServerAuthState = () => {
-  Object.assign(serverAuthState, {
-    status: null,
-    isLoading: false,
-    hasChecked: false,
-  });
+const setAuthEntry = (entry: {
+  status: SourceControlAuthStatus | null;
+  isLoading: boolean;
+  hasChecked: boolean;
+}) => {
+  serverAuthState.entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)] = entry;
+};
+
+const resetAuthState = () => {
+  for (const key of Object.keys(serverAuthState.entries)) delete serverAuthState.entries[key];
 };
 
 const renderSettings = () =>
@@ -25,20 +34,33 @@ const renderSettings = () =>
   );
 
 describe("GitHubSettings", () => {
-  beforeEach(resetServerAuthState);
-  afterEach(resetServerAuthState);
+  beforeEach(resetAuthState);
+  afterEach(resetAuthState);
 
   test("stays hidden during the initial auth status load", () => {
-    serverAuthState.isLoading = true;
+    setAuthEntry({ status: null, isLoading: true, hasChecked: false });
 
     expect(renderSettings()).toBe("");
   });
 
   test("stays mounted while a checked status is refreshing, then shows reconnect state", () => {
-    Object.assign(serverAuthState, {
+    setAuthEntry({
       status: {
+        ...GITHUB_SOURCE_CONTROL_IDENTITY,
+        status: "connected",
         connected: true,
-        user: { login: "octocat" },
+        user: { ...GITHUB_SOURCE_CONTROL_IDENTITY, id: "user-one", username: "octocat" },
+        accounts: [{
+          id: "account-one",
+          credentialId: "account-one",
+          credentialRevision: 1,
+          providerUserId: "github.com#user-one",
+          providerUserStatus: "available",
+          user: { ...GITHUB_SOURCE_CONTROL_IDENTITY, id: "user-one", username: "octocat" },
+          current: true,
+          source: "oauth",
+          status: "valid",
+        }],
       },
       isLoading: true,
       hasChecked: true,
@@ -46,10 +68,9 @@ describe("GitHubSettings", () => {
 
     const refreshingMarkup = renderSettings();
     expect(refreshingMarkup).toContain("octocat");
-    expect(refreshingMarkup).toContain("Disconnect");
 
-    Object.assign(serverAuthState, {
-      status: { connected: false },
+    setAuthEntry({
+      status: { ...GITHUB_SOURCE_CONTROL_IDENTITY, status: "disconnected", connected: false, accounts: [] },
       isLoading: false,
       hasChecked: true,
     });

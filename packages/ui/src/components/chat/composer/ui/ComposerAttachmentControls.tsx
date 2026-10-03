@@ -7,6 +7,7 @@
  * open.
  */
 
+import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
@@ -27,6 +28,8 @@ type ComposerAttachmentControlsProps = {
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
     openGitHubPicker: () => void;
+    /** The host the project's issues and change requests come from. */
+    repositoryProvider?: SourceControlProvider;
     showLinearPicker?: boolean;
     openLinearPicker?: () => void;
     onOpenSettings?: () => void;
@@ -50,6 +53,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         iconSizeClass,
         handlePickLocalFiles,
         openGitHubPicker,
+        repositoryProvider = 'github',
         showLinearPicker,
         openLinearPicker,
         onOpenSettings,
@@ -117,8 +121,8 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                     requestAnimationFrame(openGitHubPicker);
                                 }}
                             >
-                                <Icon name="github"/>
-                                {t('chat.chatInput.actions.linkGithub')}
+                                <Icon name={repositoryProvider === 'gitlab' ? 'gitlab' : 'github'}/>
+                                {t(repositoryProvider === 'gitlab' ? 'chat.chatInput.actions.linkGitlab' : 'chat.chatInput.actions.linkGithub')}
                             </DropdownMenuItem>
                             {showLinearPicker && openLinearPicker ? (
                                 <DropdownMenuItem

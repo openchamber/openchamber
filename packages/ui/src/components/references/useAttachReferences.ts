@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n';
 
 import type { ReferencePickerConfirmFailure } from './ReferencePickerDialog';
 import type { ReferencePickerSelection } from './referencePickerItems';
-import { readLinearIssueDetail } from './referenceSources';
+import { readLinearIssueDetail, useGitHubReadContext } from './referenceSources';
 import { resolveComposerReferences } from './resolveComposerReferences';
 
 /**
@@ -18,12 +18,13 @@ export function useAttachReferences(
     directory: string | null,
     onAttach: (references: ComposerReference[]) => void,
 ): (selections: ReferencePickerSelection[]) => Promise<ReferencePickerConfirmFailure | null> {
-    const { github, linear } = useRuntimeAPIs();
+    const { sourceControl, linear } = useRuntimeAPIs();
+    const githubContext = useGitHubReadContext(directory);
     const { t } = useI18n();
     return React.useCallback(async (selections) => {
         const resolved = await resolveComposerReferences(selections, {
-            github,
-            directory,
+            sourceControl,
+            context: githubContext && githubContext !== 'missing' ? githubContext : null,
             readLinearDetail: (issueId) => (linear
                 ? readLinearIssueDetail(linear, issueId)
                 : Promise.reject(new Error('Linear is not available here'))),
@@ -37,5 +38,5 @@ export function useAttachReferences(
                 error: resolved.failures[0]?.error ?? '',
             }),
         };
-    }, [directory, github, linear, onAttach, t]);
+    }, [githubContext, linear, onAttach, sourceControl, t]);
 }

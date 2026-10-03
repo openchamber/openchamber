@@ -1,6 +1,8 @@
 import { processFile } from '@pierre/diffs';
 import { z } from 'zod';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import type { SourceControlReadContext } from '@/lib/source-control/types';
+import { buildTargetQuery } from '@/lib/walkthrough/api';
 import type { WalkthroughSource } from '@/lib/walkthrough/types';
 
 export type PullRequestSource = Extract<WalkthroughSource, { kind: 'pr' }>;
@@ -31,9 +33,9 @@ async function throwPullRequestError(response: Response, fallback: string): Prom
   throw new Error(error.success ? error.data.error : `${fallback} (${response.status})`);
 }
 
-export async function fetchPullRequestDiff(directory: string, source: PullRequestSource) {
+export async function fetchPullRequestDiff(directory: string, source: PullRequestSource, context: Readonly<SourceControlReadContext>) {
   const response = await runtimeFetch('/api/walkthrough/pr-diff', {
-    query: { directory, source: JSON.stringify(source) },
+    query: buildTargetQuery(directory, { source, context }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) await throwPullRequestError(response, 'Failed to load pull request diff');
@@ -47,10 +49,16 @@ const pullRequestFileSchema = z.object({ original: z.string(), modified: z.strin
 export async function fetchPullRequestFile(
   directory: string,
   source: PullRequestSource,
+  context: Readonly<SourceControlReadContext>,
   file: { path: string; previousPath?: string; status: string },
 ) {
   const response = await runtimeFetch('/api/walkthrough/pr-file', {
-    query: { directory, source: JSON.stringify(source), path: file.path, previousPath: file.previousPath ?? '', status: file.status },
+    query: {
+      ...buildTargetQuery(directory, { source, context }),
+      path: file.path,
+      previousPath: file.previousPath ?? '',
+      status: file.status,
+    },
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) await throwPullRequestError(response, 'Failed to load pull request file');

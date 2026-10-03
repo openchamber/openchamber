@@ -20,12 +20,14 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
+import { formatChangeRequestReference, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
+import { waitForWorktreeBootstrap } from '@/lib/worktrees/worktreeBootstrap';
 import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getProjectSetup } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -37,13 +39,15 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
-import { readLinearIssueDetail } from '@/components/references/referenceSources';
+import { readLinearIssueDetail, useGitHubReadContext } from '@/components/references/referenceSources';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
 import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
 import { useInputStore } from '@/sync/input-store';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { Icon } from "@/components/icon/Icon";
-import type { GitHubPullRequestSummary } from '@/lib/api/types';
+import type { SourceControlReadContext } from '@/lib/api/types';
+import { resolvePrWorktreeConfig, type PrWorktreeSource } from './prWorktreeConfig';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { useI18n } from '@/lib/i18n';
 
@@ -70,7 +74,14 @@ interface BranchDraft {
  * handed to the new draft's composer as a chip.
  */
 type LinkedItem =
-  | { kind: 'pr'; pr: GitHubPullRequestSummary; includeDiff: boolean; selection: ReferencePickerSelection }
+  | {
+    kind: 'pr';
+    pr: PrWorktreeSource & { title: string; url: string };
+    /** The account and repository the PR's branch is fetched through. */
+    context: SourceControlReadContext;
+    includeDiff: boolean;
+    selection: ReferencePickerSelection;
+  }
   | { kind: 'issue'; number: number; title: string; url: string; selection: ReferencePickerSelection }
   | { kind: 'linear'; identifier: string; title: string; url: string; selection: ReferencePickerSelection }
   | { kind: 'guest'; guest: AttachIssueRequest };
@@ -89,80 +100,6 @@ const normalizeBranchName = (value: string): string => {
     .replace(/^heads\//, '')
     .replace(/\s+/g, '-')
     .replace(/^\/+|\/+$/g, '');
-};
-
-const sanitizeRemoteName = (value: string): string => {
-  const normalized = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-  return normalized || 'pr-head';
-};
-
-const resolvePrWorktreeConfig = (pr: GitHubPullRequestSummary, localBranches: string[], remoteBranches: string[]) => {
-  const headBranch = normalizeBranchName(pr.head || '');
-  if (!headBranch) {
-    throw new Error('PR head branch is missing');
-  }
-
-  if (localBranches.includes(headBranch)) {
-    return {
-      existingBranch: headBranch,
-      setUpstream: undefined,
-      upstreamRemote: undefined,
-      upstreamBranch: undefined,
-      ensureRemoteName: undefined,
-      ensureRemoteUrl: undefined,
-      sourceLabel: headBranch,
-    };
-  }
-
-  const availableRemoteBranch = remoteBranches.find((remoteBranch) => {
-    const slashIndex = remoteBranch.indexOf('/');
-    if (slashIndex <= 0 || slashIndex >= remoteBranch.length - 1) {
-      return false;
-    }
-    return remoteBranch.slice(slashIndex + 1) === headBranch;
-  });
-
-  if (availableRemoteBranch) {
-    const slashIndex = availableRemoteBranch.indexOf('/');
-    const remoteName = availableRemoteBranch.slice(0, slashIndex);
-    return {
-      existingBranch: `remotes/${availableRemoteBranch}`,
-      setUpstream: true as const,
-      upstreamRemote: remoteName,
-      upstreamBranch: headBranch,
-      ensureRemoteName: undefined,
-      ensureRemoteUrl: undefined,
-      sourceLabel: `${remoteName}/${headBranch}`,
-    };
-  }
-
-  const ownerFromLabel = String(pr.headLabel || '').split(':')[0]?.trim();
-  const remoteSeed = pr.headRepo?.owner || ownerFromLabel || 'pr-head';
-  const remoteName = `pr-${sanitizeRemoteName(remoteSeed)}`;
-  // Prefer HTTPS so anonymous public fetches do not require SSH agent setup.
-  const remoteUrl = pr.headRepo?.cloneUrl || pr.headRepo?.sshUrl || '';
-
-  if (!remoteUrl) {
-    throw new Error(
-      'PR head repository URL is unavailable. The fork may have been deleted; '
-      + 'push the branch to a reachable repository and try again.'
-    );
-  }
-
-  return {
-    existingBranch: `remotes/${remoteName}/${headBranch}`,
-    setUpstream: true as const,
-    upstreamRemote: remoteName,
-    upstreamBranch: headBranch,
-    ensureRemoteName: remoteName,
-    ensureRemoteUrl: remoteUrl,
-    sourceLabel: `${remoteName}/${headBranch}`,
-  };
 };
 
 const slugifyWorktreeName = (value: string): string => {
@@ -195,10 +132,12 @@ export function NewWorktreeDialog({
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
-  const { github, git, linear } = useRuntimeAPIs();
+  const { sourceControl, git, linear } = useRuntimeAPIs();
+  const trustConfirmation = useConfirmDialog();
   const isMobile = useUIStore((state) => state.isMobile);
-  const githubAuthStatus = useGitHubAuthStore((state) => state.status);
-  const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
+  const githubAuthEntry = useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY);
+  const githubAuthStatus = githubAuthEntry?.status ?? null;
+  const githubAuthChecked = githubAuthEntry?.hasChecked ?? false;
   const linearAuthStatus = useLinearAuthStore((state) => state.status);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const guestAttachItems = useGuestAttachItems();
@@ -288,6 +227,8 @@ export function NewWorktreeDialog({
   const initializedForCurrentOpen = React.useRef(false);
 
   const linkedPr = mode === 'from-item' && linked?.kind === 'pr' ? linked.pr : null;
+  const linkedPrContext = mode === 'from-item' && linked?.kind === 'pr' ? linked.context : null;
+  const githubContext = useGitHubReadContext(open ? projectDirectory : null);
   // The fields the visible tab edits.
   const draft = mode === 'from-item' ? itemBranch : newBranch;
   const setDraft = mode === 'from-item' ? setItemBranch : setNewBranch;
@@ -378,15 +319,17 @@ export function NewWorktreeDialog({
       let worktreeError: string | null = normalizedWorktree ? null : t('session.newWorktree.error.worktreeDirectoryRequired');
 
       if (normalizedBranch && normalizedWorktree) {
-        const prConfig = linkedPr ? resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches) : null;
+        const prConfig = linkedPr && linkedPrContext
+          ? resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {})
+          : null;
         const validateArgs: CreateWorktreeArgs = {
           mode: mode === 'existing-branch' || prConfig ? 'existing' : 'new',
           branchName: normalizedBranch,
           worktreeName: normalizedWorktree,
           existingBranch: prConfig?.existingBranch ?? (mode === 'existing-branch' ? normalizedBranch : undefined),
         };
-        if (prConfig?.ensureRemoteName) validateArgs.ensureRemoteName = prConfig.ensureRemoteName;
-        if (prConfig?.ensureRemoteUrl) validateArgs.ensureRemoteUrl = prConfig.ensureRemoteUrl;
+        if (prConfig?.expectedRevision) validateArgs.expectedRevision = prConfig.expectedRevision;
+        if (prConfig?.changeRequestSource) validateArgs.changeRequestSource = prConfig.changeRequestSource;
         const result = await validateWorktreeCreate(projectRef, validateArgs);
         if (abortController.signal.aborted) return;
         if (!result.ok) {
@@ -416,8 +359,8 @@ export function NewWorktreeDialog({
     branchName,
     worktreeName,
     linkedPr,
-    localBranches,
-    remoteBranches,
+    linkedPrContext,
+    branches?.branches,
     validation.touched,
     validationAbortController,
     isCreating,
@@ -442,8 +385,8 @@ export function NewWorktreeDialog({
       return;
     }
     void resolveComposerReferences([item.selection], {
-      github,
-      directory: projectDirectory,
+      sourceControl,
+      context: item.kind === 'pr' ? item.context : (githubContext && githubContext !== 'missing' ? githubContext : null),
       readLinearDetail: (issueId) => (linear
         ? readLinearIssueDetail(linear, issueId)
         : Promise.reject(new Error('Linear is not available here'))),
@@ -492,23 +435,22 @@ export function NewWorktreeDialog({
       let sourceLabel = '';
       const args: CreateWorktreeArgs = (() => {
         if (linkedPr) {
-          const prConfig = resolvePrWorktreeConfig(linkedPr, localBranches, remoteBranches);
+          if (!linkedPrContext) throw new Error(t('session.newWorktree.error.changeRequestAuthorityMissing'));
+          // The server fetches the PR's head through the repository's account
+          // and checks it is still the revision the picker showed.
+          const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {});
           sourceLabel = prConfig.sourceLabel;
-          const prArgs: CreateWorktreeArgs = {
+          return {
             preferredName: normalizedBranch || normalizedWorktree,
             mode: 'existing',
             branchName: normalizedBranch,
             worktreeName: normalizedWorktree,
             existingBranch: prConfig.existingBranch,
             setupCommands: resolvedSetupCommands,
-            setUpstream: prConfig.setUpstream,
-            upstreamRemote: prConfig.upstreamRemote,
-            upstreamBranch: prConfig.upstreamBranch,
             returnAfterDirectoryCreated: true,
+            expectedRevision: prConfig.expectedRevision,
+            changeRequestSource: prConfig.changeRequestSource,
           };
-          if (prConfig.ensureRemoteName) prArgs.ensureRemoteName = prConfig.ensureRemoteName;
-          if (prConfig.ensureRemoteUrl) prArgs.ensureRemoteUrl = prConfig.ensureRemoteUrl;
-          return prArgs;
         }
 
         sourceLabel = startsNewBranch ? sourceBranch : '';
@@ -526,6 +468,21 @@ export function NewWorktreeDialog({
       })();
 
       const metadata = await createWorktreeWithDefaults(projectRef, args);
+
+      // A contributor's fork may carry hooks or setup commands; they run only
+      // when the user says so, after the checkout is ready.
+      if (metadata.provenance?.kind === 'contributor-fork') {
+        await waitForWorktreeBootstrap(metadata.path);
+        const trust = await git.inspectCheckoutTrust(metadata.path);
+        if (trust.actions.length > 0) {
+          const run = await trustConfirmation.confirm({
+            title: t('session.newWorktree.trust.title'),
+            message: t('session.newWorktree.trust.confirmation', { actions: trust.actions.map((action) => action.label).join('\n') }),
+            action: t('session.newWorktree.trust.run'),
+          });
+          await git.decideCheckoutTrust(metadata.path, trust.digest, run ? 'run' : 'skip');
+        }
+      }
 
       onOpenChange(false);
       setIsCreating(false);
@@ -594,20 +551,23 @@ export function NewWorktreeDialog({
         return failure(t('session.githubIntegration.validation.failed'));
       }
     }
-    const pr: GitHubPullRequestSummary = {
+    if (!githubContext || githubContext === 'missing') {
+      return { failedKeys: [referencePickerItemKey(choice)], message: t('session.newWorktree.error.changeRequestAuthorityMissing') };
+    }
+    const pr: PrWorktreeSource & { title: string; url: string } = {
       number: reference.number,
       title: reference.title,
       url: reference.url,
-      state: reference.state,
-      draft: reference.draft,
-      base: reference.base,
       head: reference.head,
       headSha: reference.headSha,
-      author: reference.author,
-      headRepo: reference.headRepo,
-      sourceRepo: reference.sourceRepo,
+      headProject: reference.headRepo ? { owner: reference.headRepo.owner } : null,
+      project: {
+        id: reference.projectId ?? `${reference.sourceRepo.owner}/${reference.sourceRepo.repo}`,
+        owner: reference.sourceRepo.owner,
+        name: reference.sourceRepo.repo,
+      },
     };
-    linkItem({ kind: 'pr', pr, includeDiff: choice.includeDiff, selection: choice }, reference.head);
+    linkItem({ kind: 'pr', pr, context: githubContext, includeDiff: choice.includeDiff, selection: choice }, reference.head);
     return null;
   };
 
@@ -624,8 +584,12 @@ export function NewWorktreeDialog({
   };
 
   const isGitHubConnected = githubAuthChecked && githubAuthStatus?.connected === true;
+  // A GitLab project lists its issues and merge requests in the same picker,
+  // read with the account its context names.
+  const isGitLabProject = githubContext !== null && githubContext !== 'missing' && githubContext.provider === 'gitlab';
+  const isRepositoryConnected = isGitHubConnected || isGitLabProject;
   const isLinearConnected = Boolean(linear) && linearAuthChecked && linearAuthStatus?.connected === true;
-  const canLinkItems = isGitHubConnected || isLinearConnected || dialogGuests.length > 0;
+  const canLinkItems = isRepositoryConnected || isLinearConnected || dialogGuests.length > 0;
 
   const isFormValid = Boolean(normalizeBranchName(branchName))
     && Boolean(slugifyWorktreeName(worktreeName))
@@ -653,7 +617,9 @@ export function NewWorktreeDialog({
 
   // Where the chosen item comes from: one source opens straight away, several ask which.
   const itemSources = [
-    ...(isGitHubConnected ? [{ id: 'github', name: 'GitHub', label: t('session.newWorktree.actions.startFromGitHubIssuePr'), icon: <Icon name="github" className="size-4 shrink-0" />, open: () => setReferencePickerSource('github') }] : []),
+    ...(isRepositoryConnected ? [isGitLabProject
+      ? { id: 'github', name: 'GitLab', label: t('session.newWorktree.actions.startFromGitLabIssueMr'), icon: <Icon name="gitlab" className="size-4 shrink-0" />, open: () => setReferencePickerSource('github') }
+      : { id: 'github', name: 'GitHub', label: t('session.newWorktree.actions.startFromGitHubIssuePr'), icon: <Icon name="github" className="size-4 shrink-0" />, open: () => setReferencePickerSource('github') }] : []),
     ...(isLinearConnected ? [{ id: 'linear', name: 'Linear', label: t('session.newWorktree.actions.startFromLinearIssue'), icon: <Icon name="linear" className="size-4 shrink-0" />, open: () => setReferencePickerSource('linear') }] : []),
     ...dialogGuests.map((guest) => ({
       id: guest.id,
@@ -670,9 +636,9 @@ export function NewWorktreeDialog({
     : undefined;
   const linkedView = linked
     ? linked.kind === 'pr'
-      ? { id: t('session.newWorktree.prNumber', { number: linked.pr.number }), title: linked.pr.title, url: linked.pr.url, icon: <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" /> }
+      ? { id: linked.context.provider === 'gitlab' ? formatChangeRequestReference('gitlab', linked.pr.number) : t('session.newWorktree.prNumber', { number: linked.pr.number }), title: linked.pr.title, url: linked.pr.url, icon: <Icon name="git-pull-request" className="size-4 shrink-0 text-muted-foreground" /> }
       : linked.kind === 'issue'
-        ? { id: t('session.newWorktree.issueNumber', { number: linked.number }), title: linked.title, url: linked.url, icon: <Icon name="github" className="size-4 shrink-0 text-muted-foreground" /> }
+        ? { id: t('session.newWorktree.issueNumber', { number: linked.number }), title: linked.title, url: linked.url, icon: <Icon name={isGitLabProject ? 'gitlab' : 'github'} className="size-4 shrink-0 text-muted-foreground" /> }
         : linked.kind === 'linear'
           ? { id: linked.identifier, title: linked.title, url: linked.url, icon: <Icon name="linear" className="size-4 shrink-0 text-muted-foreground" /> }
           : { id: linked.guest.id, title: linked.guest.title, url: linked.guest.url, icon: <GuestIcon icon={linkedGuestEntry?.icon ?? 'window'} iconSrc={linkedGuestEntry?.iconSrc} className="size-4 shrink-0" /> }
@@ -944,6 +910,7 @@ export function NewWorktreeDialog({
         onAttach={handleGuestSelect}
         onSessionStarted={() => onOpenChange(false)}
       />
+      {trustConfirmation.dialog}
     </>
   );
 }

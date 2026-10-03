@@ -6,7 +6,8 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
 import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, getGitHubThreadRef, isLinkedChange } from '@/lib/linkedIssues';
 import { useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGitHubPrStatusStore';
-import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
 import { getPrStatusLabel } from '@/components/session/sidebar/prStatusLabel';
 import { getIssueStateLook, getLinearIssueStateLook } from '@/components/session/sidebar/sessions/sessionPrSummaries';
@@ -46,7 +47,7 @@ type Props = {
  */
 export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
-  const { linear, github } = useRuntimeAPIs();
+  const { linear, sourceControl } = useRuntimeAPIs();
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const mobileActions = useMobileAppActions();
   const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
@@ -166,7 +167,9 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   // Live state of the linked GitHub PRs and issues, from the same batched
   // summaries the sidebar uses. This panel asks for its own session too: the
   // session need not be on screen in the sidebar.
-  const githubConnected = useGitHubAuthStore((state) => Boolean(state.hasChecked && state.status?.connected));
+  const githubConnected = useSourceControlAuthStore(
+    (state) => state.entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)]?.status?.connected === true,
+  );
   const linkedPrs = React.useMemo(() => getLinkedGitHubPullRequests(session), [session]);
   const linkedPrRefs = React.useMemo(
     () => linkedPrs.map((link) => ({ owner: link.owner, repo: link.repo, number: link.number })),
@@ -176,7 +179,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     () => getLinkedSidebarIssues(session).flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
     [session],
   );
-  useOpenPrSummarySync(EMPTY_KEYS, linkedPrRefs, linkedIssueRefs, github, githubConnected);
+  useOpenPrSummarySync(EMPTY_KEYS, linkedPrRefs, linkedIssueRefs, sourceControl, githubConnected);
   const linkedPrSummaries = useLinkedPrVisualSummaries(linkedPrs);
   const linkedIssueStates = useLinkedIssueStates(linkedIssueRefs);
   const linkedLinearIdentifiers = React.useMemo(

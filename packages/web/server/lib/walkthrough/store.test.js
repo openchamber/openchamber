@@ -40,6 +40,15 @@ const baseKeyInput = {
   modelID: 'claude-haiku-4-5',
   files: files(),
 };
+const readContext = {
+  provider: 'github',
+  instance: 'github.com',
+  accountId: 'github.com#7',
+  repositoryId: 'repo-1',
+  bindingRevision: 4,
+  directory: '/repo',
+  primaryRemote: 'upstream',
+};
 
 const entry = (cacheKey) => ({
   cacheKey,
@@ -77,6 +86,26 @@ describe('buildCacheKey', () => {
     expect(buildCacheKey({ ...baseKeyInput, sourceKey: 'working-tree:staged' })).not.toBe(original);
     expect(buildCacheKey({ ...baseKeyInput, modelID: 'other-model' })).not.toBe(original);
     expect(buildCacheKey({ ...baseKeyInput, providerID: 'google' })).not.toBe(original);
+  });
+
+  it('separates every immutable pull request read identity field', () => {
+    const original = buildCacheKey({ ...baseKeyInput, sourceKey: 'pr:22', readContext });
+    for (const [field, value] of Object.entries({
+      provider: 'gitlab',
+      instance: 'github.example.com',
+      accountId: 'github.com#8',
+      repositoryId: 'repo-2',
+      bindingRevision: 5,
+      directory: '/worktree',
+      primaryRemote: 'origin',
+    })) {
+      expect(buildCacheKey({
+        ...baseKeyInput,
+        sourceKey: 'pr:22',
+        readContext: { ...readContext, [field]: value },
+      })).not.toBe(original);
+    }
+    expect(buildCacheKey({ ...baseKeyInput, sourceKey: 'pr:23', readContext })).not.toBe(original);
   });
 });
 
@@ -159,6 +188,15 @@ describe('pointers', () => {
 
     expect(readPointer('/repo-a', 'working-tree:all').cacheKey).toBe('a');
     expect(readPointer('/repo-b', 'working-tree:all').cacheKey).toBe('b');
+  });
+
+  it('does not consult an unscoped pointer for a scoped pull request read', () => {
+    writePointer('/repo', 'pr:22', { repoRoot: '/repo', cacheKey: 'legacy' });
+    expect(readPointer('/repo', 'pr:22', readContext)).toBeNull();
+
+    writePointer('/repo', 'pr:22', { repoRoot: '/repo', cacheKey: 'scoped' }, readContext);
+    expect(readPointer('/repo', 'pr:22', readContext)).toMatchObject({ cacheKey: 'scoped', readContext });
+    expect(readPointer('/repo', 'pr:22', { ...readContext, accountId: 'github.com#8' })).toBeNull();
   });
 
   it('prunes only pointers whose repository is gone', async () => {

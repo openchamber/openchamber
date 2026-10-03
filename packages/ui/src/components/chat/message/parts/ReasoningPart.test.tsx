@@ -37,6 +37,7 @@ const runtimeApis: RuntimeAPIs = {
   get settings() { return unavailable(); },
   get permissions() { return unavailable(); },
   get notifications() { return unavailable(); },
+  get sourceControl() { return unavailable(); },
 };
 const sdk = OpenCode.make({
   baseUrl: 'http://localhost',
