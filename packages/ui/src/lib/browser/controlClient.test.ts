@@ -84,6 +84,7 @@ describe('opening a page before any view exists', () => {
       tabId: 'tab-new',
       viewportApplied: true,
       viewport: { mode: 'mobile', width: 390, height: 844 },
+      drivable: false,
     });
   });
 
@@ -129,7 +130,19 @@ describe('opening a page before any view exists', () => {
     emitOpen({ url: 'https://example.test' });
     await wait(20);
 
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new' });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: false });
+  });
+
+  test('on a driving host, an open reports that the page can be driven', async () => {
+    // Only an Electron renderer can drive the page it shows.
+    Object.defineProperty(globalThis, 'window', { value: { __OPENCHAMBER_ELECTRON__: {} }, configurable: true, writable: true });
+    cleanups.push(() => Reflect.deleteProperty(globalThis, 'window'));
+    cleanups.push(registerBrowserOpener(() => 'tab-new'));
+
+    emitOpen({ url: 'https://example.test' });
+    await wait(20);
+
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'tab-new', drivable: true });
   });
 
   test('says the layout was not applied when no view ever appears', async () => {
@@ -235,7 +248,7 @@ describe('choosing the tab an action runs in', () => {
 
     expect(ran).toEqual([]);
     expect(opened).toEqual(['https://example.test']);
-    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'agent-tab' });
+    expect(posted[0]?.data).toEqual({ url: 'https://example.test', opened: true, tabId: 'agent-tab', drivable: false });
   });
 
   test('navigates the named tab when browser.open gives one', async () => {
