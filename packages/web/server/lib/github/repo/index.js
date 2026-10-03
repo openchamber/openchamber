@@ -1,46 +1,40 @@
 import { getRemoteUrl } from '../../git/index.js';
 
 export const parseGitHubRemoteUrl = (raw) => {
-  if (typeof raw !== 'string') {
-    return null;
-  }
-  const value = raw.trim();
+  // Coerce at the I/O boundary: git always passes a string remote, but callers
+  // may hand us null/undefined. Non-strings coerce to a form the remote
+  // patterns below cannot match, so they fall through to null.
+  const value = String(raw ?? '').trim();
   if (!value) {
     return null;
   }
 
-  // git@github.com:OWNER/REPO.git
-  if (value.startsWith('git@github.com:')) {
-    const rest = value.slice('git@github.com:'.length);
-    const cleaned = rest.endsWith('.git') ? rest.slice(0, -4) : rest;
-    const [owner, repo] = cleaned.split('/');
-    if (!owner || !repo) return null;
-    return { owner, repo, url: `https://github.com/${owner}/${repo}` };
-  }
+  let host = null;
+  let rest = null;
 
-  // ssh://git@github.com/OWNER/REPO.git
-  if (value.startsWith('ssh://git@github.com/')) {
-    const rest = value.slice('ssh://git@github.com/'.length);
-    const cleaned = rest.endsWith('.git') ? rest.slice(0, -4) : rest;
-    const [owner, repo] = cleaned.split('/');
-    if (!owner || !repo) return null;
-    return { owner, repo, url: `https://github.com/${owner}/${repo}` };
-  }
-
-  // https://github.com/OWNER/REPO(.git)
-  try {
-    const url = new URL(value);
-    if (url.hostname !== 'github.com') {
+  // scp-style remote: git@HOST:OWNER/REPO(.git)
+  const scp = value.match(/^git@([^:/\s]+):(.+)$/);
+  if (scp) {
+    host = scp[1];
+    rest = scp[2].includes(':') ? null : scp[2];
+  } else {
+    // URI-style remote: ssh://git@HOST/... or http(s)://HOST/...
+    try {
+      const url = new URL(value);
+      const sshGit = url.protocol === 'ssh:' && url.username === 'git';
+      if (sshGit || url.protocol === 'https:' || url.protocol === 'http:') {
+        host = url.hostname;
+        rest = url.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
+      }
+    } catch {
       return null;
     }
-    const path = url.pathname.replace(/^\/+/, '').replace(/\/+$/, '');
-    const cleaned = path.endsWith('.git') ? path.slice(0, -4) : path;
-    const [owner, repo] = cleaned.split('/');
-    if (!owner || !repo) return null;
-    return { owner, repo, url: `https://github.com/${owner}/${repo}` };
-  } catch {
-    return null;
   }
+
+  if (!host || !rest) return null;
+  const [owner, repo] = rest.replace(/\.git$/, '').split('/');
+  if (!owner || !repo) return null;
+  return { owner, repo, host, url: `https://${host}/${owner}/${repo}` };
 };
 
 export async function resolveGitHubRepoFromDirectory(directory, remoteName = 'origin') {

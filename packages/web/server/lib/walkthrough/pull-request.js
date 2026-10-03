@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { resolveGitHubRepoFromDirectory } from '../github/repo/index.js';
 
 async function resolvePullRequestRepo(directory, sourceRepo) {
-  const octokit = getOctokitOrNull();
+  // The host comes from the local checkout, not the pull request: sourceRepo
+  // carries only owner/repo (the upstream for a fork), never the enterprise
+  // host. Resolve the directory first so the Octokit pairs that host with the
+  // token for that host instead of defaulting to github.com.
+  const { repo: dirRepo } = await resolveGitHubRepoFromDirectory(directory);
+  const octokit = getOctokitOrNull(dirRepo?.host);
   if (!octokit) {
     throw Object.assign(new Error('Connect a GitHub account to review pull requests'), {
       statusCode: 401,
@@ -13,8 +18,7 @@ async function resolvePullRequestRepo(directory, sourceRepo) {
 
   // The resolver returns `{ repo, remoteUrl }`, not the repo itself. Reading
   // `.owner` off the wrapper made this check fail for every repository.
-  const resolved = sourceRepo ? { repo: sourceRepo } : await resolveGitHubRepoFromDirectory(directory);
-  const { repo } = resolved;
+  const { repo } = sourceRepo ? { repo: sourceRepo } : { repo: dirRepo };
   if (!repo?.owner || !repo?.repo) {
     throw Object.assign(new Error('This directory has no GitHub remote'), {
       statusCode: 400,
@@ -32,6 +36,11 @@ async function resolvePullRequestRepo(directory, sourceRepo) {
  * base branch is not part of it.
  */
 export async function getPullRequestDiff(directory, number, sourceRepo, { allowEmpty = false } = {}) {
+  // The host comes from the local checkout, not the pull request: sourceRepo
+  // carries only owner/repo (the upstream for a fork), never the enterprise
+  // host. resolvePullRequestRepo resolves the directory first so the Octokit
+  // pairs that host with the token for that host instead of defaulting to
+  // github.com.
   const { octokit, repo } = await resolvePullRequestRepo(directory, sourceRepo);
 
   const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
