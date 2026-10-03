@@ -853,7 +853,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     return div;
   }, [showLinesBelowLabel]);
 
-  const captureHunkTargets = useCallback<NonNullable<FileDiffOptions<DiffAnnotation>['onPostRender']>>((node, instance, phase) => {
+  const captureHunkTargets = useCallback<NonNullable<FileDiffOptions<DiffAnnotation, undefined>['onPostRender']>>((node, instance, phase) => {
     const targets = new Map<number, HTMLElement>();
     if (phase !== 'unmount') {
       const capsuleHeight = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 2;
@@ -1155,7 +1155,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
   const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
   const instanceWorkerPoolRef = useRef<unknown>(null);
-  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation>['hunkSeparators'] | undefined>(undefined);
+  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<DiffAnnotation, undefined>['hunkSeparators'] | undefined>(undefined);
   const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
   const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
@@ -1246,7 +1246,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [darkResolvedTheme, diffThemeKey, isDark, lightResolvedTheme]);
 
 
-  const options = useMemo<FileDiffOptions<DiffAnnotation>>(() => ({
+  const options = useMemo<FileDiffOptions<DiffAnnotation, undefined>>(() => ({
     theme: {
       dark: darkTheme.metadata.id,
       light: lightTheme.metadata.id,
