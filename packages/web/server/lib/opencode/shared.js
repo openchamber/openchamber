@@ -13,6 +13,7 @@ import {
   SyntaxKind,
 } from 'jsonc-parser';
 import { readSectionEntry, readMcpEntry } from './config-v2.js';
+import { resolveWorktreeDirectory } from './worktree-directory.js';
 
 // ============== PATH CONSTANTS ==============
 
@@ -333,6 +334,18 @@ function readConfigLayers(workingDirectory) {
 
 function readConfig(workingDirectory) {
   return readConfigLayers(workingDirectory).mergedConfig;
+}
+
+/**
+ * The parent directory OpenCode would create a worktree in for this project,
+ * read from the merged OpenCode configuration on the canonical checkout. Keeps
+ * the `worktree.directory` rule in one place (`worktree-directory.js`) and
+ * returns null when the setting is unset, so the caller can fall back to
+ * OpenChamber's data-dir location.
+ */
+function readWorktreeDirectorySetting(workingDirectory, primaryWorktree = workingDirectory) {
+  const { mergedConfig } = readConfigLayers(workingDirectory);
+  return resolveWorktreeDirectory(mergedConfig, primaryWorktree);
 }
 
 function getConfigForPath(layers, targetPath) {
@@ -903,6 +916,7 @@ export {
   isPlainObject,
   readConfigLayers,
   readConfig,
+  readWorktreeDirectorySetting,
   getConfigForPath,
   writeConfig,
   lookupSectionEntry,

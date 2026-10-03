@@ -11,6 +11,8 @@ import * as fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { execGit as executeGit } from './bridge-git-process-runtime';
+import { readConfig } from './opencodeConfig';
+import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
@@ -1280,7 +1282,11 @@ const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string>
   return projectId;
 };
 
-const resolveWorktreeProjectContext = async (directory: string) => {
+const resolveWorktreeProjectContext = async (
+  directory: string,
+  options: { tolerateWorktreeRootConfigError?: boolean } = {},
+) => {
+  const tolerateWorktreeRootConfigError = options.tolerateWorktreeRootConfigError === true;
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath) {
     throw new Error('Directory is required');
@@ -1301,9 +1307,28 @@ const resolveWorktreeProjectContext = async (directory: string) => {
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
   const primaryWorktree = path.dirname(commonDir);
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
-  const worktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  // OpenCode's `worktree.directory` is read from the canonical checkout so a
+  // linked worktree still sees the project's saved configuration. When unset,
+  // worktrees keep landing in the data-dir folder keyed by project ID.
+  const legacyWorktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  // Creation must not guess a folder the user did not choose, so a config read
+  // failure propagates there. Read-only and removal paths pass
+  // `tolerateWorktreeRootConfigError` and fall back to the data-dir root.
+  let configuredWorktreeRoot: string | null = null;
+  try {
+    configuredWorktreeRoot = resolveWorktreeDirectory(readConfig(primaryWorktree), primaryWorktree);
+  } catch (error) {
+    if (!tolerateWorktreeRootConfigError) {
+      throw error;
+    }
+    console.warn(
+      '[GitService] Failed to read OpenCode worktree.directory; using the data-dir worktree root:',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  const worktreeRoot = configuredWorktreeRoot || legacyWorktreeRoot;
 
-  return { projectID, sandbox, primaryWorktree, worktreeRoot };
+  return { projectID, sandbox, primaryWorktree, worktreeRoot, legacyWorktreeRoot };
 };
 
 const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry[]> => {
@@ -2288,7 +2313,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
 
   await waitForActiveWorktreeBootstrap(targetDirectory);
 
-  const context = await resolveWorktreeProjectContext(directory);
+  const context = await resolveWorktreeProjectContext(directory, { tolerateWorktreeRootConfigError: true });
   const deleteLocalBranch = input?.deleteLocalBranch === true;
 
   const targetCanonical = await canonicalPath(targetDirectory);
@@ -2311,12 +2336,22 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
     return null;
   })();
 
-  const removeManagedOrphan = async () => {
-    // Only a leftover directory inside the managed worktree root may be deleted;
-    // an arbitrary unregistered path is never removed recursively.
+  const removeManagedOrphan = async ({ registered }: { registered: boolean }) => {
+    // The data-dir root is ours alone, so any leftover inside it may go. A
+    // configured worktree.directory can be shared (".." is the repository's
+    // parent, holding sibling projects), so there only a directory git had
+    // registered as this project's worktree is deleted; an unregistered one
+    // could be anything.
     const worktreeRootCanonical = await canonicalPath(context.worktreeRoot);
-    const isManagedOrphan = targetCanonical !== worktreeRootCanonical
+    const legacyWorktreeRootCanonical = context.legacyWorktreeRoot
+      ? await canonicalPath(context.legacyWorktreeRoot)
+      : null;
+    const insideLegacyRoot = legacyWorktreeRootCanonical !== null
+      && targetCanonical !== legacyWorktreeRootCanonical
+      && isInsideOrSameDirectory(legacyWorktreeRootCanonical, targetCanonical);
+    const insideConfiguredRoot = targetCanonical !== worktreeRootCanonical
       && isInsideOrSameDirectory(worktreeRootCanonical, targetCanonical);
+    const isManagedOrphan = insideLegacyRoot || (registered && insideConfiguredRoot);
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists && isManagedOrphan) {
       await removeBusyDirectory(targetDirectory);
@@ -2327,7 +2362,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   };
 
   if (!matchedEntry?.worktree) {
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: false });
     clearWorktreeBootstrapState(targetDirectory);
 
     return true;
@@ -2340,7 +2375,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   const removedByGit = await removeGitWorktreeWhenFree(context.primaryWorktree, matchedEntry.worktree, targetCanonical);
   if (!removedByGit) {
     // Git deleted its registration but not the still-locked folder.
-    await removeManagedOrphan();
+    await removeManagedOrphan({ registered: true });
   }
 
   if (deleteLocalBranch) {
@@ -4062,7 +4097,7 @@ export async function canonicalizeWorktreeState(
 
   // Resolve worktree project context (worktreeRoot)
   try {
-    const context = await resolveWorktreeProjectContext(directoryPath);
+    const context = await resolveWorktreeProjectContext(directoryPath, { tolerateWorktreeRootConfigError: true });
     worktreeRoot = await canonicalizePath(context.worktreeRoot);
   } catch {
     worktreeStatus = 'invalid';
