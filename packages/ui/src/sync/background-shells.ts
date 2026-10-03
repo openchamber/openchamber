@@ -17,7 +17,7 @@ import { normalizeProjectPath } from '@/lib/projectResolution';
 // clears commands whose exit fell into a stream gap. Nothing here streams, so
 // consumers subscribe per session or per command without cost.
 
-type TrackedShell = RunningShell & { directory: string };
+export type TrackedShell = RunningShell & { directory: string };
 
 type BackgroundShellsState = {
   byId: ReadonlyMap<string, TrackedShell>;
@@ -159,6 +159,44 @@ export const resetBackgroundShells = (): void => {
   revision = 0;
   touchedAt.clear();
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS });
+};
+
+/**
+ * Which of `sessionIds` are `rootId` itself or one of its subagents, at any
+ * depth, sorted. `parentOf` answers from the session list the caller holds; a
+ * session it does not know ends its chain, so its commands stay out.
+ */
+export const sessionsInTree = (
+  sessionIds: Iterable<string>,
+  rootId: string,
+  parentOf: (sessionId: string) => string | undefined,
+): string[] => {
+  const inTree: string[] = [];
+  for (const sessionId of sessionIds) {
+    const seen = new Set<string>();
+    let current: string | undefined = sessionId;
+    while (current !== undefined && !seen.has(current)) {
+      if (current === rootId) {
+        inTree.push(sessionId);
+        break;
+      }
+      seen.add(current);
+      current = parentOf(current);
+    }
+  }
+  return inTree.sort();
+};
+
+/** Running commands of the given sessions, oldest first. */
+export const shellsOfSessions = (
+  byId: ReadonlyMap<string, TrackedShell>,
+  sessionIds: ReadonlySet<string>,
+): TrackedShell[] => {
+  const shells: TrackedShell[] = [];
+  for (const shell of byId.values()) {
+    if (sessionIds.has(shell.sessionID)) shells.push(shell);
+  }
+  return shells.sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
 };
 
 export const useRunningShell = (shellID: string | undefined): TrackedShell | undefined => (

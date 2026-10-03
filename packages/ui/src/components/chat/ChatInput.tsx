@@ -213,6 +213,7 @@ import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { RevertedMessageDock } from './composer/ui/RevertedMessageDock';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { SessionDoneHintRow } from '@/components/chat/SessionDoneHintRow';
+import { BackgroundShellsStrip } from '@/components/chat/BackgroundShellsStrip';
 import { FormDock } from '@/components/chat/FormDock';
 import { PermissionDock } from '@/components/chat/PermissionDock';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
@@ -3666,10 +3667,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             directory={currentSessionDirectoryForSync ?? currentDirectory}
         />
     ) : null;
+    // Commands the agent left running sit in the same slot, first, so a
+    // forgotten dev server is visible without scrolling the chat. Keyed by
+    // session so an expanded list collapses on a session switch.
+    const backgroundShellsRow = !isBtwActive && !newSessionDraftOpen ? (
+        <BackgroundShellsStrip
+            key={currentSessionId ?? ''}
+            sessionId={currentSessionId}
+            directory={currentSessionDirectoryForSync ?? currentDirectory}
+        />
+    ) : null;
     // Null exactly when the suggestion row alone would have been: the mobile
     // pill picks its shape from whether a top row exists.
-    const composerTopRows = doneHintRow || suggestionRow ? (
+    const composerTopRows = backgroundShellsRow || doneHintRow || suggestionRow ? (
         <>
+            {backgroundShellsRow}
             {doneHintRow}
             {suggestionRow}
         </>

@@ -21,7 +21,6 @@ import type { State } from '@/sync/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -2351,23 +2350,20 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                             )}
                         </div>
                         {background?.onStop ? (
-                            <Tooltip delayDuration={750}>
-                                <TooltipTrigger asChild>
-                                    <button
-                                        type="button"
-                                        onClick={(event) => { event.stopPropagation(); background.onStop?.(); }}
-                                        className={cn(
-                                            'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
-                                            'opacity-60 hover:opacity-100 focus-visible:opacity-100',
-                                        )}
-                                        style={{ color: 'var(--status-error)' }}
-                                        aria-label={t('chat.toolPart.background.stop')}
-                                    >
-                                        <Icon name="stop" className="h-3 w-3" />
-                                    </button>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" sideOffset={6}>{t('chat.toolPart.background.stop')}</TooltipContent>
-                            </Tooltip>
+                            // A labelled red action, the same one the composer's
+                            // background commands strip offers. The negative
+                            // margin keeps the header row at its text height.
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="xs"
+                                onClick={(event) => { event.stopPropagation(); background.onStop?.(); }}
+                                className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                                aria-label={t('chat.toolPart.background.stop')}
+                            >
+                                <Icon name="stop" className="size-3" />
+                                {t('chat.toolPart.background.stopLabel')}
+                            </Button>
                         ) : null}
                     </div>
                 )}

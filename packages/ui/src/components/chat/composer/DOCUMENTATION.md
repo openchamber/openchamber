@@ -70,6 +70,18 @@ creation state, and pending draft, hides the other three. Composer content
 also hides suggestion; new-session drafts hide form, queue and suggestion.
 Hiding the queue does not pause its delivery.
 
+`BackgroundShellsStrip` shares that top-row slot, above the "looks done" hint
+and the suggestion: the background commands of the session and of its
+subagents at any depth (`sessionsInTree` over the global sessions store, a
+subagent missing from it keeps its commands out), each with its command,
+elapsed time and Stop through `opencodeClient.stopBackgroundShell`, the same
+flow as the command's row in the chat. One command is one row; several
+collapse into a count that expands in place, collapsed again on a session
+switch. It shows whether the session runs or idles, and hides in BTW and
+new-session drafts. The elapsed text is a leaf on the shared one-second
+ticker, and the tree is compared as a string, so neither the tick nor
+session-list updates re-render the composer.
+
 The queue header toggles an `aria-expanded` disclosure with the current count.
 Its open/closed state is one persisted preference in `useUIStore`
 (`messageQueueExpanded`, open by default), shared by every session and

@@ -8,6 +8,8 @@ import {
   refreshBackgroundShells,
   replaceDirectoryShells,
   resetBackgroundShells,
+  sessionsInTree,
+  shellsOfSessions,
   useBackgroundShellsStore,
 } from './background-shells';
 
@@ -83,5 +85,35 @@ describe('background shell index', () => {
     applyBackgroundShellEvents('/private/tmp/repo', [started(shell('sh_exited'))]);
     await refreshBackgroundShells('/tmp/repo', async () => ({ directory: '/private/tmp/repo', shells: [] }));
     expect(ids()).toEqual([]);
+  });
+});
+
+describe('commands of a session tree', () => {
+  const parents = new Map<string, string>([
+    ['ses_child', 'ses_root'],
+    ['ses_grandchild', 'ses_child'],
+    ['ses_other_child', 'ses_other'],
+    ['ses_loop_a', 'ses_loop_b'],
+    ['ses_loop_b', 'ses_loop_a'],
+  ]);
+  const parentOf = (id: string) => parents.get(id);
+
+  test('a session and its subagents at any depth, nothing else', () => {
+    const candidates = ['ses_root', 'ses_grandchild', 'ses_child', 'ses_other_child', 'ses_unknown'];
+    expect(sessionsInTree(candidates, 'ses_root', parentOf)).toEqual(['ses_child', 'ses_grandchild', 'ses_root']);
+  });
+
+  test('a parent cycle ends instead of looping', () => {
+    expect(sessionsInTree(['ses_loop_a'], 'ses_root', parentOf)).toEqual([]);
+  });
+
+  test('commands of the chosen sessions, oldest first', () => {
+    applyBackgroundShellEvents('/repo', [
+      started({ ...shell('sh_late', 'ses_child'), startedAt: 3000 }),
+      started({ ...shell('sh_early', 'ses_root'), startedAt: 1000 }),
+      started({ ...shell('sh_foreign', 'ses_other'), startedAt: 2000 }),
+    ]);
+    const picked = shellsOfSessions(useBackgroundShellsStore.getState().byId, new Set(['ses_root', 'ses_child']));
+    expect(picked.map((item) => item.id)).toEqual(['sh_early', 'sh_late']);
   });
 });
