@@ -1,7 +1,9 @@
 import React from 'react';
+import { registerPlugin } from '@capacitor/core';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getClientPlatform } from '@/lib/platform';
+import type { ApnsTokenPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 
 /**
@@ -32,6 +34,36 @@ const getApnsEnvironment = (): 'sandbox' | 'production' | undefined => {
   if (env === 'development') return 'sandbox';
   if (env === 'production') return 'production';
   return undefined;
+};
+
+/**
+ * The key this phone opens sealed push text with. The native shell makes it
+ * once and keeps it where its notification extension (iOS) or messaging
+ * service (Android) can read it; iOS stamps it on the page at document start,
+ * Android answers through the app-local PushKey plugin. Undefined from a shell
+ * that predates it: the server then keeps sending plain text.
+ */
+const PUSH_KEY_PATTERN = /^[A-Za-z0-9+/]{43}=$/;
+
+declare global {
+  interface Window {
+    __OPENCHAMBER_PUSH_KEY__?: string;
+  }
+}
+
+interface PushKeyPlugin {
+  get(): Promise<{ key: string }>;
+}
+
+const PushKey = registerPlugin<PushKeyPlugin>('PushKey');
+
+const getPushKey = async (): Promise<string | undefined> => {
+  const injected = window.__OPENCHAMBER_PUSH_KEY__;
+  if (injected && PUSH_KEY_PATTERN.test(injected)) return injected;
+  // iOS has no PushKey plugin: the call rejects, and the injected key above
+  // is its answer.
+  const key = await PushKey.get().then((result) => result.key).catch(() => undefined);
+  return key && PUSH_KEY_PATTERN.test(key) ? key : undefined;
 };
 
 const isNativePushPlatform = (): boolean => {
@@ -68,11 +100,15 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
 
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
-          const apis = getRegisteredRuntimeAPIs();
-          void apis?.push?.registerApnsToken?.({
-            token: token.value,
-            platform: getClientPlatform(),
-            environment: getApnsEnvironment(),
+          void getPushKey().then((pushKey) => {
+            const apis = getRegisteredRuntimeAPIs();
+            const payload: ApnsTokenPayload = {
+              token: token.value,
+              platform: getClientPlatform(),
+              environment: getApnsEnvironment(),
+            };
+            if (pushKey) payload.pushKey = pushKey;
+            void apis?.push?.registerApnsToken?.(payload);
           });
         });
 

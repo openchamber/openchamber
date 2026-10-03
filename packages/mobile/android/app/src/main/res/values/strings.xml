@@ -4,4 +4,5 @@
     <string name="title_activity_main">OpenChamber</string>
     <string name="package_name">com.openchamber.app</string>
     <string name="custom_url_scheme">com.openchamber.app</string>
+    <string name="sealed_push_channel_name">Agent updates</string>
 </resources>

@@ -1,3 +1,5 @@
+import { sessionKeyFor, withHashedSessionKeys } from './session-key.js';
+
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 const UI_VISIBILITY_TTL_MS = 30_000;
 
@@ -24,6 +26,7 @@ export const createPushRuntime = (deps) => {
 
   let persistPushSubscriptionsLock = Promise.resolve();
   let pushInitialized = false;
+  let legacyKeysScrubQueued = false;
 
   const uiVisibilityByToken = new Map();
   const pruneUiVisibility = (now = Date.now()) => {
@@ -45,10 +48,19 @@ export const createPushRuntime = (deps) => {
         return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
       }
 
-      const subscriptionsBySession =
+      const stored =
         parsed.subscriptionsBySession && typeof parsed.subscriptionsBySession === 'object'
           ? parsed.subscriptionsBySession
           : {};
+      const { bySession: subscriptionsBySession, changed } = withHashedSessionKeys(stored);
+      if (changed && !legacyKeysScrubQueued) {
+        // Rewrite once so raw tokens leave the disk without waiting for the
+        // next subscription change.
+        legacyKeysScrubQueued = true;
+        void persistPushSubscriptionUpdate((current) => current).catch((error) => {
+          console.warn('Failed to rewrite push subscriptions with hashed keys:', error);
+        });
+      }
 
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession };
     } catch (error) {
@@ -62,7 +74,7 @@ export const createPushRuntime = (deps) => {
 
   const writePushSubscriptionsToDisk = async (data) => {
     await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
+    await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   };
 
   const persistPushSubscriptionUpdate = async (mutate) => {
@@ -127,6 +139,7 @@ export const createPushRuntime = (deps) => {
     if (!uiSessionToken) {
       return;
     }
+    const sessionKey = sessionKeyFor(uiSessionToken);
 
     await ensurePushInitialized();
 
@@ -134,7 +147,7 @@ export const createPushRuntime = (deps) => {
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
+      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
 
       const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== subscription.endpoint);
 
@@ -155,7 +168,7 @@ export const createPushRuntime = (deps) => {
               : undefined,
       });
 
-      subsBySession[uiSessionToken] = filtered.slice(0, 10);
+      subsBySession[sessionKey] = filtered.slice(0, 10);
 
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
     });
@@ -163,17 +176,18 @@ export const createPushRuntime = (deps) => {
 
   const removePushSubscription = async (uiSessionToken, endpoint) => {
     if (!uiSessionToken || !endpoint) return;
+    const sessionKey = sessionKeyFor(uiSessionToken);
 
     await ensurePushInitialized();
 
     await persistPushSubscriptionUpdate((current) => {
       const subsBySession = { ...(current.subscriptionsBySession || {}) };
-      const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
+      const existing = Array.isArray(subsBySession[sessionKey]) ? subsBySession[sessionKey] : [];
       const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
       if (filtered.length === 0) {
-        delete subsBySession[uiSessionToken];
+        delete subsBySession[sessionKey];
       } else {
-        subsBySession[uiSessionToken] = filtered;
+        subsBySession[sessionKey] = filtered;
       }
       return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
     });

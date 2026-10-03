@@ -873,6 +873,12 @@ export interface ApnsTokenPayload {
    * 'production' for TestFlight/App Store. Omitted when unknown (server defaults to production).
    */
   environment?: 'sandbox' | 'production';
+  /**
+   * The device's key for end-to-end sealed push text (base64, 32 bytes). The
+   * server seals each notification's title and body with it, so the push
+   * relay, Apple and Google never see them. Omitted by shells that predate it.
+   */
+  pushKey?: string;
 }
 
 export interface PushAPI {

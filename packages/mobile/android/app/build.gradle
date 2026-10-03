@@ -57,6 +57,11 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation project(':capacitor-cordova-android-plugins')
+    // SealedPushMessagingService extends the push plugin's service and reads RemoteMessage,
+    // which the plugin keeps as an implementation detail. Same artifact and version as the
+    // plugin (firebaseMessagingVersion in variables.gradle), not a new library.
+    implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
+    implementation "androidx.core:core:$androidxCoreVersion"
 }
 
 apply from: 'capacitor.build.gradle'

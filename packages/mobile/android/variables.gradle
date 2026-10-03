@@ -10,4 +10,7 @@ ext {
     coreSplashScreenVersion = '1.0.1'
     androidxWebkitVersion = '1.12.1'
     cordovaAndroidVersion = '13.0.0'
+    // Shared by @capacitor/push-notifications and the app's own messaging service,
+    // so both compile against the same Firebase Messaging.
+    firebaseMessagingVersion = '25.0.1'
 }
