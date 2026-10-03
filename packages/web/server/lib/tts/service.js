@@ -112,10 +112,12 @@ class TTSService {
     }
 
     try {
-      // OpenAI-compatible servers (custom baseURL) may not support `instructions`
-      // or `response_format`, but do support `speed`. Send the safe subset.
+      // OpenAI-compatible servers (custom baseURL) may not support `instructions`,
+      // but do support `speed`. `response_format: 'mp3'` is the documented default
+      // for /v1/audio/speech, and strict servers (e.g. OpenRouter) reject requests
+      // that omit it.
       const speechParams = normalizedBaseURL
-        ? { model, voice, input: text, speed }
+        ? { model, voice, input: text, speed, response_format: 'mp3' }
         : {
             model,
             voice,
@@ -129,9 +131,13 @@ class TTSService {
       const response = await client.audio.speech.create(speechParams);
 
       const arrayBuffer = await response.arrayBuffer();
+      // Servers that ignore `response_format` may still label the bytes
+      // correctly (or return an unexpected type); pass the upstream label
+      // through and only fall back to mp3 when the server omits the header.
+      const contentType = response.headers.get('content-type') ?? 'audio/mpeg';
       return {
         buffer: Buffer.from(arrayBuffer),
-        contentType: 'audio/mpeg',
+        contentType,
       };
     } catch (error) {
       console.error('[TTSService] Error generating speech:', error);

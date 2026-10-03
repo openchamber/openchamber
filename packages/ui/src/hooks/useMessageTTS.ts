@@ -11,7 +11,7 @@ import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
-import { sanitizeForTTS } from '@/lib/voice/summarize';
+import { ensureLineTerminalPunctuation, sanitizeForTTS } from '@/lib/voice/summarize';
 import { requestSmallModel } from '@/lib/smallModelRequest';
 import {
     finishReading,
@@ -181,7 +181,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 });
             } else if (voiceProvider === 'say' && isSayTTSAvailable) {
                 const wordsPerMinute = Math.round(100 + (speechRate - 0.5) * 200);
-                await speakSayTTS(sanitizedText, {
+                await speakSayTTS(ensureLineTerminalPunctuation(sanitizedText), {
                     voice: sayVoice,
                     rate: wordsPerMinute,
                     language: ttsFollowTextLanguage ? 'auto' : undefined,
@@ -194,7 +194,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 await browserVoiceService.resumeAudioContext();
                 if (!isCurrentReading(token)) return;
                 await browserVoiceService.speakText(
-                    sanitizedText,
+                    ensureLineTerminalPunctuation(sanitizedText),
                     navigator.language || 'en-US',
                     finish,
                     {

@@ -2568,6 +2568,12 @@ describe('useConfigStore provider persistence', () => {
   });
 });
 
+describe('ttsChunkedMode default', () => {
+  test('defaults to disabled until the user enables it', () => {
+    expect(useConfigStore.getState().ttsChunkedMode).toBe(false);
+  });
+});
+
 describe('stale Auto selection', () => {
   const AUTO = { currentProviderId: 'openchamber', currentModelId: 'auto' };
 
