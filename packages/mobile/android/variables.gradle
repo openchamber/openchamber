@@ -7,7 +7,7 @@ ext {
     androidxCoordinatorLayoutVersion = '1.2.0'
     androidxCoreVersion = '1.15.0'
     androidxFragmentVersion = '1.8.4'
-    coreSplashScreenVersion = '1.0.1'
+    coreSplashScreenVersion = '1.2.0'
     androidxWebkitVersion = '1.12.1'
     cordovaAndroidVersion = '13.0.0'
     // Shared by @capacitor/push-notifications and the app's own messaging service,
