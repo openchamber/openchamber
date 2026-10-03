@@ -323,6 +323,47 @@ export function patchInputFiles(input: ToolInput | undefined): string[] {
   return files
 }
 
+/** Built-ins that never add, remove or move a file. `edit` refuses to create one. */
+const LISTING_NEUTRAL_TOOLS = new Set<string>([
+  OPENCODE_TOOLS.edit,
+  OPENCODE_TOOLS.read,
+  OPENCODE_TOOLS.grep,
+  OPENCODE_TOOLS.glob,
+  OPENCODE_TOOLS.skill,
+  OPENCODE_TOOLS.webfetch,
+  OPENCODE_TOOLS.websearch,
+  OPENCODE_TOOLS.question,
+  // A subagent's own calls arrive in its child session.
+  OPENCODE_TOOLS.subagent,
+  OPENCODE_TOOLS.sessionRename,
+  OPENCODE_TOOLS.sessionMove,
+  OPENCODE_TOOLS.models,
+])
+
+/**
+ * The files whose directory listing a finished call may have changed, as the
+ * call named them (relative to the session directory, or absolute). `write`
+ * may create its file; `patch` adds, deletes and moves, so both the paths in
+ * its text and the ones it reported count. An empty list means the call
+ * changed no listing. `null` means it could have touched any file: `shell`,
+ * `execute`, and every MCP or plugin tool.
+ */
+export function toolListingChanges(
+  toolName: ToolName,
+  input: ToolInput | undefined,
+  metadata: Metadata | undefined,
+): string[] | null {
+  const name = normalizeToolName(toolName)
+  if (name === OPENCODE_TOOLS.write) {
+    const path = toolInputPath(input)
+    return path ? [path] : []
+  }
+  if (name === OPENCODE_TOOLS.patch) {
+    return [...new Set([...patchInputFiles(input), ...toolFileDiffs(metadata).map((file) => file.file)])]
+  }
+  return LISTING_NEUTRAL_TOOLS.has(name) ? [] : null
+}
+
 /**
  * The tools an `execute` script called, deduplicated in first-seen order with
  * a repeat count, capped so a long script still fits one row. While the script

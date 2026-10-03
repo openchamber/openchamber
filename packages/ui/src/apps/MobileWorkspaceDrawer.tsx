@@ -257,7 +257,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('files') ? (
           <div className={cn('h-full', tab !== 'files' && 'hidden')}>
             <ErrorBoundary>
-              <MobileFilesSurface />
+              <MobileFilesSurface visible={open && tab === 'files'} />
             </ErrorBoundary>
           </div>
         ) : null}

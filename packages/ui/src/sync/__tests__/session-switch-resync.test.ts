@@ -2,7 +2,7 @@ import { resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from "../
 import { describe, expect, test, afterEach, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
 import type { SyncEvent, ToolTransition } from "@/lib/opencode/events"
-import type { FormRequest, PermissionRequest } from "@/lib/opencode/model"
+import type { FormRequest, PermissionRequest, ToolInput } from "@/lib/opencode/model"
 
 const listPendingFormsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
 const listPendingPermissionsCalls: Array<{ directories?: Array<string | null | undefined> }> = []
@@ -98,6 +98,7 @@ import { INITIAL_STATE, type State } from "../types"
 import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { subscribeFileTreeChanges, type FileTreeChange } from "@/lib/fileTreeChanges"
 const {
   createEventRoutingIndex,
   handleEvent,
@@ -371,6 +372,56 @@ describe("resyncBlockingRequestsForDirectory", () => {
       send(partEvent("prt_edit", "edit", "running"))
       send(transitionEvent("prt_edit", { kind: "failed", executed: true, error: "boom", end: 2 }))
       expect(refreshes).toHaveLength(3)
+    } finally {
+      unsubscribe()
+      childStores.disposeAll()
+    }
+  })
+
+  test("file trees hear a write at once and a shell call when its step ends", () => {
+    const childStores = new ChildStoreManager()
+    childStores.ensureChild("/repo", { bootstrap: false })
+    const routingIndex = createEventRoutingIndex()
+    const changes: FileTreeChange[] = []
+    const unsubscribe = subscribeFileTreeChanges((change) => changes.push(change))
+    const send = (event: SyncEvent) => handleEvent("/repo", event, childStores, routingIndex, getRuntimeKey())
+    const running = (partID: string, tool: string, input: ToolInput): SyncEvent => ({
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_tree",
+        part: { id: partID, callID: partID, messageID: "msg_tree", sessionID: "ses_tree", type: "tool", tool, state: { status: "running", input, time: { start: 1 } } },
+      },
+    })
+    const succeed = (partID: string): SyncEvent => ({
+      type: "message.tool.transition",
+      properties: { sessionID: "ses_tree", messageID: "msg_tree", partID, transition: { kind: "success", executed: true, output: "", end: 2 } },
+    })
+    const stepEnded = (files: string[]): SyncEvent => ({
+      type: "message.patched",
+      properties: {
+        sessionID: "ses_tree",
+        messageID: "msg_tree",
+        patch: { time: { completed: 3 }, finish: "tool-calls", snapshot: { end: "snap", files } },
+      },
+    })
+
+    try {
+      send(running("prt_write", "write", { path: "src/new.ts" }))
+      send(succeed("prt_write"))
+      expect(changes).toEqual([{ directory: "/repo", paths: ["/repo/src/new.ts"] }])
+
+      // A read-only command: its step's snapshot saw no change.
+      send(running("prt_ls", "shell", { command: "ls" }))
+      send(succeed("prt_ls"))
+      send(stepEnded([]))
+      expect(changes).toHaveLength(1)
+
+      // A command that wrote files: one unknown change when the step ends.
+      send(running("prt_mkdir", "shell", { command: "mkdir out" }))
+      send(succeed("prt_mkdir"))
+      expect(changes).toHaveLength(1)
+      send(stepEnded(["out/a.txt"]))
+      expect(changes).toEqual([{ directory: "/repo", paths: ["/repo/src/new.ts"] }, { directory: "/repo" }])
     } finally {
       unsubscribe()
       childStores.disposeAll()

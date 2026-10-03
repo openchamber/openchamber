@@ -849,7 +849,8 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // (`mcp.status.changed`).
     case "mcp.resources.changed":
       return []
-    // OpenChamber watches the filesystem through its own server routes.
+    // 2.x watches only the repository HEAD here, not the project's files. File
+    // browsers refresh from tool and step results instead (`lib/fileTreeChanges`).
     case "filesystem.changed":
       return []
     // Worktrees go through OpenChamber's own git API, not OpenCode's.

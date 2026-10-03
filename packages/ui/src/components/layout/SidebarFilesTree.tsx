@@ -39,6 +39,7 @@ import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { DirectoryRequests } from '@/components/views/files/directoryRequests';
 import { areDirectoryNodesEqual } from '@/components/views/files/fileTreeStatus';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
+import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -565,6 +566,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileNode[]>>({});
   const [loadErrorsByDir, setLoadErrorsByDir] = React.useState<Record<string, string>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
+  // Raw entry count of each folder's last listing, before hidden/ignored filtering.
+  const entryCountByDirRef = React.useRef<Map<string, number>>(new Map());
   const directoryRequests = React.useMemo(() => new DirectoryRequests(), []);
   React.useEffect(() => () => directoryRequests.clear(), [directoryRequests]);
   const refreshAbortRef = React.useRef<AbortController | null>(null);
@@ -727,6 +730,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
           ? (await files.listDirectory(normalizedDir)).entries
           : await opencodeClient.listLocalDirectory(normalizedDir);
         if (stale()) return;
+        entryCountByDirRef.current.set(normalizedDir, entries.length);
         const mapped = mapDirectoryEntries(normalizedDir, entries);
         loadedDirsRef.current = new Set(loadedDirsRef.current);
         loadedDirsRef.current.add(normalizedDir);
@@ -873,6 +877,52 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
     wasVisibleRef.current = visible;
     if (resumed) void refreshRoot();
   }, [refreshRoot, visible]);
+
+  // Agent and app file changes re-list only what they touched. A listing on
+  // screen reloads now, unless it is too large to resend; a loaded one out of
+  // sight (collapsed, or inside a collapsed folder) is only forgotten, so
+  // expanding it reads it again.
+  const applyFileTreeChanges = React.useCallback(({ directories }: FileTreeChangeBatch) => {
+    if (!root) return;
+    const expanded = new Set(
+      (useFilesViewTabsStore.getState().byRoot[root]?.expandedPaths ?? []).map((path) => normalizePath(path)),
+    );
+    const rootPrefix = root === '/' ? '/' : `${root}/`;
+    const isOnScreen = (dir: string): boolean => {
+      for (let current = dir; current !== root; current = getParentPath(current)) {
+        if (!current.startsWith(rootPrefix) || !expanded.has(current)) return false;
+      }
+      return true;
+    };
+    const nearestLoaded = (dir: string): string | null => {
+      for (let current = dir; current === root || current.startsWith(rootPrefix); current = getParentPath(current)) {
+        if (loadedDirsRef.current.has(current)) return current;
+        if (current === root) break;
+      }
+      return null;
+    };
+
+    const toLoad = new Set<string>();
+    const toForget = new Set<string>();
+    for (const changed of directories ?? loadedDirsRef.current) {
+      const loaded = nearestLoaded(normalizePath(changed));
+      if (!loaded) continue;
+      (isOnScreen(loaded) ? toLoad : toForget).add(loaded);
+    }
+    if (toForget.size > 0) {
+      loadedDirsRef.current = new Set([...loadedDirsRef.current].filter((dir) => !toForget.has(dir)));
+    }
+    const queue = [...toLoad].filter(
+      (dir) => (entryCountByDirRef.current.get(dir) ?? 0) <= AUTO_RELIST_MAX_ENTRIES,
+    );
+    void (async () => {
+      for (let i = 0; i < queue.length; i += 3) {
+        await Promise.all(queue.slice(i, i + 3).map((dir) => loadDirectory(dir, undefined, true)));
+      }
+    })();
+  }, [loadDirectory, root]);
+
+  useFileTreeChanges({ root, active: visible, whileInactive: 'drop', onChanges: applyFileTreeChanges });
 
   // --- Fuzzy search scoring (matching FilesView) ---
 

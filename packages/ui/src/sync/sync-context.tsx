@@ -110,6 +110,7 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { isFilesystemError } from "@/lib/api/files-errors"
 import { formatMessage, useI18nStore } from "@/lib/i18n"
 import { sessionEvents } from "@/lib/sessionEvents"
+import { fileTreeChanges } from "@/lib/fileTreeChanges"
 import { listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from "@/stores/globalSessions"
 import { areRequestArraysReferentiallyEqual, collectScopedBlockingRequests } from "./scoped-blocking-requests"
 import { EMPTY_USER_MESSAGE_HISTORY_SNAPSHOT, buildUserMessageHistorySnapshot, type TranscriptPrompt, type UserMessageHistorySnapshot } from "./user-message-history"
@@ -2144,6 +2145,16 @@ export function handleEvent(
     : undefined
   if (updatedPart) {
     sessionEvents.requestGitRefreshForToolTransition(resolvedDirectory, previousPart, updatedPart)
+    fileTreeChanges.toolTransition(resolvedDirectory, previousPart, updatedPart)
+  }
+  if (payload.type === "message.patched" && payload.properties.patch.time?.completed !== undefined) {
+    const { sessionID, patch } = payload.properties
+    // A replayed shell completion changes nothing and announces nothing.
+    if (patch.shell) {
+      if (reducerChanged) fileTreeChanges.unknownChange(resolvedDirectory)
+    } else if (patch.finish !== undefined) {
+      fileTreeChanges.stepCompleted(resolvedDirectory, sessionID, patch.snapshot?.files)
+    }
   }
 
   if (reducerChanged) {

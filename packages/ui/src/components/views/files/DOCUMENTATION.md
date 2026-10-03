@@ -41,6 +41,43 @@ offscreen dimensions cannot retain an old font size. Expanded child lists
 sit outside each row's containment, so expansion, scrolling, focus and menus keep
 their existing DOM structure. Reopening still refreshes directory contents.
 
+## Refreshing after file changes
+
+The sidebar tree and the phone browser re-list folders when the agent changed
+them, with no watcher and no timer: an idle client sends nothing. OpenCode 2.x
+has no file events (`filesystem.changed` covers the repository HEAD only), so
+`lib/fileTreeChanges.ts` derives changes from what the event stream already
+carries, fed from `sync-context` and the revert actions:
+
+- a finished `write` or `patch` names its files, so only their parent folders
+  change (`toolListingChanges` in `lib/opencode/tools.ts`; `edit` never
+  creates a file and counts as no change);
+- a finished `shell`, `execute`, MCP or plugin call could touch anything, so
+  its session waits for the step's end: the step's snapshot `files` decide.
+  An empty list costs nothing (read-only commands); a non-empty or missing
+  list (snapshots off, not a Git repository, a failed step) is an unknown
+  change. The snapshot skips Git-ignored files and untracked files over 2 MB;
+- a finished user shell command, staging a revert and clearing one are
+  unknown changes.
+
+`useFileTreeChanges` collects changes for two seconds after the first one and
+delivers them as one batch, so a surface re-lists at most once per two seconds
+however fast the agent works; it holds the batch while the window is hidden.
+A folder whose last listing had more than 1000 entries
+(`AUTO_RELIST_MAX_ENTRIES`) is never re-listed on its own, because each
+re-list resends the whole listing; the refresh button and expanding it still
+read it. The sidebar drops changes while its tab is
+hidden, because reopening re-lists everything anyway; the phone browser holds
+them and reloads the folder on screen when the drawer shows it again, keeping
+the listing if that reload fails. In the sidebar a listing on screen reloads
+(forced, superseding an in-flight read); a loaded folder out of sight is only
+forgotten so expanding it reads it again; a new folder re-lists its nearest
+loaded ancestor. An unknown change re-lists the root and every expanded folder
+on screen. Changes made outside the agent (an editor, a terminal) still need
+the refresh button or reopening the tab. VS Code has no file tree, so nothing
+subscribes there. Desktop `FilesView` keeps its own 8-second poll of expanded
+folders.
+
 ## Artifact previews
 
 `previews/` holds what the viewer shows instead of text: `ImageArtifact`

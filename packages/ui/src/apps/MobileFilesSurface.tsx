@@ -16,6 +16,7 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from '@/components/icon/Icon';
 import { useFileTreeUpload } from '@/components/views/files/useFileTreeUpload';
+import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch } from '@/components/views/files/useFileTreeChanges';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
@@ -74,14 +75,16 @@ const formatFileSize = (size?: number): string => {
 type MobileFilesSurfaceProps = {
   /** When provided, the header gets a close X that calls this. */
   onClose?: () => void;
+  /** The surface is on screen; file changes wait for it. */
+  visible?: boolean;
 };
 
-export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose }) => {
+export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose, visible = true }) => {
   const root = normalizePath(useEffectiveDirectory() ?? null);
-  return <MobileFilesSurfaceForRoot key={root} root={root} onClose={onClose} />;
+  return <MobileFilesSurfaceForRoot key={root} root={root} onClose={onClose} visible={visible} />;
 };
 
-const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string }> = ({ root, onClose }) => {
+const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string; visible: boolean }> = ({ root, onClose, visible }) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
@@ -98,21 +101,28 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
   const currentDirectoryRef = React.useRef(currentDirectory);
   currentDirectoryRef.current = currentDirectory;
 
-  const loadDirectory = React.useCallback(async (directory: string) => {
+  // A background reload (a file change, not a navigation) keeps the listing
+  // on screen when it fails.
+  const loadDirectory = React.useCallback(async (directory: string, options?: { background?: boolean }) => {
     if (!directory) return;
     const requestId = directoryLoadRequestIdRef.current + 1;
     directoryLoadRequestIdRef.current = requestId;
     setIsLoadingDirectory(true);
-    setDirectoryError(null);
+    if (!options?.background) setDirectoryError(null);
     try {
       const result = await files.listDirectory(directory);
       if (directoryLoadRequestIdRef.current !== requestId) return;
+      setDirectoryError(null);
       setEntries(result.entries.slice().sort((a, b) => {
         if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
         return a.name.localeCompare(b.name);
       }));
     } catch (error) {
       if (directoryLoadRequestIdRef.current !== requestId) return;
+      if (options?.background) {
+        console.error('Failed to reload mobile directory:', error);
+        return;
+      }
       setEntries([]);
       setDirectoryError(error instanceof Error ? error.message : t('mobile.files.error.listFailed'));
     } finally {
@@ -126,6 +136,21 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
     if (route.type !== 'browser') return;
     void loadDirectory(route.directory);
   }, [loadDirectory, route]);
+
+  // The folder on screen reloads when the agent changed it, also after the
+  // drawer was closed meanwhile; a file being viewed reloads its folder on return.
+  const routeRef = React.useRef(route);
+  routeRef.current = route;
+  const entriesRef = React.useRef(entries);
+  entriesRef.current = entries;
+  const reloadChangedDirectory = React.useCallback(({ directories }: FileTreeChangeBatch) => {
+    const current = routeRef.current;
+    if (current.type !== 'browser') return;
+    if (directories && !directories.some((directory) => normalizePath(directory) === normalizePath(current.directory))) return;
+    if (entriesRef.current.length > AUTO_RELIST_MAX_ENTRIES) return;
+    void loadDirectory(current.directory, { background: true });
+  }, [loadDirectory]);
+  useFileTreeChanges({ root, active: visible, whileInactive: 'hold', onChanges: reloadChangedDirectory });
 
   // Reload the listing only when the upload landed in the folder still on screen.
   const refreshUploadedDirectory = React.useCallback(async (directory: string) => {
