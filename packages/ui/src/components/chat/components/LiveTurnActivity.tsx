@@ -7,6 +7,7 @@ import { getLiveFinalMessage } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { LiveFinalActivityContext } from './liveActivityContext';
+import { TurnMessageWindow } from './TurnMessageWindow';
 
 interface LiveTurnActivityProps {
     turn: TurnRecord;
@@ -21,6 +22,10 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
     const contentId = React.useId();
     const finalContentId = React.useId();
     const finalMessage = getLiveFinalMessage(turn.assistantMessages);
+    const activityMessages = React.useMemo(
+        () => (finalMessage ? turn.assistantMessages.filter((message) => message !== finalMessage) : turn.assistantMessages),
+        [finalMessage, turn.assistantMessages],
+    );
     const settled = Boolean(finalMessage) || hasLaterAssistant;
     const isExpanded = !settled || expanded;
     const previouslySettled = React.useRef(settled);
@@ -76,7 +81,13 @@ export function LiveTurnActivity({ turn, hasLaterAssistant, expanded, onToggle, 
                 </div>
             ) : null}
             <LiveActivityCollapse expanded={isExpanded} id={contentId}>
-                {turn.assistantMessages.map((message) => message === finalMessage ? null : renderMessage(message))}
+                {/* A settled fold opened by the reader shows the whole turn. */}
+                <TurnMessageWindow
+                    turnId={turn.turnId}
+                    messages={activityMessages}
+                    renderMessage={renderMessage}
+                    mountAll={settled && expanded}
+                />
             </LiveActivityCollapse>
             <LiveFinalActivityContext.Provider value={finalContext}>
                 {finalMessage ? renderMessage(finalMessage) : null}

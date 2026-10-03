@@ -14,6 +14,7 @@ import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/tu
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
+import { TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
@@ -1359,6 +1360,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const turnUiStatesRef = React.useRef(turnUiStates);
     turnUiStatesRef.current = turnUiStates;
 
+    // The list remounts per session, so entering a session again mounts only
+    // the newest messages of its long turns.
+    const [turnMessageWindow] = React.useState(createTurnMessageWindowStore);
+    const turnMessageWindowEnabled = chatRenderMode === 'live';
+
+    /**
+     * Mounts the whole turn holding a message that navigation is about to
+     * reach but that its turn has not mounted yet (see TurnMessageWindow).
+     */
+    const mountWindowedMessage = React.useCallback((messageId: string): void => {
+        if (!turnMessageWindowEnabled) return;
+        const turnId = turnByAssistantMessageId.get(messageId);
+        if (turnId) turnMessageWindow.setHiddenCount(turnId, 0);
+    }, [turnByAssistantMessageId, turnMessageWindow, turnMessageWindowEnabled]);
+
     /**
      * Opens the turn a linked or searched message is folded into, the way a
      * browser's find opens a closed <details>. True when it had to open it:
@@ -1504,6 +1520,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (!element) {
             // Not mounted: bring its row in from the estimate; the next step
             // measures the real position.
+            mountWindowedMessage(anchor.messageId);
             return scrollHistoryIndexIntoView(index) ? 'moved' : 'missing';
         }
         const delta = element.getBoundingClientRect().top
@@ -1517,7 +1534,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // A message near either end of the timeline cannot reach the offset:
         // the scroll is clamped, and where it stopped is as close as it gets.
         return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
-    }, [findMessageElement, messageIndexMap, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
+    }, [findMessageElement, messageIndexMap, mountWindowedMessage, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
 
     // Installed during layout so a parent's layout effect (session entry
     // restore) already reaches this list, not the one it replaced.
@@ -1560,6 +1577,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
+                if (!findMessageElement(messageId)) mountWindowedMessage(messageId);
                 const didScroll = scrollMessageElementIntoView(messageId, behavior)
                     || scrollHistoryIndexIntoView(index);
                 if (didScroll && behavior !== 'smooth') {
@@ -1648,7 +1666,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [alignViewportAnchor, findMessageElement, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
+    }, [alignViewportAnchor, findMessageElement, messageIndexMap, mountWindowedMessage, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, settleNavigationTarget, turnIndexMap, ref]);
 
     const rowContext = React.useMemo(() => ({
         scrollToBottom: stableScrollToBottom,
@@ -1690,21 +1708,23 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         // list's point of view, so fade-in is disabled for them — content
         // arriving inside the streaming tail keeps its own animations.
         <FadeInDisabledProvider disabled>
-            <TimelineList
-                key={sessionKey}
-                entries={allEntries}
-                streamingTailKey={trailingStreamingEntry?.key ?? null}
-                registerList={handleRegisterList}
-                composerOverlayHeight={composerOverlayHeight}
-                onIsAtEndChange={stableIsAtEndChange}
-                onListMetricsChange={stableListMetricsChange}
-                onTimelineDataChange={stableTimelineDataChange}
-                listHeader={listHeader}
-                listFooter={listFooter}
-                scrollContainerProps={scrollContainerProps}
-                rowContext={rowContext}
-                endPinningReleased={endPinningReleased}
-            />
+            <TurnMessageWindowContext.Provider value={turnMessageWindowEnabled ? turnMessageWindow : null}>
+                <TimelineList
+                    key={sessionKey}
+                    entries={allEntries}
+                    streamingTailKey={trailingStreamingEntry?.key ?? null}
+                    registerList={handleRegisterList}
+                    composerOverlayHeight={composerOverlayHeight}
+                    onIsAtEndChange={stableIsAtEndChange}
+                    onListMetricsChange={stableListMetricsChange}
+                    onTimelineDataChange={stableTimelineDataChange}
+                    listHeader={listHeader}
+                    listFooter={listFooter}
+                    scrollContainerProps={scrollContainerProps}
+                    rowContext={rowContext}
+                    endPinningReleased={endPinningReleased}
+                />
+            </TurnMessageWindowContext.Provider>
         </FadeInDisabledProvider>
     );
 });
