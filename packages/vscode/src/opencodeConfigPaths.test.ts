@@ -49,3 +49,27 @@ test('global CRUD uses XDG while project writes stay in the project', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a global opencode.jsonc beside opencode.json overrides it when reading', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-jsonc-'));
+  const configHome = path.join(root, 'config');
+  const globalDir = path.join(configHome, 'opencode');
+  try {
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(path.join(globalDir, 'opencode.json'), JSON.stringify({ worktree: { directory: '.from-json' }, theme: 'kept' }));
+    fs.writeFileSync(path.join(globalDir, 'opencode.jsonc'), '// override\n{ "worktree": { "directory": ".from-jsonc" } }\n');
+    const result = spawnSync(process.execPath, ['--eval', `
+      const { readConfig } = await import(${JSON.stringify(configUrl)});
+      process.stdout.write(JSON.stringify(readConfig(${JSON.stringify(root)})));
+    `], {
+      env: { ...process.env, XDG_CONFIG_HOME: configHome, OPENCODE_CONFIG: '', OPENCODE_CONFIG_DIR: '' },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const config = JSON.parse(result.stdout);
+    assert.equal(config.worktree.directory, '.from-jsonc');
+    assert.equal(config.theme, 'kept');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

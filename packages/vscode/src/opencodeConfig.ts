@@ -707,17 +707,24 @@ const readConfigLayer = (filePath?: string | null): {
 const readConfigLayers = (workingDirectory?: string) => {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
+  // OpenCode loads every global config file in order, so an `opencode.jsonc`
+  // next to `opencode.json` overrides it; the web runtime reads it the same way.
+  const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
   const userLayer = readConfigLayer(userPath);
+  const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
   const mergedConfig = mergeConfigs(
-    mergeConfigs(userLayer.config, projectLayer.config),
+    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
     customLayer.config,
   );
 
   const layerErrors: Array<{ path: string; code: string; message: string }> = [];
   if (userLayer.error) {
     layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (userOverrideLayer.error && userOverridePath) {
+    layerErrors.push({ path: userOverridePath, code: userOverrideLayer.error.code, message: userOverrideLayer.error.message });
   }
   if (projectLayer.error && projectPath) {
     layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
