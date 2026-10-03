@@ -254,7 +254,10 @@ test('a 2.x below the minimum asks for an update to that minimum, not for v2', a
   expect(host.textContent).not.toContain('OpenCode v2 required');
 });
 
-const desktopReadiness = (invoke: () => Promise<boolean>) => {
+// The readiness probe is one desktop command among others (the i18n provider
+// also syncs the menu locale on mount), so only that command reaches `probe`.
+const desktopReadiness = (probe: () => Promise<boolean>) => {
+  const invoke = (command: string) => (command === 'desktop_managed_opencode_compatible' ? probe() : Promise.resolve(undefined));
   Object.defineProperties(window, {
     __OPENCHAMBER_ELECTRON__: { configurable: true, value: { runtime: 'electron' } },
     __OPENCHAMBER_LOCAL_ORIGIN__: { configurable: true, value: 'http://127.0.0.1:3901' },
