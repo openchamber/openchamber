@@ -459,6 +459,17 @@ describe('returning a dispatched session result', () => {
     expect(client.session.active).not.toHaveBeenCalled();
   });
 
+  it('hands the end-of-run baseline to the delivery and keeps it from the agent', async () => {
+    const { service, dispatchResults, sessionService } = createReturningService();
+    sessionService.send.mockResolvedValue({ sessionId: 'ses_child', directory: '/repo', promptDispatched: true, baselineIdleRecordId: 'msg_idle_old' });
+    const result = await service.execute('session.send', { sessionId: 'ses_child', prompt: 'Again', returnResult: true }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(dispatchResults.register).toHaveBeenCalledWith({
+      parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 1_000, afterIdleId: 'msg_idle_old',
+    });
+    expect(result).not.toHaveProperty('baselineIdleRecordId');
+  });
+
   it('does not schedule a delivery for a prompt that never landed', async () => {
     const { service, dispatchResults, sessionService } = createReturningService();
     sessionService.create.mockResolvedValue({ sessionId: 'ses_child', directory: '/repo', promptDispatched: false, promptError: 'no queued message' });

@@ -31,7 +31,7 @@ comes from the agent tool (`contextSessionId`).
 
 ## Entry and persistence
 
-`{ id, parentSessionId, sessionId, dispatchedAt, messageId? }` in
+`{ id, parentSessionId, sessionId, dispatchedAt, afterIdleId?, messageId? }` in
 `<data-dir>/dispatch-results.json`, written atomically through a serialized
 write chain, owner-readable only. `register` resolves once the entry is on
 disk, so a restart right after the tool answers still delivers. A missing file
@@ -56,10 +56,16 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
    result. Rechecked after 5 s (`../opencode/session-activity.js`).
 3. The newest page of its records (`order: desc`, 50): OpenCode appends an
    `idle` record with `outcome` (`succeeded`, `failed`, `interrupted`) when a
-   run ends. The newest one created at or after `dispatchedAt` ends the
-   dispatched turn; the answer is the newest assistant reply after the
-   dispatch. Created before the dispatch, or no record yet → not over; three
-   2 s rechecks cover a record trailing its event, then events take over.
+   run ends. The dispatch route reads the newest one before the prompt goes
+   out (`afterIdleId`, null when the session has none); a newer idle record
+   ends the dispatched turn, and the answer is the newest assistant reply
+   between the two. Matching by record order keeps OpenChamber's clock out of
+   it, so a remote OpenCode whose clock lags still matches; only an entry
+   stored without the baseline compares `time.created` with `dispatchedAt`.
+   No newer record yet → not over; three 2 s rechecks cover a record trailing
+   its event, then events take over. A `session.send` into a session that is
+   already running can end on that running turn when OpenCode steers the
+   prompt into it; that turn's answer then includes the prompt's work.
 4. The session itself answers 404 → it was deleted; reported as stopped.
 
 A failed read retries with backoff (2 s doubling to 60 s).

@@ -49,17 +49,23 @@ const sessionIdSchema = z.string().regex(/^[A-Za-z0-9_-]{4,128}$/);
 const messageIdSchema = z.string().regex(/^msg_[A-Za-z0-9]{8,64}$/);
 const timeSchema = z.number().finite().nonnegative();
 
+const afterIdleSchema = z.string().min(1).nullable();
+
 const entrySchema = z.object({
   id: z.string().min(1),
   parentSessionId: sessionIdSchema,
   sessionId: sessionIdSchema,
   dispatchedAt: timeSchema,
+  // The newest end-of-run record before the dispatch; null when there was
+  // none. Entries written before this field compare clock times instead.
+  afterIdleId: afterIdleSchema.optional(),
   messageId: messageIdSchema.optional(),
 });
 
 const storedFileSchema = z.object({ entries: z.array(z.unknown()) });
 
 const idleRecordSchema = z.object({
+  id: z.string().min(1),
   type: z.literal('idle'),
   outcome: z.enum(['succeeded', 'failed', 'interrupted']),
   time: z.object({ created: timeSchema }),
@@ -75,6 +81,7 @@ const assistantRecordSchema = z.object({
 const textContentSchema = z.object({ type: z.literal('text'), text: z.string() });
 
 const recordTypeSchema = z.object({ type: z.string() });
+const recordIdSchema = z.object({ id: z.string() });
 const sessionRecordSchema = z.object({ title: z.string().optional() });
 const messagePageSchema = z.object({ data: z.array(z.unknown()) });
 
@@ -132,16 +139,29 @@ const OUTCOME_STATES = { succeeded: 'completed', failed: 'error', interrupted: '
  * OpenCode appends an `idle` record with the run's outcome when a run ends,
  * so the outcome is authoritative and survives a restart of either server.
  * The answer is the newest assistant reply of that turn.
+ *
+ * "Since the dispatch" is decided by record order against `afterIdleId`, the
+ * newest idle record before the prompt went out, so OpenChamber's clock never
+ * meets OpenCode's: a remote OpenCode whose clock lags would otherwise make a
+ * finished turn look older than its own dispatch. Only an entry stored
+ * without that baseline (`afterIdleId` undefined) falls back to `dispatchedAt`.
  */
-export const readDispatchOutcome = (records, dispatchedAt) => {
+export const readDispatchOutcome = (records, dispatchedAt, afterIdleId) => {
   const idleIndex = records.findIndex((record) => parse(recordTypeSchema, record)?.type === 'idle');
   if (idleIndex === -1) return null;
   // A malformed idle record proves nothing about the turn: keep waiting.
   const idle = parse(idleRecordSchema, records[idleIndex]);
-  if (!idle || idle.time.created < dispatchedAt) return null;
-  const reply = records.slice(idleIndex + 1)
+  if (!idle) return null;
+  const byOrder = afterIdleId !== undefined;
+  if (byOrder ? idle.id === afterIdleId : idle.time.created < dispatchedAt) return null;
+  // The turn's records sit between its idle record and the baseline one.
+  const baselineIndex = byOrder && afterIdleId !== null
+    ? records.findIndex((record) => parse(recordIdSchema, record)?.id === afterIdleId)
+    : -1;
+  const turnRecords = records.slice(idleIndex + 1, baselineIndex === -1 ? undefined : baselineIndex);
+  const reply = turnRecords
     .map((record) => parse(assistantRecordSchema, record))
-    .find((assistant) => assistant !== null && assistant.time.created >= dispatchedAt);
+    .find((assistant) => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
   return {
     state: OUTCOME_STATES[idle.outcome],
     text: reply ? assistantText(reply) : '',
@@ -384,7 +404,7 @@ export function createDispatchResultsRuntime({
       for (const entry of pendingFor(sessionId)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
-          : readDispatchOutcome(watched.records, entry.dispatchedAt);
+          : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
         if (!outcome) {
           waiting = true;
           continue;
@@ -439,7 +459,7 @@ export function createDispatchResultsRuntime({
    * and delivers its result to `parentSessionId`. Resolves once the entry is
    * on disk, so a restart right after the tool answers still delivers.
    */
-  const register = async ({ parentSessionId, sessionId, dispatchedAt }) => {
+  const register = async ({ parentSessionId, sessionId, dispatchedAt, afterIdleId }) => {
     const parent = parse(sessionIdSchema, parentSessionId);
     const watched = parse(sessionIdSchema, sessionId);
     if (!parent || !watched) throw new TypeError('parentSessionId and sessionId must be session ids');
@@ -448,6 +468,9 @@ export function createDispatchResultsRuntime({
     if (at === null) throw new TypeError('dispatchedAt must be a timestamp');
     await load();
     const entry = { id: `dispatch-${now()}-${Math.random().toString(36).slice(2, 9)}`, parentSessionId: parent, sessionId: watched, dispatchedAt: at };
+    // Kept only when it is a real baseline (an id, or null for "none yet").
+    const baseline = afterIdleSchema.safeParse(afterIdleId);
+    if (afterIdleId !== undefined && baseline.success) entry.afterIdleId = baseline.data;
     entries.set(entry.id, entry);
     if (entries.size > MAX_ENTRIES) {
       const oldest = Array.from(entries.values())

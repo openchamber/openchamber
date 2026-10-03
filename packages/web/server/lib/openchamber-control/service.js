@@ -342,11 +342,19 @@ export const createOpenChamberControlService = (dependencies) => {
    * that no answer is coming instead of waiting for one.
    */
   const scheduleResultDelivery = async (result, parentSessionID, dispatchedAt) => {
+    // The newest end-of-run record before the prompt went out (null: none yet).
+    // Absent when the history could not be read; the runtime then compares times.
+    const afterIdleId = result.baselineIdleRecordId;
     if (result.promptDispatched !== true) {
       return { status: 'not-scheduled', reason: 'The prompt was not dispatched, so there is no result to return.' };
     }
     try {
-      await dispatchResults.register({ parentSessionId: parentSessionID, sessionId: result.sessionId, dispatchedAt });
+      await dispatchResults.register({
+        parentSessionId: parentSessionID,
+        sessionId: result.sessionId,
+        dispatchedAt,
+        ...(afterIdleId !== undefined ? { afterIdleId } : {}),
+      });
       return { status: 'pending', note: RESULT_PENDING_NOTE };
     } catch (error) {
       return {
@@ -402,11 +410,13 @@ export const createOpenChamberControlService = (dependencies) => {
     if (returnResult) {
       const publicResult = { ...result, resultDelivery: await scheduleResultDelivery(result, parentSessionID, startedAt) };
       delete publicResult.baselineAssistantMessageId;
+      delete publicResult.baselineIdleRecordId;
       return publicResult;
     }
     if (input.wait !== true) {
       const publicResult = { ...result };
       delete publicResult.baselineAssistantMessageId;
+      delete publicResult.baselineIdleRecordId;
       return publicResult;
     }
     const client = await getClient(result.directory);
@@ -422,6 +432,7 @@ export const createOpenChamberControlService = (dependencies) => {
     });
     const publicResult = { ...result, sessionStatus: status };
     delete publicResult.baselineAssistantMessageId;
+    delete publicResult.baselineIdleRecordId;
     if (input.lastAssistant === true) {
       publicResult.lastAssistantMessage = (await sessionMessages(client, result.sessionId, 'assistant', 1))[0] || null;
     }

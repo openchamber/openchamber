@@ -115,8 +115,8 @@ describe('managed agent tool runtime', () => {
     }
     expect(source).not.toContain('"schedule.status"');
     const tool = await loadTools(dataDir, 'schema');
-    expect(tool.openchamber.description).toContain('Session dispatches always return at once');
-    expect(tool.openchamber.description).toContain('With returnResult its final answer arrives in this session');
+    expect(tool.openchamber.description).toContain('A dispatch returns at once');
+    expect(tool.openchamber.description).toContain('final answer then arrives in this session as a message');
     // Agents also have OpenCode's own subagent tool; the line between the two is drawn up front.
     expect(tool.openchamber.description).toContain('use the subagent tool');
     expect(tool.openchamber.input.properties.action.oneOf).toContainEqual({

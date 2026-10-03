@@ -125,6 +125,21 @@ describe('readDispatchOutcome', () => {
     expect(readDispatchOutcome([user(12)], 10)).toBeNull();
   });
 
+  it('matches the turn by record order when the baseline is known, whatever the clocks say', () => {
+    // OpenCode's clock lags OpenChamber's: every record looks older than the
+    // dispatch at 1000, yet a newer idle record than the baseline ended the turn.
+    const records = [idle('succeeded', 30), assistant('Done on the remote', 20), user(15), idle('succeeded', 5), assistant('older', 4)];
+    expect(readDispatchOutcome(records, 1000, 'msg_i5')).toEqual({ state: 'completed', text: 'Done on the remote', errorMessage: '' });
+    // The baseline is still the newest idle record: the turn has not ended.
+    expect(readDispatchOutcome([idle('succeeded', 5), assistant('older', 4)], 1000, 'msg_i5')).toBeNull();
+    // A session with no run before the dispatch: its first idle record ends the turn.
+    expect(readDispatchOutcome([idle('succeeded', 30), assistant('first', 20), user(15)], 1000, null))
+      .toEqual({ state: 'completed', text: 'first', errorMessage: '' });
+    // A reply from before the baseline is never this turn's answer.
+    expect(readDispatchOutcome([idle('succeeded', 30), user(15), idle('succeeded', 5), assistant('older', 4)], 1000, 'msg_i5'))
+      .toEqual({ state: 'completed', text: '', errorMessage: '' });
+  });
+
   it('reports a failed and a stopped turn as their states', () => {
     expect(readDispatchOutcome([idle('failed', 30), assistant('', 20, { error: { type: 'APIError', message: 'rate limited' } })], 10))
       .toEqual({ state: 'error', text: '', errorMessage: 'rate limited' });
