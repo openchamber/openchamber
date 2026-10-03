@@ -1,1 +1,1 @@
-export function resolveNpmRegistryRequest(packageName: string): { url: string; headers: Record<string, string> };
+export function resolveNpmRegistryRequest(packageName: string, metadataPath?: string): { url: string; headers: Record<string, string> };

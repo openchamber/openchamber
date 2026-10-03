@@ -1,11 +1,20 @@
-import { afterEach, describe, test } from 'node:test';
+import { afterEach, describe, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode, type OpenCodeUpgradeManager } from './opencode-upgrade-runtime';
 
 const originalFetch = globalThis.fetch;
+const originalLowerRegistry = process.env.npm_config_registry;
+const originalRegistry = process.env.NPM_CONFIG_REGISTRY;
+const originalUserConfig = process.env.npm_config_userconfig;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  if (originalLowerRegistry === undefined) delete process.env.npm_config_registry;
+  else process.env.npm_config_registry = originalLowerRegistry;
+  if (originalRegistry === undefined) delete process.env.NPM_CONFIG_REGISTRY;
+  else process.env.NPM_CONFIG_REGISTRY = originalRegistry;
+  if (originalUserConfig === undefined) delete process.env.npm_config_userconfig;
+  else process.env.npm_config_userconfig = originalUserConfig;
 });
 
 const createManager = (mode: 'managed' | 'external' = 'managed'): OpenCodeUpgradeManager => ({
@@ -16,6 +25,38 @@ const createManager = (mode: 'managed' | 'external' = 'managed'): OpenCodeUpgrad
 });
 
 describe('VS Code OpenCode upgrades', () => {
+  test('uses the configured registry and Basic headers for the v2 package version', async () => {
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'https://user:p%40ss@mirror.example.com/npm/';
+    const fetch = mock.method(globalThis, 'fetch', async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      const url = String(input);
+      return Response.json({ version: url.endsWith('/api/info') ? '2.0.21' : '2.0.22' });
+    });
+    try {
+      const status = await getOpenCodeUpgradeStatus(createManager());
+      assert.equal(status.latestVersion, '2.0.22');
+      const call = fetch.mock.calls.find((entry) => String(entry.arguments[0]).includes('mirror.example.com'));
+      assert.equal(String(call?.arguments[0]), 'https://mirror.example.com/npm/@opencode%2Fcli/latest');
+      assert.equal(new Headers(call?.arguments[1]?.headers).get('Authorization'), `Basic ${Buffer.from('user:p@ss').toString('base64')}`);
+    } finally {
+      fetch.mock.restore();
+    }
+  });
+
+  test('reports invalid registry configuration without a public-registry fallback', async () => {
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'not-a-url';
+    const fetch = mock.method(globalThis, 'fetch', async () => Response.json({ version: '2.0.21' }));
+    try {
+      const status = await getOpenCodeUpgradeStatus(createManager());
+      assert.equal(status.available, null);
+      assert.equal(status.error, 'Invalid npm registry URL');
+      assert.equal(fetch.mock.calls.some((entry) => String(entry.arguments[0]).includes('registry.npmjs.org')), false);
+    } finally {
+      fetch.mock.restore();
+    }
+  });
+
   test('reports installed and latest versions from the v2 info route', async () => {
     const manager = createManager();
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {

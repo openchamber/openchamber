@@ -1,5 +1,6 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
 import express from 'express';
+import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -72,8 +73,9 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   // OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub
   // release assets, so the registry is the one source of "latest".
   const fetchLatestOpenCodeVersion = async () => {
-    const response = await fetch('https://registry.npmjs.org/@opencode%2Fcli/latest', {
-      headers: { Accept: 'application/json' },
+    const request = resolveNpmRegistryRequest('@opencode/cli', 'latest');
+    const response = await fetch(request.url, {
+      headers: { Accept: 'application/json', ...request.headers },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {

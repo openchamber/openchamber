@@ -1,4 +1,5 @@
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+import { resolveNpmRegistryRequest } from '../../web/server/lib/opencode/npm-registry-config.js';
 
 type UpgradeCapability = {
   supported: boolean;
@@ -58,8 +59,9 @@ const getApiUrl = (manager?: OpenCodeUpgradeManager): string | null => {
 // OpenCode 2.x publishes as `@opencode/cli` on npm and has no GitHub release
 // assets, so the registry is the one source of "latest".
 const fetchLatestVersion = async (): Promise<string> => {
-  const response = await fetch('https://registry.npmjs.org/@opencode%2Fcli/latest', {
-    headers: { Accept: 'application/json' },
+  const request = resolveNpmRegistryRequest('@opencode/cli', 'latest');
+  const response = await fetch(request.url, {
+    headers: { Accept: 'application/json', ...request.headers },
     signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`OpenCode npm registry responded with ${response.status}`);

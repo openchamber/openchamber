@@ -36,6 +36,27 @@ const createApp = (overrides = {}) => {
 };
 
 describe('OpenCode upgrade routes', () => {
+  it('uses the configured registry for the v2 package version without exposing URL credentials', async () => {
+    const previousRegistry = process.env.npm_config_registry;
+    const previousUserConfig = process.env.npm_config_userconfig;
+    process.env.npm_config_userconfig = `${import.meta.dirname}/missing-test.npmrc`;
+    process.env.npm_config_registry = 'https://user:p%40ss@mirror.example.com/npm/';
+    globalThis.fetch = vi.fn(async (input) => jsonResponse({ version: String(input).endsWith('/api/info') ? '2.0.21' : '2.0.22' }));
+    const { app } = createApp({ getOpenCodeUpgradeCapability: () => supportedCapability });
+    try {
+      const response = await request(app).get('/api/opencode/upgrade-status').expect(200);
+      expect(response.body).toMatchObject({ available: true, currentVersion: '2.0.21', latestVersion: '2.0.22' });
+      const call = globalThis.fetch.mock.calls.find(([url]) => String(url).includes('mirror.example.com'));
+      expect(String(call[0])).toBe('https://mirror.example.com/npm/@opencode%2Fcli/latest');
+      expect(new Headers(call[1].headers).get('Authorization')).toBe(`Basic ${Buffer.from('user:p@ss').toString('base64')}`);
+    } finally {
+      if (previousRegistry === undefined) delete process.env.npm_config_registry;
+      else process.env.npm_config_registry = previousRegistry;
+      if (previousUserConfig === undefined) delete process.env.npm_config_userconfig;
+      else process.env.npm_config_userconfig = previousUserConfig;
+    }
+  });
+
   it('fails closed without contacting the bundled OpenCode updater', async () => {
     globalThis.fetch = vi.fn();
     const { app } = createApp();

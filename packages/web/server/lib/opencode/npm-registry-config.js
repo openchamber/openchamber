@@ -97,9 +97,10 @@ function authFor(registry, values) {
  * Build a credential-safe package metadata request using npm's standard user configuration.
  *
  * @param {string} packageName
+ * @param {string} [metadataPath]
  * @returns {{ url: string, headers: Record<string, string> }}
  */
-export function resolveNpmRegistryRequest(packageName) {
+export function resolveNpmRegistryRequest(packageName, metadataPath) {
   const values = configValues();
   let registry;
   try {
@@ -112,12 +113,19 @@ export function resolveNpmRegistryRequest(packageName) {
   }
 
   const headers = authFor(registry, values);
+  if (!headers.Authorization && (registry.username || registry.password)) {
+    try {
+      headers.Authorization = `Basic ${Buffer.from(`${decodeURIComponent(registry.username)}:${decodeURIComponent(registry.password)}`).toString('base64')}`;
+    } catch {
+      throw new Error('Invalid npm registry URL');
+    }
+  }
   registry.username = '';
   registry.password = '';
   registry.pathname = `${registry.pathname.replace(/\/+$/, '')}/`;
 
   return {
-    url: `${registry.toString()}${encodeURIComponent(packageName).replace(/^%40/i, '@')}`,
+    url: `${registry.toString()}${encodeURIComponent(packageName).replace(/^%40/i, '@')}${metadataPath ? `/${encodeURIComponent(metadataPath)}` : ''}`,
     headers,
   };
 }

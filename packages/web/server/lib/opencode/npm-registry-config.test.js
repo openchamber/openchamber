@@ -51,6 +51,26 @@ describe('npm registry configuration', () => {
     });
   });
 
+  test('encodes a metadata suffix independently of the scoped package name', () => {
+    process.env.NPM_CONFIG_REGISTRY = 'https://mirror.example.com/custom/npm/';
+    expect(resolveNpmRegistryRequest('@opencode/cli', 'latest')).toEqual({
+      url: 'https://mirror.example.com/custom/npm/@opencode%2Fcli/latest', headers: {},
+    });
+  });
+
+  test.each([['p%40ss', 'p@ss'], ['p%25ss', 'p%ss'], ['p%2520', 'p%20']])('decodes URL credentials once for %s and removes them from the URL', (password, decoded) => {
+    process.env.NPM_CONFIG_REGISTRY = `https://user:${password}@mirror.example.com/npm/`;
+    const request = resolveNpmRegistryRequest('plugin');
+    expect(request.url).toBe('https://mirror.example.com/npm/plugin');
+    expect(request.headers.Authorization).toBe(`Basic ${Buffer.from(`user:${decoded}`).toString('base64')}`);
+  });
+
+  test('a matching npmrc token takes precedence over URL credentials', () => {
+    process.env.NPM_CONFIG_REGISTRY = 'https://user:password@mirror.example.com/npm/';
+    fs.writeFileSync(userConfigPath, '//mirror.example.com/npm/:_authToken=test-token\n');
+    expect(resolveNpmRegistryRequest('plugin').headers).toEqual({ Authorization: 'Bearer test-token' });
+  });
+
   test('uses the user npm registry for an unscoped package', () => {
     fs.writeFileSync(userConfigPath, 'registry=https://mirror.example.com/custom/npm/\n');
 
