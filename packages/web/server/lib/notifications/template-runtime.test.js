@@ -89,3 +89,28 @@ describe('notification template message extraction', () => {
     await expect(runtime.fetchLastAssistantMessageText('session-1', 'msg-1')).resolves.toBe('final answer');
   });
 });
+
+describe('notification template session info', () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('sends OpenCode auth headers when fetching the session title', async () => {
+    const seenHeaders = [];
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      seenHeaders.push(init?.headers ?? {});
+      return new Response(JSON.stringify({ id: 'ses_1', title: 'Nightly cleanup' }), { status: 200 });
+    });
+    const runtime = createNotificationTemplateRuntime({
+      readSettingsFromDisk: async () => ({}),
+      buildOpenCodeUrl: (path) => path,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic dGVzdDp0ZXN0' }),
+      resolveGitBinaryForSpawn: () => 'git',
+    });
+
+    const variables = await runtime.buildTemplateVariables({ properties: { info: {} } }, 'ses_1');
+
+    expect(seenHeaders[0]).toMatchObject({ Authorization: 'Basic dGVzdDp0ZXN0' });
+    expect(variables.session_name).toBe('Nightly cleanup');
+  });
+});
