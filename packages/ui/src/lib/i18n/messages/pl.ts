@@ -3050,8 +3050,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.start.fromItemUnavailable': 'Połącz GitHub lub Linear, aby zacząć od PR lub issue.',
   'session.newWorktree.item.title': 'PR lub issue',
   'session.newWorktree.baseBranchNotApplicable': 'Nieużywane przy tym wyborze',
-  'session.newWorktree.setup.title': 'Polecenia konfiguracji',
-  'session.newWorktree.setup.hint': 'Uruchamiane w nowym worktree po jego utworzeniu, jedno na linię. Wypełnione z ustawień projektu; zmiany dotyczą tylko tego worktree.',
   'session.newWorktree.mode.fromItem': 'PR lub issue',
   'session.newWorktree.error.attachLinkedFailed': 'Nie udało się dołączyć {item}',
   'session.newWorktree.actions.startFromGitHubIssuePr': 'Rozpocznij ze zgłoszenia/PR GitHub',

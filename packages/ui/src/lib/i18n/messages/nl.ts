@@ -2210,8 +2210,6 @@ export const dict = {
   'session.newWorktree.start.fromItemUnavailable': 'Koppel GitHub of Linear om vanaf een PR of issue te beginnen.',
   'session.newWorktree.item.title': 'PR of issue',
   'session.newWorktree.baseBranchNotApplicable': 'Niet gebruikt bij deze keuze',
-  'session.newWorktree.setup.title': 'Setupcommando’s',
-  'session.newWorktree.setup.hint': 'Draaien in de nieuwe worktree nadat die is gemaakt, één per regel. Vooraf ingevuld vanuit de projectinstellingen; wijzigingen gelden alleen voor deze worktree.',
   'session.newWorktree.mode.fromItem': 'PR of issue',
   'session.newWorktree.error.attachLinkedFailed': '{item} kon niet worden bijgevoegd',
   'session.newWorktree.error.noActiveProject': 'Geen actief project',

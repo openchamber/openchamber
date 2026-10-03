@@ -2212,8 +2212,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.start.fromItemUnavailable': 'PR이나 이슈에서 시작하려면 GitHub 또는 Linear를 연결하세요.',
   'session.newWorktree.item.title': 'PR 또는 이슈',
   'session.newWorktree.baseBranchNotApplicable': '이 선택에서는 사용하지 않음',
-  'session.newWorktree.setup.title': '설정 명령',
-  'session.newWorktree.setup.hint': '만든 뒤 새 worktree에서 실행됩니다. 한 줄에 하나씩. 프로젝트 설정에서 미리 채워지며, 변경은 이 worktree에만 적용됩니다.',
   'session.newWorktree.mode.fromItem': 'PR 또는 이슈',
   'session.newWorktree.error.attachLinkedFailed': '{item}을(를) 첨부하지 못했습니다',
   'session.newWorktree.error.noActiveProject': '활성 프로젝트가 없습니다',

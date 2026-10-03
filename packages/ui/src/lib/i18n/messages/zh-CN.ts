@@ -2176,8 +2176,6 @@ export const dict: Record<I18nKey, string> = {
   'session.newWorktree.start.fromItemUnavailable': '连接 GitHub 或 Linear 才能从 PR 或 issue 开始。',
   'session.newWorktree.item.title': 'PR 或 issue',
   'session.newWorktree.baseBranchNotApplicable': '此选项不使用',
-  'session.newWorktree.setup.title': '设置命令',
-  'session.newWorktree.setup.hint': '创建后在新工作树中运行，每行一条。已按项目设置预填；修改只对这个工作树生效。',
   'session.newWorktree.mode.fromItem': 'PR 或 issue',
   'session.newWorktree.error.attachLinkedFailed': '无法附加 {item}',
   'session.newWorktree.error.noActiveProject': '没有活动项目',
