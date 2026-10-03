@@ -1,4 +1,5 @@
 import * as gitHttp from '@/lib/gitApiHttp';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { toast } from '@/components/ui';
@@ -11,7 +12,7 @@ type WorktreeBootstrapReadyHandler = (status: GitWorktreeBootstrapStatus) => voi
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 250;
 
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 const state = new Map<string, WorktreeBootstrapState>();
 type WorktreeBootstrapTarget = 'git-ready' | 'setup-ready';

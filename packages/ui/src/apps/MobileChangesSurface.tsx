@@ -46,6 +46,7 @@ import {
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { normalizePath } from '@/lib/pathNormalization';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -74,8 +75,6 @@ type ComparisonDiff =
 const LOADING_COMPARISON_DIFF: ComparisonDiff = { status: 'loading' };
 const LIST_ROUTE: ChangesRoute = { type: 'list' };
 
-const normalizePath = (value?: string | null): string => (value || '').replace(/\\/g, '/').replace(/\/+$/g, '');
-
 const isStagedStatusFile = (file: GitStatus['files'][number]): boolean => {
   const indexStatus = file.index?.trim();
   return Boolean(indexStatus && indexStatus !== '?');
@@ -102,7 +101,7 @@ type MobileChangesSurfaceProps = {
 };
 
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props) => {
-  const rootDirectory = normalizePath(useEffectiveDirectory() ?? null);
+  const rootDirectory = normalizePath(useEffectiveDirectory() ?? null) ?? '';
   const repository = useNestedGitDirectory(rootDirectory || null, { enabled: props.visible ?? true });
   return <MobileChangesPane {...props} rootDirectory={rootDirectory} repository={repository} />;
 };
