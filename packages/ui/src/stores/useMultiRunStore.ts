@@ -131,7 +131,7 @@ const resolveActiveProject = (): ProjectRef | null => {
 
   const currentDirectory = useDirectoryStore.getState().currentDirectory ?? null;
   if (currentDirectory && currentDirectory.trim().length > 0) {
-    const normalized = currentDirectory.replace(/\\/g, '/').replace(/\/+$/, '') || currentDirectory;
+    const normalized = normalizePath(currentDirectory) || currentDirectory;
     return { id: `path:${normalized}`, path: normalized };
   }
 
