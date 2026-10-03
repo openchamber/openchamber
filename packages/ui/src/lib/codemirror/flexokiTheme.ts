@@ -32,7 +32,7 @@ export function createFlexokiCodeMirrorTheme(
       position: 'relative' as const,
     },
     '.cm-scroller': {
-      fontFamily: monoFont,
+      fontFamily: `var(--font-mono, ${monoFont})`,
       backgroundColor,
     },
 
