@@ -1601,7 +1601,11 @@ const loginRemoteAndIssueClientToken = async ({ url, password, trustDevice, requ
     ? { clientKind: LOCAL_DESKTOP_CLIENT_KIND, dedupeKey: LOCAL_DESKTOP_CLIENT_DEDUPE_KEY, ...desktopDeviceMetadata() }
     : { clientKind: REMOTE_DESKTOP_CLIENT_KIND, dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`, ...desktopDeviceMetadata() };
 
-  const loginResponse = await fetch(new URL('/auth/session', `${baseUrl}/`).toString(), {
+  // Keep a sub-path prefix (https://host/openchamber); new URL('/auth/session', base) would drop it.
+  const loginUrl = new URL(baseUrl);
+  loginUrl.pathname = `${loginUrl.pathname.replace(/\/+$/, '')}/auth/session`;
+  loginUrl.search = '';
+  const loginResponse = await fetch(loginUrl.toString(), {
     method: 'POST',
     signal: AbortSignal.timeout(10_000),
     headers: {

@@ -186,7 +186,7 @@ describe('runtimeFetch transport contract', () => {
 
       expect(calls).toHaveLength(1);
       const captured = calls[0].input;
-      expect(captured.url).toBe('https://runtime.example/api/session/abc/prompt_async?directory=%2Frepo&workspace=main');
+      expect(captured.url).toBe('https://runtime.example/base/api/session/abc/prompt_async?directory=%2Frepo&workspace=main');
       expect(captured.method).toBe('POST');
       expect(captured.signal).toBe(controller.signal);
       expect(captured.headers.get('content-type')).toBe('application/json');
@@ -194,6 +194,36 @@ describe('runtimeFetch transport contract', () => {
       expect(captured.headers.get('x-init-header')).toBe('merged');
       expect(captured.headers.get('authorization')).toBe('Bearer runtime-token');
       expect(calls[0].body).toBe(JSON.stringify({ parts: [{ type: 'text', text: 'hello' }] }));
+    } finally {
+      setRuntimeUrlResolver(previous);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+    }
+  });
+
+  test('attaches runtime auth to a request already addressed under a sub-path host', async () => {
+    const previous = getRuntimeUrlResolver();
+    const originalWindow = globalThis.window;
+    const calls: Request[] = [];
+
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'https://runtime.example/base' });
+      setRuntimeBearerToken('runtime-token');
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { origin: 'https://app.example', href: 'https://app.example/app' } },
+      });
+
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        calls.push(input instanceof Request ? input : new Request(input));
+        return new Response('{}', { status: 200 });
+      }) as typeof fetch;
+
+      await runtimeFetch(new Request('https://runtime.example/base/api/config/settings'));
+      await runtimeFetch(new Request('https://runtime.example/other/api/config/settings'));
+
+      expect(calls[0].url).toBe('https://runtime.example/base/api/config/settings');
+      expect(calls[0].headers.get('authorization')).toBe('Bearer runtime-token');
+      expect(calls[1].headers.get('authorization')).toBeNull();
     } finally {
       setRuntimeUrlResolver(previous);
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });

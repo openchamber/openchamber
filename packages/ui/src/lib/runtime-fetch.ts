@@ -101,8 +101,13 @@ const splitPath = (raw: string): { path: string; rest: string; origin: string } 
   }
   try {
     const url = new URL(raw);
-    if (!isCurrentWindowUrl(url) && !isActiveRuntimeServiceUrl(url)) return null;
-    return { path: url.pathname, rest: `${url.search}${url.hash}`, origin: url.origin };
+    if (isCurrentWindowUrl(url)) {
+      return { path: url.pathname, rest: `${url.search}${url.hash}`, origin: url.origin };
+    }
+    const servicePath = activeRuntimeServicePath(url);
+    if (servicePath === null || !shouldResolveApiPath(servicePath)) return null;
+    const prefix = url.pathname.slice(0, url.pathname.length - servicePath.length);
+    return { path: servicePath, rest: `${url.search}${url.hash}`, origin: `${url.origin}${prefix}` };
   } catch {
     return null;
   }
@@ -125,16 +130,36 @@ const addressSpace = (input: string | URL | Request, init: RuntimeFetchOptions):
   return input instanceof URL ? new URL(target, input) : target;
 };
 
-const isActiveRuntimeServiceUrl = (url: URL): boolean => {
+/**
+ * Where the active runtime lives: its origin plus any sub-path prefix the host
+ * is served under (https://host/openchamber), or null for a same-origin runtime.
+ */
+const activeRuntimeServiceRoot = (): string | null => {
+  const apiBase = getRuntimeUrlResolver().api('/api');
+  if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return null;
+  const base = new URL(apiBase);
+  return `${base.origin}${base.pathname.replace(/\/api$/, '')}`;
+};
+
+/** The service path of a URL on the active runtime, with the host's sub-path prefix removed. */
+const activeRuntimeServicePath = (url: URL): string | null => {
   try {
-    const apiBase = getRuntimeUrlResolver().api('/api');
-    if (!/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) return false;
-    const base = new URL(apiBase);
-    if (url.origin !== base.origin) return false;
-    return shouldResolveApiPath(url.pathname);
+    const root = activeRuntimeServiceRoot();
+    if (!root) return null;
+    const rootUrl = new URL(root);
+    if (url.origin !== rootUrl.origin) return null;
+    const prefix = rootUrl.pathname.replace(/\/+$/, '');
+    if (!prefix) return url.pathname;
+    if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) return null;
+    return url.pathname.slice(prefix.length) || '/';
   } catch {
-    return false;
+    return null;
   }
+};
+
+const isActiveRuntimeServiceUrl = (url: URL): boolean => {
+  const path = activeRuntimeServicePath(url);
+  return path !== null && shouldResolveApiPath(path);
 };
 
 const shouldResolveFetchInput = (input: string): boolean => {
