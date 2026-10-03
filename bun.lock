@@ -428,8 +428,8 @@
     "electron",
   ],
   "patchedDependencies": {
-    "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",
     "@tanstack/virtual-core@3.17.11": "bun-patches/@tanstack+virtual-core+3.17.11.patch",
+    "happy-dom@18.0.1": "bun-patches/happy-dom@18.0.1.patch",
     "bun-pty@0.4.8": "bun-patches/bun-pty@0.4.8.patch",
     "@legendapp/list@3.6.0": "bun-patches/@legendapp%2Flist@3.6.0.patch",
   },
