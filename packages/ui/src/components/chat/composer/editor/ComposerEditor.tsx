@@ -39,6 +39,7 @@ import { composerLanguage, setLanguageContext } from './composerLanguage';
 import { composerBidi } from './bidi';
 import { replaceWithCaret } from './documentEdits';
 import type { ComposerEditorViewStore } from './viewStore';
+import { ComposerEditorView } from './ComposerEditorView';
 import { composerEditorTheme, composerSelectionExtension } from './theme';
 import { handleComposerHostMouseDown } from './hostMouseDown';
 import { getComposerHeightLimit, isComposerContentCapped } from './heightLimit';
@@ -250,7 +251,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                 },
             }];
 
-            const view = new EditorView({
+            const view = new ComposerEditorView({
                 state: EditorState.create({
                     doc: handlersRef.current.value,
                     extensions: [

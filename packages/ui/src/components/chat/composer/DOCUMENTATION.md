@@ -224,6 +224,11 @@ DOM-only tests cannot verify these.
 exactly what gets sent, so nothing downstream serializes a rich document model
 back into a prompt.
 
+The composer disables CodeMirror EditContext through `ComposerEditorView`:
+on Android Chrome with Gboard (Thai input, #3514) the EditContext path moved
+the caret into the middle of the draft and reinserted fragments. Generic
+editors (Files, Plan, Skills) keep the base `EditorView` and its EditContext.
+
 The document is not, however, the string it was given: CodeMirror normalizes
 line endings, so a `\r\n` pair becomes one break and the document ends up
 shorter than the inserted string. **Never derive a caret position from the
