@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
-import { setLoopFileEnabled } from './loops.js';
+import { loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
@@ -86,6 +86,10 @@ export const createScheduledTaskService = (dependencies) => {
       const message = error instanceof Error ? error.message : 'Failed to update loop file';
       throw new OpenChamberControlError(message, 500);
     }
+    // Enabling here is the user's approval of this version of the loop on
+    // this machine; a repository loop does not run on its file's word alone.
+    const definition = enabled ? parseLoopDefinition(task.loopFile) : null;
+    await projectConfigRuntime.setLoopApproval(id, task.loopFile, definition ? loopFingerprint(definition) : null);
     const tasks = await scheduledTasksRuntime.syncProject(id);
     return tasks.find((entry) => entry.id === taskID) || null;
   };

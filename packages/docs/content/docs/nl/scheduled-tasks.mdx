@@ -52,7 +52,7 @@ Hebben een projectloop en een gebruikersloop dezelfde naam, dan krijgt de projec
 |---|---|
 | `name` | Taaknaam, verplicht en maximaal 80 tekens. |
 | `schedule` | Cron-expressie, verplicht. Loopbestanden ondersteunen alleen cron. |
-| `enabled` | Stel in op `true` om de taak uit te voeren. Loops staan **standaard uit**, zodat het committen van een bestand niet vanzelf een taak start. |
+| `enabled` | Stel in op `true` om de taak uit te voeren. Loops staan **standaard uit**, zodat het committen van een bestand niet vanzelf een taak start. Een loop die met een repository meekomt, wacht bovendien tot u hem op uw eigen machine aanzet in Geplande taken, en opnieuw na een wijziging in schema, model of prompt. Loops in `~/.agents/loops` draaien al met alleen `true`. |
 | `model` | `provider/model`, verplicht, bijvoorbeeld `anthropic/claude-sonnet-4-5`. |
 | `agent` | Te gebruiken agent, optioneel. |
 | `timezone` | IANA-tijdzone, optioneel. Standaard wordt de tijdzone van de server gebruikt. |

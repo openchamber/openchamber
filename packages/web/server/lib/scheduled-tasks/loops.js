@@ -37,6 +37,7 @@
  * the markdown file; it continues to live in the project config/state store.
  */
 
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -140,6 +141,14 @@ export const parseLoopDefinition = (filePath) => {
   };
 };
 
+/**
+ * What a local approval of a project loop covers: everything that decides
+ * what runs and when. `enabled` is left out, it is what the approval gates.
+ */
+export const loopFingerprint = (definition) => createHash('sha256')
+  .update(JSON.stringify({ name: definition.name, schedule: definition.schedule, execution: definition.execution }))
+  .digest('hex');
+
 export const setLoopFileEnabled = (filePath, enabled) => {
   if (!parseLoopDefinition(filePath)) {
     return false;
@@ -209,7 +218,7 @@ export const discoverLoops = (projectPath) => {
     if (existing && (existing.scope === 'project' || scope === 'user')) {
       continue;
     }
-    byName.set(definition.name, { scope, filePath, definition });
+    byName.set(definition.name, { scope, filePath, definition, fingerprint: loopFingerprint(definition) });
   }
   for (const entry of byName.values()) {
     loops.push(entry);

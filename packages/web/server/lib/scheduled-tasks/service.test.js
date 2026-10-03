@@ -10,6 +10,7 @@ const createService = (overrides = {}) => {
   const projectConfigRuntime = {
     listScheduledTasks: vi.fn(async () => []),
     deleteScheduledTask: vi.fn(async () => ({ deleted: true, tasks: [] })),
+    setLoopApproval: vi.fn(async () => {}),
     ...(overrides.projectConfigRuntime || {}),
   };
   const scheduledTasksRuntime = {
@@ -87,9 +88,11 @@ Run the digest.
       const syncProject = vi.fn()
         .mockResolvedValueOnce([currentTask])
         .mockResolvedValueOnce([updatedTask]);
-      const { service } = createService({ scheduledTasksRuntime: { syncProject } });
+      const { service, projectConfigRuntime } = createService({ scheduledTasksRuntime: { syncProject } });
 
       await expect(service.setLoopEnabled('project-test', currentTask.id, false)).resolves.toEqual(updatedTask);
+      // Turning a loop off withdraws this machine's approval of it.
+      expect(projectConfigRuntime.setLoopApproval).toHaveBeenCalledWith('project-test', loopFilePath, null);
 
       const content = await readFile(loopFilePath, 'utf8');
       expect(content).toContain('enabled: false');
@@ -319,5 +322,30 @@ describe('scheduled-task service chats scope', () => {
     const { service } = createService();
 
     await expect(service.list(CHATS_SCOPE_PUBLIC_ID)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('records approval of the exact loop version when the user enables it', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-approve-'));
+    try {
+      const loopFilePath = path.join(tempRoot, 'daily.md');
+      await writeFile(loopFilePath, `---
+name: daily-digest
+schedule: "0 9 * * *"
+enabled: true
+model: openai/gpt-5
+---
+
+Run the digest.
+`, 'utf8');
+      const currentTask = { ...loopTask, loopFile: loopFilePath };
+      const syncProject = vi.fn(async () => [currentTask]);
+      const { service, projectConfigRuntime } = createService({ scheduledTasksRuntime: { syncProject } });
+
+      await service.setLoopEnabled('project-test', currentTask.id, true);
+
+      expect(projectConfigRuntime.setLoopApproval).toHaveBeenCalledWith('project-test', loopFilePath, expect.stringMatching(/^[0-9a-f]{64}$/));
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

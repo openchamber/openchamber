@@ -359,6 +359,14 @@ const normalizeTaskForStorage = (value, options) => {
   };
 };
 
+// `loopApprovals`: loop file path -> fingerprint of the version the user
+// enabled on this machine. Anything else reads as no approvals.
+const readLoopApprovals = (raw) => (
+  raw.loopApprovals && typeof raw.loopApprovals === 'object' && !Array.isArray(raw.loopApprovals)
+    ? raw.loopApprovals
+    : {}
+);
+
 const createEmptyProjectConfig = () => ({
   version: PROJECT_CONFIG_VERSION,
   scheduledTasks: [],
@@ -853,6 +861,16 @@ export const createProjectConfigRuntime = (deps) => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
       const tasks = current.scheduledTasks;
+      const approvals = readLoopApprovals(await readRawProjectConfigFromDisk(projectID));
+      // A project loop comes with the repository: `enabled: true` in its file
+      // is the author's suggestion. It runs here only once the user enabled
+      // this version of it on this machine (see setLoopApproval); a change to
+      // what it runs or when needs a new approval.
+      loops = loops.map((loop) => (
+        loop?.scope === 'project' && loop.definition?.enabled === true && approvals[loop.filePath] !== loop.fingerprint
+          ? { ...loop, definition: { ...loop.definition, enabled: false } }
+          : loop
+      ));
 
       const activeLoopFilePaths = new Set();
       const pendingLoops = new Map();
@@ -952,6 +970,22 @@ export const createProjectConfigRuntime = (deps) => {
       return nextTasks;
     });
   };
+
+  /**
+   * Record (or, with a null fingerprint, withdraw) this machine's approval of
+   * one project loop file. Kept in the per-machine project config, never in
+   * the repository.
+   */
+  const setLoopApproval = async (projectID, filePath, fingerprint) => withProjectWriteLock(projectID, async () => {
+    const existing = await readRawProjectConfigFromDisk(projectID);
+    const loopApprovals = { ...readLoopApprovals(existing) };
+    if (fingerprint) {
+      loopApprovals[filePath] = fingerprint;
+    } else {
+      delete loopApprovals[filePath];
+    }
+    await writeRawProjectConfigToDisk(projectID, { ...existing, version: PROJECT_CONFIG_VERSION, loopApprovals });
+  });
 
   // The client-owned part of the file (worktree setup, project actions, draft
   // starters); see `project-setup.js`. Reads are lock-free like task lists;
@@ -1074,6 +1108,7 @@ export const createProjectConfigRuntime = (deps) => {
     updateScheduledTaskState,
     updateScheduledTaskStateIf,
     reconcileLoopTasks,
+    setLoopApproval,
     resolveProjectConfigPath,
   };
 };

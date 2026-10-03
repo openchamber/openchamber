@@ -52,7 +52,7 @@ If a project loop and a user loop share a name, the project loop wins.
 |---|---|
 | `name` | Task name (required, max 80 characters). |
 | `schedule` | Cron expression (required) — loop files are cron-only. |
-| `enabled` | Set `true` to run. Loops are **off by default**, so committing a file never starts running a task on its own. |
+| `enabled` | Set `true` to run. Loops are **off by default**, so committing a file never starts running a task on its own. A loop that came with a repository also waits until you turn it on in Scheduled Tasks on your machine, and again after a change to its schedule, model or prompt. Loops in `~/.agents/loops` run on `true` alone. |
 | `model` | `provider/model` (required), e.g. `anthropic/claude-sonnet-4-5`. |
 | `agent` | Agent to use (optional). |
 | `timezone` | IANA timezone (optional, defaults to the server zone). |

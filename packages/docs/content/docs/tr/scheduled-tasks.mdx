@@ -52,7 +52,7 @@ Bir proje loop'u ile bir kullanıcı loop'u aynı adı paylaşırsa proje loop'u
 |---|---|
 | `name` | Görev adı, zorunlu, en fazla 80 karakter. |
 | `schedule` | Cron ifadesi, zorunlu. Loop dosyaları yalnızca cron kullanır. |
-| `enabled` | Çalışması için `true` yapın. Loop'lar **varsayılan olarak kapalıdır**, bu yüzden bir dosyayı commit etmek tek başına bir görevi başlatmaz. |
+| `enabled` | Çalışması için `true` yapın. Loop'lar **varsayılan olarak kapalıdır**, bu yüzden bir dosyayı commit etmek tek başına bir görevi başlatmaz. Bir depoyla gelen loop ayrıca siz onu kendi makinenizde Zamanlanmış Görevler'den açana kadar bekler; zamanlaması, modeli veya prompt'u değiştiğinde de yeniden bekler. `~/.agents/loops` içindeki loop'lar yalnızca `true` ile çalışır. |
 | `model` | `provider/model`, zorunlu. Örneğin `anthropic/claude-sonnet-4-5`. |
 | `agent` | Kullanılacak agent, isteğe bağlı. |
 | `timezone` | IANA saat dilimi, isteğe bağlı, varsayılan olarak sunucu saat dilimi kullanılır. |

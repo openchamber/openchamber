@@ -143,7 +143,7 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 |---|---|
 | `name` | `name` (required, max 80 characters — longer names are rejected as malformed) |
 | `schedule` | `schedule.kind: "cron"` + `schedule.cron` (required, cron-only in the portable format) |
-| `enabled` | `enabled` (default `false` — a loop only runs when the file explicitly enables it; add `enabled: true` to activate) |
+| `enabled` | `enabled` (default `false` — a loop only runs when the file explicitly enables it; add `enabled: true` to activate). For a project-scope loop the file's word is not enough: it runs only once the user enabled it on this machine, see *Local approval* |
 | `model` | split on the first `/` into `execution.providerID` / `execution.modelID` (required) |
 | `agent` | `execution.agent` (optional) |
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
@@ -186,6 +186,14 @@ project write lock on every `syncProject` when the project path is known:
 - **Malformed files** (missing `name`/`schedule`/`model`/body, invalid cron,
   unreadable) are reported to the scheduler as `definition: null` entries and
   warned about; they never block valid loops in the same or other scopes.
+- **Local approval.** A project-scope loop arrives with the repository, so
+  `enabled: true` in its file is the author's suggestion. `reconcileLoopTasks`
+  keeps it disabled unless the per-machine project config holds an approval
+  (`loopApprovals`: file path -> `loopFingerprint`) matching the file's current
+  name, schedule and execution. Enabling a loop in the UI (the loop-file
+  endpoint) records that approval; disabling withdraws it. A pull that changes
+  what a loop runs or when changes its fingerprint, and the loop waits for a
+  new approval. User-scope loops (`~/.agents/loops`) need none.
 - **Loop-file mutations.** The loop file remains authoritative. The scheduled-
   tasks UI opens it in the built-in file editor, updates its `enabled`
   frontmatter through the loop-file endpoint, and deletes the file through the

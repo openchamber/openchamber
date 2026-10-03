@@ -11,6 +11,7 @@ import {
 } from './runtime.js';
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createChatsScope } from './chats-scope.js';
+import { loopFingerprint, parseLoopDefinition } from './loops.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it.each([
@@ -182,14 +183,36 @@ Run daily.
         listProjects: async () => [{ id: 'proj', path: repoPath }],
       });
 
+      const loopFile = path.join(repoPath, '.agents', 'loops', 'daily.md');
       await runtime.syncProject('proj');
 
-      const tasks = await projectConfigRuntime.listScheduledTasks('proj');
+      // `enabled: true` came with the repository: listed, not scheduled.
+      let tasks = await projectConfigRuntime.listScheduledTasks('proj');
       expect(tasks).toHaveLength(1);
       expect(tasks[0].id).toBe('loop:project:daily');
-      expect(tasks[0].loopFile).toBe(path.join(repoPath, '.agents', 'loops', 'daily.md'));
+      expect(tasks[0].loopFile).toBe(loopFile);
+      expect(tasks[0].enabled).toBe(false);
+
+      // Approved on this machine, this version runs.
+      await projectConfigRuntime.setLoopApproval('proj', loopFile, loopFingerprint(parseLoopDefinition(loopFile)));
+      await runtime.syncProject('proj');
+      tasks = await projectConfigRuntime.listScheduledTasks('proj');
+      expect(tasks[0].enabled).toBe(true);
       // syncTaskSchedule computed and persisted the next run for the enabled task.
       expect(tasks[0].state.nextRunAt).toBeGreaterThan(0);
+
+      // A changed prompt is a new version and waits for a new approval.
+      await writeFile(loopFile, `---
+name: daily
+schedule: "0 9 * * *"
+enabled: true
+model: openai/gpt-5
+---
+Run something else.
+`, 'utf8');
+      await runtime.syncProject('proj');
+      tasks = await projectConfigRuntime.listScheduledTasks('proj');
+      expect(tasks[0].enabled).toBe(false);
     } finally {
       await cleanup();
     }
@@ -247,6 +270,8 @@ Run daily.
       });
       await mkdir(path.join(tempRoot, 'config'), { recursive: true });
       await writeFile(projectConfigRuntime.resolveProjectConfigPath('broken'), '{ not json', 'utf8');
+      const healthyLoop = path.join(healthyPath, '.agents', 'loops', 'daily.md');
+      await projectConfigRuntime.setLoopApproval('healthy', healthyLoop, loopFingerprint(parseLoopDefinition(healthyLoop)));
 
       const warnings = [];
       const runtime = createScheduledTasksRuntime({
