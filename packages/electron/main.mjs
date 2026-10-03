@@ -2331,6 +2331,9 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
     if (!shouldBlockGuestFrameNavigation({
       isMainFrame: details.isMainFrame,
       frameOrigin,
+      frame: details.frame,
+      initiator: details.initiator,
+      mainFrame: browserWindow.webContents.mainFrame,
       url: details.url,
       isAppOrigin: isAllowedNavigationUrl,
     })) return;
