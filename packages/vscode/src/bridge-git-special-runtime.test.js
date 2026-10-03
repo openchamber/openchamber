@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, mock } from 'bun:test';
 const gitService = {
   getGitRangeFiles: mock(),
   getGitRangeDiff: mock(),
+  getGitStatus: mock(),
+  getGitLog: mock(),
+  getGitDiff: mock(),
 };
 
 const sdkClient = {
@@ -22,10 +25,11 @@ const rawFetch = mock(async () => {
 mock.module('./gitService', () => gitService);
 mock.module('@opencode/client', () => ({ OpenCode: { make } }));
 
-const { handleSpecialGitBridgeMessage, setUnavailableRetryDelaysForTest } = await import('./bridge-git-special-runtime');
+const { handleSpecialGitBridgeMessage, resetBridgeGitModelCatalogForTest, setUnavailableRetryDelaysForTest } = await import('./bridge-git-special-runtime');
 
 describe('bridge git special runtime', () => {
   beforeEach(() => {
+    resetBridgeGitModelCatalogForTest();
     gitService.getGitRangeFiles.mockReset();
     gitService.getGitRangeDiff.mockReset();
     sdkClient.model.list.mockReset();
@@ -44,6 +48,32 @@ describe('bridge git special runtime', () => {
     sdkClient.generate.text.mockImplementation(async () => ({
       text: '{"title":"PR title","body":"PR body"}',
     }));
+  });
+
+  it('generates a commit message for the changed files through the OpenCode generate route', async () => {
+    gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
+    gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix(ui): earlier change' }] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":["adds a line"]}' }));
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: 'c1',
+      type: 'api:git/commit-message',
+      payload: { directory: '/repo' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+      readPromptOverrides: () => ({}),
+    });
+
+    expect(response).toEqual({
+      id: 'c1',
+      type: 'api:git/commit-message',
+      success: true,
+      data: { message: { subject: 'feat: add a line', highlights: ['adds a line'] } },
+    });
+    expect(sdkClient.generate.text).toHaveBeenCalledTimes(1);
+    expect(sdkClient.generate.text.mock.calls[0][0].prompt).toContain('+new line');
   });
 
   it('generates PR descriptions through the OpenCode generate route', async () => {

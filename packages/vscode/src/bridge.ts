@@ -87,7 +87,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     const specialGitResponse = await handleSpecialGitBridgeMessage(
       { id, type, payload },
       ctx,
-      { readSettings, execGit }
+      { readSettings, execGit, readPromptOverrides: () => readMagicPromptOverrides().overrides }
     );
     if (specialGitResponse) {
       return specialGitResponse;

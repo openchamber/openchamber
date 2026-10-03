@@ -18,6 +18,7 @@
   "command.newSession.title": "Yeni oturum",
   "command.showSettings.title": "Ayarlar",
   "command.attachExplorerToChat.title": "OpenChamber Chat'ine ekle",
+  "command.generateCommitMessage.title": "Commit mesajı oluştur",
   "configuration.apiUrl.description": "Harici bir OpenCode API sunucusunun URL'si. Yerel bir örneğin otomatik başlatılması için boş bırakın.",
   "configuration.opencodeBinary.description": "opencode CLI ikili dosyasının (binary) isteğe bağlı mutlak yolu. PATH araması başarısız olduğunda faydalıdır. Uygulanması için pencere yeniden yükleme veya API yeniden başlatma gerekir."
 }

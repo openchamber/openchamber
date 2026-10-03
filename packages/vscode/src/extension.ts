@@ -9,6 +9,7 @@ import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 import { applyConnectAttemptTimeout } from './networkDefaults';
 import { stopGitProcesses } from './bridge-git-process-runtime';
+import { registerGenerateCommitMessageCommand } from './scmCommitMessage';
 
 let chatViewProvider: ChatViewProvider | undefined;
 
@@ -857,6 +858,8 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     })
   );
+
+  registerGenerateCommitMessageCommand(context, openCodeManager);
 
   // Start OpenCode API without blocking activation.
   // Blocking here delays webview resolution and causes a blank panel until startup completes.
