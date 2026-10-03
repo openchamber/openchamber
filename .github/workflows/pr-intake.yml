@@ -28,7 +28,7 @@ jobs:
       targets: ${{ steps.collect.outputs.targets }}
     steps:
       - id: collect
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             if (context.eventName === "pull_request_target") {
@@ -92,7 +92,7 @@ jobs:
           fetch-depth: 0
 
       - name: Sync labels and parking comment
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           PR_NUMBER: ${{ matrix.target.number }}
           # A push to main touching this workflow relabels every open PR.
