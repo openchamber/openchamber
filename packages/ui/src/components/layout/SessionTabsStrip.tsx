@@ -41,6 +41,21 @@ import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
+// Firefox can report wheel deltas in lines rather than pixels.
+const WHEEL_LINE_PIXELS = 16;
+
+/**
+ * Mouse wheels scroll vertically, so the strip maps vertical wheel movement to
+ * horizontal scrolling. Horizontal gestures (trackpad swipes, Shift+wheel)
+ * already scroll it natively, and Ctrl/Cmd+wheel stays with zoom.
+ */
+const scrollTabsWithWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+  if (event.shiftKey || event.ctrlKey || event.metaKey) return;
+  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * WHEEL_LINE_PIXELS : event.deltaY;
+  event.currentTarget.scrollLeft += delta;
+};
+
 type SessionTab = { id: string; session: Session };
 
 export type SessionTabMenuComponents = {
@@ -395,6 +410,7 @@ export const SessionTabsStrip: React.FC<{
       <div
         ref={scrollRef}
         onScroll={updateEdges}
+        onWheel={scrollTabsWithWheel}
         className="session-tabs-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain"
         style={maskImage ? { maskImage, WebkitMaskImage: maskImage } : undefined}
       >
