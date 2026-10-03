@@ -24,6 +24,7 @@
  */
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { canDriveBrowserPage } from './hostCapability';
 
 type BrowserControlRequest = {
   readonly requestId: string;
@@ -199,6 +200,17 @@ const unknownTabError = (tabId: string): string => (
   `There is no browser tab with id ${tabId}. Call browser.snapshot to list the open tabs, or omit tabId to use the tab the user is looking at.`
 );
 
+/**
+ * Every successful open says whether this client can also drive the page, the
+ * same per-client fact the event stream declared to the server; otherwise the
+ * agent only learns a page is display-only when its next action fails.
+ */
+const answer = (request: BrowserControlRequest, outcome: { ok: boolean; data?: unknown; error?: string }): Promise<void> => (
+  postResult(request.requestId, request.action === 'browser.open' && outcome.ok
+    ? { ...outcome, data: Object.assign({}, outcome.data, { drivable: canDriveBrowserPage() }) }
+    : outcome)
+);
+
 const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
   const isOpen = request.action === 'browser.open';
   const { tabId: rawTabId, ...parameters } = request.parameters;
@@ -215,7 +227,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         return;
       }
       if (!await claimRequest(request.requestId)) return;
-      await postResult(request.requestId, { ok: false, error: unknownTabError(tabId) });
+      await answer(request, { ok: false, error: unknownTabError(tabId) });
       return;
     }
     await runOnTab(request, tabId, parameters);
@@ -234,12 +246,12 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
     // the answer and the agent keeps working in that tab.
     const url = typeof request.parameters.url === 'string' ? request.parameters.url : '';
     if (isOpen && !url) {
-      await postResult(request.requestId, { ok: false, error: 'url is required' });
+      await answer(request, { ok: false, error: 'url is required' });
       return;
     }
     const openedTabId = isOpen && opener ? opener(url) : null;
     if (isOpen && !openedTabId && !targetTabId) {
-      await postResult(request.requestId, { ok: false, error: 'There is no browser here to open the page in.' });
+      await answer(request, { ok: false, error: 'There is no browser here to open the page in.' });
       return;
     }
     if (openedTabId) {
@@ -248,7 +260,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         ? request.parameters.viewport
         : '';
       if (!requestedViewport || requestedViewport === 'fill') {
-        await postResult(request.requestId, { ok: true, data: { url, opened: true, tabId: openedTabId } });
+        await answer(request, { ok: true, data: { url, opened: true, tabId: openedTabId } });
         return;
       }
 
@@ -259,7 +271,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       if (!attached) {
         // Still no view. Reporting a plain success here would leave the agent
         // believing a size it asked for was applied to a page nobody is showing.
-        await postResult(request.requestId, {
+        await answer(request, {
           ok: true,
           data: {
             url,
@@ -276,7 +288,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
       const viewport = resized && typeof resized === 'object'
         ? (resized as { viewport?: unknown }).viewport ?? null
         : null;
-      await postResult(request.requestId, {
+      await answer(request, {
         ok: true,
         data: { url, opened: true, tabId: openedTabId, viewportApplied: true, viewport },
       });
@@ -284,11 +296,11 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
     }
 
     const view = await viewForTab(targetTabId!);
-    await postResult(request.requestId, view
+    await answer(request, view
       ? await runAction(view, request.action, parameters)
       : { ok: false, error: unloadableTabError(targetTabId!) });
   } catch (error) {
-    await postResult(request.requestId, {
+    await answer(request, {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -303,7 +315,7 @@ const runOnTab = async (
 ): Promise<void> => {
   if (!await claimRequest(request.requestId)) return;
   const view = await viewForTab(tabId);
-  await postResult(request.requestId, view
+  await answer(request, view
     ? await runAction(view, request.action, parameters)
     : { ok: false, error: unloadableTabError(tabId) });
 };
