@@ -58,6 +58,28 @@ Consolidate into a single report grouped by verdict — MERGE, MERGE-THEN-FIX, P
 
 If a batch subagent skips a PR, notice (count outputs against inputs) and re-dispatch the gap.
 
+### Optional: decision rounds through the question tool
+
+When the batch holds more than a handful of verdicts, offer this alongside the consolidated report: "I can walk you through them as cards instead, a few at a time." Use it only if the maintainer says yes; a large report is otherwise read in one go.
+
+A round is one call to the question tool with 4–6 cards. Each card is one decision:
+
+- **Header**: `#N` plus two or three words naming the behavior (`#3640 Cmd+Enter`), within 30 characters.
+- **Body**: the PR number and a plain title on the first line, then 3–4 sentences about what the user sees in the app today, what changes after the PR, and what it costs (risk, a new surface, a dependency, a support burden). Describe behavior, never file names; spell out jargon the maintainer would not use.
+- **Options**: 2–3, the recommended one first with `(Recommended)`. Each option says its consequence ("Close: /btw stays a command"), not only a verb. When our own follow-up is part of the verdict, the option says so ("Merge, then we fix the 1px offset").
+
+Order the rounds by how much the maintainer is needed: product decisions first, then plain bug-fix merges, then fix-before-merge, then merge-then-fix, and last one card that confirms all mechanical closes (duplicates, superseded, stale) as a list. A group of trivial, uncontested merges (translations, one-line fixes) shares one card with a one-line description per PR.
+
+Between rounds:
+
+- A free-text answer is a question or a doubt, never a verdict. Answer it before moving on, and re-ask that PR in the next round with the corrected facts.
+- When the maintainer doubts a claim ("are you sure that's still broken?", "that sounds fragile"), check the code and the current `main` yourself before replying; a reviewer's verdict is a lead, not proof, and these checks have overturned verdicts (a merge that would have mislabeled squash-merged branches, a "bug" that was a deliberate style). Report what you found in plain words, then re-ask.
+- A product decision the maintainer states during the rounds is binding: record it where it will be found next time (memory, or the owning skill) as soon as it is given.
+
+When every card is answered, show one summary grouped by outcome, list what will need the maintainer's own hands (a live check on a device or a packaged app), and get one explicit go before any GitHub write. Comments to people the maintainer works with closely (team members, regular volunteers) are shown as drafts before posting; the rest go out in the maintainer's voice without a separate review.
+
+After the batch is merged, write a symptom map of what landed (area, PR, merge sha, which part we wrote) to `.opencode/plans/pr-triage-<date>-merged.md`, so a later regression can be traced to its PR quickly.
+
 ## Message templates
 
 Canonical texts — reuse verbatim, adjusting only bracketed parts. Tone rules: honest about the backlog, no "feel free to reopen", thanks proportional to real effort.
