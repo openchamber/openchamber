@@ -199,6 +199,48 @@ export async function activate(context: vscode.ExtensionContext) {
     return true;
   };
 
+  const selectNewSessionWorkspace = async (directory?: string) => {
+    const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
+    let folderPath = directory;
+
+    if (!folderPath && candidates.length === 0) {
+      vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+      return;
+    }
+
+    if (!folderPath) {
+      folderPath = candidates.length === 1
+        ? candidates[0].path
+        : (await vscode.window.showQuickPick(
+            candidates.map((folder) => ({ label: folder.name, description: folder.path, path: folder.path })),
+            { placeHolder: 'Select a workspace folder for this session', matchOnDescription: true }
+          ))?.path;
+    }
+
+    if (!folderPath) {
+      return;
+    }
+
+    if (openCodeManager) {
+      const result = await openCodeManager.setWorkingDirectory(folderPath);
+      if (!result.success) {
+        vscode.window.showErrorMessage(`OpenChamber: ${result.error}`);
+        return;
+      }
+    }
+
+    const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
+      ? candidates
+      : [
+          ...candidates,
+          {
+            name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath,
+            path: folderPath,
+          },
+        ];
+    return { directory: folderPath, workspaceFolders };
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.focusChat', async () => {
       if (!(await revealChatViewForPayload())) {
@@ -236,8 +278,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     // The command id predates multi-run (it opened the removed Agent Manager
     // panel); it stays so existing keybindings keep working.
-    vscode.commands.registerCommand('openchamber.openAgentManager', () => {
-      sessionEditorProvider?.createOrShowParallelDraft();
+    vscode.commands.registerCommand('openchamber.openAgentManager', async () => {
+      const workspace = await selectNewSessionWorkspace();
+      if (!workspace) {
+        return;
+      }
+      sessionEditorProvider?.createOrShowParallelDraft(workspace.directory);
     })
   );
 
@@ -274,18 +320,26 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', () => {
-      sessionEditorProvider?.createOrShowNewSession();
+    vscode.commands.registerCommand('openchamber.openNewSessionInEditor', async () => {
+      const workspace = await selectNewSessionWorkspace();
+      if (!workspace) {
+        return;
+      }
+      sessionEditorProvider?.createOrShowNewSession(workspace.directory);
     })
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', () => {
+    vscode.commands.registerCommand('openchamber.openCurrentOrNewSessionInEditor', async () => {
       if (activeSessionId) {
         sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
-      } else {
-        sessionEditorProvider?.createOrShowNewSession();
+        return;
       }
+      const workspace = await selectNewSessionWorkspace();
+      if (!workspace) {
+        return;
+      }
+      sessionEditorProvider?.createOrShowNewSession(workspace.directory);
     })
   );
 
@@ -578,44 +632,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.newSession', async (directory?: unknown) => {
-      const candidates = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
-      let folderPath: string | undefined = typeof directory === 'string' ? directory : undefined;
-
-      if (!folderPath && candidates.length === 0) {
-        vscode.window.showInformationMessage('OpenChamber: No folder is open. Open a folder to start a new session.');
+      const workspace = await selectNewSessionWorkspace(typeof directory === 'string' ? directory : undefined);
+      if (!workspace) {
         return;
       }
-
-      if (!folderPath) {
-        folderPath = candidates.length === 1
-          ? candidates[0].path
-          : (await vscode.window.showQuickPick(
-              candidates.map((folder) => ({ label: folder.name, description: folder.path, path: folder.path })),
-              { placeHolder: 'Select a workspace folder for this session', matchOnDescription: true }
-            ))?.path;
-      }
-
-      if (!folderPath) {
-        return;
-      }
-
-      if (openCodeManager) {
-        const result = await openCodeManager.setWorkingDirectory(folderPath);
-        if (!result.success) {
-          vscode.window.showErrorMessage(`OpenChamber: ${result.error}`);
-          return;
-        }
-      }
-      const workspaceFolders = candidates.some((folder) => folder.path === folderPath)
-        ? candidates
-        : [
-            ...candidates,
-            {
-              name: folderPath.split(/[\\/]/).filter(Boolean).pop() ?? folderPath,
-              path: folderPath,
-            },
-          ];
-      chatViewProvider?.createNewSession({ directory: folderPath, workspaceFolders });
+      chatViewProvider?.createNewSession(workspace);
     })
   );
 
