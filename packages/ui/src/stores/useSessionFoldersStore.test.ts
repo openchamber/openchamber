@@ -32,8 +32,13 @@ mock.module('@/lib/desktop', () => ({
   isVSCodeRuntime: () => false,
 }));
 
+const postedBodies: string[] = [];
+
 mock.module('@/lib/runtime-fetch', () => ({
-  runtimeFetch: mock(async () => new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } })),
+  runtimeFetch: mock(async (_path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') postedBodies.push(String(init.body));
+    return new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } });
+  }),
 }));
 mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => runtimeKey }));
 
@@ -134,6 +139,51 @@ describe('useSessionFoldersStore folder assignments', () => {
 
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Browser folder']);
   });
+
+  // Server persistence and hydration only run in a browser.
+  const withWindow = (run: () => Promise<void>) => async () => {
+    const original = globalThis.window;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
+    try {
+      await run();
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: original });
+    }
+  };
+
+  test('sends a deleted folder as a tombstone and clears it once the server stores it', withWindow(async () => {
+    const folder = useSessionFoldersStore.getState().createFolder('/workspace/project', 'Gone');
+    await waitForPersist();
+    postedBodies.length = 0;
+
+    useSessionFoldersStore.getState().deleteFolder('/workspace/project', folder.id);
+    await waitForPersist();
+
+    expect(postedBodies).toHaveLength(1);
+    expect(Object.keys(JSON.parse(postedBodies[0]).deletedFolderIds)).toEqual([folder.id]);
+    expect(Array.from(storage.keys()).some((key) => key.startsWith('oc.sessions.folderDeletions'))).toBe(false);
+  }));
+
+  test('drops a folder another device deleted even when the browser copy is newer', withWindow(async () => {
+    const folder = useSessionFoldersStore.getState().createFolder('/workspace/project', 'Deleted elsewhere');
+    useSessionFoldersStore.getState().createFolder('/workspace/project', 'Kept');
+    diskResponseBody = {
+      version: 1,
+      exists: true,
+      foldersMap: {},
+      collapsedFolderIds: [],
+      deletedFolderIds: { [folder.id]: Date.now() },
+      updatedAt: 1,
+    };
+
+    runtimeKey = 'runtime-b';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    runtimeKey = 'runtime-a';
+    useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((entry) => entry.name)).toEqual(['Kept']);
+  }));
 
   test('does not silently evict folder state from older runtimes', () => {
     for (let index = 0; index < 10; index += 1) {
