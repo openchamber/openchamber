@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { Agent } from '@/lib/opencode/model';
+import type { Agent, Config } from '@/lib/opencode/model';
 import type { DesktopSettings } from '@/lib/desktop';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -2249,6 +2249,92 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[worktree]?.opencodeDefaultModel).toBe('openai/gpt-5.5');
     expect(state.opencodeDefaultAgent).toBe('review');
     expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5');
+  });
+
+  test('sync config applies the explicit model object form, variant included', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['high', 'xhigh'])],
+      agents: [testAgent('build'), testAgent('review')],
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude',
+      currentAgentName: 'build',
+      selectedProviderId: 'openai',
+      selectionSource: 'auto',
+    });
+
+    emitSyncConfigChanged(DIRECTORY, {
+      default_agent: 'review',
+      model: { providerID: 'openai', model: 'gpt-5.5', variant: 'xhigh' },
+    });
+
+    const state = useConfigStore.getState();
+    expect(state.opencodeDefaultAgent).toBe('review');
+    expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5#xhigh');
+    expect(state.directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBe('openai/gpt-5.5#xhigh');
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('xhigh');
+    expect(state.currentVariantSelection).toEqual({ override: undefined, inherited: 'xhigh' });
+  });
+
+  test('sync config drops a config variant the catalog does not offer', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['high'])],
+      agents: [testAgent('build'), testAgent('review')],
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude',
+      currentAgentName: 'build',
+      selectedProviderId: 'openai',
+      selectionSource: 'auto',
+    });
+
+    emitSyncConfigChanged(DIRECTORY, {
+      model: { providerID: 'openai', model: 'gpt-5.5', variant: 'ultra' },
+    });
+
+    const state = useConfigStore.getState();
+    expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5#ultra');
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe(undefined);
+  });
+
+  test('loadAgents reads the short string form with a variant', async () => {
+    const syncConfigs = new Map<string, Config>([
+      [DIRECTORY, { default_agent: 'review', model: 'openai/gpt-5.5#xhigh' }],
+    ]);
+    // SAFETY: the mock implements only the child-store surface getSyncConfig reads.
+    setSyncRefs(
+      {} as never,
+      {
+        children: new Map(),
+        getState: (directory: string) => ({ config: syncConfigs.get(directory) ?? {} }),
+      } as never,
+      DIRECTORY,
+    );
+    liveAgents = [testAgent('build'), testAgent('review')];
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['high', 'xhigh'])],
+      agents: [testAgent('build'), testAgent('review')],
+      currentProviderId: 'anthropic',
+      currentModelId: 'claude',
+      currentAgentName: 'build',
+      selectedProviderId: 'openai',
+      selectionSource: 'auto',
+    });
+
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY, source: 'test:objectModel' });
+
+    const state = useConfigStore.getState();
+    expect(state.opencodeDefaultAgent).toBe('review');
+    expect(state.opencodeDefaultModel).toBe('openai/gpt-5.5#xhigh');
+    expect(state.directoryScoped[DIRECTORY]?.opencodeDefaultModel).toBe('openai/gpt-5.5#xhigh');
+    expect(state.currentProviderId).toBe('openai');
+    expect(state.currentModelId).toBe('gpt-5.5');
+    expect(state.currentVariant).toBe('xhigh');
   });
 
   test('loadAgents refresh does not overwrite a project default agent with the global default', async () => {

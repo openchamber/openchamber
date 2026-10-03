@@ -4,6 +4,7 @@ import {
   getWorktreeBootstrapStatus as getWorktreeBootstrapStatusDefault,
   resolvePrimaryWorktreeRoot,
 } from '../git/index.js';
+import { parseModelSelection } from '../opencode/config-v2.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { AUTO_MODEL_REF, isAutoModel } from '../routing/defaults.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
@@ -90,14 +91,6 @@ const resolveVariant = (models, providerID, modelID, variant) => {
   return asList(model.variants).some((entry) => entry?.id === normalized) ? normalized : undefined;
 };
 
-// Config `model` is either "providerID/modelID" or the expanded object form.
-const parseConfigModel = (value) => {
-  if (typeof value === 'string') return splitModel(value);
-  const providerID = asNonEmptyString(value?.providerID);
-  const modelID = asNonEmptyString(value?.model);
-  return providerID && modelID ? { providerID, modelID } : null;
-};
-
 const resolveProjectDefaults = (settings, directory, projectId) => {
   const projects = Array.isArray(settings?.projects) ? settings.projects : [];
   const matchedProject = projectId
@@ -134,7 +127,9 @@ const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) =>
     if (!info) continue;
     const agent = asNonEmptyString(info.default_agent);
     if (agent) opencodeDefaultAgent = agent;
-    const model = parseConfigModel(info.model);
+    // Config `model` is the v2 selection spelling: "provider/model#variant" or
+    // the expanded object form. The canonical parser folds both.
+    const model = parseModelSelection(info.model);
     if (model) opencodeDefaultModel = model;
   }
 
@@ -170,8 +165,11 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
 
   let model = null;
   let variant;
-  const projectDefaultModel = parseConfigModel(projectDefaults?.defaultModel);
-  const settingsDefaultModel = parseConfigModel(settings?.defaultModel);
+  // Settings and project defaults store `provider/model` with the variant in
+  // its own field, so these two stay a plain split; the OpenCode config model
+  // can carry its variant and is parsed with the canonical parser.
+  const projectDefaultModel = splitModel(projectDefaults?.defaultModel);
+  const settingsDefaultModel = splitModel(settings?.defaultModel);
   // A saved choice is honoured even when the catalog has not listed it yet: a
   // discovery gap must not silently move the user onto another model.
   if (projectDefaultModel) {
@@ -191,7 +189,8 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
   }
 
   if (!model && opencodeDefaultModel) {
-    model = opencodeDefaultModel;
+    model = { providerID: opencodeDefaultModel.providerID, modelID: opencodeDefaultModel.modelID };
+    variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
   if (!model && hasCatalogModel(models, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {

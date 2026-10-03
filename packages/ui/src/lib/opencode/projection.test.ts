@@ -3,6 +3,7 @@ import type { ConfigEntry, SessionInfo, SessionMessageAssistant, SessionMessageI
 
 import { partIds, type ConfigDocument } from "./model"
 import {
+  configModelIdentifier,
   deniesAnyProvider,
   mergeConfigDocuments,
   projectAgent,
@@ -269,6 +270,22 @@ describe("mergeConfigDocuments", () => {
 
   test("no documents yields an empty config", () => {
     expect(mergeConfigDocuments([])).toEqual({})
+  })
+})
+
+describe("configModelIdentifier", () => {
+  test("keeps the identifier spelling of both served forms", () => {
+    expect(configModelIdentifier("openai/gpt-5.5")).toBe("openai/gpt-5.5")
+    expect(configModelIdentifier("openai/gpt-5.5#xhigh")).toBe("openai/gpt-5.5#xhigh")
+    expect(configModelIdentifier({ providerID: "openai", model: "gpt-5.5" })).toBe("openai/gpt-5.5")
+    expect(configModelIdentifier({ providerID: "openai", model: "gpt-5.5", variant: "xhigh" })).toBe("openai/gpt-5.5#xhigh")
+  })
+
+  test("rejects malformed or incomplete selections", () => {
+    expect(configModelIdentifier(undefined)).toBeUndefined()
+    expect(configModelIdentifier("gpt-5.5")).toBeUndefined()
+    expect(configModelIdentifier({ providerID: "", model: "gpt-5.5" })).toBeUndefined()
+    expect(configModelIdentifier({ providerID: "openai", model: "" })).toBeUndefined()
   })
 })
 

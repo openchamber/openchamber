@@ -21,7 +21,8 @@ import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
-import { parseModelIdentifier } from "@/lib/modelIdentifier";
+import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
+import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
@@ -420,10 +421,13 @@ const resolveDefaultAgentModelSelection = ({
 
     // OpenCode's global default model — used when neither our settings nor the agent pin a model.
     if (!providerId && opencodeDefaultModel) {
-        const parsed = parseModelString(opencodeDefaultModel);
+        const parsed = parseModelSelection(opencodeDefaultModel);
         if (parsed) {
-            providerId = parsed.providerId;
-            modelId = parsed.modelId;
+            providerId = parsed.providerID;
+            modelId = parsed.modelID;
+            variant = hasProviderModel(providers, providerId, modelId)
+                ? resolveVariant(providerId, modelId, parsed.variant)
+                : parsed.variant;
         }
     }
 
@@ -2554,7 +2558,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 ? normalizeOptionalString(latestSyncedOpencodeConfig.default_agent)
                                 : undefined;
                             const latestSyncedOpencodeDefaultModel = hasLatestSyncedOpencodeConfig
-                                ? normalizeOptionalString(latestSyncedOpencodeConfig.model)
+                                ? configModelIdentifier(latestSyncedOpencodeConfig.model)
                                 : undefined;
 
                             const providers = get().activeDirectoryKey === directoryKey
@@ -3284,7 +3288,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     const opencodeDefaultAgent = normalizeOptionalString(syncedConfig.default_agent);
-                    const opencodeDefaultModel = normalizeOptionalString(syncedConfig.model);
+                    const opencodeDefaultModel = configModelIdentifier(syncedConfig.model);
                     const projectDefaults = getProjectDefaultsForConfigDirectory(configDirectory);
 
                     set((state) => {

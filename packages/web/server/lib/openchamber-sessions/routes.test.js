@@ -1001,6 +1001,46 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('applies the config default model variant when the prompt omits a model', async () => {
+    useCatalog({
+      config: [{
+        type: 'document',
+        info: { model: { providerID: 'openai', model: 'gpt-5.5', variant: 'high' } },
+      }],
+    });
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'high' },
+    });
+  });
+
+  it('applies the config default model variant from the string spelling', async () => {
+    useCatalog({
+      config: [{
+        type: 'document',
+        info: { model: 'openai/gpt-5.5#high' },
+      }],
+    });
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'gpt-5.5', providerID: 'openai', variant: 'high' },
+    });
+  });
+
   it('rejects an unknown agent before creating a session or worktree', async () => {
     const { app } = createApp();
     await request(app)
