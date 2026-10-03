@@ -105,6 +105,9 @@ const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
 };
 
 type ZaiPayload = {
+  code?: number | null;
+  msg?: string | null;
+  success?: boolean;
   data?: {
     limits?: ZaiLimit[];
     level?: string;
@@ -2396,6 +2399,11 @@ const fetchZaiQuota = async (): Promise<ProviderResult> => {
     }
 
     const payload = await response.json() as ZaiPayload;
+    // Same monitor API family as bigmodel.cn: business failures arrive inside HTTP 200.
+    const failure = zhipuaiEnvelopeError(payload);
+    if (failure) {
+      return buildResult({ providerId: 'zai-coding-plan', providerName: 'z.ai', ok: false, configured: true, error: failure });
+    }
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows: Record<string, UsageWindow> = {};
     // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,

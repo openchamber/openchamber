@@ -1,4 +1,5 @@
 import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import { envelopeError } from './zhipuai-coding-plan.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -169,6 +170,20 @@ export const fetchQuota = async () => {
     }
 
     const payload = await response.json();
+    // Like bigmodel.cn, z.ai reports an expired key or a missing plan as
+    // `{code, msg, success: false}` with HTTP 200; without this the card is
+    // just empty.
+    const failure = envelopeError(payload);
+    if (failure) {
+      return buildResult({
+        providerId,
+        providerName,
+        ok: false,
+        configured: true,
+        error: failure
+      });
+    }
+
     const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
     const windows = {};
     // The API renamed TOKENS_LIMIT to CREDIT_LIMIT; field semantics stayed the same,

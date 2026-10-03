@@ -61,7 +61,8 @@ const resolveUsedPercent = (limit) => {
   return Math.round((used / total) * 100);
 };
 
-const envelopeError = (payload) => {
+/** A business failure reported inside an HTTP 200 body; shared with the z.ai provider (same monitor API). */
+export const envelopeError = (payload) => {
   const code = payload?.code;
   if (payload?.success !== false && !(code !== undefined && code !== null && code !== 200)) {
     return null;
