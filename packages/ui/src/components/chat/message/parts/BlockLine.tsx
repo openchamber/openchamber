@@ -35,7 +35,7 @@ export const BlockLine: React.FC<BlockLineProps> = ({ onToggle, topOffset = 0, b
     >
         <span
             className="absolute w-px"
-            style={{ left: 6, top: topOffset, bottom: bottomOffset, backgroundColor: 'var(--tools-border)' }}
+            style={{ left: 6, top: 0, bottom: 0, backgroundColor: 'var(--tools-border)' }}
         />
     </span>
 );
