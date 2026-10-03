@@ -157,10 +157,14 @@ The E2EE and framing logic exists twice: TypeScript in `packages/ui/src/lib/rela
 
 Client keepalive liveness comes from received frames only. Outbound HTTP retries
 cannot suppress a probe of a silent peer. Any valid inbound traffic, including a
-Pong, clears the probe deadline. Terminal relay close codes retain their error
-for the lifetime of that client: subsequent HTTP requests and WS opens fail
-immediately rather than waiting for a reconnect that will never be scheduled.
-Transient failures still use the existing reconnect/backoff path.
+Pong, clears the probe deadline. Terminal relay close codes (auth failed,
+duplicate client, limit exceeded) never schedule a timed reconnect: subsequent
+HTTP requests and WS opens fail immediately instead of waiting. Those codes do
+occur transiently in the field (a same-identity dial taking the leg, relay state
+left by a host restart), so the client keeps its wake listeners armed and the
+next `online` event or return to the foreground clears the error and makes one
+fresh attempt. There is still no background loop. Transient failures use the
+existing reconnect/backoff path.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 

@@ -2,7 +2,7 @@
 // responder side is built from the SAME protocol modules (createHostHandshake +
 // the tunnel codec). No network, no real WebSocket.
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   exportPublicKeyJwk,
   generateEcdhKeyPair,
@@ -683,5 +683,88 @@ describe('createRelayTunnelClient', () => {
     expect(await message).toBe('echo:legacy');
     const health = await client.fetch('/health');
     expect(health.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Terminal close recovery.
+// A relay close code in TERMINAL_RELAY_CLOSE_CODES (auth failed, duplicate
+// client, limit exceeded) parks the client in 'error' with no auto-redial —
+// but those codes occur transiently in the field (relay-side stale state after
+// a host restart, a same-identity probe dial taking the leg). Without a
+// recovery path the only remedy is recreating the client (= force-restarting
+// the mobile app). These tests pin the no-auto-redial semantic and the
+// recovery path: the visibility/online wake.
+
+describe('terminal close recovery', () => {
+  // Minimal window/document shims, installed only for this block: the wake
+  // path installs listeners only when these exist, and 'visible' keeps
+  // isOfflineOrHidden() false.
+  type ShimListener = () => void;
+  const shimEvents = new Map<string, Set<ShimListener>>();
+  const shimAddEventListener = (type: string, listener: ShimListener): void => {
+    let listeners = shimEvents.get(type);
+    if (!listeners) {
+      listeners = new Set<ShimListener>();
+      shimEvents.set(type, listeners);
+    }
+    listeners.add(listener);
+  };
+  const shimRemoveEventListener = (type: string, listener: ShimListener): void => {
+    shimEvents.get(type)?.delete(listener);
+  };
+  const fireShimEvent = (type: string): void => {
+    for (const listener of [...(shimEvents.get(type) ?? [])]) listener();
+  };
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'window', {
+      value: { addEventListener: shimAddEventListener, removeEventListener: shimRemoveEventListener },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, 'document', {
+      value: { visibilityState: 'visible', addEventListener: shimAddEventListener, removeEventListener: shimRemoveEventListener },
+      configurable: true,
+      writable: true,
+    });
+  });
+  afterEach(() => {
+    shimEvents.clear();
+    Reflect.deleteProperty(globalThis, 'window');
+    Reflect.deleteProperty(globalThis, 'document');
+  });
+
+  test('terminal relay close parks in error state and never auto-redials', async () => {
+    const { client, connectionCount, killWire } = await setupClient();
+    track(client);
+    await client.fetch('/health');
+    const before = connectionCount();
+    killWire(RelayCloseCode.DuplicateClient);
+    // Well beyond the client's reconnect window (max 80ms in this harness) —
+    // a terminal close must not produce an automatic redial.
+    await wait(200);
+    expect(client.getStatus().state).toBe('error');
+    expect(client.getStatus().lastError).toBe('relay connection replaced by another client');
+    expect(connectionCount()).toBe(before);
+  });
+
+
+
+
+  test('visibility wake revives a terminal-dead client without a restart', async () => {
+    const { client, connectionCount, killWire } = await setupClient();
+    track(client);
+    await client.fetch('/health');
+    const before = connectionCount();
+    killWire(RelayCloseCode.DuplicateClient);
+    await wait(60);
+    expect(client.getStatus().state).toBe('error');
+    // The user foregrounds the app: visibilitychange -> wake -> one fresh
+    // connect attempt. This is the field remedy (open the app) made automatic.
+    fireShimEvent('visibilitychange');
+    const health = await client.fetch('/health');
+    expect(health.status).toBe(200);
+    expect(connectionCount()).toBe(before + 1);
+    expect(client.getStatus().state).toBe('connected');
   });
 });
