@@ -19,6 +19,9 @@ import { Icon } from '@/components/icon/Icon';
 import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ModelControls } from '../../ModelControls';
 import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
@@ -129,6 +132,10 @@ export function ComposerFooter(props: ComposerFooterProps) {
         parallelRun = null,
     } = props;
 
+    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const [dictationSupported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
+    const showDictation = dictationEnabled && dictationSupported;
+
     return (
         <div
             className={cn(
@@ -178,7 +185,7 @@ export function ComposerFooter(props: ComposerFooterProps) {
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
                             <div className="flex items-center gap-x-1 flex-shrink-0">
-                                {!isBtw ? <button
+                                {!isBtw && showDictation ? <button
                                     type="button"
                                     className={footerIconButtonClass}
                                     // Keep the soft keyboard open (same guard as

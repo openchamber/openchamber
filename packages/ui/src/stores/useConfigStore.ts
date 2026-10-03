@@ -53,6 +53,7 @@ interface OpenChamberDefaults {
     defaultFileViewerPreview?: boolean;
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
+    dictationEnabled?: boolean;
     sttProvider?: 'local' | 'openai-compatible';
     sttServerUrl?: string;
     sttModel?: string;
@@ -136,6 +137,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         defaultFileViewerPreview: data.defaultFileViewerPreview,
         zenModel: zenModel.length > 0 ? zenModel : undefined,
         messageStreamTransport: data.messageStreamTransport,
+        dictationEnabled: data.dictationEnabled,
         sttProvider: data.sttProvider,
         sttServerUrl: data.sttServerUrl,
         sttModel: data.sttModel,
@@ -2487,6 +2489,7 @@ export const useConfigStore = create<ConfigStore>()(
                             settingsDefaultFileViewerPreview: defaults.defaultFileViewerPreview ?? true,
                             settingsZenModel: defaults.zenModel,
                             settingsMessageStreamTransport: defaults.messageStreamTransport ?? state.settingsMessageStreamTransport,
+                            dictationEnabled: typeof defaults.dictationEnabled === 'boolean' ? defaults.dictationEnabled : state.dictationEnabled,
                             sttProvider: defaults.sttProvider ?? state.sttProvider,
                             sttServerUrl: defaults.sttServerUrl ?? state.sttServerUrl,
                             sttModel: defaults.sttModel ?? state.sttModel,
@@ -4039,6 +4042,7 @@ export const useConfigStore = create<ConfigStore>()(
                     settingsDefaultFileViewerPreview: state.settingsDefaultFileViewerPreview,
                     settingsZenModel: state.settingsZenModel,
                     settingsMessageStreamTransport: state.settingsMessageStreamTransport,
+                    dictationEnabled: state.dictationEnabled,
                     speechRate: state.speechRate,
                     speechPitch: state.speechPitch,
                     speechVolume: state.speechVolume,

@@ -12,13 +12,16 @@
  * the pill; otherwise nothing sits beside it.
  */
 
-import type React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 
 export interface MobilePillComposerProps {
@@ -82,6 +85,9 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
     } = props;
     const canPrimaryAction = hasContent && Boolean(currentSessionId || newSessionDraftOpen);
     const showTrailingSendAction = canPrimaryAction && canAbort;
+    const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
+    const [dictationSupported] = useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
+    const showDictation = dictationEnabled && dictationSupported;
 
     return (
         <div className="flex flex-col">
@@ -146,17 +152,19 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                                 : t('chat.chatInput.placeholder.selectSession')}
                     </span>
                 </button>
-                <button
-                    type="button"
-                    className={footerIconButtonClass}
-                    // Starts recording in place; the composer morphs into the
-                    // voice variant once dictation actually goes live.
-                    onClick={onStartDictation}
-                    title={t('chat.dictation.start')}
-                    aria-label={t('chat.dictation.start')}
-                >
-                    <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
-                </button>
+                {showDictation ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        // Starts recording in place; the composer morphs into the
+                        // voice variant once dictation actually goes live.
+                        onClick={onStartDictation}
+                        title={t('chat.dictation.start')}
+                        aria-label={t('chat.dictation.start')}
+                    >
+                        <Icon name="mic" className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : null}
                 {/* Same visibility rule as the full composer's stop control:
                     while a turn is running the stop button takes the mic's
                     end slot and the mic shifts one slot left. Instant swap —
