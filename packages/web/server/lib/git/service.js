@@ -3759,6 +3759,15 @@ export async function stashPop(directory, options = {}) {
   return { success: true, ref };
 }
 
+// simple-git cannot put `--` before a remote, so on its paths a remote that
+// looks like an option (`--upload-pack=…`, `--mirror`) would reach git as one.
+// Those paths refuse it; raw paths pass `--` instead and keep such remotes usable.
+const assertRemoteNameIsNotOption = (remote) => {
+  if (String(remote || '').trim().startsWith('-')) {
+    throw new Error('Invalid remote name');
+  }
+};
+
 export async function push(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
@@ -3810,6 +3819,7 @@ export async function push(directory, options = {}) {
     || config.all['remote.pushdefault']
     || config.all[`branch.${status.current}.remote`]
     || (remotes.length === 1 ? remotes[0].name : 'origin');
+  assertRemoteNameIsNotOption(remoteName);
 
   const pushTo = async (target, branch, pushOptions) => {
     // simple-git drops forced updates and puts no-ops in `pushed`. Read Git's
@@ -3906,6 +3916,7 @@ export async function deleteRemoteBranch(directory, options = {}) {
     ? branch.substring('refs/heads/'.length)
     : branch;
   const remoteName = remote || 'origin';
+  assertRemoteNameIsNotOption(remoteName);
 
   try {
     await git.push(remoteName, `:${targetBranch}`);
@@ -3928,6 +3939,7 @@ export async function fetch(directory, options = {}) {
       // simple-git drops the remote when branch is omitted, so use raw to preserve `git fetch <remote>`.
       await git.raw(['fetch', ...buildRawGitOptions(fetchOptions), '--', remote]);
     } else {
+      assertRemoteNameIsNotOption(remote);
       await git.fetch(
         remote || 'origin',
         branch || undefined,
@@ -5883,7 +5895,7 @@ export async function removeRemote(directory, options = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
-    await git.removeRemote(remoteName);
+    await git.raw(['remote', 'remove', '--', remoteName]);
     return { success: true };
   } catch (error) {
     console.error('Failed to remove remote:', error);

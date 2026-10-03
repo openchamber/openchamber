@@ -825,7 +825,7 @@ export async function deleteGitBranch(directory: string, branch: string, force =
  * Delete a remote branch
  */
 export async function deleteRemoteBranch(directory: string, branch: string, remote = 'origin'): Promise<{ success: boolean }> {
-  const result = await execGit(['push', remote, '--delete', branch], directory);
+  const result = await execGit(['push', '--delete', '--', remote, branch], directory);
   return { success: result.exitCode === 0 };
 }
 
@@ -3081,7 +3081,7 @@ export async function gitPush(
         throw new Error(describePushFailure(error));
       }
 
-      const args = ['push', ...buildUpstreamOptions(gitOptions), fallbackRemote, currentBranch];
+      const args = ['push', ...buildUpstreamOptions(gitOptions), '--', fallbackRemote, currentBranch];
       await pushRaw(args);
       return normalizePushResult(currentBranch, fallbackRemote);
     }
@@ -3094,7 +3094,7 @@ export async function gitPush(
       const currentBranch = await getCurrentBranch();
       const tracking = await hasTrackingBranch();
       if (currentBranch && !tracking) {
-        const args = ['push', ...buildUpstreamOptions(gitOptions), remoteName, currentBranch];
+        const args = ['push', ...buildUpstreamOptions(gitOptions), '--', remoteName, currentBranch];
         await pushRaw(args);
         return normalizePushResult(currentBranch, remoteName);
       }
@@ -3104,7 +3104,7 @@ export async function gitPush(
   }
 
   try {
-    const args = ['push', ...normalizeGitOptions(gitOptions), remoteName];
+    const args = ['push', ...normalizeGitOptions(gitOptions), '--', remoteName];
     if (branch) {
       args.push(branch);
     }
@@ -3120,7 +3120,7 @@ export async function gitPush(
       throw new Error(describePushFailure(error));
     }
 
-    const args = ['push', ...buildUpstreamOptions(gitOptions), remoteName, fallbackBranch];
+    const args = ['push', ...buildUpstreamOptions(gitOptions), '--', remoteName, fallbackBranch];
     await pushRaw(args);
     return normalizePushResult(fallbackBranch, remoteName);
   }

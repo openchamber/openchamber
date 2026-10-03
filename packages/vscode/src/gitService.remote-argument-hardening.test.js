@@ -9,7 +9,7 @@ mock.module('vscode', () => ({
   Uri: { file: (fsPath) => ({ fsPath }) },
 }));
 
-const { createWorktree, getWorktreeBootstrapStatus, gitFetch, gitPull, removeRemote, validateWorktreeCreate } = await import('./gitService.ts?remote-argument-hardening-test');
+const { createWorktree, deleteRemoteBranch, getWorktreeBootstrapStatus, gitFetch, gitPull, gitPush, removeRemote, validateWorktreeCreate } = await import('./gitService.ts?remote-argument-hardening-test');
 
 const OPTION_LIKE_REMOTE = '--mirror';
 
@@ -257,5 +257,20 @@ describe('VS Code git remote arguments with option-like names', () => {
 
     expect(result.success).toBe(true);
     expect(runGit(repository, ['remote']).split('\n').map((line) => line.trim())).not.toContain(OPTION_LIKE_REMOTE);
+  }, 30_000);
+
+  it('pushes to and deletes a branch on an option-like remote instead of reading it as an option', async () => {
+    if (!canRunGit()) return;
+
+    const { remote, repository } = createRepositoryWithRemote();
+    addOptionLikeRemote(repository, remote);
+    runGit(repository, ['checkout', '-b', 'feature/option-like-push']);
+
+    await gitPush(repository, { remote: OPTION_LIKE_REMOTE, branch: 'feature/option-like-push' });
+    expect(runGit(remote, ['branch', '--list', 'feature/option-like-push']).trim()).toContain('feature/option-like-push');
+
+    const deleted = await deleteRemoteBranch(repository, 'feature/option-like-push', OPTION_LIKE_REMOTE);
+    expect(deleted.success).toBe(true);
+    expect(runGit(remote, ['branch', '--list', 'feature/option-like-push']).trim()).toBe('');
   }, 30_000);
 });

@@ -56,6 +56,8 @@ import {
   merge,
   rebase,
   push,
+  deleteRemoteBranch,
+  removeRemote,
 } from './service.js';
 
 // ---------------------------------------------------------------------------
@@ -2011,6 +2013,29 @@ describe('git remote arguments with option-like names', () => {
 
     const expected = runGit(remote, ['rev-parse', 'react']).trim();
     expect(runGit(repository, ['rev-parse', `refs/remotes/${OPTION_LIKE_REMOTE}/react`]).trim()).toBe(expected);
+  }, 30_000);
+
+  it('refuses to push or delete a branch on an option-like remote through simple-git', async () => {
+    if (!canRunGit()) return;
+
+    const { remote, repository } = createRepositoryWithRemote();
+    addOptionLikeRemote(repository, remote);
+    const before = runGit(remote, ['for-each-ref', '--format=%(refname)']).trim();
+
+    await expect(push(repository, { remote: OPTION_LIKE_REMOTE, branch: 'react' })).rejects.toThrow('Invalid remote name');
+    await expect(deleteRemoteBranch(repository, { remote: OPTION_LIKE_REMOTE, branch: 'react' })).rejects.toThrow('Invalid remote name');
+    expect(runGit(remote, ['for-each-ref', '--format=%(refname)']).trim()).toBe(before);
+  }, 30_000);
+
+  it('removes an option-like remote', async () => {
+    if (!canRunGit()) return;
+
+    const { remote, repository } = createRepositoryWithRemote();
+    addOptionLikeRemote(repository, remote, { fetch: false });
+
+    await removeRemote(repository, { remote: OPTION_LIKE_REMOTE });
+
+    expect(runGit(repository, ['remote']).split('\n').map((line) => line.trim())).not.toContain(OPTION_LIKE_REMOTE);
   }, 30_000);
 
   it('validates a start ref and upstream on an option-like remote', async () => {
