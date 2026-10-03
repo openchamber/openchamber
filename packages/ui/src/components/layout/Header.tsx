@@ -1143,27 +1143,43 @@ export const Header: React.FC = () => {
     return '';
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
-  const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if ((isDesktopApp && !usesFramelessChrome) || isVSCode) {
-      return undefined;
+  // Native window controls keep a fixed physical footprint, so their clearance
+  // must be expressed in pixels. The interface font-size setting scales the
+  // root rem unit, so a rem-based height floor collapses with it and lets
+  // sidebar content slide underneath the macOS traffic lights. Mirrors the
+  // pixel `--oc-titlebar-left-inset` above. macOS <= 15 uses the taller 56px
+  // titlebar that `macosHeaderSizeClass` also encodes.
+  const titlebarMinHeight = React.useMemo(() => {
+    if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
+      return macosMajorVersion !== null && macosMajorVersion <= 15 ? '56px' : '48px';
+    }
+    return '0px';
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, macosMajorVersion]);
+
+  const headerChromeStyle = React.useMemo<React.CSSProperties>(() => {
+    // Height is owned by the native chrome floor plus the browser's
+    // window-controls overlay. The rem term keeps the header growing with the
+    // interface scale on runtimes that have no native controls to clear.
+    const height = `max(3rem, ${titlebarMinHeight}, var(--oc-wco-titlebar-height, 0px))`;
+
+    // VS Code and non-frameless desktop size their own header, and frameless
+    // Electron with right-side controls keeps the pr-0 class and no inline
+    // padding so the close button sits flush with the window corner.
+    const sizesItsOwnHeader = (isDesktopApp && !usesFramelessChrome) || isVSCode;
+    const rightEdgeOwnedByInWindowControls = usesFramelessChrome && windowControlsSide === 'right';
+
+    if (sizesItsOwnHeader && titlebarMinHeight === '0px') {
+      return {};
     }
 
-    // Custom in-window controls (frameless Electron, right side) own the right
-    // edge: no inline padding, so the pr-0 class applies and the close button
-    // sits flush with the window corner per Windows conventions. Only the
-    // browser's native window-controls overlay reserves padding + right inset.
-    if (usesFramelessChrome && windowControlsSide === 'right') {
-      return undefined;
-    }
-
-    return {
+    const style: React.CSSProperties = { minHeight: height, height };
+    if (!sizesItsOwnHeader && !rightEdgeOwnedByInWindowControls) {
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
-      // the right inset / titlebar height are owned by the window-controls overlay.
-      paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
-      minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
-      height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
-    };
-  }, [isDesktopApp, isVSCode, usesFramelessChrome, windowControlsSide]);
+      // the right inset is owned by the window-controls overlay.
+      style.paddingRight = 'calc(0.75rem + var(--oc-wco-right-inset, 0px))';
+    }
+    return style;
+  }, [isDesktopApp, isVSCode, titlebarMinHeight, usesFramelessChrome, windowControlsSide]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1368,7 +1384,7 @@ export const Header: React.FC = () => {
         usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
         macosHeaderSizeClass
       )}
-      style={webWindowControlsOverlayStyle}
+      style={headerChromeStyle}
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
