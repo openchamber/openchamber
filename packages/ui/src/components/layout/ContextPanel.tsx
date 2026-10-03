@@ -22,7 +22,6 @@ const LinearIssuesView = lazyWithChunkRecovery(() => import('@/components/views/
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
@@ -37,21 +36,9 @@ import { BrowserPane } from '@/components/browser/BrowserPane';
 import { browserUrlLabel } from '@/lib/browser/url';
 import { registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
-import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import { Icon } from "@/components/icon/Icon";
 import { GuestIcon } from './GuestRailIcon';
-import {
-  EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
-  EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
-  EMBEDDED_VISIBILITY_REQUEST,
-  EMBEDDED_VISIBILITY_UPDATE,
-  getActiveEmbeddedSessionChatTab,
-  getOrCreateEmbeddedSessionChatURL,
-  type EmbeddedSessionChatURLCacheEntry,
-  type EmbeddedSessionRuntimeBootstrap,
-} from './contextPanelEmbeddedChat';
+import { ChatView } from '@/components/views/ChatView';
 const PluginPane = React.lazy(() => import('./PluginPane').then((module) => ({ default: module.PluginPane })));
 // How an extension page sits beside its shared surface: flex direction puts
 // the page first on top/left and last on bottom/right; the page's size is
@@ -573,8 +560,6 @@ export const ContextPanel: React.FC = () => {
   const toggleContextEditor = useUIStore((state) => state.toggleContextEditor);
   const openNewContextBrowserTab = useUIStore((state) => state.openNewContextBrowserTab);
   const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
-  const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
-  const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
@@ -630,8 +615,6 @@ export const ContextPanel: React.FC = () => {
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
-  const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
-  const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
 
   // Defaults and manually resized surfaces track the same available area.
@@ -852,7 +835,11 @@ export const ContextPanel: React.FC = () => {
   );
   const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
   const activeChatSessionID = isOpen && activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
-  const activeChatTab = getActiveEmbeddedSessionChatTab(chatTabs, activeChatTabID);
+  const activeChatTab = activeChatTabID ? chatTabs.find((tab) => tab.id === activeChatTabID) ?? null : null;
+  const activeChatPinnedSession = React.useMemo(
+    () => (activeChatSessionID ? { sessionId: activeChatSessionID, directory: directoryKey || null } : null),
+    [activeChatSessionID, directoryKey],
+  );
 
   React.useEffect(() => {
     if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
@@ -884,27 +871,6 @@ export const ContextPanel: React.FC = () => {
     };
   }, [activeChatSessionID, directoryKey, isOpen]);
 
-  const getEmbeddedChatSrc = React.useCallback((tabID: string, sessionID: string, readOnly: boolean): string => {
-    return getOrCreateEmbeddedSessionChatURL(chatFrameSrcByTabIDRef.current, tabID, sessionID, directoryKey || null, readOnly, {
-      mode: themeMode,
-      lightThemeId,
-      darkThemeId,
-      currentTheme,
-    }, { allowPromptingSubagentSessions });
-  }, [allowPromptingSubagentSessions, currentTheme, darkThemeId, directoryKey, lightThemeId, themeMode]);
-
-  const activeChatSrc = activeChatTab && activeChatSessionID
-    ? getEmbeddedChatSrc(activeChatTab.id, activeChatSessionID, activeChatTab.readOnly)
-    : null;
-
-  React.useEffect(() => {
-    const liveTabIDs = new Set(tabs.map((tab) => tab.id));
-    for (const tabID of chatFrameSrcByTabIDRef.current.keys()) {
-      if (!liveTabIDs.has(tabID)) {
-        chatFrameSrcByTabIDRef.current.delete(tabID);
-      }
-    }
-  }, [tabs]);
 
   const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
     if (!directoryKey || activeTab?.mode !== 'diff') {
@@ -919,149 +885,6 @@ export const ContextPanel: React.FC = () => {
     });
   }, [activeTab, directoryKey, openContextPanelTab]);
 
-  const postThemeSyncToEmbeddedChat = React.useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const payload = {
-      themeMode,
-      lightThemeId,
-      darkThemeId,
-      currentTheme,
-    };
-
-    for (const frame of chatFrameRefs.current.values()) {
-      const frameWindow = frame.contentWindow;
-      if (!frameWindow) {
-        continue;
-      }
-
-      frameWindow.postMessage(
-        {
-          type: 'openchamber:theme-sync',
-          payload,
-        },
-        window.location.origin,
-      );
-    }
-  }, [currentTheme, darkThemeId, lightThemeId, themeMode]);
-
-  const postChatSettingsSyncToEmbeddedChat = React.useCallback(() => {
-    if (typeof window === 'undefined') return;
-
-    const payload = { allowPromptingSubagentSessions };
-    for (const frame of chatFrameRefs.current.values()) {
-      const frameWindow = frame.contentWindow;
-      if (!frameWindow) continue;
-
-      frameWindow.postMessage({ type: 'openchamber:chat-settings-sync', payload }, window.location.origin);
-    }
-  }, [allowPromptingSubagentSessions]);
-
-  const postEmbeddedVisibilityToChat = React.useCallback((
-    tabID: string,
-    frame: HTMLIFrameElement,
-    targetOrigin: string,
-  ) => {
-    const frameWindow = frame.contentWindow;
-    if (!frameWindow) {
-      return;
-    }
-
-    frameWindow.postMessage(
-      {
-        type: EMBEDDED_VISIBILITY_UPDATE,
-        payload: { visible: activeChatTabID === tabID },
-      },
-      targetOrigin,
-    );
-  }, [activeChatTabID]);
-
-  const postEmbeddedVisibilityToChats = React.useCallback(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    for (const [tabID, frame] of chatFrameRefs.current.entries()) {
-      postEmbeddedVisibilityToChat(tabID, frame, window.location.origin);
-    }
-  }, [postEmbeddedVisibilityToChat]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) {
-        return;
-      }
-
-      const sourceChatFrame = Array.from(chatFrameRefs.current.entries())
-        .find(([, frame]) => frame.contentWindow === event.source);
-      if (!sourceChatFrame) {
-        return;
-      }
-
-      const data = event.data as { type?: unknown; requestId?: unknown };
-      if (data?.type === EMBEDDED_VISIBILITY_REQUEST) {
-        const [tabID, frame] = sourceChatFrame;
-        postEmbeddedVisibilityToChat(tabID, frame, event.origin);
-        return;
-      }
-      if (data?.type === EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST) {
-        if (typeof data.requestId !== 'string' || !data.requestId) return;
-        const runtimeKey = getRuntimeKey();
-        const payload: EmbeddedSessionRuntimeBootstrap = {
-          apiBaseUrl: getRuntimeApiBaseUrl(),
-          clientToken: getRuntimeBearerTokenSync(),
-          localOrigin: typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string'
-            ? window.__OPENCHAMBER_LOCAL_ORIGIN__
-            : '',
-          runtimeHeaders: getRuntimeExtraHeadersSync(),
-          relayHostId: runtimeKey.startsWith('host:') ? runtimeKey.slice('host:'.length) : '',
-          relay: getActiveRelayDescriptor() ?? undefined,
-        };
-        (event.source as WindowProxy | null)?.postMessage({
-          type: EMBEDDED_RUNTIME_BOOTSTRAP_RESPONSE,
-          requestId: data.requestId,
-          payload,
-        }, event.origin);
-        return;
-      }
-      if (data?.type === 'openchamber:theme-sync-request') {
-        postThemeSyncToEmbeddedChat();
-        return;
-      }
-      if (data?.type === 'openchamber:chat-settings-request') {
-        postChatSettingsSyncToEmbeddedChat();
-        return;
-      }
-      if (data?.type !== 'openchamber:cycle-theme-request') {
-        return;
-      }
-
-      const modes: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
-      const currentIndex = modes.indexOf(themeMode);
-      const nextIndex = (currentIndex + 1) % modes.length;
-      setThemeMode(modes[nextIndex]);
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChat, postThemeSyncToEmbeddedChat, setThemeMode, themeMode]);
-
-  React.useLayoutEffect(() => {
-    const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
-    if (!hasAnyChatTab) {
-      return;
-    }
-
-    postThemeSyncToEmbeddedChat();
-    postChatSettingsSyncToEmbeddedChat();
-    postEmbeddedVisibilityToChats();
-  }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
@@ -1431,25 +1254,20 @@ export const ContextPanel: React.FC = () => {
             <EditorTreeColumn visible={contextEditorTreeVisible} active={isOpen && isFileTabActive} fill={!showsEditor} />
           </div>
         ) : null}
-        {activeChatTab && activeChatSessionID && activeChatSrc ? (
-          <iframe
+        {activeChatTab && activeChatSessionID && activeChatPinnedSession ? (
+          // The chat renders in this app, pinned to its session: it shares
+          // the app's connection, stores and theme, and opens like a session
+          // switch instead of booting a second app.
+          <section
             key={activeChatTab.id}
-            ref={(node) => {
-              if (!node) {
-                chatFrameRefs.current.delete(activeChatTab.id);
-                return;
-              }
-              chatFrameRefs.current.set(activeChatTab.id, node);
-            }}
-            src={activeChatSrc}
-            title={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
-            className="absolute inset-0 h-full w-full border-0 bg-background"
-            onLoad={() => {
-              postThemeSyncToEmbeddedChat();
-              postChatSettingsSyncToEmbeddedChat();
-              postEmbeddedVisibilityToChats();
-            }}
-          />
+            aria-label={t('contextPanel.iframe.sessionChatTitle', { sessionID: activeChatSessionID })}
+            className="absolute inset-0 bg-background"
+          >
+            <ChatView
+              pinnedSession={activeChatPinnedSession}
+              readOnly={activeChatTab.readOnly}
+            />
+          </section>
         ) : null}
         {loadedBrowserTabs.map((tab) => (
           <div

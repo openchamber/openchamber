@@ -1,5 +1,5 @@
 import React from "react";
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { BackgroundWorkButton } from "./components/BackgroundWorkButton";
 
@@ -37,7 +37,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   providerId,
   onBackground,
 }) => {
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
 
   const shouldRenderPlaceholder = !abortActive;
   const hasContent = isWorking;

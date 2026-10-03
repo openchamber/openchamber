@@ -1368,7 +1368,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
                   draft — otherwise the auto-opened draft flashes first. The
                   shell (and sync) still mounts and warms up underneath. */}
               <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
-              <SyncAppEffects embeddedBackgroundWorkEnabled={isInitialized} />
+              <SyncAppEffects backgroundWorkEnabled={isInitialized} />
               <OpenCodeUpdateToast />
               <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {

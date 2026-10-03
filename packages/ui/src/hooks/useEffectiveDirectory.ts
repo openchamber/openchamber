@@ -1,3 +1,4 @@
+import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
@@ -21,7 +22,9 @@ import { getChatsRootForHome } from '@/lib/chatDirectories';
  * even when a draft session is being created.
  */
 export const useEffectiveDirectory = (): string | undefined => {
-    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    // Inside a chat column the session is the column's: a chat pinned in the
+    // side panel resolves its own session's directory, not the main chat's.
+    const currentSessionId = useChatSessionSelection().sessionId;
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const currentSessionDirectory = useSessionDirectory(currentSessionId);
     const worktreeAttachment = useSessionWorktreeStore((s) => currentSessionId ? s.getAttachment(currentSessionId) : undefined);

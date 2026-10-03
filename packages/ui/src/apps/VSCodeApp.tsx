@@ -112,7 +112,7 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
           <FireworksProvider>
             <TooltipProvider delayDuration={300} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <SyncAppEffects embeddedBackgroundWorkEnabled={true} />
+                <SyncAppEffects backgroundWorkEnabled />
                 <VSCodeLayout />
                 <AppLinkConfirmDialog />
                 <SharedTrustConfirmDialog />

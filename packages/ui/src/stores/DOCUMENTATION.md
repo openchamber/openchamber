@@ -124,15 +124,10 @@ Examples:
 
 These stores coordinate visible app state, navigation, selected context-panel tabs, dialogs, and lightweight feature flags. `useUIStore.activeSurface` selects the primary mobile view and the few desktop views that are promoted out of the context panel. It is not a desktop tab selection. Linear panel list filters (status, assignee, team, priority) live here too: the Linear rail surface remounts on switch, so those filters restore from this store rather than component state. `resetLinearIssueListFilters` restores those four defaults together; search stays local to the rail. The team filter is the one that is not a plain preference: a Linear team belongs to one workspace, and each OpenChamber instance has its own Linear login, so it is persisted per instance in `linearIssueListTeamIdByRuntime` and the flat `linearIssueListTeamId` is derived from it by `applyLinearIssueListFiltersForRuntime` — on an instance switch and when the rail mounts, since rehydration can run before the runtime endpoint is known. Carried across, a team id filters the new instance's list down to nothing. `linearIssueFocus` is a one-shot identifier so work-status can open a specific issue in that panel; it is not persisted. Opening a new browser tab with an address (`openContextPreview`, `openContextBrowser`, `openAgentBrowserTab`) notes it, keyed by directory and tab id, in the session-only set in `lib/browser/devServerWait.ts`; the tab's first mount reads and forgets it. Only a noted tab waits for its dev server on the first load. A tab restored from saved state, or remounted later, loads once and shows the failure. When those openers hit a tab that already exists, they send it a session-only load request instead. A mounted tab that shows a failure, or has not shown a page yet, loads the address the way a typed one loads, wait included, so a failure from launch does not stay up once a project action starts the server; a tab showing a working page ignores the request and is only focused, keeping what the person had on it.
 
-Context-panel session chats mount only the active chat iframe. After installing
-its message listener, the iframe requests its authoritative visibility from the
-parent. The parent accepts requests only from a currently mounted chat frame and
-answers from the current active tab. Do not rely only on a parent `onLoad`
-notification: it can arrive before the iframe listener exists and leave a
-visible chat with background work disabled. Message-history subscriptions in the
-mounted session-chat iframe stay enabled independently of that visibility flag
-so a delayed or lost handshake cannot hide an already-materialized transcript
-(busy subagents would otherwise show only the working-status row).
+Context-panel session chats render in this app as a chat column pinned to
+their session (`ChatView` `pinnedSession`, see the sync documentation's
+*Pinned chat columns*). Only the active chat tab is mounted while the panel is
+open; switching tabs opens the other session like a session switch.
 
 ### Session / project coordination stores
 

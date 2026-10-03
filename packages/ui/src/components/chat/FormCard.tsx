@@ -8,7 +8,7 @@ import { toast } from '@/components/ui';
 import type { FormRequest } from '@/lib/opencode/model';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
@@ -47,7 +47,7 @@ export const FormCard: React.FC<FormCardProps> = ({ form }) => {
 const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionId = useChatSessionSelection().sessionId;
     const sessions = useSessions();
 
     const isFromSubagent = React.useMemo(() => {

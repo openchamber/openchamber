@@ -1,18 +1,13 @@
 /**
  * Regression coverage for https://github.com/openchamber/openchamber/issues/2903
  *
- * Busy embedded session-chat panels were rendering only the working-status row
- * ("…is running command") because ChatContainer gated message reads on the
- * same visibility flag used to keep the composer from stealing focus. When the
- * iframe booted inactive (or a visibility postMessage was lost),
- * useSessionMessageRecords returned [] while session status stayed busy — so
- * the empty-state branch was skipped and the transcript showed status only.
- *
- * Idle sessions hit the empty state instead (#2892). Same root cause.
- *
- * Fix: embedded session-chat keeps `messagesEnabled={true}` so history stays
- * subscribed while `active={embeddedBackgroundWorkEnabled}` still gates
- * composer focus and background work.
+ * Busy side-panel subagent chats were rendering only the working-status row
+ * ("…is running command") because message reads were gated off while session
+ * status stayed busy — so the empty-state branch was skipped and the
+ * transcript showed status only. Idle sessions hit the empty state instead
+ * (#2892). The chat then ran in an iframe whose visibility handshake could be
+ * lost; it now renders in the app, and these tests keep the read gate and the
+ * empty/busy branches honest.
  */
 import { describe, expect, mock, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -60,9 +55,7 @@ const { getSessionMaterializationStatus } = await import('@/sync/materialization
 import type { State } from '@/sync/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(join(__dirname, '..', '..', '..', 'App.tsx'), 'utf-8');
 const chatContainerSource = readFileSync(join(__dirname, '..', 'ChatContainer.tsx'), 'utf-8');
-const chatViewSource = readFileSync(join(__dirname, '..', '..', 'views', 'ChatView.tsx'), 'utf-8');
 const syncContextSource = readFileSync(join(__dirname, '..', '..', '..', 'sync', 'sync-context.tsx'), 'utf-8');
 
 const SESSION_ID = 'ses_subagent_2903';
@@ -164,7 +157,7 @@ if (!syncRuntimeContext) {
   throw new Error('sync runtime context was not published on globalThis by @/sync/sync-context');
 }
 
-describe('issue #2903 busy embedded subagent status-line-only', () => {
+describe('issue #2903 busy subagent status-line-only', () => {
   test('cold disabled reads hide a fully materialized 14-message subagent; enabled reads return all 14', async () => {
     const dom = installMinimalDom();
     const root: Root = createRoot(dom.container);
@@ -249,19 +242,6 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
     expect(hookBody).toContain('snapshotRef.current.sessionID === sessionID ? snapshotRef.current.list');
   });
 
-  test('embedded session-chat keeps message history enabled while visibility gates active', () => {
-    expect(appSource).toContain('messagesEnabled={true}');
-    expect(appSource).toContain('active={embeddedBackgroundWorkEnabled}');
-    expect(appSource).toContain('const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(false);');
-    expect(chatViewSource).toContain('messagesEnabled?: boolean');
-    expect(chatContainerSource).toContain('messagesEnabled: messagesEnabledProp');
-    expect(chatContainerSource).toContain('const messagesEnabled = messagesEnabledProp ?? active;');
-    expect(chatContainerSource).toContain('enabled: messagesEnabled');
-    expect(chatContainerSource.includes('enabled: active')).toBe(false);
-    expect(chatContainerSource).toContain('if (!messagesEnabled || !currentSessionId) return;');
-    expect(chatContainerSource).toContain('void ensureSessionRenderable(currentSessionId);');
-  });
-
   test('the empty and idle branch leaves the status row to the busy path', () => {
     // A busy session with no messages yet must fall through to the viewport so
     // StatusRowContainer is the only thing on screen. The idle branch returns
@@ -279,10 +259,5 @@ describe('issue #2903 busy embedded subagent status-line-only', () => {
       emptyIdleReturn + 1600,
     );
     expect(emptyIdleBlock).not.toContain('<StatusRowContainer />');
-  });
-
-  test('visibility handshake remains as defense-in-depth for background work', () => {
-    expect(appSource).toContain('requestEmbeddedSessionVisibility();');
-    expect(appSource).toContain('EMBEDDED_VISIBILITY_UPDATE');
   });
 });

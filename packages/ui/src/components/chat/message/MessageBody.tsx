@@ -23,6 +23,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { MarkdownImageGallery, SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { LongErrorText } from '../LongErrorText';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from '../chatColumnSession';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { Session } from '@/lib/opencode/model';
@@ -1294,7 +1295,7 @@ const AssistantMessageBody = React.memo(({
     }, [assistantTextParts, isMobile, isMiniChatSurface, isVSCode, toolParts]);
 
     const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const currentSessionId = useChatSessionSelection().sessionId;
     const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();

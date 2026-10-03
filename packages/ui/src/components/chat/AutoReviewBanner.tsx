@@ -7,11 +7,11 @@ import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 
 export const AutoReviewBanner = memo(() => {
   const { t } = useI18n();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
   const run = useAutoReviewStore(React.useCallback((state) => {
     if (!currentSessionId) return null;
     const run = state.runsByOriginalSessionID[currentSessionId] ?? null;

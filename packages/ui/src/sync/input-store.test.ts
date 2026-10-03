@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { strToU8, zipSync } from "fflate"
 import { useInputStore } from "./input-store"
+import { getChatDraftIdentityKey } from "@/lib/chatDraftPersistence"
 
 class MockFileReader {
   result: string | ArrayBuffer | null = null
@@ -501,5 +502,70 @@ describe("input-store BTW composer requests", () => {
     })
     expect(useInputStore.getState().consumePendingBtwComposerRequest("parent-1")).toBeNull()
     expect(useInputStore.getState().pendingInputText).toBe("normal draft")
+  })
+})
+
+describe("input-store pinned composer addressing", () => {
+  beforeEach(() => {
+    useInputStore.setState({
+      pendingInputText: null,
+      pendingInputMode: "replace",
+      pendingInputTarget: null,
+      pendingSyntheticParts: null,
+      pinnedSyntheticParts: new Map(),
+      attachedFiles: [],
+      attachmentDraftKey: null,
+      attachmentDrafts: new Map(),
+    })
+  })
+
+  test("app-wide text reaches the main composer and never a pinned one", () => {
+    useInputStore.getState().setPendingInputText("from a plugin", "append")
+
+    expect(useInputStore.getState().consumePendingInputText("ses_pinned")).toBeNull()
+    expect(useInputStore.getState().consumePendingInputText()).toEqual({ text: "from a plugin", mode: "append" })
+    expect(useInputStore.getState().pendingInputTarget).toBeNull()
+  })
+
+  test("text quoted in a pinned chat reaches only that chat's composer", () => {
+    useInputStore.getState().setPendingInputText("> quoted", "append", "ses_pinned")
+
+    expect(useInputStore.getState().consumePendingInputText()).toBeNull()
+    expect(useInputStore.getState().consumePendingInputText("ses_other")).toBeNull()
+    expect(useInputStore.getState().consumePendingInputText("ses_pinned")).toEqual({ text: "> quoted", mode: "append" })
+    expect(useInputStore.getState().consumePendingInputText("ses_pinned")).toBeNull()
+  })
+
+  test("pending context of the main and a pinned composer stays apart", () => {
+    const main = [{ text: "main context" }]
+    const pinned = [{ text: "pinned context" }]
+    useInputStore.getState().setPendingSyntheticParts(main)
+    useInputStore.getState().setPendingSyntheticParts(pinned, "ses_pinned")
+
+    expect(useInputStore.getState().getPendingSyntheticParts()).toBe(main)
+    expect(useInputStore.getState().consumePendingSyntheticParts("ses_pinned")).toBe(pinned)
+    expect(useInputStore.getState().getPendingSyntheticParts("ses_pinned")).toBeNull()
+    expect(useInputStore.getState().consumePendingSyntheticParts()).toBe(main)
+    expect(useInputStore.getState().pendingSyntheticParts).toBeNull()
+  })
+
+  test("moving the selected attachment slot between two composers keeps both drafts' files", () => {
+    const main = { runtimeKey: "runtime", directory: "/repo", sessionId: "ses_main" }
+    const pinned = { runtimeKey: "runtime", directory: "/repo", sessionId: "ses_pinned" }
+    const file = (id: string) => ({
+      id, file: new File([], `${id}.txt`), dataUrl: "", mimeType: "text/plain", filename: `${id}.txt`, size: 0, source: "local" as const,
+    })
+    const store = useInputStore.getState()
+    store.selectAttachmentDraft(main)
+    store.setAttachedFiles([file("a")])
+    store.setAttachedFiles([file("b")], pinned)
+
+    useInputStore.getState().selectAttachmentDraft(pinned)
+    expect(useInputStore.getState().attachedFiles.map((entry) => entry.id)).toEqual(["b"])
+    expect(useInputStore.getState().attachmentDrafts.get(getChatDraftIdentityKey(main))?.map((entry) => entry.id)).toEqual(["a"])
+
+    useInputStore.getState().selectAttachmentDraft(main)
+    expect(useInputStore.getState().attachedFiles.map((entry) => entry.id)).toEqual(["a"])
+    expect(useInputStore.getState().attachmentDrafts.get(getChatDraftIdentityKey(pinned))?.map((entry) => entry.id)).toEqual(["b"])
   })
 })

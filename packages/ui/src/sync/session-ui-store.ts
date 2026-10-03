@@ -458,7 +458,8 @@ export type SessionUIState = {
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
-  armAbortPrompt: (durationMs?: number) => number | null
+  /** Arms "press Esc again to stop" for `sessionId`, the selected session by default. */
+  armAbortPrompt: (durationMs?: number, sessionId?: string) => number | null
   clearError: () => void
   markSessionAsOpenChamberCreated: (sessionId: string) => void
   isOpenChamberCreatedSession: (sessionId: string) => boolean
@@ -1640,11 +1641,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   clearAbortPrompt: () => set({ abortPromptSessionId: null, abortPromptExpiresAt: null }),
 
-  armAbortPrompt: (durationMs = 5000) => {
-    const { currentSessionId } = get()
-    if (!currentSessionId) return null
+  armAbortPrompt: (durationMs = 5000, sessionId) => {
+    const target = sessionId ?? get().currentSessionId
+    if (!target) return null
     const expiresAt = Date.now() + durationMs
-    set({ abortPromptSessionId: currentSessionId, abortPromptExpiresAt: expiresAt })
+    set({ abortPromptSessionId: target, abortPromptExpiresAt: expiresAt })
     return expiresAt
   },
 

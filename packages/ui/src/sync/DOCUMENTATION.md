@@ -92,7 +92,7 @@ Office and OpenDocument packages are metadata-validated before asynchronous extr
 
 The composer compares normalized attachment MIME types with the selected model's declared input modalities. It warns when a newly attached file or an existing attachment after a model change requires an unsupported modality, but does not block sending. Missing modality metadata remains unknown and does not produce a warning.
 
-Attachment drafts stay in memory for the page's lifetime, including composer remounts, independently of text persistence. `selectAttachmentDraft` saves the outgoing list and restores the rendered composer's runtime, directory, and session before paint. Switching cancels unfinished attachment reads. Send and queue recovery pass their captured draft identity so a late failure restores files to the source rather than the currently open session. Clearing or deleting a draft releases only its files. Opening a new-session draft leaves the outgoing session's files available for a return visit.
+Attachment drafts stay in memory for the page's lifetime, including composer remounts, independently of text persistence. `selectAttachmentDraft` saves the outgoing list and restores the rendered composer's runtime, directory, and session before paint. Switching cancels unfinished attachment reads. Send and queue recovery pass their captured draft identity so a late failure restores files to the source rather than the currently open session. Clearing or deleting a draft releases only its files. Opening a new-session draft leaves the outgoing session's files available for a return visit. With a chat pinned in the side panel two composers are on screen; each shows its own draft's files (`useDraftAttachedFiles`) and the selected slot follows the composer the user works in (composer documentation, *Pinned composer*).
 
 ## Catalog changes apply live
 
@@ -249,7 +249,7 @@ own record does.
 - The scheduler runs at most two directory bootstraps concurrently.
 - Selected session/current directory demand outranks active-project, expanded, visible, and background demand.
 - Demand is deduplicated by normalized directory and can be promoted while queued.
-- `useSessionListSync` is the only bootstrap-demand owner, and it publishes only the current directory and the selected session's directory. Known projects and worktrees are never bootstrapped for being known, shown, expanded, or restored as expanded: their rows and sessions come from the global session list, their live activity comes from the global status index, and their pending requests come from the cross-directory blocking-request index. On v2 every directory-scoped read makes OpenCode create and initialize a location, so publishing the whole topology created one location per project at startup. Sidebar notices still request bootstrap manually with `force`.
+- `useSessionListSync` publishes the current directory and the selected session's directory. The only other owner is a chat column pinned in the side panel, which publishes its own session's directory with selected priority while it is mounted (see *Pinned chat columns*). Known projects and worktrees are never bootstrapped for being known, shown, expanded, or restored as expanded: their rows and sessions come from the global session list, their live activity comes from the global status index, and their pending requests come from the cross-directory blocking-request index. On v2 every directory-scoped read makes OpenCode create and initialize a location, so publishing the whole topology created one location per project at startup. Sidebar notices still request bootstrap manually with `force`.
 - A directory that was never bootstrapped relies on the global list for sidebar readiness. Until a complete global snapshot arrives, its group shows loading or a retryable global failure. A directory bootstrap can establish active-list coverage for its own scope; it cannot establish archived coverage. Directory access and initialization failures remain scoped to directories the user selects.
 - A system-resume signal, including Capacitor foreground resume, refreshes pending forms and permissions only for the active materialized directory. The refresh is deduplicated while in flight, preserves existing state on fetch failure, and leaves unopened directories untouched; normal stream reconnect recovery remains the broader catch-up path.
 - When a materialized current turn contains a pending/running form tool but that session's pending form record is missing, the mounted chat performs a form-only recovery scoped to that session. It tries at most three times with delays of 0, 500, and 1,500 ms, stops when the chat unmounts or changes sessions, and guards every attempt against runtime changes. This closes cold-start races without adding requests to ordinary session opens or scanning unrelated sessions and directories.
@@ -319,7 +319,6 @@ then the normal cadence continues. Store error status, including a chats-root
 lookup failure, drives recovery because the loader returns retained data on
 failure. Runtime changes retire the old timer and start a fresh load immediately;
 late completions cannot restart the old timer or seed the new runtime.
-Embedded chats do not poll.
 The sidebar and tray consume the same store and must not start their own
 full-list timers. Surface-specific refreshes, such as opening the mobile session
 sheet or returning from suspension, may still request freshness at their
@@ -992,6 +991,32 @@ Nodes already transferred to the Markdown cache remain intact. This shared
 cleanup runs independently of animation frames across all chat runtimes.
 
 `bun run profile:switch` measures both moments; see `scripts/perf/DOCUMENTATION.md`.
+
+### Pinned chat columns
+
+A chat opened in the side panel ("Open in side panel", a subtask, a review
+session) is a second `ChatContainer` in the same app, pinned to its session
+(`pinnedSession`). It used to be an iframe that booted a whole second app per
+tab. The main chat follows the app's selection; a pinned column keeps its own
+and changes only through its own navigation (open a subtask in place, return
+to the parent), never the main chat's selection or draft.
+
+Everything inside a chat reads its session through `chatColumnSession.ts`:
+`useChatSessionSelection()` is the column's session inside a column and the
+live selection elsewhere (it does not subscribe to the selection inside one),
+`useEffectiveDirectory` resolves the column's session, and
+`useChatColumnActions()` routes what a chat does on its own behalf: open a
+session, open the timeline dialog, focus its composer. App-wide state the main
+chat drives stays the main chat's: the work-status panel and its flags, the
+prompt navigator's keyboard panel, the global timeline dialog, the expanded
+composer preference, and the new-session draft. A pinned column keeps local
+copies where it needs them and leaves the global ones untouched, including on
+mount and unmount. Double Escape stops the session of the column the key was
+pressed in: the column root names its session and whether it runs
+(`data-chat-column`, `data-chat-session-id`, `data-chat-working`).
+
+The composer's per-column state (model selection, attachments, pending text
+and context) is described in the composer documentation, *Pinned composer*.
 
 Select leaf values, not containers:
 

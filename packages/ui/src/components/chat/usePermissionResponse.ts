@@ -1,6 +1,6 @@
 import React from 'react';
 import type { PermissionReply, PermissionRequest } from '@/types/permission';
-import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 
@@ -10,7 +10,7 @@ const activePermissionCardIds: string[] = [];
 /** The request was raised by a child of the session the user is looking at. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
   return React.useMemo(() => {
     if (!currentSessionId || permission.sessionID === currentSessionId) return false;
     const sourceSession = sessions.find((session) => session.id === permission.sessionID);

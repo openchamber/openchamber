@@ -65,21 +65,21 @@ const MiniChatPresenceBridge: React.FC = () => {
   return null;
 };
 
-export function SyncRuntimeEffects({ embeddedBackgroundWorkEnabled }: {
-  embeddedBackgroundWorkEnabled: boolean;
+export function SyncRuntimeEffects({ backgroundWorkEnabled }: {
+  backgroundWorkEnabled: boolean;
 }) {
-  useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled });
-  useMergedWorktreeCleanup({ enabled: embeddedBackgroundWorkEnabled });
+  useSessionAutoCleanup({ enabled: backgroundWorkEnabled });
+  useMergedWorktreeCleanup({ enabled: backgroundWorkEnabled });
   // Web, desktop, and mobile hand the queue to the OpenChamber server, which
   // delivers it with or without a UI; only VS Code still sends from the UI.
-  useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled && !isServerOwnedMessageQueue());
+  useQueuedMessageAutoSend(backgroundWorkEnabled && !isServerOwnedMessageQueue());
   useMessageQueueHoldSync();
 
   return <SyncOptimisticBridge />;
 }
 
-export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
-  embeddedBackgroundWorkEnabled: boolean;
+export function SyncAppEffects({ backgroundWorkEnabled }: {
+  backgroundWorkEnabled: boolean;
 }) {
   usePwaManifestSync();
   useWindowControlsOverlayLayout();
@@ -87,7 +87,7 @@ export function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
 
   return (
     <>
-      <SyncRuntimeEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+      <SyncRuntimeEffects backgroundWorkEnabled={backgroundWorkEnabled} />
       <MiniChatPresenceBridge />
     </>
   );

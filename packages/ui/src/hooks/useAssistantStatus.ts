@@ -1,5 +1,5 @@
 import React from 'react';
-import { useChatColumnSession } from '@/components/chat/chatColumnSession';
+import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import type { Message, ModelRef, Part, ReasoningPart, TextPart, ToolPart } from '@/lib/opencode/model';
 import { executeToolCalls, isExecuteTool, isShellTool, isSubagentTool } from '@/lib/opencode/tools';
 
@@ -342,11 +342,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     // Inside the chat column, follow the session the timeline shows rather
     // than the live selection, so the status chip changes together with the
     // conversation instead of a commit ahead of it.
-    const chatColumnSession = useChatColumnSession();
-    const liveSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const liveSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
-    const currentSessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
-    const currentSessionDirectory = chatColumnSession ? chatColumnSession.directory : liveSessionDirectory;
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
 
     const rawSessionMessages = useSessionMessages(
         currentSessionId ?? '',

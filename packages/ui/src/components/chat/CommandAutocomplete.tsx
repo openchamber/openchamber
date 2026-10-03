@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatSessionSelection } from './chatColumnSession';
 import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
 import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -75,7 +76,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   style,
 }, ref) => {
   const { t } = useI18n();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
   const hasSession = Boolean(currentSessionId);
   const hasNewSessionDraft = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const canStartSessionCommand = hasSession || hasNewSessionDraft;

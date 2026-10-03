@@ -1,6 +1,6 @@
 import { OPENCODE_TOOLS } from '@/lib/opencode/tools';
 import React from 'react';
-import { focusChatInput } from './composer/editor/dom';
+import { useChatColumnActions } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 import type { ModelMetadata } from '@/types';
@@ -315,7 +315,15 @@ type ModelControlsProps = {
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
     /** Offers "Run on several models" at the top of the desktop model picker. */
     onRunInParallel?: () => void;
-} & ({ selection?: never; sessionId?: never } | { selection: BtwSelection; sessionId: string | null });
+} & (
+    | { selection?: never; sessionId?: never; agentSelectable?: never }
+    | {
+        selection: BtwSelection;
+        sessionId: string | null;
+        /** Offers the agent picker and saves the pick for `sessionId` (a chat pinned in the side panel). */
+        agentSelectable?: boolean;
+    }
+);
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
@@ -324,8 +332,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     onRunInParallel,
     selection,
     sessionId: controlledSessionId,
+    agentSelectable = false,
 }) => {
     const { t } = useI18n();
+    const { focusInput: focusColumnInput } = useChatColumnActions();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
     const { isReady: canSelectAgent } = useOpenCodeReadiness('agents');
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
@@ -548,10 +558,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             // Restore focus to chat input when model selector closes
             if (wasOpen && !isCompact) {
-                requestAnimationFrame(focusChatInput);
+                requestAnimationFrame(focusColumnInput);
             }
         }
-    }, [isModelSelectorOpen, isCompact]);
+    }, [focusColumnInput, isModelSelectorOpen, isCompact]);
 
     // Handle agent selector close behavior
     const [agentSearchQuery, setAgentSearchQuery] = React.useState('');
@@ -559,10 +569,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!selection && !isAgentSelectorOpen) {
             setAgentSearchQuery('');
             if (!isCompact) {
-                requestAnimationFrame(focusChatInput);
+                requestAnimationFrame(focusColumnInput);
             }
         }
-    }, [isAgentSelectorOpen, isCompact, selection]);
+    }, [focusColumnInput, isAgentSelectorOpen, isCompact, selection]);
 
     const selectableDesktopAgents = React.useMemo(() => {
         return agents.filter((agent) => isPrimaryMode(agent.mode));
@@ -1402,7 +1412,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [commitVariantSelectionForModel, currentModelId, currentProviderId]);
 
     const handleAgentChange = React.useCallback((agentName: string, options?: { closeModelSelector?: boolean }) => {
-        if (selection) return;
+        if (selection) {
+            if (!agentSelectable || !controlledSessionId) return;
+            // The pick belongs to the controlled session only; the app-wide
+            // agent stays the main chat's.
+            saveSessionAgentSelection(controlledSessionId, agentName);
+            addRecentAgent(agentName);
+            if (options?.closeModelSelector ?? true) {
+                setAgentMenuOpen(false);
+            }
+            return;
+        }
         try {
             setAgent(agentName);
             addRecentAgent(agentName);
@@ -1421,7 +1441,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     }, [
         addRecentAgent,
+        agentSelectable,
         closeMobilePanel,
+        controlledSessionId,
         currentSessionId,
         isCompact,
         saveSessionAgentSelection,
@@ -1484,7 +1506,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 closeMobilePanel();
             }
             // Restore focus to chat input after model selection.
-            requestAnimationFrame(focusChatInput);
+            requestAnimationFrame(focusColumnInput);
         } catch (error) {
             console.error('[ModelControls] Handle model change error:', error);
         }
@@ -1835,7 +1857,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
             setExpandedMobileModelKey(null);
             closeMobilePanel();
-            requestAnimationFrame(focusChatInput);
+            requestAnimationFrame(focusColumnInput);
         };
 
         const openMobileVariantOverflow = (providerId: string, modelId: string) => {
@@ -2191,7 +2213,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
 
             closeMobilePanel();
-            requestAnimationFrame(focusChatInput);
+            requestAnimationFrame(focusColumnInput);
         };
 
         return (
@@ -3130,7 +3152,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     {!inlineMobileSelection && renderVariantSelector()}
                     {renderModelSelector()}
                     {inlineMobileSelection && renderVariantSelector()}
-                    {!selection && !isAutoSelected && renderAgentSelector()}
+                    {(!selection || agentSelectable) && !isAutoSelected && renderAgentSelector()}
                 </div>
             </div>
 

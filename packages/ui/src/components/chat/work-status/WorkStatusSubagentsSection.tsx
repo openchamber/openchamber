@@ -11,7 +11,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { getProviderModelDisplayName } from '@/lib/modelDisplay';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { formatCost } from './subagentCost';
@@ -85,10 +84,10 @@ export const WorkStatusSubagentsSection: React.FC<Props> = ({ sessionId, directo
   }, [children.length, setSectionExpanded]);
 
   // Same branch the transcript's Task tool takes: surfaces that cannot host an
-  // embedded panel navigate to the child session instead of opening a tab.
+  // side panel navigate to the child session instead of opening a tab.
   const openChildSession = React.useCallback((childId: string, label: string) => {
     if (!directory) return;
-    if (isEmbeddedSessionChat() || isMobile || isVSCodeRuntime()) {
+    if (isMobile || isVSCodeRuntime()) {
       setCurrentSession(childId, directory);
       return;
     }

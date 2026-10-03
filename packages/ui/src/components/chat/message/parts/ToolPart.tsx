@@ -78,7 +78,7 @@ import {
     resolveToolQuickOpenTarget,
     type DiffPatchEntry,
 } from './toolDiffUtils';
-import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
+import { useChatColumnActions } from '@/components/chat/chatColumnSession';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
@@ -1048,6 +1048,7 @@ const TaskToolSummary: React.FC<{
     const { t } = useI18n();
     const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+    const column = useChatColumnActions();
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
@@ -1059,10 +1060,14 @@ const TaskToolSummary: React.FC<{
     const handleOpenSession = (event: React.MouseEvent) => {
         event.stopPropagation();
         if (sessionId && currentDirectory) {
-            // In contexts with no ContextPanel (embedded session-chat iframe)
-            // or single-surface layouts (mobile, VS Code), navigate in place.
+            // A chat already in the side panel opens the subtask in place.
+            if (column.pinned) {
+                column.openSession(sessionId, currentDirectory);
+                return;
+            }
+            // Single-surface layouts (mobile, VS Code) navigate in place.
             // Otherwise open a new side-panel tab.
-            if (isEmbeddedSessionChat() || isMobile || runtime?.runtime.isVSCode) {
+            if (isMobile || runtime?.runtime.isVSCode) {
                 setCurrentSession(sessionId, currentDirectory);
                 return;
             }

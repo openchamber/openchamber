@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal, flushSync } from 'react-dom';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useChatColumnActions, useChatSessionSelection } from '../chatColumnSession';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessions } from '@/sync/sync-context';
 import { useInputStore } from '@/sync/input-store';
@@ -23,7 +24,6 @@ import {
     useMobileCommentDraft,
 } from '../composer/comment/MobileCommentComposerContext';
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
-import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
@@ -133,7 +133,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const mouseUpTimeoutRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
   const activeAddToChatCleanupRef = React.useRef<(() => void) | null>(null);
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const currentSessionId = useChatSessionSelection().sessionId;
+  const { focusInput: focusColumnInput, pinned: columnPinned } = useChatColumnActions();
   const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
   const addContextDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const setPendingInputText = useInputStore((state) => state.setPendingInputText);
@@ -234,15 +235,16 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   const addMarkdownToChat = React.useCallback((markdownText: string) => {
     const markdownBlock = wrapMarkdownSelectionForChat(markdownText);
-    setPendingInputText(markdownBlock, 'append');
+    // Quoted inside a chat pinned in the side panel, it goes to that chat's composer.
+    setPendingInputText(markdownBlock, 'append', columnPinned ? currentSessionId : null);
 
     hideMenu();
 
     window.getSelection()?.removeAllRanges();
     queueMicrotask(() => {
-      focusChatInput();
+      focusColumnInput();
     });
-  }, [hideMenu, setPendingInputText]);
+  }, [columnPinned, currentSessionId, focusColumnInput, hideMenu, setPendingInputText]);
 
   const showMenu = React.useCallback(() => {
     if (!pendingSelectionRef.current) return;
@@ -512,9 +514,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     hideMenu();
     window.getSelection()?.removeAllRanges();
     queueMicrotask(() => {
-      focusChatInput();
+      focusColumnInput();
     });
-  }, [currentSessionId, hideMenu, requestBtwComposer, selectedTextMarkdown]);
+  }, [currentSessionId, focusColumnInput, hideMenu, requestBtwComposer, selectedTextMarkdown]);
 
   // The selection is read word for word: the reader picked exactly what to
   // hear. While a reading of this message plays the same button stops it, so
@@ -606,9 +608,9 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     }
     hideMenu();
     queueMicrotask(() => {
-      focusChatInput();
+      focusColumnInput();
     });
-  }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
+  }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
   const currentSession = React.useMemo(() => {
     if (!currentSessionId) {

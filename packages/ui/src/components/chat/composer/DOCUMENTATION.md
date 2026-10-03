@@ -91,7 +91,7 @@ surviving session switches and reloads.
 The expanded list retains its drag sensors, ordering, edit, send, and remove
 actions, and clamps to available space above the composer. It receives the
 composer's main-session queue target instead of resolving the global selection,
-so embedded chat columns address their own queue.
+so a chat pinned in the side panel addresses its own queue.
 
 The shared frame measures its height and gap into the chat column's
 `--chat-floating-panel-clearance`. The floating status row and
@@ -499,6 +499,43 @@ send, and a runtime change prevents fork creation and stale UI recovery.
 The unsent panel shows "Ask your question" until fork creation starts.
 Existing panels hide titles. Promotion retains the existing internal title, without
 transcript fetching or Small Model generation.
+
+## Pinned composer
+
+A chat pinned in the side panel has a composer of its own next to the main
+chat's (see the sync documentation, *Pinned chat columns*). What used to be
+one app-wide composer state is split per column:
+
+- **Model, agent and effort.** The app-wide current model belongs to the main
+  chat. A pinned composer sends with `usePinnedComposerSelection`: what was
+  picked in it, saved for its session in the selection store the way the BTW
+  composer saves its picks, otherwise the session record's model, variant and
+  agent. Its picker is `ModelControls` in controlled mode with
+  `agentSelectable`, so the agent pick is saved for the session and never
+  changes the main chat's agent. "Run in parallel" is offered only in the main
+  chat.
+- **Attachments.** Each draft's files live under its draft identity in the
+  input store, and `useDraftAttachedFiles(identity)` shows a composer its own
+  files. The selected slot (`attachedFiles`) belongs to the composer the user
+  last worked in: pointer down, focus or drag-enter in a composer selects its
+  draft, so its paste, drop, picker and remove act on its own files. A pinned
+  composer does not take the slot on mount, so app-wide attachments keep
+  landing in the main chat until the user works in the pinned one.
+- **Pending text and context.** `setPendingInputText` and
+  `setPendingSyntheticParts` take a target. Null is the main chat's composer,
+  which every app-wide source writes to (plugins, git dialogs, file
+  selections, todo sends); a session id addresses the pinned composer on that
+  session, which is what text quoted inside that chat and the composer's own
+  restores use. A composer consumes only what is addressed to it. Preset
+  submits, guest-issue attaches and pending composer references are main-chat
+  only.
+- **Focus.** `focusChatInput()` focuses the main chat's composer and skips
+  pinned ones; a chat focuses its own through `useChatColumnActions().focusInput`.
+  A pinned composer takes focus on session entry only when the focus is
+  already inside its column, so opening a subtask in the panel never pulls
+  keystrokes away from the main chat.
+- **Stop prompt.** `armAbortPrompt` arms for a given session. A composer
+  clears the prompt of the session it leaves, never another column's.
 
 ## Mobile
 

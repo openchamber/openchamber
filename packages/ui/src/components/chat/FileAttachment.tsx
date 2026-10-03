@@ -1,5 +1,6 @@
 import React, { useRef, memo } from 'react';
-import { useInputStore } from '@/sync/input-store';
+import { useDraftAttachedFiles, useInputStore } from '@/sync/input-store';
+import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -359,10 +360,12 @@ VSCodeFileChip.displayName = 'VSCodeFileChip';
 interface AttachedFilesListProps {
   onShowPopup?: (content: ToolPopupContent) => void;
   className?: string;
+  /** The composer draft whose files to show; its own even while another composer holds the slot. */
+  draftIdentity?: ChatDraftIdentity | null;
 }
 
-export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListProps) => {
-  const attachedFiles = useInputStore((state) => state.attachedFiles);
+export const AttachedVSCodeFileChips = memo(({ onShowPopup, draftIdentity }: AttachedFilesListProps) => {
+  const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
   const vscodeFiles = attachedFiles.filter((file) => file.source === 'vscode');
@@ -392,8 +395,8 @@ export const AttachedVSCodeFileChips = memo(({ onShowPopup }: AttachedFilesListP
 
 AttachedVSCodeFileChips.displayName = 'AttachedVSCodeFileChips';
 
-export const AttachedFilesList = memo(({ onShowPopup, className }: AttachedFilesListProps) => {
-  const attachedFiles = useInputStore((state) => state.attachedFiles);
+export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }: AttachedFilesListProps) => {
+  const attachedFiles = useDraftAttachedFiles(draftIdentity);
   const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
   const localFiles = attachedFiles.filter((file) => file.source !== 'server' && file.source !== 'vscode');

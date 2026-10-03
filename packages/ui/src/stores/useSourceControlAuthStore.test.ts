@@ -311,11 +311,10 @@ describe('source-control auth store', () => {
     const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
     // The effect also bootstraps Linear, which is not a source-control
     // provider; only the source-control call and the dependency array matter.
-    const effect = appSource.match(/React\.useEffect\(\(\) => \{\s*if \(embeddedSessionChat \|\| !isConnected\)[\s\S]*?void refreshSourceControlAuth\(apis\.sourceControl, \{ force: true \}\);[\s\S]*?\}, \[([^\]]+)\]\);/);
+    const effect = appSource.match(/React\.useEffect\(\(\) => \{\s*if \(!isConnected\)[\s\S]*?void refreshSourceControlAuth\(apis\.sourceControl, \{ force: true \}\);[\s\S]*?\}, \[([^\]]+)\]\);/);
     expect(effect).not.toBeNull();
     const dependencies = effect?.[1].split(',').map((dependency) => dependency.trim()) ?? [];
     expect(dependencies).toContain('apis.sourceControl');
-    expect(dependencies).toContain('embeddedSessionChat');
     expect(dependencies).toContain('isConnected');
     expect(dependencies).toContain('refreshSourceControlAuth');
     expect(dependencies).toContain('runtimeEndpointEpoch');

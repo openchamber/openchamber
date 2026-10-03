@@ -1,9 +1,8 @@
 import React from 'react';
-import { useChatColumnSession } from '@/components/chat/chatColumnSession';
+import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { opencodeClient } from '@/lib/opencode/client';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 
 /**
  * Moves what the shown session's turn is blocked on (a running shell command,
@@ -13,11 +12,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
  */
 export function useBackgroundSessionWork(): () => void {
     const { t } = useI18n();
-    const chatColumnSession = useChatColumnSession();
-    const liveSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const liveSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
-    const sessionId = chatColumnSession ? chatColumnSession.sessionId : liveSessionId;
-    const directory = chatColumnSession ? chatColumnSession.directory : liveSessionDirectory;
+    const { sessionId, directory } = useChatSessionSelection();
 
     return React.useCallback(() => {
         if (!sessionId) return;
