@@ -30,6 +30,7 @@ configureOpenCodeCredentials({
     key('zai-coding-plan'),
     key('zhipuai-coding-plan'),
     key('deepseek'),
+    key('deepinfra'),
     key('hyper'),
     oauth('github-copilot'),
     oauth('anthropic'),
@@ -1349,6 +1350,45 @@ describe('NeuralWatt quota provider (VS Code parity)', () => {
     assert.equal(result.configured, true);
     assert.equal(result.error, 'No quota data in response');
     assert.equal(result.usage, null);
+  });
+});
+
+describe('DeepInfra quota provider (VS Code parity)', () => {
+  test('shows a negative stripe_balance as spendable credit', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ checklist: { stripe_balance: -50.75 } })));
+
+    const result = await fetchQuotaForProvider('deepinfra');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.providerId, 'deepinfra');
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$50.75');
+  });
+
+  test('shows a positive stripe_balance as money owed', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ checklist: { stripe_balance: '5.50' } })));
+
+    const result = await fetchQuotaForProvider('deepinfra');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '-$5.50');
+  });
+
+  test('treats a blank balance as missing data, not as $0.00', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({ checklist: { stripe_balance: '  ' } })));
+
+    const result = await fetchQuotaForProvider('deepinfra');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'No quota data in response');
+  });
+
+  test('asks to re-authenticate on 401', async () => {
+    stubFetchFailing(async () => ({}), { ok: false, status: 401 });
+
+    const result = await fetchQuotaForProvider('deepinfra');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Session expired — please re-authenticate with DeepInfra');
   });
 });
 

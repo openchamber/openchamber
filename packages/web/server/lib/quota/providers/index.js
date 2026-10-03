@@ -13,6 +13,7 @@ import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
 import * as copilot from './copilot.js';
 import * as cursor from './cursor.js';
+import * as deepinfra from './deepinfra.js';
 import * as deepseek from './deepseek.js';
 import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
@@ -55,6 +56,12 @@ const registry = {
     providerName: cursor.providerName,
     isConfigured: cursor.isConfigured,
     fetchQuota: cursor.fetchQuota
+  },
+  deepinfra: {
+    providerId: deepinfra.providerId,
+    providerName: deepinfra.providerName,
+    isConfigured: deepinfra.isConfigured,
+    fetchQuota: deepinfra.fetchQuota
   },
   deepseek: {
     providerId: deepseek.providerId,
@@ -233,6 +240,7 @@ export const fetchOpenaiQuota = openai.fetchQuota;
 export const fetchGoogleQuota = google.fetchGoogleQuota;
 export const fetchCodexQuota = codex.fetchQuota;
 export const fetchCursorQuota = cursor.fetchQuota;
+export const fetchDeepinfraQuota = deepinfra.fetchQuota;
 export const fetchDeepseekQuota = deepseek.fetchQuota;
 export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchCopilotQuota = copilot.fetchQuota;
