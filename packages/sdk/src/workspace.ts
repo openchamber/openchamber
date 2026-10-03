@@ -8,6 +8,7 @@ export type GuestWorktree = {
   branch: string;
   status: 'ready' | 'pending' | 'invalid' | 'missing';
 };
+/** `waiting-question` means the agent is waiting on an answer — a form it put to the user. */
 export type GuestSessionActivity = 'unknown' | 'idle' | 'running' | 'retrying' | 'waiting-permission' | 'waiting-question';
 export type GuestSessionRecord = {
   id: string;

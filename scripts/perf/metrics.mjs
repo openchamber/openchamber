@@ -87,3 +87,64 @@ export const summarizeLongTasks = (traceEvents, thresholdMs = 50) => {
     taskP99Ms: percentile(durations, 0.99),
   }
 }
+
+/**
+ * Attributes recorded CPU time to threads, and within each thread to the
+ * trace events that spent it.
+ *
+ * The main thread is one of many: a renderer also runs a compositor thread,
+ * raster and garbage-collection workers, and the GPU process draws what they
+ * produce. None of that appears in a main-thread profile, yet all of it is in
+ * the CPU figure a user reads off a process monitor.
+ *
+ * Time is exclusive, so a task's cost is not counted again in the tasks it
+ * contains, and it is thread CPU time (`tdur`) where Chrome recorded it, which
+ * leaves out the time a thread spent descheduled or blocked.
+ */
+export const summarizeThreads = (traceEvents, { topThreads = 12, topEvents = 8 } = {}) => {
+  const threadNames = new Map()
+  const processNames = new Map()
+  const byThread = new Map()
+  for (const event of traceEvents) {
+    if (event.name === "thread_name" && event.args?.name) threadNames.set(`${event.pid}:${event.tid}`, event.args.name)
+    else if (event.name === "process_name" && event.args?.name) processNames.set(event.pid, event.args.name)
+    if (event.ph !== "X" || !(Number(event.dur) >= 0)) continue
+    const key = `${event.pid}:${event.tid}`
+    const events = byThread.get(key) ?? []
+    events.push(event)
+    byThread.set(key, events)
+  }
+
+  const threads = []
+  for (const [key, events] of byThread) {
+    // Parents sort before the children they enclose.
+    events.sort((left, right) => left.ts - right.ts || right.dur - left.dur)
+    const cost = (event) => Number(event.tdur ?? event.dur)
+    const totals = new Map()
+    const open = []
+    let cpuMicros = 0
+    const close = (entry) => {
+      const exclusive = Math.max(0, cost(entry.event) - entry.childCost)
+      totals.set(entry.event.name, (totals.get(entry.event.name) ?? 0) + exclusive)
+    }
+    for (const event of events) {
+      while (open.length > 0 && open.at(-1).end <= event.ts) close(open.pop())
+      if (open.length === 0) cpuMicros += cost(event)
+      else open.at(-1).childCost += cost(event)
+      open.push({ event, end: event.ts + Number(event.dur), childCost: 0 })
+    }
+    while (open.length > 0) close(open.pop())
+
+    const [pid] = key.split(":")
+    threads.push({
+      process: processNames.get(Number(pid)) ?? `pid ${pid}`,
+      thread: threadNames.get(key) ?? `tid ${key.split(":")[1]}`,
+      cpuMs: round(cpuMicros / 1000),
+      events: [...totals.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, topEvents)
+        .map(([name, micros]) => ({ name, cpuMs: round(micros / 1000) })),
+    })
+  }
+  return threads.sort((left, right) => right.cpuMs - left.cpuMs).slice(0, topThreads)
+}

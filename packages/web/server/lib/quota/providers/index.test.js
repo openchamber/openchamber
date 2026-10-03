@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => ({}) }));
 
 import * as google from './google/index.js';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './index.js';
@@ -11,8 +13,8 @@ describe('quota provider registry', () => {
     expect(typeof google.resolveGoogleAuthSources).toBe('function');
   });
 
-  it('can list configured providers without missing provider exports', () => {
-    expect(() => listConfiguredQuotaProviders()).not.toThrow();
+  it('can list configured providers without missing provider exports', async () => {
+    await expect(listConfiguredQuotaProviders()).resolves.toBeInstanceOf(Array);
   });
 
   it('coalesces concurrent refreshes by provider ID', async () => {

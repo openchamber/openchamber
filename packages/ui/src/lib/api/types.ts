@@ -92,6 +92,8 @@ export interface ResizeTerminalPayload {
   sessionId: string;
   cols: number;
   rows: number;
+  /** The terminal's working directory; one inside an isolated space addresses that space. */
+  directory?: string | null;
 }
 
 export interface TerminalHandlers {
@@ -117,14 +119,19 @@ export interface TerminalAPI {
   listShells?(): Promise<TerminalShellOption[]>;
   /** Server-side sessions for a working directory, or all directories when cwd is empty; absent on runtimes without a server terminal list. */
   listSessions?(cwd: string): Promise<TerminalServerSession[]>;
-  /** Marks the sessions as active so the server's idle sweep does not reap terminals an open client still shows. */
-  touchSessions?(sessionIds: string[]): Promise<void>;
+  /**
+   * Marks the sessions as active so the server's idle sweep does not reap terminals an open
+   * client still shows. `directory` is the sessions' working directory: one inside an isolated
+   * space addresses that space, so a batch spans one directory.
+   */
+  touchSessions?(sessionIds: string[], directory?: string | null): Promise<void>;
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
-  connect(sessionId: string, handlers: TerminalHandlers): Subscription;
-  sendInput(sessionId: string, input: string): Promise<void>;
+  /** `directory` is the terminal's working directory; one inside an isolated space addresses that space's terminal socket. */
+  connect(sessionId: string, handlers: TerminalHandlers, directory?: string | null): Subscription;
+  sendInput(sessionId: string, input: string, directory?: string | null): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
-  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>): Promise<void>;
-  close(sessionId: string): Promise<void>;
+  updateAppearance?(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>, directory?: string | null): Promise<void>;
+  close(sessionId: string, directory?: string | null): Promise<void>;
   restartSession?(currentSessionId: string, options: RestartTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }
@@ -164,7 +171,16 @@ export interface GitStatus {
   upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;
-  diffStats?: Record<string, { insertions: number; deletions: number }>;
+  /**
+   * Per-file line stats split by Git scope. A file with edits in both scopes
+   * appears in both maps; the values are never summed into each other.
+   */
+  diffStats?: {
+    /** HEAD -> index (`git diff --cached --numstat`). */
+    staged: Record<string, { insertions: number; deletions: number }>;
+    /** index -> working tree (`git diff --numstat`). */
+    working: Record<string, { insertions: number; deletions: number }>;
+  };
   /** Present when a merge is in progress with conflicts */
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */
@@ -180,6 +196,27 @@ export interface GitUnpushedBranchCounts {
 
 export interface GitDiffResponse {
   diff: string;
+}
+
+/**
+ * What a submodule entry records. Its patch alone cannot say everything: a
+ * submodule that only gained untracked files is modified in status while its
+ * patch is empty. Commits are null where nothing is recorded, and
+ * `worktreeCommit` is null when the submodule is not checked out.
+ */
+export interface GitSubmoduleState {
+  headCommit: string | null;
+  indexCommit: string | null;
+  worktreeCommit: string | null;
+  hasTrackedChanges: boolean;
+  hasUntrackedFiles: boolean;
+  /** Unmerged: the index holds conflicting commits and no single recorded one. */
+  hasConflict: boolean;
+}
+
+/** Working-tree or staged diff for one status path. `submodule` is null for ordinary paths. */
+export interface GitPathDiffResponse extends GitDiffResponse {
+  submodule: GitSubmoduleState | null;
 }
 
 export interface GetGitDiffOptions {
@@ -224,6 +261,7 @@ export interface GitFileDiffResponse {
   modified: string;
   path: string;
   isBinary?: boolean;
+  submodule: GitSubmoduleState | null;
 }
 
 export interface GetGitFileDiffOptions {
@@ -486,6 +524,19 @@ export interface RemoveGitWorktreePayload {
   deleteLocalBranch?: boolean;
 }
 
+/** Private ref (`refs/openchamber/runs/<group>/<session>`) holding a worktree snapshot. */
+export interface GitWorktreeSnapshotPayload {
+  ref: string;
+}
+
+export interface GitWorktreeSnapshotResult {
+  ref: string;
+  /** Snapshot commit: HEAD plus every staged, unstaged and untracked (not ignored) change. */
+  commit: string;
+  /** The worktree HEAD the snapshot was taken on top of. */
+  head: string;
+}
+
 export interface GitDeleteBranchPayload {
   branch: string;
   force?: boolean;
@@ -531,12 +582,14 @@ interface GitWorktreeAPI {
   preview?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
+  /** `directory` is the worktree to snapshot. */
+  snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
 }
 
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
   getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
-  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
+  getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
   getGitRangeFiles?(directory: string, options: GetGitRangeFilesOptions): Promise<GitRangeFileEntry[]>;
@@ -704,6 +757,7 @@ export interface ProjectEntry {
   } | null;
   iconBackground?: string | null;
   color?: string | null;
+  defaultAgent?: string;
   defaultModel?: string;
   /** Variant of `defaultModel`, when that model exposes any. */
   defaultVariant?: string;
@@ -771,11 +825,6 @@ interface DiagnosticsAPI {
   downloadLogs(): Promise<{ fileName: string; content: string }>;
 }
 
-export interface ToolsAPI {
-
-  getAvailableTools(): Promise<string[]>;
-}
-
 export interface EditorAPI {
   openFile(path: string, line?: number, column?: number): Promise<void>;
   openDiff(
@@ -788,7 +837,6 @@ export interface EditorAPI {
 
 export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
-  openAgentManager(): Promise<void>;
   openExternalUrl(url: string): Promise<void>;
   pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
   saveImage?(payload: unknown): Promise<unknown>;
@@ -992,6 +1040,37 @@ export type GitHubPullRequestStatus = {
   resolvedRemoteName?: string | null;
 };
 
+export type GitHubPullRequestRef = GitHubRepoSelector & { number: number };
+
+/** Live fields of a known PR, refreshed in batches for list surfaces. */
+export type GitHubPullRequestLiveSummary = GitHubPullRequestRef & {
+  state: GitHubPullRequest['state'];
+  draft: boolean;
+  title: string;
+  headSha?: string;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+  /** Null for closed/merged PRs, whose checks are not actionable. */
+  checks: GitHubChecksSummary | null;
+};
+
+/** Live state of a known issue; a closed one says whether it was done or dropped. */
+export type GitHubIssueLiveSummary = GitHubPullRequestRef & {
+  title: string;
+  state: 'open' | 'completed' | 'not_planned';
+};
+
+export type GitHubPullRequestSummariesResult =
+  | { connected: false }
+  | {
+      connected: true;
+      /** Server-side stamp of when GitHub was asked (ms epoch). */
+      fetchedAt: number;
+      /** PRs and issues GitHub could not resolve are absent: unknown, not closed. */
+      summaries: GitHubPullRequestLiveSummary[];
+      issueSummaries: GitHubIssueLiveSummary[];
+    };
+
 export type GitHubPullRequestCreateInput = {
   directory: string;
   title: string;
@@ -1034,7 +1113,7 @@ export type GitHubPullRequestMergeResult = {
   message?: string;
 };
 
-type GitHubIssueLabel = {
+export type GitHubIssueLabel = {
   name: string;
   color?: string;
 };
@@ -1070,13 +1149,96 @@ export type GitHubIssueComment = {
   updatedAt?: string;
 };
 
-export type GitHubIssuesListResult = {
-  connected: boolean;
-  repo?: GitHubRepoRef | null;
-  issues?: GitHubIssueSummary[];
-  page?: number;
-  hasMore?: boolean;
+export type GitHubReferenceKind = 'issue' | 'pull';
+
+/** Which slice of open items the picker lists; `reviewRequested` is for PRs. */
+export type GitHubReferenceFilter = 'open' | 'assigned' | 'created' | 'reviewRequested';
+
+export type GitHubReferencesOptions = {
+  kind: GitHubReferenceKind;
+  filter?: GitHubReferenceFilter;
+  /** Search text, or a pasted link or number, which names one item of either kind. */
+  query?: string;
+  cursor?: string | null;
 };
+
+type GitHubReferenceCommon = {
+  number: number;
+  title: string;
+  url: string;
+  /** The description as the preview shows it, cut at 20 000 characters. */
+  body: string;
+  bodyTruncated: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  author: { login: string; avatarUrl?: string } | null;
+  labels: GitHubIssueLabel[];
+  commentCount: number;
+  sourceRepo: GitHubRepoSelector & { source: string };
+};
+
+export type GitHubIssueReference = GitHubReferenceCommon & {
+  kind: 'issue';
+  state: GitHubIssueLiveSummary['state'];
+};
+
+export type GitHubPullReference = GitHubReferenceCommon & {
+  kind: 'pull';
+  state: GitHubPullRequest['state'];
+  draft: boolean;
+  head: string;
+  base: string;
+  headSha: string;
+  headRepo: GitHubPullRequestHeadRepo | null;
+};
+
+/** A comment as the picker preview shows it; review entries carry their verdict or file and line. */
+export type GitHubReferenceComment = {
+  author: { login: string; avatarUrl?: string } | null;
+  body: string;
+  createdAt: string | null;
+  url: string;
+  path: string | null;
+  line: number | null;
+  review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
+};
+
+/** What the preview adds for one item; too slow to ask for a whole page. */
+export type GitHubReferenceDetail = {
+  number: number;
+  /** Oldest first: the newest 50 comments and, for a PR, its reviews. */
+  comments: GitHubReferenceComment[];
+  /** How many conversation comments the item has in all. */
+  commentTotal: number;
+  /** Null for an issue. */
+  pull: {
+    reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
+    additions: number;
+    deletions: number;
+    changedFiles: number;
+    /** Null for closed and merged PRs. */
+    checks: GitHubChecksSummary | null;
+  } | null;
+};
+
+export type GitHubReferenceDetailResult =
+  | { connected: false }
+  | { connected: true; detail: GitHubReferenceDetail | null };
+
+/** An issue or PR as the reference picker lists and previews it. */
+export type GitHubReference = GitHubIssueReference | GitHubPullReference;
+
+export type GitHubReferencesResult =
+  | { connected: false }
+  | {
+      connected: true;
+      /** Null when the project has no GitHub remote. */
+      repo: GitHubRepoRef | null;
+      items: GitHubReference[];
+      cursor: string | null;
+      hasMore: boolean;
+      total: number;
+    };
 
 export type GitHubRepoUpstreamResult = {
   connected: boolean;
@@ -1213,6 +1375,7 @@ export type LinearIssueSummary = {
   team?: LinearIssueTeam | null;
   priority?: LinearIssuePriority | null;
   labels?: LinearIssueLabel[];
+  updatedAt?: string | null;
 };
 
 export type LinearIssueComment = {
@@ -1251,6 +1414,21 @@ export type LinearIssueGetResult = {
   connected: boolean;
   issue?: LinearIssue | null;
 };
+
+/** Linear's workflow category; team-specific state names map onto these. */
+export type LinearStateType = 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
+
+/** Live state of a linked Linear issue, refreshed in batches for list surfaces. */
+export type LinearIssueLiveSummary = {
+  identifier: string;
+  title: string;
+  state: { name: string; type: LinearStateType };
+};
+
+/** Issues the current workspace does not have are left out. */
+export type LinearIssueSummariesResult =
+  | { connected: false }
+  | { connected: true; issues: LinearIssueLiveSummary[] };
 
 export type LinearIssueStatesResult = {
   connected: boolean;
@@ -1315,6 +1493,8 @@ export interface LinearAPI {
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
   issueGet(id: string): Promise<LinearIssueGetResult>;
+  /** At most 50 identifiers. Throws on failure; disconnected is `{ connected: false }`. */
+  issueSummaries(identifiers: string[]): Promise<LinearIssueSummariesResult>;
   issueStates(teamId: string): Promise<LinearIssueStatesResult>;
   issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
   mappingGet(): Promise<LinearMappingResult>;
@@ -1334,6 +1514,7 @@ export interface GitHubAPI {
   me?(): Promise<GitHubUserSummary>;
 
   prStatus(directory: string, branch: string, remote?: string, options?: { force?: boolean }): Promise<GitHubPullRequestStatus>;
+  prSummaries(refs: GitHubPullRequestRef[], issueRefs?: GitHubPullRequestRef[]): Promise<GitHubPullRequestSummariesResult>;
   prCreate(payload: GitHubPullRequestCreateInput): Promise<GitHubPullRequest>;
   prUpdate(payload: GitHubPullRequestUpdateInput): Promise<GitHubPullRequest>;
   prMerge(payload: GitHubPullRequestMergeInput): Promise<GitHubPullRequestMergeResult>;
@@ -1346,7 +1527,10 @@ export interface GitHubAPI {
     options?: { includeDiff?: boolean; includeCheckDetails?: boolean; sourceRepo?: GitHubRepoSelector | null }
   ): Promise<GitHubPullRequestContextResult>;
 
-  issuesList(directory: string, options?: { page?: number; query?: string }): Promise<GitHubIssuesListResult>;
+  /** One page of issues or PRs for the reference picker. Throws on failure. */
+  references(directory: string, options: GitHubReferencesOptions): Promise<GitHubReferencesResult>;
+  /** Comments of one item the picker previews, and a PR's size, review and checks. Throws on failure. */
+  referenceDetail(directory: string, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
   issueGet(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueGetResult>;
   issueComments(directory: string, number: number, options?: { sourceRepo?: GitHubRepoSelector | null }): Promise<GitHubIssueCommentsResult>;
   repoUpstream(directory: string): Promise<GitHubRepoUpstreamResult>;
@@ -1440,6 +1624,10 @@ export interface ClientAuthAPI {
 }
 
 export interface RuntimeAPIs {
+  /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
+  themeFiles?: {
+    pick(): Promise<{ status: 'unsupported' } | { status: 'picked'; file: { name: string; size: number; text: string } | null }>;
+  };
   runtime: RuntimeDescriptor;
   terminal: TerminalAPI;
   git: GitAPI;
@@ -1452,7 +1640,6 @@ export interface RuntimeAPIs {
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
-  tools: ToolsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;
   worktrees?: WorktreeMetadata[];
@@ -1558,8 +1745,6 @@ export interface SkillsInstallResponse {
   skipped?: Array<{ skillName: string; reason: string }>;
   error?: SkillsInstallError;
   requiresReload?: boolean;
-  requiresRestart?: boolean;
-  restartDeferred?: boolean;
   requiresManualRestart?: boolean;
   reloadFailed?: boolean;
   warning?: string;

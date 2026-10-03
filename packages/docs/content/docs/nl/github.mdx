@@ -1,0 +1,38 @@
+---
+title: GitHub-issues en PR's
+description: Verbind GitHub en start sessies vanuit issues en pull requests.
+---
+
+# GitHub-issues en PR's
+
+Verbind uw GitHub-account om issues en pull requests op te halen, er direct een sessie vanuit te starten en PR's te openen of bij te werken.
+
+## GitHub verbinden
+
+1. Open **Instellingen → Integraties** en klap de kaart **GitHub** open.
+2. Kies **GitHub verbinden**. OpenChamber toont een link en een korte code.
+3. Open de link, voer de code in en geef toestemming.
+
+Na het verbinden verschijnt uw account op de kaart. U kunt meerdere accounts verbinden, ertussen wisselen en op elk moment de verbinding verbreken. Als de `gh` CLI op dezelfde computer is aangemeld, kan OpenChamber die als terugval gebruiken.
+
+## Beginnen vanuit een issue of PR
+
+Wanneer GitHub verbonden is, kunt u een nieuwe [worktree-sessie](/nl/worktrees/) starten vanuit een issue of een pull request:
+
+- kies een **issue** om de branch ernaar te laten noemen
+- kies een **pull request** om de PR-branch uit te checken; voeg desgewenst de diff toe, zodat de agent de volledige wijziging heeft
+
+De nieuwe sessie opent met het issue of de PR al toegevoegd aan het berichtveld. Er wordt niets voor u verstuurd: kies het model en de agent, zeg wat er moet gebeuren en verstuur.
+
+## Pull requests openen en beheren
+
+In het tabblad **PR** van de [Git-weergave](/nl/git/) kunt u een pull request aanmaken, bijwerken, een concept gereed voor review melden of mergen. OpenChamber kan de titel en beschrijving uit uw wijzigingen genereren.
+
+## Een issue of PR aan een bericht koppelen
+
+Open in het chatinvoerveld het menu **+** en kies **GitHub**. Kies een of meer issues of pull requests: elk gaat als context mee met uw volgende bericht (een PR kan de diff meenemen). Het werkstatuspaneel van de sessie bewaart een link ernaartoe. Toevoegen geeft alleen context; in uw bericht zegt u wat ermee moet gebeuren.
+
+## Zie ook
+
+- [Werken met Git en GitHub](/nl/git/) om commits te maken en branches te beheren
+- [Worktree-sessies](/nl/worktrees/) waarin sessies vanuit issues en PR's beginnen

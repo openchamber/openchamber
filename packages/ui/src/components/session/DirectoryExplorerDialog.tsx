@@ -731,7 +731,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => executeRow(row)}
                   className={cn(
-                    'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    'flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     isActive && 'bg-interactive-selection text-interactive-selection-foreground',
                     !isActive && 'hover:bg-interactive-hover/50',
                     row.type === 'directory' && row.disabled && 'opacity-45'

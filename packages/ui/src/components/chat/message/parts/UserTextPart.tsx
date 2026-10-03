@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import type { Part } from '@opencode-ai/sdk/v2';
+import type { Part } from '@/lib/opencode/model';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
@@ -138,6 +138,15 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         }
     }, [collapsibleUserMessages]);
 
+    const handleExpand = React.useCallback(() => {
+        setIsTruncated(true);
+        if (isControlled) {
+            onExpandMessage?.();
+        } else {
+            setIsExpanded(true);
+        }
+    }, [isControlled, onExpandMessage]);
+
     const handleClick = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
         const target = event.target as HTMLElement | null;
         const skillLink = target?.closest<HTMLElement>('[data-skill-name]');
@@ -163,14 +172,9 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         // the text is clipped right now is what decides if expanding does
         // anything, and the flag can still be catching up on a fresh message.
         if (collapsibleUserMessages && !effectiveExpanded && element.scrollHeight > element.clientHeight) {
-            setIsTruncated(true);
-            if (isControlled) {
-                onExpandMessage?.();
-            } else {
-                setIsExpanded(true);
-            }
+            handleExpand();
         }
-    }, [collapsibleUserMessages, effectiveExpanded, hasActiveSelectionInElement, isControlled, onExpandMessage, openSkill]);
+    }, [collapsibleUserMessages, effectiveExpanded, handleExpand, hasActiveSelectionInElement, openSkill]);
 
     const handleCollapse = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
@@ -204,7 +208,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 <button
                     key={`skill-${slashIndex}-${skillName}`}
                     type="button"
-                    className="text-primary hover:underline"
+                    dir="ltr"
+                    className="text-primary hover:underline [unicode-bidi:isolate]"
                     onClick={(event) => {
                         event.stopPropagation();
                         openSkill(skillName);
@@ -233,7 +238,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 <a
                     key={`agent-${index}`}
                     href={buildAgentMentionUrl(agentMention.name)}
-                    className="text-primary hover:underline"
+                    dir="ltr"
+                    className="text-primary hover:underline [unicode-bidi:isolate]"
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(event) => event.stopPropagation()}
@@ -265,17 +271,30 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 <button
                     type="button"
                     onClick={handleCollapse}
-                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-[var(--surface-elevated)] p-0.5 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] transition-colors"
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-surface-elevated p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
                     aria-label={t('chat.message.userText.collapseAria')}
                 >
                     <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
+                </button>
+            )}
+            {collapsibleUserMessages && !effectiveExpanded && isTruncated && (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleExpand();
+                    }}
+                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-surface-elevated p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
+                    aria-label={t('chat.message.userText.expandAria')}
+                >
+                    <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
                 </button>
             )}
             <div
                 className={cn(
                     "break-words font-sans typography-markdown-body",
                     !isControlled && isExpanded && "pb-3",
-                    normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
+                    normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap [unicode-bidi:plaintext] text-start',
                     isCollapsed && "line-clamp-2",
                     collapsibleUserMessages && isTruncated && !effectiveExpanded && "cursor-pointer"
                 )}
@@ -314,7 +333,7 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
                 <div className="mt-2 space-y-1.5">
                     {terminalContextState.contexts.map((context, index) => (
                         <details key={`${context.terminalLabel}-${context.startLine}-${index}`} className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5 text-xs">
-                            <summary className="cursor-pointer text-[var(--surface-mutedForeground)]">
+                            <summary className="cursor-pointer text-muted-foreground">
                                 {t('chat.message.terminalContext', { terminal: context.terminalLabel, start: context.startLine, end: context.endLine })}
                             </summary>
                             <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--surface-foreground)]">{context.text}</pre>

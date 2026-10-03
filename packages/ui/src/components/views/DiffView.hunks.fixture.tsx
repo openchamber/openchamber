@@ -47,7 +47,9 @@ export const closeDiffHunkWorkers = async () => {
   workerThreads.clear();
 };
 
-export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline') {
+// Installs happy-dom and the Node-backed highlight worker as globals. The
+// returned teardown waits for in-flight highlights, then restores the globals.
+const installFixtureDom = () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -64,12 +66,30 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
-  const { createRoot } = await import('react-dom/client');
   document.documentElement.style.fontSize = '16px';
   const originalFetch = globalThis.fetch;
-  // Unrelated bootstrap I/O stays pending; the Git adapter below owns this
-  // scenario's reads and mutations. No real account or filesystem is touched.
+  // Unrelated bootstrap I/O stays pending; each scenario's Git adapter owns
+  // its reads and mutations. No real account or filesystem is touched.
   globalThis.fetch = Object.assign(async () => new Promise<Response>(() => {}), originalFetch);
+  const restore = async () => {
+    const deadline = Date.now() + 5000;
+    while (pendingHighlightRequests.size > 0 && workerFailures.length === 0 && Date.now() < deadline) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+    globalThis.fetch = originalFetch;
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  };
+  return { dom, restore };
+};
+
+export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline') {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../../web/src/api/index');
@@ -101,7 +121,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       }).join('')).join('');
   };
   const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 3, deletions: 3, isNew: false };
-  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: {} };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 3, deletions: 3 } } } };
   const base = createWebAPIs();
   const apis = { ...base, git: { ...base.git,
     checkIsGitRepository: async () => true,
@@ -110,8 +130,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
       if (failReads) throw new Error('Refresh unavailable');
       if (options.contextLines === 3) normalReads += 1;
       const full = (options.contextLines ?? 3) > 3;
-      const response = { diff: makePatch(full, full ? fullVersion : currentVersion) };
-      if (deferVersions) return new Promise<{ diff: string }>((resolve) => {
+      const response = { diff: makePatch(full, full ? fullVersion : currentVersion), submodule: null };
+      if (deferVersions) return new Promise<{ diff: string; submodule: null }>((resolve) => {
         if (full) releaseFull = () => resolve(response);
         else releaseCanonical = () => resolve(response);
       });
@@ -232,16 +252,100 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
     expect(mutations).toBe(3);
   } finally {
     await act(async () => root.unmount());
+    await restore();
+  }
+}
+
+/**
+ * A patch-only diff cannot tell how many lines follow its last hunk, so
+ * Pierre draws no separator there. The viewer's own row below the last hunk
+ * loads the full file and expands the region after it; a hunk that provably
+ * reaches the end of the file gets no row.
+ */
+export async function exerciseTrailingContextExpansion(layout: 'inline' | 'side-by-side' = 'inline') {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const lineCount = 150;
+  let changedIndex = 49;
+  let fullReads = 0;
+  const makePatch = (full: boolean) => {
+    const [start, end] = full ? [0, lineCount] : [Math.max(0, changedIndex - 3), Math.min(lineCount, changedIndex + 4)];
+    return `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`
+      + `@@ -${start + 1},${end - start} +${start + 1},${end - start} @@\n`
+      + Array.from({ length: end - start }, (_, offset) => {
+        const index = start + offset;
+        return index === changedIndex ? `-line${index}\n+changed${index}\n` : ` line${index}\n`;
+      }).join('');
+  };
+  const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 1, deletions: 1, isNew: false };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 1, deletions: 1 } } } };
+  const base = createWebAPIs();
+  const apis = { ...base, git: { ...base.git,
+    checkIsGitRepository: async () => true,
+    getGitStatus: async () => status,
+    getGitDiff: async (_directory: string, options: { contextLines?: number }) => {
+      const full = (options.contextLines ?? 3) > 3;
+      if (full) fullReads += 1;
+      return { diff: makePatch(full), submodule: null };
+    },
+  } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const container = document.createElement('div');
+  container.dataset.diffVirtualRoot = '';
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1280, 2000);
+  Object.defineProperty(container, 'clientHeight', { value: 2000 });
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (key: string) => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
+    <MultiFileDiffEntry key={key} directory="/repo" file={file} layout={layout} wrapLines={false} isSelected={false}
+      isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}}
+      hunkActionsEnabled={false} />
+  </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
     const deadline = Date.now() + 5000;
-    while (pendingHighlightRequests.size > 0 && workerFailures.length === 0 && Date.now() < deadline) {
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
-    await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
-    globalThis.fetch = originalFetch;
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
-    await dom.happyDOM.close();
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  try {
+    await render('middle');
+    await waitFor('the partial diff', () => shadowText().includes('changed49'));
+    await waitFor('the trailing row', () => container.querySelector('[data-oc-trailing-expand]') !== null);
+    const row = container.querySelector<HTMLElement>('[data-oc-trailing-expand]');
+    expect(row?.textContent).toBe('Show lines below');
+    const slots = container.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('slot') ?? [];
+    const wrapper = row?.closest('[slot]');
+    const slot = [...slots].find((candidate) => wrapper != null && candidate.assignedElements().includes(wrapper));
+    expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
+    if (layout === 'side-by-side') expect(slot?.closest('[data-deletions]')).not.toBeNull();
+    expect(shadowText()).not.toContain('line53');
+
+    await act(async () => row?.click());
+    await waitFor('the expanded tail', () => shadowText().includes('line72'));
+    expect(fullReads).toBe(1);
+    // Pierre's own separator now sizes what is left after the 20 expanded lines.
+    expect(shadowText()).not.toContain('line73');
+    expect(shadowText()).toContain('77 unmodified lines');
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+
+    // Two trailing context lines: git reached the end of the file.
+    changedIndex = lineCount - 3;
+    await render('end');
+    await waitFor('the partial diff at the end', () => shadowText().includes(`changed${changedIndex}`));
+    expect(container.querySelector('[data-oc-trailing-expand]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
   }
 }

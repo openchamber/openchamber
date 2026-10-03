@@ -1,13 +1,13 @@
 {
   "name": "@openchamber/example-tasks-demo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "openchamber": {
     "apiVersion": 1,
     "contributes": {
       "panel": {
         "id": "tasks-demo",
-        "name": "Tasks Demo",
+        "name": "Task Board",
         "icon": "task",
         "entry": "panel/index.html"
       },

@@ -8,7 +8,7 @@ const temporaryDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchambe
 process.env.OPENCHAMBER_DATA_DIR = temporaryDataDirectory;
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ 'opencode-go': { key: 'test-key' } }),
+  readOpenCodeCredentials: async () => ({ 'opencode-go': { key: 'test-key' } }),
 }));
 
 import { fetchOpenCodeGoUsage, fetchQuota, parseOpenCodeGoUsage } from './opencode-go.js';

@@ -22,6 +22,7 @@ const linearApi = (authStatus: LinearAPI["authStatus"]): LinearAPI => ({
   issuesList: unreachable,
   issueGet: unreachable,
   issueStates: unreachable,
+  issueSummaries: unreachable,
   issueUpdate: unreachable,
   mappingGet: unreachable,
   mappingSet: unreachable,

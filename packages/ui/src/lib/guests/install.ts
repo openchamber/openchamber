@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { parseInstalledGuestJson } from './parse.ts';
 import type { InstalledGuest } from './types.ts';
+import type { GuestRequestFailure } from './request-failure.ts';
 
 const errorSchema = z.object({
   error: z.enum([
@@ -16,9 +17,11 @@ const errorSchema = z.object({
     'missing-build',
     'host-too-old',
     'bundled',
+    'reserved-id',
     'clone-failed',
     'extract-failed',
     'too-large',
+    'enterprise-mode',
   ]),
   required: z.string().trim().min(1).max(64).optional(),
   id: z.string().trim().min(1).max(128).optional(),
@@ -34,20 +37,22 @@ export type InstallGuestErrorCode =
   | 'missing-build'
   | 'host-too-old'
   | 'bundled'
+  | 'reserved-id'
   | 'clone-failed'
   | 'extract-failed'
   | 'too-large'
+  | 'enterprise-mode'
   | 'failed';
 
 type InstallGuestResult =
   | { ok: true; guest: InstalledGuest; replaced?: boolean }
-  | { ok: false; code: InstallGuestErrorCode; required?: string; id?: string };
+  | { ok: false; code: InstallGuestErrorCode; required?: string; id?: string; diagnostic?: GuestRequestFailure };
 
 type UninstallGuestResult =
   | { ok: true }
   | { ok: false; code: InstallGuestErrorCode };
 
-type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean };
+type InstallGuestRequest = ({ path: string } | { url: string }) & { replace?: boolean; gitIdentityId?: string };
 
 type ParseInstallInputResult =
   | { ok: true; request: InstallGuestRequest }
@@ -59,6 +64,9 @@ export const parseInstallInput = (raw: string): ParseInstallInputResult => {
     return { ok: false, code: 'invalid-path' };
   }
   if (value.slice(0, 8).toLowerCase() === 'https://') {
+    return { ok: true, request: { url: value } };
+  }
+  if (value.slice(0, 6).toLowerCase() === 'ssh://' || /^(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z0-9.-]+:[^\s]+$/.test(value)) {
     return { ok: true, request: { url: value } };
   }
   const windowsPath = /^[a-zA-Z]:[\\/]/.test(value);
@@ -96,25 +104,18 @@ const readInstallError = async (
 
 export type InstallGuestOptions = {
   replace?: boolean;
+  gitIdentityId?: string;
 };
 
-const readInstallResponse = async (response: Response): Promise<InstallGuestResult> => {
+const readInstallResponse = async (response: Response, path: GuestRequestFailure['path']): Promise<InstallGuestResult> => {
   if (!response.ok) {
     const error = await readInstallError(response);
-    if (error.required && error.id) {
-      return { ok: false, code: error.code, required: error.required, id: error.id };
-    }
-    if (error.required) {
-      return { ok: false, code: error.code, required: error.required };
-    }
-    if (error.id) {
-      return { ok: false, code: error.code, id: error.id };
-    }
-    return { ok: false, code: error.code };
+    return { ok: false, ...error, diagnostic: { method: 'POST', path, kind: 'http', status: response.status } };
   }
-  const guest = parseInstalledGuestJson(await response.text());
+  const content = await response.text().catch(() => null);
+  const guest = content === null ? null : parseInstalledGuestJson(content);
   if (!guest) {
-    return { ok: false, code: 'failed' };
+    return { ok: false, code: 'failed', diagnostic: { method: 'POST', path, kind: 'invalid-response', status: response.status } };
   }
   return { ok: true, guest, replaced: response.status === 200 };
 };
@@ -127,18 +128,18 @@ export const installGuest = async (
   if (!parsed.ok) {
     return parsed;
   }
-  const body = options.replace
-    ? { ...parsed.request, replace: true as const }
-    : parsed.request;
+  const body: InstallGuestRequest = { ...parsed.request };
+  if (options.replace) body.replace = true;
+  if ('url' in body && options.gitIdentityId) body.gitIdentityId = options.gitIdentityId;
   try {
     const response = await runtimeFetch('/api/guests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(body),
     });
-    return await readInstallResponse(response);
+    return await readInstallResponse(response, '/api/guests');
   } catch {
-    return { ok: false, code: 'failed' };
+    return { ok: false, code: 'failed', diagnostic: { method: 'POST', path: '/api/guests', kind: 'network' } };
   }
 };
 
@@ -162,9 +163,9 @@ export const uploadGuestZip = async (
       headers: { 'Content-Type': 'application/octet-stream', Accept: 'application/json' },
       body: file,
     });
-    return await readInstallResponse(response);
+    return await readInstallResponse(response, '/api/guests/upload');
   } catch {
-    return { ok: false, code: 'failed' };
+    return { ok: false, code: 'failed', diagnostic: { method: 'POST', path: '/api/guests/upload', kind: 'network' } };
   }
 };
 

@@ -26,5 +26,8 @@
       "lan": true,
       "apiOnly": false
     }
-  ]
+  ],
+  "electron": {
+    "opencodeConfigDir": "~/.config/opencode-v2"
+  }
 }

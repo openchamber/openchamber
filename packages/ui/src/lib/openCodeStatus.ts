@@ -251,34 +251,25 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
     return url.toString();
   };
 
-  // OpenCode's own view of its directories; `home` anchors the log path below.
-  const pathInfo: { home?: unknown } | null = await (async () => {
-    const url = buildProbeUrl('/path', true);
-    if (!url) return null;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    try {
-      const resp = await runtimeFetch(url, { signal: controller.signal, cache: 'no-store' });
-      if (!resp.ok) return null;
-      const json = (await resp.json().catch(() => null)) as unknown;
-      return isRecord(json) ? json : null;
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timeout);
-    }
-  })();
+  // OpenCode 2.x serves no home directory of its own, so the log path below is
+  // anchored on the home the client derives from the directories it knows.
+  const opencodeHome = await opencodeClient
+    .getSystemInfo()
+    .then((info) => (info.homeDirectory && info.homeDirectory !== '/' ? info.homeDirectory : ''))
+    .catch(() => '');
 
   const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
-    { label: 'health', path: '/global/health', includeDirectory: false },
+    // OpenCode 2.x routes. `info` replaced `health`, `location` replaced
+    // `project/current` and `path`, and providers and models are top-level.
+    { label: 'info', path: '/info', includeDirectory: false },
     { label: 'config', path: '/config', includeDirectory: true },
-    { label: 'providers', path: '/config/providers', includeDirectory: true },
+    { label: 'providers', path: '/provider', includeDirectory: true },
+    { label: 'models', path: '/model', includeDirectory: true },
     { label: 'agents', path: '/agent', includeDirectory: true, timeoutMs: 12000 },
     { label: 'commands', path: '/command', includeDirectory: true, timeoutMs: 10000 },
-    { label: 'project', path: '/project/current', includeDirectory: true },
-    { label: 'path', path: '/path', includeDirectory: true },
+    { label: 'location', path: '/location', includeDirectory: true },
     { label: 'sessions', path: '/session', includeDirectory: true, timeoutMs: 12000 },
-    { label: 'sessionStatus', path: '/session/status', includeDirectory: true },
+    { label: 'sessionStatus', path: '/session/active', includeDirectory: true },
   ];
 
   const probes = apiBase
@@ -356,7 +347,6 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   // directory (the same default on every platform, which is why Windows users
   // do not find it under AppData); the desktop app writes the server console,
   // including OpenCode lifecycle lines, through electron-log.
-  const opencodeHome = typeof pathInfo?.home === 'string' ? pathInfo.home : '';
   const isWindows = /Windows NT/.test(platform);
   const isDesktop = origin.startsWith('openchamber-ui://');
   lines.push('');

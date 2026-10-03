@@ -12,6 +12,8 @@ import {
 } from './catalog.js';
 import { stopGuestService } from './service.js';
 import { cloneGitRepository, isHttpsZipUrl, isPublicHostname, parseGitInstallUrl, publicAddressesOf } from './clone.js';
+import { isReservedBuiltInId } from './builtins.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { extractZipBuffer, unwrapGuestRoot } from './extract-zip.js';
 import {
   guestCopiesDir,
@@ -26,6 +28,7 @@ const DOWNLOAD_TIMEOUT_MS = 60_000;
 const installBodySchema = z.object({
   path: z.string().trim().min(1).optional(),
   url: z.string().trim().min(1).optional(),
+  gitIdentityId: z.string().trim().min(1).max(128).optional(),
   replace: z.boolean().optional(),
 }).refine((value) => Boolean(value.path) !== Boolean(value.url));
 
@@ -35,6 +38,7 @@ export const parseInstallRequest = (body) => {
 };
 
 const persistGuest = async (guest, root, source, persistPath, { replace = false, origin = null } = {}) => {
+  if (isReservedBuiltInId(guest.id)) return { ok: false, code: 'reserved-id' };
   const stored = await readExtensionStore(persistPath);
   const storedRoots = await Promise.all(stored.paths.map((entry) => resolveGuestPackageRoot(entry)));
   if (storedRoots.some((entry) => entry === root)) {
@@ -96,6 +100,15 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
     if (!inspected.ok) {
       await removeDir(staging);
       return inspected;
+    }
+    if (isReservedBuiltInId(inspected.guest.id)) {
+      await removeDir(staging);
+      return { ok: false, code: 'reserved-id' };
+    }
+    const blocked = enterpriseBlockedCapabilities(inspected.guest, { source, gitUrl: origin?.url });
+    if (blocked.length > 0) {
+      await removeDir(staging);
+      return { ok: false, code: 'enterprise-mode', capabilities: blocked };
     }
     const dest = path.join(copies, inspected.guest.id);
     const store = await readExtensionStore(persistPath);
@@ -299,10 +312,14 @@ export const installGuestFromPath = async (rawPath, persistPath, { openchamberVe
   if (!inspected.ok) {
     return inspected;
   }
+  const blocked = enterpriseBlockedCapabilities(inspected.guest, { source: 'path' });
+  if (blocked.length > 0) {
+    return { ok: false, code: 'enterprise-mode', capabilities: blocked };
+  }
   return persistGuest(inspected.guest, root, 'path', persistPath, { replace });
 };
 
-export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVersion, replace = false, gitBinary } = {}) => {
+export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVersion, replace = false, gitBinary, gitIdentityId } = {}) => {
   if (isHttpsZipUrl(rawUrl)) {
     try {
       const buffer = await downloadZip(rawUrl);
@@ -318,7 +335,7 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
   if (!gitSource) {
     return { ok: false, code: 'invalid-url' };
   }
-  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref });
+  return installGuestFromGitSource(gitSource.url, persistPath, { openchamberVersion, replace, gitBinary, ref: gitSource.ref, gitIdentityId });
 };
 
 /**
@@ -326,24 +343,27 @@ export const installGuestFromUrl = async (rawUrl, persistPath, { openchamberVers
  * or tag to pin (omitted means the remote default branch). Both are stored
  * as the guest's origin so Settings → Extensions can check for updates later.
  */
-export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary, ref } = {}) => (
-  installCopiedGuest({
+export const installGuestFromGitSource = async (source, persistPath, { openchamberVersion, replace = false, gitBinary, ref, gitIdentityId, lookup } = {}) => {
+  const origin = { url: source };
+  if (ref) origin.ref = ref;
+  if (gitIdentityId) origin.gitIdentityId = gitIdentityId;
+  return installCopiedGuest({
     source: 'git',
     persistPath,
     openchamberVersion,
     replace,
-    origin: ref ? { url: source, ref } : { url: source },
+    origin,
     prepare: async (staging) => {
-      const cloned = await cloneGitRepository(source, staging, { gitBinary, ref });
+      const cloned = await cloneGitRepository(source, staging, { gitBinary, ref, gitIdentityId, lookup });
       return cloned.ok ? { ok: true, root: staging } : cloned;
     },
-  })
-);
+  });
+};
 
 export const installGuest = async (request, persistPath, { openchamberVersion, gitBinary } = {}) => {
   const replace = Boolean(request.replace);
   if (request.url) {
-    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary });
+    return installGuestFromUrl(request.url, persistPath, { openchamberVersion, replace, gitBinary, gitIdentityId: request.gitIdentityId });
   }
   return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace });
 };

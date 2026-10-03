@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
+import { isPermissionMode } from '../permission-auto-accept/modes.js';
+import { idleStopSchema } from '../spaces/idle-stop.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -63,8 +65,9 @@ export const createSettingsHelpers = (dependencies) => {
   const MOBILE_KEYBOARD_MODE_VALUES = new Set(['native', 'resize-content']);
   const TERMINAL_SHELL_VALUES = new Set(['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu']);
   const SIDEBAR_PROJECT_DISPLAY_MODE_VALUES = new Set(['all', 'single']);
-  const SIDEBAR_SESSION_GROUPING_MODE_VALUES = new Set(['by-worktree', 'flat']);
+  const SIDEBAR_VIEW_MODE_VALUES = new Set(['projects', 'timeline']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
+  const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -269,8 +272,10 @@ export const createSettingsHelpers = (dependencies) => {
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
       if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
-        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
-          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        // A mode, or a boolean from a policy written before the modes existed;
+        // the permission runtime converts those on its first read.
+        for (const [sessionId, mode] of Object.entries(sourceSessions)) {
+          if (sessionId && (typeof mode === 'boolean' || isPermissionMode(mode))) sessions[sessionId] = mode;
         }
       }
       result.permissionAutoAccept = {
@@ -280,6 +285,15 @@ export const createSettingsHelpers = (dependencies) => {
           ? candidate.permissionAutoAccept.revision
           : 0,
       };
+    }
+    if (isPermissionMode(candidate.permissionDefaultMode)) {
+      result.permissionDefaultMode = candidate.permissionDefaultMode;
+    }
+    if (typeof candidate.messageSearchEnabled === 'boolean') {
+      result.messageSearchEnabled = candidate.messageSearchEnabled;
+    }
+    if (typeof candidate.messageSearchReasoningEnabled === 'boolean') {
+      result.messageSearchReasoningEnabled = candidate.messageSearchReasoningEnabled;
     }
     if (typeof candidate.desktopUiPassword === 'string') {
       result.desktopUiPassword = candidate.desktopUiPassword.trim();
@@ -296,11 +310,14 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
       result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
     }
-    if (SIDEBAR_SESSION_GROUPING_MODE_VALUES.has(candidate.sidebarSessionGroupingMode)) {
-      result.sidebarSessionGroupingMode = candidate.sidebarSessionGroupingMode;
+    if (SIDEBAR_VIEW_MODE_VALUES.has(candidate.sidebarViewMode)) {
+      result.sidebarViewMode = candidate.sidebarViewMode;
     }
     if (SIDEBAR_PROJECT_SORT_ORDER_VALUES.has(candidate.sidebarProjectSortOrder)) {
       result.sidebarProjectSortOrder = candidate.sidebarProjectSortOrder;
+    }
+    if (SIDEBAR_WORKTREE_SORT_ORDER_VALUES.has(candidate.sidebarWorktreeSortOrder)) {
+      result.sidebarWorktreeSortOrder = candidate.sidebarWorktreeSortOrder;
     }
     if (typeof candidate.sidebarShowRecentSection === 'boolean') {
       result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
@@ -408,8 +425,17 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionSuggestionEnabled === 'boolean') {
       result.sessionSuggestionEnabled = candidate.sessionSuggestionEnabled;
     }
+    if (typeof candidate.sessionWorkEnabled === 'boolean') {
+      result.sessionWorkEnabled = candidate.sessionWorkEnabled;
+    }
+    if (typeof candidate.sessionWorkAutoOpen === 'boolean') {
+      result.sessionWorkAutoOpen = candidate.sessionWorkAutoOpen;
+    }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
+    }
+    if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
+      result.sessionGoalChecker = candidate.sessionGoalChecker;
     }
     if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
       result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
@@ -480,6 +506,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
       result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
+    if (typeof candidate.mergedWorktreeCleanupEnabled === 'boolean') {
+      result.mergedWorktreeCleanupEnabled = candidate.mergedWorktreeCleanupEnabled;
     }
     if (candidate.tunnelBootstrapTtlMs === null) {
       result.tunnelBootstrapTtlMs = null;
@@ -598,14 +627,26 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentWebToolEnabled === 'boolean') {
       result.agentWebToolEnabled = candidate.agentWebToolEnabled;
     }
+    if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
+      result.browserProvider = candidate.browserProvider.trim();
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }
     if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
       result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
     }
-    if (typeof candidate.optimizeSystemPrompt === 'boolean') {
-      result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
+    if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
+      result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
+    }
+    if (typeof candidate.agentToolsCodeMode === 'boolean') {
+      result.agentToolsCodeMode = candidate.agentToolsCodeMode;
+    }
+    if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
+      result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
+    }
+    if (idleStopSchema.safeParse(candidate.isolatedSpacesIdleStop).success) {
+      result.isolatedSpacesIdleStop = { ...candidate.isolatedSpacesIdleStop };
     }
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
@@ -1013,6 +1054,9 @@ export const createSettingsHelpers = (dependencies) => {
       // Tells the client whether agent memory exists in this build at all, so
       // its settings row and panel tab can be absent rather than merely off.
       agentMemoryFeatureAvailable: isAgentMemoryFeatureAvailable(),
+      // Jev routing needs the OpenChamber server, so it is present here and
+      // absent wherever this payload does not come from one (VS Code).
+      routingFeatureAvailable: true,
       ...(pwaAppName ? { pwaAppName } : {}),
       pwaOrientation,
       mobileKeyboardMode,
@@ -1025,7 +1069,8 @@ export const createSettingsHelpers = (dependencies) => {
             desktopLanAccessActive: process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_ACTIVE === 'true',
             desktopLanAccessBlockedReason:
               process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'missing-password'
-                ? 'missing-password'
+                || process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON === 'enterprise-mode'
+                ? process.env.OPENCHAMBER_DESKTOP_LAN_ACCESS_BLOCKED_REASON
                 : null,
           }
         : {}),

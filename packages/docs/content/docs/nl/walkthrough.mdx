@@ -1,0 +1,85 @@
+---
+title: Rondleiding door wijzigingen
+description: Lees een diff in een logische volgorde in plaats van op alfabet.
+---
+
+# Rondleiding door wijzigingen
+
+Een diff is op bestandspad gesorteerd. Dat is zelden de volgorde waarin een wijziging het best te begrijpen is. De rondleiding groepeert samenhangende bewerkingen in **stappen**, legt bij elke stap uit wat de code nu anders doet en zet ze in een volgorde waarin ze op elkaar voortbouwen.
+
+De rondleiding legt uit en ordent. Ze beoordeelt de code niet en geeft geen oordeel. Daarvoor gebruikt u [Review](/nl/git/).
+
+Open haar met het pictogram **Rondleiding** in de rechterbalk of de knop **AI-rondleiding** in de panelen Wijzigingen en Pull request. Beide openen alleen het paneel. Er wordt pas iets gegenereerd wanneer u op **Rondleiding genereren** klikt.
+
+## Labels bij stappen
+
+Elke stap noemt het onderwerp, geeft een of twee zinnen uitleg en toont vervolgens precies de bijbehorende code. Sommige stappen hebben een klein label naast de titel:
+
+| Label | Betekenis |
+| --- | --- |
+| **Belangrijkste wijziging** | Deze stap bepaalt de rest van de wijziging of bevat het grootste risico. Lees deze eerst en aandachtig. |
+| **Context** | Een ondersteunende wijziging die nodig is om de rest te begrijpen. Deze kunt u vluchtig doornemen. |
+| *Geen label* | Een gewone stap in de leesvolgorde. |
+
+Het label geeft aan **waar u uw aandacht op moet richten**, niet hoe goed de code is. Een stap krijgt nooit een label omdat er iets fout in is gevonden. De rondleiding bevat geen bevindingen, ernstniveaus of eindoordeel. Gebruik voor een beoordeling de actie **Review** bij [Git en GitHub](/nl/git/).
+
+Alleen **Verouderd** en **Niet behandeld** wijzen op een probleem. Beide gaan over een rondleiding die niet meer bij de actuele wijzigingen past, niet over de kwaliteit van uw code. Daarover leest u hieronder meer.
+
+## Welke wijzigingen kunt u bekijken?
+
+| Bereik | Inhoud |
+| --- | --- |
+| Alle niet-gecommitte wijzigingen | Alles wat nog niet is gecommit: gestagede, niet-gestagede en nieuwe bestanden |
+| Gestaged | Alleen wat op dit moment in een commit zou komen |
+| Niet gestaged | Wijzigingen in de werkboom en nieuwe bestanden |
+| Deze branch | Elke commit op deze branch die niet op de basisbranch staat |
+| Pull request | De wijziging zoals die op GitHub staat |
+
+**Deze branch** betekent niet 'ongepushte commits'. Het gaat om alles wat de branch aan de basis toevoegt, gepusht of niet. Na committen maar vóór pushen verschilt dit dus bewust van de pull request: de ene toont wat u hebt gedaan, de andere wat reviewers nu zien.
+
+Elk bereik wordt afzonderlijk opgeslagen. Wisselen wist dus niets.
+
+## Het model kiezen
+
+Rondleidingen gebruiken standaard uw kleine model. Kies een ander bij **Instellingen → Sessies → Model voor rondleiding door wijzigingen**, of voor één beoordeling bovenaan het paneel. Dat is handig bij een wijziging die een krachtiger model verdient.
+
+De kiezer toont alleen modellen die gestructureerde uitvoer kunnen teruggeven, omdat de rondleiding anders niet kan worden opgebouwd. Is het model te klein voor de diff, dan wordt het genereren met uitleg geweigerd. De invoer wordt niet stilzwijgend afgekapt: uitleg op basis van een halve diff kan overtuigend klinken en toch onjuist zijn.
+
+Als u het paneel opnieuw opent, toont het het model dat de zichtbare rondleiding heeft gemaakt. **Opnieuw genereren** gebruikt hetzelfde model, tenzij u dat wijzigt.
+
+## De taal kiezen
+
+Rondleidingen worden standaard in de interfacetaal geschreven. De taalkiezer bovenaan begint met die taal. Voor een afzonderlijke beoordeling kunt u elke andere ondersteunde interfacetaal kiezen. Uitleg is pas nuttig als u haar goed kunt lezen.
+
+Alleen de lopende tekst wordt vertaald. Identifiers, bestandspaden en API-namen blijven precies zoals ze in de code staan, zodat u kunt zoeken naar wat een stap noemt.
+
+Als er nog geen rondleiding in de gekozen taal is, blijft het paneel de bestaande tonen en vermeldt het dat. Het paneel wordt dus niet leeg. Klik op **Rondleiding genereren** om een versie in de nieuwe taal te krijgen.
+
+## Kosten en cache
+
+Er wordt nooit vanzelf iets gegenereerd. Zowel de eerste generatie als het opnieuw genereren begint alleen op uw verzoek.
+
+Resultaten worden bewaard op basis van de exacte diffinhoud. Als u de werkboom terugzet naar een eerdere toestand, keert de bijbehorende rondleiding zonder nieuwe modelaanroep terug. Taal en model maken deel uit van de cachesleutel. Elke combinatie wordt apart bewaard. Zijn er voor dezelfde diff rondleidingen in twee talen, dan is wisselen direct en kosteloos.
+
+Het genereren draait op de OpenChamber-server, niet in uw browsertabblad. U kunt de pagina herladen of het paneel sluiten; het werk gaat door en het resultaat wacht wanneer u terugkomt. Alleen **Annuleren** stopt het genereren.
+
+## Zien wanneer uitleg verouderd is
+
+Elke stap is gekoppeld aan de exacte code die wordt beschreven. Daardoor kan het paneel aangeven wanneer de code is veranderd:
+
+- **Verouderde stappen:** de beschreven code is gewijzigd of verdwenen. De rondleiding blijft zichtbaar met een markering, zodat u kunt beslissen of u opnieuw wilt genereren.
+- **Niet behandeld:** wijzigingen in de huidige diff die geen enkele stap beschrijft. Dat omvat latere bewerkingen, wijzigingen die als routine zijn beschouwd en lockfiles en andere gegenereerde bestanden die bewust niet naar het model gaan. Ze staan allemaal onderaan, zodat niets ongemerkt verdwijnt.
+
+Opnieuw genereren maakt een nieuwe rondleiding in plaats van losse stukken te repareren. De vorige versie gaat als context naar het model zodat bruikbare uitleg behouden blijft. Alle stappen worden opnieuw aan de actuele code gekoppeld.
+
+## Opmerkingen
+
+- U kunt bij elke regel een opmerking plaatsen, net als in de diffweergave. Die wordt aan het chatinvoerveld toegevoegd.
+- Beschikbaar op desktop- en tabletbreedte. Niet beschikbaar in de VS Code-extensie of de mobiele app.
+- Voor het bekijken van een pull request moet een GitHub-account verbonden zijn. Zie [GitHub-issues en PR's](/nl/github/).
+
+## Zie ook
+
+- [Git en GitHub](/nl/git/) voor het wijzigingenpaneel en de reviewactie die code wél beoordeelt
+- [GitHub-issues en PR's](/nl/github/) om GitHub te verbinden
+- [Providers, modellen en agents](/nl/providers/) voor het kleine model

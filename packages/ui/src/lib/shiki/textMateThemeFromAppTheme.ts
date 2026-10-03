@@ -1,4 +1,5 @@
 import type { Theme } from '@/types/theme';
+import { resolveSyntaxTokens } from '../theme/syntax';
 
 import type { VSCodeTextMateTheme, VSCodeTokenColorRule } from './vscodeTextMateTheme';
 
@@ -28,11 +29,11 @@ const pick = (value: string | undefined, fallback: string): string => {
   return fallback;
 };
 
-const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
-  const base = theme.colors.syntax.base;
-  const tokens = theme.colors.syntax.tokens ?? {};
+export const buildSyntaxTokenRules = (syntax: Theme['colors']['syntax']): VSCodeTokenColorRule[] => {
+  const base = syntax.base;
+  const tokens = new Map(Object.entries(resolveSyntaxTokens(syntax)));
 
-  const t = (key: string, fallback: string): string => pick(tokens[key], fallback);
+  const t = (key: string, fallback: string): string => pick(tokens.get(key), fallback);
 
   return [
     {
@@ -68,7 +69,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'methods',
       scope: ['entity.name.function.method', 'meta.function.method'],
-      settings: { foreground: t('method', theme.colors.status.success) },
+      settings: { foreground: t('method', base.function) },
     },
     {
       name: 'functions',
@@ -83,7 +84,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'variablesOther',
       scope: ['variable.other.object', 'variable.other.readwrite.alias'],
-      settings: { foreground: t('variableOther', t('method', theme.colors.status.success)) },
+      settings: { foreground: t('variableOther', base.variable) },
     },
     {
       name: 'globalVariables',
@@ -93,7 +94,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'localVariables',
       scope: ['variable.other.local'],
-      settings: { foreground: t('variableLocal', theme.colors.surface.elevated) },
+      settings: { foreground: t('variableLocal', base.variable) },
     },
     {
       name: 'parameters',
@@ -103,7 +104,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'properties',
       scope: ['variable.other.property', 'meta.property'],
-      settings: { foreground: t('variableProperty', theme.colors.status.info) },
+      settings: { foreground: t('variableProperty', base.variable) },
     },
     {
       name: 'strings',
@@ -138,7 +139,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'docComments',
       scope: ['comment.documentation', 'comment.line.documentation'],
-      settings: { foreground: t('commentDoc', theme.colors.surface.mutedForeground) },
+      settings: { foreground: t('commentDoc', base.comment) },
     },
     {
       name: 'numbers',
@@ -168,7 +169,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'urls',
       scope: ['markup.underline.link'],
-      settings: { foreground: t('url', theme.colors.status.info) },
+      settings: { foreground: t('url', base.string) },
     },
     {
       name: 'tags',
@@ -266,7 +267,7 @@ const buildTokenColors = (theme: Theme): VSCodeTokenColorRule[] => {
     {
       name: 'green',
       scope: [],
-      settings: { foreground: t('method', theme.colors.status.success) },
+      settings: { foreground: t('method', base.function) },
     },
     {
       name: 'cyan',
@@ -313,13 +314,14 @@ const buildColors = (theme: Theme): Record<string, string> => {
   const st = theme.colors.status;
   const base = theme.colors.syntax.base;
   const hl = theme.colors.syntax.highlights ?? {};
+  const codeBackground = base.background;
 
   const diffAddedBg = pick(hl.diffAddedBackground, st.successBackground);
   const diffRemovedBg = pick(hl.diffRemovedBackground, st.errorBackground);
 
   return {
-    'editor.background': s.background,
-    'editor.foreground': s.foreground,
+    'editor.background': codeBackground,
+    'editor.foreground': base.foreground,
     'editor.hoverHighlightBackground': pick(i.hover, s.subtle),
     'editor.lineHighlightBackground': s.muted,
     'editor.selectionBackground': i.selection,
@@ -338,7 +340,7 @@ const buildColors = (theme: Theme): Record<string, string> => {
     'editorHoverWidget.background': s.elevated,
     'editorLineNumber.activeForeground': pick(hl.lineNumberActive, s.foreground),
     'editorLineNumber.foreground': pick(hl.lineNumber, s.mutedForeground),
-    'editorGutter.background': s.background,
+    'editorGutter.background': codeBackground,
     'editorGutter.modifiedBackground': st.info,
     'editorGutter.addedBackground': st.success,
     'editorGutter.deletedBackground': st.error,
@@ -477,6 +479,6 @@ export function buildTextMateThemeFromAppTheme(theme: Theme): VSCodeTextMateThem
     name: theme.metadata.name,
     type: theme.metadata.variant,
     colors: buildColors(theme),
-    tokenColors: buildTokenColors(theme),
+    tokenColors: buildSyntaxTokenRules(theme.colors.syntax),
   };
 }

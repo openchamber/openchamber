@@ -4,6 +4,7 @@ import { devtools, persist } from 'zustand/middleware';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
+import { chatQuoteAnchorSchema, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 
 export type InlineCommentSource = 'diff' | 'plan' | 'file' | 'preview-annotation' | 'terminal' | 'pr-comment' | 'pr-check' | 'chat-quote' | 'file-quote';
 
@@ -25,6 +26,8 @@ export interface InlineCommentDraft {
   text: string;
   /** Owning terminal session; set only for `source: 'terminal'`. */
   terminalId?: string;
+  /** Where the quote sits in its message; set only for `source: 'chat-quote'`. */
+  anchor?: ChatQuoteAnchor;
   createdAt: number;
 }
 
@@ -183,6 +186,7 @@ const persistedDraftSchema = z.object({
   language: z.string(),
   text: z.string(),
   terminalId: z.string().optional(),
+  anchor: chatQuoteAnchorSchema.optional(),
   createdAt: z.number(),
 });
 

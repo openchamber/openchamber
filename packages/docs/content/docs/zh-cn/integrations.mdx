@@ -1,6 +1,6 @@
 ---
 title: 集成
-description: 将 GitHub 和 Linear 连接到 OpenChamber。
+description: 连接 OpenChamber 所使用的服务和订阅。
 ---
 
 # 集成
@@ -34,17 +34,51 @@ description: 将 GitHub 和 Linear 连接到 OpenChamber。
 
 - 在 Linear 面板中打开 issue 并选择 **Start session**。滚动 issue 时按钮始终停留在底部。
 - 在聊天中选择 **New Session From Linear Issue** 从列表中挑选；需要新分支时选择 **Create in worktree**。
-- 在 **New Worktree** 对话框中选择 **Start from Linear Issue**。
+- 在 **New Worktree** 对话框中选择一个 Linear issue。新会话打开时该 issue 已附加在消息框中，第一条消息由你自己来写。
 
-会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
+从 Linear 面板和聊天开始时，会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
 
 ### 将 issue 关联到消息
 
-在聊天输入框中选择 **Link Linear Issue**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
+在聊天输入框中打开 **+** 菜单并选择 **Linear**。该 issue 会作为上下文随你的下一条消息一起发送，会话的工作状态面板会保留指向它的链接。
 
 ### 会话评论
 
-在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
+在 Linear 卡片中开启 **Session comments**，从 issue 开始的会话，或第一条消息附加了该 issue 的会话，会在开始、完成或失败时在该 issue 下发布评论，每条评论都带有打开会话的链接。只有当此 OpenChamber 服务器拥有公网地址时才会发布评论，这样 issue 中的每个人都能打开链接；在本地或私有地址下不会发布任何内容。
+
+## 安装集成
+
+1. 打开 **Settings → Integrations**。
+2. 找到所需的集成并选择 **Install**。
+3. 在提示时重启 OpenCode — 重启后提供商就会出现。
+4. 选择 **Set up** 并登录。之后模型会出现在聊天室的模型选择器中。
+
+集成按用户安装，因此在所有项目中都可用。你可以随时在同一张卡片上更新或移除它们。
+
+## Claude Code
+
+Claude Code 通过你电脑上的 Claude Code CLI 使用你的 Claude Pro 或 Max 套餐 — 无需 API 密钥。
+
+1. 安装集成（见上文）。
+2. 选择 **Set up** 并登录。如果你还没有 Claude Code CLI，安装向导会先提供安装，然后再登录。
+
+**你的 Claude 账户如何受到保护：** 此集成使用 Anthropic 官方的 Claude Agent SDK 和你已安装的 Claude Code CLI。它不会劫持 OAuth，不会提取或重放浏览器令牌，不会冒充不受支持的客户端，也不会绕过 Anthropic 的身份验证。它始终运行在 Anthropic 支持的访问路径上，因此不会带来与令牌劫持或未授权身份验证变通手段相关的封号风险。
+
+## 更新或移除
+
+- **Update** 安装插件的最新发布版本。
+- **Remove** 从你的 OpenCode 配置中删除该插件。OpenCode 重新加载后，该提供商将不再加载。
+
+如果卡片提示条目需要手动管理，请选择 **Manage plugins** 并在那里清理重复项。
+
+## Excalidraw
+
+Excalidraw 让你直接在 Files 中绘制 `.excalidraw` 文件和 Obsidian 的 `.excalidraw.md` 绘图。它是一个 OpenChamber 扩展，列在同一页面的 **OpenChamber extensions** 下。
+
+1. 打开 **Settings → Integrations**，在 Excalidraw 卡片上选择 **Install**。你也可以在 Files 中打开一个绘图，然后在其上方的提示中选择 **Install**。
+2. 重新打开该绘图。画布会取代文件的文本，Cmd/Ctrl+S、自动保存、源码切换和全屏的用法与其他文件相同。
+
+在卡片上，你可以在有新版本时更新扩展、重新启用已暂停的扩展，或将其移除。移除后你的绘图保持不变，只是会以文本形式打开。仅支持 Web 和桌面端。
 
 ## 相关内容
 

@@ -36,6 +36,157 @@ Devices paired through [Connect a Device](/connect-devices/) authenticate with t
 - If you need a public URL, prefer a [tunnel](/tunnels/) or a private network (like a VPN) over opening a port to the internet.
 - If you put OpenChamber behind your own HTTPS server, see [Reverse Proxy](/reverse-proxy/).
 
+## Enterprise mode
+
+If your team may only send conversation content to the model providers you configured in OpenCode, turn on enterprise mode. There are two ways, and either one is enough.
+
+### A policy file on the machine
+
+This is the one to use on laptops you manage. Put a file named `policy.json` in a folder only an administrator can write to:
+
+| System | Path |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+The path doesn't depend on how OpenChamber is installed. The desktop app, the web server started from npm, the CLI and the VS Code extension all read the same file. You can roll it out with your device manager (Jamf, Intune and the like). For a server in Docker, mount the file at the Linux path.
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+Only `enterpriseMode` is needed. `organization` is shown in Settings as "Managed by Acme", so people know who made the call. `relayUrl` and `jev` pin your own relay and your own Jev endpoint, `allowNetworkAccess` lets other devices reach OpenChamber over the network, and `allowedExtensions` lists the extension repositories you trust. All of them are described below.
+
+- Nothing a user sets, in Settings or in the environment, turns off what the file turns on.
+- When the file turns enterprise mode on, only the file decides. The environment variables below for the relay, Jev and network access are ignored, because a user can set those themselves.
+- If the file exists but can't be read or isn't valid JSON, enterprise mode stays on and nothing is pinned. Settings says the policy couldn't be read. A broken file never quietly lifts the protection.
+- Changes apply without a restart.
+- OpenChamber runs as the user, so the user can read the file. Keep that in mind before you put an API key in it.
+
+### An environment variable
+
+On a server or in a container, where you control the environment, this is enough:
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+On a laptop it's a weaker lock: the desktop app reads it from the login shell profile (for example `~/.zshrc`), and the user can edit that. Use the policy file there.
+
+With the variable, the relay, Jev, network access and allowed extensions come from their own variables too: `OPENCHAMBER_RELAY_URL`, `OPENCHAMBER_JEV_URL`, `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`, `OPENCHAMBER_ALLOWED_EXTENSIONS` (repository URLs separated by commas) and `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`. In Docker you'll need the network one, since the server has to listen beyond the container.
+
+### Pin the OpenCode CLI
+
+If your machines already have OpenCode installed and OpenChamber should use that install, put its path in the policy file. This works with or without enterprise mode.
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber starts OpenCode only from that path. It ignores the path in Settings, `OPENCODE_BINARY`, and the copy bundled with the desktop app, which stays on disk unused.
+- If nothing runnable is at that path, OpenChamber doesn't fall back to another copy. It stops with an error that names the path.
+- Settings shows the path read-only, with a note that the administrator set it.
+- OpenChamber doesn't install or update a pinned OpenCode and doesn't announce new versions. Updates come with your rollout.
+- The CLI has to be OpenCode 2.x, at least the version OpenChamber asks for. With an older one, OpenChamber stops at the "update OpenCode" screen.
+- A folder works too, if it holds `opencode` (`opencode.exe` on Windows). There's no environment variable for this, since a user can set those themselves.
+
+### Examples
+
+Put the policy file on a Mac. Run in Terminal as an administrator:
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+On Linux it's the same with `/etc/openchamber` as the folder.
+
+On Windows, run PowerShell as Administrator. The last line leaves the folder writable only by administrators and the system:
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+A server in Docker, added to the `environment` of `docker-compose.yml`. The container listens beyond itself, so it needs network access allowed:
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+To check it worked, open Settings → Providers: an Enterprise mode notice with your organization's name appears at the top.
+
+### What changes
+
+- Model providers come only from your OpenCode config. Connecting a provider, signing in to one, adding a key or creating a custom provider is turned off in OpenChamber; removing or switching accounts that already exist still works. This only closes the way in through the app; the lock itself is the OpenCode policy described below. Signing in to an MCP server from your OpenCode config still works, since it reaches that server and not a model provider.
+- [Classification providers (Jev)](/classification-providers/) stay off, including a custom endpoint someone types in Settings. The safety net and Auto aren't offered, and sessions move into work only by hand. To use Jev through your own infrastructure, pin an endpoint with `jev` in the policy file, or with `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` and, if it needs one, `OPENCHAMBER_JEV_API_KEY`). It becomes the default, people can still turn it off, and nothing else can be picked.
+- Read-aloud through OpenAI is off. A custom speech or transcription server has to run on the same machine. Local voices and local dictation models keep working.
+- Push notifications to phones and browsers carry only a generic title like "Agent response is ready", with no message text or session name. Desktop notifications stay on your machine and keep the full text.
+- Update checks keep running, so security fixes still reach you, but they never report usage, not even the anonymous install ID.
+- [External tunnels](/tunnels/) (Cloudflare, ngrok) are off. A tunnel provider decrypts traffic at its edge and sees every request in plain text.
+- The [Private Relay](/private-relay/) works only through your own relay. Run a [self-hosted relay](https://github.com/openchamber/openchamber-relay) and point OpenChamber at it with `relayUrl` in the policy file or `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. The shared relay can't read your traffic either, since it's end-to-end encrypted, but your own keeps the connection metadata and the way into this machine inside your network. Without your own relay, devices can't be paired at all.
+- OpenChamber listens only on the machine it runs on. The desktop setting that lets other devices on the local network open the app is turned off, and the server refuses to start on a network address, whether through the CLI (`--host`, `--lan`) or the environment. If the policy file appears while the app is running, connections from other machines are dropped until the next start. Allow network access with `"allowNetworkAccess": true` in the policy file, or `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` where the environment turns enterprise mode on. Keep in mind that the connection is plain HTTP, so on a shared network anyone can read it; put a server that others reach behind [your own HTTPS](/reverse-proxy/).
+- [Extensions](/extensions/) that can send data off the machine (ones that talk to an outside API, load from outside addresses, or run a background service) install only from a Git repository listed in `allowedExtensions`. Extensions that do none of this install as usual. An installed extension from anywhere else stays off, and Settings says why. The list holds repository URLs, since an extension picks its own name; an entry ending in `/`, like `https://github.com/acme/`, allows every repository under it. On the machines of people who build extensions, `"allowLocalExtensions": true` also allows installing from a local folder. A ZIP stays closed either way.
+- In the VS Code extension, connecting providers is off and update checks don't report usage. It has no Jev, relay, tunnels, push notifications or cloud speech to begin with.
+
+Small-model tasks (session titles, recaps, commit messages, the diff walkthrough) need no special mode. They always run on the small model you chose in Settings, or on a small model of the provider you're working with, or on the default model from your OpenCode config. They never fall back to some other provider you happen to have connected.
+
+Which model providers may be used at all is decided by OpenCode, not OpenChamber. Lock it with [OpenCode policies](https://opencode.ai/v2/docs/policies/): deny every provider, then allow the ones you approved.
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+A denied provider disappears even if someone adds a key for it. Put the policies in the global `~/.config/opencode/opencode.jsonc`, where a project can't lift them, or deliver them from an OpenCode Console workspace, which has the final say. Enterprise mode covers what OpenChamber itself sends on top of that.
+
+The agent's web searches and page fetches also go through OpenCode, to the search service and to the pages themselves. If they shouldn't leave your network, deny them with the same kind of policy:
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## Related
 
 - [Connect a Device](/connect-devices/) — one-time pairing and per-device tokens

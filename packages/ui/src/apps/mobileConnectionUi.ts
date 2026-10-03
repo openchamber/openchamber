@@ -6,4 +6,4 @@ export const mobileInputKeyboardProps = {
   spellCheck: false,
 } as const;
 
-export const mobileConnectionInputClass = 'h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20';
+export const mobileConnectionInputClass = 'oc-surface-elevated h-12 w-full rounded-[16px] border border-border/70 bg-surface-elevated px-4 text-[16px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-interactive-border-focus focus:ring-2 focus:ring-ring';

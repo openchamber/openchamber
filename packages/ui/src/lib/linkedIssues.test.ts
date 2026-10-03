@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Session } from '@opencode-ai/sdk/v2';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import type { Session } from '@/lib/opencode/model';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
 type LinkedGitHubIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
@@ -279,5 +279,92 @@ describe('canOpenLinearIssueInContextPanel', () => {
       inDedicatedMobileShell: false,
       directory: '  ',
     })).toBe(false);
+  });
+});
+
+describe('getLinkedGitHubPullRequests', () => {
+  test('reads the repository of each linked GitHub PR from its id', () => {
+    const session = sessionWith([
+      issue(),
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', title: 'Fix', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Linear', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 },
+    ]);
+    expect(getLinkedGitHubPullRequests(session)).toEqual([
+      { owner: 'acme', repo: 'app', number: 7, url: 'https://github.com/acme/app/pull/7', title: 'Fix' },
+    ]);
+  });
+
+  test('skips a PR whose id could not name its repository', () => {
+    const session = sessionWith([
+      issue({ id: 'https://ghe.example/acme/app/pull/7#7', number: 7, kind: 'pull', url: 'https://ghe.example/acme/app/pull/7' }),
+    ]);
+    expect(getLinkedGitHubPullRequests(session)).toEqual([]);
+  });
+});
+
+describe('getLinkedSidebarIssues', () => {
+  test('lists GitHub issues with their repository and trackers by identifier, never pull requests', () => {
+    const session = sessionWith([
+      issue(),
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'linear:ENG-1', identifier: 'ENG-1', title: 'Linear task', url: 'https://linear.app/x', kind: 'linear', linkedAt: 1 },
+      { id: 'guest:jira:OPS-2', providerId: 'jira', identifier: 'OPS-2', title: 'Ops', url: 'https://jira/x', kind: 'guest', thread: 'issue', linkedAt: 1 },
+      { id: 'guest:gitea:5', providerId: 'gitea', identifier: '5', title: 'Guest PR', url: 'https://gitea/x', kind: 'guest', thread: 'pull', linkedAt: 1 },
+    ]);
+    expect(getLinkedSidebarIssues(session)).toEqual([
+      { source: 'github', key: 'owner/repo#12', owner: 'owner', repo: 'repo', number: 12, url: 'https://github.com/owner/repo/issues/12', title: 'Rail badge count' },
+      { source: 'linear', key: 'linear:ENG-1', identifier: 'ENG-1', url: 'https://linear.app/x', title: 'Linear task' },
+      { source: 'guest', key: 'guest:jira:OPS-2', identifier: 'OPS-2', url: 'https://jira/x', title: 'Ops' },
+    ]);
+  });
+
+  test('an agent-linked external issue is listed by identifier; its merge request is not an issue', () => {
+    const session = sessionWith([
+      { id: 'link:https://jira.example/OPS-7', kind: 'external', thread: 'issue', identifier: 'OPS-7', title: 'Outage', url: 'https://jira.example/OPS-7', linkedAt: 1 },
+      { id: 'link:https://gitlab.com/a/b/-/merge_requests/42', kind: 'external', thread: 'change', identifier: '!42', title: 'Fix', url: 'https://gitlab.com/a/b/-/merge_requests/42', linkedAt: 1 },
+      { id: 'link:broken', kind: 'external', thread: 'pull', identifier: 'x', title: 'Bad', url: 'u', linkedAt: 1 },
+    ]);
+    expect(getLinkedIssues(session).map((entry) => entry.id)).toEqual([
+      'link:https://jira.example/OPS-7',
+      'link:https://gitlab.com/a/b/-/merge_requests/42',
+    ]);
+    expect(getLinkedSidebarIssues(session)).toEqual([
+      { source: 'external', key: 'link:https://jira.example/OPS-7', identifier: 'OPS-7', url: 'https://jira.example/OPS-7', title: 'Outage' },
+    ]);
+  });
+});
+
+describe('links to github.com from extensions and agents', () => {
+  test('count as the GitHub thread: looked up, and listed once', () => {
+    const session = sessionWith([
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'guest:gh:7', providerId: 'gh', identifier: '7', title: 'Same PR', url: 'https://github.com/acme/app/pull/7', kind: 'guest', thread: 'pull', linkedAt: 1 },
+      { id: 'guest:gh:8', providerId: 'gh', identifier: '8', title: 'Other PR', url: 'https://github.com/acme/app/pull/8', kind: 'guest', thread: 'pull', linkedAt: 1 },
+      { id: 'link:https://github.com/acme/app/issues/9', kind: 'external', thread: 'issue', identifier: 'github.com', title: 'Bug', url: 'https://github.com/acme/app/issues/9', linkedAt: 1 },
+      issue({ id: 'acme/app#9', number: 9, kind: 'issue', url: 'https://github.com/acme/app/issues/9' }),
+    ]);
+    expect(getLinkedGitHubPullRequests(session).map((pr) => pr.number)).toEqual([7, 8]);
+    expect(getLinkedSidebarChanges(session)).toEqual([]);
+    expect(getDistinctLinkedIssues(session).map((entry) => entry.id)).toEqual([
+      'acme/app#7', 'guest:gh:8', 'link:https://github.com/acme/app/issues/9',
+    ]);
+    expect(getLinkedSidebarIssues(session)).toEqual([
+      { source: 'github', key: 'acme/app#9', owner: 'acme', repo: 'app', number: 9, url: 'https://github.com/acme/app/issues/9', title: 'Bug' },
+    ]);
+  });
+});
+
+describe('getLinkedSidebarChanges', () => {
+  test('lists merge and pull requests from other services, never GitHub ones or issues', () => {
+    const session = sessionWith([
+      issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }),
+      { id: 'guest:gitea:5', providerId: 'gitea', identifier: '5', title: 'Guest PR', url: 'https://gitea/x', kind: 'guest', thread: 'pull', linkedAt: 1 },
+      { id: 'link:https://gitlab.com/a/b/-/merge_requests/42', kind: 'external', thread: 'change', identifier: '!42', title: 'Fix', url: 'https://gitlab.com/a/b/-/merge_requests/42', linkedAt: 1 },
+      { id: 'link:https://jira.example/OPS-7', kind: 'external', thread: 'issue', identifier: 'OPS-7', title: 'Outage', url: 'https://jira.example/OPS-7', linkedAt: 1 },
+    ]);
+    expect(getLinkedSidebarChanges(session)).toEqual([
+      { key: 'guest:gitea:5', identifier: '5', url: 'https://gitea/x', title: 'Guest PR' },
+      { key: 'link:https://gitlab.com/a/b/-/merge_requests/42', identifier: '!42', url: 'https://gitlab.com/a/b/-/merge_requests/42', title: 'Fix' },
+    ]);
   });
 });

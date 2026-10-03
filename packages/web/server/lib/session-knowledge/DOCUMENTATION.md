@@ -52,6 +52,11 @@ Nothing here may fail a send. A message without its background costs the agent
 some context; a failed send costs the user their message. Every caller treats an
 error as "no block this time".
 
+While memory is on, every session is told when to save, even with an empty
+store. The tool description alone is read only when the agent already means to
+call it, so agents told nothing here saved only when the user said "remember".
+The session hears "nothing is stored yet" only when both scopes loaded.
+
 A source that will not load never blanks the rest: an unreadable memory store
 still delivers the pinned notes. A memory scope that failed to load is left out
 rather than indexed as empty, which would teach the agent to store again what it
@@ -60,6 +65,16 @@ already has.
 Delivery is recorded only after the send is accepted. Recording it when the text
 is handed over would leave a failed send believing the agent had context it never
 received.
+
+## When to link
+
+A session whose agent has the managed `openchamber` tool (the setting is on and
+OpenChamber launched OpenCode) is also told when to link an issue or change to
+it with `session.link` (`SESSION_LINK_GUIDANCE`). The same rule leads the tool's
+own description. Stated only in the action's description it went unread: an
+agent handed an issue to investigate saw no reason to open a session-control
+tool, so it never linked anything. It rides the same signature (`l:on`), so it
+is sent once and again after compaction.
 
 ## Entries that read as instructions
 

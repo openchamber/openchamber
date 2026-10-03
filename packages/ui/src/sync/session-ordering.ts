@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { isSessionPinned } from '@/stores/useSessionPinnedStore';
 import { countSyncPerformance } from './performance-diagnostics';
 
@@ -41,6 +41,12 @@ const promoteSessions = (sessionIds: Iterable<string>, useSharedRank = false): v
     }
     return { rankById };
   });
+};
+
+/** Promote a confirmed restore without deriving or changing session activity. */
+export const promoteRestoredSessionOrdering = (sessionId: string): void => {
+  if (!sessionId) return;
+  promoteSessions([sessionId]);
 };
 
 export const observeSessionActivityEvent = (
@@ -114,8 +120,14 @@ const finiteTime = (value: unknown): number => (
   typeof value === 'number' && Number.isFinite(value) ? value : 0
 );
 
+/**
+ * When the session last had a conversation. `time.idle` moves only when a turn
+ * ends; `time.updated` also moves on title and metadata writes, which must not
+ * lift a session nobody touched. Sessions migrated from 1.x have no `idle`
+ * until their first 2.x turn, so they fall back to `updated`.
+ */
 const updatedAt = (session: Session): number => (
-  finiteTime(session.time?.updated) || finiteTime(session.time?.created)
+  finiteTime(session.time?.idle) || finiteTime(session.time?.updated) || finiteTime(session.time?.created)
 );
 
 const createdAt = (session: Session): number => finiteTime(session.time?.created);

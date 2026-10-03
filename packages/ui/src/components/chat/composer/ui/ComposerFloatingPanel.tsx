@@ -24,8 +24,9 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
         // chrome that would end up over the panel (the recap hint) can hide.
         mountedPanels.set(column, (mountedPanels.get(column) ?? 0) + 1);
         column.setAttribute('data-floating-panel', 'true');
-        // Only the floating status/navigation overlays use this offset.
-        // Transcript dimensions and scroll insets remain unchanged.
+        // The floating status/navigation overlays translate up by this
+        // offset, and the transcript's tail spacer grows by it so the panel
+        // never covers the last rows.
         const update = () => {
             const gap = Number.parseFloat(getComputedStyle(panel).marginBottom) || 0;
             const clearance = `${Math.ceil(panel.getBoundingClientRect().height + gap)}px`;
@@ -51,11 +52,15 @@ export function ComposerFloatingPanel({ header, children, compact = false, role,
 
     return (
         <div ref={panelRef} className="chat-input-column absolute bottom-full left-0 right-0 z-30 mb-3" role={role} aria-label={ariaLabel}>
-            <div className="oc-glass-popover w-full min-w-0 overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+            {/* Shadow on the wrapper, never on the glass: see "Floating composer"
+                in composer/DOCUMENTATION.md. */}
+            <div className="rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+            <div className="oc-glass-popover w-full min-w-0 overflow-hidden rounded-xl border border-[var(--interactive-border)]">
                 <div className={cn('flex items-center gap-2 px-3', compact ? 'min-h-8 py-0' : 'py-1.5')}>
                     {header}
                 </div>
                 {children}
+            </div>
             </div>
         </div>
     );

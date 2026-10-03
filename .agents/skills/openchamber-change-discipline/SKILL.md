@@ -71,9 +71,11 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 | Added/deleted/renamed source file, export/type/entrypoint/import shape | `bun run dead-code` in addition to relevant checks |
 | Persisted or external contract | Compatibility and round-trip tests plus the applicable failure/ordering cases: missing-versus-empty, malformed data, stale reads versus newer mutations, out-of-order writes, lifecycle handling for debounced writes, conversion, and failed-write/migration rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
+| Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. CI does not build the image. |
 | Generated asset | Regeneration check plus consumer build/test |
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |
 | Platform/runtime behavior | Relevant runtime build or manual/integration check; static checks are insufficient |
+| Desktop update or quit/install sequence | A real update run; read `references/updater-testing.md` first, because a run done the obvious way completes the update and reports success while testing nothing |
 
 Use a sufficiently long timeout for broad checks. Report exactly what ran and what did not.
 

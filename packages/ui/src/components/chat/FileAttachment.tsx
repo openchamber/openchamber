@@ -6,7 +6,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
-import { isDrawioFile } from '@/lib/toolHelpers';
+import { isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -217,7 +217,7 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
           handleOpenPreview();
         }
       }}
-      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0 cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label={displayName}
     >
       <img
@@ -331,7 +331,7 @@ const VSCodeFileChip = memo(({ file, onRemove }: FileChipProps) => {
         }
       }}
       className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm border border-solid bg-transparent text-foreground not-italic hover:opacity-90 transition-colors text-left"
-      style={{ borderColor: 'var(--syntax-punctuation)' }}
+      style={{ borderColor: 'var(--interactive-border)' }}
       title={file.vscodePath}
     >
       <span
@@ -503,7 +503,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showSelectionPin && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -522,7 +522,7 @@ export const ActiveEditorFileSuggestion = memo(() => {
       {showFileAdd && (
         <div
           className="inline-flex items-center gap-1 text-xs pr-1 rounded-sm italic text-muted-foreground border border-dashed bg-transparent"
-          style={{ borderColor: 'var(--syntax-punctuation)' }}
+          style={{ borderColor: 'var(--interactive-border)' }}
           title={relativePath}
         >
           <button
@@ -734,7 +734,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                       <button
                         type="button"
                         onClick={() => handleImageClick(index)}
-                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-ring"
                         aria-label={filename}
                       >
                         {file.url ? (
@@ -835,9 +835,9 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         const sourceType = typeof source?.type === 'string' ? source.type : undefined;
         const sourcePath = source && typeof (source as Record<string, unknown>).path === 'string' ? (source as Record<string, unknown>).path as string : undefined;
         const filePath = sourceType === 'file' && sourcePath ? sourcePath : (file.url || '');
-        const isDrawio = filePath && isDrawioFile(filePath);
+        const opensInDiagramEditor = filePath && (isDrawioFile(filePath) || isExcalidrawFile(filePath));
 
-        if (isDrawio) {
+        if (opensInDiagramEditor) {
           return (
             <Tooltip key={file.url || `${fileName}-${index}`}>
               <TooltipTrigger asChild>

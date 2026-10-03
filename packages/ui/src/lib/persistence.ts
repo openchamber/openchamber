@@ -237,6 +237,7 @@ export const subscribeToSettingsSaveState = (listener: () => void): (() => void)
  * their own APIs instead of updateDesktopSettings. 'error' resets to idle.
  */
 export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  ensureSettingsRuntimeLifecycle();
   dispatchSettingsSaveState(state);
 };
 
@@ -497,6 +498,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _settingsCache = null;
     _settingsInflight = null;
     _serverKnownSettings = {};
+    dispatchSettingsSaveState('saved');
   });
 
   // Mirror the deferred safe-storage lifecycle: without these listeners, a

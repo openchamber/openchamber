@@ -4,7 +4,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
 import { getAttachedSessionDirectory } from '@/sync/session-worktree-contract';
 import { useSessions } from '@/sync/sync-context';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 
 export const useChatSearchDirectory = (): string | undefined => {
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);

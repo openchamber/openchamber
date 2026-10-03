@@ -32,10 +32,13 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 ## Invariants
 
 - Call `applyHostReady` from `onReady` before the first mount. Without those tokens the kit has no colours.
+- The required `*Text` tokens come from the host's `lib/theme/readableColors.ts`. The SDK never duplicates the contrast calculation. `applyHostTheme` writes both naming schemes on every snapshot. Tinted button labels, badge text, banner titles and error text use these values; fills keep the base colors.
 - Colours come only from `var(--host-name, var(--oc-alias, fallback))`. No literal hex in `style.ts`.
+- Inputs and picker triggers use the elevated pair; hover/pressed colors layer over that fill. Popups scope the text foreground for nested neutral controls. Secondary buttons use the muted surface, selected tabs use the selection pair, and focus stays independent from primary actions.
 - A mount paints from `props`. The only hidden state is UI state: open popup, highlighted row, typed filter. `update()` merges props and keeps that state unless the related prop changed.
 - Every string lands through `textContent`. `mountText` is the only place that creates `a` and `img`, and only for `http(s)` URLs.
 - `dispose()` removes the node and every listener, including the document and window listeners a popup added.
+- `GUEST_SCROLLBAR_CSS` in `src/scrollbar-style.ts` owns native scrollbar defaults for the iframe document. The UI kit includes it, and the server appends the same stylesheet to served guest HTML so existing bundles get it too. Chromium/WebKit use 6px rounded thumbs and transparent tracks; Firefox uses the standard thin scrollbar. Like the app's overlay scrollbars, thumbs are invisible at rest and appear on hover or while the element scrolls: `ensureStyle` calls `installGuestScrollbarActivity`, one passive capturing `scroll` listener per document that sets `data-oc-scrolling` and clears it after a quiet second. Colors follow `--oc-muted`, including later theme snapshots. Forced-colors mode uses the system text color. Scrolling itself remains browser-owned.
 - Focus is `box-shadow` on `:focus-visible`, never `outline`. Disabled is `opacity: .5; pointer-events: none`.
 - Popups render inside the mount wrapper with `position: fixed`; a transformed ancestor would break placement, so guests should not transform the kit's parents.
 - Tests run in `bun:test` without a DOM. Test the pure helpers (`navigation.ts`, `filterSelectOptions`, `splitTextMedia`, `clampProgress`); keep painting thin.

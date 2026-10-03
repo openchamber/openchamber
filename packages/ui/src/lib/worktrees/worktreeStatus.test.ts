@@ -20,7 +20,21 @@ mock.module('@/lib/gitApi', () => ({
   },
 }));
 
-const { getRootBranch, invalidateResolvedProjectRootCache } = await import('./worktreeStatus');
+const { canDeleteWorktreeWithoutConfirm, getRootBranch, invalidateResolvedProjectRootCache } = await import('./worktreeStatus');
+
+describe('worktreeStatus.canDeleteWorktreeWithoutConfirm', () => {
+  test('allows only a clean worktree whose upstream has every commit', () => {
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 0, behind: 3, upstream: 'origin/feature' })).toBe(true);
+  });
+
+  test('keeps the dialog when something could be lost or is unknown', () => {
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: true, ahead: 0, upstream: 'origin/feature' })).toBe(false);
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 2, upstream: 'origin/feature' })).toBe(false);
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 0, upstream: null })).toBe(false);
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, upstream: 'origin/feature' })).toBe(false);
+    expect(canDeleteWorktreeWithoutConfirm(undefined)).toBe(false);
+  });
+});
 
 describe('worktreeStatus.getRootBranch', () => {
   beforeEach(() => {

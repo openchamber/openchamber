@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from "@/components/icon/icons";
@@ -32,6 +31,8 @@ import {
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -169,11 +170,20 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
   };
 };
 
-export function ScheduledTasksDialog() {
+/** Why the page is being left: a started session or a loop file to edit
+ *  takes over the screen, and each shell decides how to get there. */
+export type ScheduledTasksLeaveReason = 'session' | 'file';
+
+/**
+ * The scheduled tasks page. `page` is the desktop surface that replaces the
+ * chat area (scope list at the left, tasks at the right); `mobile` is the
+ * single-column body of the mobile shell's fullscreen surface.
+ */
+export function ScheduledTasksView({ layout, onLeave }: {
+  layout: 'page' | 'mobile';
+  onLeave: (reason: ScheduledTasksLeaveReason) => void;
+}) {
   const { t } = useI18n();
-  const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
-  const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
-  const isMobile = useUIStore((state) => state.isMobile);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
@@ -188,6 +198,9 @@ export function ScheduledTasksDialog() {
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
+  // Chats are scheduled like a project; each run starts a new chat. VS Code
+  // has no chats, so the entry exists everywhere else.
+  const chatsAvailable = !isVSCodeRuntime();
 
   const selectedProject = React.useMemo(
     () => projects.find((project) => project.id === selectedProjectID) || null,
@@ -261,10 +274,7 @@ export function ScheduledTasksDialog() {
   }, [t]);
 
   React.useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const preferredProjectID = activeProject?.id || projects[0]?.id || '';
+    const preferredProjectID = activeProject?.id || projects[0]?.id || (chatsAvailable ? CHAT_DRAFT_PROJECT_ID : '');
     setSelectedProjectID(preferredProjectID);
     if (preferredProjectID) {
       void reloadTasks(preferredProjectID);
@@ -272,12 +282,9 @@ export function ScheduledTasksDialog() {
       setTasks([]);
       setLoading(false);
     }
-  }, [open, activeProject, projects, reloadTasks]);
+  }, [activeProject, projects, chatsAvailable, reloadTasks]);
 
   React.useEffect(() => {
-    if (!open) {
-      return;
-    }
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = subscribeOpenchamberEvents((event) => {
       if (event.type !== 'scheduled-task-ran') {
@@ -299,7 +306,7 @@ export function ScheduledTasksDialog() {
       }
       unsubscribe();
     };
-  }, [open, selectedProjectID, reloadTasks]);
+  }, [selectedProjectID, reloadTasks]);
 
   const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>) => {
     if (!selectedProjectID) {
@@ -367,10 +374,10 @@ export function ScheduledTasksDialog() {
     if (!selectedProject?.path) {
       return;
     }
-    setOpen(false);
     useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
     useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
-  }, [selectedProject?.path, setOpen]);
+    onLeave('file');
+  }, [selectedProject?.path, onLeave]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -378,7 +385,7 @@ export function ScheduledTasksDialog() {
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId, persistError } = await runScheduledTaskNow(selectedProjectID, task.id);
+      const { sessionId, directory, persistError } = await runScheduledTaskNow(selectedProjectID, task.id);
       await Promise.all([
         reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
@@ -389,17 +396,25 @@ export function ScheduledTasksDialog() {
         toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
       }
       if (sessionId) {
-        // Jump straight into the started session; selecting it also closes
-        // this surface (MainLayout closes surfaces on session selection).
+        // Jump straight into the started session.
         const project = projects.find((entry) => entry.id === selectedProjectID);
-        useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
-        }
+        useSessionUIStore.getState().setCurrentSession(sessionId, directory ?? project?.path ?? null);
+        onLeave('session');
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.runFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, projects, reloadTasks, t]);
+  }, [selectedProjectID, projects, reloadTasks, onLeave, t]);
+
+  const chatsLabel = (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
+      <span className="truncate">{t('sessions.scheduledTasks.dialog.project.chats')}</span>
+    </span>
+  );
+  const hasScopes = chatsAvailable || projects.length > 0;
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
@@ -416,15 +431,18 @@ export function ScheduledTasksDialog() {
           }
         }}
       >
-        <SelectTrigger size="lg" className={isMobile ? 'w-full' : undefined}>
-          {selectedProject ? (
+        <SelectTrigger size="lg" className="w-full">
+          {selectedProjectID === CHAT_DRAFT_PROJECT_ID ? (
+            <SelectValue>{chatsLabel}</SelectValue>
+          ) : selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
             <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
           )}
         </SelectTrigger>
         <SelectContent>
-          {projects.length === 0 ? <SelectItem value="__none">{t('sessions.scheduledTasks.dialog.project.empty')}</SelectItem> : null}
+          {!hasScopes ? <SelectItem value="__none">{t('sessions.scheduledTasks.dialog.project.empty')}</SelectItem> : null}
+          {chatsAvailable ? <SelectItem value={CHAT_DRAFT_PROJECT_ID}>{chatsLabel}</SelectItem> : null}
           {projects.map((project) => (
             <SelectItem key={project.id} value={project.id}>
               {renderProjectLabel(project)}
@@ -448,6 +466,22 @@ export function ScheduledTasksDialog() {
       setTasks([]);
     }
   };
+
+  const renderScopeButton = (scopeID: string, label: React.ReactNode) => (
+    <button
+      key={scopeID}
+      type="button"
+      onClick={() => selectProject(scopeID)}
+      className={cn(
+        'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        selectedProjectID === scopeID
+          ? 'bg-interactive-selection text-foreground'
+          : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+      )}
+    >
+      {label}
+    </button>
+  );
 
   const tasksList = (
       <div className="min-h-[280px]">
@@ -610,81 +644,51 @@ export function ScheduledTasksDialog() {
       </div>
   );
 
-  const tasksContent = (
-    <div className="space-y-4">
-      {projectSelector}
-      {tasksList}
-    </div>
+  const newTaskButton = (className?: string) => (
+    <Button className={className} size={layout === 'page' ? 'sm' : 'default'} onClick={openNewTaskEditor} disabled={!selectedProjectID}>
+      <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
+    </Button>
   );
 
   return (
     <>
-      {isMobile ? (
-        <MobileOverlayPanel
-          open={open}
-          title={t('sessions.scheduledTasks.dialog.title')}
-          onClose={() => setOpen(false)}
-          contentMaxHeightClassName="max-h-[min(80vh,640px)]"
-          renderHeader={(closeButton) => (
-            <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="typography-ui-label font-semibold text-foreground">{t('sessions.scheduledTasks.dialog.title')}</h2>
-                {closeButton}
-              </div>
-              <p className="typography-micro text-muted-foreground">
-                {t('sessions.scheduledTasks.dialog.description')}
-              </p>
-            </div>
-          )}
-          footer={(
-            <Button
-              className="w-full"
-              onClick={openNewTaskEditor}
-              disabled={!selectedProjectID}
-            >
-              <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-            </Button>
-          )}
-        >
-          {tasksContent}
-        </MobileOverlayPanel>
-      ) : open ? (
+      {layout === 'mobile' ? (
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+            <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.description')}</p>
+            {projectSelector}
+            {tasksList}
+          </div>
+          <div
+            className="shrink-0 border-t border-border/70 px-4 pt-2"
+            style={{ paddingBottom: 'calc(0.5rem + var(--oc-safe-area-bottom, 0px))' }}
+          >
+            {newTaskButton('w-full')}
+          </div>
+        </div>
+      ) : (
         // Full-page surface replacing the chat area (mounted inside <main>).
-        // Master-detail: a scrollable project filter panel at the left, the
-        // selected project's tasks at the right. The app Header shows the
-        // surface title, so the page itself only carries the close affordance.
+        // Master-detail: a scrollable scope list at the left, the selected
+        // scope's tasks at the right. The app Header shows the surface title,
+        // so the page itself only carries the close affordance.
         <div className="absolute inset-0 z-10 flex flex-col bg-background">
           <div className="flex min-h-0 flex-1">
             <div className="flex w-60 flex-shrink-0 flex-col border-r border-border/50">
               <div className="flex-1 space-y-0.5 overflow-y-auto p-2">
-                {projects.length === 0 ? (
+                {!hasScopes ? (
                   <div className="px-2 py-2 typography-meta text-muted-foreground">
                     {t('sessions.scheduledTasks.dialog.project.empty')}
                   </div>
-                ) : projects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => selectProject(project.id)}
-                    className={cn(
-                      'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-left typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                      selectedProjectID === project.id
-                        ? 'bg-interactive-selection text-foreground'
-                        : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-                    )}
-                  >
-                    {renderProjectLabel(project)}
-                  </button>
-                ))}
+                ) : null}
+                {chatsAvailable ? renderScopeButton(CHAT_DRAFT_PROJECT_ID, chatsLabel) : null}
+                {projects.map((project) => renderScopeButton(project.id, renderProjectLabel(project)))}
               </div>
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
               {/* Pages have no close button: you leave by picking a session,
                   a draft, or another surface in the sidebar. */}
               <div className="flex items-center px-6 pt-3">
-                <Button size="sm" onClick={openNewTaskEditor} disabled={!selectedProjectID}>
-                  <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-                </Button>
+                {newTaskButton()}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
                 <div className="mx-auto w-full max-w-3xl">
@@ -694,7 +698,7 @@ export function ScheduledTasksDialog() {
             </div>
           </div>
         </div>
-      ) : null}
+      )}
 
       <ScheduledTaskEditorDialog
         open={editorOpen}
@@ -704,4 +708,13 @@ export function ScheduledTasksDialog() {
       />
     </>
   );
+}
+
+/** The desktop page, open while the UI store says so. The mobile shell mounts
+ *  ScheduledTasksView in its own fullscreen surface instead. */
+export function ScheduledTasksDialog() {
+  const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  const leave = React.useCallback(() => setOpen(false), [setOpen]);
+  return open ? <ScheduledTasksView layout="page" onLeave={leave} /> : null;
 }

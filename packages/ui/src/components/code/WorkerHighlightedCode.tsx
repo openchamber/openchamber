@@ -103,7 +103,7 @@ export const WorkerHighlightedCode: React.FC<WorkerHighlightedCodeProps> = ({
   return (
     <div
       ref={hostRef}
-      className={cn('typography-code', className)}
+      className={cn('oc-surface-code bg-[var(--syntax-background)] typography-code', className)}
       style={{ ...(syntaxVars as React.CSSProperties), ...style }}
     />
   );

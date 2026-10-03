@@ -5,6 +5,7 @@ import {
   VALID_SETTINGS_SECTIONS,
   ROUTE_PARAMS,
 } from './types';
+import { isLinkIdentifier } from './messageFocus';
 
 /**
  * Parse the current URL search parameters into a RouteState.
@@ -15,6 +16,7 @@ export function parseRoute(searchParams?: URLSearchParams): RouteState {
 
   return {
     sessionId: parseSessionId(params),
+    messageId: parseMessageId(params),
     tab: parseTab(params),
     settingsPath: parseSettingsPath(params),
     diffFile: parseDiffFile(params),
@@ -46,6 +48,18 @@ function parseSessionId(params: URLSearchParams): string | null {
     return null;
   }
   return value.trim();
+}
+
+/**
+ * Parse the linked message from URL parameters. It only means something next
+ * to a session, and IDs outside the plain identifier alphabet are rejected.
+ */
+function parseMessageId(params: URLSearchParams): string | null {
+  const value = params.get(ROUTE_PARAMS.MESSAGE)?.trim() ?? '';
+  if (!parseSessionId(params) || !isLinkIdentifier(value)) {
+    return null;
+  }
+  return value;
 }
 
 /**

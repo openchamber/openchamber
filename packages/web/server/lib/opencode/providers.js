@@ -5,6 +5,16 @@ import {
   getConfigForPath,
   writeConfig,
 } from './shared.js';
+import {
+  readSectionEntry,
+  writeSectionEntry,
+  deleteSectionEntry,
+  toModelVariants,
+  toProviderEntity,
+  readStoredProviderEntry,
+  toProviderPackage,
+  toNpmPackage,
+} from './config-v2.js';
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-_]*$/;
 const BASE_URL_PATTERN = /^https?:\/\//;
@@ -15,40 +25,36 @@ const CUSTOM_PROVIDER_NPM_PACKAGES = new Set([
   '@ai-sdk/anthropic',
 ]);
 
+// OpenCode 2 keeps providers under `providers` with `package: "aisdk:<npm>"`,
+// `settings.baseURL`, and `models.<id>.modelID`. The v1 `provider` map with
+// `npm`/`api`/`options` is still decoded, so reads accept it; every write is v2.
+
+function providerExistsIn(config, providerId) {
+  return readSectionEntry(config, 'providers', providerId).value !== undefined;
+}
+
 function getProviderSources(providerId, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const { userConfig, projectConfig, customConfig, paths } = layers;
 
-  const customProviders = isPlainObject(customConfig?.provider) ? customConfig.provider : {};
-  const customProvidersAlias = isPlainObject(customConfig?.providers) ? customConfig.providers : {};
-  const projectProviders = isPlainObject(projectConfig?.provider) ? projectConfig.provider : {};
-  const projectProvidersAlias = isPlainObject(projectConfig?.providers) ? projectConfig.providers : {};
-  const userProviders = isPlainObject(userConfig?.provider) ? userConfig.provider : {};
-  const userProvidersAlias = isPlainObject(userConfig?.providers) ? userConfig.providers : {};
-
-  const customExists =
-    Object.prototype.hasOwnProperty.call(customProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(customProvidersAlias, providerId);
-  const projectExists =
-    Object.prototype.hasOwnProperty.call(projectProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(projectProvidersAlias, providerId);
-  const userExists =
-    Object.prototype.hasOwnProperty.call(userProviders, providerId) ||
-    Object.prototype.hasOwnProperty.call(userProvidersAlias, providerId);
-
   return {
     sources: {
       auth: { exists: false },
-      user: { exists: userExists, path: paths.userPath },
-      project: { exists: projectExists, path: paths.projectPath || null },
-      custom: { exists: customExists, path: paths.customPath }
-    }
+      user: { exists: providerExistsIn(userConfig, providerId), path: paths.userPath },
+      project: { exists: providerExistsIn(projectConfig, providerId), path: paths.projectPath || null },
+      custom: { exists: providerExistsIn(customConfig, providerId), path: paths.customPath },
+    },
+    // Same precedence as the edit scope: custom > project > user.
+    config: readStoredProviderEntry([customConfig, projectConfig, userConfig], providerId),
   };
 }
 
 /**
  * Validate a custom provider config payload before persistence.
  * Returns { ok: true, value } or { ok: false, error }.
+ *
+ * Accepts the v2 spelling (`package`, `settings.baseURL`) and the v1 spelling
+ * (`npm`, `options.baseURL`); the normalized value is always v2.
  *
  * Credentials: either config.env contains a variable name, or hasStoredAuth is true
  * (auth.json already has a key — typically after auth.set, or when editing).
@@ -67,17 +73,19 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     return { ok: false, error: 'Provider name is required' };
   }
 
-  const npm = typeof config.npm === 'string' ? config.npm.trim() : OPENAI_COMPATIBLE_NPM;
+  const npm = toNpmPackage(config.package ?? config.npm) || OPENAI_COMPATIBLE_NPM;
   if (!CUSTOM_PROVIDER_NPM_PACKAGES.has(npm)) {
     return { ok: false, error: 'Custom providers must use @ai-sdk/openai-compatible, @ai-sdk/openai, or @ai-sdk/anthropic' };
   }
 
-  const optionsBlock = isPlainObject(config.options) ? config.options : null;
-  if (!optionsBlock) {
-    return { ok: false, error: 'Provider options are required' };
+  const settingsBlock = isPlainObject(config.settings)
+    ? config.settings
+    : (isPlainObject(config.options) ? config.options : null);
+  if (!settingsBlock) {
+    return { ok: false, error: 'Provider settings are required' };
   }
 
-  const baseURL = typeof optionsBlock.baseURL === 'string' ? optionsBlock.baseURL.trim() : '';
+  const baseURL = typeof settingsBlock.baseURL === 'string' ? settingsBlock.baseURL.trim() : '';
   if (!baseURL) {
     return { ok: false, error: 'Base URL is required' };
   }
@@ -103,15 +111,17 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     if (!modelName) {
       return { ok: false, error: `Model "${trimmedId}" requires a name` };
     }
-    normalizedModels[trimmedId] = { name: modelName };
+    normalizedModels[trimmedId] = { modelID: trimmedId, name: modelName };
+    // Present means the caller owns the levels; an empty list removes them.
+    if (Array.isArray(modelValue.variants)) {
+      normalizedModels[trimmedId].variants = toModelVariants(modelValue.variants);
+    }
   }
 
   const normalized = {
-    npm,
+    package: toProviderPackage(npm),
     name,
-    options: {
-      baseURL,
-    },
+    settings: { baseURL },
     models: normalizedModels,
   };
 
@@ -133,9 +143,10 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
     };
   }
 
-  if (isPlainObject(optionsBlock.headers)) {
+  const headerSource = isPlainObject(config.headers) ? config.headers : settingsBlock.headers;
+  if (isPlainObject(headerSource)) {
     const headers = {};
-    for (const [headerKey, headerValue] of Object.entries(optionsBlock.headers)) {
+    for (const [headerKey, headerValue] of Object.entries(headerSource)) {
       if (typeof headerKey !== 'string' || !headerKey.trim()) {
         continue;
       }
@@ -145,7 +156,7 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
       headers[headerKey.trim()] = headerValue.trim();
     }
     if (Object.keys(headers).length > 0) {
-      normalized.options.headers = headers;
+      normalized.headers = headers;
     }
   }
 
@@ -153,34 +164,38 @@ function validateCustomProviderConfig(providerId, config, options = {}) {
 }
 
 function mergeCustomProviderConfig(existingValue, normalizedConfig) {
-  const existing = isPlainObject(existingValue) ? existingValue : {};
-  const existingOptions = isPlainObject(existing.options) ? existing.options : {};
-  const normalizedOptions = isPlainObject(normalizedConfig.options) ? normalizedConfig.options : {};
-  const mergedOptions = { ...existingOptions, ...normalizedOptions };
-  if (!Object.prototype.hasOwnProperty.call(normalizedOptions, 'headers')) {
-    delete mergedOptions.headers;
-  }
+  // Read the existing entry through the v2 projection so a legacy
+  // `npm`/`api`/`options` block is carried forward in native shape.
+  const existing = toProviderEntity(existingValue);
+  const mergedSettings = { ...(existing.settings ?? {}), ...(normalizedConfig.settings ?? {}) };
 
   const existingModels = isPlainObject(existing.models) ? existing.models : {};
   const normalizedModels = isPlainObject(normalizedConfig.models) ? normalizedConfig.models : {};
   const mergedModels = Object.fromEntries(
     Object.entries(normalizedModels).map(([modelId, normalizedModel]) => {
       const existingModel = isPlainObject(existingModels[modelId]) ? existingModels[modelId] : {};
-      const nextModel = isPlainObject(normalizedModel) ? normalizedModel : {};
-      return [modelId, { ...existingModel, ...nextModel }];
+      const mergedModel = { ...existingModel, ...normalizedModel };
+      if (Array.isArray(mergedModel.variants) && mergedModel.variants.length === 0) {
+        delete mergedModel.variants;
+      }
+      return [modelId, mergedModel];
     }),
   );
 
   const merged = {
     ...existing,
     ...normalizedConfig,
-    options: mergedOptions,
+    settings: mergedSettings,
     models: mergedModels,
   };
+  // Headers and env are explicit removals when the form omits them.
+  if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'headers')) {
+    delete merged.headers;
+  }
   if (!Object.prototype.hasOwnProperty.call(normalizedConfig, 'env')) {
     delete merged.env;
   }
-  return merged;
+  return toProviderEntity(merged);
 }
 
 /**
@@ -213,20 +228,11 @@ function upsertProviderConfig(providerId, config, workingDirectory, scope = 'use
   }
 
   const targetConfig = getConfigForPath(layers, targetPath);
-  const providerConfig = isPlainObject(targetConfig.provider) ? { ...targetConfig.provider } : {};
-  const providersAlias = isPlainObject(targetConfig.providers) ? { ...targetConfig.providers } : {};
-  const existingProvider = providerConfig[validated.value.providerId] ?? providersAlias[validated.value.providerId];
-  const mergedConfig = mergeCustomProviderConfig(existingProvider, validated.value.config);
-  providerConfig[validated.value.providerId] = mergedConfig;
-  targetConfig.provider = providerConfig;
-  if (Object.prototype.hasOwnProperty.call(providersAlias, validated.value.providerId)) {
-    delete providersAlias[validated.value.providerId];
-    if (Object.keys(providersAlias).length === 0) {
-      delete targetConfig.providers;
-    } else {
-      targetConfig.providers = providersAlias;
-    }
-  }
+  const existing = readSectionEntry(targetConfig, 'providers', validated.value.providerId).value;
+  const mergedConfig = mergeCustomProviderConfig(existing, validated.value.config);
+  // Writes `providers`; a legacy `provider.<id>` in the same file is dropped so
+  // the two spellings cannot disagree.
+  writeSectionEntry(targetConfig, 'providers', validated.value.providerId, mergedConfig);
 
   if (Array.isArray(targetConfig.disabled_providers)) {
     targetConfig.disabled_providers = targetConfig.disabled_providers.filter(
@@ -265,31 +271,8 @@ function removeProviderConfig(providerId, workingDirectory, scope = 'user') {
   }
 
   const targetConfig = getConfigForPath(layers, targetPath);
-  const providerConfig = isPlainObject(targetConfig.provider) ? targetConfig.provider : {};
-  const providersConfig = isPlainObject(targetConfig.providers) ? targetConfig.providers : {};
-  const removedProvider = Object.prototype.hasOwnProperty.call(providerConfig, providerId);
-  const removedProviders = Object.prototype.hasOwnProperty.call(providersConfig, providerId);
-
-  if (!removedProvider && !removedProviders) {
+  if (!deleteSectionEntry(targetConfig, 'providers', providerId)) {
     return false;
-  }
-
-  if (removedProvider) {
-    delete providerConfig[providerId];
-    if (Object.keys(providerConfig).length === 0) {
-      delete targetConfig.provider;
-    } else {
-      targetConfig.provider = providerConfig;
-    }
-  }
-
-  if (removedProviders) {
-    delete providersConfig[providerId];
-    if (Object.keys(providersConfig).length === 0) {
-      delete targetConfig.providers;
-    } else {
-      targetConfig.providers = providersConfig;
-    }
   }
 
   writeConfig(targetConfig, targetPath || CONFIG_FILE);

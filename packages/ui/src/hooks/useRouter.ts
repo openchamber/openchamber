@@ -2,7 +2,7 @@ import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
-import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
+import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import type { RouteState, AppRouteState } from '@/lib/router';
 import { resolveSettingsSlug } from '@/lib/settings/metadata';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
@@ -65,9 +65,10 @@ export function useRouter(): void {
       isApplyingRouteRef.current = true;
 
       try {
-        // 1. Apply session first (may trigger async operations)
+        // 1. Apply session first (may trigger async operations); a message
+        // link also asks the session's timeline to show that message.
         if (route.sessionId) {
-          await openSessionFromRoute(route.sessionId);
+          await openSessionLink(route.sessionId, route.messageId);
         }
 
         // 2. Handle settings first because it is a full-screen overlay.

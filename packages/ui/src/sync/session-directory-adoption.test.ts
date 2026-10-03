@@ -44,11 +44,11 @@ describe("adoptAuthoritativeSessionDirectory", () => {
     const sessionId = "ses_windows_global_directory"
     useGlobalSessionsStore.getState().upsertSession({
       id: sessionId,
-      slug: "windows-worktree",
       projectID: "windows-project",
       directory: "c:\\repo\\.worktrees\\feature",
       title: "Worktree session",
-      version: "1",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       time: { created: 1, updated: 1 },
     })
     try {

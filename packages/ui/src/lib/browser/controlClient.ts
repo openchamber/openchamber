@@ -11,6 +11,16 @@
  * since opening a tab is precisely what creates one. The view it creates then
  * takes over the rest of that same request, so asking for a layout while
  * opening does not cost the agent a second call.
+ *
+ * Every browser tab registers its view under the tab's id. An action with a
+ * `tabId` goes to that tab; without one it goes to the tab the user last
+ * looked at, never to whichever view happened to register last. Acting in a
+ * background tab does not switch the user to it. Snapshots list every tab
+ * with its id so the agent can name one.
+ *
+ * A tab restored from a previous run has no view until something needs it, so
+ * it registers as asleep instead. It is listed like any other tab, and an
+ * action that lands on it wakes it and waits for its view before running.
  */
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
@@ -23,12 +33,28 @@ type BrowserControlRequest = {
 
 /** Implemented by the mounted browser pane. */
 export type BrowserController = {
+  /** The browser tab this view belongs to; the id agents pass as `tabId`. */
+  readonly tabId: string;
+  /** What the tab shows now, for the tab list in snapshots. */
+  readonly describe: () => { title: string; url: string };
   /** Runs one action and resolves with its JSON-serializable result. */
   readonly run: (action: string, parameters: Record<string, unknown>) => Promise<unknown>;
 };
 
-/** Opens a URL when no browser view exists yet. */
-export type BrowserOpener = (url: string) => void;
+/** A browser tab whose page has not been loaded, registered by the panel. */
+export type SleepingBrowserTab = {
+  readonly tabId: string;
+  /** What the tab showed when it was last loaded, from its saved state. */
+  readonly describe: () => { title: string; url: string };
+  /** Loads the tab; its view then registers itself as a controller. */
+  readonly wake: () => void;
+};
+
+/**
+ * Opens a URL in a new background tab for the agent and returns that tab's id,
+ * or null when this client has nowhere to open one.
+ */
+export type BrowserOpener = (url: string) => string | null;
 
 /**
  * How long a freshly opened tab is given to mount its view. A pane appears
@@ -38,7 +64,18 @@ export type BrowserOpener = (url: string) => void;
 const VIEW_ATTACH_TIMEOUT_MS = 2_000;
 const VIEW_ATTACH_POLL_MS = 50;
 
-let activeController: BrowserController | null = null;
+/**
+ * A client that does not have the tab an action names waits this long before
+ * claiming it to answer "no such tab", so the client that has it wins the claim.
+ */
+const UNKNOWN_TAB_CLAIM_DELAY_MS = 400;
+
+/** Mounted views by tab id, in registration order. */
+const controllers = new Map<string, BrowserController>();
+/** Tabs with no view yet, by tab id. A mounted view takes precedence. */
+const sleepingTabs = new Map<string, SleepingBrowserTab>();
+/** The browser tab the user last had in front of them. */
+let shownTabId: string | null = null;
 let opener: BrowserOpener | null = null;
 let unsubscribe: (() => void) | null = null;
 
@@ -96,46 +133,129 @@ const postResult = async (requestId: string, outcome: { ok: boolean; data?: unkn
  * by whichever pane mounts; a callback would have to be maintained by every
  * caller of `registerBrowserController` for one waiter.
  */
-const waitForController = async (
+const waitForTab = async (
+  tabId: string,
   timeoutMs = VIEW_ATTACH_TIMEOUT_MS,
 ): Promise<BrowserController | null> => {
   const deadline = Date.now() + timeoutMs;
-  while (!activeController && Date.now() < deadline) {
+  while (!controllers.has(tabId) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, VIEW_ATTACH_POLL_MS));
   }
-  return activeController;
+  return controllers.get(tabId) ?? null;
 };
+
+const hasTab = (tabId: string): boolean => controllers.has(tabId) || sleepingTabs.has(tabId);
+
+const lastKey = (map: ReadonlyMap<string, unknown>): string | null => {
+  let last: string | null = null;
+  for (const key of map.keys()) last = key;
+  return last;
+};
+
+/**
+ * The tab the user is looking at, else the most recently registered view, else
+ * the most recently registered sleeping tab.
+ */
+const defaultTabId = (): string | null => {
+  if (shownTabId && hasTab(shownTabId)) return shownTabId;
+  return lastKey(controllers) ?? lastKey(sleepingTabs);
+};
+
+/**
+ * The view that runs an action in a tab, waking the tab first if it is asleep.
+ * Waking loads a page, so this is called only once the request is claimed.
+ */
+const viewForTab = async (tabId: string): Promise<BrowserController | null> => {
+  const mounted = controllers.get(tabId);
+  if (mounted) return mounted;
+  const sleeping = sleepingTabs.get(tabId);
+  if (!sleeping) return null;
+  sleeping.wake();
+  return waitForTab(tabId);
+};
+
+const listTabs = (): Array<{ id: string; title: string; url: string; active: boolean }> => {
+  const active = defaultTabId();
+  const tabs: Array<{ tabId: string; describe: () => { title: string; url: string } }> = [
+    ...controllers.values(),
+    ...[...sleepingTabs.values()].filter((tab) => !controllers.has(tab.tabId)),
+  ];
+  return tabs.map((tab) => {
+    let described = { title: '', url: '' };
+    try {
+      described = tab.describe();
+    } catch {
+      // A view that cannot say what it shows is still a tab the agent may name.
+    }
+    return { id: tab.tabId, title: described.title, url: described.url, active: tab.tabId === active };
+  });
+};
+
+const unloadableTabError = (tabId: string): string => (
+  `The browser tab ${tabId} could not be loaded. Try again, or open the page in a new tab with browser.open.`
+);
+
+const unknownTabError = (tabId: string): string => (
+  `There is no browser tab with id ${tabId}. Call browser.snapshot to list the open tabs, or omit tabId to use the tab the user is looking at.`
+);
 
 const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
   const isOpen = request.action === 'browser.open';
-  const controller = activeController;
+  const { tabId: rawTabId, ...parameters } = request.parameters;
+  const tabId = rawTabId === undefined ? null : String(rawTabId);
 
-  if (!controller && !(isOpen && opener)) return;
+  if (tabId !== null) {
+    if (!hasTab(tabId)) {
+      // Another client may have this tab: let it claim first, and answer
+      // "no such tab" only if nobody did, instead of leaving the agent to time out.
+      if (controllers.size === 0 && sleepingTabs.size === 0 && !opener) return;
+      await new Promise((resolve) => setTimeout(resolve, UNKNOWN_TAB_CLAIM_DELAY_MS));
+      if (hasTab(tabId)) {
+        await runOnTab(request, tabId, parameters);
+        return;
+      }
+      if (!await claimRequest(request.requestId)) return;
+      await postResult(request.requestId, { ok: false, error: unknownTabError(tabId) });
+      return;
+    }
+    await runOnTab(request, tabId, parameters);
+    return;
+  }
+
+  const targetTabId = defaultTabId();
+  if (!targetTabId && !(isOpen && opener)) return;
 
   // Nothing below this line may touch a page without the server's grant.
   if (!await claimRequest(request.requestId)) return;
 
   try {
-    if (isOpen && !controller) {
-      const url = typeof request.parameters.url === 'string' ? request.parameters.url : '';
-      if (!url) {
-        await postResult(request.requestId, { ok: false, error: 'url is required' });
-        return;
-      }
-      opener?.(url);
+    // Opening a page without naming a tab makes a new background tab, so the
+    // agent never replaces the page the user is on; the id comes back with
+    // the answer and the agent keeps working in that tab.
+    const url = typeof request.parameters.url === 'string' ? request.parameters.url : '';
+    if (isOpen && !url) {
+      await postResult(request.requestId, { ok: false, error: 'url is required' });
+      return;
+    }
+    const openedTabId = isOpen && opener ? opener(url) : null;
+    if (isOpen && !openedTabId && !targetTabId) {
+      await postResult(request.requestId, { ok: false, error: 'There is no browser here to open the page in.' });
+      return;
+    }
+    if (openedTabId) {
 
       const requestedViewport = typeof request.parameters.viewport === 'string'
         ? request.parameters.viewport
         : '';
       if (!requestedViewport || requestedViewport === 'fill') {
-        await postResult(request.requestId, { ok: true, data: { url, opened: true } });
+        await postResult(request.requestId, { ok: true, data: { url, opened: true, tabId: openedTabId } });
         return;
       }
 
       // The tab was just created, so its view is a few frames away. Waiting for
       // it lets the layout the agent asked for be applied to the page it is
       // opening, rather than to the next call it has to make.
-      const attached = await waitForController();
+      const attached = await waitForTab(openedTabId);
       if (!attached) {
         // Still no view. Reporting a plain success here would leave the agent
         // believing a size it asked for was applied to a page nobody is showing.
@@ -144,6 +264,7 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
           data: {
             url,
             opened: true,
+            tabId: openedTabId,
             viewportApplied: false,
             note: 'The panel had no browser view yet, so the viewport was not applied. Call browser.resize now that one exists.',
           },
@@ -157,18 +278,49 @@ const handleRequest = async (request: BrowserControlRequest): Promise<void> => {
         : null;
       await postResult(request.requestId, {
         ok: true,
-        data: { url, opened: true, viewportApplied: true, viewport },
+        data: { url, opened: true, tabId: openedTabId, viewportApplied: true, viewport },
       });
       return;
     }
 
-    const data = await controller!.run(request.action, request.parameters);
-    await postResult(request.requestId, { ok: true, data });
+    const view = await viewForTab(targetTabId!);
+    await postResult(request.requestId, view
+      ? await runAction(view, request.action, parameters)
+      : { ok: false, error: unloadableTabError(targetTabId!) });
   } catch (error) {
     await postResult(request.requestId, {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
+  }
+};
+
+/** An action that named its tab: claimed and run there, whatever the user is looking at. */
+const runOnTab = async (
+  request: BrowserControlRequest,
+  tabId: string,
+  parameters: BrowserControlRequest['parameters'],
+): Promise<void> => {
+  if (!await claimRequest(request.requestId)) return;
+  const view = await viewForTab(tabId);
+  await postResult(request.requestId, view
+    ? await runAction(view, request.action, parameters)
+    : { ok: false, error: unloadableTabError(tabId) });
+};
+
+const runAction = async (
+  controller: BrowserController,
+  action: string,
+  parameters: BrowserControlRequest['parameters'],
+): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
+  try {
+    const data = await controller.run(action, parameters);
+    if (action === 'browser.snapshot' && Object(data) === data) {
+      return { ok: true, data: { ...Object(data), tabs: listTabs() } };
+    }
+    return { ok: true, data };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 };
 
@@ -185,23 +337,41 @@ const ensureSubscribed = (): void => {
 };
 
 const releaseIfIdle = (): void => {
-  if (activeController || opener || !unsubscribe) return;
+  if (controllers.size > 0 || sleepingTabs.size > 0 || opener || !unsubscribe) return;
   unsubscribe();
   unsubscribe = null;
 };
 
 /**
- * Registers the mounted browser view. The most recently mounted view wins;
- * unregistering only clears the registry when it still points at the caller,
- * so a stale unmount cannot detach a newer view.
+ * Registers a tab's mounted browser view under its tab id. Unregistering only
+ * removes the entry when it still points at the caller, so a stale unmount
+ * cannot detach the same tab's newer view.
  */
 export const registerBrowserController = (controller: BrowserController): (() => void) => {
-  activeController = controller;
+  controllers.set(controller.tabId, controller);
   ensureSubscribed();
   return () => {
-    if (activeController === controller) activeController = null;
+    if (controllers.get(controller.tabId) === controller) controllers.delete(controller.tabId);
     releaseIfIdle();
   };
+};
+
+/**
+ * Registers a tab that has no view yet. Unregistering follows the same rule as
+ * `registerBrowserController`.
+ */
+export const registerSleepingBrowserTab = (tab: SleepingBrowserTab): (() => void) => {
+  sleepingTabs.set(tab.tabId, tab);
+  ensureSubscribed();
+  return () => {
+    if (sleepingTabs.get(tab.tabId) === tab) sleepingTabs.delete(tab.tabId);
+    releaseIfIdle();
+  };
+};
+
+/** The browser tab the user has in front of them; actions without a `tabId` go there. */
+export const setShownBrowserTab = (tabId: string): void => {
+  shownTabId = tabId;
 };
 
 /** Registers the app-level fallback that can open a browser tab on demand. */

@@ -13,6 +13,7 @@ import { Radio } from '@/components/ui/radio';
 import { Button } from '@/components/ui/button';
 import { NumberInput } from '@/components/ui/number-input';
 import { Icon } from "@/components/icon/Icon";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
     SettingsSection,
     SettingsCheckboxRow,
@@ -33,6 +34,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
+
+const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated w-full h-7 rounded-lg border border-input bg-surface-elevated px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-interactive-border-focus';
 
 const LOCAL_STT_MODELS = [
     {
@@ -179,7 +182,7 @@ const LocalModelPicker = ({
                         key={entry.id}
                         className={cn(
                             'rounded-lg border border-[var(--interactive-border)] p-3',
-                            selected && 'border-[var(--primary-base)] bg-[var(--primary-base)]/5',
+                            selected && 'border-border bg-interactive-selection text-interactive-selection-foreground',
                         )}
                     >
                         <div className="flex items-start justify-between gap-2">
@@ -387,66 +390,148 @@ const buildLocalTtsVoiceOptions = (models: DictationModelState[]): LocalTtsVoice
     return options;
 };
 
+const LocalTtsModelRow = ({
+    model,
+    requestingId,
+    request,
+    t,
+}: {
+    model: DictationModelState;
+    requestingId: string | null;
+    request: (modelId: string, method: 'POST' | 'DELETE') => Promise<void>;
+    t: ReturnType<typeof useI18n>['t'];
+}) => (
+    <div className="flex items-center gap-2 py-1.5">
+        <span className="typography-ui-label text-foreground">{model.description ?? model.id}</span>
+        {model.installed ? (
+            <>
+                <Icon
+                    name="checkbox-circle"
+                    className="h-4 w-4 text-[var(--status-success)]"
+                    aria-label={t('settings.voice.page.stt.modelInstalled')}
+                />
+                <Button
+                    variant="ghost"
+                    size="xs"
+                    className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
+                    disabled={requestingId !== null}
+                    onClick={() => { void request(model.id, 'DELETE'); }}
+                    title={t('settings.voice.page.stt.modelDelete')}
+                    aria-label={t('settings.voice.page.stt.modelDelete')}
+                >
+                    <Icon name="delete-bin" className="h-4 w-4" />
+                </Button>
+            </>
+        ) : model.downloading ? (
+            <span className="flex items-center gap-1.5">
+                <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                <span className="typography-ui-compact tabular-nums text-muted-foreground">
+                    {typeof model.downloadProgress === 'number' ? `${model.downloadProgress}%` : ''}
+                </span>
+            </span>
+        ) : (
+            <Button
+                variant="ghost"
+                size="xs"
+                className="h-6 w-6 p-0"
+                disabled={requestingId !== null}
+                onClick={() => { void request(model.id, 'POST'); }}
+                title={t('settings.voice.page.stt.modelDownload')}
+                aria-label={t('settings.voice.page.stt.modelDownload')}
+            >
+                <Icon name="download" className="h-4 w-4" />
+            </Button>
+        )}
+        {model.downloadError ? (
+            <span className="typography-meta text-[var(--status-error)]">{model.downloadError}</span>
+        ) : null}
+    </div>
+);
+
 const LocalTtsModelStatus = ({ models, requestingId, request }: ReturnType<typeof useLocalTtsModels>) => {
     const { t } = useI18n();
+    const [availableOpen, setAvailableOpen] = useState(false);
+    const [filter, setFilter] = useState('');
 
-    // The default English model is always listed; language models the server
-    // fetched on its own appear once they are installed or downloading, so
-    // the list shows what is on disk rather than the whole catalog.
-    const visible = models.filter((model) => model.id === LOCAL_TTS_MODEL_ID || model.installed || model.downloading);
-    if (visible.length === 0) {
+    if (models.length === 0) {
         return null;
     }
 
+    // Installed models, anything downloading or in an error state, and the
+    // default English model stay inline where the user expects them; the rest
+    // of the catalog sits behind a collapse so the panel does not flood with
+    // 14 rows.
+    const inline: DictationModelState[] = [];
+    const available: DictationModelState[] = [];
+    for (const model of models) {
+        if (model.id === LOCAL_TTS_MODEL_ID || model.installed || model.downloading || model.downloadError) {
+            inline.push(model);
+        } else {
+            available.push(model);
+        }
+    }
+
+    const query = filter.trim().toLowerCase();
+    const filtered = query
+        ? available.filter((m) =>
+            (m.description ?? '').toLowerCase().includes(query) ||
+            m.id.toLowerCase().includes(query))
+        : available;
+
     return (
         <div className="flex flex-col">
-            {visible.map((model) => (
-                <div key={model.id} className="flex items-center gap-2 py-1.5">
-                    <span className="typography-ui-label text-foreground">{model.description ?? model.id}</span>
-                    {model.installed ? (
-                        <>
-                            <Icon
-                                name="checkbox-circle"
-                                className="h-4 w-4 text-[var(--status-success)]"
-                                aria-label={t('settings.voice.page.stt.modelInstalled')}
-                            />
-                            <Button
-                                variant="ghost"
-                                size="xs"
-                                className="h-6 w-6 p-0 text-muted-foreground hover:text-[var(--status-error)]"
-                                disabled={requestingId !== null}
-                                onClick={() => { void request(model.id, 'DELETE'); }}
-                                title={t('settings.voice.page.stt.modelDelete')}
-                                aria-label={t('settings.voice.page.stt.modelDelete')}
-                            >
-                                <Icon name="delete-bin" className="h-4 w-4" />
-                            </Button>
-                        </>
-                    ) : model.downloading ? (
-                        <span className="flex items-center gap-1.5">
-                            <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                            <span className="typography-ui-compact tabular-nums text-muted-foreground">
-                                {typeof model.downloadProgress === 'number' ? `${model.downloadProgress}%` : ''}
-                            </span>
-                        </span>
-                    ) : (
-                        <Button
-                            variant="ghost"
-                            size="xs"
-                            className="h-6 w-6 p-0"
-                            disabled={requestingId !== null}
-                            onClick={() => { void request(model.id, 'POST'); }}
-                            title={t('settings.voice.page.stt.modelDownload')}
-                            aria-label={t('settings.voice.page.stt.modelDownload')}
-                        >
-                            <Icon name="download" className="h-4 w-4" />
-                        </Button>
-                    )}
-                    {model.downloadError ? (
-                        <span className="typography-meta text-[var(--status-error)]">{model.downloadError}</span>
-                    ) : null}
-                </div>
+            {inline.map((model) => (
+                <LocalTtsModelRow
+                    key={model.id}
+                    model={model}
+                    requestingId={requestingId}
+                    request={request}
+                    t={t}
+                />
             ))}
+            {available.length > 0 ? (
+                <Collapsible open={availableOpen} onOpenChange={setAvailableOpen}>
+                    <CollapsibleTrigger className="group flex w-full items-center justify-between py-1 hover:bg-transparent">
+                        <div className="flex items-center gap-1.5 text-left">
+                            <span className="typography-ui-label font-normal text-foreground">
+                                {t('settings.voice.page.localTts.availableToDownload')}
+                            </span>
+                            <span className="typography-micro text-muted-foreground">
+                                ({available.length})
+                            </span>
+                        </div>
+                        <Icon
+                            name={availableOpen ? 'arrow-down-s' : 'arrow-right-s'}
+                            className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground"
+                        />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-1">
+                        <input
+                            type="text"
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                            placeholder={t('settings.voice.page.localTts.filterPlaceholder')}
+                            aria-label={t('settings.voice.page.localTts.filterPlaceholder')}
+                            className={cn(VOICE_TEXT_INPUT_CLASS, 'mb-1')}
+                        />
+                        {filtered.length === 0 ? (
+                            <div className="typography-meta py-1.5 text-muted-foreground">
+                                {t('settings.voice.page.localTts.filterNoMatch')}
+                            </div>
+                        ) : (
+                            filtered.map((model) => (
+                                <LocalTtsModelRow
+                                    key={model.id}
+                                    model={model}
+                                    requestingId={requestingId}
+                                    request={request}
+                                    t={t}
+                                />
+                            ))
+                        )}
+                    </CollapsibleContent>
+                </Collapsible>
+            ) : null}
         </div>
     );
 };
@@ -520,6 +605,8 @@ export const VoiceSettings: React.FC = () => {
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const ttsInputMode = useConfigStore((state) => state.ttsInputMode);
     const setTtsInputMode = useConfigStore((state) => state.setTtsInputMode);
+    const ttsChunkedMode = useConfigStore((state) => state.ttsChunkedMode);
+    const setTtsChunkedMode = useConfigStore((state) => state.setTtsChunkedMode);
     // STT settings
     const sttProvider = useConfigStore((state) => state.sttProvider);
     const setSttProvider = useConfigStore((state) => state.setSttProvider);
@@ -543,6 +630,8 @@ export const VoiceSettings: React.FC = () => {
     const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [isOpenAIAvailable, setIsOpenAIAvailable] = useState(false);
+    // The server refuses cloud speech and remote custom servers; this only explains why.
+    const [voiceEnterpriseMode, setVoiceEnterpriseMode] = useState(false);
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
     const [openaiPreviewAudio, setOpenaiPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
@@ -636,7 +725,9 @@ export const VoiceSettings: React.FC = () => {
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
-                setIsOpenAIAvailable(hasServerKey || hasSettingsKey);
+                const enterpriseMode = data.enterpriseMode === true;
+                setVoiceEnterpriseMode(enterpriseMode);
+                setIsOpenAIAvailable(!enterpriseMode && (hasServerKey || hasSettingsKey));
             } catch {
                 setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
             }
@@ -900,6 +991,10 @@ export const VoiceSettings: React.FC = () => {
                             />
                         </SettingsControlGroup>
 
+                            {voiceEnterpriseMode && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <p className={SETTINGS_HELPER_CLASS}>{t('settings.voice.page.enterpriseMode')}</p>
+                            )}
+
                             {/* OpenAI API Key */}
                             {voiceProvider === 'openai' && (
                                 <div className="space-y-1.5">
@@ -919,7 +1014,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={openaiApiKey}
                                             onChange={(e) => setOpenaiApiKey(e.target.value)}
                                             placeholder="sk-..."
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {openaiApiKey && (
                                             <button
@@ -950,7 +1045,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleUrl}
                                                 onChange={(e) => setOpenaiCompatibleUrl(e.target.value)}
                                                 placeholder="http://localhost:8880/v1"
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                             {openaiCompatibleUrl && (
                                                 <button
@@ -974,7 +1069,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleApiKey}
                                                 onChange={(e) => setOpenaiCompatibleApiKey(e.target.value)}
                                                 placeholder="sk-..."
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                             {openaiCompatibleApiKey && (
                                                 <button
@@ -995,7 +1090,7 @@ export const VoiceSettings: React.FC = () => {
                                                 value={openaiCompatibleTtsModel}
                                                 onChange={(e) => setOpenaiCompatibleTtsModel(e.target.value)}
                                                 placeholder="speaches-ai/Kokoro-82M-v1.0-ONNX"
-                                                className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                className={VOICE_TEXT_INPUT_CLASS}
                                             />
                                         </div>
                                     </div>
@@ -1011,7 +1106,7 @@ export const VoiceSettings: React.FC = () => {
                                                     value={openaiCompatibleVoice}
                                                     onChange={(e) => setOpenaiCompatibleVoice(e.target.value)}
                                                     placeholder="af_sky"
-                                                    className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                                    className={VOICE_TEXT_INPUT_CLASS}
                                                 />
                                             </div>
                                             <Button size="xs" variant="ghost" onClick={previewCompatibleVoice} title={t('settings.voice.page.actions.preview')} disabled={!openaiCompatibleUrl.trim()}>
@@ -1165,6 +1260,16 @@ export const VoiceSettings: React.FC = () => {
                                     ]}
                                 />
                             </SettingsControlGroup>
+
+                            {(voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <SettingsCheckboxRow
+                                    checked={ttsChunkedMode}
+                                    onChange={setTtsChunkedMode}
+                                    label={t('settings.voice.page.field.ttsChunkedMode')}
+                                    ariaLabel={t('settings.voice.page.field.ttsChunkedModeAria')}
+                                    info={t('settings.voice.page.tooltip.ttsChunked')}
+                                />
+                            )}
                     </>
                 )}
             </SettingsSection>
@@ -1226,7 +1331,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttServerUrl}
                                             onChange={(e) => setSttServerUrl(e.target.value)}
                                             placeholder="http://localhost:8001/v1"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {sttServerUrl && (
                                             <button
@@ -1250,7 +1355,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttApiKey}
                                             onChange={(e) => setSttApiKey(e.target.value)}
                                             placeholder="sk-..."
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                         {sttApiKey && (
                                             <button
@@ -1271,7 +1376,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttModel}
                                             onChange={(e) => setSttModel(e.target.value)}
                                             placeholder="deepdml/faster-whisper-large-v3-turbo-ct2"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                     </div>
                                 </div>
@@ -1286,7 +1391,7 @@ export const VoiceSettings: React.FC = () => {
                                             value={sttLanguage}
                                             onChange={(e) => setSttLanguage(e.target.value)}
                                             placeholder="auto"
-                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                            className={VOICE_TEXT_INPUT_CLASS}
                                         />
                                     </div>
                                 </div>

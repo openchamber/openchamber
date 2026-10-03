@@ -49,19 +49,20 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
       return;
     }
     if (!response.ok) {
-      store.markFailed(runtimeKey);
+      store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'http', status: response.status });
       return;
     }
-    const guests = parseGuestCatalogJson(await response.text());
+    const content = await response.text().catch(() => null);
+    const guests = content === null ? null : parseGuestCatalogJson(content);
     if (useGuestsStore.getState().runtimeKey !== runtimeKey) {
       return;
     }
     if (!guests) {
-      store.markFailed(runtimeKey);
+      store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'invalid-response', status: response.status });
       return;
     }
     useGuestsStore.getState().replaceCatalog(guests, runtimeKey);
   } catch {
-    useGuestsStore.getState().markFailed(runtimeKey);
+    useGuestsStore.getState().markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
   }
 };

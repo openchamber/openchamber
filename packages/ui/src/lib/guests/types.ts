@@ -1,7 +1,10 @@
 import type {
   AttachContribution,
+  FileEditorContribution,
   GuestActionContribution,
+  GuestCapability,
   GuestCommandContribution,
+  GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
   PublicGuestCapabilities,
@@ -14,8 +17,13 @@ export type InstalledGuest = {
   id: string;
   name: string;
   icon: string;
-  /** Panel page. Absent for a page-less (tools-only) extension, which never mounts a frame. */
+  /** Visible panel page. Absent for background-only and tools-only extensions. */
   entry?: string;
+  /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
+  entryDock?: GuestSurfaceDock;
+  entrySize?: number;
+  /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
+  backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
   version?: string;
   attach?: AttachContribution;
@@ -23,9 +31,17 @@ export type InstalledGuest = {
   attachEntry?: string;
   pageEntry?: string;
   pageTitle?: string;
+  /** HTML of the extension's Work Status section (`contributes.statusSection`); may exist without `entry`. */
+  statusEntry?: string;
+  /** Section header title; the extension name when absent. */
+  statusTitle?: string;
+  /** Starting frame height in CSS px before the guest reports its own. */
+  statusHeight?: number;
   integration?: PublicIntegration;
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];
+  /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
+  origins?: string[];
   service?: PublicService;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
@@ -33,8 +49,12 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
+  fileEditors?: FileEditorContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
+  /** Capabilities enterprise mode refuses this package: it is not from a repository the administrator allowed. */
+  enterpriseBlocked?: GuestCapability[];
   source?: GuestSource;
   path?: string | null;
   /** False when the user disabled the extension. Omitted/true means enabled. */

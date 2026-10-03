@@ -28,7 +28,7 @@ It is not a one-time mount callback. Mount your UI and register subscriptions on
 | `locale` | the app language tag |
 | `directory` | current project directory, or `null` |
 | `session` | `{ id, title, busy }` or `null`. Title falls back to the session id. `busy` is the live status. `model` and `agent` (the OpenCode agent) appear when the session has them. |
-| `surface` | `panel` on the rail, `dialog` in the attach window, `page` full-screen |
+| `surface` | `panel` on the rail, `dialog` in the attach window, `page` full-screen, `status` in the Work Status panel, `file` as a file editor in Files |
 | `item` | what this surface was opened for, or `null`: the attached item the user clicked (the same fields you passed to `attach`, including `data`), a message (`kind: "message"`), or a session (`kind: "session"`) from one of your declared actions. See [Actions](/sdk/#actions-commands-and-the-badge). |
 | `connection` | `{ connected, account }` for your integration |
 | `settings` | values of the fields you declared in `integration.settings` |
@@ -36,6 +36,8 @@ It is not a one-time mount callback. Mount your UI and register subscriptions on
 Access tokens never appear here or in a `request` result.
 
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings`, and `onItem` replay the latest value when you subscribe late, then keep firing as it changes.
+
+`theme.tokens` includes `primaryText`, `successText`, `warningText`, `errorText`, and `infoText`. These required fields contain host-computed text colors for neutral backgrounds and the UI kit's tinted controls, not solid fills. `applyHostReady` applies them on each snapshot. See [UI kit](/sdk/ui/) for the CSS variables.
 
 ## Methods
 
@@ -63,6 +65,14 @@ Access tokens never appear here or in a `request` result.
 | `generate({ prompt, system?, maxOutputTokens? })` | one-off text from the user's Small Model. Returns `{ text }`. Needs the `model` capability. |
 | `onResolve(handler)` | register the handler for your slash commands. It gets `{ command, args }` and returns an attach item or `null`. |
 | `setBadge(count)` | show a number (0 to 999) on your rail icon, or `null` to clear it |
+| `openCommit(sha)` | open the Diff view on that commit of the current project. `sha` is 7 to 64 hex characters; OpenChamber reads the commit itself. |
+| `setHeight(px)` | set the height of your Work Status section. OpenChamber keeps it between 24 and 320 pixels; taller content scrolls inside your page. Other places ignore it. |
+| `onFileOpen(listener)` | file editors: get the file to edit, `{ path, name, readOnly }` plus `encoding: "text"` with `content`, or `encoding: "binary"` with `bytes`. Also makes Cmd/Ctrl+S in your page save. |
+| `onFileSnapshot(handler)` | file editors: return `{ content, version }` (or `{ bytes, version }` for a binary editor), the whole edited file. OpenChamber calls it to save and before switching to the source view or fullscreen. |
+| `onFileSaved(listener)` | file editors: the snapshot with that `version` is on disk. Answer with `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | file editors: tell OpenChamber whether there are unsaved changes and whether the document just changed |
+| `requestFileSave()` | file editors: save now, as Cmd/Ctrl+S does |
+| `reportFileUnsupported()` | file editors: this file can't be opened here, show its source instead |
 
 ## attach, startSession, and sessionLink
 
@@ -239,12 +249,13 @@ Failed calls throw `HostRequestError`. `code` is one of these; `message` says mo
 | `NO_SERVICE` | no service declared, not approved, or not running |
 | `NOT_GRANTED` | the user has not approved the capability this call needs |
 | `SERVICE_FAILED` | the service crashed or never became ready |
-| `NO_DIRECTORY` | a relative file path was used with no open project |
-| `NOT_FOUND` | `readFile` on a file that does not exist |
+| `NO_DIRECTORY` | a relative file path was used with no open project, or `openCommit` with no open project |
+| `NOT_FOUND` | `readFile` on a file that does not exist, or `openCommit` on a commit that is not in the project |
 | `FILE_TOO_LARGE` | file content over the limit, on read or write |
 | `DENIED` | the operating system refused the file operation |
 | `NO_MODEL` | `generate` with no Small Model available |
 | `MODEL_FAILED` | the Small Model returned an error |
+| `UNSUPPORTED` | this OpenChamber cannot do the call, for example `openCommit` where there is no Diff view |
 
 ## Related
 

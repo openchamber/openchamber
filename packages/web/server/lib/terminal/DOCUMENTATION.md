@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.js` owns terminal identity, PTY processes, launch mode, session purpose, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. `shutdown.js` owns bounded runtime-wide process cleanup. `shells.js` discovers executable shell families, resolves the persisted shell ID, and builds the per-shell argv for interactive versus command launches. Clients own tab arrangement. Interactive terminals use stable IDs; project actions keep a stable UI tab and allocate a fresh terminal ID for each command execution. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -30,6 +30,7 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - A client may create before its renderer has mounted. It derives an initial size from the container and font metrics (falling back to 80x24 when unavailable), then sends a resize once Ghostty reports its final dimensions. This allows shell startup and renderer initialization to overlap.
 - PTY children never inherit `NODE_CHANNEL_FD`; daemon IPC descriptors are host-private and invalid after PTY descriptor cleanup, and an inherited value (even empty) makes Node CLIs such as opencode print `Failed to parse IPC channel number` on exit.
 - PTY children also strip AppImage `ARGV0` (and other host-private shell vars such as `ELECTRON_RUN_AS_NODE`, `BASH_ENV`, `ENV`, `BASH_XTRACEFD`). An exported `ARGV0` makes zsh rewrite argv[0] for every external command, which breaks Python venv detection and other argv[0]/$0 consumers while leaving `/proc/self/exe` correct. On POSIX, PTY spawn is wrapped with `env -u ARGV0 -u NODE_CHANNEL_FD` (`resolvePosixPtyLaunch`) because `bun-pty` merges the native OS environ and would otherwise reintroduce both after a JS-only delete.
+- Inside a Linux AppImage (`APPDIR` set), PTY children, the managed OpenCode server and the server's git environment (`buildGitEnv`) also lose what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`, `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` (`stripAppImageLauncherEnv`): the mount's `usr/lib`, `usr/share` and `usr/sbin`, the mount root, the relative `./share/`, and the empty entries the launcher leaves when a variable was unset. Otherwise user tools load the app's bundled libraries, and an empty `LD_LIBRARY_PATH` entry makes the dynamic linker search the current directory (#4177). The user's own entries and the bundled OpenCode CLI directory stay. No `env -u` is needed: only Electron runs from an AppImage, and its `node-pty` uses the given env as is.
 - `GET /api/terminal/shells` reports shell IDs available on the active server using the same augmented PATH provided to spawned PTYs, plus whether each executable has a supported login-mode argument. `auto` preserves environment/platform fallback order; an explicit unavailable shell fails creation instead of silently running a different shell. Login mode is opt-in and uses only built-in arguments for known shells. Interactive shells still launch as before. Command-mode launches reuse the same environment and login support, but switch argv by shell family: POSIX and Fish use interactive `-c`, Nushell uses `-c`, PowerShell uses `-Command`, and cmd uses `/d /s /c`. Preference changes affect new sessions and explicit restarts, not running PTYs.
 - PTY data and exit callbacks enter one FIFO queue. The runtime wires those listeners in the same synchronous turn that receives the PTY object. `node-pty` and `bun-pty` both expose the PTY before dispatching registered callbacks. If a backend emitted exit before listener registration, this layer could not recover it, so the wiring stays adjacent to PTY creation.
 - Scrollback is retained on the server and capped at 512 KiB with UTF-8-safe trimming. Device-status, device-attribute, cursor-position reply, and color-query exchanges are removed from replay history with incomplete control sequences carried across PTY chunks; live output remains byte-for-byte unchanged.
@@ -39,8 +40,9 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID. Command-mode sessions reject restart with HTTP 400 instead of silently turning into interactive shells with stale action metadata.
 - A restart rechecks session ownership before and after PTY creation. Close, force-kill, idle removal, or shutdown can invalidate it while spawn is pending. A late replacement is terminated instead of being attached to a retired session.
 - A delete that arrives while create is still pending leaves a cancellation tombstone. When the PTY arrives, the runtime terminates it immediately, never inserts the session into the live map, and returns a create error while the delete still succeeds.
-- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill, idle cleanup, and runtime shutdown terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
+- Close uses SIGTERM with bounded SIGKILL escalation. Force-kill and idle cleanup terminate process groups immediately where supported. Removal explicitly sends a fatal scoped closure and evicts client projections even when a PTY backend fails to emit `onExit`; attached terminals are not considered idle.
 - Shutdown is single-flight, rejects new creates, cancels pending creates, and waits for pending creates and restarts before clearing live sessions. A PTY that arrives during shutdown follows the same cancellation cleanup as a pending create that was explicitly closed.
+- On POSIX, shutdown disconnects input and gives terminal workloads a shared 20-second SIGTERM grace. Process-table snapshots retain descendant ownership across shell exit and separate job-control groups; PID start times guard against reused PIDs. Linux reads `/proc` directly so minimal containers do not need `ps`. Shells remain open until the workloads exit, then receive SIGHUP. An exec'ed server receives SIGTERM and the full grace even though it occupies the shell PID. Remaining processes receive SIGKILL at the deadline. A process-table failure warns and forces known owned processes closed. Windows retains ConPTY-owned teardown because it has no POSIX signal protocol.
 
 ## Security And Relay
 
@@ -52,5 +54,23 @@ Run:
 
 ```sh
 bun test packages/web/server/lib/terminal/runtime.test.js packages/web/server/lib/terminal/terminal-ws-protocol.test.js
+bun run --cwd packages/web test server/lib/terminal/shutdown.test.js
 bun test packages/web/server/lib/ui-auth/ui-auth.test.js packages/web/server/lib/relay/cross-compat.test.js
 ```
+
+The #3389 macOS ARM64 reproduction used real Electron 43.7.0 PTYs and HTTP
+servers with signal handlers that took 15 seconds to finish cleanup. On the
+baseline, File > Restart and Quit sent SIGKILL to the exec'ed server within
+3–4 ms; a foreground child in another process group received SIGHUP and outlived
+Electron. After the fix, both workloads completed after SIGTERM before Electron
+exited, in bundled and HMR runs. A noncooperative workload was killed after the
+shared 20-second deadline.
+
+Packaged test builds 1.24.90 and 1.24.91 exercised the real macOS Squirrel install
+with a loopback feed, isolated app identity/profile, and a shared test signing
+requirement. Both the normal update and closing the window during cleanup
+installed and relaunched N+1 after the terminal workloads finished. The installed
+ASAR matched N+1, and OpenCode remained bundled after its own restart. A rejected
+signature also reached the installer error handler after the 15-second cleanup.
+Linux ARM64 process regressions pass without `ps` installed. Native Windows
+ConPTY and Linux Electron installer behavior were not exercised for this fix.

@@ -452,7 +452,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                                   onClick={() => updateAction(action.id, (current) => ({ ...current, icon: entry.key }))}
                                   className={cn(
                                     'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-foreground hover:bg-[var(--interactive-hover)]',
-                                    selected && 'border-[var(--primary-base)] bg-[var(--primary-base)]/10 text-[var(--primary-base)]'
+                                    selected && 'border-border bg-interactive-selection text-interactive-selection-foreground'
                                   )}
                                   aria-label={t('settings.projects.actions.field.iconAria', { icon: entry.label })}
                                 >
@@ -569,6 +569,9 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                               {t('settings.projects.actions.field.overrideUrlTooltip')}
                             </SettingsInfoHint>
                           </div>
+                          <p className="typography-meta mt-0.5 max-w-[24rem] text-muted-foreground">
+                            {t('settings.projects.actions.field.overrideUrlVariables')}
+                          </p>
 
                           {isDesktopShellApp ? (
                             <div className="mt-2">

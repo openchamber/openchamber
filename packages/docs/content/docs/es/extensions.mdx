@@ -15,11 +15,16 @@ Las extensiones funcionan en OpenChamber web y de escritorio. VS Code y la app m
 
 ## Instalar una
 
+Las extensiones marcadas como **Integrada** se incluyen con la instancia OpenChamber seleccionada. Empiezan activadas y reciben sus permisos declarados sin otro diálogo. Usa **Desactivar** o **Activar** en su tarjeta. No se pueden eliminar ni actualizar por separado de la app. Desactivarlas conserva sus datos y cuentas conectadas, y esa elección se mantiene tras actualizar la app.
+
+Sus cuentas aparecen en **Ajustes → Integraciones → Integraciones nativas**. Un servicio puede seguir necesitando un token API o iniciar sesión para acceder a tu cuenta.
+
 1. Abre **Configuración → Extensiones**.
 2. Pega una de estas opciones en el campo **Carpeta, ZIP o URL** y elige **Añadir**:
    - la ruta absoluta de una carpeta en este equipo
    - la ruta de un archivo `.zip`
    - un enlace https a un repositorio git o a un archivo zip
+   - una dirección Git SSH como `git@github.com:owner/extension.git`
 3. Si la extensión pide permisos, un diálogo los enumera. Elige **Permitir y activar**, o **Eliminar** para quitarla.
 
 También puedes arrastrar un `.zip` sobre el campo o elegirlo con el botón de archivo que está al lado; el archivo se sube al servidor de OpenChamber, así que esto también funciona con una instancia remota. En el escritorio, el botón de carpeta abre un selector nativo, y una carpeta arrastrada se instala desde su ruta.
@@ -27,6 +32,12 @@ También puedes arrastrar un `.zip` sobre el campo o elegirlo con el botón de a
 El icono de la extensión aparece en la barra. Si no aparece, consulta [Solución de problemas](/troubleshooting/).
 
 Una instalación desde carpeta se ejecuta directamente desde esa carpeta, así que quien desarrolla una extensión puede editar y recargar. Un zip o una URL se copia primero en la carpeta de datos de OpenChamber; el archivo original no se toca.
+
+## Repositorios privados e identidades Git
+
+Las instalaciones SSH aceptan `git@github.com:owner/extension.git` y `ssh://git@github.com/owner/extension.git`, con `#branch-or-tag` opcional. Elige la identidad global o una identidad Git guardada en el menú de huella junto al campo. La selección se conserva para comprobar e instalar actualizaciones; los cambios de clave se aplican en la siguiente operación.
+
+La identidad global usa la configuración Git/SSH y el agente SSH del usuario que ejecuta el servidor OpenChamber seleccionado. En una instancia remota, la clave debe estar disponible allí. Desbloquea primero las claves protegidas en el agente SSH de ese proceso. HTTPS usa las credenciales HTTPS de Git, sin cambiar automáticamente a SSH. Los hosts Git deben resolver a direcciones públicas; no se admiten alias SSH locales ni destinos de redes privadas.
 
 ## Qué puede hacer una extensión
 
@@ -46,6 +57,8 @@ Cuando una versión más nueva pide más de lo que permitiste, la tarjeta muestr
 ## Dónde aparece
 
 Además de su panel en la barra lateral, una extensión puede añadir entradas a menús que ya usas: las acciones de un mensaje del chat, el menú de una sesión, el menú + junto al cuadro de chat y comandos de barra como `/task ABC-12` que adjuntan algo sin abrir nada. También puede dar a sus propias herramientas un icono, un título y un diseño de salida propios en el chat, como los que tienen las herramientas integradas de OpenChamber. La extensión decide cuáles de ellos ofrece; todos están apagados hasta que permites la extensión.
+
+Algunas extensiones muestran una imagen en vivo en lugar de un panel propio: aquello en lo que un agente está trabajando en el servidor, como un navegador o un simulador. Haz clic en la imagen o escribe para tomar el control; la línea de estado dirá **Tienes el control** y las acciones de navegador del agente se rechazarán hasta que pulses **Devolver al agente**. Copiar y pegar funcionan como siempre. Otro dispositivo conectado a la vez ve quién tiene el control y no puede quitarlo. Una extensión así puede añadir sus propios controles junto a la imagen, por ejemplo una barra de direcciones encima o una columna de herramientas al lado.
 
 ## Conectar su cuenta
 

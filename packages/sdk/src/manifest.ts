@@ -1,17 +1,41 @@
 import type { OpenChamberManifestApiVersion } from './api-version.ts';
+import type { FileEditorContribution } from './file-editor.ts';
 
 export const PANEL_ID = /^[a-z][a-z0-9-]*$/;
 
 /**
  * The extension's identity on the rail, the Extensions card, and the approval
- * dialog. `entry` is the panel page; without it the extension has no page and
- * may only declare `tools` (see `hasGuestPage`).
+ * dialog. `entry` is the optional visible panel page. Code can instead run
+ * from `background.entry` without adding a rail icon.
  */
 export type PanelContribution = {
   id: string;
   name: string;
   icon: string;
   entry?: string;
+  /**
+   * Beside a shared surface (`service.surface`), the panel page is docked to
+   * one edge of the host-drawn picture: a toolbar above it, an inspector
+   * below, a tool column beside it. `dock` is the edge (default
+   * `GUEST_SURFACE_DOCK_DEFAULT`) and `size` the page's thickness in CSS
+   * pixels across that edge (default `GUEST_SURFACE_DOCK_SIZE_DEFAULT`).
+   * Both only make sense with `entry` and `service.surface` together.
+   */
+  dock?: GuestSurfaceDock;
+  size?: number;
+};
+
+export const GUEST_SURFACE_DOCKS = ['top', 'bottom', 'left', 'right'] as const;
+export type GuestSurfaceDock = (typeof GUEST_SURFACE_DOCKS)[number];
+export const GUEST_SURFACE_DOCK_DEFAULT: GuestSurfaceDock = 'top';
+/** Thickness in CSS px of a docked `panel.entry` when the manifest names none. */
+export const GUEST_SURFACE_DOCK_SIZE_DEFAULT = 40;
+export const GUEST_SURFACE_DOCK_SIZE_MIN = 24;
+export const GUEST_SURFACE_DOCK_SIZE_MAX = 480;
+
+/** Sandboxed HTML loaded on demand for background actions and slash commands. */
+export type BackgroundContribution = {
+  entry: string;
 };
 
 export type AttachMode = 'panel' | 'dialog';
@@ -31,6 +55,24 @@ export type AttachContribution = boolean | AttachMode | AttachContributionObject
 /** A user-opened full-screen page, optionally with its own HTML and title. */
 export type PageContribution = true | { entry: string; title?: string };
 
+/**
+ * A section inside the chat's Work Status panel. `true` reuses `panel.entry`;
+ * the object form names its own package HTML, so an extension can ship only
+ * this section and no rail panel. `title` replaces `panel.name` on the section
+ * header; `height` is the starting frame height in CSS px before the guest
+ * reports its own through `setHeight`.
+ */
+export type StatusSectionContribution = true | { entry: string; title?: string; height?: number };
+
+/** Characters in a status section title. */
+export const GUEST_STATUS_SECTION_TITLE_MAX = 60;
+/** Smallest frame height the host gives a status section, in CSS px. */
+export const GUEST_STATUS_SECTION_HEIGHT_MIN = 24;
+/** Tallest frame height the host gives a status section; taller content scrolls inside the frame. */
+export const GUEST_STATUS_SECTION_HEIGHT_MAX = 320;
+/** Frame height before the manifest or the guest says otherwise. */
+export const GUEST_STATUS_SECTION_HEIGHT_DEFAULT = 120;
+
 export type GuestActionWhere = 'message' | 'session';
 export type GuestActionRole = 'user' | 'assistant';
 /** What a session action wants alongside the session id and title. */
@@ -48,7 +90,7 @@ export const GUEST_COMMAND_DESCRIPTION_MAX = 80;
 export const GUEST_COMMAND_NAME = /^[a-z][a-z0-9-]{0,23}$/;
 
 /**
- * A menu entry on a message or a session. Clicking it opens the guest with
+ * A menu entry on a message or a session. By default it opens the guest with
  * the message or session as `ready.item`. `roles` narrows a message action
  * to user or assistant messages (default both); `payload: ["messages"]` on
  * a session action asks for the conversation and needs the `conversation`
@@ -60,6 +102,8 @@ export type GuestActionContribution = {
   /** Remixicon name or package `.svg` path, same as `panel.icon`. Falls back to the panel icon. */
   icon?: string;
   where: GuestActionWhere;
+  /** `background` calls `host.onAction` in a temporary hidden frame. Default: `open`. */
+  mode?: 'open' | 'background';
   roles?: GuestActionRole[];
   payload?: GuestActionPayload[];
 };
@@ -267,10 +311,27 @@ export type PublicSocketBinding = {
   override: string | null;
 };
 
+/**
+ * Host roles a service can stand in for. `browser` answers the agent's
+ * `browser.*` actions in place of the in-app browser view; the contract is in
+ * `service-providers.ts`. A service that provides a role needs no panel or
+ * background entry: the host starts it on the first action.
+ */
+export const GUEST_SERVICE_PROVIDES = ['browser'] as const;
+export type GuestServiceProvides = (typeof GUEST_SERVICE_PROVIDES)[number];
+
 export type ServiceContribution = {
   entry: string;
   runtime: 'host';
   permissions?: ServicePermissions;
+  provides?: GuestServiceProvides[];
+  /**
+   * The service shows a live surface (frames out, input in) that the host
+   * draws in this extension's rail panel; see `service-surface.ts`. With
+   * `panel.entry` too, that page is docked to one edge of the picture (see
+   * `PanelContribution.dock`); without it, the panel is the surface alone.
+   */
+  surface?: true;
 };
 
 /** Catalog card for a local service. Drops nothing secret; grant is host state. */
@@ -278,19 +339,26 @@ export type PublicService = {
   runtime: 'host';
   permissions?: PublicServicePermissions;
   socketBindings?: PublicSocketBinding[];
+  provides?: GuestServiceProvides[];
+  surface?: true;
   granted: boolean;
 };
+
+export const serviceProvides = (
+  service: Pick<ServiceContribution, 'provides'> | undefined,
+  role: GuestServiceProvides,
+): boolean => Boolean(service?.provides?.includes(role));
 
 /**
  * What a guest may do beyond drawing its own panel. The user approves the
  * full list once, when the package is installed; a later package that asks
  * for more is re-approved. `prompt`, `sessions`, `files`, and `model` are
- * declared under `contributes.capabilities`; `service`, `network`, and
- * `filesystem` follow from `contributes.service`, `contributes.integration`,
- * and `contributes.filesystem`. `model` is one-off text generation with the
+ * declared under `contributes.capabilities`; `service`, `network`,
+ * `filesystem` and `origins` follow from `contributes.service`,
+ * `contributes.integration`, `contributes.filesystem` and `contributes.origins`. `model` is one-off text generation with the
  * user's Small Model (`host.generate`), outside any session.
  */
-export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'conversation', 'service', 'network', 'filesystem'] as const;
+export const GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'model', 'conversation', 'service', 'network', 'filesystem', 'origins'] as const;
 
 export type GuestCapability = (typeof GUEST_CAPABILITIES)[number];
 
@@ -298,6 +366,9 @@ export const DECLARED_GUEST_CAPABILITIES = ['prompt', 'sessions', 'files', 'mode
 
 /** The capabilities a manifest may ask for directly. */
 export type DeclaredGuestCapability = (typeof DECLARED_GUEST_CAPABILITIES)[number];
+
+/** How many `contributes.origins` a package may declare. */
+export const GUEST_ORIGINS_MAX = 8;
 
 /** How many `contributes.filesystem` patterns a package may declare. */
 export const GUEST_FILESYSTEM_PATTERNS_MAX = 16;
@@ -325,19 +396,29 @@ export const isGuestFilesystemPattern = (value: string): boolean => {
 
 export type OpenChamberContributes = {
   panel: PanelContribution;
+  background?: BackgroundContribution;
   attach?: AttachContribution;
   page?: PageContribution;
+  /** A section in the chat's Work Status panel. */
+  statusSection?: StatusSectionContribution;
   capabilities?: DeclaredGuestCapability[];
   integration?: IntegrationContribution;
   service?: ServiceContribution;
   /** Paths outside the project the panel may read and write. Grants `filesystem`. */
   filesystem?: string[];
+  /**
+   * https origins the frame may exchange data with directly: fetch, images,
+   * fonts, styles and media, never scripts. Grants `origins`, approved per list.
+   */
+  origins?: string[];
   /** Menu entries on messages and sessions. */
   actions?: GuestActionContribution[];
   /** Composer slash commands that attach a chip. */
   commands?: GuestCommandContribution[];
   /** How the extension's tool calls look in the chat. */
   tools?: GuestToolContribution[];
+  /** Editors the Files view opens matching files in. */
+  fileEditors?: FileEditorContribution[];
 };
 
 /** Whether any declared action asks for a session's messages, which needs `conversation`. */
@@ -352,21 +433,20 @@ export type PublicGuestCapabilities = {
 };
 
 export const requestedGuestCapabilities = (
-  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions'>,
+  contributes: Pick<OpenChamberContributes, 'capabilities' | 'integration' | 'service' | 'filesystem' | 'actions' | 'origins'>,
 ): GuestCapability[] => {
   const declared = new Set<GuestCapability>(contributes.capabilities ?? []);
   if (guestActionsNeedConversation(contributes.actions)) declared.add('conversation');
   if (contributes.service) declared.add('service');
   if (contributes.integration) declared.add('network');
   if (contributes.filesystem && contributes.filesystem.length > 0) declared.add('filesystem');
+  if (contributes.origins && contributes.origins.length > 0) declared.add('origins');
   return GUEST_CAPABILITIES.filter((capability) => declared.has(capability));
 };
 
 /**
- * Whether the package ships a panel page. A page-less package (no
- * `panel.entry`) never mounts an iframe: no rail surface, attach row, action,
- * command, service, integration, or capability; parse refuses those without
- * an entry. `tools` is the only contribution it may carry.
+ * Whether the package ships a visible panel. Background-only extensions can
+ * execute code but have no rail surface, attach picker, or full-screen page.
  */
 export const hasGuestPage = (
   contributes: Pick<OpenChamberContributes, 'panel'>,
@@ -411,6 +491,25 @@ export const resolvePageEntry = (contributes: Pick<OpenChamberContributes, 'pane
   return contributes.page === true ? contributes.panel.entry : contributes.page.entry;
 };
 
+/**
+ * The HTML the Work Status section loads: `panel.entry` for `true`, the
+ * object's own `entry` otherwise, `null` when nothing is declared or `true`
+ * has no panel page to reuse.
+ */
+export const resolveStatusSectionEntry = (
+  contributes: Pick<OpenChamberContributes, 'panel' | 'statusSection'>,
+): string | null => {
+  const section = contributes.statusSection;
+  if (!section) return null;
+  return section === true ? contributes.panel.entry ?? null : section.entry;
+};
+
+/** Clamp a requested status section height to what the host allows. */
+export const clampStatusSectionHeight = (height: number): number => {
+  if (!Number.isFinite(height)) return GUEST_STATUS_SECTION_HEIGHT_DEFAULT;
+  return Math.min(GUEST_STATUS_SECTION_HEIGHT_MAX, Math.max(GUEST_STATUS_SECTION_HEIGHT_MIN, Math.round(height)));
+};
+
 export type OpenChamberEngines = {
   openchamber: string;
 };
@@ -433,15 +532,19 @@ export type ParseManifestErrorCode =
   | 'invalid-panel-name'
   | 'invalid-panel-icon'
   | 'invalid-panel-entry'
+  | 'invalid-background'
   | 'invalid-attach'
   | 'invalid-page'
+  | 'invalid-status-section'
   | 'invalid-capabilities'
   | 'invalid-integration'
   | 'invalid-service'
   | 'invalid-filesystem'
+  | 'invalid-origins'
   | 'invalid-actions'
   | 'invalid-commands'
-  | 'invalid-tools';
+  | 'invalid-tools'
+  | 'invalid-file-editors';
 
 export type ParseManifestFailure = {
   ok: false;
@@ -531,6 +634,12 @@ export const toPublicService = (
       resolved: binding.resolved,
       override: binding.override,
     }));
+  }
+  if (service.provides && service.provides.length > 0) {
+    next.provides = [...service.provides];
+  }
+  if (service.surface) {
+    next.surface = true;
   }
   return next;
 };

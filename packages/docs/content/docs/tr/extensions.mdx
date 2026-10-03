@@ -15,11 +15,16 @@ Uzantılar OpenChamber web ve masaüstünde çalışır. VS Code ve mobil uygula
 
 ## Uzantı kurma
 
+**Yerleşik** olarak işaretlenen eklentiler seçili OpenChamber örneğiyle gelir. Başlangıçta etkindirler ve bildirdikleri izinler ayrı bir pencere olmadan verilir. Kartlarındaki **Devre dışı bırak** veya **Etkinleştir** seçeneğini kullanın. Uygulamadan ayrı kaldırılamaz veya güncellenemezler. Devre dışı bırakmak verileri ve bağlı hesapları korur; bu seçim uygulama güncellemelerinde de saklanır.
+
+Hesap ayarları **Ayarlar → Entegrasyonlar → Yerleşik entegrasyonlar** bölümündedir. Bir hizmetin hesabınıza erişmesi için yine de API tokeni veya oturum açma gerekebilir.
+
 1. **Ayarlar → Uzantılar** sayfasını açın.
 2. Şunlardan birini **Klasör, ZIP veya URL** alanına yapıştırıp **Ekle** seçeneğini seçin:
    - bu bilgisayardaki bir klasörün tam yolu
    - bir `.zip` dosyasının yolu
    - bir git deposuna ya da zip dosyasına giden https bağlantısı
+   - `git@github.com:owner/extension.git` gibi bir SSH Git adresi
 3. Uzantı izin istiyorsa bir iletişim kutusu bunları listeler. **İzin ver ve etkinleştir** seçeneğini seçin ya da geri çıkarmak için **Kaldır** deyin.
 
 Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilirsiniz; arşiv OpenChamber sunucusuna yüklenir, bu yüzden uzak bir örnekte de çalışır. Masaüstünde klasör düğmesi sistemin seçim penceresini açar ve bırakılan bir klasör kendi yolundan kurulur.
@@ -27,6 +32,12 @@ Alana bir `.zip` de bırakabilir ya da yanındaki arşiv düğmesiyle seçebilir
 Uzantının simgesi rayda görünür. Görünmüyorsa [Sorun giderme](/troubleshooting/) sayfasına bakın.
 
 Klasörden kurulum doğrudan o klasörden çalışır, bu yüzden uzantı geliştiren biri düzenleyip yeniden yükleyebilir. Zip ya da URL önce OpenChamber'ın kendi veri klasörüne kopyalanır; özgün dosyaya dokunulmaz.
+
+## Özel depolar ve Git kimlikleri
+
+SSH kurulumu `git@github.com:owner/extension.git` ve `ssh://git@github.com/owner/extension.git` adreslerini ve isteğe bağlı `#branch-or-tag` ekini destekler. Alanın yanındaki parmak izi menüsünden genel kimliği veya kayıtlı bir Git kimliğini seçin. Bu seçim güncelleme kontrollerinde ve güncellemelerde korunur; anahtar değişikliği sonraki işlemde uygulanır.
+
+Genel kimlik, seçili OpenChamber sunucusunu çalıştıran kullanıcının Git/SSH ayarlarını ve SSH agent bağlantısını kullanır. Uzak örnekte anahtar o sunucuda bulunmalıdır. Parolalı anahtarları önce sunucu sürecinin SSH agent bağlantısında açın. HTTPS, Git HTTPS kimlik bilgilerini kullanır ve otomatik olarak SSH biçimine geçmez. Git sunucuları genel IP adreslerine çözülmelidir; yerel SSH takma adları ve özel ağ hedefleri desteklenmez.
 
 ## Uzantı neler yapabilir
 
@@ -46,6 +57,8 @@ Daha yeni bir sürüm izin verdiğinizden fazlasını istediğinde kart **Onay g
 ## Nerede görünür
 
 Raydaki panelinin yanı sıra bir uzantı, zaten kullandığınız menülere girdiler ekleyebilir: bir sohbet mesajındaki eylemler, bir oturumun menüsü, sohbet kutusunun yanındaki + menüsü ve hiçbir şey açmadan bir şey iliştiren `/task ABC-12` gibi eğik çizgi komutları. Ayrıca kendi araçlarına, OpenChamber'ın yerleşik araçlarında olduğu gibi sohbette düzgün bir simge, başlık ve çıktı düzeni verebilir. Bunlardan hangilerini sunacağına uzantı karar verir; uzantıya izin verene kadar hepsi kapalıdır.
+
+Bazı uzantılar kendi paneli yerine canlı bir görüntü gösterir: bir ajanın sunucuda içinde çalıştığı şey, örneğin bir tarayıcı veya bir simülatör. Kontrolü almak için görüntüye tıklayın ya da yazın; durum satırı **Kontrol sizde** der ve **Ajana geri ver** düğmesine basana kadar ajanın tarayıcı eylemleri reddedilir. Kopyalama ve yapıştırma her zamanki gibi çalışır. Aynı anda bağlı başka bir cihaz kontrolün kimde olduğunu görür ve onu devralamaz. Böyle bir uzantı, görüntünün yanına kendi kontrollerini ekleyebilir, örneğin üstüne bir adres çubuğu veya yanına bir araç sütunu.
 
 ## Hesabını bağlama
 

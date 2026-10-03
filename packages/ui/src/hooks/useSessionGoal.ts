@@ -1,8 +1,10 @@
 import React from 'react';
 import { useSession } from '@/sync/sync-context';
 import { getSessionGoal, type SessionGoalPayload } from '@/lib/sessionGoalMetadata';
-import { fetchGoalObjectiveContent } from '@/lib/sessionGoalActions';
+import { fetchGoalObjectiveContent } from '@/lib/goalObjectiveFiles';
 import { useUIStore } from '@/stores/useUIStore';
+import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
+import { useSmallModelAvailability } from '@/hooks/useSmallModelAvailability';
 
 export interface SessionGoalState {
   /** Parsed goal payload, or null when the session has no goal. */
@@ -22,6 +24,20 @@ export function useSessionGoal(sessionId: string, directory?: string): SessionGo
   };
 }
 
+/**
+ * False only when nothing can check a goal's progress: Jev is not the chosen
+ * checker or has no classification provider, and the small model is known to
+ * be unavailable. The server checks with the small model whenever Jev cannot,
+ * so that is the model asked about here.
+ */
+export function useGoalCheckAvailable(directory: string | undefined, active: boolean): boolean {
+  const jevAvailable = useRoutingStore(selectSafetyNetAvailable);
+  const checker = useUIStore((state) => state.sessionGoalChecker);
+  const jevChecks = jevAvailable && checker === 'classifier';
+  const smallModel = useSmallModelAvailability(directory, active && !jevChecks);
+  return jevChecks || smallModel !== 'unavailable';
+}
+
 const OBJECTIVE_CONTENT_CACHE_MAX = 64;
 const objectiveContentByFetchKey = new Map<string, Promise<string | null>>();
 
@@ -29,7 +45,7 @@ const objectiveContentByFetchKey = new Map<string, Promise<string | null>>();
 // text directly; file-backed goals fetch the server-side file once per
 // goal edit (keyed by id + updatedAt). Display-only: a failed fetch yields
 // null and callers degrade gracefully (e.g. VS Code, where the OpenChamber
-// route is unavailable — the strip then shows only the audit note).
+// route is unavailable — the strip then shows a generic goal title).
 export function useGoalObjectiveContent(sessionId: string, goal: SessionGoalPayload | null): string | null {
   const [fetched, setFetched] = React.useState<string | null>(null);
   const fetchKey = goal?.objectiveFile ? `${sessionId}:${goal.id}:${goal.updatedAt}` : '';

@@ -1,229 +1,106 @@
-# Custom Themes
+# Custom themes
 
-OpenChamber supports user-defined themes. Drop a JSON file into the themes directory and reload — no app restart required.
+Open **Settings → Appearance → Import VS Code theme** to search Open VSX.
+Choose a package, compare the variant previews, and select the variants to import.
+Batch import keeps your current theme active. Open VSX is a separate catalog;
+themes published only in Microsoft Marketplace may not appear.
 
-## Quick Start
+**Choose JSON file** imports a self-contained `.json` or `.jsonc` file. Desktop
+starts its native picker in the local `~/.vscode/extensions` folder when it exists,
+even when connected to a remote server. Browsers and mobile use their own picker.
+UI colors use the same
+surface mapping as the VS Code runtime adapter; general TextMate and semantic
+token colors populate the syntax palette, and diff colors remain separate.
+Regular imports adapt generic border intensity to OpenChamber's standard light
+and dark palettes while retaining the source hue. High-contrast themes keep
+their authored borders.
+The theme is saved on the connected server and selected in its light/dark mode.
+Package imports resolve JSON `include` and token files inside the downloaded VSIX.
+For individual files with those references, export the active theme with
+**Developer: Generate Color Theme From Current Settings** in VS Code first.
 
-1. Create the themes directory:
-   ```bash
-   mkdir -p ~/.config/openchamber/themes
-   ```
+Delete a custom theme using the trash icon beside it in the theme dropdown.
+This includes valid themes you added directly to the server's `themes` folder.
+Deleting a selected theme restores the standard OpenChamber theme for that mode.
+Built-in themes cannot be deleted. Delete and reimport a theme to update it.
 
-2. Create a theme JSON file (e.g., `my-theme.json`) with the format below.
+Save a JSON file in `~/.config/openchamber/themes/`, then open **Settings → Theme → Reload themes** and select it. A custom OpenChamber data directory uses its own `themes` folder.
 
-3. In OpenChamber: **Settings → Theme → Reload themes**.
+## Start with the base colors
 
-4. Select your theme from the dropdown.
-
-## Theme Location
-
-| Platform | Path |
-|----------|------|
-| macOS/Linux | `~/.config/openchamber/themes/` |
-
-## Theme Format
+This is a complete theme. OpenChamber supplies omitted states, foregrounds, syntax aliases and diff backgrounds.
 
 ```json
 {
-  "metadata": {
-    "id": "my-custom-theme",
-    "name": "My Custom Theme",
-    "description": "A custom theme for OpenChamber",
-    "version": "1.0.0",
-    "variant": "dark",
-    "tags": ["dark", "custom"]
-  },
+  "metadata": { "id": "my-theme", "name": "My theme", "variant": "dark" },
   "colors": {
-    "primary": {
-      "base": "#EC8B49",
-      "hover": "#DA702C",
-      "active": "#F9AE77",
-      "foreground": "#100F0F",
-      "muted": "#EC8B4980",
-      "emphasis": "#F9AE77"
-    },
+    "primary": { "base": "#da7c47" },
     "surface": {
-      "background": "#100F0F",
-      "foreground": "#CECDC3",
-      "muted": "#1C1B1A90",
-      "mutedForeground": "#878580",
-      "elevated": "#1C1A1990",
-      "elevatedForeground": "#CECDC3",
-      "overlay": "#00000080",
-      "subtle": "#1e1d1c"
+      "background": "#120f0e",
+      "foreground": "#c9c5ba",
+      "muted": "#171615",
+      "mutedForeground": "#8f8b81",
+      "elevated": "#181715"
     },
-    "interactive": {
-      "border": "#343331",
-      "borderHover": "#403E3C",
-      "borderFocus": "#EC8B49",
-      "selection": "#f4f4f41f",
-      "selectionForeground": "#CECDC3",
-      "focus": "#EC8B49",
-      "focusRing": "#EC8B4950",
-      "cursor": "#CECDC3",
-      "hover": "#ffffff18",
-      "active": "#ffffff1f"
-    },
+    "interactive": { "border": "#242323" },
     "status": {
-      "error": "#D14D41",
-      "errorForeground": "#100F0F",
-      "errorBackground": "#AF302920",
-      "errorBorder": "#AF302950",
-      "warning": "#DA702C",
-      "warningForeground": "#100F0F",
-      "warningBackground": "#BC521520",
-      "warningBorder": "#BC521550",
-      "success": "#A0AF54",
-      "successForeground": "#100F0F",
-      "successBackground": "#66800B20",
-      "successBorder": "#66800B50",
-      "info": "#4385BE",
-      "infoForeground": "#100F0F",
-      "infoBackground": "#205EA620",
-      "infoBorder": "#205EA650"
-    },
-    "pr": {
-      "open": "#A0AF54",
-      "draft": "#878580",
-      "blocked": "#DA702C",
-      "merged": "#8B7EC8",
-      "closed": "#D14D41"
+      "error": "#da5b4a",
+      "warning": "#c67f13",
+      "success": "#76ad4f",
+      "info": "#479fe6"
     },
     "syntax": {
       "base": {
-        "background": "#1C1B1A",
-        "foreground": "#CECDC3",
-        "comment": "#878580",
-        "keyword": "#4385BE",
-        "string": "#3AA99F",
-        "number": "#8B7EC8",
-        "function": "#DA702C",
-        "variable": "#CECDC3",
-        "type": "#D0A215",
-        "operator": "#D14D41"
-      },
-      "tokens": {
-        "commentDoc": "#575653",
-        "stringEscape": "#CECDC3",
-        "keywordImport": "#D14D41",
-        "storageModifier": "#4385BE",
-        "functionCall": "#DA702C",
-        "method": "#879A39",
-        "variableProperty": "#4385BE",
-        "variableOther": "#879A39",
-        "variableGlobal": "#CE5D97",
-        "variableLocal": "#282726",
-        "parameter": "#CECDC3",
-        "constant": "#CECDC3",
-        "class": "#DA702C",
-        "className": "#DA702C",
-        "interface": "#D0A215",
-        "struct": "#DA702C",
-        "enum": "#DA702C",
-        "typeParameter": "#DA702C",
-        "namespace": "#D0A215",
-        "module": "#D14D41",
-        "tag": "#4385BE",
-        "jsxTag": "#CE5D97",
-        "tagAttribute": "#D0A215",
-        "tagAttributeValue": "#3AA99F",
-        "boolean": "#D0A215",
-        "decorator": "#D0A215",
-        "label": "#CE5D97",
-        "punctuation": "#878580",
-        "macro": "#4385BE",
-        "preprocessor": "#CE5D97",
-        "regex": "#3AA99F",
-        "url": "#4385BE",
-        "key": "#DA702C",
-        "exception": "#CE5D97"
-      },
-      "highlights": {
-        "diffAdded": "#879A39",
-        "diffAddedBackground": "#66800B20",
-        "diffRemoved": "#D14D41",
-        "diffRemovedBackground": "#AF302920",
-        "diffModified": "#4385BE",
-        "diffModifiedBackground": "#205EA620",
-        "lineNumber": "#403E3C",
-        "lineNumberActive": "#CECDC3"
+        "comment": "#728772",
+        "keyword": "#34983a",
+        "string": "#d58373",
+        "number": "#279e93",
+        "function": "#78a952",
+        "variable": "#c69457",
+        "type": "#479cb1",
+        "operator": "#da6b6d"
       }
-    },
-    "markdown": {
-      "heading1": "#fbf9e6",
-      "heading2": "#e6e4d2",
-      "heading3": "#CECDC3",
-      "heading4": "#CECDC3",
-      "link": "#4385BE",
-      "linkHover": "#205EA6",
-      "inlineCode": "#A0AF53",
-      "inlineCodeBackground": "#1C1B1A",
-      "blockquote": "#878580",
-      "blockquoteBorder": "#343331",
-      "listMarker": "#D0A21599"
-    },
-    "chat": {
-      "userMessage": "#CECDC3",
-      "userMessageBackground": "#2d1d15",
-      "assistantMessage": "#CECDC3",
-      "assistantMessageBackground": "#100F0F",
-      "timestamp": "#878580",
-      "divider": "#343331"
-    },
-    "tools": {
-      "background": "#1C1B1A50",
-      "border": "#42403e9d",
-      "headerHover": "#34333150",
-      "icon": "#aca7a1",
-      "title": "#CECDC3",
-      "description": "#878580",
-      "edit": {
-        "added": "#879A39",
-        "addedBackground": "#66800B25",
-        "removed": "#D14D41",
-        "removedBackground": "#AF302925",
-        "lineNumber": "#403E3C"
-      }
-    }
-  },
-  "config": {
-    "fonts": {
-      "sans": "\"IBM Plex Mono\", monospace",
-      "mono": "\"IBM Plex Mono\", monospace",
-      "heading": "\"IBM Plex Mono\", monospace"
-    },
-    "radius": {
-      "none": "0",
-      "sm": "0.325rem",
-      "md": "0.75rem",
-      "lg": "1.125rem",
-      "xl": "1.5rem",
-      "full": "9999px"
-    },
-    "transitions": {
-      "fast": "150ms ease",
-      "normal": "250ms ease",
-      "slow": "350ms ease"
     }
   }
 }
 ```
 
-## Surface Alpha Requirement
+Use hex or `rgb()`/`rgba()` colors for automatic contrast adjustment. Hex alpha is supported, such as `#ffffff20`. Surfaces can be opaque or translucent; there is no required alpha value.
 
-- `colors.surface.muted` and `colors.surface.elevated` must always use 90 alpha (`...90` in 8-digit hex, e.g. `#1C1B1A90`).
+## Color roles
 
-## Validation
+- `surface.background` is the main canvas, `muted` is the secondary area, and `elevated` is for cards, inputs, dropdowns and dialogs. Components may adjust opacity while using the same role.
+- `surface.foreground` and `mutedForeground` are primary and secondary text. `surface.elevatedForeground` controls text in dialogs, menus, cards and fields; it defaults to `foreground`.
+- `primary.base` is the main action. `interactive.selection` is the selected state. They are independent.
+- Fields keep their elevated background during hover, with `interactive.hover` layered over it. Focus uses `interactive.focusRing`; separators use `interactive.border`. `surface.subtle` is a quiet background, not a hover or focus color.
+- Status colors represent feedback. Solid fills get a contrasting foreground; tinted buttons and alerts get separate computed text colors. Those computed colors are not extra authoring fields.
+- Syntax controls code in chat, files and diffs. It uses your palette rather than a fixed third-party highlighting theme.
 
-Themes are validated on load. Invalid themes are skipped with a console warning.
+## Optional overrides
 
-Common issues:
-- Missing required fields
-- Invalid `variant` (must be `"light"` or `"dark"`)
-- File size > 512KB
+Add an override only when the default relationship does not fit your palette.
 
-## Tips
+| Group | Optional fields |
+|---|---|
+| `primary` | `foreground`, `hover`, `active`, `muted` |
+| `surface` | `elevatedForeground`, `overlay`, `subtle` |
+| `interactive` | `selection`, `selectionForeground`, `hover`, `active`, `borderHover`, `borderFocus`, `focus`, `focusRing`, `cursor` |
+| `status` | Each status accepts `Foreground`, `Background` and `Border` suffixes |
+| `pr` | `open`, `draft`, `blocked`, `merged`, `closed` |
+| `chat` | `userMessageBackground`, `divider`, legacy `background` used as the inline-code background fallback |
+| `markdown` | `link`, `linkHover`, `inlineCode`, `inlineCodeBackground`, `blockquote`, `blockquoteBorder`, `listMarker`, `bold`, `italic`, `strikethrough`, `hr` |
+| `tools` | `border`, `icon`, `title`, `description`; `edit` accepts `addedBackground`, `removedBackground`, `modifiedBackground`, `lineNumber` |
 
-- Use hex with alpha for transparency (e.g., `#FFFFFF20`)
-- Reference built-in themes in `packages/ui/src/lib/theme/themes/` for more examples
-- Theme `id` must be unique; duplicates are skipped
+`syntax.base.background` and `foreground` inherit the main canvas and text. Choose a code background close to `surface.background` for a subtle separation. Code surfaces render that color directly, without an automatic blend with the canvas. `syntax.highlights` accepts `diffAdded`, `diffRemoved`, `diffModified`, their `Background` variants, `lineNumber` and `lineNumberActive`. Diff backgrounds inherit their corresponding diff color at a low opacity.
+
+`syntax.tokens` contains exceptions to the shared mapping. `method` and `functionCall` inherit `base.function`; `class`, `struct` and `enum` inherit `className`, which defaults to `base.type`; `key` and `tagAttribute` inherit `variableProperty`. For distinct class and property colors, only those two overrides are needed.
+
+Built-in JSON files in `packages/ui/src/lib/theme/themes/` show the supported overrides. The full syntax mapping is in `packages/ui/src/lib/theme/syntax.ts`.
+
+Optional `config.fonts` accepts `sans`, `mono` and `heading`. Optional `config.transitions` accepts `fast`, `normal` and `slow` CSS transition values.
+
+## Existing themes
+
+Expanded theme files still load. Explicit supported overrides win over defaults. Retired fields, including Markdown heading colors, unused chat text colors and unused component sections, are ignored. Markdown headings in the file editor use the syntax foreground.
+
+Malformed themes are skipped without dropping valid siblings. A file must be no larger than 512 KiB. Duplicate IDs in the custom directory are skipped; a custom theme may override a built-in theme with the same ID.

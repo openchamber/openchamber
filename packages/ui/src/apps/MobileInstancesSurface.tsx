@@ -222,7 +222,7 @@ export const MobileInstancesSurface: React.FC<{
                   >
                     <button
                       type="button"
-                      className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-60"
+                      className="flex min-w-0 flex-1 items-center gap-3 px-3.5 py-3 text-left transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-60"
                       onClick={() => {
                         if (isActive) return;
                         setConnectingId(connection.id);
@@ -264,7 +264,7 @@ export const MobileInstancesSurface: React.FC<{
                         <button
                           type="button"
                           aria-label={t('mobile.instances.edit')}
-                          className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                          className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() => {
                             setEditingId(connection.id);
                             setUrl(connectionDisplayUrl(connection));
@@ -282,7 +282,7 @@ export const MobileInstancesSurface: React.FC<{
                         aria-label={confirming
                           ? t('mobile.instances.cancelDeleteAria', { label: connection.label })
                           : t('mobile.instances.deleteAria', { label: connection.label })}
-                        className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         onClick={() => toggleConfirmDelete(connection.id)}
                         style={{ touchAction: 'manipulation' }}
                       >

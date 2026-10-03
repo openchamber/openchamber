@@ -7,6 +7,16 @@ description: Personnalisez OpenChamber avec des thèmes intégrés et définis p
 
 OpenChamber prend en charge les thèmes intégrés et les fichiers JSON de thème personnalisés.
 
+## Importer un thème VS Code
+
+Ouvrez **Paramètres → Apparence → Importer un thème VS Code** pour rechercher dans Open VSX. Les résultats affichent l'icône, le nom et l'auteur. Choisissez un paquet, comparez les aperçus des couleurs et importez les variantes souhaitées. L'import par lot conserve le thème actif. Les thèmes publiés uniquement sur Microsoft Marketplace peuvent être absents d'Open VSX.
+
+Utilisez **Choisir un fichier JSON** pour un fichier local `.json` ou `.jsonc` de 512 KiB maximum. Sur ordinateur, le sélecteur ouvre `~/.vscode/extensions` si ce dossier existe. L'import convertit les couleurs de l'interface, de la syntaxe et des diffs, puis active le thème du fichier. La corbeille à côté d'un thème importé le supprime du serveur connecté. Supprimer le thème sélectionné rétablit le thème par défaut de ce mode.
+
+Le thème est enregistré sur le serveur OpenChamber connecté, même depuis l'application de bureau ou mobile. Réimporter le même fichier ne crée pas de doublon et n'écrase pas un thème modifié sur le serveur. L'extension VS Code suit le thème de VS Code.
+
+Si le fichier utilise `include` ou référence un fichier de tokens distinct, exécutez **Developer: Generate Color Theme From Current Settings** dans la palette de commandes de VS Code et importez le JSON généré.
+
 ## Ajouter un thème personnalisé
 
 1. Créez le dossier des thèmes :

@@ -13,10 +13,40 @@ const runtimeCtx = {
   isMac: false,
   isWindows: false,
   isLinux: false,
-  isWindowsArm64: false,
+  routingAvailable: false,
+  enterpriseMode: false,
+  jevBlockedByEnterprise: false,
 };
 
 describe('settings search', () => {
+  test('finds the Claude Code integration by name and package, never in VS Code', () => {
+    for (const query of ['claude', '@openchamber/opencode-claude']) {
+      for (const isVSCode of [false, true]) {
+        const results = buildSettingsSearchResults({
+          query,
+          runtimeCtx: { ...runtimeCtx, isVSCode },
+          t,
+          getPageTitle: (page) => page,
+        });
+
+        expect(results.some((result) => result.id === 'integrations.third-party.opencode-claude')).toBe(!isVSCode);
+      }
+    }
+  });
+
+  test('Enter-to-send is searchable only outside mobile', () => {
+    for (const isMobile of [false, true]) {
+      const results = buildSettingsSearchResults({
+        query: 'shift enter',
+        runtimeCtx: { ...runtimeCtx, isMobile },
+        t,
+        getPageTitle: (page) => page,
+      });
+
+      expect(results.some((result) => result.id === 'chat.enter-to-send')).toBe(!isMobile);
+    }
+  });
+
   test('finds the scrollbar preference on every surface', () => {
     for (const context of [runtimeCtx, { ...runtimeCtx, isDesktop: true }, { ...runtimeCtx, isVSCode: true }, { ...runtimeCtx, isMobile: true }]) {
       const results = buildSettingsSearchResults({

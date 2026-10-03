@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+Das Kit verwendet vom Host berechnete Textfarben für getönte Buttons, Badges, Hinweistitel, Validierungsmeldungen und Links. Du musst Kontraste nicht selbst berechnen.
+
+Für eigenes CSS stellt `applyHostReady` die Variablen `--primary-text`, `--success-text`, `--warning-text`, `--error-text` und `--info-text` sowie passende `--oc-*-text`-Aliase bereit. Nutze sie für Text auf neutralen oder leicht getönten Hintergründen. Füllungen behalten die Basisfarben; Text auf einer vollen `--oc-primary`-Füllung verwendet `--oc-primary-fg`. Wende jeden `onReady`-Snapshot an, damit die Farben aktuell bleiben.
+
 `onReady` kann bei geöffneter Seite mehrfach laufen, etwa wenn sich der Sitzungskontext ändert. Wende das Theme jedes Mal an, aber mounte Controls und registriere Listener nur einmal. Bewahre Entwürfe außerhalb der Renderfunktionen auf. Blende beim Tabwechsel vorhandene Panels aus oder stelle ihre Werte aus deinem Zustand wieder her.
 
 ## Auswahl und Eingaben synchron halten

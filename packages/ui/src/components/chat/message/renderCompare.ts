@@ -1,4 +1,4 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
 import type { TurnActivityGroup, TurnActivityRecord, TurnChangedFile, TurnDiffStats, TurnGroupingContext } from '../lib/turns/types';
 
 type MessageRecord = {
@@ -299,7 +299,7 @@ export const areRelevantTurnGroupingContextsEqual = (
   if (left.hasTools !== right.hasTools) return false;
   if (left.hasReasoning !== right.hasReasoning) return false;
   if (left.userMessageCreatedAt !== right.userMessageCreatedAt) return false;
-  if (left.userMessageVariant !== right.userMessageVariant) return false;
+  if (left.assistantVariant !== right.assistantVariant) return false;
 
   const headerRelevant = left.headerMessageId === messageId || right.headerMessageId === messageId;
   if (headerRelevant && left.headerMessageId !== right.headerMessageId) {

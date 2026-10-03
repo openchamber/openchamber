@@ -1,20 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { I18nProvider } from '@/lib/i18n';
 import { useSessionGrouping } from './useSessionGrouping';
 import { useSessionSidebarSections } from './useSessionSidebarSections';
 import type { SessionGroup } from '../types';
+import type { SessionFoldersMap } from '@/stores/useSessionFoldersStore';
 
 const CHATS_ROOT = '/home/user/.config/openchamber/chats';
 
 const chatSession = (id: string, title: string): Session => ({
   id,
-  slug: id,
   projectID: 'chats',
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   title,
-  version: '1',
   directory: `${CHATS_ROOT}/2026-08-28/session-${id}`,
   time: { created: 1, updated: 1 },
 });
@@ -37,7 +38,12 @@ type Sections = ReturnType<typeof useSessionSidebarSections>;
 
 // The real matcher and the real grouping callbacks run here: the reported bug
 // was never about matching, so a stubbed matcher would test nothing.
-const renderSections = (group: SessionGroup, query: string, projectSessions?: Session[]): Sections => {
+const renderSections = (
+  group: SessionGroup,
+  query: string,
+  projectSessions?: Session[],
+  foldersMap: SessionFoldersMap = { [CHATS_ROOT]: [{ id: 'folder', name: group.label, sessionIds: [], createdAt: 1 }] },
+): Sections => {
   let captured: Sections | null = null;
   const Harness = () => {
     const grouping = useSessionGrouping({
@@ -47,6 +53,7 @@ const renderSections = (group: SessionGroup, query: string, projectSessions?: Se
       sessionOrderRanks: new Map(),
       gitBranches: new Map(),
       isVSCode: false,
+      worktreeSortOrder: 'recent' as const,
     });
     captured = useSessionSidebarSections({
       normalizedProjects: projectSessions ? [{ id: 'project', path: CHATS_ROOT, normalizedPath: CHATS_ROOT }] : [],
@@ -62,7 +69,7 @@ const renderSections = (group: SessionGroup, query: string, projectSessions?: Se
       normalizedSessionSearchQuery: query,
       filterSessionNodesForSearch: grouping.filterSessionNodesForSearch,
       buildGroupSearchText: grouping.buildGroupSearchText,
-      foldersMap: { [CHATS_ROOT]: [{ id: 'folder', name: group.label, sessionIds: [], createdAt: 1 }] },
+      foldersMap,
       standaloneGroups: projectSessions ? [] : [group],
     });
     return null;
@@ -158,6 +165,22 @@ describe('sidebar search over standalone groups', () => {
     ]);
 
     expect(renderSections(group, 'release').searchMatchCount).toBe(2);
+  });
+
+  test('searches folders from every managed Chats scope', () => {
+    const group = chatsGroup([]);
+    const alternateScope = `${CHATS_ROOT}/2026-08-28/session-a`;
+    group.folderScopes = [
+      { scopeKey: CHATS_ROOT, directory: CHATS_ROOT },
+      { scopeKey: alternateScope, directory: alternateScope },
+    ];
+    const sections = renderSections(group, 'alternate', undefined, {
+      [CHATS_ROOT]: [],
+      [alternateScope]: [{ id: 'alternate-folder', name: 'Alternate notes', sessionIds: [], createdAt: 1 }],
+    });
+
+    expect(sections.groupSearchDataByGroup.get(group)?.folderNameMatchCount).toBe(1);
+    expect(sections.searchMatchCount).toBe(1);
   });
 
   test('reports no match for a chat group nothing matches in', () => {

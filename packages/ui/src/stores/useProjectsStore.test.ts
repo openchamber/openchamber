@@ -165,6 +165,24 @@ describe("useProjectsStore default model and thinking level", () => {
     const project = useProjectsStore.getState().projects[0]
     expect(project?.defaultVariant).toBe(undefined)
   })
+
+  test("persists and clears a project default agent", () => {
+    seed({ id: "project-a", path: "/repo" })
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "plan" })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+
+    useProjectsStore.getState().updateProjectMeta("project-a", { defaultAgent: "   " })
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe(undefined)
+  })
+
+  test("sanitizes a project default agent from settings", () => {
+    useProjectsStore.getState().synchronizeFromSettings({
+      projects: [{ id: "project-a", path: "/repo", defaultAgent: "  plan  " }],
+    })
+
+    expect(useProjectsStore.getState().projects[0]?.defaultAgent).toBe("plan")
+  })
 })
 
 describe("useProjectsStore.addProjects", () => {

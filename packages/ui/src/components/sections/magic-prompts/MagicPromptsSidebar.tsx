@@ -26,16 +26,6 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
         ],
       },
       {
-        groupKey: 'settings.magicPrompts.sidebar.group.github',
-        items: [
-          { id: 'github.pr.review', titleKey: 'settings.magicPrompts.sidebar.item.githubPrReview' },
-          { id: 'github.issue.review', titleKey: 'settings.magicPrompts.sidebar.item.githubIssueReview' },
-          { id: 'github.pr.checks.review', titleKey: 'settings.magicPrompts.sidebar.item.githubPrFailedChecksReview' },
-          { id: 'github.pr.comments.review', titleKey: 'settings.magicPrompts.sidebar.item.githubPrCommentsReview' },
-          { id: 'github.pr.comment.single', titleKey: 'settings.magicPrompts.sidebar.item.githubSinglePrCommentReview' },
-        ],
-      },
-      {
         groupKey: 'settings.magicPrompts.sidebar.group.linear',
         items: [
           { id: 'linear.issue.review', titleKey: 'settings.magicPrompts.sidebar.item.linearIssueReview' },

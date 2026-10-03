@@ -40,6 +40,15 @@ const ensureNotificationTemplateShape = (templates) => {
   return { templates: next, changed };
 };
 
+/** Settings that decide which OpenChamber plugins the managed OpenCode loads. */
+const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
+  'agentControlToolEnabled',
+  'agentWebToolEnabled',
+  'agentMemoryToolEnabled',
+  'agentNotifyToolEnabled',
+  'agentToolsCodeMode',
+]);
+
 export const createSettingsRuntime = (deps) => {
   const {
     fsPromises,
@@ -58,6 +67,9 @@ export const createSettingsRuntime = (deps) => {
     normalizeManagedRemoteTunnelPresetTokens,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    onManagedPluginSettingsChanged = async () => {},
+    onMessageSearchEnabledChanged = () => {},
+    onMessageSearchReasoningChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1110,7 +1122,23 @@ export const createSettingsRuntime = (deps) => {
         }
       }
 
-      await writeSettingsToDisk(next, { surface, changedKeys: Object.keys(sanitized) });
+      const changedKeys = Object.keys(sanitized);
+      await writeSettingsToDisk(next, { surface, changedKeys });
+      // OpenChamber's own OpenCode plugins live in a config file OpenCode
+      // watches, so flipping one of these switches takes effect in the running
+      // process instead of waiting for a restart.
+      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
+          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+        });
+      }
+      // The search index starts or stops in the background; the save does not wait for it.
+      if (changedKeys.includes('messageSearchEnabled')) {
+        onMessageSearchEnabledChanged(next.messageSearchEnabled === true);
+      }
+      if (changedKeys.includes('messageSearchReasoningEnabled')) {
+        onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
+      }
       return formatSettingsResponse(next);
     });
 

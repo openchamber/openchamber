@@ -1,0 +1,39 @@
+---
+title: Worktree-sessies
+description: Geef een sessie een eigen branch en map om het werk gescheiden te houden.
+---
+
+# Worktree-sessies
+
+Een worktree-sessie werkt in een eigen uitgecheckte kopie van uw repository, op een eigen branch: een Git-worktree. Zo zitten parallelle sessies elkaar niet in de weg. De ene kan herstructureren terwijl de andere een fout oplost, zonder dat u steeds tussen branches hoeft te wisselen.
+
+## Een worktree-sessie maken
+
+1. Open het venster voor een nieuwe worktree: kies **Nieuwe worktree…** in het branchmenu boven het invoerveld als je een nieuwe sessie start, of gebruik de worktree-knop op een projectrij in de zijbalk.
+2. Kies onder **Start from** een van deze opties:
+   - **nieuwe branch:** geef de branch een naam
+   - **bestaande branch:** check een branch uit die al bestaat
+   - **PR or issue:** kies er een uit GitHub, Linear of een extensie. De branch krijgt de naam ervan (een PR checkt zijn eigen branch uit) en het item wordt aan uw eerste bericht toegevoegd.
+3. Controleer **Based on** (de branch waarvan een nieuwe branch vertrekt, standaard de huidige branch van het project) en **Folder name**; wijzig ze alleen als dat nodig is.
+4. Maak de worktree aan. Heeft het project setupcommando's, dan toont het dialoogvenster ze; ze worden direct daarna uitgevoerd.
+
+OpenChamber maakt de branch, richt de map in en opent daar een nieuwe sessie, klaar voor uw eerste bericht. U kunt ook direct vanuit een [taak](/nl/notes-todos-plans/) of een [GitHub-issue of PR](/nl/github/) beginnen.
+
+Wil je geen vragen, kies dan **Snelle worktree** in hetzelfde branchmenu: OpenChamber geeft de branch een naam en richt de nieuwe sessie erop.
+
+## Het werk overnemen
+
+Is het werk klaar voor gebruik, kies dan **Integreren** in de Git-weergave om de commits uit de worktree naar een andere branch, zoals `main`, over te nemen. Bij een conflict kunt u de agent vragen het op te lossen.
+
+## Opruimen
+
+Bij het verwijderen of archiveren van een sessie kunt u de worktree laten verwijderen. U kiest zelf of ook de branch wordt verwijderd, lokaal en eventueel op de remote. Niets wordt zonder uw verzoek verwijderd.
+
+## Als er iets niet klopt
+
+Een worktree kan aandacht nodig hebben als de map is verdwenen, er geen actieve branch is of een merge of rebase niet is afgerond. OpenChamber signaleert dat zodat u het kunt herstellen. Zie [Worktrees en Git](/nl/troubleshooting/worktrees-git/).
+
+## Zie ook
+
+- [Parallelle runs](/nl/multi-run/) om meerdere worktree-sessies tegelijk te starten
+- [Git en GitHub](/nl/git/) om vanuit OpenChamber te committen en integreren

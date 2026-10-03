@@ -8,7 +8,7 @@ import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
-import { getChatDraftIdentityKey, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
+import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
 const FILE_URI_PREFIX = "file://"
 const MAX_ATTACHMENT_PREPARATION_ATTEMPTS = 3
@@ -154,6 +154,10 @@ export type InputState = {
   pendingGuestIssue: AttachIssueRequest | null
   pendingBtwComposerRequest: PendingBtwComposerRequest | null
   attachedFiles: AttachedFile[]
+  attachmentDraftKey: string | null
+  attachmentDrafts: Map<string, AttachedFile[]>
+  selectAttachmentDraft: (target: ChatDraftIdentity | null) => void
+  restoreAttachedFiles: (files: AttachedFile[], target: ChatDraftIdentity | null) => void
   activeEditorFile: VSCodeActiveEditorFile | null
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
@@ -168,8 +172,8 @@ export type InputState = {
   consumePendingSyntheticParts: () => SyntheticContextPart[] | null
   addAttachedFile: (file: File) => Promise<boolean>
   removeAttachedFile: (id: string) => void
-  setAttachedFiles: (files: AttachedFile[]) => void
-  clearAttachedFiles: () => void
+  setAttachedFiles: (files: AttachedFile[], target?: ChatDraftIdentity | null) => void
+  clearAttachedFiles: (target?: ChatDraftIdentity | null) => void
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, file: File) => Promise<void>
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
@@ -192,6 +196,31 @@ export const useInputStore = create<InputState>()((set, get) => ({
   pendingGuestIssue: null,
   pendingBtwComposerRequest: null,
   attachedFiles: [],
+  attachmentDraftKey: null,
+  attachmentDrafts: new Map(),
+  selectAttachmentDraft: (target) => {
+    const key = target ? getChatDraftIdentityKey(target) : null
+    const state = get()
+    if (key === state.attachmentDraftKey) return
+    const drafts = new Map(state.attachmentDrafts)
+    if (state.attachmentDraftKey) {
+      if (state.attachedFiles.length) drafts.set(state.attachmentDraftKey, state.attachedFiles)
+      else drafts.delete(state.attachmentDraftKey)
+    }
+    // Unowned files may arrive from a native picker before the first mount.
+    const files = key ? (drafts.get(key) ?? (state.attachmentDraftKey === null ? state.attachedFiles : [])) : []
+    if (key) drafts.delete(key)
+    attachmentReadGeneration += 1
+    set({ attachmentDraftKey: key, attachmentDrafts: drafts, attachedFiles: files })
+  },
+  restoreAttachedFiles: (files, target) => {
+    const state = get()
+    const key = target ? getChatDraftIdentityKey(target) : null
+    const existing = key === state.attachmentDraftKey ? state.attachedFiles : (key && state.attachmentDrafts.get(key)) || []
+    const present = new Set(existing.map((file) => file.id))
+    const missing = files.filter((file) => !present.has(file.id))
+    if (missing.length) state.setAttachedFiles([...existing, ...missing], target)
+  },
   activeEditorFile: null,
 
   setPendingInputText: (text, mode = "replace") =>
@@ -271,15 +300,22 @@ export const useInputStore = create<InputState>()((set, get) => ({
       return { attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }
     }),
 
-  setAttachedFiles: (files) => {
+  setAttachedFiles: (files, target) => {
+    const state = get()
+    const key = target === undefined ? state.attachmentDraftKey : target ? getChatDraftIdentityKey(target) : null
+    if (key !== state.attachmentDraftKey) {
+      if (!key) return
+      const drafts = new Map(state.attachmentDrafts)
+      if (files.length) drafts.set(key, files)
+      else drafts.delete(key)
+      set({ attachmentDrafts: drafts })
+      return
+    }
     attachmentReadGeneration += 1
     set({ attachedFiles: files })
   },
 
-  clearAttachedFiles: () => {
-    attachmentReadGeneration += 1
-    set({ attachedFiles: [] })
-  },
+  clearAttachedFiles: (target) => get().setAttachedFiles([], target),
 
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -308,7 +344,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   addVSCodeSelectionAttachment: async (path: string, file: File) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     const generation = attachmentReadGeneration
-    const selectionKey = getVSCodeSelectionKey(path, file.name)
+    const selectionKey = `${generation}\u0000${getVSCodeSelectionKey(path, file.name)}`
     const isDuplicate = get().attachedFiles.some(
       (f) => f.source === 'vscode' && f.vscodeSource === 'selection' && f.filename === file.name && f.vscodePath === path
     )
@@ -361,3 +397,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
     set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
   },
 }))
+
+subscribeChatDraftDeletion((identity) => {
+  useInputStore.getState().setAttachedFiles([], identity)
+})

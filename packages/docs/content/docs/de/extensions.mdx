@@ -15,11 +15,16 @@ Erweiterungen laufen in OpenChamber Web und Desktop. VS Code und die Mobile-App 
 
 ## Eine Erweiterung installieren
 
+Erweiterungen mit **Integriert** werden mit der ausgewählten OpenChamber-Instanz geliefert. Sie sind zunächst aktiviert und erhalten ihre deklarierten Berechtigungen ohne zusätzlichen Dialog. Nutze **Deaktivieren** oder **Aktivieren** auf der Karte. Sie lassen sich nicht getrennt von der App entfernen oder aktualisieren. Beim Deaktivieren bleiben Daten und verbundene Konten erhalten; die Auswahl gilt auch nach App-Updates.
+
+Ihre Kontoeinstellungen stehen unter **Einstellungen → Integrationen → Eingebaute Integrationen**. Für den Kontozugriff kann weiterhin ein API-Token oder eine Anmeldung nötig sein.
+
 1. Öffne **Einstellungen → Erweiterungen**.
 2. Füge eines davon in das Feld **Ordner, ZIP oder URL** ein und wähle **Hinzufügen**:
    - den absoluten Pfad eines Ordners auf diesem Computer
    - den Pfad einer `.zip`-Datei
    - einen https-Link zu einem Git-Repository oder einer Zip-Datei
+   - eine SSH-Git-Adresse wie `git@github.com:owner/extension.git`
 3. Wenn die Erweiterung Berechtigungen anfragt, listet ein Dialog sie auf. Wähle **Erlauben und aktivieren** oder **Entfernen**, um sie wieder zu entfernen.
 
 Du kannst auch eine `.zip` auf das Feld ziehen oder sie über die Archiv-Schaltfläche daneben auswählen; das Archiv wird auf den OpenChamber-Server hochgeladen, das funktioniert also auch bei einer entfernten Instanz. Auf dem Desktop öffnet die Ordner-Schaltfläche eine native Dateiauswahl, und ein abgelegter Ordner wird über seinen Pfad installiert.
@@ -27,6 +32,12 @@ Du kannst auch eine `.zip` auf das Feld ziehen oder sie über die Archiv-Schaltf
 Das Symbol der Erweiterung erscheint in der Leiste. Falls nicht, sieh unter [Fehlerbehebung](/troubleshooting/) nach.
 
 Eine Installation aus einem Ordner läuft direkt aus diesem Ordner, sodass jemand, der eine Erweiterung entwickelt, bearbeiten und neu laden kann. Eine Zip-Datei oder eine URL wird zuerst in den Datenordner von OpenChamber kopiert; die Originaldatei bleibt unberührt.
+
+## Private Repositories und Git-Identitäten
+
+SSH-Installationen akzeptieren `git@github.com:owner/extension.git` und `ssh://git@github.com/owner/extension.git`, optional mit `#branch-or-tag`. Wähle im Fingerabdruck-Menü neben dem Eingabefeld die globale oder eine gespeicherte Git-Identität. Die Auswahl bleibt für Update-Prüfungen und Updates erhalten. Ein geänderter Schlüssel wird beim nächsten Vorgang verwendet.
+
+Die globale Identität nutzt Git/SSH-Konfiguration und SSH-Agent des Benutzers, der den ausgewählten OpenChamber-Server ausführt. Bei einer Remote-Instanz muss der Schlüssel dort verfügbar sein. Entsperre geschützte Schlüssel vorher im SSH-Agent dieses Serverprozesses. HTTPS nutzt die HTTPS-Zugangsdaten von Git und wechselt nicht automatisch zu SSH. Git-Hosts müssen öffentliche Adressen haben; lokale SSH-Aliase und private Netzwerkziele werden nicht unterstützt.
 
 ## Was eine Erweiterung darf
 
@@ -46,6 +57,8 @@ Wenn eine neuere Version mehr verlangt, als du erlaubt hast, zeigt die Karte **F
 ## Wo sie auftaucht
 
 Neben ihrem Panel in der Leiste kann eine Erweiterung Einträge in Menüs ergänzen, die du ohnehin benutzt: die Aktionen an einer Chat-Nachricht, das Menü einer Sitzung, das +-Menü neben dem Chatfeld und Slash-Befehle wie `/task ABC-12`, die etwas anhängen, ohne etwas zu öffnen. Sie kann ihren eigenen Tools auch ein richtiges Symbol, einen Titel und ein Ausgabelayout im Chat geben, so wie es die eingebauten Tools von OpenChamber haben. Die Erweiterung entscheidet, welche davon sie anbietet; alle bleiben aus, bis du die Erweiterung erlaubst.
+
+Manche Erweiterungen zeigen statt eines eigenen Panels ein Live-Bild: das, worin ein Agent auf dem Server gerade arbeitet, etwa einen Browser oder einen Simulator. Klicke in das Bild oder tippe, um die Steuerung zu übernehmen; die Statuszeile zeigt dann **Du steuerst**, und die Browser-Aktionen des Agenten werden abgelehnt, bis du **An Agent zurückgeben** drückst. Kopieren und Einfügen funktionieren wie gewohnt. Ein gleichzeitig verbundenes anderes Gerät sieht, wer steuert, und kann die Steuerung nicht übernehmen. Eine solche Erweiterung kann neben dem Bild eigene Bedienelemente zeigen, zum Beispiel eine Adressleiste darüber oder eine Werkzeugspalte daneben.
 
 ## Ihr Konto verbinden
 

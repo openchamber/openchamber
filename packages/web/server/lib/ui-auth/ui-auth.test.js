@@ -182,36 +182,35 @@ describe('ui auth client credential seam', () => {
     expect(await auth.ensureSessionToken(urlReq, urlRes)).toBe('client:device-1');
     expect(await auth.resolveAuthContext(urlReq, urlRes, { allowUrlToken: false })).toBe(null);
 
-    const serveReq = { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
-    const serveRes = createResponse();
-    let serveCalled = false;
-    await auth.requireAuth(serveReq, serveRes, () => {
-      serveCalled = true;
-    });
-    expect(serveCalled).toBe(true);
+    // The session URL token no longer opens file previews: a preview page can
+    // read its own URL, so it gets a narrow fs grant instead (see fs routes).
+    for (const denied of [
+      { method: 'GET', path: '/api/fs/serve/tmp/index.html', url: `/api/fs/serve/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} },
+      { method: 'GET', path: '/api/fs/preview/grant/tmp/index.html', url: `/api/fs/preview/grant/tmp/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} },
+    ]) {
+      const deniedRes = createResponse();
+      let deniedCalled = false;
+      await auth.requireAuth(denied, deniedRes, () => {
+        deniedCalled = true;
+      });
+      expect(deniedCalled).toBe(false);
+      expect(deniedRes.statusCode).toBe(401);
+    }
 
-    const absoluteServeReq = { method: 'GET', path: '/api/fs/serve/Users/test/project/preview-test.html', url: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
-    const absoluteServeRes = createResponse();
-    let absoluteServeCalled = false;
-    await auth.requireAuth(absoluteServeReq, absoluteServeRes, () => {
-      absoluteServeCalled = true;
-    });
-    expect(absoluteServeCalled).toBe(true);
-
-    const mountedServeReq = {
+    const mountedRawReq = {
       method: 'GET',
       baseUrl: '/api',
-      path: '/fs/serve/Users/test/project/preview-test.html',
-      originalUrl: `/api/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
-      url: `/fs/serve/Users/test/project/preview-test.html?oc_url_token=${encodeURIComponent(urlToken)}`,
+      path: '/fs/raw',
+      originalUrl: `/api/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`,
+      url: `/fs/raw?path=%2Ftmp%2Fimage.png&oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: {},
     };
-    const mountedServeRes = createResponse();
-    let mountedServeCalled = false;
-    await auth.requireAuth(mountedServeReq, mountedServeRes, () => {
-      mountedServeCalled = true;
+    const mountedRawRes = createResponse();
+    let mountedRawCalled = false;
+    await auth.requireAuth(mountedRawReq, mountedRawRes, () => {
+      mountedRawCalled = true;
     });
-    expect(mountedServeCalled).toBe(true);
+    expect(mountedRawCalled).toBe(true);
 
     const guestReq = { method: 'GET', path: '/api/guests/hello/panel/index.html', url: `/api/guests/hello/panel/index.html?oc_url_token=${encodeURIComponent(urlToken)}`, headers: {} };
     const guestRes = createResponse();
@@ -261,6 +260,22 @@ describe('ui auth client credential seam', () => {
     };
     expect(await auth.ensureSessionToken(dictationWsReq, null)).toBe('client:device-1');
 
+    // An extension surface socket takes the session-wide URL token, never a
+    // guest-scoped one: it carries the user's pointer and keyboard.
+    const surfaceWsReq = {
+      method: 'GET',
+      path: '/api/guests/server-chrome/surface/ws',
+      url: `/api/guests/server-chrome/surface/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    };
+    expect(await auth.ensureSessionToken(surfaceWsReq, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({ ...surfaceWsReq, url: `/api/guests/server-chrome/surface/ws?oc_url_token=${encodeURIComponent(guestToken)}` }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      ...surfaceWsReq,
+      path: '/api/guests/server-chrome/surface/ws/extra',
+      url: `/api/guests/server-chrome/surface/ws/extra?oc_url_token=${encodeURIComponent(urlToken)}`,
+    }, null)).toBe(null);
+
     const devTunnelWsReq = {
       method: 'GET',
       path: '/api/dev-tunnel',
@@ -268,6 +283,35 @@ describe('ui auth client credential seam', () => {
       headers: { upgrade: 'websocket' },
     };
     expect(await auth.ensureSessionToken(devTunnelWsReq, null)).toBe('client:device-1');
+
+    // The sockets and the raw file of an isolated space, by path shape, and nothing else under the prefix.
+    for (const socket of ['terminal/ws', 'dev-tunnel', 'event/ws', 'global/event/ws']) {
+      const spaceWsReq = {
+        method: 'GET',
+        path: `/api/spaces/a1b2c3d4e5f6/${socket}`,
+        url: `/api/spaces/a1b2c3d4e5f6/${socket}?oc_url_token=${encodeURIComponent(urlToken)}`,
+        headers: { upgrade: 'websocket' },
+      };
+      expect(await auth.ensureSessionToken(spaceWsReq, null)).toBe('client:device-1');
+    }
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/dictation/ws',
+      url: `/api/spaces/a1b2c3d4e5f6/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/fs/raw',
+      url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    }, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/session',
+      url: `/api/spaces/a1b2c3d4e5f6/session?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'application/json' },
+    }, null)).toBe(null);
 
     const devTunnelSubpathWsReq = {
       method: 'GET',
@@ -355,5 +399,61 @@ describe('ui auth client credential seam', () => {
     const expiresAt = Date.parse(createClientInput.expiresAt);
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
+  });
+});
+
+// issue #2377: browsers key cookie jars on host only, so two instances on one
+// LAN IP (different ports) collided on `oc_ui_session`. Cookies are now scoped
+// by the request port so each instance owns its own slot.
+describe('ui auth port-scoped session cookies (issue #2377)', () => {
+  const loginHost = async (auth, host) => {
+    const req = { method: 'POST', headers: { host }, body: { password: 'secret' } };
+    const res = createResponse();
+    await auth.handleSessionCreate(req, res);
+    return String(res.getHeader('set-cookie') || '').split(';', 1)[0];
+  };
+
+  it('names the issued cookie with the request port', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    const issued = await loginHost(auth, '192.168.0.1:3000');
+    expect(issued).toMatch(/^oc_ui_session_3000=/);
+    expect(issued.length).toBeGreaterThan('oc_ui_session_3000='.length);
+  });
+
+  it('keeps the bare cookie name when the host has no explicit port', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    expect(await loginHost(auth, '192.168.0.1')).toMatch(/^oc_ui_session=/);
+  });
+
+  it('reads the slot for the request port and ignores another port cookie', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+
+    // Valid token issued against :3000.
+    const portCookie = await loginHost(auth, '192.168.0.1:3000');
+    const validToken = portCookie.slice('oc_ui_session_3000='.length);
+
+    // A request that lands on :3001 must read the :3001 slot, NOT the :3000 one,
+    // even though the browser ships both cookies to either port.
+    const wrongSlot = {
+      method: 'GET',
+      headers: { host: '192.168.0.1:3001', cookie: `oc_ui_session_3000=${validToken}; oc_ui_session_3001=stale` },
+    };
+    const wrongRes = createResponse();
+    await auth.handleSessionStatus(wrongSlot, wrongRes);
+    expect(wrongRes.body.authenticated).toBe(false);
+
+    // The same token read on its own port authenticates.
+    const rightSlot = {
+      method: 'GET',
+      headers: { host: '192.168.0.1:3000', cookie: `oc_ui_session_3000=${validToken}` },
+    };
+    const rightRes = createResponse();
+    await auth.handleSessionStatus(rightSlot, rightRes);
+    expect(rightRes.body.authenticated).toBe(true);
   });
 });

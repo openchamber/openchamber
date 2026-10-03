@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest, Message, Part, PermissionRequest } from "@/lib/opencode/model"
 import {
   canDisposeDirectory,
   hasPendingBlockingRequests,
@@ -13,29 +13,29 @@ const DAY_MS = 24 * 60 * 60 * 1000
 function buildState(overrides: Partial<State> = {}): State {
   return {
     ...INITIAL_STATE,
-    question: {},
+    form: {},
     permission: {},
     ...overrides,
   }
 }
 
-function buildQuestion(overrides: Partial<QuestionRequest> = {}): QuestionRequest {
+function buildForm(overrides: Partial<FormRequest> = {}): FormRequest {
   return {
-    id: "que_1",
+    id: "frm_1",
     sessionID: "ses_1",
-    questions: [{ question: "Continue?", header: "Q", options: [{ label: "Yes", description: "" }] }],
+    title: "Continue?",
+    fields: [],
     ...overrides,
-  } as QuestionRequest
+  } as FormRequest
 }
 
 function buildPermission(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
   return {
     id: "perm_1",
     sessionID: "ses_1",
-    permission: "bash",
-    patterns: [],
+    action: "bash",
+    resources: [],
     metadata: {},
-    always: [],
     ...overrides,
   } as PermissionRequest
 }
@@ -46,8 +46,8 @@ describe("hasPendingBlockingRequests", () => {
     expect(hasPendingBlockingRequests(buildState())).toBe(false)
   })
 
-  test("returns true when at least one session has a pending question", () => {
-    const state = buildState({ question: { ses_a: [buildQuestion()] } })
+  test("returns true when at least one session has a pending form", () => {
+    const state = buildState({ form: { ses_a: [buildForm()] } })
     expect(hasPendingBlockingRequests(state)).toBe(true)
   })
 
@@ -57,16 +57,16 @@ describe("hasPendingBlockingRequests", () => {
   })
 
   test("treats empty arrays under a session key as no pending work", () => {
-    const state = buildState({ question: { ses_a: [] }, permission: { ses_b: [] } })
+    const state = buildState({ form: { ses_a: [] }, permission: { ses_b: [] } })
     expect(hasPendingBlockingRequests(state)).toBe(false)
   })
 })
 
 describe("pickDirectoriesToEvict", () => {
-  test("does not evict an idle directory that has a pending question", () => {
-    const stores = ["/idle-with-question", "/idle-empty"]
+  test("does not evict an idle directory that has a pending form", () => {
+    const stores = ["/idle-with-form", "/idle-empty"]
     const state = new Map<string, DirState>([
-      ["/idle-with-question", { lastAccessAt: 0 }],
+      ["/idle-with-form", { lastAccessAt: 0 }],
       ["/idle-empty", { lastAccessAt: 0 }],
     ])
     const list = pickDirectoriesToEvict({
@@ -76,7 +76,7 @@ describe("pickDirectoriesToEvict", () => {
       max: 30,
       ttl: 1000,
       now: DAY_MS,
-      hasPendingBlockingRequests: (dir) => dir === "/idle-with-question",
+      hasPendingBlockingRequests: (dir) => dir === "/idle-with-form",
     })
     expect(list).toEqual(["/idle-empty"])
   })
@@ -142,8 +142,6 @@ describe("session cache eviction", () => {
         ses_busy: { type: "busy" },
         ses_idle: { type: "idle" },
       },
-      session_diff: {},
-      todo: {},
       message: {
         ses_streaming: [{ id: "msg_1", role: "assistant", time: { created: 1 } } as Message],
       },
@@ -151,14 +149,14 @@ describe("session cache eviction", () => {
       permission: {
         ses_permission: [buildPermission({ sessionID: "ses_permission" })],
       },
-      question: {
-        ses_question: [buildQuestion({ sessionID: "ses_question" })],
+      form: {
+        ses_form: [buildForm({ sessionID: "ses_form" })],
       },
     })
 
-    expect(protectedIds).toEqual(new Set(["ses_busy", "ses_streaming", "ses_permission", "ses_question"]))
+    expect(protectedIds).toEqual(new Set(["ses_busy", "ses_streaming", "ses_permission", "ses_form"]))
 
-    const seen = new Set(["ses_old", "ses_busy", "ses_permission", "ses_question", "ses_streaming", "ses_current"])
+    const seen = new Set(["ses_old", "ses_busy", "ses_permission", "ses_form", "ses_streaming", "ses_current"])
     const evicted = pickSessionCacheEvictions({
       seen,
       keep: "ses_current",
@@ -169,7 +167,7 @@ describe("session cache eviction", () => {
     expect(evicted).toEqual(["ses_old"])
     expect(seen.has("ses_busy")).toBe(true)
     expect(seen.has("ses_permission")).toBe(true)
-    expect(seen.has("ses_question")).toBe(true)
+    expect(seen.has("ses_form")).toBe(true)
     expect(seen.has("ses_streaming")).toBe(true)
   })
 

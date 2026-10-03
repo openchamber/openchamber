@@ -132,6 +132,21 @@ export async function startLinearIssueSession(args: {
     const sessionTitle = `${issue.identifier} ${issue.title}`.trim();
     const login = issue.assignee?.displayName || issue.assignee?.name;
 
+    // Resolved before the session exists, so it can be created on this model
+    // and agent instead of being switched by the first prompt.
+    const configState = useConfigStore.getState();
+    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
+    const defaultModel = resolveDefaultModelSelection();
+    const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
+    const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
+    const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
+    if (!providerID || !modelID) {
+      toast.error(t('session.linearIssuePicker.error.noModelSelected'));
+      return true;
+    }
+
+    const variant = resolveDefaultVariant(providerID, modelID);
+
     const { sessionId, sessionDirectory } = await (async () => {
       if (createInWorktree) {
         const preferred = `issue-${issue.identifier}-${generateBranchSlug()}`;
@@ -147,7 +162,10 @@ export async function startLinearIssueSession(args: {
         return { sessionId: created.id, sessionDirectory: created.path };
       }
 
-      const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
+      const session = await sessionActions.createSession(sessionTitle, projectDirectory, undefined, undefined, {
+        model: { providerID, id: modelID, variant },
+        agent: agentName,
+      });
       if (!session?.id) {
         throw new Error('Failed to create session');
       }
@@ -171,18 +189,6 @@ export async function startLinearIssueSession(args: {
       issueIdentifier: issue.identifier,
     });
 
-    const configState = useConfigStore.getState();
-    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
-    const defaultModel = resolveDefaultModelSelection();
-    const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
-    const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
-    const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
-    if (!providerID || !modelID) {
-      toast.error(t('session.linearIssuePicker.error.noModelSelected'));
-      return true;
-    }
-
-    const variant = resolveDefaultVariant(providerID, modelID);
     const visiblePromptText = await renderMagicPrompt('linear.issue.review.visible', {
       identifier: issue.identifier,
     });

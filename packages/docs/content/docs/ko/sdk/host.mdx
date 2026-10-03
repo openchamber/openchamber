@@ -28,7 +28,7 @@ const host = connectHost();
 | `locale` | 앱 언어 태그 |
 | `directory` | 현재 프로젝트 디렉터리, 또는 `null` |
 | `session` | `{ id, title, busy }` 또는 `null`. 제목이 없으면 세션 id를 사용합니다. `busy`는 실시간 상태입니다. 세션에 있으면 `model`과 `agent`(OpenCode 에이전트)도 포함됩니다. |
-| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page` |
+| `surface` | 레일은 `panel`, 첨부 창은 `dialog`, 전체 화면은 `page`, Work Status 패널은 `status`, Files의 파일 편집기는 `file` |
 | `item` | 이 화면이 무엇 때문에 열렸는지, 또는 `null`. 사용자가 클릭한 첨부 항목(`attach`에 넘긴 것과 같은 필드, `data` 포함), 또는 선언한 작업에서 온 메시지(`kind: "message"`)나 세션(`kind: "session"`). [작업](/sdk/#작업-명령-배지) 참고. |
 | `connection` | 여러분의 통합에 대한 `{ connected, account }` |
 | `settings` | `integration.settings`에 선언한 입력란의 값 |
@@ -36,6 +36,8 @@ const host = connectHost();
 액세스 토큰은 여기에도, `request` 결과에도 절대 나타나지 않습니다.
 
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings`, `onItem`은 늦게 구독해도 최신 값을 다시 보내주고, 이후 값이 바뀔 때마다 계속 실행됩니다.
+
+`theme.tokens`에는 `primaryText`, `successText`, `warningText`, `errorText`, `infoText`가 포함됩니다. 이 필수 필드에는 호스트가 계산한 텍스트 색상이 들어 있습니다. 중립적인 배경과 UI 키트의 옅은 색상 컨트롤용이며, 진한 단색 배경용은 아닙니다. `applyHostReady`가 매 스냅샷에 이 값을 적용합니다. CSS 변수는 [UI 키트](/sdk/ui/)를 참고하세요.
 
 ## 메서드
 
@@ -63,6 +65,14 @@ const host = connectHost();
 | `generate({ prompt, system?, maxOutputTokens? })` | 사용자의 Small Model에서 일회성 텍스트를 받습니다. `{ text }`를 반환합니다. `model` 권한이 필요합니다. |
 | `onResolve(handler)` | 슬래시 명령의 핸들러를 등록합니다. `{ command, args }`를 받고 첨부할 항목 또는 `null`을 반환합니다. |
 | `setBadge(count)` | 레일 아이콘에 숫자(0부터 999까지)를 표시하고, `null`이면 지웁니다 |
+| `openCommit(sha)` | 현재 프로젝트의 해당 커밋으로 Diff 뷰를 엽니다. `sha`는 16진수 7~64자이며, 커밋은 OpenChamber가 직접 읽습니다. |
+| `setHeight(px)` | Work Status 섹션의 높이를 정합니다. OpenChamber는 24~320픽셀 사이로 유지하고, 더 긴 콘텐츠는 페이지 안에서 스크롤됩니다. 다른 곳에서는 무시됩니다. |
+| `onFileOpen(listener)` | 파일 편집기: 편집할 파일을 받습니다. `{ path, name, readOnly }`에 더해 `encoding: "text"`이면 `content`, `encoding: "binary"`이면 `bytes`가 들어 있습니다. 페이지 안에서 Cmd/Ctrl+S로도 저장되게 합니다. |
+| `onFileSnapshot(handler)` | 파일 편집기: 편집된 파일 전체를 `{ content, version }`(바이너리 편집기는 `{ bytes, version }`)으로 반환합니다. OpenChamber는 저장할 때와 소스 보기나 전체 화면으로 전환하기 전에 호출합니다. |
+| `onFileSaved(listener)` | 파일 편집기: 해당 `version`의 스냅샷이 디스크에 저장되었습니다. `reportFileChange`로 응답하세요. |
+| `reportFileChange({ dirty, edited })` | 파일 편집기: 저장하지 않은 변경이 있는지, 문서가 방금 바뀌었는지 OpenChamber에 알립니다 |
+| `requestFileSave()` | 파일 편집기: Cmd/Ctrl+S처럼 지금 저장합니다 |
+| `reportFileUnsupported()` | 파일 편집기: 이 파일은 여기서 열 수 없으니 대신 소스를 보여 줍니다 |
 
 ## attach, startSession, sessionLink
 
@@ -215,12 +225,13 @@ const { text } = await host.generate({ prompt: notes, system: "Summarize in one 
 | `NO_SERVICE` | 로컬 서비스가 선언되지 않았거나, 승인되지 않았거나, 실행 중이 아님 |
 | `NOT_GRANTED` | 이 호출에 필요한 권한을 사용자가 승인하지 않음 |
 | `SERVICE_FAILED` | 로컬 서비스가 충돌했거나 ready 상태가 되지 못함 |
-| `NO_DIRECTORY` | 열린 프로젝트 없이 상대 파일 경로를 사용함 |
-| `NOT_FOUND` | 존재하지 않는 파일에 대한 `readFile` |
+| `NO_DIRECTORY` | 열린 프로젝트 없이 상대 파일 경로를 사용함, 또는 열린 프로젝트 없이 `openCommit` 호출 |
+| `NOT_FOUND` | 존재하지 않는 파일에 대한 `readFile`, 또는 프로젝트에 없는 커밋에 대한 `openCommit` |
 | `FILE_TOO_LARGE` | 읽기 또는 쓰기 시 파일 내용이 제한을 넘음 |
 | `DENIED` | 운영 체제가 파일 작업을 거부함 |
 | `NO_MODEL` | 사용할 수 있는 Small Model 없이 `generate` 호출 |
 | `MODEL_FAILED` | Small Model이 오류를 반환함 |
+| `UNSUPPORTED` | 이 OpenChamber에서는 할 수 없는 호출, 예를 들어 Diff 뷰가 없는 곳의 `openCommit` |
 
 ## 관련 문서
 

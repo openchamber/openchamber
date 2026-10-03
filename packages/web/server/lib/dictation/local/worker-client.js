@@ -14,6 +14,10 @@ import { fileURLToPath } from 'url';
 
 import { applySherpaLoaderEnv } from './sherpa-loader.js';
 
+// Every request is answered by the worker on its next event-loop turn, so this
+// only has to cover IPC latency, not inference time. `session.commit` acks
+// BEFORE the segment is decoded (see worker-process.js) precisely so a long
+// segment can no longer trip this timeout.
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_LOCAL_SAMPLE_RATE = 16000;
@@ -88,26 +92,31 @@ export class DictationWorkerClient {
   }
 
   appendSessionAudio(sessionId, audio) {
-    void this.sendRequest({ type: 'session.append', sessionId, audio }).catch((err) => {
+    // Fire-and-forget with no per-request timeout: audio queued behind a
+    // decode is accepted, just waiting its turn. A dead worker is caught by
+    // handleWorkerExit.
+    void this.sendRequest({ type: 'session.append', sessionId, audio }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   commitSession(sessionId) {
-    void this.sendRequest({ type: 'session.commit', sessionId }).catch((err) => {
+    // Fire-and-forget like appendSessionAudio: the committed/transcript events
+    // carry the result, and a dead worker is caught by handleWorkerExit.
+    void this.sendRequest({ type: 'session.commit', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   clearSession(sessionId) {
-    void this.sendRequest({ type: 'session.clear', sessionId }).catch((err) => {
+    void this.sendRequest({ type: 'session.clear', sessionId }, { timeoutMs: 0 }).catch((err) => {
       this.emitSessionError(sessionId, err);
     });
   }
 
   closeSession(sessionId) {
     this.sessionEmitters.delete(sessionId);
-    void this.sendRequest({ type: 'session.close', sessionId }).catch(() => {
+    void this.sendRequest({ type: 'session.close', sessionId }, { timeoutMs: 0 }).catch(() => {
       // Closing is best-effort; the parent already dropped the session.
     });
     this.scheduleIdleShutdownIfReady();
@@ -141,13 +150,22 @@ export class DictationWorkerClient {
     this.inFlightRequests += 1;
     this.clearIdleTimer();
 
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(requestId);
-        this.inFlightRequests = Math.max(0, this.inFlightRequests - 1);
-        this.scheduleIdleShutdownIfReady();
-        reject(new Error(`Dictation worker request timed out: ${input.type}`));
-      }, options.timeoutMs ?? this.requestTimeoutMs);
+      // timeoutMs === 0 means "no per-request timeout": used for fire-and-forget
+      // audio traffic whose result is discarded. A dead worker is still caught
+      // by the worker 'close' handler (handleWorkerExit), which rejects every
+      // pending request.
+      const timeout =
+        timeoutMs > 0
+          ? setTimeout(() => {
+              this.pendingRequests.delete(requestId);
+              this.inFlightRequests = Math.max(0, this.inFlightRequests - 1);
+              this.scheduleIdleShutdownIfReady();
+              reject(new Error(`Dictation worker request timed out: ${input.type}`));
+            }, timeoutMs)
+          : null;
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 

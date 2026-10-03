@@ -29,6 +29,7 @@ import type { InstalledGuest } from '@/lib/guests/types';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 
@@ -36,7 +37,7 @@ type GuestIntegrationCardProps = {
   guest: InstalledGuest;
 };
 
-const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) => {
+export const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) => {
   const { t } = useI18n();
   const integration = guest.integration;
   const status = useGuestOauthStore((state) => state.byId[guest.id]);
@@ -56,6 +57,9 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   const [settings, setSettings] = React.useState<Record<string, string>>({});
   const [copied, setCopied] = React.useState(false);
   const pollTimerRef = React.useRef<number | null>(null);
+  const [ownerRuntimeKey] = React.useState(getRuntimeKey);
+  const mountedRef = React.useRef(true);
+  const isCurrent = () => mountedRef.current && getRuntimeKey() === ownerRuntimeKey;
 
   const stopWaiting = React.useCallback(() => {
     if (pollTimerRef.current != null) {
@@ -66,8 +70,10 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   }, []);
 
   React.useEffect(() => {
+    mountedRef.current = true;
     void refresh(guest.id);
     return () => {
+      mountedRef.current = false;
       stopWaiting();
     };
   }, [guest.id, refresh, stopWaiting]);
@@ -101,6 +107,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   const name = integration.name;
 
   const saveClient = async (): Promise<boolean> => {
+    if (!isCurrent()) return false;
     const nextId = clientId.trim();
     if (!nextId) {
       if (status?.hasClient) {
@@ -111,6 +118,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
     }
     reportSettingsSaveState('saving');
     const saved = await saveGuestOauthClient(guest.id, nextId, clientSecret.trim() || undefined);
+    if (!isCurrent()) return false;
     if (!saved) {
       reportSettingsSaveState('error');
       toast.error(t('settings.integrations.guests.toast.saveFailed', { name }));
@@ -123,6 +131,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   };
 
   const saveDeclaredSettings = async (next: Record<string, string> = settings): Promise<boolean> => {
+    if (!isCurrent()) return false;
     const stored = status?.settings ?? {};
     const declared = integration.settings ?? [];
     const unchanged = declared.every((field) => (next[field.id] ?? '').trim() === (stored[field.id] ?? ''));
@@ -131,6 +140,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
     }
     reportSettingsSaveState('saving');
     const saved = await saveGuestSettings(guest.id, next);
+    if (!isCurrent()) return false;
     if (!saved) {
       reportSettingsSaveState('error');
       toast.error(t('settings.integrations.guests.toast.saveFailed', { name }));
@@ -142,6 +152,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   };
 
   const saveToken = async (): Promise<boolean> => {
+    if (!isCurrent()) return false;
     const nextToken = token.trim();
     if (!nextToken) {
       if (connected) {
@@ -157,6 +168,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
     }
     reportSettingsSaveState('saving');
     const saved = await saveGuestAccessToken(guest.id, nextToken, needsUsername ? nextUsername : undefined);
+    if (!isCurrent()) return false;
     if (!saved) {
       reportSettingsSaveState('error');
       toast.error(t('settings.integrations.guests.toast.tokenInvalid'));
@@ -170,6 +182,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
   };
 
   const startConnect = async (): Promise<void> => {
+    if (!isCurrent()) return;
     stopWaiting();
     setIsBusy(true);
     const previous = status?.connection ?? { connected: false, account: '' };
@@ -178,8 +191,9 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
         const saved = await saveToken();
         if (saved) {
           if ((integration.settings ?? []).length > 0) {
-            await saveDeclaredSettings();
+            if (!await saveDeclaredSettings()) return;
           }
+          if (!isCurrent()) return;
           toast.success(t('settings.integrations.guests.toast.connected', { name }));
         }
         return;
@@ -191,6 +205,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
         }
       }
       const authorizationUrl = await startGuestOauth(guest.id);
+      if (!isCurrent()) return;
       if (!authorizationUrl) {
         toast.error(t('settings.integrations.guests.toast.startFailed', { name }));
         return;
@@ -201,12 +216,14 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
       const deadline = Date.now() + AUTHORIZATION_WATCH_MS;
       pollTimerRef.current = window.setInterval(() => {
         void (async () => {
+          if (!isCurrent()) { stopWaiting(); return; }
           if (Date.now() > deadline) {
             stopWaiting();
             toast.error(t('settings.integrations.guests.toast.authorizationFailed', { name }));
             return;
           }
           const next = await refresh(guest.id);
+          if (!isCurrent()) return;
           if (next && guestAuthorizationCompleted(previous, next.connection)) {
             stopWaiting();
             toast.success(t('settings.integrations.guests.toast.connected', { name }));
@@ -217,19 +234,22 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
         })();
       }, AUTHORIZATION_POLL_MS);
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to start guest connect:', error);
       toast.error(t('settings.integrations.guests.toast.startFailed', { name }));
       stopWaiting();
     } finally {
-      setIsBusy(false);
+      if (isCurrent()) setIsBusy(false);
     }
   };
 
   const disconnect = async (): Promise<void> => {
+    if (!isCurrent()) return;
     setIsBusy(true);
     try {
       stopWaiting();
       const next = await disconnectGuestOauth(guest.id);
+      if (!isCurrent()) return;
       if (!next) {
         toast.error(t('settings.integrations.guests.toast.disconnectFailed', { name }));
         return;
@@ -237,10 +257,11 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
       setStatus(guest.id, next);
       toast.success(t('settings.integrations.guests.toast.disconnected', { name }));
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to disconnect guest:', error);
       toast.error(t('settings.integrations.guests.toast.disconnectFailed', { name }));
     } finally {
-      setIsBusy(false);
+      if (isCurrent()) setIsBusy(false);
     }
   };
 
@@ -440,6 +461,7 @@ const GuestIntegrationCard: React.FC<GuestIntegrationCardProps> = ({ guest }) =>
 export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divider = true }) => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
+  const runtimeKey = useGuestsStore((state) => state.runtimeKey);
 
   React.useEffect(() => {
     void loadGuestCatalog();
@@ -449,7 +471,7 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
     return null;
   }
 
-  const cards = guests.filter((guest) => guest.integration && isGuestActive(guest));
+  const cards = guests.filter((guest) => guest.source !== 'bundled' && guest.integration && isGuestActive(guest));
   if (cards.length === 0) {
     return null;
   }
@@ -463,7 +485,7 @@ export const GuestIntegrationsSection: React.FC<{ divider?: boolean }> = ({ divi
       contentClassName="space-y-3"
     >
       {cards.map((guest) => (
-        <GuestIntegrationCard key={guest.id} guest={guest} />
+        <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />
       ))}
     </SettingsSection>
   );

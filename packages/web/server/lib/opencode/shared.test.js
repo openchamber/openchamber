@@ -3,9 +3,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig } from './shared.js';
+import { parseMdFile, writeMdFile, readConfigFile, readConfigLayers, writeConfig, walkSkillMdFiles } from './shared.js';
 import { updateAgent } from './agents.js';
-import { updateMcpConfig } from './mcp.js';
+import { updateMcpConfig, createMcpConfig, deleteMcpConfig } from './mcp.js';
 
 const FIXTURE_DIR = path.join(os.tmpdir(), `openchamber-shared-test-${process.pid}`);
 
@@ -165,10 +165,12 @@ describe('updateAgent frontmatter preservation', () => {
     expect(content.match(/^---\r?\n/g)).toHaveLength(1);
 
     const parsed = parseMdFile(agentPath);
+    // `temperature` is a v1 field: reading accepts it, writing moves it under
+    // the v2 `request.body` overlay.
     expect(parsed.frontmatter).toEqual({
       description: 'Strategy agent',
       model: 'openai/gpt-5',
-      temperature: 0.7,
+      request: { body: { temperature: 0.7 } },
     });
     expect(parsed.body).toBe('');
   });
@@ -196,7 +198,7 @@ describe('updateAgent frontmatter preservation', () => {
     expect(parsed.frontmatter).toEqual({
       description: 'Updated strategy agent',
       mode: 'primary',
-      temperature: 0.7,
+      request: { body: { temperature: 0.7 } },
     });
     expect(parsed.body).toBe('Body of strateg.');
   });
@@ -314,7 +316,7 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
     config.mcp.openproject.enabled = false;
     writeConfig(config, file);
 
-    const rewritten = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const rewritten = readConfigFile(file);
     expect(rewritten.plugin).toEqual(['opencode-see-image']);
     expect(rewritten.provider['ollama-cloud'].name).toBe('Ollama Cloud');
     expect(rewritten.mcp.openproject.enabled).toBe(false);
@@ -372,15 +374,289 @@ describe('readConfigFile / writeConfig JSONC safety (issue #2923)', () => {
         }),
       ]);
 
-      updateMcpConfig('openproject', { enabled: false }, projectDir);
-      const rewritten = JSON.parse(fs.readFileSync(custom, 'utf8'));
+      updateMcpConfig('openproject', { disabled: true }, projectDir);
+      const rewritten = readConfigFile(custom);
       expect(rewritten.plugin).toEqual(['opencode-see-image']);
-      expect(rewritten.mcp.openproject.enabled).toBe(false);
+      // The v1 `mcp.<name>` entry is rewritten in place into `mcp.servers`.
+      expect(rewritten.mcp.openproject).toBeUndefined();
+      expect(rewritten.mcp.servers.openproject.disabled).toBe(true);
       expect(fs.readFileSync(projectFile, 'utf8')).toBe(PARTIAL_PARSE_CONFIG);
       expect(fs.existsSync(`${projectFile}.openchamber.backup`)).toBe(false);
     } finally {
       if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
       else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
     }
+  });
+});
+
+describe('walkSkillMdFiles', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const writeSkill = (relativeDir) => writeFixture(path.join(relativeDir, 'SKILL.md'), STANDARD_MD);
+  // A junction needs no elevation on Windows, which is what Skills Manager deploys;
+  // the type argument is ignored on POSIX.
+  const linkDirectory = (target, relativeLink) =>
+    fs.symlinkSync(target, path.join(FIXTURE_DIR, relativeLink), process.platform === 'win32' ? 'junction' : 'dir');
+  const foundRelative = () =>
+    walkSkillMdFiles(FIXTURE_DIR)
+      .map((found) => path.relative(FIXTURE_DIR, found).split(path.sep).join('/'))
+      .sort();
+
+  it('walks a skill deployed as a link inside the scanned root', () => {
+    writeSkill('real-skill');
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'collection'), { recursive: true });
+    writeSkill(path.join('collection', 'nested-skill'));
+    linkDirectory(path.join(FIXTURE_DIR, 'real-skill'), 'linked-skill');
+    linkDirectory(path.join(FIXTURE_DIR, 'collection'), 'collection-link');
+
+    expect(foundRelative()).toEqual([
+      'collection-link/nested-skill/SKILL.md',
+      'collection/nested-skill/SKILL.md',
+      'linked-skill/SKILL.md',
+      'real-skill/SKILL.md',
+    ]);
+  });
+
+  it('ends on a link that points back into the scanned tree', () => {
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'loopdir'), { recursive: true });
+    writeSkill('loopdir');
+    linkDirectory(FIXTURE_DIR, path.join('loopdir', 'back'));
+
+    expect(foundRelative()).toEqual(['loopdir/SKILL.md']);
+  });
+
+  it('skips a link whose target is gone and keeps the rest of the scan', () => {
+    writeSkill('real-skill');
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'gone-skill'), { recursive: true });
+    linkDirectory(path.join(FIXTURE_DIR, 'gone-skill'), 'dangling-link');
+    fs.rmSync(path.join(FIXTURE_DIR, 'gone-skill'), { recursive: true, force: true });
+
+    expect(foundRelative()).toEqual(['real-skill/SKILL.md']);
+  });
+
+  it('follows a link nested below the top level of the scanned root', () => {
+    const outside = `${FIXTURE_DIR}-outside`;
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.mkdirSync(path.join(outside, 'deep-skill'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'deep-skill', 'SKILL.md'), STANDARD_MD);
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'group'), { recursive: true });
+    try {
+      linkDirectory(path.join(outside, 'deep-skill'), path.join('group', 'linked'));
+      expect(foundRelative()).toEqual(['group/linked/SKILL.md']);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('ends on a nested link loop between two directories', () => {
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'a'), { recursive: true });
+    fs.mkdirSync(path.join(FIXTURE_DIR, 'b'), { recursive: true });
+    writeSkill('a');
+    linkDirectory(path.join(FIXTURE_DIR, 'b'), path.join('a', 'to-b'));
+    linkDirectory(path.join(FIXTURE_DIR, 'a'), path.join('b', 'to-a'));
+
+    expect(foundRelative()).toEqual(['a/SKILL.md', 'b/to-a/SKILL.md']);
+  });
+});
+
+describe('writeConfig preserves JSONC comments (issue #3587)', () => {
+  beforeEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  const COMMENTED_CONFIG = [
+    '{',
+    '  // schema for editor hints',
+    '  "$schema": "https://opencode.ai/config.json",',
+    '  /* my servers */',
+    '  "mcp": {',
+    '    "servers": {',
+    '      "openproject": {',
+    '        "type": "remote",',
+    '        "url": "https://openproject.example.com/mcp",',
+    '        "disabled": true, // toggle per environment',
+    '      }',
+    '    }',
+    '  },',
+    '  "plugin": ["opencode-see-image"],',
+    '}',
+    '',
+  ].join('\n');
+
+  const withCustomConfig = (file, run) => {
+    const previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+    try {
+      process.env.OPENCODE_CONFIG = file;
+      return run();
+    } finally {
+      if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+      else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    }
+  };
+
+  it('keeps every comment when a single MCP value changes', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => updateMcpConfig('openproject', { disabled: false }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    expect(raw).toContain('// toggle per environment');
+    expect(readConfigFile(file)).toEqual({
+      $schema: 'https://opencode.ai/config.json',
+      mcp: {
+        servers: {
+          openproject: {
+            type: 'remote',
+            url: 'https://openproject.example.com/mcp',
+            disabled: false,
+          },
+        },
+      },
+      plugin: ['opencode-see-image'],
+    });
+    expect(fs.readFileSync(`${file}.openchamber.backup`, 'utf8')).toBe(COMMENTED_CONFIG);
+  });
+
+  it('keeps comments when adding a new MCP server', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => createMcpConfig('linear', { type: 'remote', url: 'https://mcp.linear.app/sse' }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    expect(raw).toContain('// toggle per environment');
+    expect(readConfigFile(file).mcp.servers.linear).toEqual({
+      type: 'remote',
+      url: 'https://mcp.linear.app/sse',
+    });
+    expect(readConfigFile(file).mcp.servers.openproject.disabled).toBe(true);
+  });
+
+  it('keeps comments when deleting an MCP server and the emptied section', () => {
+    const file = writeFixture('opencode.jsonc', COMMENTED_CONFIG);
+
+    withCustomConfig(file, () => deleteMcpConfig('openproject'));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// schema for editor hints');
+    expect(raw).toContain('/* my servers */');
+    const rewritten = readConfigFile(file);
+    expect(rewritten.mcp).toBeUndefined();
+    expect(rewritten.plugin).toEqual(['opencode-see-image']);
+  });
+
+  it('keeps comments when deleting the only property of a trailing-comma object', () => {
+    const file = writeFixture('trailing-comma.jsonc', [
+      '{',
+      '  // the only entry',
+      '  "mcp": {',
+      '    "servers": {',
+      '      "openproject": { "type": "remote", "url": "https://x", "disabled": true },',
+      '    },',
+      '  },',
+      '}',
+      '',
+    ].join('\n'));
+
+    withCustomConfig(file, () => deleteMcpConfig('openproject'));
+
+    expect(fs.readFileSync(file, 'utf8')).toContain('// the only entry');
+    expect(readConfigFile(file)).toEqual({});
+  });
+
+  it('keeps a standalone comment between a removed property and the next one', () => {
+    const file = writeFixture('gap-comment.jsonc', [
+      '{',
+      '  "a": 1,',
+      '  // about b',
+      '  "b": 2,',
+      '}',
+      '',
+    ].join('\n'));
+
+    const config = readConfigFile(file);
+    delete config.a;
+    writeConfig(config, file);
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// about b');
+    expect(readConfigFile(file)).toEqual({ b: 2 });
+  });
+
+  it('appends the config after comments of a comment-only file', () => {
+    const file = writeFixture('comments-only.jsonc', '// placeholder\n/* still empty */\n');
+
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('// placeholder');
+    expect(raw).toContain('/* still empty */');
+    expect(readConfigFile(file)).toEqual({ $schema: 'https://opencode.ai/config.json' });
+  });
+
+  it('writes a new file as plain JSON when it is missing or empty', () => {
+    const file = path.join(FIXTURE_DIR, 'fresh.jsonc');
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, file);
+    expect(fs.readFileSync(file, 'utf8')).toBe(
+      JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2),
+    );
+
+    const empty = writeFixture('empty.jsonc', '');
+    writeConfig({ $schema: 'https://opencode.ai/config.json' }, empty);
+    expect(fs.readFileSync(empty, 'utf8')).toBe(
+      JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2),
+    );
+  });
+
+  it('leaves the file byte-identical when nothing changed', () => {
+    const file = writeFixture('unchanged.jsonc', COMMENTED_CONFIG);
+
+    writeConfig(readConfigFile(file), file);
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(COMMENTED_CONFIG);
+  });
+
+  it('preserves CRLF line endings and comments', () => {
+    const file = writeFixture('crlf.jsonc', [
+      '{',
+      '  // windows file',
+      '  "mcp": {',
+      '    "servers": {',
+      '      "openproject": { "type": "remote", "url": "https://x", "disabled": true }',
+      '    }',
+      '  },',
+      '}',
+      '',
+    ].join('\r\n'));
+
+    withCustomConfig(file, () => updateMcpConfig('openproject', { disabled: false }));
+
+    const raw = fs.readFileSync(file, 'utf8');
+    expect(raw).toContain('\r\n');
+    expect(raw).toContain('// windows file');
+    expect(readConfigFile(file).mcp.servers.openproject.disabled).toBe(false);
+  });
+
+  it('falls back to a normalized rewrite when the edit cannot round-trip', () => {
+    const file = writeFixture('duplicate-keys.jsonc', '{\n  "a": 1,\n  "a": 2,\n}\n');
+
+    writeConfig({ a: 3 }, file);
+
+    expect(fs.readFileSync(file, 'utf8')).toBe(JSON.stringify({ a: 3 }, null, 2));
   });
 });

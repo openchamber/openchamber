@@ -32,7 +32,7 @@ export const createTunnelWiringRuntime = (dependencies) => {
     setRuntimeManagedRemoteTunnelToken,
   } = dependencies;
 
-  const initialize = (app, initialPort) => {
+  const initialize = (app, initialPort, hasUiPassword) => {
     let activePort = initialPort;
 
     const tunnelService = createTunnelService({
@@ -51,6 +51,7 @@ export const createTunnelWiringRuntime = (dependencies) => {
       tunnelService,
       tunnelProviderRegistry,
       tunnelAuthController,
+      hasUiPassword,
       readSettingsFromDiskMigrated,
       readManagedRemoteTunnelConfigFromDisk,
       normalizeTunnelProvider,

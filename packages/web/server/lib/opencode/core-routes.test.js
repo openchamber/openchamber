@@ -127,6 +127,47 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { content: 'Snippet body' } });
   });
 
+  it('leaves the body of a request alone when told to, for both parsers', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express, skipBodyParsing: (req) => req.path.startsWith('/api/spaces/') });
+    const raw = (req, res) => {
+      // A body a parser read is complete already, and its stream ends no second time.
+      if (req.complete) {
+        res.json({ body: req.body ?? null, raw: '' });
+        return;
+      }
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => res.json({ body: req.body ?? null, raw: Buffer.concat(chunks).toString('utf8') }));
+    };
+    app.post('/api/spaces/abc/form', raw);
+    app.post('/api/spaces/abc/config/snippets/x', raw);
+    app.post('/api/other/form', raw);
+
+    const kept = await request(app).post('/api/spaces/abc/form').type('form').send('a=1&b=2').expect(200);
+    expect(kept.body).toEqual({ body: null, raw: 'a=1&b=2' });
+    const keptJson = await request(app).post('/api/spaces/abc/config/snippets/x').send({ content: 'x' }).expect(200);
+    expect(keptJson.body).toEqual({ body: null, raw: '{"content":"x"}' });
+    // Elsewhere the parsers still run, and a parsed body leaves nothing to read.
+    const parsed = await request(app).post('/api/other/form').type('form').send('a=1&b=2').expect(200);
+    expect(parsed.body).toEqual({ body: { a: '1', b: '2' }, raw: '' });
+  });
+
+  it('should parse JSON bodies for the web search config route', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/config/websearch', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/config/websearch')
+      .send({ selection: 'random' })
+      .expect(200);
+
+    expect(response.body).toEqual({ body: { selection: 'random' } });
+  });
+
   it('should parse JSON bodies for custom provider upsert routes', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });
@@ -200,6 +241,45 @@ describe('core-routes', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('lets only GET html-preview file reads past API auth; the grant in the path is checked by the fs route', async () => {
+    const app = express();
+    const requireAuth = vi.fn((_req, res) => res.status(401).json({ error: 'Unauthorized' }));
+    registerAuthAndAccessRoutes(app, {
+      express,
+      tunnelAuthController: {
+        classifyRequestScope: () => 'local',
+        requireTunnelSession: vi.fn(),
+        getTunnelSessionFromRequest: vi.fn(),
+        clearTunnelSessionCookie: vi.fn(),
+        exchangeBootstrapToken: vi.fn(),
+      },
+      uiAuthController: {
+        requireAuth,
+        handleSessionStatus: vi.fn(),
+        handleSessionCreate: vi.fn(),
+        handlePasskeyStatus: vi.fn(),
+        handlePasskeyAuthenticationOptions: vi.fn(),
+        handlePasskeyAuthenticationVerify: vi.fn(),
+        handlePasskeyRegistrationOptions: vi.fn(),
+        handlePasskeyRegistrationVerify: vi.fn(),
+        handlePasskeyList: vi.fn(),
+        handlePasskeyRevoke: vi.fn(),
+        handleResetAuth: vi.fn(),
+      },
+      readSettingsFromDiskMigrated: vi.fn(async () => ({})),
+      normalizeTunnelSessionTtlMs: vi.fn(),
+    });
+    app.get(/^\/api\/fs\/preview\/.+$/, (_req, res) => res.json({ reached: true }));
+    app.post('/api/fs/preview', (_req, res) => res.json({ reached: true }));
+    app.get('/api/fs/read', (_req, res) => res.json({ reached: true }));
+
+    await request(app).get('/api/fs/preview/grant-1/repo/index.html').expect(200, { reached: true });
+    await request(app).post('/api/fs/preview').send({ path: '/repo/index.html' }).expect(401);
+    await request(app).get('/api/fs/preview/grant-1').expect(401);
+    await request(app).get('/api/fs/read?path=/repo/index.html').expect(401);
+    expect(requireAuth).toHaveBeenCalledTimes(3);
   });
 
   it('should probe loopback preview URLs and return ok: true for status codes 200-599', async () => {

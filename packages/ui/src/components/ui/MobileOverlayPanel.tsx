@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from './ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
+import { useI18n } from '@/lib/i18n';
+import { isInsideOpenPopup, isTopmostBackLayer, registerBackLayer } from '@/lib/mobileBackLayers';
 
 interface MobileOverlayPanelProps {
   open: boolean;
@@ -41,6 +43,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   contentMaxHeightClassName,
   renderHeader,
 }) => {
+  const { t } = useI18n();
   const overlayRootRef = React.useRef<HTMLElement | null>(null);
   const [entered, setEntered] = React.useState(false);
   // True once the enter transition has finished. While entering, the panel's
@@ -85,14 +88,30 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     };
   }, [open]);
 
+  // One stable closer per panel: it is this panel's identity in the back
+  // layer stack, and always calls the latest onClose.
+  const onCloseRef = React.useRef(onClose);
+  React.useLayoutEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+  const closeLayer = React.useCallback(() => onCloseRef.current(), []);
+
+  // The Android back button closes the newest open panel first.
+  React.useEffect(() => {
+    if (!open) return;
+    return registerBackLayer(closeLayer);
+  }, [open, closeLayer]);
+
   React.useEffect(() => {
     if (!open) {
       return;
     }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    // Escape belongs to the newest layer: a select or dialog open inside the
+    // panel closes itself, and a panel under another panel stays open.
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && isTopmostBackLayer(closeLayer) && !isInsideOpenPopup(event.target)) {
         onClose();
       }
     };
@@ -101,7 +120,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [open, onClose]);
+  }, [open, onClose, closeLayer]);
 
   if (!open || !overlayRootRef.current) {
     return null;
@@ -112,7 +131,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity duration-200 ease-out',
+        'oc-keyboard-inset-surface oc-bottom-safe-surface fixed inset-0 z-[60] flex flex-col bg-surface-overlay transition-opacity duration-200 ease-out',
         !enterSettled && 'oc-keyboard-inset-snap',
         entered ? 'opacity-100' : 'opacity-0',
       )}
@@ -132,7 +151,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
     >
         <div
           className={cn(
-            'mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-background shadow-none pwa-overlay-panel',
+            'oc-surface-elevated mt-auto flex max-h-[calc(100dvh-0.75rem)] min-h-0 w-full flex-col rounded-t-xl border-x border-t border-border/50 bg-surface-elevated shadow-none pwa-overlay-panel',
             'mx-auto max-w-lg',
             className
           )}
@@ -146,6 +165,7 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
           const closeButton = (
             <button
               type="button"
+              aria-label={t('dialog.common.actions.close')}
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-interactive-hover"
             >

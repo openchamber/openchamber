@@ -12,7 +12,7 @@ Vous n’avez pas besoin de cette page pour un usage normal. Utilisez-la lorsque
 ## Modifier un prompt
 
 1. Ouvrez **Paramètres → Magic Prompts**.
-2. Choisissez un prompt dans les groupes de la barre latérale — Git, GitHub, Planning et Session.
+2. Choisissez un prompt dans les groupes de la barre latérale — Git, Linear, Planning et Session.
 3. Modifiez le texte et enregistrez.
 
 Certains prompts ont une partie visible (le message que vous verriez) et une partie instructions (des consignes cachées pour l’agent). Les prompts peuvent contenir des `{{placeholders}}` qu’OpenChamber remplit, comme le diff ou le titre de l’issue — gardez-les en place.
@@ -33,14 +33,6 @@ Chaque prompt ci-dessous indique où il s’exécute et ce qui le déclenche. V�
 | Génération de PR | Le formulaire de création de pull request dans l’onglet PR de la vue git | Vous générez le titre et le corps d’une PR. Sont insérés les branches base et head, les commits et fichiers modifiés entre elles, votre contexte additionnel et le modèle de PR du dépôt s’il existe. |
 | Résolution de conflit merge/rebase | Le dialogue de conflits dans la vue git, quand un merge ou un rebase s’arrête sur des conflits | Vous choisissez « Resolve in current session » ou « Resolve in new session ». L’agent lit les fichiers en conflit, propose une stratégie par fichier et attend votre confirmation avant de modifier, staging ou poursuivre l’opération. |
 | Résolution de conflit cherry-pick | La section « Re-integrate commits » d’une session en worktree | Le déplacement des commits de la session vers la branche cible rencontre un conflit et vous le confiez à l’agent. L’agent résout dans le worktree temporaire, stage les fichiers et poursuit le cherry-pick. |
-
-### GitHub
-
-| Prompt | Où il s’exécute | Quand il se déclenche |
-| --- | --- | --- |
-| Relecture de PR | Le sélecteur « Link GitHub PR » dans le menu de pièces jointes du composer, et le dialogue de nouveau worktree | Deux déclencheurs. Attacher une PR comme contexte prépare les instructions, envoyées avec votre prochain message. Créer une session de worktree depuis une PR utilise le prompt comme premier message de la session, avec le contexte complet de la PR. |
-| Relecture d’issue | Le dialogue de nouveau worktree, quand le worktree part d’une issue | Le premier message de la nouvelle session relit l’issue, avec son corps et ses commentaires attachés comme contexte. |
-| Relecture de checks échoués / commentaires de PR / commentaire unique de PR | — | Aucun flux ne les envoie aujourd’hui. La vue PR les déclenchait avant via des actions de relecture en un clic ; désormais les checks échoués et les commentaires s’épinglent comme brouillons de contexte de chat. Ils restent modifiables pour que les overrides existants continuent de fonctionner. |
 
 ### Planning
 

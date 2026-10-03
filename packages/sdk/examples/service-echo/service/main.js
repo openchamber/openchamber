@@ -1,4 +1,4 @@
-// service/main.ts
+// packages/sdk/examples/service-echo/service/main.ts
 import { execFile } from "node:child_process";
 import http from "node:http";
 var port = Number(process.env.OPENCHAMBER_SERVICE_PORT);

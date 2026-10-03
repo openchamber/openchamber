@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Feature request or idea
+    url: https://github.com/openchamber/openchamber/discussions/categories/ideas
+    about: New features and behavior changes start as an Ideas discussion, not an issue.
+  - name: Question or help
+    url: https://github.com/openchamber/openchamber/discussions/categories/q-a
+    about: Setup problems, "how do I", and "is this expected" go to Q&A.

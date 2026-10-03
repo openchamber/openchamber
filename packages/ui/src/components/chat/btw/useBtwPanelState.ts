@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useSession } from '@/sync/sync-context';
 import { getBtwBoundaryMessageID, getBtwSessionID } from '@/lib/sessionBtwMetadata';
 import { useBtwStore } from '@/stores/useBtwStore';

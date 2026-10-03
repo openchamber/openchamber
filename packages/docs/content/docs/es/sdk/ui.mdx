@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+El kit usa colores de texto calculados por el host en botones con tintes suaves, insignias, títulos de avisos, mensajes de validación y enlaces. No necesitas calcular el contraste.
+
+Para tu propio CSS, `applyHostReady` proporciona `--primary-text`, `--success-text`, `--warning-text`, `--error-text` e `--info-text`, con los alias correspondientes `--oc-*-text`. Úsalos para texto sobre fondos neutros o ligeramente teñidos. Conserva los colores base para los rellenos y usa `--oc-primary-fg` para texto sobre un relleno sólido `--oc-primary`. Aplica cada instantánea de `onReady` para mantener los colores actualizados.
+
 `onReady` puede ejecutarse varias veces mientras el panel está abierto, por ejemplo al cambiar el contexto de sesión. Aplica el tema en cada llamada, pero monta controles y registra listeners solo una vez. Guarda los borradores fuera de las funciones de renderizado. Al cambiar de pestaña, oculta los paneles existentes o restaura sus valores desde el estado.
 
 ## Sincroniza la selección y los campos

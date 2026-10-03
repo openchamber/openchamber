@@ -37,10 +37,39 @@ const runtimes = new Map();
 /** @type {Map<string, Promise<ServiceRuntime>>} */
 const startingByGuest = new Map();
 
+/** @type {Map<string, Promise<void>>} */
+const stoppingByGuest = new Map();
+
+// Requests retain their lifecycle object across awaits. A later host start
+// cannot reopen admission for work that belonged to the previous host.
+let hostLifecycle = { accepting: true };
+
+export const beginGuestServiceHost = () => {
+  if (runtimes.size || startingByGuest.size || stoppingByGuest.size) {
+    throw new Error('Guest services must finish stopping before a new host starts.');
+  }
+  hostLifecycle.accepting = false;
+  hostLifecycle = { accepting: true };
+};
+
+export const beginGuestServiceShutdown = () => {
+  hostLifecycle.accepting = false;
+};
+
+const assertGuestHostActive = (lifecycle) => {
+  if (!lifecycle.accepting) {
+    throw new GuestServiceError('The host is shutting down.', 'NO_SERVICE');
+  }
+};
+
 export class GuestServiceError extends Error {
   /**
    * @param {string} message
-   * @param {'NO_SERVICE' | 'SERVICE_FAILED' | 'BAD_PATH' | 'BAD_METHOD'} code
+   * @param {'NO_SERVICE' | 'SERVICE_FAILED' | 'REQUEST_FAILED' | 'BAD_PATH' | 'BAD_METHOD' | 'DISABLED' | 'CANCELLED'} code
+   * `SERVICE_FAILED` is a service that never became ready: nothing was sent
+   * to it. `REQUEST_FAILED` is a request that was sent and got no usable
+   * answer (timeout, dropped connection, unreadable body): the service may
+   * have acted on it.
    */
   constructor(message, code) {
     super(message);
@@ -176,12 +205,79 @@ const stopEpochs = new Map();
 const stopEpochOf = (guestId) => stopEpochs.get(guestId) ?? 0;
 
 /**
+ * Services the host starts on its own (a provider role) have no panel whose
+ * closing would end them, so they end themselves: a request arms a timer, the
+ * next request re-arms it, and when it fires with nothing in flight the
+ * process goes away. The next request starts it again. A panel-driven service
+ * passes no `idleStopMs` and keeps today's lifetime.
+ * @type {Map<string, { timer: ReturnType<typeof setTimeout>, inflight: number, idleMs: number }>}
+ */
+const idleStops = new Map();
+
+const clearIdleStop = (guestId) => {
+  const entry = idleStops.get(guestId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  idleStops.delete(guestId);
+};
+
+/** Long-lived consumers (a surface viewer) that keep an idle-stopping service up. */
+const holds = new Map();
+
+const armIdleStop = (guestId, idleMs) => {
+  const previous = idleStops.get(guestId);
+  const inflight = previous?.inflight ?? 0;
+  if (previous) clearTimeout(previous.timer);
+  const timer = setTimeout(() => {
+    const current = idleStops.get(guestId);
+    if (!current || current.inflight > 0 || (holds.get(guestId) ?? 0) > 0) {
+      // A request is running or a viewer is attached; whichever ends last
+      // re-arms the timer.
+      return;
+    }
+    idleStops.delete(guestId);
+    void discardRuntime(guestId);
+  }, idleMs);
+  timer.unref?.();
+  idleStops.set(guestId, { timer, inflight, idleMs });
+};
+
+/**
+ * Keeps an idle-stopping service alive while the returned release function
+ * has not been called. Releasing the last hold restarts the idle window.
+ * @param {string} guestId
+ */
+export const holdGuestService = (guestId) => {
+  holds.set(guestId, (holds.get(guestId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = (holds.get(guestId) ?? 1) - 1;
+    if (remaining > 0) {
+      holds.set(guestId, remaining);
+      return;
+    }
+    holds.delete(guestId);
+    const entry = idleStops.get(guestId);
+    if (entry && runtimes.get(guestId)) armIdleStop(guestId, entry.idleMs);
+  };
+};
+
+const trackInflight = (guestId, delta) => {
+  const entry = idleStops.get(guestId);
+  if (!entry) return;
+  entry.inflight = Math.max(0, entry.inflight + delta);
+};
+
+/**
  * A user-facing stop (Pause, Remove, withdrawn approval, socket change,
  * host quit): ends the process and cancels any request or start in flight.
  * @param {string} guestId
  */
 export const stopGuestService = async (guestId) => {
   stopEpochs.set(guestId, stopEpochOf(guestId) + 1);
+  clearIdleStop(guestId);
   await discardRuntime(guestId);
 };
 
@@ -192,6 +288,8 @@ export const stopGuestService = async (guestId) => {
  * @param {string} guestId
  */
 const discardRuntime = async (guestId) => {
+  const stopping = stoppingByGuest.get(guestId);
+  if (stopping) return stopping;
   const runtime = runtimes.get(guestId);
   if (!runtime) {
     return;
@@ -202,7 +300,7 @@ const discardRuntime = async (guestId) => {
   if (child.exitCode !== null || child.signalCode) {
     return;
   }
-  await new Promise((resolve) => {
+  const stopped = new Promise((resolve) => {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       resolve(undefined);
@@ -213,14 +311,24 @@ const discardRuntime = async (guestId) => {
     });
     child.kill('SIGTERM');
   });
+  stoppingByGuest.set(guestId, stopped);
+  try {
+    await stopped;
+  } finally {
+    stoppingByGuest.delete(guestId);
+  }
 };
 
 /** Test seam: the pid of a guest's running service, or `null`. */
 export const readServicePid = (guestId) => runtimes.get(guestId)?.child.pid ?? null;
 
 export const stopAllGuestServices = async () => {
-  const ids = [...runtimes.keys()];
-  await Promise.all(ids.map((id) => stopGuestService(id)));
+  const starts = [...startingByGuest.values()];
+  const ids = new Set([...runtimes.keys(), ...startingByGuest.keys(), ...stoppingByGuest.keys()]);
+  const stops = [...ids].map((id) => stopGuestService(id));
+  // Cancelled starts reject normally. Await their cleanup as well as children
+  // already registered when shutdown began.
+  await Promise.allSettled([...starts, ...stops]);
 };
 
 /**
@@ -266,7 +374,14 @@ const startGuestService = async ({
   socketBindings = [],
   socketOverrides = {},
   epoch,
+  lifecycle,
 }) => {
+  assertGuestHostActive(lifecycle);
+  // A replacement must not occupy the same guest slot while its previous
+  // child is still stopping; host shutdown must be able to drain both.
+  const previousStop = stoppingByGuest.get(guestId);
+  if (previousStop) await previousStop;
+  assertGuestHostActive(lifecycle);
   const existing = runtimes.get(guestId);
   if (existing?.status === 'ready' && existing.child.exitCode === null && !existing.child.signalCode) {
     return existing;
@@ -276,7 +391,7 @@ const startGuestService = async ({
   }
   // The request's epoch, read before its first store access: a Pause that
   // finished anywhere since then is a cancellation, spawn included.
-  const cancelled = () => stopEpochOf(guestId) !== epoch;
+  const cancelled = () => !lifecycle.accepting || stopEpochOf(guestId) !== epoch;
   const stoppedError = () => new GuestServiceError('The service was stopped before it became ready.', 'NO_SERVICE');
 
   const absoluteEntry = path.resolve(packageRoot, entry);
@@ -294,6 +409,7 @@ const startGuestService = async ({
     throw stoppedError();
   }
   const port = await reserveLoopbackPort();
+  if (cancelled()) throw stoppedError();
   const token = crypto.randomBytes(24).toString('hex');
   const socketEnv = socketBindings.length > 0
     ? await resolveServiceSocketEnv(socketBindings, socketOverrides)
@@ -418,8 +534,15 @@ const ensureGuestService = async (params) => {
 };
 
 /**
+ * Starts the guest's service if needed and sends it one HTTP request, giving
+ * back the raw `Response`. This is the one place a host-driven caller (a
+ * provider role, a shared surface) or a panel proxy talks to the loopback:
+ * the enabled check, the grant, the spawn, the epoch, and the bearer live
+ * here. The caller reads the body as it needs it (text, JSON, image bytes).
+ *
  * @param {{
  *   guestId: string,
+ *   guestName?: string,
  *   packageRoot: string,
  *   service: { entry: string, permissions?: { sockets?: Array<{ id: string, candidatesByPlatform?: Partial<Record<'linux' | 'darwin' | 'win32', string[]>> }>, exec?: string[] } },
  *   granted: string[],
@@ -428,9 +551,17 @@ const ensureGuestService = async (params) => {
  *   path: string,
  *   query?: Record<string, string>,
  *   body?: string,
- * }} params
+ *   accept?: string,
+ *   headers?: Record<string, string>,
+ *   timeoutMs?: number,
+ *   idleStopMs?: number,
+ *   signal?: AbortSignal,
+ * }} params `timeoutMs` and `idleStopMs` are for host-driven calls; a
+ * panel's `serviceRequest` keeps the SDK limits. With `idleStopMs` the
+ * service stops itself after that long without a request; `holdGuestService`
+ * suspends that while a long-lived consumer (a surface viewer) is attached.
  */
-export const proxyGuestServiceRequest = async ({
+export const openGuestServiceRequest = async ({
   guestId,
   guestName,
   packageRoot,
@@ -441,7 +572,14 @@ export const proxyGuestServiceRequest = async ({
   path: requestPath,
   query,
   body,
+  accept = 'application/json',
+  headers: extraHeaders,
+  timeoutMs = GUEST_REQUEST_TIMEOUT_MS,
+  idleStopMs,
+  signal,
 }) => {
+  const lifecycle = hostLifecycle;
+  assertGuestHostActive(lifecycle);
   if (!METHODS.has(method)) {
     throw new GuestServiceError('Unsupported request method.', 'BAD_METHOD');
   }
@@ -453,6 +591,7 @@ export const proxyGuestServiceRequest = async ({
   // enabled flag it read before the pause.
   const epoch = stopEpochOf(guestId);
   const store = await readExtensionStore(persistPath);
+  assertGuestHostActive(lifecycle);
   if (store.disabledGuests?.[guestId]) {
     const label = typeof guestName === 'string' && guestName.trim() ? guestName.trim() : 'This extension';
     throw new GuestServiceError(
@@ -481,9 +620,10 @@ export const proxyGuestServiceRequest = async ({
       socketBindings,
       socketOverrides,
       epoch,
+      lifecycle,
     });
   }
-  if (stopEpochOf(guestId) !== epoch) {
+  if (!lifecycle.accepting || stopEpochOf(guestId) !== epoch) {
     if (runtimes.get(guestId) === runtime) {
       await discardRuntime(guestId);
     }
@@ -507,13 +647,27 @@ export const proxyGuestServiceRequest = async ({
 
   /** @type {Record<string, string>} */
   const headers = {
-    Accept: 'application/json',
+    // Host-set context (surface viewer headers) first: nothing in it can
+    // replace the bearer or the content type below.
+    ...extraHeaders,
+    Accept: accept,
     [OPENCHAMBER_SERVICE_AUTH_HEADER]: `Bearer ${runtime.token}`,
   };
   if (body !== undefined && method !== 'GET') {
     headers['Content-Type'] = 'application/json';
   }
 
+  if (idleStopMs) {
+    armIdleStop(guestId, idleStopMs);
+    trackInflight(guestId, 1);
+  }
+  const settleIdle = () => {
+    if (!idleStopMs) return;
+    trackInflight(guestId, -1);
+    // Measured from the end of the last request, not its start: a long
+    // action must not be cut short by a timer armed before it began.
+    if (runtimes.get(guestId) === runtime) armIdleStop(guestId, idleStopMs);
+  };
   let response;
   try {
     response = await fetch(url, {
@@ -521,18 +675,47 @@ export const proxyGuestServiceRequest = async ({
       headers,
       body: method === 'GET' || body === undefined ? undefined : body,
       redirect: 'manual',
-      signal: AbortSignal.timeout(GUEST_REQUEST_TIMEOUT_MS),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
     });
   } catch {
+    settleIdle();
+    if (signal?.aborted) {
+      throw new GuestServiceError('The request was cancelled.', 'CANCELLED');
+    }
     runtime.status = 'failed';
-    throw new GuestServiceError('Guest service request failed.', 'SERVICE_FAILED');
+    throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
   }
+  // The body is still streaming when we return; the idle window starts once
+  // the caller has read it (or dropped it), which is what `finished` marks.
+  return {
+    response,
+    finished: settleIdle,
+  };
+};
 
-  const text = await response.text();
+/**
+ * Panel-shaped proxy: text answer, capped. Same params as
+ * `openGuestServiceRequest` plus `responseMax`.
+ */
+export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RESPONSE_MAX, ...params }) => {
+  const { response, finished } = await openGuestServiceRequest(params);
+  let text;
+  try {
+    text = await response.text();
+  } catch {
+    finished();
+    if (params.signal?.aborted) {
+      throw new GuestServiceError('The request was cancelled.', 'CANCELLED');
+    }
+    const runtime = runtimes.get(params.guestId);
+    if (runtime) runtime.status = 'failed';
+    throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
+  }
+  finished();
   return {
     status: response.status,
-    body: text.length <= GUEST_REQUEST_RESPONSE_MAX
+    body: text.length <= responseMax
       ? text
-      : text.slice(0, GUEST_REQUEST_RESPONSE_MAX),
+      : text.slice(0, responseMax),
   };
 };

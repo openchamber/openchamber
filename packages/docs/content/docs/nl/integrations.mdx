@@ -1,0 +1,87 @@
+---
+title: Integraties
+description: Verbind de diensten en abonnementen waarmee OpenChamber werkt.
+---
+
+# Integraties
+
+Bij **Instellingen → Integraties** meldt u zich aan bij diensten waarmee OpenChamber werkt. De aanmelding wordt op de OpenChamber-server bewaard, zodat web, desktop en een gekoppelde telefoon haar delen.
+
+## GitHub
+
+Klap de kaart **GitHub** open en kies **GitHub verbinden** om u met een korte apparaatcode aan te melden. Daarna kan OpenChamber sessies vanuit issues en pull requests starten, ze aan berichten koppelen en PR's openen of bijwerken. Alle mogelijkheden staan bij [GitHub-issues en PR's](/nl/github/).
+
+## Linear
+
+### Een werkruimte verbinden
+
+1. Klap de kaart **Linear** open en kies **Verbinden**.
+2. Geef toegang in het browsertabblad dat opent. Totdat u dat doet, toont de kaart **Wachten op Linear**.
+
+Verbind een andere Linear-organisatie met **Werkruimte toevoegen**. Er is steeds één actieve werkruimte. Wissel met **Overschakelen naar**. **Verbinding verbreken** verwijdert alleen de huidige verbinding. Uw projectkoppelingen blijven behouden.
+
+### Issues bekijken
+
+Na het verbinden verschijnt het paneel **Linear** in de rechtercontextbalk. Het toont de issues van de huidige werkruimte. U kunt:
+
+- filteren op status: **Backlog**, **Te doen**, **Bezig**, **In review**, **Klaar**, **Geannuleerd** of **Duplicaat**; op toegewezen persoon: **Iedereen** of **Aan mij toegewezen**; en op team en prioriteit
+- zoeken op titel, identifier of Linear-URL
+- een issue openen om beschrijving, reacties, labels en prioriteit te lezen
+- de **Status** wijzigen of het **Issue sluiten**
+- wisselen van **Werkruimte**
+
+### Een sessie vanuit een issue starten
+
+- Open een issue in het Linear-paneel en kies **Sessie starten**. De knop blijft onderaan staan terwijl u door het issue scrolt.
+- Kies in de chat **Nieuwe sessie vanuit Linear-issue** om er een uit de lijst te kiezen. Gebruik **In worktree maken** als u een nieuwe branch wilt.
+- Kies in het venster **Nieuwe worktree** een Linear-issue. De nieuwe sessie opent met het issue toegevoegd aan het berichtveld, en het eerste bericht schrijft u zelf.
+
+Vanuit het Linear-paneel en de chat opent de sessie in het project dat aan het team van het issue is gekoppeld, met het issue als eerste prompt. Stel de koppelingen in op de Linear-kaart: **Standaardproject** geldt voor alle teams en **Teamprojecten** kunnen dat per team overschrijven. Bij een team zonder koppeling wordt eerst gevraagd die in te stellen. Het eerste bericht wordt opgebouwd met de magische prompt **Issue-review**, te bewerken bij **Instellingen → Magic Prompts → Linear**.
+
+### Een issue aan een bericht koppelen
+
+Open in het chatinvoerveld het menu **+** en kies **Linear**. Het issue gaat als context mee met uw volgende bericht. Het werkstatuspaneel bewaart een link ernaartoe.
+
+### Sessiereacties
+
+Schakel **Sessiereacties** in op de Linear-kaart. Een sessie die vanuit een issue is gestart, of waarvan het eerste bericht het issue als bijlage heeft, plaatst dan een reactie bij het starten, afronden of mislukken, steeds met een link naar de sessie. Dat gebeurt alleen als deze OpenChamber-server een openbaar adres heeft, zodat iedereen bij het issue de link kan gebruiken. Bij een lokaal of privéadres wordt niets geplaatst.
+
+## Een integratie installeren
+
+1. Open **Instellingen → Integraties**.
+2. Zoek de integratie en kies **Installeren**.
+3. Herstart OpenCode wanneer daarom wordt gevraagd. De provider verschijnt na de herstart.
+4. Kies **Instellen** en meld u aan. De modellen verschijnen daarna in de modelkiezer van de chat.
+
+Integraties worden voor uw gebruiker geïnstalleerd en werken dus in elk project. U kunt ze op elk moment via dezelfde kaart bijwerken of verwijderen.
+
+## Claude Code
+
+Claude Code gebruikt uw Claude Pro- of Max-abonnement via de Claude Code CLI op uw computer, zonder API-sleutels.
+
+1. Installeer de integratie zoals hierboven beschreven.
+2. Kies **Instellen** en meld u aan. Als de Claude Code CLI nog ontbreekt, biedt de installatie aan die eerst te installeren en u daarna aan te melden.
+
+**Hoe uw Claude-account wordt beschermd:** deze integratie gebruikt de officiële Claude Agent SDK van Anthropic en uw geïnstalleerde Claude Code CLI. Ze onderschept geen OAuth, haalt geen browsertokens op om ze opnieuw te gebruiken, doet zich niet voor als een niet-ondersteunde client en omzeilt de authenticatie van Anthropic niet. Ze volgt de ondersteunde toegangsroute en brengt daarmee niet het risico op accountblokkering mee dat hoort bij gestolen tokens of ongeoorloofde authenticatieomwegen.
+
+## Bijwerken of verwijderen
+
+- **Bijwerken** installeert de nieuwste gepubliceerde pluginversie.
+- **Verwijderen** haalt de plugin uit uw OpenCode-configuratie. De provider wordt niet meer geladen nadat OpenCode is vernieuwd.
+
+Als een kaart aangeeft dat vermeldingen handmatig beheerd moeten worden, kiest u **Plugins beheren** en verwijdert u daar de dubbele vermeldingen.
+
+## Excalidraw
+
+Met Excalidraw tekent u rechtstreeks in Bestanden in `.excalidraw`-bestanden en Obsidian-tekeningen met `.excalidraw.md`. Het is een OpenChamber-extensie, onder **OpenChamber-extensies** op dezelfde pagina.
+
+1. Open **Instellingen → Integraties** en kies **Installeren** op de Excalidraw-kaart. U kunt ook een tekening in Bestanden openen en op **Installeren** klikken in de melding erboven.
+2. Open de tekening opnieuw. Het tekenvlak vervangt de bestandstekst. Cmd/Ctrl+S, automatisch opslaan, de bronweergave en volledig scherm werken zoals bij andere bestanden.
+
+Via de kaart werkt u de extensie bij, schakelt u haar opnieuw in als ze gepauzeerd is of verwijdert u haar. Verwijderen laat uw tekeningen intact; ze openen dan gewoon als tekst. Alleen beschikbaar op web en desktop.
+
+## Zie ook
+
+- [GitHub-issues en PR's](/nl/github/) voor alle GitHub-functies
+- [Worktree-sessies](/nl/worktrees/) waarin issuesessies kunnen starten
+- [Magische prompts](/nl/magic-prompts/) om de beginprompt van een Linear-sessie aan te passen

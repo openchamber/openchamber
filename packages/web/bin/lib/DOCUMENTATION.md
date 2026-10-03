@@ -54,11 +54,12 @@ Command modules implement user-facing commands and preserve output contracts acr
   - Finds or starts a local instance and prints the browser/connect URL according to the selected output mode.
   - Emits a **pairing v2** link (`openchamber://connect?v=2&p=<base64url>`): it creates a one-time pairing session in the shared store (`client-pairing-sessions.json`) and encodes the pairing id + secret + transport candidates. The client redeems the secret over whichever candidate connects first (`/api/client-auth/pairing/redeem`). No standalone token is embedded — the QR itself is the single-use credential.
   - The default form advertises the resolved server URL as a direct (lan/tunnel) candidate and folds in a relay candidate when the host relay is enabled, so one link works on-LAN and off-network.
-  - `--relay` builds a relay-only pairing link (the sole candidate is the relay transport), for sharing with a device that is not on the host's network — no server URL, no auto-start. The relay endpoint follows `OPENCHAMBER_RELAY_URL` / the stored setting / the default, matching the running host; the host must be running with the relay enabled to serve the redeem over the tunnel.
+  - `--relay` builds a relay-only pairing link (the sole candidate is the relay transport), for sharing with a device that is not on the host's network — no server URL, no auto-start. The relay endpoint follows the administrator's pin (`pinnedRelayUrl`: policy file, then `OPENCHAMBER_RELAY_URL`) / the stored setting / the default, matching the running host; the host must be running with the relay enabled to serve the redeem over the tunnel.
 
 - `commands-update.js`
   - Implements `openchamber update`.
   - Loads the package-manager helper, performs update flow, and coordinates restart behavior after updates.
+  - Installs the exact version returned by the update check and verifies the globally installed version after the package manager exits; a zero exit status without the target version is a loud failure, not a success report (#3083).
 
 - `commands-tunnel.js`
   - Implements `openchamber tunnel` and its subcommands: `profile`, `providers`, `ready`, `doctor`, `status`, `start`, `stop`, and `completion`.

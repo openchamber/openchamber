@@ -134,6 +134,7 @@ function createRuntime(server, overrides = {}) {
     isExecutable: () => false,
     isRequestOriginAllowed: async () => true,
     rejectWebSocketUpgrade() {},
+    shutdownProcesses: async terminals => { for (const terminal of terminals) terminal.process.kill('SIGKILL'); },
     TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: 30_000,
     TERMINAL_INPUT_WS_REBIND_WINDOW_MS: 1_000,
     TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: 3,
@@ -227,6 +228,27 @@ describe('terminal runtime', () => {
     expect(later.statusCode).toBe(400);
     expect(harness.processes).toHaveLength(1);
     await harness.runtime.shutdown();
+  });
+
+  it('joins terminal cleanup and retires sessions before waiting for shutdown', async () => {
+    const gate = deferred();
+    let terminals;
+    const harness = createHarness({ shutdownProcesses: async current => { terminals = current; await gate.promise; } });
+    await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'running', cwd: '/repo' } }, createResponse());
+    let done = false;
+    const closing = harness.runtime.shutdown();
+    expect(harness.runtime.shutdown()).toBe(closing);
+    closing.then(() => { done = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0].process).toBe(harness.processes[0]);
+    expect(done).toBe(false);
+    const later = createResponse();
+    await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'later', cwd: '/repo' } }, later);
+    expect(later.statusCode).toBe(400);
+    gate.resolve();
+    await closing;
+    expect(done).toBe(true);
   });
 
   for (const removal of ['close', 'force-kill']) {
@@ -433,6 +455,25 @@ describe('terminal runtime', () => {
     } finally {
       if (previousArgv0 === undefined) delete process.env.ARGV0;
       else process.env.ARGV0 = previousArgv0;
+      await harness.runtime.shutdown();
+    }
+  });
+
+  it('removes the AppImage launcher entries from the PTY environment', async () => {
+    const previous = { APPDIR: process.env.APPDIR, LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH };
+    process.env.APPDIR = '/tmp/.mount_OpenChAbC123';
+    process.env.LD_LIBRARY_PATH = '/tmp/.mount_OpenChAbC123/usr/lib:/opt/cuda/lib64:';
+    const harness = createHarness();
+    try {
+      const response = createResponse();
+      await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-ld-path', cwd: '/repo', cols: 80, rows: 24 } }, response);
+      expect(response.statusCode).toBe(200);
+      expect(harness.processes[0].options.env.LD_LIBRARY_PATH).toBe('/opt/cuda/lib64');
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       await harness.runtime.shutdown();
     }
   });
@@ -674,6 +715,35 @@ describe('terminal runtime', () => {
       await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'term-1' } }, createResponse());
       expect(harness.processes[0].kills).toEqual(['SIGTERM', 'SIGKILL']);
     } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('refuses a sandboxed page (Origin: null) even when the UI has no password', async () => {
+    const server = http.createServer();
+    const refused = [];
+    const runtime = createRuntime(server, {
+      rejectWebSocketUpgrade(socket, status) {
+        refused.push(status);
+        socket.write(`HTTP/1.1 ${status} Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+        socket.destroy();
+      },
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const socketUrl = `ws://127.0.0.1:${server.address().port}/api/terminal/ws`;
+    const handshake = (headers) => new Promise((resolve) => {
+      const socket = new WebSocket(socketUrl, { headers });
+      socket.once('open', () => { socket.close(); resolve('open'); });
+      socket.once('unexpected-response', (_req, res) => resolve(res.statusCode));
+      socket.once('error', () => resolve('error'));
+    });
+    try {
+      expect(await handshake({ Origin: 'null' })).toBe(403);
+      expect(refused).toEqual([403]);
+      // Native clients send no Origin and keep working without a password.
+      expect(await handshake({})).toBe('open');
+    } finally {
+      await runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it('runs snapshot-first attach, scoped I/O, replay, reconnect, and close over a real websocket', async () => {

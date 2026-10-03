@@ -13,6 +13,9 @@ type FakeElement = {
     innerHTML: string;
     setAttribute: (name: string, value: string) => void;
     getAttribute: (name: string) => string | null;
+    hasAttribute: (name: string) => boolean;
+    removeAttribute: (name: string) => void;
+    readonly lastElementChild: FakeElement | null;
     appendChild: (child: FakeElement) => FakeElement;
     replaceWith: (replacement: FakeElement) => void;
     remove: () => void;
@@ -67,6 +70,15 @@ const makeFakeElement = (ownerDocument: { createElement: () => FakeElement }): F
         },
         getAttribute(name) {
             return this.attributes.get(name) ?? null;
+        },
+        hasAttribute(name) {
+            return this.attributes.has(name);
+        },
+        removeAttribute(name) {
+            this.attributes.delete(name);
+        },
+        get lastElementChild() {
+            return this.children.at(-1) ?? null;
         },
         appendChild(child) {
             child.parentNode = this;
@@ -125,6 +137,7 @@ const installRendererDom = () => {
     Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: {
+            location: { origin: 'http://localhost', href: 'http://localhost/' },
             matchMedia: () => ({ matches: false }),
             setTimeout,
             clearTimeout,
@@ -252,7 +265,6 @@ mock.module('@/hooks/useEffectiveDirectory', () => ({ useEffectiveDirectory: () 
 mock.module('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ editor: undefined, runtime: { isVSCode: false } }) }));
 mock.module('@/lib/desktop', () => ({ isDesktopLocalOriginActive: () => false, isDesktopShell: () => false, isVSCodeRuntime: () => false }));
 mock.module('@/lib/runtimeSurface', () => ({ isMobileSurfaceRuntime: () => false }));
-mock.module('@/lib/outsideFileGrants', () => ({ ensureOutsideFileGrantForDesktop: async () => undefined }));
 mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFilePathWithinDirectory: () => true, toAbsoluteFilePath: () => '' }));
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
@@ -270,7 +282,8 @@ mock.module('./markdown/detachedMarkdownDomCache', () => ({
         store: () => undefined,
     },
 }));
-mock.module('@/lib/runtime-switch', () => ({ getRuntimeKey: () => 'runtime' }));
+mock.module('@/lib/runtime-switch', () => ({ getRuntimeApiBaseUrl: () => '', getRuntimeKey: () => 'runtime' }));
+mock.module('@/lib/router/openSessionFromRoute', () => ({ openSessionLink: async () => undefined }));
 type TestDecorateContext = {
     labels: { copy: string };
     codeBlockLineWrap: boolean;

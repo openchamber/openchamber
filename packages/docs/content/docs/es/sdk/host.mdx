@@ -28,7 +28,7 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 | `locale` | la etiqueta de idioma de la app |
 | `directory` | el directorio del proyecto actual, o `null` |
 | `session` | `{ id, title, busy }` o `null`. Si no hay título, se usa el id de la sesión. `busy` es el estado en vivo. `model` y `agent` (el agente de OpenCode) aparecen cuando la sesión los tiene. |
-| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa |
+| `surface` | `panel` en la barra lateral, `dialog` en la ventana de adjuntar, `page` a pantalla completa, `status` en el panel Work Status, `file` como editor de archivos en Files |
 | `item` | para qué se abrió esta superficie, o `null`: el elemento adjunto en el que el usuario hizo clic (los mismos campos que pasaste a `attach`, incluido `data`), un mensaje (`kind: "message"`) o una sesión (`kind: "session"`) desde una de tus acciones declaradas. Ver [Acciones](/sdk/#acciones-comandos-y-la-insignia). |
 | `connection` | `{ connected, account }` de tu integración |
 | `settings` | los valores de los campos que declaraste en `integration.settings` |
@@ -36,6 +36,8 @@ No es un callback de montaje único. Monta la UI y registra suscripciones una ve
 Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 
 `onDirectory`, `onSession`, `onSessionLifecycle`, `onConnection`, `onSettings` y `onItem` reproducen el último valor si te suscribes tarde, y luego siguen disparándose cada vez que cambia.
+
+`theme.tokens` incluye `primaryText`, `successText`, `warningText`, `errorText` e `infoText`. Estos campos obligatorios contienen colores de texto calculados por el host para fondos neutros y controles con tintes suaves del UI kit, no para rellenos de color sólido. `applyHostReady` los aplica en cada instantánea. Consulta [UI kit](/sdk/ui/) para las variables CSS.
 
 ## Métodos
 
@@ -63,6 +65,14 @@ Los tokens de acceso nunca aparecen aquí ni en el resultado de un `request`.
 | `generate({ prompt, system?, maxOutputTokens? })` | texto puntual del Small Model del usuario. Devuelve `{ text }`. Necesita la capacidad `model`. |
 | `onResolve(handler)` | registra el manejador de tus comandos de barra. Recibe `{ command, args }` y devuelve un elemento para adjuntar o `null`. |
 | `setBadge(count)` | muestra un número (0 a 999) en tu icono de la barra lateral, o `null` para quitarlo |
+| `openCommit(sha)` | abrir la vista Diff en ese commit del proyecto actual. `sha` tiene de 7 a 64 caracteres hexadecimales; OpenChamber lee el commit por su cuenta. |
+| `setHeight(px)` | fijar la altura de tu sección de Work Status. OpenChamber la mantiene entre 24 y 320 píxeles; el contenido más alto se desplaza dentro de tu página. En otros sitios se ignora. |
+| `onFileOpen(listener)` | editores de archivos: recibir el archivo que se va a editar, `{ path, name, readOnly }` más `encoding: "text"` con `content`, o `encoding: "binary"` con `bytes`. También hace que Cmd/Ctrl+S guarde dentro de tu página. |
+| `onFileSnapshot(handler)` | editores de archivos: devolver `{ content, version }` (o `{ bytes, version }` en un editor binario), el archivo editado completo. OpenChamber lo llama para guardar y antes de cambiar a la vista de código fuente o a pantalla completa. |
+| `onFileSaved(listener)` | editores de archivos: la instantánea con esa `version` está en disco. Responde con `reportFileChange`. |
+| `reportFileChange({ dirty, edited })` | editores de archivos: indicar a OpenChamber si hay cambios sin guardar y si el documento acaba de cambiar |
+| `requestFileSave()` | editores de archivos: guardar ahora, igual que Cmd/Ctrl+S |
+| `reportFileUnsupported()` | editores de archivos: este archivo no se puede abrir aquí, mostrar su código fuente en su lugar |
 
 ## attach, startSession y sessionLink
 
@@ -215,12 +225,13 @@ Las llamadas fallidas lanzan `HostRequestError`. `code` es uno de estos; `messag
 | `NO_SERVICE` | no hay servicio local declarado, no está aprobado o no está en ejecución |
 | `NOT_GRANTED` | el usuario no ha aprobado la capacidad que necesita esta llamada |
 | `SERVICE_FAILED` | el servicio local falló o nunca llegó a estar listo |
-| `NO_DIRECTORY` | se usó una ruta de archivo relativa sin proyecto abierto |
-| `NOT_FOUND` | `readFile` sobre un archivo que no existe |
+| `NO_DIRECTORY` | se usó una ruta de archivo relativa sin proyecto abierto, o `openCommit` sin proyecto abierto |
+| `NOT_FOUND` | `readFile` sobre un archivo que no existe, o `openCommit` sobre un commit que no está en el proyecto |
 | `FILE_TOO_LARGE` | contenido del archivo por encima del límite, al leer o escribir |
 | `DENIED` | el sistema operativo rechazó la operación sobre el archivo |
 | `NO_MODEL` | `generate` sin ningún Small Model disponible |
 | `MODEL_FAILED` | el Small Model devolvió un error |
+| `UNSUPPORTED` | este OpenChamber no puede hacer la llamada, por ejemplo `openCommit` donde no hay vista Diff |
 
 ## Relacionado
 

@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+Kit; hafif renkli düğmeler, rozetler, bildirim başlıkları, doğrulama mesajları ve bağlantılar için host'un hesapladığı metin renklerini kullanır. Kontrastı kendiniz hesaplamanız gerekmez.
+
+Kendi CSS'iniz için `applyHostReady`; `--primary-text`, `--success-text`, `--warning-text`, `--error-text` ve `--info-text` değişkenlerini ve bunlara karşılık gelen `--oc-*-text` takma adlarını sağlar. Bunları nötr veya hafif renkli arka planlardaki metinlerde kullanın. Dolgular için temel renkleri, düz `--oc-primary` dolgusu üzerindeki metin için `--oc-primary-fg` kullanın. Renkleri güncel tutmak için her `onReady` durumunu uygulayın.
+
 `onReady`, panel açıkken oturum bağlamı değişiklikleri dahil birçok kez çalışabilir. Temayı her çağrıda uygulayın, ancak kontrolleri ve dinleyicileri yalnızca bir kez oluşturun. Taslak değerlerini çizim fonksiyonlarının dışında tutun. Sekme değiştirirken mevcut panelleri gizleyin veya değerlerini durumdan geri yükleyin.
 
 ## Seçimi ve giriş alanlarını eşitleyin

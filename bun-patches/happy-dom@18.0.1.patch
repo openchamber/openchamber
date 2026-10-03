@@ -1,0 +1,64 @@
+diff --git a/cjs/mutation-observer/MutationObserverListener.cjs b/cjs/mutation-observer/MutationObserverListener.cjs
+index f2b9090aef88bdba2e52cd0e307dbedd35cc2006..c31e7cb3d3f6d90a304edeceb9535a0502fcde52 100644
+--- a/cjs/mutation-observer/MutationObserverListener.cjs
++++ b/cjs/mutation-observer/MutationObserverListener.cjs
+@@ -13,6 +13,10 @@ class MutationObserverListener {
+     #records = [];
+     #destroyed = false;
+     #timeout = null;
++    // Strong reference: Node holds only a WeakRef to this callback, so without
++    // it a GC between observe() and a mutation silently drops the records.
++    // Backport of the fix shipped in happy-dom 20.12.
++    #listenerCallback;
+     /**
+      * Constructor.
+      *
+@@ -28,7 +32,7 @@ class MutationObserverListener {
+         this.target = init.target;
+         this.mutationListener = {
+             options: init.options,
+-            callback: new WeakRef((record) => this.report(record))
++            callback: new WeakRef((this.#listenerCallback = (record) => this.report(record)))
+         };
+         this.#window = init.window;
+         this.#observer = init.observer;
+@@ -85,6 +89,7 @@ class MutationObserverListener {
+         this.#destroyed = true;
+         this.options = null;
+         this.target = null;
++        this.#listenerCallback = null;
+         this.mutationListener = null;
+         this.#window = null;
+         this.#observer = null;
+diff --git a/lib/mutation-observer/MutationObserverListener.js b/lib/mutation-observer/MutationObserverListener.js
+index 3a68b9a76db624429603fb6847a7130769323773..2f7882b480c4f5da84fcb63bc59c7f474a1d0c79 100644
+--- a/lib/mutation-observer/MutationObserverListener.js
++++ b/lib/mutation-observer/MutationObserverListener.js
+@@ -11,6 +11,10 @@ export default class MutationObserverListener {
+     #records = [];
+     #destroyed = false;
+     #timeout = null;
++    // Strong reference: Node holds only a WeakRef to this callback, so without
++    // it a GC between observe() and a mutation silently drops the records.
++    // Backport of the fix shipped in happy-dom 20.12.
++    #listenerCallback;
+     /**
+      * Constructor.
+      *
+@@ -26,7 +30,7 @@ export default class MutationObserverListener {
+         this.target = init.target;
+         this.mutationListener = {
+             options: init.options,
+-            callback: new WeakRef((record) => this.report(record))
++            callback: new WeakRef((this.#listenerCallback = (record) => this.report(record)))
+         };
+         this.#window = init.window;
+         this.#observer = init.observer;
+@@ -83,6 +87,7 @@ export default class MutationObserverListener {
+         this.#destroyed = true;
+         this.options = null;
+         this.target = null;
++        this.#listenerCallback = null;
+         this.mutationListener = null;
+         this.#window = null;
+         this.#observer = null;

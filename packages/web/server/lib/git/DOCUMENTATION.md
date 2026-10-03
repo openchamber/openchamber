@@ -16,7 +16,7 @@ This module provides Git repository operations for the web server runtime, inclu
 The following functions are exported and used by the web server:
 
 ### Repository Operations
-- `isGitRepository(directory)`: Check if a directory is a Git repository.
+- `isGitRepository(directory)`: Check if a directory is a Git repository. A repository whose root is the home directory or a filesystem root (`C:\`, `/`) answers `false` (`unsupportedRepositoryRootReason`): such a repository covers the whole disk, every status read would walk it, and it is nearly always an accidental `git init`. All Git surfaces then show the non-repository state for that directory.
 - `getGlobalIdentity()`: Get global Git user.name, user.email, and core.sshCommand.
 - `getCurrentIdentity(directory)`: Get local Git identity (fallback to global if not set locally).
 - `hasLocalIdentity(directory)`: Check if local Git identity is configured.
@@ -24,13 +24,16 @@ The following functions are exported and used by the web server:
 - `getRemoteUrl(directory, remoteName)`: Get URL for a specific remote.
 
 ### Status and Diff Operations
-- `getStatus(directory)`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state.
+- `getStatus(directory, { mode })`: Get comprehensive Git status including current branch, tracking, ahead/behind, file changes, diff stats, merge/rebase state. `mode: 'light'` skips the diff stats. One read runs per directory at a time and at most four run across directories (`serial-refresh.js`): a call made while a read is running waits for one follow-up read that starts after the call, so no caller gets a snapshot older than its request, and every caller that arrives during one read shares that single follow-up at the widest mode any of them asked for. Clients refresh after every completed agent tool call and from several surfaces at once; on a large repository (a status read is a dozen Git processes walking the working tree) this bound is what keeps identical `git status` processes from piling up side by side. A slot is held only while the read is alive: every process the read spawns is killed after two minutes without output (one minute for the untracked-directory listing, thirty seconds for the repository probe), so a Git process that hangs, which happens on Windows, fails that read instead of holding a slot until someone kills it by hand. On Windows the listing is ended with `taskkill /T`, because the spawned `git.exe` is Git for Windows' launcher and killing it alone leaves the real `git` child walking the tree as an orphan. Untracked files are listed with `-unormal` and each new directory is then expanded to its files with a bounded `ls-files` listing (`UNTRACKED_DIRECTORY_EXPANSION_LIMIT`, 1000): up to that many files the result equals `-uall`; beyond it the directory stays one `dir/` entry, because `-uall` would walk a forgotten build or dependency directory in full on every read. A nested repository stays a `dir/` entry as before.
+- `getTrackingBranch(directory)`: Upstream of the checked-out branch as `remote/branch` (the same value as `status.tracking`, including an upstream whose remote ref is gone), or `null` when HEAD is detached or unborn or no upstream is configured. Reads refs and config only. Callers that need just the tracking name (GitHub PR status polling, PR creation) use this instead of `getStatus`.
 - `getDiff(directory, { path, staged, contextLines })`: Get diff output for files or entire working tree with full Git blob identities. Untracked symbolic links are represented as link entries without following their targets.
+- `getPathDiff(directory, { path, staged, contextLines })`: `getDiff` for one path, returning `{ diff, submodule }`. `submodule` is `null` for ordinary paths. For a gitlink it is `{ headCommit, indexCommit, worktreeCommit, hasTrackedChanges, hasUntrackedFiles, hasConflict }`, because a submodule that only gained untracked files shows as modified in status while its patch is empty. `worktreeCommit` is `null` when the submodule is not checked out. An unmerged gitlink has no single index commit, so it reports `hasConflict: true` with `indexCommit: null`. Exposed as `GET /api/git/diff`.
+- Paths come from an earlier status listing and can stop resolving. Per-path operations reject with `error.code`: `path_not_found` when the path is absent from the working tree, index, and HEAD (for example, a file removed after the listing), `nested_repository` when the path is a directory holding its own `.git` that is not a submodule (status lists it as `dir/`), and `untracked_directory` when the path is a directory status kept as one `dir/` entry because it holds more untracked files than the expansion bound. `GET /api/git/diff` and `GET /api/git/file-diff` answer these with 404, 422 and 422 and a `{ error, code }` body instead of 500. Entry existence is read from `ls-files --stage` and `ls-tree` modes, not `cat-file -e`: a gitlink's commit is not in the parent's object store, and simple-git reports that silent exit 1 as success.
 - `getRangeDiff(directory, { base, head, path, contextLines, includeWorkingTree })`: Compare the merge base of the exact selected refs with `head`. With `includeWorkingTree: true`, compare with the checked-out branch's current files instead, including committed, staged, unstaged, and untracked work in one net diff. This mode rejects a head that is not the checked-out branch. Exposed as `GET /api/git/range-diff`; omit `path` for the whole comparison.
 - `getRangeFiles(directory, { base, head, includeWorkingTree })`: List changed paths using the same comparison as `getRangeDiff`. A successful empty list means the final files match the merge base, even if staging and working-tree changes cancel each other out.
 - Both range operations honor refs literally. A local `main` is never replaced with `origin/main`, and an unavailable ref fails rather than choosing a different remote. The UI picker sends qualified refs to distinguish local and remote branches with matching display names.
 - Working-tree comparisons use the real index read-only. When untracked paths exist, a temporary copy of the index receives intent-to-add entries so Git computes additions, deletions, recreations, and renames together. Current contents come from the working tree, symlinks remain links, ignored files stay excluded, and temporary files are removed on success or failure.
-- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text).
+- `getFileDiff(directory, { path, staged })`: Get original and modified file contents for a single file (handles images as data URLs and symbolic links as their link-target text). For a submodule, both sides are Git's `Subproject commit <sha>` text (HEAD against the worktree checkout, or against the index when `staged`) and the result carries the same `submodule` state as `getPathDiff`; other paths return no `submodule`, which the route sends as `null`.
 - `listUntrackedPaths(directory)`: List individual untracked file paths honoring ignore rules. Much cheaper than `getStatus` when that is all a caller needs. Deliberately not `--directory`: collapsed directory entries end in a slash and are rejected by the per-file diff helpers, so a caller would silently lose every file inside a new directory.
 - `getUntrackedDiffs(directory, filePaths, { concurrency, contextLines })`: Diffs for untracked files against an empty tree. Resolves the repository context once instead of per file (`getDiff` re-resolves every call, costing an extra `rev-parse` each time) and bounds how many diff processes run at once. Returns one entry per input path in order; unreadable paths yield `''` rather than failing the batch.
 - `collectDiffs(directory, files)`: Collect diff output for multiple files.
@@ -40,7 +43,7 @@ The following functions are exported and used by the web server:
 - `applyHunk(directory, filePath, options)`: Apply a single-hunk patch via `git apply`. `options.action` is `stage` (`git apply --cached`), `unstage` (`git apply --cached --reverse`), or `discard` (`git apply --reverse` in the working tree). Inside the index mutation queue, the server verifies that the complete patch exactly matches one current three-context-line hunk for that file and scope, then runs `--check` before applying. Applicability alone cannot prove an unstaged change: old staged or committed hunks can reverse cleanly too. Stale, historical and multi-file patches fail with a refresh error. Temporary patch files are removed on success and failure; hunk content retains CRLF bytes.
 
 ### Branch Operations
-- `getBranchBase(directory, branch)`: Read a named creation source from reflog. After a rebase, the creation source is no longer a current parent record, so return `null` and let the user choose a base. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
+- `getBranchBase(directory, branch)`: Read a named creation source from reflog. After a rebase, the creation source is no longer a current parent record, so return `null` and let the user choose a base. A source that is the branch's own remote copy (`git switch feat` records `Created from refs/remotes/origin/feat`) is not a parent either and also returns `null`. Explicit per-runtime, directory, and branch choices in the shared UI outrank detection.
 - `getBranches(directory)`: Get list of local and remote branches (filtered to active remote branches).
 - `getUnpushedBranchCounts(directory, branchNames)`: Count commits ahead of each locally known upstream for up to five supplied local branches. This reads local refs only and omits branches without an upstream.
 - `createBranch(directory, branchName, options)`: Create and checkout a new branch.
@@ -55,8 +58,16 @@ The following functions are exported and used by the web server:
 - `subscribeWorktreeTopologyChanges(listener)`: Listener receives `{ directories, at }`, where `directories` are every directory of that repository the server has observed, so clients can map them onto registered projects. Returns an unsubscribe function.
 - `validateWorktreeCreate(directory, input)`: Validate worktree creation parameters (mode, branchName, startRef, upstream config).
 - `createWorktree(directory, input)`: Create a new worktree (supports 'new' and 'existing' modes, upstream setup). When the current tracked branch has no unpublished commits, the UI supplies its remote-tracking ref and this operation fetches that branch once before creating the worktree. A failed fetch falls back to the local branch and reports `sourceFetchFailed`; other remote start refs still require an existing local ref when their fetch fails. After populating the worktree, the repository's `post-checkout` hook runs once with git's standard arguments (null ref as previous HEAD, the checked-out HEAD, and flag `1`) from the worktree directory, mirroring `git worktree add` without `--no-checkout`; a missing or non-executable hook is skipped and a failing hook is logged as a warning, never failing worktree creation or the session bootstrap.
-- `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch).
+- `removeWorktree(directory, input)`: Remove a worktree (optionally delete local branch). `--force` discards uncommitted work, so callers that must keep it snapshot first. A directory that is not a registered worktree is deleted only when it sits inside the data-dir worktree root (`<opencode data>/worktree/<projectID>`), never inside a configured `worktree.directory`, which can be shared with other projects (`".."`); inside a configured folder only a registered worktree that git failed to delete is removed; the VS Code runtime (`packages/vscode/src/gitService.ts`) applies the same guard. A registered linked worktree is released through the caller-injected `input.disposeInstance` hook after the match is confirmed and before `git worktree remove`, while the directory path still resolves; disposal is best-effort, so a failing hook is logged as a warning and never fails the removal. `DELETE /api/git/worktrees` builds that hook from the OpenCode URL/auth helpers injected into `registerGitRoutes`. The primary workspace and the orphan fallback never dispose, because neither is a registered linked worktree.
+- `snapshotWorktree(directory, { ref })` (`POST /api/git/worktrees/snapshot`): Record the worktree's complete state (HEAD plus staged, unstaged and untracked-but-not-ignored files) as a commit whose parent is HEAD, stored at `ref`. Only `refs/openchamber/runs/<group>/<session>` refs are accepted, so snapshots never appear as branches or tags. A throwaway index (`GIT_INDEX_FILE`) keeps the real index, HEAD, branch and files untouched; the commit uses a fixed OpenChamber identity. Returns `{ ref, commit, head }`. Used by multi-run Keep and code fusion (`packages/ui/src/lib/multirun/DOCUMENTATION.md`); VS Code implements it in the bridge git runtime.
 - `isLinkedWorktree(directory)`: Check if directory is a linked worktree (not primary).
+
+### Worktree location
+- New worktrees go under OpenCode's `worktree.directory` when it is set: relative paths resolve against the project's canonical checkout, absolute paths are used as-is, and a leading `~` means the user's home directory. OpenCode appends the worktree name to that folder, so only the name is added.
+- The setting is read from the merged OpenCode configuration on the canonical checkout (`packages/web/server/lib/opencode/worktree-directory.js`, shared with the VS Code extension host through `packages/vscode/src/worktree-directory.ts`) so a linked worktree sees the project's saved value.
+- When the setting is absent, or names no usable directory, worktrees keep landing in OpenChamber's data-dir folder keyed by project ID. Changing the setting only affects worktrees created afterwards; nothing is moved.
+- `removeWorktree` deletes an unregistered leftover only under the data-dir root, so worktrees created before the setting was set stay removable while a shared configured folder such as `".."` can never make a sibling project eligible for deletion; a config read failure there falls back to the data-dir root instead of blocking the removal. Creation still fails loudly on an unreadable config so a worktree is never created in an unchosen folder.
+- The web reader merges a secondary user config file (`opencode.jsonc`) as an override layer; the VS Code reader reads only the primary user file, so a `worktree.directory` set only in the secondary user file is honored on web/desktop and ignored by the extension host. Pre-existing to this setting; noted beside the shared module in `packages/vscode/src/worktree-directory.ts`.
 
 ### Worktree topology change tracking
 There is no filesystem watcher and no polling. The server notices worktree changes in two ways, and both scale with what users are doing rather than with the number of registered projects:
@@ -80,6 +91,17 @@ bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 - `fetch(directory, options)`: Fetch changes from remote.
 - `removeRemote(directory, options)`: Remove a configured remote (except `origin`).
 - `deleteRemoteBranch(directory, options)`: Delete a remote branch.
+
+`push` leaves an unspecified destination to Git, including `branch.<name>.pushRemote`
+and `remote.pushDefault`. Its missing-upstream fallback uses that same destination;
+an explicit remote overrides configuration. `pushed` contains only refs changed by
+the operation, derived from Git's porcelain flags, including first publication,
+fast-forward and forced updates. Each entry's `remote` is the destination remote
+name, not a ref. A successful no-op returns an empty array; rejected pushes throw.
+Commit & Push and Sync share the same fetch/pull/push flow in web, Electron and
+mobile, and never infer publication from an upstream `ahead` count. Fetch follows
+the selected upstream while push routing remains independent. VS Code does not
+mount these Git panels and keeps its separate extension-host Git implementation.
 
 ### Log Operations
 - `getLog(directory, options)`: Get commit history with stats (supports maxCount, from, to, file filters).
@@ -108,12 +130,12 @@ bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 
 The following functions are internal helpers used by exported functions:
 - `buildSshCommand(sshKeyPath)`: Build SSH command string for git config.
-- `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution.
+- `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution and `GIT_TERMINAL_PROMPT=0` (unless the server was started with it set): the server has no terminal a user could answer, so a Git command that would ask for a username or password fails instead of waiting forever on a console nobody sees. Credential helpers, including GUI ones, still run before Git would prompt. Inside a Linux AppImage it also drops what the AppImage launcher added to `PATH`, `LD_LIBRARY_PATH`, `GSETTINGS_SCHEMA_DIR` and `XDG_DATA_DIRS` (`stripAppImageLauncherEnv`, #4177), so hooks run with the user's values.
 - `createGit(directory)`: Create simple-git instance with environment.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.
-- `resolveWorktreeProjectContext(directory)`: Resolve project context (projectID, primaryWorktree, worktreeRoot).
+- `resolveWorktreeProjectContext(directory)`: Resolve project context (projectID, primaryWorktree, worktreeRoot, legacyWorktreeRoot); `worktreeRoot` honors OpenCode's `worktree.directory` and falls back to the data-dir folder keyed by project ID.
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
@@ -130,7 +152,7 @@ The following functions are internal helpers used by exported functions:
 - `upstreamComparison`: Optional comparison against `upstream/<current-branch>`, with `{ remote, branch, ahead, behind }`.
 - `files`: Array of file objects with `path`, `index`, `working_dir` status codes.
 - `isClean`: Boolean indicating if working tree is clean.
-- `diffStats`: Object mapping file paths to `{ insertions, deletions }`.
+- `diffStats`: Scope-aware per-file line stats, `{ staged, working }`. `staged` is HEAD → index (`git diff --cached --numstat`), `working` is index → working tree (`git diff --numstat`). A partially staged file appears in both maps with its own scope's counts; the two are never summed together. Untracked and working-tree-added files are counted into `working`; files added to the index are counted into `staged`.
 - `mergeInProgress`: Object with `{ head, message }` if merge in progress.
 - `rebaseInProgress`: Object with `{ headName, onto }` if rebase in progress.
 
@@ -166,6 +188,7 @@ The following functions are internal helpers used by exported functions:
   surface and VS Code does not mount these controls.
 - Untracked patches from `getDiff` and `getUntrackedDiffs` use `git diff --no-index` with separate stdout, stderr, and process exit status. Exit codes 0 and 1 return stdout only, so line-ending warnings never become patch text or request failures. Other exits and process failures reject the single-file request; the batch keeps an empty entry for the failed path and preserves the other results.
 - `status.files` exposes both `index` and `working_dir` codes. Shared UI uses these as separate scopes: staged rows are derived from non-empty `index` statuses, while unstaged rows are derived from `working_dir` statuses and untracked files.
+- `status.diffStats` follows the same scopes (`staged`, `working`), so a staged row shows HEAD → index counts and an unstaged row shows index → working-tree counts. A file with edits in both scopes reports each part in its own row instead of one combined total.
 - A file with both staged and unstaged changes can appear in both UI sections. Staged rows request diffs with `staged: true`; unstaged rows request normal working-tree diffs.
 - The shared Git panel exposes explicit staging actions. Unstaged rows use `stageFile`, staged rows use `unstageFile`, and commits operate on the current staged index.
 - `stageFiles` remains supported for callers that need to stage a selected unstaged subset as part of commit. In that mode the server temporarily unstages unrelated index entries, stages `stageFiles`, commits from the index, then restores temporarily unstaged entries.

@@ -35,7 +35,7 @@ export interface CommandInfo {
 // Every name the composer runs itself; an extension command with one of
 // these names is dropped before it reaches the list.
 const LOCAL_COMMAND_NAMES = [
-  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'btw', 'summary', 'workspace-review', 'handoff-review',
+  'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'handoff-review',
   'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
 ];
 
@@ -180,6 +180,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             : []
           ),
           ...(hasSession
+            ? [{ id: 'openchamber:fork', name: 'fork', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.forkDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(hasSession
             ? [{ id: 'openchamber:summary', name: 'summary', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.summaryDescription'), isOpenChamber: true }]
             : []
           ),
@@ -263,6 +267,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           { id: 'openchamber:compact', name: 'compact', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.compactDescription'), isBuiltIn: true },
           ...(hasSession
             ? [{ id: 'openchamber:btw', name: 'btw', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.btwDescription'), isOpenChamber: true }]
+            : []
+          ),
+          ...(hasSession
+            ? [{ id: 'openchamber:fork', name: 'fork', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.forkDescription'), isOpenChamber: true }]
             : []
           ),
           ...(hasSession
@@ -375,24 +383,24 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
     switch (command.name) {
       case 'init':
-        return <Icon name="file" className="h-3.5 w-3.5 text-green-500" />;
+        return <Icon name="file" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'undo':
-        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'redo':
-        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-orange-500" />;
+        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'timeline':
         return <Icon name="time" className="h-3.5 w-3.5" />;
       case 'compact':
-        return <Icon name="scissors" className="h-3.5 w-3.5 text-purple-500" />;
+        return <Icon name="scissors" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'review':
-        return <Icon name="search-eye" className="h-3.5 w-3.5 text-blue-500" />;
+        return <Icon name="search-eye" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'test':
       case 'build':
       case 'run':
         return <Icon name="terminal-box" className="h-3.5 w-3.5 text-cyan-500" />;
       default:
         if (command.isBuiltIn) {
-          return <Icon name="flashlight" className="h-3.5 w-3.5 text-yellow-500" />;
+          return <Icon name="flashlight" className="h-3.5 w-3.5 text-muted-foreground" />;
         }
         if (command.source === 'extension') {
           return <Icon name="window" className="h-3.5 w-3.5 text-muted-foreground" />;

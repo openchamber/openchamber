@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+O kit usa cores de texto calculadas pelo host em botões com tons suaves, badges, títulos de avisos, mensagens de validação e links. Não é necessário calcular o contraste.
+
+Para CSS próprio, `applyHostReady` fornece `--primary-text`, `--success-text`, `--warning-text`, `--error-text` e `--info-text`, além dos aliases correspondentes `--oc-*-text`. Use essas variáveis para texto sobre fundos neutros ou levemente coloridos. Mantenha as cores base nos preenchimentos e use `--oc-primary-fg` para texto sobre um preenchimento sólido `--oc-primary`. Aplique cada snapshot de `onReady` para manter as cores atualizadas.
+
 `onReady` pode executar várias vezes enquanto o painel está aberto, inclusive quando o contexto da sessão muda. Aplique o tema em cada chamada, mas monte controles e registre listeners apenas uma vez. Guarde rascunhos fora das funções de renderização. Ao trocar de aba, oculte os painéis existentes ou restaure seus valores a partir do estado.
 
 ## Sincronize a seleção e os campos

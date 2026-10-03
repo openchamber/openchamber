@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type ResolveResultPayload, type StartSessionRequest } from '@openchamber/sdk';
+import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 import type { GuestGenerateProxyResult } from './generate.ts';
 
@@ -44,15 +44,27 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   file: overrides.file ?? (async () => ({ ok: true, result: { written: true as const } })),
   generate: overrides.generate ?? (async () => ({ ok: true, result: { text: '' } })),
   setBadge: overrides.setBadge ?? (() => {}),
+  resize: overrides.resize ?? (() => {}),
+  openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
 });
 
 describe('answerGuestMessage', () => {
+  test('forwards toast buttons and persistence to the host without awaiting a click', async () => {
+    const request: ToastRequest = { kind: 'info', message: 'Summary', copy: { text: 'Source' }, dismiss: true, persistent: true };
+    const seen: ToastRequest[] = [];
+    const reply = await answerGuestMessage({ ...toast, payload: request }, effects({
+      toast: (payload) => { seen.push(payload); },
+    }));
+    expect(seen).toEqual([request]);
+    expect(reply).toMatchObject({ type: 'result', ok: true });
+  });
+
   test('toasts and answers ok', async () => {
     const seen: string[] = [];
     const reply = await answerGuestMessage(toast, effects({
-      toast: (_kind, message) => {
-        seen.push(message);
+      toast: (request) => {
+        seen.push(request.message);
       },
     }));
     expect(seen).toEqual(['Hello']);
@@ -579,6 +591,19 @@ describe('badge and resolve-result', () => {
     }, effects({ setBadge: (count) => { seen.push(count); } }));
     expect(seen).toEqual([4]);
     expect(reply).toMatchObject({ type: 'result', id: 'oc-9', ok: true });
+  });
+
+  test('resize hands the height to the pane and answers ok', async () => {
+    const seen: number[] = [];
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: 1,
+      type: 'resize',
+      id: 'oc-10',
+      payload: { height: 180 },
+    }, effects({ resize: (height) => { seen.push(height); } }));
+    expect(seen).toEqual([180]);
+    expect(reply).toMatchObject({ type: 'result', id: 'oc-10', ok: true });
   });
 
   test('resolve-result hands the payload to the pane and sends nothing back', async () => {

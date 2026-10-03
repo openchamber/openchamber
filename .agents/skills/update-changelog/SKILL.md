@@ -31,6 +31,9 @@ Every release section is grouped. Under the version header come, in this order a
 ### Fixes
 - Chat: huge patches in tool cards open without freezing the page (thanks to @karimodm).
 
+### SDK
+- Actions: use `mode: "background"` to handle a message action without opening a panel.
+
 ### Misc
 - Bundled OpenCode updated to 1.19.
 ```
@@ -40,6 +43,7 @@ Where a change goes:
 - **New** — something the user could not do before: a feature, a surface, a language.
 - **Improvements** — something they could do works better or reads clearer now.
 - **Fixes** — something was broken and showed a wrong result; the bullet names the symptom.
+- **SDK** — capabilities and API changes for extension authors, under `## App`, after Fixes and before Misc. Name the API and what an author can build with it. User-visible extension features and fixes stay in the regular groups.
 - **Misc** — bundled tool versions, packaging, platform support, retirements. Rarely more than a few lines.
 
 The generator emits the groups in this order whatever order the source lists them and drops empty ones; version, date, and headers are its concern, not yours.
@@ -82,6 +86,8 @@ Worked example, same change:
 
 The weak version is accurate and lost the reader at the first comma. The good version keeps the three things a user notices and drops the mechanics that explain them.
 
+SDK bullets address extension authors: use exact API names in backticks and state how to use the new capability. Keep the same short bullet format; implementation internals still belong in the PR.
+
 Load `.agents/skills/communication-style/SKILL.md` and run its pattern scan over the finished sections; its rules on em dashes, hedging, and puffery apply here unchanged.
 
 ## Gather
@@ -96,9 +102,9 @@ git diff --stat "$BASE"..HEAD
 
 A squashed merge (subject ending in `(#123)`) or a `Merge pull request #123` commit hides the real change behind a terse subject. Read the PR: `gh pr view <number> --json number,title,body,author,mergedAt`. Distill its intent into the bullet shape above; the body's own wording is reviewer-facing and stays there. When `gh` cannot fetch it, use the commit and diff and say what remains uncertain.
 
-**Follow-ups fold in.** A maintainer commit that completes or reworks a merged PR (a "complete ... follow-ups" commit, a reshaping merge) has no bullet of its own; its user-visible effect goes into the bullet of the PR it finished, written as one behaviour. A change with no user-visible effect (tooling, CI, tests, docs, dead-code removal, internal guards) gets no bullet at all.
+**Follow-ups fold in.** A maintainer commit that completes or reworks a merged PR (a "complete ... follow-ups" commit, a reshaping merge) has no bullet of its own; its user-visible effect goes into the bullet of the PR it finished, written as one behaviour. Changes that affect neither app users nor extension authors (tooling, CI, tests, docs, dead-code removal, internal guards) get no bullet.
 
-Gathering is complete when every user-visible change has evidence, a known platform reach, and a contributor identity where one exists.
+Gathering is complete when every user-visible or SDK change has evidence, a known platform reach, and a contributor identity where one exists.
 
 ## Order and highlights
 
@@ -119,10 +125,10 @@ End the bullet with `(thanks to @username)` using the GitHub login from the PR o
 
 Read each finished section top to bottom and check every bullet:
 
-- A user could point at it in the app within five seconds of reading it.
+- A user could point at it in the app within five seconds of reading it; an SDK entry tells an extension author which API to use and why.
 - It is one or two sentences (three for a highlight) in plain words, with no mechanism and no contrast against the old behaviour.
 - It sits in the group its wording claims (a Fix names a symptom, a New names a capability) and no higher than the bullets above it in impact.
-- Empty groups are absent; present groups appear in the order New, Improvements, Fixes, Misc.
+- Empty groups are absent; present groups appear in the order New, Improvements, Fixes, SDK, Misc.
 - It appears only in the section whose runtime receives it.
 - Its contributor is credited.
 - The `title:` line names the release's headline change in two to six plain words.

@@ -9,7 +9,7 @@ edge (`components/layout/ContextPanelRail.tsx`) and rendered by
 
 ## Model
 
-Full-screen extension pages are separate from this rail registry. `contributes.page` appears in one sidebar-header menu and uses `useUIStore.openGuestPageId`, the same mutually exclusive main-page lifecycle as Archive and Scheduled tasks. It mounts `PluginPane` with `surface="page"`, closes on runtime switch/uninstall/disable, and is not persisted. `openContextSurface` and the guest's `openSurface` cannot open a full-screen page. The entry-point restrictions below describe context-rail surfaces only.
+Full-screen extension pages are separate from this rail registry. `contributes.page` appears in one sidebar-header menu and uses `useUIStore.openGuestPageId`, the same mutually exclusive main-page lifecycle as Archive and Scheduled tasks. It mounts `PluginPane` with `surface="page"`, closes on runtime switch/uninstall/disable, and is not persisted. `openContextSurface` and the guest's `openSurface` cannot open a full-screen page. Work Status sections (`contributes.statusSection`) are not rail surfaces either: they mount `PluginPane` with `surface="status"` inside the chat's Work Status panel and never open a tab. The entry-point restrictions below describe context-rail surfaces only.
 
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
   Built-in modes stay a closed list. Installed guests add `plugin:${id}`
@@ -25,6 +25,13 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   per mode in `useUIStore.contextPanelByDirectory[dir].widthFractionByMode`;
   `widthByMode` retains the last pixel size until the available area is known.
   Every surface, including walkthrough, restores both values on reload.
+  The file surface stores its full editor width under `file`. Without an
+  editor, the panel uses `contextEditorTreeWidth`, the same pixel width as the
+  docked file tree. Resizing the tree-only panel updates that shared tree width
+  without changing the full editor width. Old `file-tree` width entries are
+  discarded on hydration. Tree-only mode temporarily suspends panel expansion;
+  reopening the editor restores its previous expanded state. The tree stays
+  right-aligned at its saved width during the panel's collapse transition.
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
@@ -76,6 +83,8 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   the session stores. A closed panel mounts no chat iframe.
   Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
+- Portalled menus and dialogs handle their own Escape key. The panel's capture
+  handler ignores their events so dismissing an overlay does not close the panel.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
   Linear is a desktop/web singleton on this rail. VS Code and mobile omit it

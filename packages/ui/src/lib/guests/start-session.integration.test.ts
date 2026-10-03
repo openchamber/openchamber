@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test';
-import { createOpencodeClient, type Session } from '@opencode-ai/sdk/v2';
-import { opencodeClient } from '@/lib/opencode/client';
+import type { Session } from '@/lib/opencode/model';
+import { createRuntimeOpencodeClient, opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -12,7 +12,11 @@ import * as worktreeBootstrap from '@/lib/worktrees/worktreeBootstrap';
 import * as projectConfig from '@/lib/openchamberConfig';
 import * as sharedTrust from '@/lib/sharedTrustConfirmation';
 
-const created: Session = { id: 'background-session', directory: '/project-b', title: 'Task', slug: 'task', projectID: 'b', version: '1', time: { created: 1, updated: 1 } };
+const created: Session = {
+  id: 'background-session', directory: '/project-b', title: 'Task', projectID: 'b', cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: 1, updated: 1 },
+};
 afterEach(() => mock.restore());
 const setup = () => {
   const create = spyOn(opencodeClient, 'createSession').mockImplementation(async (_input, directory) => ({ ...created, directory: directory ?? created.directory }));
@@ -70,13 +74,13 @@ test('existing worktrees create sessions in their directory without creating or 
 
 test('a replaced SDK client cannot publish a late creation even when the runtime key is unchanged', async () => {
   const create = setup();
-  let client = createOpencodeClient();
+  let client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:1' });
   spyOn(opencodeClient, 'getSdkClient').mockImplementation(() => client);
   create.mockImplementation(async () => {
-    client = createOpencodeClient();
+    client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:2' });
     return { ...created, id: 'late-session' };
   });
-  const result = await sessionActions.createSession('Late', '/project-b', null, undefined, undefined, 'preserve');
+  const result = await sessionActions.createSession('Late', '/project-b', undefined, undefined, undefined, 'preserve');
   expect(result).toBeNull();
   expect(useGlobalSessionsStore.getState().entityById.has('late-session')).toBe(false);
   expect(useSessionUIStore.getState().currentSessionId).toBe('existing-chat');

@@ -44,11 +44,13 @@ export const SharedTrustConfirmDialog = () => {
         }
       }}
     >
-      <DialogContent>
+      <DialogContent layerClassName="z-[70]" backdropProps={{ className: 'z-[70]' }}>
         <DialogHeader>
           <DialogTitle>{t('projects.sharedTrust.title')}</DialogTitle>
           <DialogDescription>
-            {t('projects.sharedTrust.description', { path: request?.sharedPath ?? '' })}
+            {request?.runsIn === 'space'
+              ? t('spaces.sharedTrust.description', { path: request.sharedPath })
+              : t('projects.sharedTrust.description', { path: request?.sharedPath ?? '' })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

@@ -107,6 +107,43 @@ A short intro.
   assert.deepEqual(Object.keys(renderOutputs(loaded, { legacyAppChangelog: true })), ['CHANGELOG.md', 'packages/vscode/CHANGELOG.md', 'changelog/index.json']);
 });
 
+test('SDK notes survive Markdown and JSON rendering between Fixes and Misc', () => {
+  const parsed = parseRelease(release.replace('## App', `## App
+
+### Misc
+- Packaging update.
+
+### SDK
+- Actions: use \`host.onAction\` for background work.`), 'changelog/1.2.3.md');
+  const loaded = { releases: [parsed] };
+  const expected = `### Fixes
+
+- Chat: huge patches open without freezing the page (thanks to @someone).
+
+### SDK
+
+- Actions: use \`host.onAction\` for background work.
+
+### Misc
+
+- Packaging update.`;
+
+  assert.ok(renderReleaseNotes(parsed).includes(expected));
+  assert.ok(renderAppChangelog(loaded).includes(expected));
+  assert.ok(!renderVsCodeChangelog(loaded).includes('### SDK'));
+  const [entry] = JSON.parse(renderIndex(loaded));
+  assert.deepEqual(entry.app.sdk, ['Actions: use `host.onAction` for background work.']);
+  assert.deepEqual(Object.keys(entry.app), ['new', 'improvements', 'fixes', 'sdk', 'misc']);
+  assert.equal(Object.hasOwn(entry.vscode, 'sdk'), false);
+});
+
+test('empty SDK groups add no heading or JSON field', () => {
+  const parsed = parseRelease(release.replace('## App', '## App\n\n### SDK\n'), 'changelog/1.2.3.md');
+  assert.ok(!renderReleaseNotes(parsed).includes('### SDK'));
+  const [entry] = JSON.parse(renderIndex({ releases: [parsed] }));
+  assert.equal(Object.hasOwn(entry.app, 'sdk'), false);
+});
+
 test('loadReleases refuses a file whose name and version disagree, and a release without a title', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-'));
   fs.writeFileSync(path.join(directory, '9.9.9.md'), release);

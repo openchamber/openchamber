@@ -36,6 +36,157 @@ openchamber --ui-password be-creative-here
 - 公開 URL が必要な場合は、インターネットにポートを開けるより、[トンネル](/tunnels/) または VPN のようなプライベートネットワークを推奨します。
 - OpenChamber を自分の HTTPS サーバーの背後に置く場合は、[リバースプロキシ](/reverse-proxy/) を参照してください。
 
+## エンタープライズモード
+
+チームが会話の内容を OpenCode で設定したモデルプロバイダーにしか送れない場合は、エンタープライズモードをオンにします。方法は 2 つあり、どちらか一方で十分です。
+
+### マシン上のポリシーファイル
+
+管理しているノート PC ではこちらを使います。管理者だけが書き込めるフォルダーに `policy.json` という名前のファイルを置きます。
+
+| システム | パス |
+|---|---|
+| macOS | `/Library/Application Support/OpenChamber/policy.json` |
+| Windows | `C:\ProgramData\OpenChamber\policy.json` |
+| Linux | `/etc/openchamber/policy.json` |
+
+パスは OpenChamber のインストール方法に関係ありません。デスクトップアプリ、npm から起動した Web サーバー、CLI、VS Code 拡張機能はすべて同じファイルを読みます。配布にはデバイス管理ツール（Jamf、Intune など）を使えます。Docker で動かすサーバーでは、Linux のパスにファイルをマウントしてください。
+
+```json
+{
+  "enterpriseMode": true,
+  "organization": "Acme",
+  "relayUrl": "wss://relay.acme.com/ws",
+  "allowNetworkAccess": false,
+  "allowedExtensions": ["https://github.com/acme/"],
+  "jev": {
+    "url": "https://llm.acme.com/v1",
+    "model": "acme-classifier",
+    "apiKey": "..."
+  }
+}
+```
+
+必須なのは `enterpriseMode` だけです。`organization` は設定に「Acme が管理しています。」と表示され、誰が決めたのかがわかります。`relayUrl` と `jev` は自前のリレーと自前の Jev エンドポイントを固定し、`allowNetworkAccess` はほかのデバイスがネットワーク経由で OpenChamber にアクセスできるようにし、`allowedExtensions` は信頼する拡張機能のリポジトリを列挙します。いずれも後述します。
+
+- ユーザーが設定や環境で何を指定しても、ファイルでオンにしたものはオフになりません。
+- ファイルでエンタープライズモードをオンにした場合、決めるのはファイルだけです。後述のリレー、Jev、ネットワークアクセス用の環境変数は無視されます。これらはユーザーが自分で設定できるためです。
+- ファイルがあるのに読み込めない、または JSON として正しくない場合、エンタープライズモードはオンのままで、何も固定されません。設定には、ポリシーを読み込めなかったことが表示されます。壊れたファイルが知らないうちに保護を外すことはありません。
+- 変更は再起動なしで反映されます。
+- OpenChamber はユーザーの権限で動くため、ユーザーはこのファイルを読めます。API キーを書き込む前に、この点を考慮してください。
+
+### 環境変数
+
+環境を自分で管理できるサーバーやコンテナーなら、これで十分です。
+
+```bash
+OPENCHAMBER_ENTERPRISE_MODE=1
+```
+
+ノート PC ではロックとして弱くなります。デスクトップアプリはこの変数をログインシェルのプロファイル（例：`~/.zshrc`）から読み込みますが、そのファイルはユーザーが編集できます。ノート PC ではポリシーファイルを使ってください。
+
+この変数を使う場合、リレー、Jev、ネットワークアクセス、許可する拡張機能もそれぞれの変数（`OPENCHAMBER_RELAY_URL`、`OPENCHAMBER_JEV_URL`、`OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`、`OPENCHAMBER_ALLOWED_EXTENSIONS`、`OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS=1`）で指定します。`OPENCHAMBER_ALLOWED_EXTENSIONS` にはリポジトリの URL をカンマ区切りで並べます。Docker ではサーバーがコンテナーの外に向けて待ち受ける必要があるため、ネットワークアクセスの変数が必要です。
+
+### OpenCode CLI を固定する
+
+マシンにすでに OpenCode がインストールされていて、OpenChamber にそれを使わせたい場合は、そのパスをポリシーファイルに書きます。エンタープライズモードの有無に関係なく使えます。
+
+```json
+{
+  "opencodeBinary": "/usr/local/bin/opencode"
+}
+```
+
+- OpenChamber はこのパスからだけ OpenCode を起動します。設定のパス、`OPENCODE_BINARY`、デスクトップアプリに同梱されたコピーは無視されます。同梱のコピーはディスクに残りますが使われません。
+- このパスに実行できるものがない場合、OpenChamber は別のコピーに切り替えません。パスを示したエラーで停止します。
+- 設定にはパスが読み取り専用で表示され、管理者が設定したことが書かれます。
+- OpenChamber は固定された OpenCode をインストールも更新もせず、新しいバージョンの通知もしません。更新は管理者の配布で行います。
+- CLI は OpenCode 2.x で、OpenChamber が求めるバージョン以上である必要があります。古い場合、OpenChamber は「OpenCode を更新」画面で止まります。
+- `opencode`（Windows では `opencode.exe`）が入ったフォルダーを指定することもできます。環境変数は用意していません。ユーザーが自分で設定できてしまうためです。
+
+### 例
+
+Mac にポリシーファイルを置くには、ターミナルで管理者として次を実行します。
+
+```bash
+sudo mkdir -p "/Library/Application Support/OpenChamber"
+sudo tee "/Library/Application Support/OpenChamber/policy.json" > /dev/null <<'JSON'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+JSON
+```
+
+Linux でも同じで、フォルダーは `/etc/openchamber` です。
+
+Windows では、PowerShell を管理者として実行します。最後の行で、フォルダーに書き込めるのを管理者とシステムだけにします。
+
+```powershell
+New-Item -ItemType Directory -Force "C:\ProgramData\OpenChamber" | Out-Null
+@'
+{
+  "enterpriseMode": true,
+  "organization": "Acme"
+}
+'@ | Set-Content -Encoding UTF8 "C:\ProgramData\OpenChamber\policy.json"
+icacls "C:\ProgramData\OpenChamber" /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Users:(OI)(CI)RX"
+```
+
+Docker で動かすサーバーでは、`docker-compose.yml` の `environment` に追加します。コンテナーは自身の外に向けて待ち受けるため、ネットワークアクセスの許可が必要です。
+
+```yaml
+environment:
+  OPENCHAMBER_UI_PASSWORD: ${OPENCHAMBER_UI_PASSWORD}
+  OPENCHAMBER_ENTERPRISE_MODE: "1"
+  OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
+  # Optional:
+  OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_MODEL: acme-classifier
+  OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
+  OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/
+```
+
+うまくいったか確かめるには、設定 → プロバイダーを開きます。上部に、組織名の入ったエンタープライズモードの通知が表示されます。
+
+### 変わること
+
+- モデルプロバイダーは OpenCode の設定からのみ読み込まれます。OpenChamber でプロバイダーを接続する、サインインする、キーを追加する、カスタムプロバイダーを作成する操作はオフになります。すでにあるアカウントの削除や切り替えは引き続きできます。これはアプリ経由の入り口を閉じるだけで、実際のロックは後述の OpenCode ポリシーです。 OpenCode の設定にある MCP サーバーへのサインインは引き続きできます。つながる先はそのサーバーで、モデルプロバイダーではありません。
+- [分類プロバイダー（Jev）](/classification-providers/)はオフのままで、誰かが設定で入力したカスタムエンドポイントも同様です。セーフティネットと Auto は表示されず、セッションは手動で移したときだけ作業中になります。自社のインフラ経由で Jev を使うには、ポリシーファイルの `jev`、または `OPENCHAMBER_JEV_URL`（加えて `OPENCHAMBER_JEV_MODEL`、必要なら `OPENCHAMBER_JEV_API_KEY`）でエンドポイントを固定します。それが既定になり、オフにはできますが、ほかのものは選べません。
+- OpenAI による読み上げはオフになります。カスタムの音声合成サーバーや文字起こしサーバーは、同じマシン上で動かす必要があります。ローカルの音声とローカルの音声入力モデルはそのまま使えます。
+- スマートフォンやブラウザへのプッシュ通知には「Agent response is ready」のような汎用のタイトルだけが入り、メッセージ本文やセッション名は含まれません。デスクトップ通知はあなたのマシンの中にとどまり、全文を表示します。
+- 更新の確認は引き続き行われるため、セキュリティ修正は届きます。ただし利用状況は一切報告せず、匿名のインストール ID すら送りません。
+- [外部トンネル](/tunnels/)（Cloudflare、ngrok）はオフになります。トンネルのプロバイダーはエッジで通信を復号するため、すべてのリクエストを平文で見られます。
+- [Private Relay](/private-relay/) は自前のリレー経由でのみ動作します。[セルフホストのリレー](https://github.com/openchamber/openchamber-relay)を動かし、ポリシーファイルの `relayUrl` または `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` で OpenChamber をそこに向けてください。共有リレーもエンドツーエンドで暗号化されているため通信内容は読めませんが、自前のリレーなら接続のメタデータとこのマシンへの入り口をネットワーク内にとどめられます。自前のリレーがなければ、デバイスのペアリングは一切できません。
+- OpenChamber は動いているマシン上でしか待ち受けません。ローカルネットワーク上のほかのデバイスからアプリを開けるようにするデスクトップの設定はオフになり、CLI（`--host`、`--lan`）でも環境でも、サーバーはネットワークアドレスでの起動を拒否します。アプリの実行中にポリシーファイルが置かれた場合、ほかのマシンからの接続は次回の起動まで切断されます。ネットワークアクセスを許可するには、ポリシーファイルで `"allowNetworkAccess": true` を指定するか、環境でエンタープライズモードをオンにしている場合は `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` を設定します。接続は暗号化されていない HTTP なので、共有ネットワークでは誰でも内容を読めることに注意してください。ほかの人がアクセスするサーバーは[自前の HTTPS](/reverse-proxy/) の背後に置いてください。
+- マシンの外にデータを送れる[拡張機能](/extensions/)（外部の API と通信するもの、外部のアドレスから読み込むもの、バックグラウンドサービスを動かすもの）は、`allowedExtensions` に載っている Git リポジトリからしかインストールできません。どれにも当てはまらない拡張機能は通常どおりインストールできます。ほかの場所からインストールされた拡張機能はオフのままになり、設定にその理由が表示されます。拡張機能は自分で名前を決められるため、リストにはリポジトリの URL を書きます。`https://github.com/acme/` のように `/` で終わるエントリーは、その下にあるすべてのリポジトリを許可します。拡張機能を開発する人のマシンでは、`"allowLocalExtensions": true` にするとローカルフォルダーからのインストールも許可されます。ZIP はどちらの場合もインストールできません。
+- VS Code 拡張機能では、プロバイダーの接続がオフになり、更新の確認は利用状況を報告しません。Jev、リレー、トンネル、プッシュ通知、クラウドの音声機能はもともとありません。
+
+小さなモデルのタスク（セッションのタイトル、要約、コミットメッセージ、変更のウォークスルー）に特別なモードは必要ありません。常に、設定で選んだ小さなモデル、作業中のプロバイダーの小さなモデル、または OpenCode の設定にあるデフォルトモデルのいずれかで動きます。たまたま接続している別のプロバイダーに切り替わることはありません。
+
+そもそもどのモデルプロバイダーを使えるかを決めるのは、OpenChamber ではなく OpenCode です。[OpenCode ポリシー](https://opencode.ai/v2/docs/policies/)で固定してください。すべてのプロバイダーを拒否し、そのうえで承認したものを許可します。
+
+```jsonc
+{
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "anthropic", "effect": "allow" }
+    ]
+  }
+}
+```
+
+拒否されたプロバイダーは、誰かがキーを追加しても表示されません。ポリシーは、プロジェクトから解除できないグローバルの `~/.config/opencode/opencode.jsonc` に置くか、最終的な決定権を持つ OpenCode Console のワークスペースから配布してください。エンタープライズモードが扱うのは、それに加えて OpenChamber 自身が送るものです。
+
+エージェントの Web 検索やページ取得も OpenCode を経由し、検索サービスやページそのものに接続します。これらをネットワークの外に出したくない場合は、同じ種類のポリシーで拒否してください。
+
+```jsonc
+{ "action": "permission", "resource": "websearch:*", "effect": "deny" },
+{ "action": "permission", "resource": "webfetch:*", "effect": "deny" }
+```
+
 ## 関連
 
 - [デバイスを接続する](/connect-devices/) — 1 回限りのペアリングとデバイスごとのトークン

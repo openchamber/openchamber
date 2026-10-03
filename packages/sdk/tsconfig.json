@@ -9,8 +9,12 @@
     "allowImportingTsExtensions": true,
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@openchamber/sdk": ["./src/index.ts"],
+      "@openchamber/sdk/ui": ["./src/ui/index.ts"]
+    }
   },
-  "include": ["src"],
+  "include": ["src", "examples/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

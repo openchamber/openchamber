@@ -1,18 +1,39 @@
 {
   "name": "@openchamber/example-tools-only",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
+  "type": "module",
   "openchamber": {
     "apiVersion": 1,
     "contributes": {
       "panel": {
         "id": "tools-only",
-        "name": "Tools Only",
+        "name": "Tool Gallery",
         "icon": "tools"
       },
       "tools": [
         {
+          "match": "example_findings",
+          "name": "Code review",
+          "icon": "search",
+          "title": "Review · {input.scope}",
+          "subtitle": "{output.summary}",
+          "output": "table",
+          "columns": ["severity", "file", "finding"]
+        },
+        {
+          "match": "example_checks",
+          "name": "Project checks",
+          "icon": "checkbox-circle",
+          "title": "Checks · {input.project}",
+          "subtitle": "{output.summary}",
+          "output": "table",
+          "columns": ["check", "status", "detail"]
+        },
+        {
           "match": "mcp.*",
+          "name": "Tool result",
+          "icon": "tools",
           "output": "json"
         }
       ]

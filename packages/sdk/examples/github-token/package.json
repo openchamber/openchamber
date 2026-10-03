@@ -1,17 +1,18 @@
 {
   "name": "@openchamber/example-github-token",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "openchamber": {
     "apiVersion": 1,
     "contributes": {
       "panel": {
         "id": "github-token",
-        "name": "GitHub Token",
+        "name": "Repository Explorer",
         "icon": "github",
         "entry": "panel/index.html"
       },
       "attach": "panel",
+      "page": true,
       "integration": {
         "name": "GitHub (token)",
         "description": "Lists your repositories with a personal access token.",

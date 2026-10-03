@@ -2,9 +2,11 @@
  * The mobile composer's pill ↔ full-composer state machine.
  *
  * With the keyboard closed the composer collapses into a narrow pill; any
- * interaction expands it back. The swap is deliberately instant and
- * synchronized with the keyboard choreography, so the chat compensates
- * keyboard and composer height in a single motion rather than a staircase.
+ * interaction expands it back. The swap commits synchronously and, in the
+ * native iOS shell, plays as a FLIP morph timed to the keyboard
+ * (mobileComposerMorph.ts), while the transcript glides on the same curve
+ * (keyboardFollowGlide.ts), so keyboard, composer and chat move as one
+ * motion rather than a staircase.
  *
  * Most of the code here is not the state machine itself but the corrections
  * that keep it from fighting the platform: mobile browsers dismiss the
@@ -21,6 +23,7 @@ import { flushSync } from 'react-dom';
 import { observeEditorFocus } from '@/lib/hardwareKeyboard';
 import { isCapacitorApp } from '@/lib/platform';
 import type { ComposerEditorHandle } from '../editor/ComposerEditor';
+import { createComposerMorphController, type ComposerMorphController } from './mobileComposerMorph';
 
 /**
  * Everything that must keep the composer expanded even with the keyboard
@@ -31,9 +34,8 @@ export interface MobileComposerHolders {
     controlsPanelOpen: boolean;
     attachMenuOpen: boolean;
     draftPickerOpen: boolean;
-    issuePickerOpen: boolean;
-    prPickerOpen: boolean;
-    linearPickerOpen: boolean;
+    /** The GitHub or Linear reference picker. */
+    referencePickerOpen: boolean;
     isDragging: boolean;
 }
 
@@ -97,6 +99,14 @@ export function useMobileComposerShell(
         expandedRef.current = expanded;
     });
 
+    // Plays the pill ↔ composer swap as a FLIP morph on the glass box
+    // (native iOS only; a plain swap elsewhere). One controller per shell so
+    // a collapse interrupting an expand cancels it cleanly.
+    const morphRef = React.useRef<ComposerMorphController | null>(null);
+    if (morphRef.current === null) morphRef.current = createComposerMorphController();
+    const morph = morphRef.current;
+    React.useEffect(() => () => morph.cancel(), [morph]);
+
     // A hardware keyboard can be attached (or detached) at any moment, so this
     // is a live condition rather than a mount-time one. Detaching does NOT
     // force a collapse — the normal idle/keyboard-hide paths take over again.
@@ -130,8 +140,12 @@ export function useMobileComposerShell(
         // flushSync so the editor exists NOW and focus() still runs inside the
         // gesture's call stack: mobile browsers only open the soft keyboard for
         // focus calls made synchronously from the tap (an rAF here worked in
-        // the Capacitor WebView but not in Safari or Chrome).
-        flushSync(() => setExpanded(true));
+        // the Capacitor WebView but not in Safari or Chrome). The morph wraps
+        // the commit: it measures the pill, commits, measures the composer and
+        // grows the box from one to the other once the keyboard starts rising.
+        morph.run('expand', formRef.current, () => {
+            flushSync(() => setExpanded(true));
+        });
 
         if (isCapacitorApp()) {
             // Timing tuned on device, against WKWebView pausing frame
@@ -158,7 +172,7 @@ export function useMobileComposerShell(
         // synchronously from the tap; their native reveal is also the only
         // thing that positions the composer, so no preventScroll.
         editorRef.current?.focus({ preventScroll: false });
-    }, [editorRef]);
+    }, [editorRef, formRef, morph]);
 
     const onDictationActiveChange = React.useCallback((active: boolean) => {
         setDictationActive(active);
@@ -204,9 +218,7 @@ export function useMobileComposerShell(
     const overlayOpen = overlayHostBusy
         || holders.controlsPanelOpen
         || holders.attachMenuOpen
-        || holders.issuePickerOpen
-        || holders.prPickerOpen
-        || holders.linearPickerOpen;
+        || holders.referencePickerOpen;
 
     // Installed PWA (standalone): a focus() from a bare timeout is outside the
     // user gesture and iOS refuses to raise the keyboard for it (Safari
@@ -214,7 +226,7 @@ export function useMobileComposerShell(
     // 'oc:mobile-overlay-closed' synchronously from the same React flush as the
     // click that closed it — refocus right there, while the gesture is live.
     const pickerDialogsOpenRef = React.useRef(false);
-    pickerDialogsOpenRef.current = holders.issuePickerOpen || holders.prPickerOpen || holders.linearPickerOpen;
+    pickerDialogsOpenRef.current = holders.referencePickerOpen;
     const skipNextCloseRestoreRef = React.useRef(false);
     const openSheetCountRef = React.useRef(0);
     const holdFocusUntilRef = React.useRef(0);
@@ -307,9 +319,7 @@ export function useMobileComposerShell(
         || holders.controlsPanelOpen
         || holders.attachMenuOpen
         || holders.draftPickerOpen
-        || holders.issuePickerOpen
-        || holders.prPickerOpen
-        || holders.linearPickerOpen
+        || holders.referencePickerOpen
         || holders.isDragging;
 
     React.useEffect(() => {
@@ -374,14 +384,19 @@ export function useMobileComposerShell(
             // that closed the keyboard, a drag) — the fallback path handles it.
             if (busyRef.current) return;
             expandIntentRef.current = null;
-            flushSync(() => {
-                setExpanded(false);
-                setExpandedInput(false);
+            // Committed inside the morph: the box folds from the composer's
+            // height to the pill's over the keyboard's hide leg (the anim
+            // event follows this intent in the same task).
+            morph.run('collapse', formRef.current, () => {
+                flushSync(() => {
+                    setExpanded(false);
+                    setExpandedInput(false);
+                });
             });
         };
         window.addEventListener('oc:keyboard-intent', handleIntent);
         return () => window.removeEventListener('oc:keyboard-intent', handleIntent);
-    }, [isMobile, setExpandedInput]);
+    }, [formRef, isMobile, morph, setExpandedInput]);
 
     const onEditorFocus = React.useCallback(() => {
         if (!isMobile) return;

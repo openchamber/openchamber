@@ -1,16 +1,8 @@
 import { getGitStatus, resolveGitPrimaryRoot } from '@/lib/gitApi';
+import { normalizePath as normalizePathImpl } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-const normalizePath = (value: string): string => {
-  if (!value) {
-    return '';
-  }
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.replace(/\/+$/, '');
-};
+const normalizePath = (value: string | null | undefined): string => normalizePathImpl(value) ?? '';
 
 export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeMetadata['status']> {
   const normalizedPath = normalizePath(worktreePath);
@@ -21,6 +13,14 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeM
     behind: status.behind,
     upstream: status.tracking,
   };
+}
+
+// Deleting a worktree force-removes its files and force-deletes its branch, so
+// skipping the confirmation is allowed only when nothing would be lost: no
+// uncommitted changes and a branch with an upstream that has every commit.
+// A branch never pushed has no upstream and always goes through the dialog.
+export function canDeleteWorktreeWithoutConfirm(status: WorktreeMetadata['status']): boolean {
+  return Boolean(status && !status.isDirty && status.upstream && status.ahead === 0);
 }
 
 // Resolving a project's root (primary worktree) requires shelling out to

@@ -5,6 +5,13 @@ const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@
 const LOOPBACK_URL_PATTERN = /(https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[(?:::1|::)\])(?::\d{2,5})?(?:\/[^\s<>'"`]*)?)/gi;
 const PREVIEW_OUTPUT_PATTERN = /(?:➜\s*(?:Local|Network):)|\b(?:local|network|loopback|serving|listening|available|ready|started|running|server|vite|webpack|next\.js|astro|sveltekit|nuxt)\b/i;
 const PYTHON_HTTP_SERVER_PATTERN = /Serving HTTP on .*? port (\d{2,5})/i;
+// portless (vercel-labs/portless) puts a dev server behind a named address:
+// it prints "-- Using port 4123" for the port it hands the server, then the
+// address itself as "  -> https://auth.myapp.localhost". The server then
+// announces its own loopback port, which is the same app without the name.
+const PORTLESS_PORT_PATTERN = /^--\s+Using port (\d{2,5})\b/;
+const PORTLESS_URL_PATTERN = /^\s*->\s+(https?:\/\/[^\s<>'"`]+)\s*$/;
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '::', '[::1]', '[::]']);
 const TRAILING_PUNCT = new Set(['.', ',', ';', ':', '!', '?']);
 
 const trimUrlTrailingPunctuation = (url: string): string => {
@@ -45,14 +52,67 @@ const normalizeLoopbackUrl = (url: string): string => {
  * a coin toss decided by which chunk the terminal emitted first, so callers
  * that must choose are given all of them instead.
  */
-export const extractAnnouncedUrls = (text: string): string[] => {
+const portOf = (url: string): number | null => {
+  try {
+    const parsed = new URL(url);
+    if (!LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    const port = Number.parseInt(parsed.port, 10);
+    return Number.isFinite(port) ? port : null;
+  } catch {
+    return null;
+  }
+};
+
+/** True for an address on this machine's loopback interface by number or `localhost`. */
+export const isLoopbackPreviewUrl = (url: string): boolean => {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Loopback ports portless announced it put behind a named address. Output is
+ * scanned in chunks, so callers keep what earlier chunks reported and pass it
+ * back to `extractAnnouncedUrls`.
+ */
+export const extractProxiedPorts = (text: string): number[] => {
+  const ports: number[] = [];
+  for (const line of text.replace(ANSI_ESCAPE_PATTERN, '').split('\n')) {
+    const port = Number.parseInt(PORTLESS_PORT_PATTERN.exec(line.trim())?.[1] ?? '', 10);
+    if (Number.isFinite(port) && port > 0 && port <= 65535 && !ports.includes(port)) ports.push(port);
+  }
+  return ports;
+};
+
+export type AnnouncementOptions = {
+  /** Ports earlier output said portless put behind a name. */
+  readonly proxiedPorts?: readonly number[];
+  /**
+   * False when a named local address resolves on the wrong machine (a desktop
+   * viewing a remote instance, which tunnels loopback ports only): portless
+   * names are then skipped and the port behind them is the address.
+   */
+  readonly namedAddressesReachable?: boolean;
+};
+
+export const extractAnnouncedUrls = (
+  text: string,
+  { proxiedPorts = [], namedAddressesReachable = true }: AnnouncementOptions = {},
+): string[] => {
   if (!text) return [];
 
   const cleaned = text.replace(ANSI_ESCAPE_PATTERN, '');
+  const proxied = new Set(namedAddressesReachable ? [...proxiedPorts, ...extractProxiedPorts(cleaned)] : []);
   const found: string[] = [];
   const seen = new Set<string>();
   const add = (url: string) => {
     if (seen.has(url)) return;
+    // The server behind a portless name, reached around it: the named
+    // address is the one to open.
+    const port = portOf(url);
+    if (port !== null && proxied.has(port)) return;
     seen.add(url);
     found.push(url);
   };
@@ -66,6 +126,11 @@ export const extractAnnouncedUrls = (text: string): string[] => {
   }
 
   for (const line of cleaned.split('\n')) {
+    const portlessUrl = PORTLESS_URL_PATTERN.exec(line)?.[1];
+    if (portlessUrl) {
+      if (namedAddressesReachable) add(trimUrlTrailingPunctuation(portlessUrl));
+      continue;
+    }
     if (!PREVIEW_OUTPUT_PATTERN.test(line)) continue;
 
     const matches = Array.from(line.matchAll(LOOPBACK_URL_PATTERN));
@@ -84,8 +149,8 @@ export const extractAnnouncedUrls = (text: string): string[] => {
   return found;
 };
 
-export const extractTerminalPreviewUrl = (text: string): string | null => (
-  extractAnnouncedUrls(text)[0] ?? null
+export const extractTerminalPreviewUrl = (text: string, options: AnnouncementOptions = {}): string | null => (
+  extractAnnouncedUrls(text, options)[0] ?? null
 );
 
 export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 1500): Promise<boolean> => {
@@ -103,9 +168,11 @@ export const isTerminalPreviewUrlAvailable = async (url: string, timeoutMs = 150
     return false;
   }
 
-  const host = parsed.hostname.toLowerCase();
-  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '0.0.0.0' && host !== '::1' && host !== '::') {
-    return false;
+  // Only portless announces a named address here, and it does so once the
+  // route is registered. The server's probe stays loopback-only (a name can
+  // resolve anywhere), so a named address is taken as announced.
+  if (!isLoopbackPreviewUrl(parsed.toString())) {
+    return true;
   }
 
   const controller = new AbortController();
@@ -151,9 +218,10 @@ const ANY_URL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
  */
 export const extractProjectActionUrl = (
   text: string,
-  { requireAnnounced = false }: { requireAnnounced?: boolean } = {},
+  { requireAnnounced = false, ...announcement }: AnnouncementOptions & { requireAnnounced?: boolean } = {},
 ): string | null => {
-  const announced = extractTerminalPreviewUrl(text);
+  const announced = extractTerminalPreviewUrl(text, announcement);
+  const proxiedPorts = announcement.namedAddressesReachable === false ? [] : (announcement.proxiedPorts ?? []);
   if (announced) return announced;
   if (requireAnnounced) return null;
 
@@ -162,7 +230,8 @@ export const extractProjectActionUrl = (
   for (const raw of cleaned.match(ANY_URL_PATTERN) ?? []) {
     try {
       const parsed = new URL(trimUrlTrailingPunctuation(raw));
-      if (parsed.port) candidates.push(parsed);
+      const loopbackPort = portOf(parsed.toString());
+      if (parsed.port && !(loopbackPort !== null && proxiedPorts.includes(loopbackPort))) candidates.push(parsed);
     } catch {
       // Not a URL after trimming; nothing to score.
     }

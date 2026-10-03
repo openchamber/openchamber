@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+The kit uses host-computed text colors for tinted buttons, badges, banner titles, validation messages, and links. You don't need to calculate contrast yourself.
+
+For custom CSS, `applyHostReady` provides `--primary-text`, `--success-text`, `--warning-text`, `--error-text`, and `--info-text`, plus matching `--oc-*-text` aliases. Use them for text on neutral or lightly tinted backgrounds. Keep base colors for fills and `--oc-primary-fg` for text on a solid `--oc-primary` fill. Apply every `onReady` snapshot to keep the colors current.
+
 `onReady` can run many times while the panel is open, including when session context changes. Apply the theme on every call, but mount controls and register listeners only once. Keep draft values outside rendering functions. When switching tabs, hide existing panels or restore their values from your state rather than clearing them.
 
 ## Keep selection and input state in sync

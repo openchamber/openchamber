@@ -25,6 +25,9 @@ import {
     type InlineCommentSource,
 } from '@/stores/useInlineCommentDraftStore';
 import type { Theme } from '@/types/theme';
+import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { useChatQuoteHighlightApi, type ChatQuoteMark } from '../../hooks/chatQuoteHighlightStore';
+import { getContextPreviewMaxHeight } from './contextPreviewHeight';
 
 export interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
@@ -55,8 +58,8 @@ const basename = (path: string): string => {
     return segments[segments.length - 1] ?? path;
 };
 
-const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--surface-mutedForeground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]';
-const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-[var(--surface-mutedForeground)] opacity-60';
+const ENTRY_ACTION_CLASS = 'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-interactive-hover hover:text-foreground';
+const ENTRY_LABEL_CLASS = 'text-[10px] font-medium uppercase tracking-wide text-muted-foreground opacity-60';
 
 const DraftPreviewEntry: React.FC<{
     draft: InlineCommentDraft;
@@ -67,7 +70,10 @@ const DraftPreviewEntry: React.FC<{
     onEndEdit: () => void;
     onRemove: () => void;
     onSaveComment: ((text: string) => void) | null;
-}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment }) => {
+    /** Chat quotes: point at the quoted fragment in the transcript. */
+    onFocusQuote: ((focused: boolean) => void) | null;
+    onRevealQuote: (() => void) | null;
+}> = ({ draft, index, title, editing, onStartEdit, onEndEdit, onRemove, onSaveComment, onFocusQuote, onRevealQuote }) => {
     const { t } = useI18n();
     const [editText, setEditText] = React.useState(draft.text);
     const editRef = React.useRef<HTMLTextAreaElement>(null);
@@ -107,12 +113,19 @@ const DraftPreviewEntry: React.FC<{
         if (editing) event.preventDefault();
     };
 
+    const quoteClassName = monoSource(draft.source)
+        ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-foreground'
+        : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground';
+
     return (
-        <div>
+        <div
+            onMouseEnter={onFocusQuote ? () => onFocusQuote(true) : undefined}
+            onMouseLeave={onFocusQuote ? () => onFocusQuote(false) : undefined}
+        >
             <div className="flex items-center gap-1.5 px-3 py-1.5"
-                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 8%, transparent)' }}>
-                <span className="text-xs font-medium text-[var(--surface-mutedForeground)]">{index + 1}.</span>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--surface-foreground)]" title={title}>
+                style={{ backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 8%, transparent)' }}>
+                <span className="text-xs font-medium text-muted-foreground">{index + 1}.</span>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={title}>
                     {title}
                 </span>
                 {onSaveComment ? (
@@ -144,15 +157,19 @@ const DraftPreviewEntry: React.FC<{
                 {draft.code.trim() ? (
                     <div>
                         <div className={ENTRY_LABEL_CLASS}>{t('chat.chatInput.contextPreview.selectedLabel')}</div>
-                        <div
-                            className={
-                                monoSource(draft.source)
-                                    ? 'mt-0.5 whitespace-pre-wrap break-words font-mono text-xs text-[var(--surface-foreground)]'
-                                    : 'mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]'
-                            }
-                        >
-                            {draft.code}
-                        </div>
+                        {onRevealQuote ? (
+                            <button
+                                type="button"
+                                className={`${quoteClassName} block w-full cursor-pointer text-left hover:underline`}
+                                style={{ minHeight: 0 }}
+                                onClick={onRevealQuote}
+                                title={t('chat.message.context.showQuoteSource')}
+                            >
+                                {draft.code}
+                            </button>
+                        ) : (
+                            <div className={quoteClassName}>{draft.code}</div>
+                        )}
                     </div>
                 ) : null}
                 {onSaveComment && (editing || draft.text.trim()) ? (
@@ -180,11 +197,11 @@ const DraftPreviewEntry: React.FC<{
                                     }
                                 }}
                                 placeholder={t('chat.textSelection.comment.placeholder')}
-                                className="mt-0.5 w-full resize-none rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-2 py-1 text-sm text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)]"
+                                className="oc-surface-elevated mt-0.5 w-full resize-none rounded-md border border-border bg-surface-elevated px-2 py-1 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                                 style={{ minHeight: 0 }}
                             />
                         ) : (
-                            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-[var(--surface-foreground)]">{draft.text}</div>
+                            <div className="mt-0.5 whitespace-pre-wrap break-words text-sm text-foreground">{draft.text}</div>
                         )}
                     </div>
                 ) : null}
@@ -205,6 +222,8 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         ),
     );
     const removeDraft = useInlineCommentDraftStore((state) => state.removeDraft);
+    const quoteHighlights = useChatQuoteHighlightApi();
+    const quotePublisher = React.useId();
     const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);
 
     const [openGroupKey, setOpenGroupKey] = React.useState<string | null>(null);
@@ -213,6 +232,32 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
     editingRef.current = editingDraftId;
     const containerRef = React.useRef<HTMLDivElement>(null);
     const closeTimerRef = React.useRef<number | null>(null);
+    const [previewMaxHeight, setPreviewMaxHeight] = React.useState<number | null>(null);
+
+    React.useLayoutEffect(() => {
+        const anchor = containerRef.current;
+        if (!openGroupKey || !anchor) return;
+
+        const boundary = anchor.closest('[data-composer-bound]') ?? anchor.closest('[data-chat-area]');
+        const updateHeight = () => {
+            setPreviewMaxHeight(getContextPreviewMaxHeight(
+                anchor.getBoundingClientRect().top,
+                boundary?.getBoundingClientRect().top ?? 0,
+                window.innerHeight,
+            ));
+        };
+        updateHeight();
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(anchor);
+        if (boundary) observer.observe(boundary);
+        const form = anchor.closest('form');
+        if (form) observer.observe(form);
+        window.addEventListener('resize', updateHeight);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener('resize', updateHeight);
+        };
+    }, [openGroupKey]);
 
     const cancelClose = React.useCallback(() => {
         if (closeTimerRef.current !== null) {
@@ -313,6 +358,31 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         return result;
     }, [drafts, t]);
 
+    // Quotes waiting here stay marked in their messages until sent or removed.
+    const quoteMarks = React.useMemo<ChatQuoteMark[]>(() => {
+        if (!draftTarget) return [];
+        return drafts.flatMap((draft) => (
+            draft.source === 'chat-quote' && draft.fileLabel
+                ? [{
+                    id: draft.id,
+                    messageId: draft.fileLabel,
+                    anchor: draft.anchor ?? legacyChatQuoteAnchor(draft.code),
+                    comment: draft.text,
+                    updateComment: (text: string) => updateDraft(draftTarget, draft.id, { text }),
+                    remove: () => removeDraft(draftTarget, draft.id),
+                }]
+                : []
+        ));
+    }, [draftTarget, drafts, removeDraft, updateDraft]);
+    React.useEffect(() => {
+        if (!quoteHighlights) return;
+        quoteHighlights.publishMarks(quotePublisher, quoteMarks);
+        return () => quoteHighlights.publishMarks(quotePublisher, []);
+    }, [quoteHighlights, quoteMarks, quotePublisher]);
+    React.useEffect(() => {
+        if (!openGroupKey) quoteHighlights?.focusMark(null);
+    }, [openGroupKey, quoteHighlights]);
+
     React.useEffect(() => {
         if (openGroupKey && !groups.some((group) => group.key === openGroupKey)) {
             setOpenGroupKey(null);
@@ -328,11 +398,20 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
         <div className="relative" ref={containerRef}>
             {openGroup ? (
                 <div
-                    className="oc-glass-popover absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] overflow-hidden rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
+                    // Shadow on the wrapper, never on the glass: see "Floating
+                    // composer" in composer/DOCUMENTATION.md.
+                    className="absolute bottom-full left-0 z-30 mb-1.5 w-full max-w-[480px] rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]"
                     onMouseEnter={cancelClose}
                     onMouseLeave={scheduleClose}
                 >
-                    <div className="max-h-[min(50vh,420px)] divide-y divide-[var(--interactive-border)] overflow-y-auto">
+                <div
+                    className="oc-glass-popover overflow-hidden rounded-xl border border-[var(--interactive-border)]"
+                    style={previewMaxHeight === null ? undefined : { maxHeight: previewMaxHeight }}
+                >
+                    <div
+                        className="divide-y divide-[var(--interactive-border)] overflow-y-auto"
+                        style={previewMaxHeight === null ? undefined : { maxHeight: Math.max(0, previewMaxHeight - 2) }}
+                    >
                         {openGroup.drafts.map((draft, index) => (
                             <DraftPreviewEntry
                                 key={draft.id}
@@ -346,9 +425,16 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
                                 onSaveComment={editableSource(draft.source)
                                     ? (text) => updateDraft(draftTarget, draft.id, { text })
                                     : null}
+                                onFocusQuote={quoteHighlights && draft.source === 'chat-quote'
+                                    ? (focused) => quoteHighlights.focusMark(focused ? draft.id : null)
+                                    : null}
+                                onRevealQuote={quoteHighlights && draft.source === 'chat-quote' && draft.fileLabel
+                                    ? () => quoteHighlights.reveal(draft.fileLabel, draft.anchor ?? legacyChatQuoteAnchor(draft.code))
+                                    : null}
                             />
                         ))}
                     </div>
+                </div>
                 </div>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 pb-2">

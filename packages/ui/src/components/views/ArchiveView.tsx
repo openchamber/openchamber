@@ -1,6 +1,6 @@
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import React from 'react';
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { Icon } from '@/components/icon/Icon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/components/ui';
@@ -14,11 +14,14 @@ import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/
 import { formatSessionDateLabel, normalizePath } from '@/components/session/sidebar/utils';
 import { useShallow } from 'zustand/react/shallow';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
+import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 
 type DirectoryBucket = {
   directory: string;
   label: string;
   sessions: Session[];
+  // The chats of a deleted isolated space: named after the space, with no way to restore them.
+  fromDeletedSpace: boolean;
 };
 
 // Bound the mounted DOM: archives grow into the hundreds; batch rendering
@@ -36,6 +39,19 @@ export function ArchiveView(): React.ReactNode {
   const [query, setQuery] = React.useState('');
   const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
+  const spaceArchives = useSpaceArchivesStore((state) => state.byDirectory);
+
+  // The chats of deleted spaces are read-only and named after their space; read which they are
+  // each time the page opens, since a space may have been deleted from another window.
+  React.useEffect(() => {
+    if (open) void refreshSpaceArchives().catch(() => {});
+  }, [open]);
+
+  const labelOf = React.useCallback((directory: string): string => {
+    const archive = spaceArchives?.get(directory);
+    if (archive) return archive.name;
+    return directory ? (formatDirectoryName(directory, homeDirectory) || directory) : t('sessions.archivePage.otherProjects');
+  }, [homeDirectory, spaceArchives, t]);
 
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -55,14 +71,13 @@ export function ArchiveView(): React.ReactNode {
       }
       byDirectory.set(directory, {
         directory,
-        label: directory
-          ? (formatDirectoryName(directory, homeDirectory) || directory)
-          : t('sessions.archivePage.otherProjects'),
+        label: labelOf(directory),
         sessions: [session],
+        fromDeletedSpace: spaceArchives?.has(directory) ?? false,
       });
     }
     return [...byDirectory.values()].sort((a, b) => b.sessions.length - a.sessions.length);
-  }, [homeDirectory, sortedSessions, t]);
+  }, [labelOf, sortedSessions, spaceArchives]);
 
   // Search spans every archived session; the directory filter applies only
   // while not searching.
@@ -112,20 +127,22 @@ export function ArchiveView(): React.ReactNode {
     onSelect: () => void,
     fullPath?: string,
     sessionsForDelete?: Session[],
+    fromDeletedSpace = false,
   ) => (
     <div key={key} className="group/dir relative">
       <button
         type="button"
         onClick={onSelect}
-        title={fullPath}
+        title={fromDeletedSpace ? t('spaces.archive.groupTitle', { name: label }) : fullPath}
         className={cn(
-          'flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label transition-[padding] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          'flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left typography-ui-label transition-[padding] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           sessionsForDelete ? 'group-hover/dir:pr-8 group-focus-within/dir:pr-8' : '',
           isSelected
             ? 'bg-interactive-selection text-foreground'
             : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
         )}
       >
+        {fromDeletedSpace ? <Icon name="box-3" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         <span className="flex-shrink-0 typography-micro text-muted-foreground/70">{count}</span>
       </button>
@@ -135,7 +152,7 @@ export function ArchiveView(): React.ReactNode {
             <button
               type="button"
               onClick={() => sessionEvents.requestDelete({ sessions: sessionsForDelete, mode: 'session' })}
-              className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/dir:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('sessions.archivePage.deleteProjectAria', { label })}
             >
               <Icon name="delete-bin" className="h-3.5 w-3.5" />
@@ -168,6 +185,7 @@ export function ArchiveView(): React.ReactNode {
               () => selectDirectory(bucket.directory),
               bucket.directory || undefined,
               bucket.sessions,
+              bucket.fromDeletedSpace,
             ))}
           </div>
         </div>
@@ -204,9 +222,9 @@ export function ArchiveView(): React.ReactNode {
                 </div>
               ) : visibleSessions.map((session) => {
                 const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
-                const directoryLabel = sessionDirectory
-                  ? (formatDirectoryName(sessionDirectory, homeDirectory) || sessionDirectory)
-                  : null;
+                const directoryLabel = sessionDirectory ? labelOf(sessionDirectory) : null;
+                // A deleted space's chat has nowhere to be restored to.
+                const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
                 return (
                   <div
                     key={session.id}
@@ -232,24 +250,24 @@ export function ArchiveView(): React.ReactNode {
                     <span className="flex-shrink-0 text-[0.72rem] text-muted-foreground/75">
                       {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
                     </span>
-                    <button
+                    {restorable ? <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         restoreSession(session);
                       }}
-                      className="absolute right-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      className="absolute right-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-foreground group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={t('sessions.archivePage.restoreSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
                     >
                       <Icon name="inbox-unarchive" className="h-3.5 w-3.5" />
-                    </button>
+                    </button> : null}
                     <button
                       type="button"
                       onClick={(event) => {
                         event.stopPropagation();
                         sessionEvents.requestDelete({ sessions: [session], mode: 'session' });
                       }}
-                      className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity pointer-events-none hover:text-destructive group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={t('sessions.archivePage.deleteSessionAria', { title: session.title || t('sessions.sidebar.session.untitled') })}
                     >
                       <Icon name="delete-bin" className="h-3.5 w-3.5" />

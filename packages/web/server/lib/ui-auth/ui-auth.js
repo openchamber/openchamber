@@ -1,9 +1,16 @@
 import crypto from 'crypto';
-import { SignJWT, jwtVerify } from 'jose';
+
+// jose is loaded on the first session check, not with the server.
+let josePending;
+const loadJose = () => {
+  josePending ??= import('jose');
+  return josePending;
+};
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
+import { sessionCookieNameForRequest } from './session-cookie.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -266,7 +273,8 @@ const getUrlAuthTokenFromRequest = (req) => {
       token = undefined;
     }
   }
-  return typeof token === 'string' && token.trim() ? token.trim() : null;
+  if (typeof token === 'string' && token.trim()) return token.trim();
+  return null;
 };
 
 const getRequestPathname = (req) => {
@@ -310,6 +318,10 @@ const parseUrlAuthScope = (value) => {
 
 const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guests/${guestId}/`);
 
+// An isolated space's raw file and its sockets, under `/api/spaces/<id>/`, matched by shape.
+const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
+const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
+
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
@@ -317,12 +329,11 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
-    || pathname === '/api/fs/serve'
-    || pathname.startsWith('/api/fs/serve/')
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'
-    || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname);
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname)
+    || SPACE_RAW_FILE_PATH.test(pathname);
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {
@@ -332,7 +343,9 @@ const isUrlAuthWebSocketPath = (pathname) => {
     || pathname === '/api/terminal/ws'
     || pathname === '/api/dictation/ws'
     || pathname === '/api/dev-tunnel'
-    || pathname.startsWith('/api/preview/proxy/');
+    || /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/.test(pathname)
+    || pathname.startsWith('/api/preview/proxy/')
+    || SPACE_WS_PATH.test(pathname);
 };
 
 const canUseUrlAuthTokenForRequest = (req, scope = null) => {
@@ -516,7 +529,7 @@ export const createUiAuth = ({
       const secure = isSecureRequest(req);
       const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
-        name: cookieName,
+        name: sessionCookieNameForRequest(req, cookieName),
         value: encodeURIComponent(token),
         maxAge: maxAgeSeconds,
         secure,
@@ -526,8 +539,9 @@ export const createUiAuth = ({
 
     const ensureSessionToken = async (req, res) => {
       const cookies = parseCookies(req.headers.cookie);
-      if (cookies[cookieName]) {
-        return cookies[cookieName];
+      const name = sessionCookieNameForRequest(req, cookieName);
+      if (cookies[name]) {
+        return cookies[name];
       }
       const token = crypto.randomBytes(32).toString('base64url');
       setSessionCookie(req, res, token, sessionTtlMs);
@@ -560,8 +574,9 @@ export const createUiAuth = ({
 
     const resolveAuthContext = async (req, res, { allowClientAuth = true, allowUrlToken = true } = {}) => {
       const cookies = parseCookies(req.headers.cookie);
-      if (cookies[cookieName]) {
-        return { type: 'session', token: cookies[cookieName] };
+      const name = sessionCookieNameForRequest(req, cookieName);
+      if (cookies[name]) {
+        return { type: 'session', token: cookies[name] };
       }
       if (allowClientAuth) {
         const clientAuth = await authenticateClientRequest(req, { allowUrlToken });
@@ -672,8 +687,9 @@ export const createUiAuth = ({
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
-    if (cookies[cookieName]) {
-      return cookies[cookieName];
+    const name = sessionCookieNameForRequest(req, cookieName);
+    if (cookies[name]) {
+      return cookies[name];
     }
     return null;
   };
@@ -682,7 +698,7 @@ export const createUiAuth = ({
     const secure = isSecureRequest(req);
     const maxAgeSeconds = Math.floor(ttlMs / 1000);
     const header = buildCookie({
-      name: cookieName,
+      name: sessionCookieNameForRequest(req, cookieName),
       value: encodeURIComponent(token),
       maxAge: maxAgeSeconds,
       secure,
@@ -693,7 +709,7 @@ export const createUiAuth = ({
   const clearSessionCookie = (req, res) => {
     const secure = isSecureRequest(req);
     const header = buildCookie({
-      name: cookieName,
+      name: sessionCookieNameForRequest(req, cookieName),
       value: '',
       maxAge: 0,
       secure,
@@ -722,6 +738,7 @@ export const createUiAuth = ({
       return false;
     }
     try {
+      const { jwtVerify } = await loadJose();
       await jwtVerify(token, jwtSecret);
       return true;
     } catch {
@@ -731,6 +748,7 @@ export const createUiAuth = ({
 
   const issueSession = async (req, res, { trustDevice = false } = {}) => {
     const ttlMs = resolveSessionTtlMs(trustDevice);
+    const { SignJWT } = await loadJose();
     const token = await new SignJWT({ type: 'ui-session' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()

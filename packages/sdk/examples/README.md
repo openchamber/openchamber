@@ -1,42 +1,50 @@
-# Example extensions
+# Extension gallery
 
-Six small extensions that exercise the SDK contract end to end. They are built
-and checked in so they install as-is; edit `main.ts` and rebuild with the command
-below when you change one.
+Eight examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
-| Folder | Capabilities it asks for | What it shows |
+| Folder | In the app | Try this |
 | --- | --- | --- |
-| `hello-kit` | none | Every UI kit control, the pushes from the app (session, directory, theme), toast, clipboard, open URL, compose into the chat box. No approval dialog. |
-| `tasks-demo` | `prompt`, `sessions`, `model`, `conversation` | A fake task list. Attach a task as a chip, link it to the current session, start a session (optionally on a worktree), send a prompt. Appears in the composer + menu as a dialog that loads its own page (`panel/attach.html`, declared as `attach: { mode: "dialog", entry }`): from the + menu it is a picker (`ctx.item` is null); click the attached chip and the same dialog opens on that task's details (`ctx.item` set) with the status and comments it put on `attach` as `data`, read back from `ctx.item.data` (list lookup as fallback), and a Send to chat button. Also declares two `actions` and one command: "Create task from message" on assistant messages opens the dialog on that message's text (`ctx.item.kind === "message"`) with a Create button that toasts and attaches; "Summarize session" in the session menus (`payload: ["messages"]`, hence `conversation`) shows the message count and the first 200 characters of each; `/task DEMO-2` in the chat box is answered by `host.onResolve` in `panel/main.ts` (the app mounts that page off-screen when the panel is closed) and attaches the task. The rail icon shows the open-task count through `host.setBadge` until you open the panel. Draft summary asks the Small Model for one sentence through `host.generate` (capability `model`) and puts it in the chat box. Exercises the approval dialog and `NOT_GRANTED` when you decline. |
-| `service-echo` | `service` | A local service process (Node HTTP server on loopback). The panel calls it through `host.serviceRequest` and shows status. Exercises the service approval and spawn/stop lifecycle. |
-| `github-token` | `network` | A token integration against `https://api.github.com`. Paste a GitHub token in Settings → Integrations, then the panel lists your repositories through `host.request`. Exercises the OAuth/token store and the request proxy. |
-| `tools-only` | none | A `package.json` and nothing else: no panel page, no `panel.entry`. One `tools` rule renders every `mcp.*` tool call in the chat with the JSON views. Shows a page-less extension: no rail icon, no + menu row, the Extensions card says "No panel". Install it, run any MCP tool, and the call's expanded body switches to the JSON summary/tree/raw views. |
-| `config-editor` | `filesystem` | Reads `~/.config/opencode/opencode.json` (declared under `contributes.filesystem`), parses it, and shows it as a browsable tree (Explore tab: keys, types, drill into objects and arrays) next to a raw editor (Raw tab) that saves back atomically. Exercises the outside-project file scope, the missing-file and invalid-JSON states, and the approval dialog's pattern list. |
+| `hello-kit` | **SDK Playground** | Explore Components, Live context, Host actions, and Storage. Change an input, switch the host theme, compose a chat draft, and save a note for your next visit. The examples expose their SDK calls under How this works. No capability approval needed. |
+| `tasks-demo` | **Task Board** | Add your own task, edit its brief and status, attach it to chat, or start an agent in a chosen project/worktree. Linked sessions stay with the task. Draft a brief with the Small Model. `/task DEMO-2` and message/session actions use the same saved tasks. |
+| `github-token` | **Repository Explorer** | Connect GitHub in Settings → Integrations → Extension accounts → GitHub (token). Search and filter repositories, load another page, inspect a repository, and add its context to chat. Sample repositories let you explore the layout before connecting. |
+| `service-echo` | **Local Service Lab** | Send an echo request, inspect its response and round-trip time, and watch the service state. Try an invalid path to see the host refuse it. The optional system-information experiment requires `uname` on the server. |
+| `config-editor` | **Config Studio** | Browse and filter JSON keys, edit or format the raw file, then compare the on-disk content with your draft before saving. Reads only the declared `~/.config/opencode/opencode.json` path on the connected instance. |
+| `git-graph-status` | **Git Graph** | Open a chat in a git project and look at the Work Status panel: **Recent commits** draws the project's history with the same lanes and curves as the Git view, branch, remote and tag badges, and a row for uncommitted changes. Switch between Auto (your branch and its upstream), All, and Manual (tick the branches you want). Click a commit to see its details, copy its hash, open it on GitHub, or open its diff. It has no rail icon and no panel, only that section. Approve its local service at install; the service only reads git. |
+| `checklist-editor` | **Checklist** | Create a file named `todo.checklist.md` in a project and open it in Files: its `- [ ]` lines become a checklist you tick, edit, add to, and remove from, while every other line stays as written. Save with Cmd/Ctrl+S or let autosave do it, switch to the source view and back, or open it fullscreen. It has no rail icon and no panel, only the editor. OpenChamber keeps the file; the editor never reads or writes it. |
+| `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
 
-## Install
+## Install and explore
 
-`tasks-demo` also declares a full-screen Tasks board. Open it from the Extension pages menu above the session list. It reads registered projects and worktrees, starts sessions without closing the board, shows live session states, opens selected chats, and saves board notes with `host.storage`. An idle session does not mark a task Done.
+1. Run `bun run dev` from the repository root and open the printed URL.
+2. In **Settings → Extensions**, add an absolute example folder, such as `<repo>/packages/sdk/examples/hello-kit`.
+3. Approve the requested capabilities. Remove uninstalls the extension, so its panel will not run.
+4. Open its context-rail panel or choose its full-screen page from the Extension pages menu above the session list. SDK Playground also adds **Show message length** to chat message actions. It shows a persistent toast with Copy and OK without opening a panel, using `mode: "background"` and `host.onAction`. Copy copies the result and keeps the toast open; OK closes it.
 
-1. Run the app: `bun run dev` from the repo root, open the URL it prints.
-2. Settings → Extensions → paste the absolute path of a folder below → Add:
-   - `<repo>/packages/sdk/examples/hello-kit`
-   - `<repo>/packages/sdk/examples/tasks-demo`
-   - `<repo>/packages/sdk/examples/service-echo`
-   - `<repo>/packages/sdk/examples/github-token`
-   - `<repo>/packages/sdk/examples/config-editor`
-   - `<repo>/packages/sdk/examples/tools-only`
-3. Approve what the dialog lists (or Remove to see the refusal path). The icon appears on the context rail.
+The checked-in JavaScript makes each folder installable without a build step. Provider requests and agent sessions are real when you connect an account or click Start session. Task Board's initial tasks and Repository Explorer's disconnected sample collection are sample data. An idle agent does not mark a task Done.
 
-## Rebuild after editing
+Task Board stores one record per task, including deletion markers for sample tasks. Editing one task cannot erase unrelated tasks. A malformed record stays untouched and is reported while other tasks remain usable. Use Refresh to see edits made in another open panel; simultaneous edits to the same task are last-write-wins. Board notes use a separate key. Storage failures do not block project/session subscriptions.
 
-`onReady` is a repeated snapshot, not a one-time mount event. Examples apply the theme on every snapshot, mount controls and register subscriptions once, and update existing handles afterward. Input values and selections belong to the extension. Keep them when switching tabs. Compare relevant connection/settings/item values before refreshing data or replacing content.
+Config Studio validates JSON syntax, not every OpenCode configuration option. Review shows up to 80,000 characters per side; Save writes the full draft. A completed save preserves edits typed while it was in flight. Unsaved changes disable Reload until you save or discard them.
 
-For Git URL installs, commit the built JavaScript and the lockfile; ignore `node_modules/`. To publish an extension update, bump its own `package.json` version, rebuild, commit, and push. OpenChamber does not build source or install dependencies during installation.
+## Read the implementation
 
-From the repo root:
+- `shared.ts` is presentation code for these examples, not a new SDK API. It supplies the responsive shell, section layout, plain-text output, and theme-token CSS. Bundles embed it, so installations do not need that source file.
+- `tasks-demo/panel/tasks.ts` owns task validation and storage; `board.ts` composes the UI; `workspace.ts` owns live project/session subscriptions and generation guards.
+- Every panel applies `applyHostReady` on repeated snapshots and mounts once. Controlled inputs call their handle's `update`. Provider and conversation data render as text.
+- SDK Playground keeps its message action in `hello-kit/background/main.ts`, separate from the panel. To make a background-only variant, omit `panel.entry` and `page` from its manifest; the action remains available and the rail icon disappears.
+- Example source uses the workspace SDK and the repository's existing Zod dependency for boundary validation. To move an example into its own repository, copy `shared.ts` into that package, adjust its imports, and declare `@openchamber/sdk` and `zod` where used.
+- The optional Tool Gallery MCP fixture is a separate process. Installing the extension never starts it or changes OpenCode configuration.
+
+Panel copy is intentionally English so the source stays easy to follow. A localized extension can select its own dictionaries using `HostReadyContext.locale`; an iframe cannot use the host's React i18n context.
+
+## Rebuild
+
+From the repository root:
 
 ```bash
+bun run --cwd packages/sdk build
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/hello-kit/panel/main.ts packages/sdk/examples/hello-kit/panel/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/hello-kit/background/main.ts packages/sdk/examples/hello-kit/background/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/github-token/panel/main.ts packages/sdk/examples/github-token/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/service-echo/panel/main.ts packages/sdk/examples/service-echo/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/service-echo/service/main.ts packages/sdk/examples/service-echo/service/main.js
@@ -44,4 +52,21 @@ bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/config-editor/pan
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/main.ts packages/sdk/examples/tasks-demo/panel/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/attach.ts packages/sdk/examples/tasks-demo/panel/attach.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/page.ts packages/sdk/examples/tasks-demo/panel/page.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tools-only/mcp.ts packages/sdk/examples/tools-only/mcp.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/git-graph-status/status/main.ts packages/sdk/examples/git-graph-status/status/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/git-graph-status/service/main.ts packages/sdk/examples/git-graph-status/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/checklist-editor/editor/main.ts packages/sdk/examples/checklist-editor/editor/main.js
 ```
+
+Rebuild all panels after editing `shared.ts` or the SDK. Commit built files with the extension; installation never builds source or installs dependencies. Bump the extension's own version when publishing an update through Git.
+
+## Check
+
+```bash
+bun run --cwd packages/sdk type-check
+bun run --cwd packages/sdk lint
+bun run --cwd packages/sdk test
+bun test packages/ui/src/lib/guests/sdk-examples.test.ts
+```
+
+SDK checks cover example TypeScript, manifests, persistence failures, the optional MCP fixture, and freshness of every bundle. UI-owned DOM tests exercise those bundles with a simulated host. These tests never read your real config or use a provider credential.

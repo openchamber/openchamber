@@ -124,7 +124,7 @@ mock.module('@/components/icon/Icon', () => ({
   Icon: ({ name, className }: { name: string; className?: string }) => React.createElement('span', { 'data-icon': name, className }),
 }));
 mock.module('@/components/ui/sortable-tabs-strip', () => ({
-  SortableTabsStrip: ({ items }: { items: Array<{ id: string; label: string; icon?: React.ReactNode }> }) => React.createElement(
+  SortableTabsStrip: ({ items, onClose }: { items: Array<{ id: string; label: string; icon?: React.ReactNode }>; onClose?: (id: string) => void }) => React.createElement(
     'div',
     { 'data-tabs-strip': 'terminal' },
     items.map((item) => React.createElement(
@@ -132,6 +132,7 @@ mock.module('@/components/ui/sortable-tabs-strip', () => ({
       { key: item.id, 'data-tab-id': item.id },
       item.icon,
       React.createElement('span', { 'data-tab-label': item.id }, item.label),
+      React.createElement('button', { type: 'button', 'data-tab-close': item.id, onClick: () => onClose?.(item.id) }),
     )),
   ),
 }));
@@ -232,6 +233,41 @@ describe('TerminalView project action tab indicator', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     useTerminalStore.getState().clearAll();
+  });
+
+  test('closing the last tab closes the surface instead of only replacing the tab', async () => {
+    effectiveDirectory = '/solo';
+    useTerminalStore.getState().ensureDirectory('/solo');
+    let lastTabClosedCalls = 0;
+    const onLastTabClosed = () => { lastTabClosedCalls += 1; };
+
+    await act(async () => {
+      root.render(React.createElement(TerminalView, { visible: false, onLastTabClosed }));
+    });
+    const [onlyTab] = useTerminalStore.getState().getDirectoryState('/solo')!.tabs;
+    await act(async () => {
+      host.querySelector<HTMLElement>(`[data-tab-close="${onlyTab!.id}"]`)?.click();
+    });
+    await flushEffects();
+
+    expect(lastTabClosedCalls).toBe(1);
+  });
+
+  test('closing one of several tabs keeps the surface open', async () => {
+    let lastTabClosedCalls = 0;
+    const onLastTabClosed = () => { lastTabClosedCalls += 1; };
+
+    await act(async () => {
+      root.render(React.createElement(TerminalView, { visible: false, onLastTabClosed }));
+    });
+    const [firstTab] = useTerminalStore.getState().getDirectoryState('/repo')!.tabs;
+    await act(async () => {
+      host.querySelector<HTMLElement>(`[data-tab-close="${firstTab!.id}"]`)?.click();
+    });
+    await flushEffects();
+
+    expect(lastTabClosedCalls).toBe(0);
+    expect(useTerminalStore.getState().getDirectoryState('/repo')!.tabs).toHaveLength(2);
   });
 
   test('shows a spinner only for active project-action tabs and keeps terminal or action icons elsewhere', async () => {

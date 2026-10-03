@@ -13,7 +13,7 @@ const hello: InstalledGuest = {
 };
 
 const resetStore = () => {
-  useGuestsStore.setState({ status: 'idle', guests: [], runtimeKey: '' });
+  useGuestsStore.setState({ status: 'idle', guests: [], runtimeKey: '', failure: null });
 };
 
 describe('useGuestsStore', () => {
@@ -59,9 +59,12 @@ describe('useGuestsStore', () => {
     resetStore();
     useGuestsStore.getState().resetForRuntimeSwitch('instance-a');
     useGuestsStore.getState().replaceCatalog([hello], 'instance-a');
-    useGuestsStore.getState().markFailed('instance-a');
+    useGuestsStore.getState().markFailed('instance-a', { method: 'GET', path: '/api/guests', kind: 'http', status: 503 });
     expect(useGuestsStore.getState().status).toBe('ready');
     expect(useGuestsStore.getState().guests).toEqual([hello]);
+    expect(useGuestsStore.getState().failure).toEqual({ method: 'GET', path: '/api/guests', kind: 'http', status: 503 });
+    useGuestsStore.getState().resetForRuntimeSwitch('instance-b');
+    expect(useGuestsStore.getState().failure).toBeNull();
   });
 
   test('overlays update checks without touching untouched rows', () => {

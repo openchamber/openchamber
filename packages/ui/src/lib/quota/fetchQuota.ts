@@ -11,8 +11,11 @@ const windowSchema = z.object({
   resetAtFormatted: z.string().nullable(),
   resetAfterFormatted: z.string().nullable(),
   valueLabel: z.string().nullable().optional(),
+  giftReset: z.object({ recordId: z.number(), expireAt: z.number() }).nullable().optional(),
 });
 const windowsSchema = z.record(z.string(), windowSchema);
+
+export type QuotaGiftResetType = 'FIVE_HOUR' | 'WEEK';
 
 /** The deadline covers response bodies too, including transports that ignore abort. */
 export const fetchQuota = async (
@@ -51,6 +54,47 @@ export const fetchQuota = async (
   };
   try {
     return await Promise.race([readResult(), aborted]);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    controller.signal.removeEventListener('abort', rejectAborted);
+  }
+};
+
+/** The deadline covers response bodies too, including transports that ignore abort. */
+export const activateGiftReset = async (
+  providerId: QuotaProviderId,
+  recordId: number,
+  resetType: QuotaGiftResetType,
+  { signal, timeoutMs = 30_000 }: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<void> => {
+  const controller = new AbortController();
+  const abort = () => controller.abort(new DOMException('The operation was aborted.', 'AbortError'));
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new DOMException('Gift reset request timed out', 'TimeoutError')), timeoutMs);
+  let rejectAborted: () => void = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAborted = () => reject(controller.signal.reason);
+    if (controller.signal.aborted) rejectAborted();
+    else controller.signal.addEventListener('abort', rejectAborted, { once: true });
+  });
+  const readResult = async () => {
+    controller.signal.throwIfAborted();
+    const response = await runtimeFetch(`/api/quota/${encodeURIComponent(providerId)}/gift-reset/use`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordId, resetType }),
+      signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      const failure = z.object({ error: z.string() }).safeParse(payload);
+      throw new Error(failure.success ? failure.data.error : `Failed to activate gift reset (${response.status})`);
+    }
+  };
+  try {
+    await Promise.race([readResult(), aborted]);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);

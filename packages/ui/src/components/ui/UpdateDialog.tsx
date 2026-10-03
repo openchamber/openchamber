@@ -23,6 +23,8 @@ interface UpdateDialogProps {
   info: UpdateInfo | null;
   downloading: boolean;
   downloaded: boolean;
+  /** Desktop install is being applied — the restart is already in flight */
+  installing?: boolean;
   progress: UpdateProgress | null;
   error: string | null;
   onDownload: () => void;
@@ -117,6 +119,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   info,
   downloading,
   downloaded,
+  installing = false,
   progress,
   error,
   onDownload,
@@ -229,7 +232,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
-      <DialogContent className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]" showCloseButton={true}>
+      <DialogContent className="max-w-4xl p-5 border-[var(--interactive-border)]" showCloseButton={true}>
         
         {/* Header Section */}
         <div className="flex items-center mb-1">
@@ -263,7 +266,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
-            <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
+            <div className="rounded-lg bg-surface-elevated/30 p-5 border border-border">
               <div className="flex items-center gap-3">
                 <Icon name="loader" className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
                 <div className="typography-ui-label text-foreground">
@@ -280,7 +283,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
           {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
-            <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/20 overflow-hidden">
+              <div className="rounded-lg border border-border bg-surface-elevated/20 overflow-hidden">
               <ScrollableOverlay
                 className="max-h-[400px] p-0"
                 fillContainer={false}
@@ -301,7 +304,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                     <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} enableFileReferences={false} />
                   </div>
                 ) : (
-                  <div className="divide-y divide-[var(--surface-subtle)]">
+                  <div className="divide-y divide-border">
                     {changelog.sections.map((section) => (
                       <div key={section.version} className="p-4">
                         <div className="flex items-center gap-3 mb-3">
@@ -341,7 +344,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 <Icon name="terminal" className="h-4 w-4" />
                 <span>{t('updateDialog.fallback.updateViaTerminal')}</span>
               </div>
-              <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
+              <div className="flex items-center gap-2 p-1 pl-3 bg-surface-elevated/50 rounded-md border border-border">
                 <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
                   {updateCommand}
                 </code>
@@ -423,7 +426,17 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </button>
             )}
 
-            {!isWebRuntime && !isMobileRuntime && downloaded && (
+            {!isWebRuntime && !isMobileRuntime && downloaded && installing && (
+              <button
+                disabled
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)]/50 text-white cursor-not-allowed"
+              >
+                <Icon name="loader" className="h-4 w-4 animate-spin" />
+                {t('updateDialog.status.restarting')}
+              </button>
+            )}
+
+            {!isWebRuntime && !isMobileRuntime && downloaded && !installing && (
               <button
                 onClick={onRestart}
                 className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"

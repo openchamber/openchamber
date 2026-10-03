@@ -103,7 +103,7 @@ export const UI_FONT_OPTIONS: FontOptionDefinition<UiFontOption>[] = [
         id: 'system',
         label: 'System',
         description: 'Native operating system interface font.',
-        stack: '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
+        stack: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
     }
 ];
 

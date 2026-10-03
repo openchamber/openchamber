@@ -93,6 +93,8 @@ describe("input-store attachments", () => {
       pendingGuestIssue: null,
       pendingBtwComposerRequest: null,
       activeEditorFile: null,
+      attachmentDraftKey: null,
+      attachmentDrafts: new Map(),
     })
     useInputStore.getState().setAttachedFiles([])
   })
@@ -108,6 +110,24 @@ describe("input-store attachments", () => {
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })
 
+  testWithMockFileReader("rejects pending file and selection reads after switching drafts, even after returning", async () => {
+    const source = { runtimeKey: "runtime", directory: "/repo", sessionId: "source" }
+    const input = useInputStore.getState()
+    input.selectAttachmentDraft(source)
+    input.addRestoredAttachment({ url: "data:text/plain;base64,aGVsbG8=", mimeType: "text/plain", filename: "ready.txt" })
+    const ready = useInputStore.getState().attachedFiles
+    const local = input.addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
+    const selection = input.addVSCodeSelectionAttachment("/repo/code.ts", new File(["hello"], "selection.ts", { type: "text/plain" }))
+    expect(pendingReaders).toHaveLength(2)
+    input.selectAttachmentDraft({ ...source, sessionId: "other" })
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+    input.selectAttachmentDraft(source)
+    for (const reader of pendingReaders) resolveReader(reader, "data:text/plain;base64,aGVsbG8=")
+    expect(await local).toBe(false)
+    await selection
+    expect(useInputStore.getState().attachedFiles).toBe(ready)
+  })
+
   testWithMockFileReader("does not attach a local file after attached files are replaced", async () => {
     const addPromise = useInputStore.getState().addAttachedFile(new File(["hello"], "hello.txt", { type: "text/plain" }))
     expect(pendingReaders).toHaveLength(1)
@@ -116,6 +136,25 @@ describe("input-store attachments", () => {
     resolveReader(pendingReaders[0], "data:text/plain;base64,aGVsbG8=")
     await addPromise
 
+    expect(useInputStore.getState().attachedFiles).toEqual([])
+  })
+
+  testWithMockFileReader("a pending selection in another draft does not block the same selection here", async () => {
+    const source = { runtimeKey: "runtime", directory: "/repo", sessionId: "source" }
+    const input = useInputStore.getState()
+    const file = new File(["hello"], "selection.ts", { type: "text/plain" })
+    input.selectAttachmentDraft(source)
+    const first = input.addVSCodeSelectionAttachment("/repo/code.ts", file)
+    input.selectAttachmentDraft({ ...source, sessionId: "other" })
+    const second = input.addVSCodeSelectionAttachment("/repo/code.ts", file)
+    expect(pendingReaders).toHaveLength(2)
+    // A repeated selection of the current identity must not cancel its read.
+    input.selectAttachmentDraft({ ...source, sessionId: "other" })
+    input.clearAttachedFiles(source)
+    for (const reader of pendingReaders) resolveReader(reader, "data:text/plain;base64,aGVsbG8=")
+    await Promise.all([first, second])
+    expect(useInputStore.getState().attachedFiles.map((attachment) => attachment.filename)).toEqual(["selection.ts"])
+    input.selectAttachmentDraft(source)
     expect(useInputStore.getState().attachedFiles).toEqual([])
   })
 

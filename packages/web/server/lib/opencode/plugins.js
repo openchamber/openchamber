@@ -8,6 +8,11 @@ import {
   writeConfig,
 } from './shared.js';
 import { isPathSpec } from './plugin-spec.js';
+import { PLUGIN_SECTION, toPluginEntity, fromPluginEntity, readPluginList } from './config-v2.js';
+
+// OpenCode 2 reads `plugins` (bare string or `{package, options}`) and still
+// decodes the v1 `plugin` array with its `[spec, options]` tuples. OpenChamber
+// reads both and always writes `plugins` with v2 entries.
 
 const PLUGIN_FILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_.]*\.(js|ts|mjs|cjs)$/;
 
@@ -77,7 +82,6 @@ function getActiveOpencodeConfigDir() {
 function getActiveUserConfigPaths() {
   const configDir = getActiveOpencodeConfigDir();
   return [
-    path.join(configDir, 'config.json'),
     path.join(configDir, 'opencode.json'),
     path.join(configDir, 'opencode.jsonc'),
   ];
@@ -184,9 +188,12 @@ function getPluginTarget(id, workingDirectory) {
   validateScope(scope);
   const layers = readPluginConfigLayers(workingDirectory);
   const source = configSources(layers).find((candidate) => candidate.scope === scope);
-  const plugin = Array.isArray(source?.config?.plugin) ? source.config.plugin : [];
+  if (!source) {
+    return null;
+  }
+  const plugin = pluginArrayForWrite(source.config);
   const index = plugin.findIndex((raw) => parsePluginRaw(raw).spec === spec);
-  if (!source || index === -1) {
+  if (index === -1) {
     return null;
   }
   return { source, plugin, index };
@@ -201,6 +208,16 @@ function pluginDirForScope(scope, workingDirectory) {
     return path.join(workingDirectory, '.opencode', 'plugins');
   }
   return path.join(getActiveOpencodeConfigDir(), 'plugins');
+}
+
+/**
+ * The directories OpenCode 2 scans for local plugins in a scope: `plugins/`
+ * (where OpenChamber writes) and the v1 `plugin/`. Each holds `.ts`/`.js`
+ * files and plugin package directories.
+ */
+function pluginDirsForScope(scope, workingDirectory) {
+  const preferred = pluginDirForScope(scope, workingDirectory);
+  return [preferred, path.join(path.dirname(preferred), 'plugin')];
 }
 
 function fileTargetFromId(id, workingDirectory) {
@@ -231,41 +248,71 @@ function decodePluginId(id) {
   return { prefix: decoded.slice(0, separator), value: decoded.slice(separator + 1) };
 }
 
+/** Accept a v1 string/tuple or a v2 `{package, options}` object. */
 function parsePluginRaw(raw) {
-  if (typeof raw === 'string') {
-    return { spec: validatePluginSpec(raw) };
+  const entity = toPluginEntity(raw);
+  if (!entity) {
+    throw codedError('Plugin spec must be a string, [string, object], or {package, options}', 'INVALID_SPEC');
   }
-  if (Array.isArray(raw) && raw.length === 2 && isRecord(raw[1])) {
-    return { spec: validatePluginSpec(raw[0]), options: { ...raw[1] } };
-  }
-  throw codedError('Plugin spec must be a string or [string, object]', 'INVALID_SPEC');
+  const parsed = { spec: validatePluginSpec(entity.package) };
+  if (hasOptions(entity.options)) parsed.options = { ...entity.options };
+  return parsed;
 }
 
+/** Always v2: a bare string, or `{package, options}`. Never a tuple. */
 function serializePluginEntry(entry) {
   const spec = validatePluginSpec(entry?.spec);
-  if (hasOptions(entry?.options)) {
-    return [spec, { ...entry.options }];
+  const serialized = fromPluginEntity({ package: spec, options: hasOptions(entry?.options) ? entry.options : undefined });
+  if (serialized === null) {
+    throw codedError('Plugin spec must be a non-empty string', 'INVALID_SPEC');
   }
-  return spec;
+  return serialized;
+}
+
+function migratePluginRaw(raw) {
+  try {
+    return serializePluginEntry(parsePluginRaw(raw));
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * The plugin array a write should target. Prefer the v2 `plugins` key; when the
+ * file only has the v1 `plugin` array, migrate the whole array into `plugins`
+ * in place so the two spellings cannot disagree.
+ */
+function pluginArrayForWrite(config) {
+  const legacy = Array.isArray(config[PLUGIN_SECTION.v1]) ? config[PLUGIN_SECTION.v1] : null;
+  if (!Array.isArray(config[PLUGIN_SECTION.v2])) config[PLUGIN_SECTION.v2] = [];
+  if (legacy) {
+    config[PLUGIN_SECTION.v2] = [
+      // An entry we cannot parse is carried over untouched rather than dropped:
+      // it is the user's config, and losing it would be worse than leaving it
+      // in a shape OpenCode already refuses.
+      ...legacy.map((raw) => migratePluginRaw(raw)),
+      ...config[PLUGIN_SECTION.v2],
+    ];
+    delete config[PLUGIN_SECTION.v1];
+  }
+  return config[PLUGIN_SECTION.v2];
 }
 
 function listPluginEntries(workingDirectory) {
   const layers = readPluginConfigLayers(workingDirectory);
   return configSources(layers).flatMap((source) => {
-    if (!Array.isArray(source.config?.plugin)) {
-      return [];
-    }
-    return source.config.plugin.map((raw) => {
-      const parsed = parsePluginRaw(raw);
-      return {
-        id: encodePluginId('config', `${source.scope}:${parsed.spec}`),
-        spec: parsed.spec,
-        ...(parsed.options !== undefined ? { options: parsed.options } : {}),
+    return readPluginList(source.config).map((item) => {
+      const entry = {
+        id: encodePluginId('config', `${source.scope}:${item.entry.package}`),
+        spec: item.entry.package,
         scope: source.scope,
         kind: 'config',
-        parsedKind: parsedKindForSpec(parsed.spec),
+        parsedKind: parsedKindForSpec(item.entry.package),
         sourcePath: source.filePath,
+        legacy: item.legacy,
       };
+      if (item.entry.options !== undefined) entry.options = item.entry.options;
+      return entry;
     });
   });
 }
@@ -282,8 +329,7 @@ function createPluginEntry(entry, workingDirectory) {
   const layers = readPluginConfigLayers(workingDirectory);
   const existing = configSources(layers).find((source) => (
     source.scope === scope
-    && Array.isArray(source.config?.plugin)
-    && source.config.plugin.some((raw) => parsePluginRaw(raw).spec === spec)
+    && readPluginList(source.config).some((item) => item.entry.package === spec)
   ));
   if (existing) {
     throw codedError(`Plugin "${spec}" already exists`, 'ENTRY_EXISTS');
@@ -299,10 +345,7 @@ function createPluginEntry(entry, workingDirectory) {
     config = layers.paths.customPath ? layers.customConfig : layers.userConfig;
   }
 
-  if (!Array.isArray(config.plugin)) {
-    config.plugin = [];
-  }
-  config.plugin.push(serializePluginEntry({ spec, options: entry.options }));
+  pluginArrayForWrite(config).push(serializePluginEntry({ spec, options: entry.options }));
   writeConfig(config, targetPath);
 }
 
@@ -325,7 +368,7 @@ function deletePluginEntry(id, workingDirectory) {
   }
   target.plugin.splice(target.index, 1);
   if (target.plugin.length === 0) {
-    delete target.source.config.plugin;
+    delete target.source.config[PLUGIN_SECTION.v2];
   }
   writeConfig(target.source.config, target.source.filePath);
 }
@@ -335,21 +378,29 @@ function listPluginDirFiles(workingDirectory) {
   if (workingDirectory) {
     scopes.push(AGENT_SCOPE.PROJECT);
   }
-  return scopes.flatMap((scope) => {
-    const dir = pluginDirForScope(scope, workingDirectory);
+  return scopes.flatMap((scope) => pluginDirsForScope(scope, workingDirectory).flatMap((dir) => {
     if (!fs.existsSync(dir)) {
       return [];
     }
+    const editable = dir === pluginDirForScope(scope, workingDirectory);
     return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name) && !entry.name.includes('..'))
-      .map((entry) => ({
-        id: encodePluginId('file', `${scope}:${entry.name}`),
-        fileName: entry.name,
-        scope,
-        kind: 'file',
-        absolutePath: path.join(dir, entry.name),
-      }));
-  });
+      .filter((entry) => !entry.name.includes('..') && !entry.name.startsWith('.'))
+      .flatMap((entry) => {
+        if (entry.isFile() && PLUGIN_FILE_NAME_PATTERN.test(entry.name)) {
+          // Only files in the v2 `plugins/` directory are editable through
+          // the file id; a v1 `plugin/` file is listed for what it is.
+          return editable
+            ? [{ id: encodePluginId('file', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'file', absolutePath: path.join(dir, entry.name) }]
+            : [{ id: encodePluginId('legacy', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+        }
+        if (entry.isDirectory()) {
+          // A plugin package (a directory with its own entry point): OpenCode
+          // loads it, OpenChamber only lists it.
+          return [{ id: encodePluginId('package', `${scope}:${entry.name}`), fileName: entry.name, scope, kind: 'package', absolutePath: path.join(dir, entry.name) }];
+        }
+        return [];
+      });
+  }));
 }
 
 function readPluginDirFile(id, workingDirectory) {

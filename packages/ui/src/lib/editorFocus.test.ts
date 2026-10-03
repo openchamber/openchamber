@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { isVimEditorEventTarget } from './editorFocus';
+import { isEditorEventTarget, isVimEditorEventTarget } from './editorFocus';
 
 const dom = new Window();
 Object.assign(globalThis, { window: dom, document: dom.document, Element: dom.Element });
@@ -44,6 +44,28 @@ describe('isVimEditorEventTarget', () => {
     } finally {
       plain.editor.remove();
       button.remove();
+    }
+  });
+});
+
+describe('isEditorEventTarget', () => {
+  test('recognizes any CodeMirror editor and an overlay the editor opened, nothing else', () => {
+    const { editor, content } = mountEditor({ vim: false });
+    const overlay = document.createElement('div');
+    overlay.setAttribute('data-editor-overlay', '');
+    const input = document.createElement('input');
+    overlay.appendChild(input);
+    const outside = document.createElement('button');
+    document.body.append(overlay, outside);
+    try {
+      expect(isEditorEventTarget(content)).toBe(true);
+      expect(isEditorEventTarget(input)).toBe(true);
+      expect(isEditorEventTarget(outside)).toBe(false);
+      expect(isEditorEventTarget(null)).toBe(false);
+    } finally {
+      editor.remove();
+      overlay.remove();
+      outside.remove();
     }
   });
 });

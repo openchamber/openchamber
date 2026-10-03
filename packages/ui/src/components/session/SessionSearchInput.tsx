@@ -14,12 +14,17 @@ type SessionSearchInputProps = {
   onClose?: () => void;
   active?: boolean;
   mobile?: boolean;
+  /** Replaces the Enter hint on the left of the hint row (e.g. a match count). */
+  leadingHint?: React.ReactNode;
+  /** Right-aligned hint on the same row as the Enter hint. */
+  trailingHint?: React.ReactNode;
 };
 
 // Draft text stays here: typing must not invalidate the session tree or run its
 // search projection. Parents receive only submitted queries and explicit clears.
 export function SessionSearchInput({
   value, onSearch, placeholder, clearLabel, inputRef, onClose, active = true, mobile = false,
+  leadingHint, trailingHint,
 }: SessionSearchInputProps) {
   const { t } = useI18n();
   const [draft, setDraft] = React.useState(value);
@@ -47,7 +52,7 @@ export function SessionSearchInput({
           ref={ref}
           value={draft}
           aria-label={placeholder}
-          aria-describedby={hintId}
+          aria-describedby={mobile ? undefined : hintId}
           enterKeyHint="search"
           placeholder={placeholder}
           className={mobile ? 'h-11 pl-9 pr-10' : 'h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground'}
@@ -89,7 +94,13 @@ export function SessionSearchInput({
           </Button>
         ) : null}
       </div>
-      <p id={hintId} className="mt-1 typography-micro text-muted-foreground">{t('sessions.search.submitHint')}</p>
+      {/* The phone keyboard's own search key explains itself; the hint row is desktop-only. */}
+      {mobile ? null : (
+        <div className="mt-1 flex items-center justify-between gap-2 typography-micro text-muted-foreground">
+          <p id={hintId} className="min-w-0 truncate">{leadingHint ?? t('sessions.search.submitHint')}</p>
+          {trailingHint ? <span className="shrink-0">{trailingHint}</span> : null}
+        </div>
+      )}
     </div>
   );
 }

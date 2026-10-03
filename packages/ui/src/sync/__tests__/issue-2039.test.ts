@@ -1,17 +1,46 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
-import { togglePermissionAutoAccept } from "../../components/chat/permissionAutoAccept"
+import { cyclePermissionMode } from "../../components/chat/permissionAutoAccept"
 
 const storage = new Map<string, string>()
-const createSessionCalls: Array<{ title?: string; directory: string | null; parentID: string | null; metadata?: unknown }> = []
-const permissionAutoAcceptCalls: Array<[string, boolean]> = []
+const createSessionCalls: Array<{ title?: string; directory: string | null; metadata?: unknown }> = []
+const permissionAutoAcceptCalls: Array<[string, string]> = []
 const savedVariantCalls: Array<string | undefined> = []
+const savedAgentModelCalls: Array<[string, string, string, string]> = []
+const applyDefaultModelAgentSelectionCalls: Array<{
+  projectDefaultAgent?: string | null
+  projectDefaultModel?: string | null
+  projectDefaultVariant?: string | null
+}> = []
+const activateDirectoryCalls: Array<string | null | undefined> = []
+const activationOptions: Array<{ preserveManualModel?: boolean } | undefined> = []
 let configVariantOverride: string | null | undefined
-let projects: Array<{ id: string; path: string; label: string }> = []
+let activationPending: Promise<void> | undefined
+let selectionSource: 'auto' | 'manual' = 'auto'
 const createdWorktreeProjects: Array<{ id: string; path: string }> = []
 // Sync's session→directory index. `createSession` writes it, and directory
 // resolution reads it as the authoritative source, so the mock has to keep one.
 const sessionDirectoryRegistry = new Map<string, string>()
 let createdSessionDirectory: string | undefined
+const projectsState = {
+  projects: [] as Array<{
+    id: string
+    path: string
+    defaultAgent?: string | null
+    defaultModel?: string | null
+    defaultVariant?: string | null
+  }>,
+  activeProjectId: null as string | null,
+  setActiveProjectIdOnly: (projectId: string | null) => {
+    projectsState.activeProjectId = projectId
+  },
+  getActiveProject: () => null as {
+    id: string
+    path: string
+    defaultAgent?: string | null
+    defaultModel?: string | null
+    defaultVariant?: string | null
+  } | null,
+}
 
 const getMockCalls = (fn: unknown): unknown[][] => ((fn as { mock?: { calls: unknown[][] } }).mock?.calls ?? [])
 
@@ -91,8 +120,8 @@ mock.module("@/lib/opencode/client", () => ({
 mock.module("@/stores/permissionStore", () => ({
   usePermissionStore: {
     getState: () => ({
-      setSessionAutoAccept: mock(async (sessionId: string, enabled: boolean) => {
-        permissionAutoAcceptCalls.push([sessionId, enabled])
+      setSessionMode: mock(async (sessionId: string, mode: string) => {
+        permissionAutoAcceptCalls.push([sessionId, mode])
       }),
     }),
   },
@@ -105,20 +134,27 @@ mock.module("@/stores/useConfigStore", () => ({
       currentProviderId: "provider",
       currentModelId: "model",
       currentVariantSelection: { override: configVariantOverride, inherited: "high" },
+      selectionSource,
       agents: [],
-      activateDirectory: mock(async () => undefined),
-      applyDefaultModelAgentSelection: mock(() => undefined),
+      activateDirectory: mock(async (directory: string | null | undefined, options?: { preserveManualModel?: boolean }) => {
+        activateDirectoryCalls.push(directory)
+        activationOptions.push(options)
+        await activationPending
+      }),
+      applyDefaultModelAgentSelection: mock((selection: {
+        projectDefaultAgent?: string | null
+        projectDefaultModel?: string | null
+        projectDefaultVariant?: string | null
+      }) => {
+        applyDefaultModelAgentSelectionCalls.push(selection)
+      }),
     }),
   },
 }))
 
 mock.module("@/stores/useProjectsStore", () => ({
   useProjectsStore: {
-    getState: () => ({
-      projects,
-      activeProjectId: null,
-      getActiveProject: () => null,
-    }),
+    getState: () => projectsState,
   },
 }))
 
@@ -160,16 +196,20 @@ mock.module("@/stores/useCommandsStore", () => ({
   useCommandsStore: {
     getState: () => ({
       commands: [],
+      commandsByDirectory: {},
     }),
   },
+  selectCommandsForDirectory: () => [],
 }))
 
 mock.module("@/stores/useSkillsStore", () => ({
   useSkillsStore: {
     getState: () => ({
       skills: [],
+      skillsByDirectory: {},
     }),
   },
+  selectSkillsForDirectory: () => [],
 }))
 
 mock.module("@/components/ui", () => ({
@@ -185,7 +225,9 @@ mock.module("../selection-store", () => ({
     getState: () => ({
       saveSessionModelSelection: () => undefined,
       saveSessionAgentSelection: () => undefined,
-      saveAgentModelForSession: () => undefined,
+      saveAgentModelForSession: (sessionId: string, agent: string, provider: string, model: string) => {
+        savedAgentModelCalls.push([sessionId, agent, provider, model])
+      },
       saveAgentModelVariantForSession: (_sessionId: string, _agent: string, _provider: string, _model: string, variant: string | undefined) => {
         savedVariantCalls.push(variant)
       },
@@ -280,11 +322,10 @@ mock.module("../session-actions", () => ({
   createSession: mock(async (
     title: string | undefined,
     directory: string | null,
-    parentID: string | null,
     metadata?: unknown,
     selectionTransition?: "submitted-draft",
   ) => {
-    createSessionCalls.push({ title, directory, parentID, metadata })
+    createSessionCalls.push({ title, directory, metadata })
     const session = { id: "ses_issue_2039", directory: createdSessionDirectory ?? directory }
     const sessionDirectory = session.directory ?? null
     if (sessionDirectory) {
@@ -295,6 +336,7 @@ mock.module("../session-actions", () => ({
     store.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   }),
+  forkAfterMessage: mock(async () => undefined),
   deleteSession: mock(async () => true),
   deleteSessions: mock(async () => ({ deletedIds: [], failedIds: [] })),
   archiveSession: mock(async () => true),
@@ -348,49 +390,49 @@ mock.module("@/lib/worktrees/worktreeCreate", () => ({
 const { materializeOpenDraftSession, useSessionUIStore } = await import("../session-ui-store")
 
 describe("issue 2039 draft auto-accept", () => {
-  test("toggles draft state before a session exists", () => {
-    const setDraftPermissionAutoAcceptEnabled = mock(() => undefined)
-    const setSessionAutoAccept = mock(async () => undefined)
+  test("cycles the draft mode before a session exists", () => {
+    const setDraftPermissionMode = mock(() => undefined)
+    const setSessionMode = mock(async () => undefined)
     const onOpenSessionFirst = mock(() => undefined)
     const onToggleFailed = mock(() => undefined)
 
-    togglePermissionAutoAccept({
+    cyclePermissionMode({
       permissionScopeSessionId: null,
       newSessionDraftOpen: true,
-      draftPermissionAutoAcceptEnabled: false,
-      permissionAutoAcceptEnabled: false,
-      setDraftPermissionAutoAcceptEnabled,
-      setSessionAutoAccept,
+      currentMode: "ask",
+      safetyAvailable: true,
+      setDraftPermissionMode,
+      setSessionMode,
       onOpenSessionFirst,
       onToggleFailed,
     })
 
-    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled).length).toBe(1)
-    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled)[0]).toEqual([true])
-    expect(getMockCalls(setSessionAutoAccept).length).toBe(0)
+    expect(getMockCalls(setDraftPermissionMode).length).toBe(1)
+    expect(getMockCalls(setDraftPermissionMode)[0]).toEqual(["safety"])
+    expect(getMockCalls(setSessionMode).length).toBe(0)
     expect(getMockCalls(onOpenSessionFirst).length).toBe(0)
     expect(getMockCalls(onToggleFailed).length).toBe(0)
   })
 
   test("guards the toggle when no draft is open", () => {
-    const setDraftPermissionAutoAcceptEnabled = mock(() => undefined)
-    const setSessionAutoAccept = mock(async () => undefined)
+    const setDraftPermissionMode = mock(() => undefined)
+    const setSessionMode = mock(async () => undefined)
     const onOpenSessionFirst = mock(() => undefined)
     const onToggleFailed = mock(() => undefined)
 
-    togglePermissionAutoAccept({
+    cyclePermissionMode({
       permissionScopeSessionId: null,
       newSessionDraftOpen: false,
-      draftPermissionAutoAcceptEnabled: false,
-      permissionAutoAcceptEnabled: false,
-      setDraftPermissionAutoAcceptEnabled,
-      setSessionAutoAccept,
+      currentMode: "ask",
+      safetyAvailable: true,
+      setDraftPermissionMode,
+      setSessionMode,
       onOpenSessionFirst,
       onToggleFailed,
     })
 
-    expect(getMockCalls(setDraftPermissionAutoAcceptEnabled).length).toBe(0)
-    expect(getMockCalls(setSessionAutoAccept).length).toBe(0)
+    expect(getMockCalls(setDraftPermissionMode).length).toBe(0)
+    expect(getMockCalls(setSessionMode).length).toBe(0)
     expect(getMockCalls(onOpenSessionFirst).length).toBe(1)
     expect(getMockCalls(onToggleFailed).length).toBe(0)
   })
@@ -398,11 +440,22 @@ describe("issue 2039 draft auto-accept", () => {
   beforeEach(() => {
     storage.clear()
     createSessionCalls.length = 0
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
     sessionDirectoryRegistry.clear()
     permissionAutoAcceptCalls.length = 0
     savedVariantCalls.length = 0
+    savedAgentModelCalls.length = 0
     configVariantOverride = undefined
+    activationPending = undefined
+    selectionSource = 'auto'
     createdSessionDirectory = undefined
+    projectsState.projects = []
+    projectsState.activeProjectId = null
+    projectsState.setActiveProjectIdOnly = (projectId: string | null) => {
+      projectsState.activeProjectId = projectId
+    }
+    projectsState.getActiveProject = () => null
 
     useSessionUIStore.setState({
       currentSessionId: null,
@@ -420,11 +473,12 @@ describe("issue 2039 draft auto-accept", () => {
   test("stores auto-accept in the draft and applies it when the session materializes", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
 
-    expect(useSessionUIStore.getState().newSessionDraft.permissionAutoAcceptEnabled).toBe(false)
+    // No choice yet: the server writes the default from Settings.
+    expect(useSessionUIStore.getState().newSessionDraft.permissionMode).toBeUndefined()
 
-    useSessionUIStore.getState().setDraftPermissionAutoAcceptEnabled(true)
+    useSessionUIStore.getState().setDraftPermissionMode("safety")
 
-    expect(useSessionUIStore.getState().newSessionDraft.permissionAutoAcceptEnabled).toBe(true)
+    expect(useSessionUIStore.getState().newSessionDraft.permissionMode).toBe("safety")
 
     const result = await materializeOpenDraftSession({
       providerID: "provider",
@@ -434,7 +488,7 @@ describe("issue 2039 draft auto-accept", () => {
 
     expect(result?.sessionId).toBe("ses_issue_2039")
     expect(createSessionCalls).toHaveLength(1)
-    expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", true]])
+    expect(permissionAutoAcceptCalls).toEqual([["ses_issue_2039", "safety"]])
     expect(useSessionUIStore.getState().currentSessionId).toBe("ses_issue_2039")
   })
 
@@ -461,13 +515,195 @@ describe("issue 2039 draft auto-accept", () => {
     expect(savedVariantCalls).toEqual([undefined, "high"])
   })
 
+  test("stores a draft agent model only after an explicit model choice", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedAgentModelCalls).toEqual([])
+
+    selectionSource = "manual"
+    useSessionUIStore.getState().openNewSessionDraft()
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "other-model",
+      agent: "agent-default",
+      variant: "high",
+    })
+
+    expect(savedAgentModelCalls).toEqual([
+      ["ses_issue_2039", "agent-default", "provider", "other-model"],
+    ])
+  })
+
+  test("preserves choices when a draft keeps the same project", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+    activationOptions.length = 0
+
+    useSessionUIStore.getState().setNewSessionDraftTarget({
+      projectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual([])
+    expect(applyDefaultModelAgentSelectionCalls).toEqual([])
+  })
+
+  test("loads the selected worktree's config when a project draft changes directories", async () => {
+    const project = { id: "project-1", path: "/repo" }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    activateDirectoryCalls.length = 0
+    activationOptions.length = 0
+
+    useSessionUIStore.getState().setNewSessionDraftTarget({
+      projectId: project.id,
+      directoryOverride: "/repo-worktree",
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo-worktree"])
+    expect(activationOptions).toEqual([{ preserveManualModel: true }])
+  })
+
+  test("reapplies project defaults when a project draft target is overridden", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo"])
+    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
+      projectDefaultAgent: "agent-project",
+      projectDefaultModel: "model-project",
+      projectDefaultVariant: "variant-project",
+    })
+  })
+
+  test("late activation preserves a manual pick and same-project worktree refinements", async () => {
+    let finish!: () => void
+    activationPending = new Promise<void>((resolve) => { finish = resolve })
+    projectsState.projects = [{ id: 'project-1', path: '/repo', defaultAgent: 'build' }]
+    useSessionUIStore.getState().openNewSessionDraft({ target: 'project', selectedProjectId: 'project-1', directoryOverride: '/repo' })
+    expect(applyDefaultModelAgentSelectionCalls).toHaveLength(1)
+    selectionSource = 'manual'
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({ directoryOverride: '/worktree', pendingWorktreeRequestId: 'request' })
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(applyDefaultModelAgentSelectionCalls).toHaveLength(1)
+  })
+
+  test("late project activation cannot replace a newer draft target or a closed draft", async () => {
+    let finish!: () => void
+    activationPending = new Promise<void>((resolve) => { finish = resolve })
+    projectsState.projects = [{ id: 'project-1', path: '/repo', defaultAgent: 'project-agent' }]
+    useSessionUIStore.getState().openNewSessionDraft({ target: 'project', selectedProjectId: 'project-1', directoryOverride: '/repo' })
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: 'openchamber:chats' })
+    const appliedBeforeClose = applyDefaultModelAgentSelectionCalls.length
+    useSessionUIStore.getState().closeNewSessionDraft()
+    finish()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(applyDefaultModelAgentSelectionCalls).toHaveLength(appliedBeforeClose)
+  })
+
+  test("reapplies global defaults when opening a fresh no-project draft", async () => {
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual([null])
+    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
+      projectDefaultAgent: undefined,
+      projectDefaultModel: undefined,
+      projectDefaultVariant: undefined,
+    })
+  })
+
+  test("restores project defaults when the next draft restores the previous project target", async () => {
+    const project = {
+      id: "project-1",
+      path: "/repo",
+      defaultAgent: "agent-project",
+      defaultModel: "model-project",
+      defaultVariant: "variant-project",
+    }
+    projectsState.projects = [project]
+
+    useSessionUIStore.getState().openNewSessionDraft({
+      target: "project",
+      selectedProjectId: project.id,
+      directoryOverride: project.path,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await materializeOpenDraftSession({
+      providerID: "provider",
+      modelID: "model",
+      agent: "agent-project",
+    })
+
+    applyDefaultModelAgentSelectionCalls.length = 0
+    activateDirectoryCalls.length = 0
+
+    useSessionUIStore.getState().openNewSessionDraft()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(activateDirectoryCalls).toEqual(["/repo"])
+    expect(applyDefaultModelAgentSelectionCalls.at(-1)).toEqual({
+      projectDefaultAgent: "agent-project",
+      projectDefaultModel: "model-project",
+      projectDefaultVariant: "variant-project",
+    })
+  })
+
   test("does not apply draft auto-accept after the draft is closed", async () => {
     useSessionUIStore.getState().openNewSessionDraft()
-    useSessionUIStore.getState().setDraftPermissionAutoAcceptEnabled(true)
+    useSessionUIStore.getState().setDraftPermissionMode("auto")
     useSessionUIStore.getState().closeNewSessionDraft()
 
     expect(useSessionUIStore.getState().newSessionDraft.open).toBe(false)
-    expect(useSessionUIStore.getState().newSessionDraft.permissionAutoAcceptEnabled === undefined).toBe(true)
+    expect(useSessionUIStore.getState().newSessionDraft.permissionMode === undefined).toBe(true)
 
     const result = await materializeOpenDraftSession({
       providerID: "provider",
@@ -570,9 +806,9 @@ describe("assistant answer worktree routing", () => {
   })
 
   test("creates a sibling worktree from the captured source worktree directory", async () => {
-    projects = [
-      { id: "project", path: "/repo", label: "Repo" },
-      { id: "source-worktree", path: "/worktrees/source", label: "Source worktree" },
+    projectsState.projects = [
+      { id: "project", path: "/repo" },
+      { id: "source-worktree", path: "/worktrees/source" },
     ]
     createdWorktreeProjects.length = 0
     const sourceWorktree = {
@@ -595,11 +831,11 @@ describe("assistant answer worktree routing", () => {
         createdDirectory = directory
         return {
           id: "created-session",
-          slug: "created-session",
           projectID: "project",
           directory: directory ?? "",
           title: "Created session",
-          version: "1",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           time: { created: 1, updated: 1 },
         }
       },
@@ -625,7 +861,7 @@ describe("assistant answer worktree routing", () => {
         sendMessage: originalSendMessage,
         worktreeMetadata: originalWorktreeMetadata,
       })
-      projects = []
+      projectsState.projects = []
     }
 
     expect(createdWorktreeProjects).toEqual([{ id: "project", path: "/repo" }])

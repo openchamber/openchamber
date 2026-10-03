@@ -1,4 +1,5 @@
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part } from '@/lib/opencode/model';
+import { isConversationRole } from '@/lib/opencode/model';
 import { computeCacheHitRate } from '@/stores/utils/tokenUtils';
 
 type SessionMessageRecord = {
@@ -21,6 +22,7 @@ type CompletedStepStats = {
 export type CompletedTurnStats = {
   lastAssistantMessageId: string;
   stepsCount: number;
+  elapsedDurationMs: number | null;
   totalLlmDurationMs: number | null;
   totalToolDurationMs: number | null;
   avgTtftMs: number | null;
@@ -81,9 +83,10 @@ export const formatTelemetryDuration = (ms: number): string => {
   if (ms < 60_000) {
     return `${(ms / 1000).toFixed(1)}s`;
   }
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.floor((ms % 60_000) / 1000);
-  return `${minutes}m${seconds}s`;
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
 };
 
 export const formatTelemetryTokens = (tokens: number): string => {
@@ -143,8 +146,6 @@ function calculateResponseTokenRate(record: SessionMessageRecord): number | null
   const intervals: Array<[number, number]> = [];
   for (const part of parts) {
     if (part.type !== 'text') continue;
-    // Synthetic/ignored text cannot be matched to the provider's output count.
-    if (part.synthetic || part.ignored) return null;
     if (!part.text) continue;
     const start = part.time?.start;
     const end = part.time?.end;
@@ -236,8 +237,18 @@ export function getLatestCompletedTurnStats(
 
   // Only the newest user-bounded turn qualifies. A partial newer turn must not
   // be published as complete or silently replaced with an older turn's stats.
-  const lastCompletedAssistantIdx = records.length - 1;
-  if (records[lastCompletedAssistantIdx].info.role !== 'assistant') return null;
+  // v2 plumbing roles can trail the final assistant step, so the turn ends at
+  // the newest conversation record rather than the newest record.
+  let lastCompletedAssistantIdx = -1;
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    if (isConversationRole(records[i].info.role)) {
+      lastCompletedAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastCompletedAssistantIdx < 0) return null;
+  const lastAssistantInfo = records[lastCompletedAssistantIdx].info;
+  if (lastAssistantInfo.role !== 'assistant') return null;
   let turnStartIdx = -1;
   for (let i = records.length - 1; i >= 0; i -= 1) {
     const record = records[i];
@@ -248,6 +259,13 @@ export function getLatestCompletedTurnStats(
   }
 
   if (turnStartIdx === -1) return null;
+
+  const turnStartMs = nonnegative(records[turnStartIdx - 1].info.time.created);
+  const turnEndMs = nonnegative(lastAssistantInfo.time.completed);
+  const elapsedDurationMs =
+    turnStartMs !== null && turnEndMs !== null && turnEndMs >= turnStartMs
+      ? turnEndMs - turnStartMs
+      : null;
 
   const stepStatsList: CompletedStepStats[] = [];
   for (let i = turnStartIdx; i <= lastCompletedAssistantIdx; i += 1) {
@@ -298,6 +316,7 @@ export function getLatestCompletedTurnStats(
   return {
     lastAssistantMessageId: records[lastCompletedAssistantIdx].info.id,
     stepsCount: stepStatsList.length,
+    elapsedDurationMs,
     totalLlmDurationMs,
     totalToolDurationMs,
     avgTtftMs,

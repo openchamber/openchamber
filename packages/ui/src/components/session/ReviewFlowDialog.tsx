@@ -17,6 +17,7 @@ import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
+import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 export type ReviewFlowExecution = {
   providerID: string;
@@ -112,8 +113,8 @@ export function ReviewFlowDialog({
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === execution.providerID);
-    const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: Record<string, unknown> } | undefined;
-    return model?.variants ? Object.keys(model.variants) : [];
+    const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: ModelVariantSource } | undefined;
+    return listModelVariantIds(model?.variants);
   }, [providers, execution.providerID, execution.modelID]);
 
   const hasVariantOptions = variantOptions.length > 0;

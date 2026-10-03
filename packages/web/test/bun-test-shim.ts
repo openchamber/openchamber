@@ -16,6 +16,8 @@ const mock = Object.assign(
     module: vi.mock,
   },
 );
+const spyOn = vi.spyOn;
+
 
 export {
   afterAll,
@@ -26,6 +28,7 @@ export {
   expect,
   it,
   mock,
+  spyOn,
   test,
   vi,
 };

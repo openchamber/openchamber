@@ -1,16 +1,17 @@
 {
   "name": "@openchamber/example-config-editor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "openchamber": {
     "apiVersion": 1,
     "contributes": {
       "panel": {
         "id": "config-editor",
-        "name": "Config Editor",
+        "name": "Config Studio",
         "icon": "file-edit",
         "entry": "panel/index.html"
       },
+      "page": true,
       "filesystem": [
         "~/.config/opencode/opencode.json"
       ]

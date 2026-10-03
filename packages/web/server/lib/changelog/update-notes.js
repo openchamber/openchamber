@@ -2,7 +2,7 @@
 //
 // The repo publishes `changelog/index.json` on `main`: one object per release,
 // newest first, with the app notes grouped as New / Improvements / Fixes /
-// Misc. This module fetches it and renders the releases between the installed
+// SDK / Misc. This module fetches it and renders the releases between the installed
 // version (exclusive) and the offered one (inclusive) as the Markdown the
 // dialog already understands: a `## [x.y.z] - YYYY-MM-DD` header per release,
 // the release title in bold, the intro, then the groups.
@@ -16,6 +16,7 @@ const GROUPS = [
   ['new', 'New'],
   ['improvements', 'Improvements'],
   ['fixes', 'Fixes'],
+  ['sdk', 'SDK'],
   ['misc', 'Misc'],
 ];
 

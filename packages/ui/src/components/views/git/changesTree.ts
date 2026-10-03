@@ -2,33 +2,37 @@ import type { GitStatus } from '@/lib/api/types';
 
 export const TREE_INDENT_PX = 14;
 
-export type ChangesTreeDirectoryNode = {
+type TreeFile = { path: string };
+
+export type ChangesTreeDirectoryNode<F extends TreeFile = GitStatus['files'][number]> = {
   id: string;
   path: string;
   name: string;
-  children: Map<string, ChangesTreeDirectoryNode>;
-  directFiles: GitStatus['files'];
-  files: GitStatus['files'];
+  children: Map<string, ChangesTreeDirectoryNode<F>>;
+  directFiles: F[];
+  files: F[];
 };
 
-export type FlattenedTreeRow =
+export type FlattenedTreeRow<F extends TreeFile = GitStatus['files'][number]> =
   | {
       key: string;
       kind: 'directory';
       depth: number;
-      directory: ChangesTreeDirectoryNode;
+      /** Display label; merged single-child chains read `ui/src`. */
+      label: string;
+      directory: ChangesTreeDirectoryNode<F>;
     }
   | {
       key: string;
       kind: 'file';
       depth: number;
-      file: GitStatus['files'][number];
+      file: F;
     };
 
 const normalizePathForTree = (value: string): string =>
   value.replace(/\\/g, '/').replace(/^\/+/, '').trim();
 
-const createDirectoryNode = (path: string, name: string): ChangesTreeDirectoryNode => ({
+const createDirectoryNode = <F extends TreeFile>(path: string, name: string): ChangesTreeDirectoryNode<F> => ({
   id: `dir:${path}`,
   path,
   name,
@@ -37,8 +41,8 @@ const createDirectoryNode = (path: string, name: string): ChangesTreeDirectoryNo
   files: [],
 });
 
-export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirectoryNode => {
-  const root = createDirectoryNode('', '');
+export const buildChangesTree = <F extends TreeFile>(entries: F[]): ChangesTreeDirectoryNode<F> => {
+  const root = createDirectoryNode<F>('', '');
 
   for (const file of entries) {
     const normalized = normalizePathForTree(file.path);
@@ -62,7 +66,7 @@ export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirect
           continue;
         }
 
-        const created = createDirectoryNode(currentPath, segment);
+        const created = createDirectoryNode<F>(currentPath, segment);
         created.files.push(file);
         current.children.set(segment, created);
         current = created;
@@ -75,19 +79,39 @@ export const buildChangesTree = (entries: GitStatus['files']): ChangesTreeDirect
   return root;
 };
 
-export const flattenChangesTree = (
-  root: ChangesTreeDirectoryNode,
-  expandedDirectories: Set<string>,
-): FlattenedTreeRow[] => {
-  const rows: FlattenedTreeRow[] = [];
+/**
+ * Follows a chain of directories that hold nothing but one subdirectory, so
+ * `packages/ui/src` renders as one row instead of three. The returned node is
+ * the deepest one; its path keys expansion state.
+ */
+export const compactDirectory = <F extends TreeFile>(
+  directory: ChangesTreeDirectoryNode<F>,
+): { node: ChangesTreeDirectoryNode<F>; label: string } => {
+  let node = directory;
+  let label = directory.name;
+  while (node.directFiles.length === 0 && node.children.size === 1) {
+    const [only] = node.children.values();
+    node = only;
+    label = `${label}/${only.name}`;
+  }
+  return { node, label };
+};
 
-  const walk = (node: ChangesTreeDirectoryNode, depth: number) => {
+export const flattenChangesTree = <F extends TreeFile>(
+  root: ChangesTreeDirectoryNode<F>,
+  expandedDirectories: Set<string>,
+): FlattenedTreeRow<F>[] => {
+  const rows: FlattenedTreeRow<F>[] = [];
+
+  const walk = (node: ChangesTreeDirectoryNode<F>, depth: number) => {
     const directories = Array.from(node.children.values()).sort((a, b) => a.path.localeCompare(b.path));
-    for (const directory of directories) {
+    for (const child of directories) {
+      const { node: directory, label } = compactDirectory(child);
       rows.push({
         key: directory.id,
         kind: 'directory',
         depth,
+        label,
         directory,
       });
 

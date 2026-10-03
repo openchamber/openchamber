@@ -118,7 +118,7 @@ const JsonRow = React.memo(
 
     return (
       <div
-        className="flex items-center py-0.5 px-2 hover:bg-[var(--surface-hover)] rounded-sm cursor-default font-mono text-xs leading-5 whitespace-nowrap"
+        className="flex items-center py-0.5 px-2 rounded-sm cursor-default font-mono text-xs leading-5 whitespace-nowrap"
         style={{ paddingLeft: `${indent + 8}px` }}
         onContextMenu={handleContextMenu}
       >
@@ -146,17 +146,17 @@ const JsonRow = React.memo(
             >
               {/^\d+$/.test(node.key) ? node.key : `"${node.key}"`}
             </span>
-            <span className="mr-1 text-[var(--surface-foreground)]">:</span>
+            <span className="mr-1 text-[var(--syntax-foreground)]">:</span>
           </>
         )}
 
         {node.isExpandable ? (
           isExpanded ? (
-            <span className="text-[var(--surface-foreground)]">
+            <span className="text-[var(--syntax-foreground)]">
               {node.type === 'object' ? '{' : '['}
             </span>
           ) : (
-            <span style={{ color: 'var(--surface-mutedForeground)' }}>
+            <span className="text-muted-foreground">
               {getCollapsedPreview(node)}
             </span>
           )

@@ -122,7 +122,7 @@ const isLinearIssueListPriority = (value: string): value is LinearIssueListPrior
 
 const labelChipStyle = (color: string | null): React.CSSProperties | undefined => {
   if (!color) {
-    return { backgroundColor: 'color-mix(in srgb, var(--surface-mutedForeground) 12%, transparent)' };
+    return { backgroundColor: 'color-mix(in srgb, var(--surface-muted-foreground) 12%, transparent)' };
   }
   return {
     color,
@@ -652,7 +652,7 @@ export const LinearIssuesView: React.FC = () => {
           setCreateInWorktree((value) => !value);
         }}
         aria-label={t('session.linearIssuePicker.actions.toggleWorktreeAria')}
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {createInWorktree ? (
           <Icon name="checkbox" className="h-4 w-4 text-primary" />
@@ -835,6 +835,7 @@ export const LinearIssuesView: React.FC = () => {
                     content={description}
                     className={LINEAR_MARKDOWN_CLASS}
                     enableFileReferences={false}
+                    allowRawHtml
                   />
                 ) : (
                   <p className="typography-meta text-muted-foreground">{t('contextPanel.linear.empty.noDescription')}</p>
@@ -883,6 +884,7 @@ export const LinearIssuesView: React.FC = () => {
                                 content={comment.body}
                                 className={cn('typography-markdown-body text-foreground break-words', LINEAR_MARKDOWN_CLASS)}
                                 enableFileReferences={false}
+                                allowRawHtml
                               />
                             ) : null}
                           </div>

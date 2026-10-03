@@ -232,7 +232,7 @@ export const MobileConnectionWelcome: React.FC<{
                         key={connection.id}
                         type="button"
                         disabled={isBusy}
-                        className="flex min-h-14 w-full items-center gap-3 border-b border-border/70 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:opacity-70"
+                        className="flex min-h-14 w-full items-center gap-3 border-b border-border/70 px-3.5 py-2.5 text-left last:border-b-0 hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-70"
                         onClick={() => {
                           setConnectingId(connection.id);
                           void conn.connect({ id: connection.id, candidates: connection.candidates, clientToken: connection.clientToken, label: connection.label })
@@ -267,7 +267,7 @@ export const MobileConnectionWelcome: React.FC<{
                   type="button"
                   onClick={() => setManualOpen((value) => !value)}
                   aria-expanded={manualOpen}
-                  className="mx-auto flex items-center gap-1 rounded-full px-2 py-1 typography-small text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="mx-auto flex items-center gap-1 rounded-full px-2 py-1 typography-small text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span>{t('mobile.connect.manual.toggle')}</span>
                   <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', manualOpen && 'rotate-180')} />

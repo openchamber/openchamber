@@ -146,6 +146,7 @@ const RENDER_COUNTERS = [
   "ui.session_sidebar.render",
   "ui.sidebar_projects_list.render",
   "ui.sidebar_session_node.render",
+  "ui.sidebar_tree_item.render",
   "ui.message_list.render",
   "ui.chat_message.render",
   "ui.markdown_renderer.settled_paint.reused",

@@ -18,7 +18,7 @@ export type DirectoryStore = State & {
 type BlockingRequestSubscriber = () => void
 type BlockingRequestSubscribers = WeakMap<StoreApi<DirectoryStore>, Map<string, Set<BlockingRequestSubscriber>>>
 const permissionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
-const questionSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
+const formSubscribersByStore: BlockingRequestSubscribers = new WeakMap()
 
 type SessionMessageChange = {
   messagesChanged: boolean
@@ -80,21 +80,38 @@ export function subscribeDirectoryPermission(
   return subscribeBlockingRequest(permissionSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestion(
+export function subscribeDirectoryPermissions(
+  store: StoreApi<DirectoryStore>,
+  sessionIDs: readonly string[],
+  listener: BlockingRequestSubscriber,
+): () => void {
+  return subscribeBlockingRequests(permissionSubscribersByStore, store, sessionIDs, listener)
+}
+
+export function subscribeDirectoryForm(
   store: StoreApi<DirectoryStore>,
   sessionID: string,
   listener: BlockingRequestSubscriber,
 ): () => void {
-  return subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+  return subscribeBlockingRequest(formSubscribersByStore, store, sessionID, listener)
 }
 
-export function subscribeDirectoryQuestions(
+export function subscribeDirectoryForms(
+  store: StoreApi<DirectoryStore>,
+  sessionIDs: readonly string[],
+  listener: BlockingRequestSubscriber,
+): () => void {
+  return subscribeBlockingRequests(formSubscribersByStore, store, sessionIDs, listener)
+}
+
+function subscribeBlockingRequests(
+  subscribersByStore: BlockingRequestSubscribers,
   store: StoreApi<DirectoryStore>,
   sessionIDs: readonly string[],
   listener: BlockingRequestSubscriber,
 ): () => void {
   const unsubscribers = [...new Set(sessionIDs.filter(Boolean))].map((sessionID) => (
-    subscribeBlockingRequest(questionSubscribersByStore, store, sessionID, listener)
+    subscribeBlockingRequest(subscribersByStore, store, sessionID, listener)
   ))
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe()
@@ -127,7 +144,7 @@ function subscribeBlockingRequest(
 
 const notifyChangedBlockingRequests = <T,>(
   subscribersByStore: BlockingRequestSubscribers,
-  counter: "permissionChangeCallbacks" | "questionChangeCallbacks",
+  counter: "permissionChangeCallbacks" | "formChangeCallbacks",
   store: StoreApi<DirectoryStore>,
   current: Record<string, T>,
   previous: Record<string, T>,
@@ -207,6 +224,7 @@ export type DirectoryBootstrapReason =
   | "project-expanded"
   | "worktree-expanded"
   | "server-connected"
+  | "location-shutdown"
   | "action-demand"
 
 export type DirectoryBootstrapDemand = {
@@ -283,7 +301,7 @@ function createDirectoryStore(directory: string): StoreApi<DirectoryStore> {
     if (state.icon !== prev.icon) persistIcon(directory, state.icon)
     if (state.session !== prev.session) persistSessions(directory, state.session)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
-    notifyChangedBlockingRequests(questionSubscribersByStore, "questionChangeCallbacks", store, state.question, prev.question)
+    notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
     notifyChangedSessionMessages(store, state, prev)
   })
 
@@ -535,6 +553,11 @@ export class ChildStoreManager {
     return result
   }
 
+  private hasForegroundBootstrapDemand(directory: string): boolean {
+    const demand = this.aggregateBootstrapDemand(directory)
+    return Boolean(demand && demand.priority !== "background")
+  }
+
   private reconcileBootstrapQueue(): void {
     const directories = new Set<string>()
     for (const demands of this.bootstrapDemandsByOwner.values()) {
@@ -730,7 +753,7 @@ export class ChildStoreManager {
       !canDisposeDirectory({
         directory,
         hasStore: this.children.has(directory),
-        pinned: this.pinned(directory),
+        pinned: this.pinned(directory) || this.hasForegroundBootstrapDemand(directory),
         booting: this.bootstrapStates.get(directory) === "queued"
           || this.bootstrapStates.get(directory) === "running"
           || (this.isBooting?.(directory) ?? false),
@@ -763,10 +786,13 @@ export class ChildStoreManager {
   runEviction(skip?: string) {
     const stores = [...this.children.keys()]
     if (stores.length === 0) return
+    const protectedDirectories = new Set(stores.filter((directory) => (
+      this.pinned(directory) || this.hasForegroundBootstrapDemand(directory)
+    )))
     const list = pickDirectoriesToEvict({
       stores,
       state: this.lifecycle,
-      pins: new Set(stores.filter((d) => this.pinned(d))),
+      pins: protectedDirectories,
       max: MAX_DIR_STORES,
       ttl: DIR_IDLE_TTL_MS,
       graceMs: EVICTION_GRACE_MS,

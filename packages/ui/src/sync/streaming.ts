@@ -7,7 +7,7 @@
  */
 
 import { create } from "zustand"
-import type { Message, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, SessionStatus } from "@/lib/opencode/model"
 import type { State } from "./types"
 import { countSyncPerformance } from "./performance-diagnostics"
 

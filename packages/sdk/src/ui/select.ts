@@ -93,8 +93,12 @@ export const mountSelect = (root: Element, initial: SelectProps): SelectHandle =
   };
 
   const close = (): void => {
-    closePopup?.();
+    // Removing a focused row fires `focusout` synchronously from inside the disposer, and
+    // that handler calls `close` again. Clearing the slot first makes the re-entry a no-op
+    // instead of a second `popup.remove()` that throws before the pick reaches `onChange`.
+    const dispose = closePopup;
     closePopup = null;
+    dispose?.();
     query = '';
     search.value = '';
     trigger.setAttribute('aria-expanded', 'false');

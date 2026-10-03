@@ -1,0 +1,76 @@
+---
+title: Sesje w toku
+description: Trzymaj sesje z trwającą pracą na widoku w pasku bocznym, dopóki nie oznaczysz ich jako gotowe.
+---
+
+# Sesje w toku
+
+Pytania, research i szybkie eksperymenty szybko się mnożą, a sesja, w której naprawdę coś naprawiasz, ginie między nimi. Blok **W toku** zbiera takie sesje w jednym miejscu paska bocznego. Sesja zostaje tam, dopóki nie powiesz, że praca jest skończona.
+
+Tym różni się od sekcji „Ostatnie”. „Ostatnie” pokazują wszystko, co zmieniło się w ciągu ostatnich dwóch dni, i odświeżają się same: sesja, którą rano otworzyłeś z ciekawości, tam jest, a poprawka, którą odłożyłeś w poniedziałek, już zniknęła. „W toku” to lista tego, czego jeszcze nie skończyłeś, bez względu na to, jak dawno to otwierałeś.
+
+## Gdzie go znaleźć
+
+Blok **W toku** jest w pasku bocznym pod czatami i nad „Ostatnimi” (albo nad osią czasu w trybie Timeline). Na telefonie jest w tym samym miejscu listy sesji.
+
+Sesja w toku przenosi się tam razem ze swoimi podsesjami. Nie pojawia się drugi raz w „Ostatnich”, na osi czasu, w swoim projekcie ani w swoim folderze. Oznacz ją jako gotową, a wróci tam, gdzie była.
+
+## Śledź i kończ sesje ręcznie
+
+- **Śledzenie:** najedź na sesję i kliknij oko albo wybierz **Śledź jako w toku** w menu sesji.
+- **Zakończenie:** najedź na sesję w bloku i kliknij ptaszek albo wybierz **Oznacz jako gotowe** w menu.
+
+Na telefonie przesuń wiersz sesji, żeby dostać się do tej samej akcji, albo użyj menu sesji.
+
+W toku może być każda sesja projektu, także sesje w worktree. Podsesje idą razem ze swoją sesją nadrzędną. Czaty nigdy: to zwykłe rozmowy, więc nie mają oka.
+
+## Niech Jev przenosi sesje za Ciebie
+
+Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), nie musisz śledzić sesji sam. Jev czyta każdą wysłaną wiadomość i przenosi sesję do toku, gdy:
+
+- prosisz o zmianę
+- zgłaszasz błąd
+- omawiasz konkretną zmianę, którą zamierzasz wprowadzić
+
+Pytania, wyjaśnienia i research się nie liczą. Jev sprawdza jeszcze raz, gdy agent kończy turę, i tak wyłapuje pracę, która staje się jasna dopiero z odpowiedzi.
+
+Jev tylko przenosi sesje **do** toku. Gdy oznaczysz sesję jako gotową, wróci tam dopiero po nowej prośbie wysłanej później.
+
+### „Ta praca wygląda na skończoną.”
+
+Gdy tura wygląda na koniec pracy (podziękowałeś, poprosiłeś o commit, potwierdziłeś, że działa), Jev niczego nie zamyka, tylko zostawia wskazówkę:
+
+- szary ptaszek przy wierszu sesji w pasku bocznym
+- pasek nad polem wiadomości: **Ta praca wygląda na skończoną.** z przyciskiem **Oznacz jako gotowe**
+
+Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością.
+
+## Podsumowanie i podpowiedź następnej wiadomości
+
+Gdy agent skończy, a sesja przez minutę jest cicho, OpenChamber może napisać dwie rzeczy za pomocą Twojego małego modelu (zobacz [Dostawcy, modele i agenci](/pl/providers/)):
+
+- **Podsumowanie:** krótkie przypomnienie, co zrobiono i na czym stanęło, widoczne pod ostatnią odpowiedzią i w dymku sesji w pasku bocznym
+- **Podpowiedź:** wiadomość, którą najpewniej wyślesz jako następną, jako wiersz na górze pola wiadomości; kliknięcie wstawia tekst do pola, a sama nigdy się nie wysyła
+
+Gdy Jev jest dostępny, OpenChamber najpierw pyta go, czy tura ich potrzebuje. Zwykłe „dzięki, to wszystko” po prawdziwej pracy i tak dostanie podsumowanie, ale podpowiedź zostaje pominięta, gdy nie ma już nic do zrobienia, a mały model w ogóle nie jest wywoływany, gdy żadne z nich się nie przyda. Bez Jev oba powstają po każdej turze, tak jak wcześniej.
+
+Włączysz je i wyłączysz w **Ustawienia → Czat → Wsparcie sesji**.
+
+## Ustawienia
+
+Otwórz **Ustawienia → Sesje → Sesje w toku**:
+
+- **Pokazuj sesje w toku:** sam blok; po wyłączeniu sesje zostają tam, gdzie były zawsze
+- **Automatycznie przenoś sesje do toku:** część z Jev; wyłącz, żeby śledzić tylko ręcznie
+
+Obie opcje są domyślnie włączone.
+
+## Gdzie to działa
+
+Blok oraz ręczne śledzenie i kończenie działają wszędzie, także w VS Code. Automatyczne przenoszenie, wskazówka „wygląda na skończoną” i filtr Jev dla podsumowań potrzebują serwera OpenChamber, więc działają w aplikacji desktopowej, w aplikacji webowej i na telefonie, ale nie w VS Code.
+
+## Powiązane
+
+- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/): skonfiguruj automatyczne śledzenie
+- [Czaty](/pl/chats/): rozmowy, które nie trafiają do toku
+- [Cele sesji](/pl/session-goals/): niech agent pracuje aż do mety

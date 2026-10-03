@@ -7,6 +7,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
+import { parseNonEmptyTrimmedString } from '@/lib/settings/parsers';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -64,6 +65,7 @@ interface ProjectsStore {
     icon?: string | null;
     color?: string | null;
     iconBackground?: string | null;
+    defaultAgent?: string | null;
     defaultModel?: string | null;
     defaultVariant?: string | null;
   }) => void;
@@ -289,6 +291,10 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    const defaultAgent = parseNonEmptyTrimmedString(candidate.defaultAgent, {});
+    if (defaultAgent) {
+      project.defaultAgent = defaultAgent;
     }
     const defaultModel = normalizeDefaultModel(candidate.defaultModel);
     if (defaultModel) {
@@ -529,6 +535,7 @@ const vscodeWorkspaceProjectsEqual = (left: ProjectEntry[], right: ProjectEntry[
       && leftProject.icon === rightProject.icon
       && leftProject.color === rightProject.color
       && leftProject.iconBackground === rightProject.iconBackground
+      && leftProject.defaultAgent === rightProject.defaultAgent
       && leftProject.defaultModel === rightProject.defaultModel
       && leftProject.defaultVariant === rightProject.defaultVariant
       && leftProject.addedAt === rightProject.addedAt
@@ -737,6 +744,10 @@ export const useProjectsStore = create<ProjectsStore>()(
           next.delete(normalizedPath);
           return { availableWorktreesByProject: next };
         });
+        // Its running isolated spaces stop, but not one whose agent is working. Loaded on demand,
+        // so the feature stays out of this store's module graph.
+        const label = project.label?.trim() || project.path.split('/').pop() || project.path;
+        void import('@/lib/spaces/space-close').then(({ stopSpacesOfClosedProject }) => stopSpacesOfClosedProject(project.path, label));
       }
 
       if (nextActiveId) {
@@ -814,6 +825,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       icon?: string | null;
       color?: string | null;
       iconBackground?: string | null;
+      defaultAgent?: string | null;
       defaultModel?: string | null;
       defaultVariant?: string | null;
     }) => {
@@ -832,6 +844,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         if (meta.color !== undefined) updated.color = meta.color;
         if (meta.iconBackground !== undefined) {
           updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
+        if (meta.defaultAgent !== undefined) {
+          const normalized = parseNonEmptyTrimmedString(meta.defaultAgent, {});
+          if (normalized) {
+            updated.defaultAgent = normalized;
+          } else {
+            delete updated.defaultAgent;
+          }
         }
         if (meta.defaultModel !== undefined) {
           const normalized = normalizeDefaultModel(meta.defaultModel);

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Icon } from "@/components/icon/Icon";
-import type { Session } from '@opencode-ai/sdk/v2';
+import type { Session } from '@/lib/opencode/model';
 import { useI18n } from '@/lib/i18n';
 
 export type DeleteSessionConfirmState = {
@@ -66,7 +66,7 @@ export function SessionDeleteConfirmDialog(props: {
           <button
             type="button"
             onClick={() => setShowDeletionDialog(!showDeletionDialog)}
-            className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+            className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             aria-pressed={!showDeletionDialog}
           >
             {!showDeletionDialog ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}
@@ -76,7 +76,7 @@ export function SessionDeleteConfirmDialog(props: {
             <button
               type="button"
               onClick={() => setValue(null)}
-              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {t('sessions.sidebar.dialogs.cancel')}
             </button>
@@ -95,6 +95,7 @@ export function SessionDeleteConfirmDialog(props: {
 }
 
 export type BulkDeleteSessionsConfirmState = {
+  sessionIds: string[];
   sessionCount: number;
   archivedBucket: boolean;
 } | null;
@@ -136,7 +137,7 @@ export function BulkSessionDeleteConfirmDialog(props: {
           <button
             type="button"
             onClick={() => setShowDeletionDialog(!showDeletionDialog)}
-            className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+            className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             aria-pressed={!showDeletionDialog}
           >
             {!showDeletionDialog ? <Icon name="checkbox" className="h-4 w-4 text-primary" /> : <Icon name="checkbox-blank" className="h-4 w-4" />}
@@ -146,7 +147,7 @@ export function BulkSessionDeleteConfirmDialog(props: {
             <button
               type="button"
               onClick={() => setValue(null)}
-              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {t('sessions.sidebar.dialogs.cancel')}
             </button>
@@ -209,7 +210,7 @@ export function FolderDeleteConfirmDialog(props: {
           <button
             type="button"
             onClick={() => setValue(null)}
-            className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {t('sessions.sidebar.dialogs.cancel')}
           </button>

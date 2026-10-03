@@ -3,7 +3,8 @@ import fs from 'fs';
 import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { discoverSkills, getSkillSources, mergeDiscoveredSkills, renameSkill } from './skills.js';
+import yaml from 'yaml';
+import { discoverSkills, getSkillSources, mergeDiscoveredSkills, renameSkill, updateSkill } from './skills.js';
 
 describe('skills', () => {
   it('merges locally discovered skills missing from OpenCode live discovery', () => {
@@ -144,6 +145,70 @@ describe('skills', () => {
       expect(sources.md.source).toBe('agents');
       expect(sources.md.description).toBe('Example from agents');
       expect(sources.md.instructions).toBe('Use this skill for examples.');
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('writes and clears "run only when called" as both frontmatter keys, keeping other metadata', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skills-invocation-'));
+    const skillDir = path.join(tempRoot, 'manual-skill');
+    const skillPath = path.join(skillDir, 'SKILL.md');
+    const discovered = { name: 'manual-skill', path: skillPath, scope: 'user', source: 'agents' };
+    const readFrontmatter = async () => {
+      const content = await fsPromises.readFile(skillPath, 'utf8');
+      return yaml.parse(content.split('---')[1]);
+    };
+
+    try {
+      await fsPromises.mkdir(skillDir, { recursive: true });
+      await fsPromises.writeFile(
+        skillPath,
+        ['---', 'name: manual-skill', 'description: Manual', 'metadata:', '  team: core', '---', '', 'Body.', ''].join('\n'),
+        'utf8',
+      );
+      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(false);
+
+      updateSkill('manual-skill', { disableModelInvocation: true }, tempRoot, skillPath);
+      expect(await readFrontmatter()).toEqual({
+        name: 'manual-skill',
+        description: 'Manual',
+        metadata: { team: 'core', 'opencode/autoinvoke': false },
+        'disable-model-invocation': true,
+      });
+      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(true);
+
+      updateSkill('manual-skill', { disableModelInvocation: false }, tempRoot, skillPath);
+      expect(await readFrontmatter()).toEqual({
+        name: 'manual-skill',
+        description: 'Manual',
+        metadata: { team: 'core' },
+      });
+      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(false);
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the invocation flag the way OpenCode does: opencode/autoinvoke wins', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skills-invocation-read-'));
+    const skillDir = path.join(tempRoot, 'read-skill');
+    const skillPath = path.join(skillDir, 'SKILL.md');
+    const discovered = { name: 'read-skill', path: skillPath, scope: 'user', source: 'agents' };
+    const disabledFor = async (frontmatterLines) => {
+      await fsPromises.writeFile(
+        skillPath,
+        ['---', 'name: read-skill', 'description: Read', ...frontmatterLines, '---', '', 'Body.', ''].join('\n'),
+        'utf8',
+      );
+      return getSkillSources('read-skill', tempRoot, discovered).md.disableModelInvocation;
+    };
+
+    try {
+      await fsPromises.mkdir(skillDir, { recursive: true });
+      expect(await disabledFor(['disable-model-invocation: "yes"'])).toBe(true);
+      expect(await disabledFor(['metadata:', '  opencode/autoinvoke: "false"'])).toBe(true);
+      expect(await disabledFor(['disable-model-invocation: true', 'metadata:', '  opencode/autoinvoke: true'])).toBe(false);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
     }

@@ -14,8 +14,10 @@ import {
   type JsonValue,
 } from '@openchamber/sdk';
 import { applyHostReady, mountBadge, mountButton, mountList, mountSearchField, mountSeparator, mountText } from '@openchamber/sdk/ui';
+import { z } from 'zod';
 
-import { PROVIDER, TASKS, attachPayload, findTask, type TaskComment, type TaskData } from './tasks.ts';
+import { TASKS, attachPayload, findTask, loadTasks, saveTask, type TaskData, type Task } from './tasks.ts';
+import { createExample, element, feedback } from '../../shared.ts';
 
 const host = connectHost();
 const root = document.querySelector('#root');
@@ -23,38 +25,21 @@ if (!root) throw new Error('no root');
 
 // `data` is whatever this extension put on `attach`; the host stored it and
 // handed it back untouched. Read it as our own shape, fall back to the list.
+const taskDataSchema = z.object({ status: z.string(), comments: z.array(z.object({ author: z.string(), text: z.string() })), description: z.string().optional() });
 const readTaskData = (data: JsonValue | undefined): TaskData | null => {
-  if (!data || Array.isArray(data) || Object(data) !== data) return null;
-  const record = data as { [key: string]: JsonValue };
-  const status = record.status;
-  const comments = record.comments;
-  if (String(status) !== status || !Array.isArray(comments)) return null;
-  const parsed: TaskComment[] = [];
-  for (const entry of comments) {
-    if (!entry || Array.isArray(entry) || Object(entry) !== entry) return null;
-    const { author, text } = entry as { [key: string]: JsonValue };
-    if (String(author) !== author || String(text) !== text) return null;
-    parsed.push({ author, text });
-  }
-  return { status, comments: parsed };
+  const parsed = taskDataSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
 };
 
 const newPage = (): HTMLDivElement => {
-  while (root.firstChild) root.removeChild(root.firstChild);
-  const page = document.createElement('div');
-  page.style.padding = '12px';
-  page.style.display = 'flex';
-  page.style.flexDirection = 'column';
-  page.style.gap = '10px';
-  root.append(page);
-  return page;
+  return createExample(root, { number: '02', title: 'Task Board', description: 'Keep the useful context close to the conversation.', api: 'Attach · Actions' }).content;
 };
 
 const renderDetails = (item: AttachIssueRequest): void => {
   const page = newPage();
   const task = findTask(item.id);
-  const title = task?.title ?? item.title;
-  const url = task?.url ?? item.url;
+  const title = item.title;
+  const url = item.url;
   const details: TaskData = readTaskData(item.data)
     ?? (task ? { status: task.status, comments: task.comments } : { status: 'Unknown', comments: [] });
 
@@ -66,7 +51,10 @@ const renderDetails = (item: AttachIssueRequest): void => {
   mountBadge(head, { label: item.id, tone: 'primary' });
   mountBadge(head, { label: details.status, tone: item.kind === 'pull' ? 'info' : 'warning' });
 
-  mountText(page, { text: title });
+  page.append(element('h2', 'detail-title', title));
+  if (details.description) {
+    const brief = element('p', '', details.description); brief.style.whiteSpace = 'pre-wrap'; page.append(brief);
+  }
   mountText(page, { text: `[${url}](${url})`, onOpenUrl: (href) => { void host.openUrl(href); } });
   mountSeparator(page);
   mountText(page, { text: details.comments.length ? 'Comments' : 'No comments yet.' });
@@ -102,11 +90,12 @@ const renderPicker = (): void => {
   const page = newPage();
   mountText(page, { text: 'Pick a task to attach it to the chat.' });
   let query = '';
+  let tasks = TASKS;
   const listRoot = document.createElement('div');
   const list = mountList(listRoot, {
     items: [],
     onSelect: (id) => {
-      const task = findTask(id);
+      const task = tasks.find((entry) => entry.id === id);
       if (!task) return;
       void (async () => {
         try {
@@ -121,7 +110,7 @@ const renderPicker = (): void => {
   });
   const paint = (): void => {
     list.update({
-      items: TASKS
+      items: tasks
         .filter((t) => t.title.toLowerCase().includes(query.toLowerCase()) || t.id.toLowerCase().includes(query.toLowerCase()))
         .map((t) => ({ id: t.id, leading: t.id, title: t.title, badge: { label: t.kind, tone: t.kind === 'pull' ? 'info' as const : 'success' as const } })),
     });
@@ -129,9 +118,14 @@ const renderPicker = (): void => {
   const search = mountSearchField(page, { value: query, placeholder: 'Search tasks', onChange: (v) => { query = v; search.update({ value: v }); paint(); } });
   page.append(listRoot);
   paint();
+  const notice = feedback(page);
+  void notice.run(async () => {
+    const collection = await loadTasks(host); tasks = collection.tasks; paint();
+    if (collection.failedKeys.length) notice.show('Some tasks are unavailable', 'Open the board and refresh to retry.', 'warning');
+  });
 };
 
-const closeAfter = async (run: () => Promise<unknown>, label: string): Promise<void> => {
+const closeAfter = async (run: () => Promise<void>, label: string): Promise<void> => {
   try {
     await run();
     await host.close();
@@ -167,17 +161,13 @@ const renderMessageAction = (item: GuestMessageItem): void => {
   mountButton(actions, {
     label: 'Create',
     onClick: () => {
-      const id = `DEMO-${TASKS.length + 1}`;
+      const id = `TASK-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const title = item.text.split('\n').find((line) => line.trim())?.trim().slice(0, 80) ?? 'Task from message';
       void closeAfter(async () => {
+        const task: Task = { id, title, url: `https://example.com/tasks/${id}`, kind: 'issue', status: 'Todo', comments: [], description: item.text.slice(0, 12000) };
+        await saveTask(host, task);
         await host.toast({ kind: 'success', message: `Created ${id}: ${title}` });
-        await host.attach({
-          providerId: PROVIDER,
-          id,
-          title,
-          url: `https://example.com/tasks/${id}`,
-          text: `Task ${id} was created from message ${item.messageId} in "${item.sessionTitle}":\n${item.text}`,
-        });
+        await host.attach(attachPayload(task));
       }, 'Create');
     },
   });
@@ -198,7 +188,9 @@ const renderSessionAction = (item: GuestSessionItem): void => {
   mountSeparator(page);
   for (const message of messages) {
     const line = message.text.replace(/\s+/g, ' ').slice(0, 200);
-    mountText(page, { text: `${message.role}: ${line}${message.text.length > 200 ? '…' : ''}` });
+    const preview = document.createElement('p');
+    preview.textContent = `${message.role}: ${line}${message.text.length > 200 ? '…' : ''}`;
+    page.append(preview);
   }
   const actions = document.createElement('div');
   actions.style.display = 'flex';

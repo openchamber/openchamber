@@ -11,9 +11,17 @@
  * `req.body` is parsed here without a per-route parser.
  */
 
+import path from 'node:path';
+import { z } from 'zod';
+import { createProjectIdFromPath } from './project-id.js';
 import { isProjectSetupValidationError } from './project-setup.js';
 
 const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const directoryRequestSchema = z.object({
+  path: z.string().trim().catch(''),
+  create: z.literal(true).catch(false),
+}).catch({ path: '', create: false });
 
 const respondWithError = (res, error, fallbackMessage) => {
   const message = error instanceof Error ? error.message : fallbackMessage;
@@ -21,6 +29,63 @@ const respondWithError = (res, error, fallbackMessage) => {
     return res.status(400).json({ error: message });
   }
   return res.status(500).json({ error: message || fallbackMessage });
+};
+
+export const registerProjectDirectoryRoutes = (app, dependencies) => {
+  const { fsPromises, validateDirectoryPath, readSettingsFromDisk, sanitizeProjects, persistSettings } = dependencies;
+
+  app.post('/api/openchamber/directory', async (req, res) => {
+    try {
+      const { path: requestedPath, create } = directoryRequestSchema.parse(req.body);
+      if (!requestedPath) {
+        return res.status(400).json({ error: 'Path is required' });
+      }
+
+      if (create) {
+        await fsPromises.mkdir(path.resolve(requestedPath), { recursive: true });
+      }
+
+      const validated = await validateDirectoryPath(requestedPath);
+      if (!validated.ok) {
+        return res.status(400).json({ error: validated.error });
+      }
+
+      const resolvedPath = validated.directory;
+      const currentSettings = await readSettingsFromDisk();
+      const existingProjects = sanitizeProjects(currentSettings.projects) || [];
+      const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
+
+      const nextProjects = existing
+        ? existingProjects
+        : [
+            ...existingProjects,
+            {
+              id: createProjectIdFromPath(resolvedPath),
+              path: resolvedPath,
+              addedAt: Date.now(),
+              lastOpenedAt: Date.now(),
+            },
+          ];
+
+      const activeProjectId = existing ? existing.id : nextProjects[nextProjects.length - 1].id;
+
+      const updated = await persistSettings({
+        projects: nextProjects,
+        activeProjectId,
+        lastDirectory: resolvedPath,
+      });
+
+      return res.json({
+        success: true,
+        restarted: false,
+        path: resolvedPath,
+        settings: updated,
+      });
+    } catch (error) {
+      console.error('Failed to update project directory:', error);
+      return res.status(500).json({ error: error.message || 'Failed to update working directory' });
+    }
+  });
 };
 
 export const registerProjectSetupRoutes = (app, dependencies) => {

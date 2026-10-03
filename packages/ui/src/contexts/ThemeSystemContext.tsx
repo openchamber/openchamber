@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { z } from 'zod';
 import type { Theme, ThemeMode } from '@/types/theme';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
@@ -28,7 +29,8 @@ import {
   readEmbeddedThemeBootstrap,
   readEmbeddedThemeSearchParams,
 } from './theme-embedded-bootstrap';
-import { isValidTheme } from './theme-validation';
+import { themeSchema, themeListSchema, type ThemeDefinition } from '@/lib/theme/definition';
+import { ThemeImportError } from '@/lib/theme/importErrors';
 import { getSyncedThemeFromPayload, getSyncedThemeVariant } from './theme-sync-payload';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
@@ -160,6 +162,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
   const customThemesRequestRef = useRef(0);
+  const themeImportRequestRef = useRef(0);
+  const themeRuntimeGenerationRef = useRef(0);
+  const missingThemeReloadRef = useRef('');
   // Set only by the handlers a person reaches through the UI. The persist
   // effect below writes to the server only while this is raised, so a mount,
   // a runtime switch, an OS light/dark flip, or a settings sync adopting
@@ -209,8 +214,9 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
   useEffect(() => {
     const handleThemeHmr = (event: Event) => {
-      const theme = (event as CustomEvent<unknown>).detail;
-      if (!isValidTheme(theme)) return;
+      const parsedTheme = themeSchema.safeParse((event as CustomEvent<unknown>).detail);
+      if (!parsedTheme.success) return;
+      const theme = parsedTheme.data;
 
       const nextTheme = withPrColors(theme);
       setDevelopmentThemes((previous) => {
@@ -287,8 +293,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
 
       const payload = await res.json();
       if (request !== customThemesRequestRef.current || runtimeKey !== getRuntimeKey()) return;
-      const incoming = Array.isArray(payload?.themes) ? payload.themes : [];
-      const normalized = incoming.filter(isValidTheme);
+      const normalized = themeListSchema.parse(payload?.themes);
       setCustomThemes(normalized);
     } catch {
       // ignore
@@ -303,9 +308,27 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
 
+  useEffect(() => {
+    if (isVSCode || receivesParentThemeSync || customThemesLoading) return;
+    const missing = [preferences.lightThemeId, preferences.darkThemeId]
+      .filter((id) => !availableThemes.some((theme) => theme.metadata.id === id));
+    if (!missing.length) {
+      missingThemeReloadRef.current = '';
+      return;
+    }
+    // Another window may select a newly imported server theme. Fetch once per
+    // missing selection, without polling forever for a deleted or invalid ID.
+    const key = JSON.stringify([getRuntimeKey(), missing]);
+    if (missingThemeReloadRef.current === key) return;
+    missingThemeReloadRef.current = key;
+    void reloadCustomThemes();
+  }, [availableThemes, customThemesLoading, isVSCode, preferences.lightThemeId, preferences.darkThemeId, receivesParentThemeSync, reloadCustomThemes]);
+
   useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    themeWriteIntentRef.current = false;
     customThemesRequestRef.current += 1;
+    themeRuntimeGenerationRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
     // Adopt the new instance's last-known theme immediately; the incoming
@@ -741,12 +764,76 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     [availableThemes],
   );
 
+  const importTheme = useCallback(async (definition: ThemeDefinition, { activate = true }: { activate?: boolean } = {}): Promise<Theme> => {
+    if (isVSCode) throw new ThemeImportError('unsupported');
+    const runtimeKey = getRuntimeKey();
+    const initialPreferences = preferences;
+    const runtimeGeneration = themeRuntimeGenerationRef.current;
+    const importRequest = ++themeImportRequestRef.current;
+    let theme: Theme;
+    try {
+      const response = await runtimeFetch('/api/config/themes', {
+        method: 'POST',
+        credentials: isDesktopLocalOriginActive() ? 'omit' : 'include',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ theme: definition }),
+      });
+      if (!response.ok) throw new ThemeImportError(response.status === 409 ? 'conflict' : response.status === 413 ? 'size' : 'save');
+      const payload = await response.json();
+      theme = themeSchema.parse(payload?.theme);
+    } catch (error) {
+      if (error instanceof ThemeImportError) throw error;
+      throw new ThemeImportError('save');
+    }
+    if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    // A reload started before the save must not erase the new authoritative item.
+    customThemesRequestRef.current += 1;
+    setCustomThemesLoading(false);
+    setCustomThemes((current) => [...current.filter((item) => item.metadata.id !== theme.metadata.id), theme]);
+    setPreferences((current) => {
+      // A choice made while the upload was pending takes precedence.
+      if (!activate || current !== initialPreferences || importRequest !== themeImportRequestRef.current) return current;
+      themeWriteIntentRef.current = true;
+      return {
+        ...current,
+        themeMode: theme.metadata.variant,
+        ...(theme.metadata.variant === 'dark' ? { darkThemeId: theme.metadata.id } : { lightThemeId: theme.metadata.id }),
+      };
+    });
+    return theme;
+  }, [isVSCode, preferences]);
+
+  const deleteImportedTheme = useCallback(async (themeId: string): Promise<void> => {
+    if (isVSCode || !customThemes.some((theme) => theme.metadata.id === themeId)) throw new Error('unsupported');
+    const runtimeKey = getRuntimeKey();
+    const runtimeGeneration = themeRuntimeGenerationRef.current;
+    const response = await runtimeFetch(`/api/config/themes/${encodeURIComponent(themeId)}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('delete');
+    z.object({ success: z.literal(true) }).parse(await response.json());
+    if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== themeRuntimeGenerationRef.current) throw new ThemeImportError('connection');
+    customThemesRequestRef.current += 1;
+    setCustomThemesLoading(false);
+    setCustomThemes((current) => current.filter((theme) => theme.metadata.id !== themeId));
+    setPreferences((current) => {
+      if (current.lightThemeId !== themeId && current.darkThemeId !== themeId) return current;
+      themeWriteIntentRef.current = true;
+      return {
+        ...current,
+        lightThemeId: current.lightThemeId === themeId ? fallbackThemeForVariant('light').metadata.id : current.lightThemeId,
+        darkThemeId: current.darkThemeId === themeId ? fallbackThemeForVariant('dark').metadata.id : current.darkThemeId,
+      };
+    });
+  }, [customThemes, isVSCode]);
+
   const value: ThemeContextValue = {
     currentTheme,
     availableThemes,
+    customThemeIds: customThemes.map((theme) => theme.metadata.id),
     setTheme,
     customThemesLoading,
     reloadCustomThemes,
+    importTheme,
+    deleteImportedTheme,
     isSystemPreference: preferences.themeMode === 'system',
     setSystemPreference: setSystemPreferenceHandler,
     themeMode: preferences.themeMode,

@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const GROUPS = ['New', 'Improvements', 'Fixes', 'Misc'];
+export const GROUPS = ['New', 'Improvements', 'Fixes', 'SDK', 'Misc'];
 const LEGACY_BANNER = '<!-- Legacy copy for app versions up to 1.22.1, which fetch this file for their update notes. Generated from changelog/*.md while it exists; delete it after 2026-09-19 and nothing will recreate it. -->';
 export const SURFACES = ['App', 'VS Code'];
 
@@ -55,7 +55,7 @@ const parseFrontMatter = (lines, file) => {
  *   ---
  *   optional intro paragraph(s)
  *   ## App
- *   ### New | Improvements | Fixes | Misc
+ *   ### New | Improvements | Fixes | SDK | Misc
  *   - bullet
  *   ## VS Code
  *   ### ...
@@ -192,7 +192,11 @@ export const renderReleaseNotes = (release) => {
 const groupsToJson = (groups) => {
   if (!groups) return null;
   const out = {};
-  for (const name of GROUPS) out[name.toLowerCase()] = groups[name] ?? [];
+  for (const name of GROUPS) {
+    // SDK is optional so releases written before its introduction keep their JSON shape.
+    if (name === 'SDK' && !groups[name]?.length) continue;
+    out[name.toLowerCase()] = groups[name] ?? [];
+  }
   return out;
 };
 

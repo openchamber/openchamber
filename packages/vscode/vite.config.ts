@@ -17,7 +17,6 @@ export default defineConfig(({ mode }) => ({
   ],
   resolve: {
     alias: [
-      { find: '@opencode-ai/sdk/v2', replacement: path.resolve(__dirname, '../../node_modules/@opencode-ai/sdk/dist/v2/client.js') },
       { find: '@openchamber/sdk/schemas', replacement: path.resolve(__dirname, '../sdk/src/schemas.ts') },
       { find: '@openchamber/sdk', replacement: path.resolve(__dirname, '../sdk/src/index.ts') },
       { find: '@openchamber/ui', replacement: path.resolve(__dirname, '../ui/src') },
@@ -56,7 +55,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
+    include: ['@opencode/client'],
   },
   build: {
     outDir: path.resolve(__dirname, 'dist/webview'),

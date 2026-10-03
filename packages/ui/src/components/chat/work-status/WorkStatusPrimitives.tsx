@@ -142,6 +142,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
   ariaLabel,
   className,
 }) => {
+  const labelId = React.useId();
   const body = (
     <>
       {leading ?? (icon ? (
@@ -151,7 +152,7 @@ export const WorkStatusRow: React.FC<RowProps> = ({
           style={iconColor ? { color: iconColor } : undefined}
         />
       ) : null)}
-      <span className={cn('min-w-0 flex-1 truncate text-[13px]', muted && 'text-muted-foreground')}>
+      <span id={labelId} className={cn('min-w-0 flex-1 truncate text-[13px]', muted && 'text-muted-foreground')}>
         {label}
       </span>
       {value !== undefined && value !== null ? (
@@ -167,15 +168,23 @@ export const WorkStatusRow: React.FC<RowProps> = ({
 
   if (!onClick) return <div className={shared}>{body}</div>;
 
+  // A button cannot hold another one, and rows often carry their own (unpin,
+  // a row action). The row's button is stretched under the content instead:
+  // the whole row still answers a press, and controls inside it sit above.
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      className={cn(shared, 'transition-colors hover:text-foreground')}
-    >
-      {body}
-    </button>
+    <div className={cn(shared, 'relative transition-colors hover:text-foreground')}>
+      <button
+        type="button"
+        onClick={onClick}
+        // The label no longer sits inside the button, so it names it here.
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabel ? undefined : labelId}
+        className="absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--interactive-focus-ring)]"
+      />
+      <div className="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2 [&_a]:pointer-events-auto [&_button]:pointer-events-auto">
+        {body}
+      </div>
+    </div>
   );
 };
 

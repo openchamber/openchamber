@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test"
-import type { PermissionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest, Session } from "@/lib/opencode/model"
 import { createVSCodePermissionAutoAcceptRuntime } from "./vscode-permission-auto-accept"
 
 const permission = { id: "perm-1", sessionID: "child" } as PermissionRequest

@@ -18,8 +18,9 @@ import { isDesktopShell } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { terminalSnapshotSize } from '@/lib/terminalApi';
-import { extractAnnouncedUrls, extractProjectActionUrl } from '@/lib/terminalPreview';
+import { extractAnnouncedUrls, extractProjectActionUrl, extractProxiedPorts } from '@/lib/terminalPreview';
 import { setAnnouncedDevServers } from '@/lib/browser/announcedServers';
+import { reachesDevServersThroughTunnel } from '@/lib/browser/devTunnel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { openExternalUrl } from '@/lib/url';
@@ -40,6 +41,7 @@ import {
   toProjectActionRunKey,
 } from '@/lib/projectActions';
 import { detectDevServerCommand, readPackageJsonScripts } from '@/lib/detectDevServer';
+import { hasOpenUrlTemplate, resolveOpenUrl } from '@/lib/projectActionOpenUrl';
 import {
   createProjectActionTerminalSession,
   normalizeProjectActionCommand,
@@ -63,6 +65,8 @@ type UrlWatchEntry = {
   announced: string[];
   /** Set once the panel is showing these candidates and wants later ones too. */
   offering: boolean;
+  /** Loopback ports portless put behind a named address in this run's output. */
+  proxiedPorts: number[];
 };
 
 interface ProjectActionsButtonProps {
@@ -118,7 +122,7 @@ export const ProjectActionsButton = ({
 }: ProjectActionsButtonProps) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
-  const { terminal, runtime } = useRuntimeAPIs();
+  const { terminal, runtime, git } = useRuntimeAPIs();
   const effectiveDirectory = useEffectiveDirectory();
   const { isMobile } = useDeviceInfo();
   const isDesktopShellApp = React.useMemo(() => isDesktopShell(), []);
@@ -537,6 +541,7 @@ export const ProjectActionsButton = ({
               openInPreview: false,
               announced: [],
               offering: false,
+              proxiedPorts: [],
             };
         urlWatchByRunKeyRef.current[runKey] = watch;
         const action = displayActions.find((item) => item.id === entry.actionId);
@@ -548,6 +553,9 @@ export const ProjectActionsButton = ({
 
         const combined = nextChunks.map((chunk) => chunk.data).join('');
         const textForScan = `${watch.tail}${combined}`;
+        for (const port of extractProxiedPorts(textForScan)) {
+          if (!watch.proxiedPorts.includes(port)) watch.proxiedPorts.push(port);
+        }
         // Auto-discovery inferred the command; it must not also infer the
         // address. It collects what the servers announce and decides once they
         // have had a moment to all speak up.
@@ -555,7 +563,7 @@ export const ProjectActionsButton = ({
         // one project can be seconds apart, and a list that froze at whoever was
         // ready first would quietly omit the rest.
         if (watch.openInPreview && (!watch.openedUrl || watch.offering)) {
-          const announced = extractAnnouncedUrls(textForScan);
+          const announced = extractAnnouncedUrls(textForScan, { proxiedPorts: watch.proxiedPorts, namedAddressesReachable: !reachesDevServersThroughTunnel() });
           const before = watch.announced.length;
           for (const url of announced) {
             if (!watch.announced.includes(url)) watch.announced.push(url);
@@ -574,7 +582,7 @@ export const ProjectActionsButton = ({
         }
 
         const maybeUrl = !watch.openedUrl && action.autoOpenUrl === true && !watch.openInPreview
-          ? extractProjectActionUrl(textForScan)
+          ? extractProjectActionUrl(textForScan, { proxiedPorts: watch.proxiedPorts, namedAddressesReachable: !reachesDevServersThroughTunnel() })
           : null;
         const lastChunkId = nextChunks[nextChunks.length - 1]?.id ?? watch.lastSeenChunkId;
 
@@ -675,7 +683,7 @@ export const ProjectActionsButton = ({
             useTerminalStore.getState().setTabPurpose(tabDirectory, tab.id, { type: 'project-action', actionId, executionId: null });
             clearExecutionUi(tabDirectory, actionId, currentExecutionId);
           },
-        });
+        }, tabDirectory);
         streamCleanupByRunKeyRef.current[streamKey] = subscription.close;
       }
     }
@@ -774,7 +782,16 @@ export const ProjectActionsButton = ({
       const hasDesktopForwardSelection = discovered.autoOpenUrl === true
         && isDesktopShellApp
         && (discovered.desktopOpenSshForward || '').trim().length > 0;
-      const manualOpenUrl = discovered.autoOpenUrl ? normalizeManualOpenUrl(discovered.openUrl) : null;
+      // `{worktree}` / `{branch}` name the checkout the action runs in.
+      const openUrlTemplate = discovered.autoOpenUrl ? (discovered.openUrl || '') : '';
+      let openUrlUnresolved = false;
+      const resolvedOpenUrl = hasOpenUrlTemplate(openUrlTemplate)
+        ? await resolveOpenUrl(git, openUrlTemplate, executionDirectory).catch(() => {
+          openUrlUnresolved = true;
+          return '';
+        })
+        : openUrlTemplate;
+      const manualOpenUrl = discovered.autoOpenUrl ? normalizeManualOpenUrl(resolvedOpenUrl) : null;
       const desktopForwardUrl = discovered.autoOpenUrl && isDesktopShellApp
         ? resolveProjectActionDesktopForwardUrl(discovered.desktopOpenSshForward, desktopSshInstances)
         : null;
@@ -848,6 +865,7 @@ export const ProjectActionsButton = ({
         openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
         announced: [],
         offering: false,
+        proxiedPorts: [],
       };
 
       const executionStateKey = executionKey(executionDirectory, discovered.id, adoptedExecutionId);
@@ -892,6 +910,7 @@ export const ProjectActionsButton = ({
               clearExecutionUi(executionDirectory, discovered.id, adoptedExecutionId);
             }
           } },
+          executionDirectory,
         );
       if (!matchesActionExecution(executionDirectory, tabId, adoptedExecutionId)) {
         subscription.close();
@@ -933,6 +952,9 @@ export const ProjectActionsButton = ({
         setTabPreviewUrl(executionDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true, expectedExecutionId: adoptedExecutionId });
         openContextPreview(launchContextHostDirectory, manualOpenUrl);
         toast.success(t('projectActions.toast.openedActionUrl'));
+      } else if (openUrlUnresolved) {
+        setTabPreviewUrl(executionDirectory, tabId, null, { locked: true, expectedExecutionId: adoptedExecutionId });
+        toast.error(t('projectActions.error.openUrlTemplateUnresolved'));
       } else if (hasCustomOpenUrl) {
         setTabPreviewUrl(executionDirectory, tabId, null, { locked: true, expectedExecutionId: adoptedExecutionId });
         toast.error(t('projectActions.error.invalidCustomUrlFormat'));
@@ -968,6 +990,7 @@ export const ProjectActionsButton = ({
     contextHostDirectoryRef,
     desktopSshInstances,
     getOrCreateActionTab,
+    git,
     allowMobile,
     isMobile,
     isDesktopShellApp,
@@ -1126,7 +1149,7 @@ export const ProjectActionsButton = ({
               className={cn(
                 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] p-2',
                 'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 'disabled:cursor-not-allowed',
                 className
               )}
@@ -1151,7 +1174,7 @@ export const ProjectActionsButton = ({
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="app-region-no-drag -ml-1 inline-flex h-9 w-7 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                className="app-region-no-drag -ml-1 inline-flex h-9 w-7 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t('projectActions.actions.openPreview')}
                 onClick={handleOpenSelectedPreview}
               >
@@ -1165,7 +1188,7 @@ export const ProjectActionsButton = ({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="app-region-no-drag -ml-1 inline-flex h-9 w-5 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="app-region-no-drag -ml-1 inline-flex h-9 w-5 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('projectActions.actions.chooseActionAria')}
             >
               <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
@@ -1232,7 +1255,7 @@ export const ProjectActionsButton = ({
             className={cn(
               'inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
               compact ? 'w-9 px-0' : 'px-2.5',
-              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
+              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed'
             )}
             aria-label={selectedRunning
               ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
@@ -1261,7 +1284,7 @@ export const ProjectActionsButton = ({
               className={cn(
                 compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
                 'border-l border-[var(--interactive-border)] text-foreground',
-                'hover:bg-interactive-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                'hover:bg-interactive-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
               )}
               aria-label={t('projectActions.actions.openPreview')}
             >
@@ -1279,7 +1302,7 @@ export const ProjectActionsButton = ({
             className={cn(
               compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
               'border-l border-[var(--interactive-border)] text-muted-foreground',
-              'hover:bg-interactive-hover hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              'hover:bg-interactive-hover hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
             )}
             aria-label={t('projectActions.actions.chooseActionAria')}
           >

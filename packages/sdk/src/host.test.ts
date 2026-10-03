@@ -8,6 +8,9 @@ import {
   GUEST_FILE_PATH_MAX,
   GUEST_GENERATE_OUTPUT_TOKENS_MAX,
   GUEST_GENERATE_PROMPT_MAX,
+  GUEST_RESOLVE_ERROR_MAX,
+  GUEST_CLIPBOARD_TEXT_MAX,
+  GUEST_TOAST_MAX,
   type GuestMessage,
   type HostMessage,
 } from './contract.ts';
@@ -60,6 +63,11 @@ const ready: HostMessage = {
         active: '#e5e5e5',
         selectionForeground: '#111111',
         primaryForeground: '#ffffff',
+        primaryText: '#123456',
+        successText: '#224433',
+        warningText: '#664422',
+        errorText: '#882233',
+        infoText: '#334488',
         success: '#16a34a',
         warning: '#d97706',
         error: '#dc2626',
@@ -87,6 +95,91 @@ const demoItem = {
 };
 
 describe('connectHost', () => {
+  test('toast options are sent as data and resolve on display acknowledgement', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    const pending = host.toast({ kind: 'success', message: '  Result  ', copy: { text: '  original\n' }, dismiss: true, persistent: true });
+    const request = frame.posted.at(-1);
+    if (!request || request.type !== 'toast') throw new Error('Expected toast');
+    expect(request.payload).toEqual({ kind: 'success', message: 'Result', copy: { text: '  original\n' }, dismiss: true, persistent: true });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true } }));
+    await pending;
+    host.dispose();
+  });
+
+  test('invalid toast text rejects locally instead of waiting for a timeout', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    for (const message of ['', ' ', 'x'.repeat(GUEST_TOAST_MAX + 1)]) {
+      await expect(host.toast({ kind: 'info', message })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    }
+    for (const text of ['', 'x'.repeat(GUEST_CLIPBOARD_TEXT_MAX + 1)]) {
+      await expect(host.toast({ kind: 'info', message: 'Summary', copy: { text } })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    }
+    expect(frame.posted.map((message) => message.type)).toEqual(['hello']);
+    host.dispose();
+  });
+
+  const action: HostMessage = {
+    channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'action', id: 'action-1',
+    payload: { kind: 'message', action: 'count', sessionId: 's1', sessionTitle: 'Session', directory: '/repo', messageId: 'm1', role: 'assistant', text: 'Hello' },
+  };
+
+  test('background action waits for the handler and its toast acknowledgement', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    host.onAction(async (item) => {
+      expect(item).toEqual(action.payload);
+      await host.toast({ kind: 'info', message: 'Done' });
+    });
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    await Promise.resolve();
+    const toast = frame.posted.find((message) => message.type === 'toast');
+    if (!toast || toast.type !== 'toast') throw new Error('Expected toast');
+    expect(frame.posted.some((message) => message.type === 'action-result')).toBe(false);
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: toast.id, ok: true } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.posted.at(-1)).toEqual({ channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'action-result', id: 'action-1', payload: { ok: true } });
+    host.dispose();
+  });
+
+  test('missing action handlers and rejected handlers answer with bounded failures', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    expect(frame.posted.at(-1)).toMatchObject({ type: 'action-result', payload: { ok: false, error: 'This extension does not handle background actions.' } });
+    const removeOld = host.onAction(() => {});
+    const removeCurrent = host.onAction(async () => { throw new Error('x'.repeat(GUEST_RESOLVE_ERROR_MAX + 20)); });
+    removeOld();
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.posted.at(-1)).toMatchObject({ type: 'action-result', payload: { ok: false, error: 'x'.repeat(GUEST_RESOLVE_ERROR_MAX) } });
+    removeCurrent();
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    expect(frame.posted.at(-1)).toMatchObject({ type: 'action-result', payload: { ok: false, error: 'This extension does not handle background actions.' } });
+    host.dispose();
+  });
+
+  test('disposing during an action suppresses its late result and unrelated sources never run it', async () => {
+    const frame = createFrame();
+    let accepted = false;
+    let calls = 0;
+    let finish = () => {};
+    const host = connectHost({ target: frame, acceptSource: () => accepted });
+    host.onAction(() => { calls++; return new Promise<void>((resolve) => { finish = resolve; }); });
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    await Promise.resolve();
+    expect(calls).toBe(0);
+    accepted = true;
+    frame.dispatch(new MessageEvent('message', { data: action }));
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    host.dispose();
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.posted.some((message) => message.type === 'action-result')).toBe(false);
+  });
+
   test('workspace subscriptions deliver an initial snapshot, unsubscribe, and propagate refusals', async () => {
     const guest = createFrame();
     const host = connectHost({ target: guest, acceptSource: () => true });
@@ -812,6 +905,31 @@ describe('connectHost resolve and badge', () => {
     const calls = [3, 5000, -2, 2.6, null].map((count) => host.setBadge(count).catch(() => undefined));
     const badges = parent.posted.filter((message) => message.type === 'badge');
     expect(badges.map((message) => (message.type === 'badge' ? message.payload.count : undefined))).toEqual([3, 999, 0, 3, null]);
+    host.dispose();
+    await Promise.all(calls);
+  });
+
+  test('openCommit posts a valid hash and refuses anything else locally', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+    const sent = host.openCommit('abcdef1').catch(() => undefined);
+    await expect(host.openCommit('main')).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    expect(parent.posted.filter((message) => message.type === 'open-commit').map((message) => (message.type === 'open-commit' ? message.payload.sha : ''))).toEqual(['abcdef1']);
+    host.dispose();
+    await sent;
+  });
+
+  test('setHeight sends whole pixels within the wire range', async () => {
+    const parent = createFrame();
+    const guest = createFrame();
+    guest.parent = parent.parent;
+    const host = connectHost({ target: guest, acceptSource: () => true });
+
+    const calls = [180, 12.2, -5, 50_000, Number.NaN].map((height) => host.setHeight(height).catch(() => undefined));
+    const sizes = parent.posted.filter((message) => message.type === 'resize');
+    expect(sizes.map((message) => (message.type === 'resize' ? message.payload.height : undefined))).toEqual([180, 13, 0, 10_000, 0]);
     host.dispose();
     await Promise.all(calls);
   });

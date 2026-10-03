@@ -3,12 +3,13 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
-/* Load KaTeX styles eagerly with the main bundle. Importing them inside the
-   lazy MarkdownRendererImpl chunk meant a stylesheet was injected late on the
-   first markdown render of a session; that late injection triggered a style
-   recalc during which the layered `.chat-message-column` width clamp briefly
-   lost, flashing message text to full width before it snapped back. */
-@import "katex/dist/katex.min.css";
+/* KaTeX styles are loaded eagerly through `styles/katex-css` (a JS import) at
+   every app entry point. Keeping them eager avoids a late stylesheet injection
+   on the first markdown render, whose style recalc briefly lost the layered
+   `.chat-message-column` width clamp and flashed message text to full width.
+   A JS import is required because Lightning CSS inlines a CSS `@import`
+   without resolving the relative `url(fonts/...)` references, leaving the
+   KaTeX font files unbundled (openchamber/openchamber#1880). */
 @source "./**/*.{ts,tsx,css}";
 
 /* KaTeX theme overrides for light/dark mode */
@@ -31,6 +32,16 @@
 }
 
 @custom-variant dark (&:is(.dark *));
+
+/* Hover-revealed row actions cross-fade over a row's right end instead of
+   re-laying the row out: the text they cover fades away under them. The
+   masked element sits --oc-actions-inset from its nearest @container's left
+   edge; the actions reach --oc-actions-reserve in from that container's right
+   edge. */
+@utility oc-actions-mask {
+  --oc-actions-edge: calc(100cqw - var(--oc-actions-inset, 0px) - var(--oc-actions-reserve, 0px));
+  mask-image: linear-gradient(to right, #000 calc(var(--oc-actions-edge) - 14px), transparent calc(var(--oc-actions-edge) - 2px));
+}
 
 /* Buttons should never look selectable. */
 button,
@@ -75,38 +86,80 @@ button,
   line-height: round(1.625em, 1px);
 }
 
-/* Text selection in chat and file previews: the theme accent at 30%, the same
-   in every theme. The themes' own selection token is tuned for selected rows
-   and in several light themes is nearly the page background; a translucent
-   accent stays visible over every background and never hides the text. */
+/* Resolve prose per paragraph, including plain-text fallbacks. Keep direction
+   off the message root: it also contains code, tables and their controls. */
+.markdown-content,
+.markdown-content :where(p, h1, h2, h3, h4, h5, h6, li, blockquote, td:not([align]), th:not([align]), div.whitespace-pre-wrap),
+.markdown-content details[data-md-details] > summary > span:last-child {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+/* Markdown's explicit column alignment still wins over automatic alignment. */
+.markdown-content :where(td[align], th[align]) {
+  unicode-bidi: plaintext;
+}
+
+/* A technical fragment is one LTR run, even inside an RTL list or quote. */
+.markdown-content :where(
+  pre, code, kbd, samp,
+  [data-component="markdown-code"],
+  [data-markdown="table-wrapper"],
+  [data-markdown="mermaid-block"],
+  .katex,
+  [data-openchamber-file-link="true"],
+  [data-openchamber-agent-mention="true"],
+  [data-skill-name]
+) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+
+/* Native selection uses the theme's selection pair. */
 .message-content-text::selection,
 .message-content-text ::selection,
 .oc-file-preview::selection,
 .oc-file-preview ::selection {
   background: var(--oc-text-selection);
-  color: var(--surface-foreground);
+  color: var(--interactive-selection-foreground);
 }
 
 .oc-cm-selected-line {
-  background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+  background: var(--interactive-selection);
+  color: var(--interactive-selection-foreground);
 }
 
-/* Quoted chat fragment kept visibly highlighted while its comment input is
-   open (the native selection collapses once the input takes focus). The
-   rectangles come from the selection's own client rects and paint in the
-   selection colour, so shape and shade both match the native selection that
-   was just showing; the colour is translucent because these rectangles sit
-   above the text. */
+/* These rectangles sit above glyphs, so the fill must remain translucent. */
 .oc-chat-comment-rect {
+  background-color: color-mix(in srgb, var(--interactive-selection) 35%, transparent);
+}
+
+/* Chat quotes waiting in the composer stay marked in their message, tinted
+   like a text selection. The hovered or just-revealed one is painted in both
+   layers, so the translucent fills stack into a stronger mark. */
+::highlight(oc-chat-quote),
+::highlight(oc-chat-quote-focus) {
   background-color: var(--oc-text-selection);
 }
 
+/* In-conversation search (chat/search): every occurrence tinted, the current
+   message's painted solid so the eye lands on it. */
+::highlight(oc-chat-search) {
+  background-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+::highlight(oc-chat-search-current) {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
 .pierre-diff-wrapper {
-  --diffs-bg-selection-override: color-mix(in srgb, var(--primary-base) 22%, transparent);
-  --diffs-bg-selection-background-override: color-mix(in srgb, var(--primary-base) 14%, transparent);
-  --diffs-bg-selection-number-override: color-mix(in srgb, var(--primary-base) 28%, transparent);
-  --diffs-bg-selection-number-background-override: color-mix(in srgb, var(--primary-base) 18%, transparent);
-  --diffs-selection-color-override: var(--primary-base);
+  --diffs-bg-selection-override: var(--interactive-selection);
+  --diffs-bg-selection-background-override: var(--interactive-selection);
+  --diffs-bg-selection-number-override: var(--interactive-selection);
+  --diffs-bg-selection-number-background-override: var(--interactive-selection);
+  --diffs-selection-color-override: var(--interactive-selection-foreground);
 }
 
 /* Codemirror syntax fallback for classHighlighter tokens */
@@ -247,7 +300,7 @@ button,
 }
 
 :root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
@@ -266,6 +319,30 @@ div[data-chat-input-footer="true"] {
      variable inline (the hook-based chat scroller). Inline styles from the
      ScrollShadow component still override this. */
   --scroll-shadow-size: 48px;
+  /* The band at the scroller's end that floating chrome covers. The end fade
+     sits above it, so content dissolves before it reaches that chrome. */
+  --scroll-shadow-end-inset: 0px;
+}
+
+/* The chat composer floats over the transcript's tail (plus any panel docked
+   above it), and the working row sits in the gap the tail spacer leaves. While
+   a live reply outruns the follow glide, its newest lines land in that gap;
+   fading them out above the composer keeps the composer's top edge from
+   cutting a line in half. Only then (`data-live-tail`: a reply streams and the
+   view follows it): at rest and while reading history the rows slide under
+   the composer's glass, which is what makes it read as floating; there the
+   end fade starts just above the composer and runs to the scroller's edge,
+   so rows thin out under the glass and beside a composer narrower than the
+   transcript (wide layout) instead of meeting the window's edge at full
+   strength. In flow (draft, expanded editor) the inset is unset and the
+   fade stays at the scroller's edge. */
+.chat-scroll {
+  --scroll-shadow-end-size: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px) + var(--scroll-shadow-size));
+}
+
+[data-live-tail="true"] .chat-scroll {
+  --scroll-shadow-end-inset: calc(var(--chat-composer-inset, 0px) + var(--chat-floating-panel-clearance, 0px));
+  --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
 [data-scroll-shadow="true"][data-orientation="vertical"] {
@@ -276,26 +353,27 @@ div[data-chat-input-footer="true"] {
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
     transparent var(--scroll-shadow-top-clear-size, 0px),
     #000 var(--scroll-shadow-top-size, var(--scroll-shadow-size)),
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -327,18 +405,19 @@ div[data-chat-input-footer="true"] {
   opacity: 1;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     #000 0%,
-    #000 calc(100% - var(--scroll-shadow-size)),
-    transparent 100%
+    #000 calc(100% - var(--scroll-shadow-end-inset) - var(--scroll-shadow-end-size, var(--scroll-shadow-size))),
+    transparent calc(100% - var(--scroll-shadow-end-inset))
   );
 }
 
@@ -419,11 +498,21 @@ button svg,
   shape-rendering: geometricPrecision;
 }
 
-/* GPU acceleration for non-spinning SVGs */
-button svg:not(.animate-spin),
-[role="button"] svg:not(.animate-spin) {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
+/*
+ * WebKit only. A 3D transform gives every matched icon a compositor layer of
+ * its own, and the compositor walks every layer on every frame. Measured in
+ * Chromium with 60 icons on screen: 66 layers per frame instead of 9, three
+ * times the layerization time, and four points of renderer CPU while a
+ * response streams. The cost grows with the number of buttons on screen, so
+ * Chromium runtimes no longer get the hint. `font: -apple-system-body` is a
+ * value only WebKit parses, which keeps the rule where it was written for.
+ */
+@supports (font: -apple-system-body) {
+  button svg:not(.animate-spin):not(.activity-spinner),
+  [role="button"] svg:not(.animate-spin):not(.activity-spinner) {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
@@ -495,6 +584,12 @@ svg.animate-spin {
 
 .app-region-drag {
   -webkit-app-region: drag;
+}
+
+/* Native drag regions still intercept pointer input beneath portal dialogs.
+   Restore them when the last dialog closes. */
+.oc-dialog-open .app-region-drag {
+  -webkit-app-region: no-drag;
 }
 
 .app-region-no-drag {
@@ -662,6 +757,13 @@ html:not(.dark) .chat-scroll {
   padding-right: 6px;
 }
 
+/* Settings pages cross the overflow threshold all the time (collapsible
+   sections, catalogs loading), so they reserve the thumb's space up front
+   instead of shifting content the moment a scrollbar appears. */
+.overlay-scrollbar-wrapper--stable-gutter {
+  padding-right: 6px;
+}
+
 .overlay-scrollbar {
   position: absolute;
   inset: 0;
@@ -732,6 +834,54 @@ html:not(.dark) .chat-scroll {
 
 .pierre-diff-wrapper diffs-container {
   display: block;
+}
+
+/* Row below the last hunk of a patch-only diff (PierreDiffViewer). Pierre
+   draws no separator there, so this mirrors its on-demand separators. */
+.pierre-diff-wrapper [data-oc-trailing-expand] {
+  display: flex;
+  align-items: center;
+  gap: 1ch;
+  height: 24px;
+  padding: 0 0 0 1ch;
+  border: none;
+  background: transparent;
+  color: var(--diffs-fg-number, var(--surface-muted-foreground));
+  font-family: var(--diffs-header-font-family, var(--font-sans));
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]::before {
+  content: '\2193';
+  display: block;
+  flex-shrink: 0;
+}
+
+.pierre-diff-wrapper [data-oc-trailing-expand]:hover {
+  color: var(--diffs-fg, var(--surface-foreground));
+}
+
+/* Full file requested: same spinner and dimming as the separators. */
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand] {
+  cursor: default;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.pierre-diff-wrapper diffs-container[data-oc-expand-loading] [data-oc-trailing-expand]::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: oc-trailing-expand-spin 0.8s linear infinite;
+}
+
+@keyframes oc-trailing-expand-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Header tab responsiveness */
@@ -1036,6 +1186,13 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+/* Documents rendered with their raw HTML (the Files preview) lay images out
+   the way GitHub does: inline beside text and other badges, not one block per
+   line as Tailwind preflight makes them. */
+.markdown-content[data-markdown-html] img {
+  display: inline;
+}
+
 /* Block rhythm: every block carries the same margin on both sides, so the
    gap between any two neighbours is one paragraph spacing (margins collapse)
    and the first/last block of a message adds nothing. Tailwind preflight
@@ -1053,13 +1210,16 @@ html:not(.dark) .chat-scroll {
    element, so the message-level [&_.markdown-content>*:first-child]:mt-0 /
    [&_.markdown-content>*:last-child]:mb-0 nullifiers target the wrapper
    (where margin is ignored), not the block. Trim the outer blocks directly so
-   messages gain no extra space at the top or bottom. */
+   messages gain no extra space at the top or bottom. The last block is found
+   by the renderer's [data-md-last] marker, not [data-md-block]:last-child: a
+   structural pseudo-class in that position makes every append to <body> (each
+   tooltip and menu portal) restyle the whole app. */
 .markdown-content > [data-md-block]:first-child > :first-child,
 .markdown-content > :first-child:not([data-md-block]) {
   margin-top: 0;
 }
 
-.markdown-content > [data-md-block]:last-child > :last-child,
+.markdown-content > [data-md-last] > :last-child,
 .markdown-content > :last-child:not([data-md-block]) {
   margin-bottom: 0;
 }
@@ -1076,15 +1236,15 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code) !important;
 }
 
-.question-markdown > .markdown-content.markdown-tool {
+.form-markdown > .markdown-content.markdown-tool {
   font-size: inherit !important;
 }
 
-.question-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
+.form-markdown > .markdown-content > [data-md-block]:first-child > :first-child {
   margin-top: 0;
 }
 
-.question-markdown > .markdown-content > [data-md-block]:last-child > :last-child {
+.form-markdown > .markdown-content > [data-md-last] > :last-child {
   margin-bottom: 0;
 }
 
@@ -1092,10 +1252,6 @@ html:not(.dark) .chat-scroll {
 .markdown-content.markdown-reasoning {
   font-size: var(--text-markdown);
   color: var(--surface-muted-foreground);
-  --markdown-heading1: inherit;
-  --markdown-heading2: inherit;
-  --markdown-heading3: inherit;
-  --markdown-heading4: inherit;
   --markdown-link: inherit;
   --markdown-link-hover: var(--surface-foreground);
   --markdown-blockquote: inherit;
@@ -1179,6 +1335,22 @@ html:not(.dark) .chat-scroll {
   font-size: 0.875rem;
 }
 
+/* GitHub writes `<summary><h3>Findings</h3></summary>`: like GitHub, the
+   heading keeps its size but sits on the chevron's line without margins. */
+.markdown-content details[data-md-details] > summary > span:last-child > :is(h1, h2, h3, h4, h5, h6, p) {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) {
+  align-items: center;
+}
+
+.markdown-content details[data-md-details] > summary:has(> span:last-child > :is(h1, h2, h3, h4, h5, h6)) > [data-md-disclosure-icon] {
+  align-self: center;
+  margin-top: 0;
+}
+
 /* Code font */
 .markdown-content code,
 .markdown-content pre {
@@ -1241,8 +1413,8 @@ html:not(.dark) .chat-scroll {
 
 /* Markdown blockquote - use theme colors */
 .markdown-content blockquote {
-  border-left: 2px solid var(--markdown-blockquote-border, var(--border));
-  padding-left: 0.8rem;
+  border-inline-start: 2px solid var(--markdown-blockquote-border, var(--border));
+  padding-inline-start: 0.8rem;
   color: var(--markdown-blockquote, var(--muted-foreground));
 }
 
@@ -1302,6 +1474,8 @@ html:not(.dark) .chat-scroll {
 
 /* Reduce code block header height */
 [data-markdown="code-block-header"] {
+  --foreground: var(--surface-foreground);
+  color: var(--foreground);
   margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
@@ -1328,7 +1502,9 @@ html:not(.dark) .chat-scroll {
   max-inline-size: 100%;
   min-inline-size: 0;
   overflow: hidden;
-  background: var(--surface-background);
+  --foreground: var(--syntax-foreground);
+  color: var(--foreground);
+  background: var(--syntax-background);
   border: 1px solid var(--interactive-border);
   border-radius: 0.75rem;
 }
@@ -1767,6 +1943,47 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
 }
 
+/*
+ * The staggered dots of a busy indicator that stays on screen for as long as
+ * the agent works. A smooth opacity pulse is composited, yet it still makes
+ * the compositor and the GPU process draw sixty frames a second: about ten
+ * percent of a core on an otherwise still page. Three steps per half cycle
+ * last 200ms each, the same as the stagger between dots, so every dot changes
+ * on the same five frames a second, which halves that cost. Keep the stagger
+ * a multiple of one step or the dots stop sharing frames.
+ */
+.animate-busy-wave {
+  animation: oc-busy-pulse 1.2s steps(3, jump-none) infinite;
+}
+
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}
+
+@keyframes activity-spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Running-session spinner (opt-in). steps() limits rotation changes to 20 per
+   second. This still adds compositor work while a running indicator is visible.
+   Technique from VS Code's codicon-modifier-spin. */
+.activity-spinner {
+  animation: activity-spin 1.5s steps(30) infinite;
+  transform-box: fill-box;
+  transform-origin: center center;
+}
+
 @keyframes navrail-dot-wave {
   0%, 100% {
     transform: scale(0.72);
@@ -1887,7 +2104,9 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     display: none;
   }
 
-  .animate-busy-pulse {
+  .animate-busy-pulse,
+  .animate-busy-wave,
+  .animate-status-logo {
     animation: none;
   }
 

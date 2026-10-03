@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'node:child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -37,6 +38,10 @@ if (isDirectRun) {
     fs.writeFileSync(fullPath, JSON.stringify(pkg, null, 2) + '\n');
     console.log(`  ${pkgPath}: ${oldVersion} -> ${newVersion}`);
   }
+
+  // Bun packs workspace:* using the lockfile's version, even after a frozen
+  // install. Refresh it with the manifests before any release package is packed.
+  execFileSync('bun', ['install', '--lockfile-only', '--ignore-scripts'], { cwd: ROOT, stdio: 'inherit' });
 
   console.log('\nVersion bump complete. Review changes, then commit and tag.');
 }

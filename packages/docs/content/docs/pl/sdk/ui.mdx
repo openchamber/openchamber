@@ -23,6 +23,10 @@ host.onReady((ctx) => {
 });
 ```
 
+Zestaw używa kolorów tekstu obliczonych przez hosta w delikatnie zabarwionych przyciskach, plakietkach, tytułach powiadomień, komunikatach walidacji i linkach. Nie trzeba samodzielnie obliczać kontrastu.
+
+Do własnego CSS `applyHostReady` udostępnia `--primary-text`, `--success-text`, `--warning-text`, `--error-text` i `--info-text` oraz odpowiadające im aliasy `--oc-*-text`. Używaj ich do tekstu na neutralnych lub lekko zabarwionych tłach. Dla wypełnień zachowaj kolory bazowe, a dla tekstu na pełnym wypełnieniu `--oc-primary` używaj `--oc-primary-fg`. Stosuj każdy stan z `onReady`, aby kolory były aktualne.
+
 `onReady` może uruchamiać się wielokrotnie, gdy panel jest otwarty, na przykład po zmianie kontekstu sesji. Stosuj motyw za każdym razem, ale montuj kontrolki i rejestruj listenery tylko raz. Przechowuj szkice poza funkcjami renderującymi. Przy zmianie zakładki ukrywaj istniejące panele lub odtwarzaj ich wartości ze stanu.
 
 ## Synchronizacja wyboru i pól

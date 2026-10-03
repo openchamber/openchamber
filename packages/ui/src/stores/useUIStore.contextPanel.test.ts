@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CONTEXT_SURFACES, sortContextSurfaces } from '../lib/surfaces/registry';
+import {
+  forgetBrowserTabOpenedWithAddress,
+  subscribeBrowserTabLoadRequests,
+  wasBrowserTabOpenedWithAddress,
+} from '../lib/browser/devServerWait';
 import { useTerminalStore } from './useTerminalStore';
 import { useUIStore } from './useUIStore';
 
@@ -11,6 +16,41 @@ const originalPersistOptions = useUIStore.persist.getOptions();
 beforeEach(() => {
   useUIStore.setState({ contextPanelByDirectory: {}, contextRailOrder: [] });
   useTerminalStore.getState().clearAll();
+});
+
+describe('useUIStore preview file tabs', () => {
+  const fileTabs = () => getContextPanelTabs('/repo').filter((tab) => tab.mode === 'file');
+
+  test('a preview replaces the previous preview in its slot instead of adding a tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/kept.ts');
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/kept.ts', false],
+      ['/repo/b.ts', true],
+    ]);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(fileTabs()[1].id);
+  });
+
+  test('a regular open, an explicit pin, or a preview of an open file keeps the tab', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts');
+    expect(fileTabs().map((tab) => tab.preview)).toEqual([false]);
+
+    store.openContextFile('/repo', '/repo/b.ts', { preview: true });
+    store.pinContextPanelTab('/repo', fileTabs()[1].id);
+    store.openContextFile('/repo', '/repo/c.ts', { preview: true });
+    store.openContextFile('/repo', '/repo/a.ts', { preview: true });
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/a.ts', false],
+      ['/repo/b.ts', false],
+      ['/repo/c.ts', true],
+    ]);
+  });
 });
 
 describe('useUIStore context panel tabs', () => {
@@ -446,6 +486,45 @@ describe('useUIStore context panel tabs', () => {
   });
 });
 
+describe('useUIStore browser tabs opened with an address', () => {
+  const url = 'http://localhost:5173/';
+  const tabID = `browser:${url}`;
+
+  test('a new tab counts as opened now, so its first load may wait for the server', () => {
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    useUIStore.getState().openContextPreview('/repo', url);
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(true);
+    expect(wasBrowserTabOpenedWithAddress('/other', tabID)).toBe(false);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+  });
+
+  test('opening the address of an existing tab asks that tab to load it again', () => {
+    useUIStore.getState().openContextBrowser('/repo', url);
+    forgetBrowserTabOpenedWithAddress('/repo', tabID);
+    const requested: string[] = [];
+    const elsewhere: string[] = [];
+    const stop = subscribeBrowserTabLoadRequests('/repo', tabID, (next) => requested.push(next));
+    const stopElsewhere = subscribeBrowserTabLoadRequests('/other', tabID, (next) => elsewhere.push(next));
+
+    useUIStore.getState().openContextPreview('/repo', url);
+    useUIStore.getState().openContextBrowser('/repo', url);
+
+    expect(requested).toEqual([url, url]);
+    expect(elsewhere).toEqual([]);
+    // Loaded through the request, not marked: a later remount still counts as restored.
+    expect(wasBrowserTabOpenedWithAddress('/repo', tabID)).toBe(false);
+    stop();
+    stopElsewhere();
+  });
+
+  test('an agent tab opened with an address counts as opened now', () => {
+    const agentTabID = useUIStore.getState().openAgentBrowserTab('/repo', url);
+    expect(agentTabID === null).toBe(false);
+    expect(wasBrowserTabOpenedWithAddress('/repo', agentTabID ?? '')).toBe(true);
+    forgetBrowserTabOpenedWithAddress('/repo', agentTabID ?? '');
+  });
+});
+
 describe('useUIStore openContextSurface', () => {
   const directory = '/repo';
 
@@ -510,6 +589,14 @@ describe('useUIStore openContextSurface', () => {
     const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
     expect(activeTab?.mode).toBe('file');
     expect(activeTab?.targetPath).toBe('/repo/b.ts');
+  });
+
+  test('reopening the file surface reveals the file tree when it was left hidden', () => {
+    useUIStore.setState({ contextEditorTreeVisible: false });
+
+    useUIStore.getState().openContextSurface(directory, 'file');
+
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
   });
 
   test('opening the terminal surface clears a stale target on the singleton tab', () => {
@@ -612,6 +699,65 @@ describe('useUIStore openContextSurface', () => {
   });
 });
 
+describe('useUIStore file editor visibility', () => {
+  const directory = '/repo';
+
+  beforeEach(() => {
+    useUIStore.setState({ contextEditorVisible: true, contextEditorTreeVisible: true });
+  });
+
+  test('hiding the editor keeps the open file tabs', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextFile(directory, '/repo/b.ts');
+
+    useUIStore.getState().toggleContextEditor();
+
+    const state = useUIStore.getState();
+    expect(state.contextEditorVisible).toBe(false);
+    expect(state.contextPanelByDirectory[directory]?.tabs.filter((tab) => tab.mode === 'file')).toHaveLength(2);
+  });
+
+  test('the editor and the tree are never hidden together', () => {
+    useUIStore.getState().toggleContextEditor();
+    useUIStore.getState().toggleContextEditorTree();
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(false);
+    expect(useUIStore.getState().contextEditorVisible).toBe(true);
+
+    useUIStore.getState().toggleContextEditor();
+    expect(useUIStore.getState().contextEditorVisible).toBe(false);
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
+  });
+
+  test('opening a file shows a hidden editor', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().toggleContextEditor();
+
+    useUIStore.getState().openContextFile(directory, '/repo/b.ts');
+
+    expect(useUIStore.getState().contextEditorVisible).toBe(true);
+  });
+
+  test('picking the already active file tab shows a hidden editor', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    const activeTabId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
+    if (!activeTabId) throw new Error('expected an active tab');
+    useUIStore.getState().toggleContextEditor();
+
+    useUIStore.getState().setActiveContextPanelTab(directory, activeTabId);
+
+    expect(useUIStore.getState().contextEditorVisible).toBe(true);
+  });
+
+  test('a background file upsert leaves a hidden editor hidden', () => {
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().toggleContextEditor();
+
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'file', targetPath: '/repo/b.ts' }, { reveal: false });
+
+    expect(useUIStore.getState().contextEditorVisible).toBe(false);
+  });
+});
+
 describe('useUIStore closeContextPanelTab surface stability', () => {
   const directory = '/repo';
 
@@ -633,14 +779,50 @@ describe('useUIStore closeContextPanelTab surface stability', () => {
 
   test('closing the last tab of the active surface closes the panel', () => {
     useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
-    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
 
     const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
-    useUIStore.getState().closeContextPanelTab(directory, stateBefore?.activeTabId as string);
+    const activeTabId = stateBefore?.activeTabId;
+    if (!activeTabId) throw new Error('expected an active tab');
+    useUIStore.getState().closeContextPanelTab(directory, activeTabId);
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(state?.isOpen).toBe(false);
     expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal']);
+  });
+
+  test('closing the last file tab keeps the file surface on its empty editor tab', () => {
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
+    useUIStore.getState().openContextFile(directory, '/repo/a.ts');
+    useUIStore.setState({ contextEditorTreeVisible: false });
+
+    const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTabId = stateBefore?.tabs.find((tab) => tab.mode === 'file')?.id;
+    if (!fileTabId) throw new Error('expected a file tab');
+    useUIStore.getState().closeContextPanelTab(directory, fileTabId);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(state?.isOpen).toBe(true);
+    expect(activeTab?.mode).toBe('file');
+    expect(activeTab?.targetPath).toBe(null);
+    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal', 'file']);
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
+    expect(state?.widthByMode).toEqual(stateBefore?.widthByMode);
+    expect(state?.widthFractionByMode).toEqual(stateBefore?.widthFractionByMode);
+  });
+
+  test('closing the empty editor tab itself still closes the file surface', () => {
+    useUIStore.getState().openContextSurface(directory, 'file');
+
+    const stateBefore = useUIStore.getState().contextPanelByDirectory[directory];
+    const fileTabId = stateBefore?.tabs.find((tab) => tab.mode === 'file')?.id;
+    if (!fileTabId) throw new Error('expected a file tab');
+    useUIStore.getState().closeContextPanelTab(directory, fileTabId);
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(state?.isOpen).toBe(false);
+    expect(state?.tabs).toHaveLength(0);
   });
 
   test('closing an inactive tab keeps the active tab untouched', () => {
@@ -674,20 +856,25 @@ describe('useUIStore closeContextPanelTabs bulk', () => {
     expect(state?.isOpen).toBe(false);
   });
 
-  test('closing all tabs of the active surface closes the panel but keeps other surfaces in state', () => {
+  test('closing all tabs of the active file surface keeps the surface on its empty editor tab', () => {
     useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal' });
     useUIStore.getState().openContextFile(directory, '/repo/a.ts');
     useUIStore.getState().openContextFile(directory, '/repo/b.ts');
+    useUIStore.setState({ contextEditorTreeVisible: false });
 
     const state0 = useUIStore.getState().contextPanelByDirectory[directory];
     const fileIds = state0?.tabs.filter((tab) => tab.mode === 'file').map((tab) => tab.id) ?? [];
     useUIStore.getState().closeContextPanelTabs(directory, fileIds);
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
-    expect(state?.tabs.map((tab) => tab.mode)).toEqual(['terminal']);
-    expect(state?.activeTabId).toBe('terminal');
-    // Matches the single-close rule: emptying the active surface closes the panel.
-    expect(state?.isOpen).toBe(false);
+    const activeTab = state?.tabs.find((tab) => tab.id === state.activeTabId);
+    expect(state?.isOpen).toBe(true);
+    expect(activeTab?.mode).toBe('file');
+    expect(activeTab?.targetPath).toBe(null);
+    expect(state?.tabs.some((tab) => tab.mode === 'terminal')).toBe(true);
+    expect(useUIStore.getState().contextEditorTreeVisible).toBe(true);
+    expect(state?.widthByMode).toEqual(state0?.widthByMode);
+    expect(state?.widthFractionByMode).toEqual(state0?.widthFractionByMode);
   });
 
   test('closing only inactive-mode tabs leaves the active tab and panel intact', () => {
@@ -760,6 +947,63 @@ describe('useUIStore per-surface panel widths', () => {
     expect(panel?.widthByMode.walkthrough).toBe(600);
     expect(panel?.widthFractionByMode.walkthrough).toBeUndefined();
   });
+
+  test('tree resizing and visibility changes preserve the full editor width', () => {
+    const store = useUIStore.getState();
+    store.setContextPanelWidth(directory, 'file', 800, 1000);
+    store.openContextFile(directory, '/repo/a.ts');
+    store.setContextEditorTreeWidth(260);
+    store.toggleContextEditor();
+    expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
+    store.setContextEditorTreeWidth(300);
+    store.openContextFile(directory, '/repo/b.ts');
+    expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
+    const fileIds = useUIStore.getState().contextPanelByDirectory[directory]?.tabs.map((tab) => tab.id) ?? [];
+    store.closeContextPanelTabs(directory, fileIds);
+
+    const panel = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(useUIStore.getState().contextEditorTreeWidth).toBe(300);
+    expect(panel?.widthByMode).toEqual({ file: 800 });
+    expect(panel?.widthFractionByMode).toEqual({ file: 0.8 });
+  });
+
+  test('restores the shared tree width and ignores obsolete tree-only panel widths', async () => {
+    useUIStore.persist.setOptions({
+      storage: {
+        getItem: () => ({
+          version: 20,
+          state: {
+            contextEditorTreeWidth: 260,
+            contextPanelByDirectory: {
+              [directory]: {
+                isOpen: true,
+                expanded: false,
+                widthByMode: { 'file-tree': 400, file: 800 },
+                widthFractionByMode: { 'file-tree': 0.4, file: 0.8 },
+                touchedAt: 1,
+                activeTabId: null,
+                tabs: [],
+              },
+            },
+          },
+        }),
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+
+    try {
+      useUIStore.setState(useUIStore.getInitialState(), true);
+      await useUIStore.persist.rehydrate();
+
+      const panel = useUIStore.getState().contextPanelByDirectory[directory];
+      expect(useUIStore.getState().contextEditorTreeWidth).toBe(260);
+      expect(panel?.widthByMode).toEqual({ file: 800 });
+      expect(panel?.widthFractionByMode).toEqual({ file: 0.8 });
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
 });
 
 describe('useUIStore contextRailOrder', () => {
@@ -806,5 +1050,22 @@ describe('context panel tab limits', () => {
     const tabs = state?.tabs ?? [];
     expect(tabs.some((tab) => tab.id === state?.activeTabId)).toBe(true);
     expect(tabs.some((tab) => tab.targetPath === 'http://localhost:3019/')).toBe(true);
+  });
+});
+
+describe('useUIStore openAgentBrowserTab', () => {
+  const directory = '/agent-repo';
+
+  test('opens a new background tab even when one already shows the address, and returns its id', () => {
+    useUIStore.getState().openContextBrowser(directory, 'https://a.test');
+    const shownId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
+
+    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test');
+
+    const state = useUIStore.getState().contextPanelByDirectory[directory];
+    expect(agentId).not.toBeNull();
+    expect(agentId).not.toBe(shownId);
+    expect(state?.tabs.find((tab) => tab.id === agentId)?.targetPath).toBe('https://a.test');
+    expect(state?.activeTabId).toBe(shownId);
   });
 });

@@ -6,7 +6,6 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { noteDeferredRestartFromPayload } from '@/lib/opencode/deferredRestart';
 
 export type McpScope = 'user' | 'project';
 
@@ -16,7 +15,6 @@ type McpMutationResult = {
   message?: string;
   warning?: string;
   requiresManualRestart?: boolean;
-  restartDeferred?: boolean;
 };
 
 /**
@@ -52,32 +50,79 @@ const getConfigDirectory = (): string | null => {
 
 // ============== TYPES ==============
 
-interface McpLocalConfig {
+/**
+ * OpenCode 2 splits an MCP server's timeouts by phase, all in milliseconds.
+ * `startup` only applies to a local (spawned) server.
+ */
+export interface McpTimeout {
+  startup?: number;
+  catalog?: number;
+  execution?: number;
+}
+
+/** OAuth fields as OpenCode 2 spells them in config (snake_case). */
+export interface McpOAuthConfig {
+  client_id?: string;
+  client_secret?: string;
+  scope?: string;
+  callback_port?: number;
+  redirect_uri?: string;
+  /** Added in OpenCode 2.0.8; points at the authorization server metadata document. */
+  auth_server_metadata_url?: string;
+}
+
+/**
+ * How OpenCode opens the MCP connection (2.0.8+). An absent key means
+ * `legacy`, so the config file only ever carries the other two.
+ */
+export type McpProtocol = 'legacy' | 'auto' | '2026-07-28';
+
+export const MCP_PROTOCOLS: readonly McpProtocol[] = ['legacy', 'auto', '2026-07-28'];
+
+/**
+ * Code Mode as the form offers it. `default` is an absent key: OpenCode then
+ * decides per server (on, except servers its own defaults exclude, such as
+ * executor.sh). `on` and `off` write an explicit value that OpenCode keeps.
+ */
+export type McpCodemodeChoice = 'default' | 'on' | 'off';
+
+export const MCP_CODEMODE_CHOICES: readonly McpCodemodeChoice[] = ['default', 'on', 'off'];
+
+export const codemodeChoiceOf = (value: boolean | undefined): McpCodemodeChoice =>
+  value === undefined ? 'default' : value ? 'on' : 'off';
+
+interface McpConfigBase {
+  environment?: Record<string, string>;
+  /** v2 replaced the v1 `enabled` flag; absent means the server is active. */
+  disabled?: boolean;
+  /** Expose the server's tools through Code Mode instead of one tool each. */
+  codemode?: boolean;
+  timeout?: McpTimeout;
+  protocol?: McpProtocol;
+}
+
+interface McpLocalConfig extends McpConfigBase {
   type: 'local';
   command: string[];
-  environment?: Record<string, string>;
-  enabled: boolean;
+  cwd?: string;
 }
 
-interface McpOAuthConfig {
-  clientId?: string;
-  clientSecret?: string;
-  scope?: string;
-  redirectUri?: string;
-}
-
-interface McpRemoteConfig {
+interface McpRemoteConfig extends McpConfigBase {
   type: 'remote';
   url: string;
-  environment?: Record<string, string>;
   headers?: Record<string, string>;
   oauth?: McpOAuthConfig | false;
-  timeout?: number;
-  enabled: boolean;
 }
 
 export type McpServerConfig = (McpLocalConfig | McpRemoteConfig) & { name: string };
-type McpServerWithScope = McpServerConfig & { scope?: McpScope | null };
+
+type McpServerWithScope = McpServerConfig & {
+  scope?: McpScope | null;
+  /** The config file the entry lives in. */
+  path?: string | null;
+  /** The entry still uses v1 spellings; the next save rewrites it in v2. */
+  legacy?: boolean;
+};
 
 export interface McpDraft {
   name: string;
@@ -92,8 +137,14 @@ export interface McpDraft {
   oauthClientSecret: string;
   oauthScope: string;
   oauthRedirectUri: string;
-  timeout: string;
-  enabled: boolean;
+  oauthCallbackPort: string;
+  oauthAuthServerMetadataUrl: string;
+  protocol: McpProtocol;
+  timeoutStartup: string;
+  timeoutCatalog: string;
+  timeoutExecution: string;
+  codemode: McpCodemodeChoice;
+  disabled: boolean;
 }
 
 // ============== HELPERS ==============
@@ -107,6 +158,15 @@ const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Record<st
   const filtered = arr.filter((e) => e.key.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));
+};
+
+/** A millisecond/port form field, or undefined when it says nothing usable. */
+const positiveInteger = (value: string | undefined): number | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.floor(parsed);
 };
 
 const trimOptionalString = (value: string | undefined): string | undefined => {
@@ -263,17 +323,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: config.name })) {
-              await get().loadMcpConfigs({ force: true, directory: configDirectory });
-              return {
-                ok: true,
-                restartDeferred: true,
-                reloadFailed: payload?.reloadFailed === true,
-                message: payload?.message,
-                warning: payload?.warning,
-              };
-            }
-
             if (payload?.requiresReload) {
               startConfigUpdate('Creating MCP server configuration…');
               await refreshAfterOpenCodeRestart({
@@ -329,17 +378,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               return {
                 ok: true,
                 requiresManualRestart: true,
-                reloadFailed: payload?.reloadFailed === true,
-                message: payload?.message,
-                warning: payload?.warning,
-              };
-            }
-
-            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: name })) {
-              await get().loadMcpConfigs({ force: true, directory: configDirectory });
-              return {
-                ok: true,
-                restartDeferred: true,
                 reloadFailed: payload?.reloadFailed === true,
                 message: payload?.message,
                 warning: payload?.warning,
@@ -406,17 +444,6 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               };
             }
 
-            if (noteDeferredRestartFromPayload(payload, 'mcp', { id: name })) {
-              await get().loadMcpConfigs({ force: true, directory: configDirectory });
-              return {
-                ok: true,
-                restartDeferred: true,
-                reloadFailed: payload?.reloadFailed === true,
-                message: payload?.message,
-                warning: payload?.warning,
-              };
-            }
-
             if (payload?.requiresReload) {
               startConfigUpdate('Deleting MCP server configuration…');
               await refreshAfterOpenCodeRestart({
@@ -464,6 +491,7 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
 
   if (config.scope !== undefined) body.scope = config.scope;
 
+  // v2 requires `type`: an entry without it is dropped when the config loads.
   if (config.type !== undefined) body.type = config.type;
 
   if (config.type === 'local' || config.command !== undefined) {
@@ -482,44 +510,73 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
     body.headers = envArrayToRecord(config.headers) ?? {};
   }
 
-  if (
+  const touchesOAuth =
     config.oauthEnabled !== undefined ||
     config.oauthClientId !== undefined ||
     config.oauthClientSecret !== undefined ||
     config.oauthScope !== undefined ||
-    config.oauthRedirectUri !== undefined
-  ) {
+    config.oauthRedirectUri !== undefined ||
+    config.oauthCallbackPort !== undefined ||
+    config.oauthAuthServerMetadataUrl !== undefined;
+
+  if (touchesOAuth) {
     if (config.oauthEnabled === false) {
       body.oauth = false;
     } else {
-      const oauth = {
-        clientId: trimOptionalString(config.oauthClientId),
-        clientSecret: trimOptionalString(config.oauthClientSecret),
-        scope: trimOptionalString(config.oauthScope),
-        redirectUri: trimOptionalString(config.oauthRedirectUri),
-      };
+      const callbackPort = positiveInteger(config.oauthCallbackPort);
+      const oauth: McpOAuthConfig = {};
+      const clientId = trimOptionalString(config.oauthClientId);
+      const clientSecret = trimOptionalString(config.oauthClientSecret);
+      const scope = trimOptionalString(config.oauthScope);
+      const redirectUri = trimOptionalString(config.oauthRedirectUri);
+      const authServerMetadataUrl = trimOptionalString(config.oauthAuthServerMetadataUrl);
+      if (clientId) oauth.client_id = clientId;
+      if (clientSecret) oauth.client_secret = clientSecret;
+      if (scope) oauth.scope = scope;
+      if (redirectUri) oauth.redirect_uri = redirectUri;
+      if (callbackPort !== undefined) oauth.callback_port = callbackPort;
+      // An emptied field drops the key: the object is rebuilt from the form
+      // every save rather than merged onto what is already stored.
+      if (authServerMetadataUrl) oauth.auth_server_metadata_url = authServerMetadataUrl;
 
-      if (oauth.clientId || oauth.clientSecret || oauth.scope || oauth.redirectUri) {
+      if (Object.keys(oauth).length > 0 || config.oauthEnabled) {
         body.oauth = oauth;
-      } else if (config.oauthEnabled) {
-        body.oauth = {};
       } else {
         body.oauth = false;
       }
     }
   }
 
-  if (config.timeout !== undefined) {
-    const timeout = Number(config.timeout);
-    if (Number.isFinite(timeout) && timeout > 0) {
-      body.timeout = timeout;
-    } else {
-      body.timeout = null;
-    }
+  const touchesTimeout =
+    config.timeoutStartup !== undefined ||
+    config.timeoutCatalog !== undefined ||
+    config.timeoutExecution !== undefined;
+
+  if (touchesTimeout) {
+    const timeout: McpTimeout = {};
+    const startup = positiveInteger(config.timeoutStartup);
+    const catalog = positiveInteger(config.timeoutCatalog);
+    const execution = positiveInteger(config.timeoutExecution);
+    // `startup` is meaningless for a server OpenChamber does not spawn.
+    if (startup !== undefined && config.type !== 'remote') timeout.startup = startup;
+    if (catalog !== undefined) timeout.catalog = catalog;
+    if (execution !== undefined) timeout.execution = execution;
+    body.timeout = Object.keys(timeout).length > 0 ? timeout : null;
   }
 
-  if (config.enabled !== undefined) {
-    body.enabled = config.enabled;
+  if (config.codemode !== undefined) {
+    // `default` removes the key so OpenCode's own per-server default applies.
+    body.codemode = config.codemode === 'default' ? null : config.codemode === 'on';
+  }
+
+  if (config.disabled !== undefined) {
+    body.disabled = config.disabled;
+  }
+
+  if (config.protocol !== undefined) {
+    // `legacy` is what OpenCode does without the key, so it is written as a
+    // removal: the config file only ever names a non-default negotiation.
+    body.protocol = config.protocol === 'legacy' ? null : config.protocol;
   }
 
   return body;

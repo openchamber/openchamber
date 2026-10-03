@@ -102,7 +102,7 @@ const MemoryRow: React.FC<{
         <button
           type="button"
           onClick={onDelete}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('rightSidebar.contextNotesTodo.memory.actions.delete')}
           title={t('rightSidebar.contextNotesTodo.memory.actions.delete')}
         >

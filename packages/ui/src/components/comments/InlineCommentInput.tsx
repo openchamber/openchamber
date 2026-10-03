@@ -145,6 +145,8 @@ export function InlineCommentInput({
     <div
       className={cn(
         'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] animate-in fade-in zoom-in-95 duration-200',
+        // The glass card's shadow lives here, off its backdrop-filter element.
+        'rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
         className
       )}
       style={{
@@ -154,9 +156,9 @@ export function InlineCommentInput({
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
     >
-      <div className="oc-glass-popover rounded-xl border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
+      <div className="oc-glass-popover rounded-xl border border-[var(--interactive-border)]">
         {(fileLabel || displayRange) ? (
-          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-[var(--surface-mutedForeground)] opacity-60">
+          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-muted-foreground opacity-60">
             {fileLabel ? <span className="max-w-[200px] truncate">{fileLabel}</span> : null}
             {fileLabel && displayRange ? <span>•</span> : null}
             {displayRange ? (
@@ -175,7 +177,7 @@ export function InlineCommentInput({
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
           className={cn(
-            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-[var(--surface-foreground)] outline-none placeholder:text-[var(--surface-mutedForeground)] placeholder:opacity-60',
+            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60',
             isMobile ? 'py-1.5 text-base leading-6' : 'py-1.5'
           )}
           style={{ minHeight: 0, height: 'auto' }}

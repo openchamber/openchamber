@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../github/octokit.js', () => ({ getOctokitOrNull: vi.fn() }));
 vi.mock('../github/repo/index.js', () => ({ resolveGitHubRepoFromDirectory: vi.fn() }));
 
-const { getPullRequestDiff } = await import('./pull-request.js');
+const { getPullRequestDiff, getPullRequestFileContents } = await import('./pull-request.js');
 const { getOctokitOrNull } = await import('../github/octokit.js');
 const { resolveGitHubRepoFromDirectory } = await import('../github/repo/index.js');
 
@@ -89,5 +89,58 @@ describe('getPullRequestDiff', () => {
       code: 'empty-diff',
       statusCode: 404,
     });
+  });
+});
+
+describe('getPullRequestFileContents', () => {
+  const HEAD = 'a'.repeat(40);
+  const BASE_TIP = 'b'.repeat(40);
+  const MERGE_BASE = 'c'.repeat(40);
+  let request;
+
+  beforeEach(() => {
+    request = vi.fn(async (route, params) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') return { data: { head: { sha: HEAD }, base: { sha: BASE_TIP } } };
+      if (route === 'GET /repos/{owner}/{repo}/compare/{basehead}') return { data: { merge_base_commit: { sha: MERGE_BASE } } };
+      if (route === 'GET /repos/{owner}/{repo}/contents/{path}') return { data: `${params.path}@${params.ref}` };
+      throw new Error(`unexpected ${route}`);
+    });
+    getOctokitOrNull.mockReturnValue({ request });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reads the base side at the merge base and the head side at the PR head', async () => {
+    const result = await getPullRequestFileContents('/repo', 7, { owner: 'upstream', repo: 'project' }, { path: 'src/a.ts', status: 'M' });
+    expect(result).toEqual({ original: `src/a.ts@${MERGE_BASE}`, modified: `src/a.ts@${HEAD}` });
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/compare/{basehead}', {
+      owner: 'upstream', repo: 'project', basehead: `${BASE_TIP}...${HEAD}`,
+    });
+    expect(request).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/contents/{path}', expect.objectContaining({
+      owner: 'upstream', repo: 'project', headers: { accept: 'application/vnd.github.raw+json' },
+    }));
+  });
+
+  it('skips the missing side of added and deleted files and follows renames', async () => {
+    expect(await getPullRequestFileContents('/repo', 7, { owner: 'o', repo: 'r' }, { path: 'new.ts', status: 'A' }))
+      .toEqual({ original: '', modified: `new.ts@${HEAD}` });
+    expect(await getPullRequestFileContents('/repo', 7, { owner: 'o', repo: 'r' }, { path: 'gone.ts', status: 'D' }))
+      .toEqual({ original: `gone.ts@${MERGE_BASE}`, modified: '' });
+    expect(await getPullRequestFileContents('/repo', 7, { owner: 'o', repo: 'r' }, { path: 'new.ts', previousPath: 'old.ts', status: 'R' }))
+      .toEqual({ original: `old.ts@${MERGE_BASE}`, modified: `new.ts@${HEAD}` });
+  });
+
+  it('rejects oversized files and malformed GitHub metadata', async () => {
+    request.mockImplementationOnce(async () => ({ data: { head: { sha: 'nope' }, base: { sha: BASE_TIP } } }));
+    await expect(getPullRequestFileContents('/repo', 7, { owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toThrow(/invalid pull request head/);
+
+    request.mockImplementation(async (route) => {
+      if (route === 'GET /repos/{owner}/{repo}/pulls/{pull_number}') return { data: { head: { sha: HEAD }, base: { sha: BASE_TIP } } };
+      if (route === 'GET /repos/{owner}/{repo}/compare/{basehead}') return { data: { merge_base_commit: { sha: MERGE_BASE } } };
+      return { data: 'x'.repeat(5 * 1024 * 1024 + 1) };
+    });
+    await expect(getPullRequestFileContents('/repo', 7, { owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toMatchObject({ code: 'file-too-large', statusCode: 413 });
   });
 });

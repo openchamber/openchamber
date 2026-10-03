@@ -22,7 +22,7 @@ describe('resolveGuestIconName', () => {
   });
 
   test('falls back when the sprite has no such Remixicon', () => {
-    expect(resolveGuestIconName('not-an-icon')).toBe(FALLBACK_GUEST_ICON);
+    expect(resolveGuestIconName('not-an-icon')).toBe('apps');
   });
 
   test('falls back for a package SVG path (rail uses iconSrc)', () => {

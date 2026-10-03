@@ -1,12 +1,13 @@
 import React, { act } from 'react';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { plugin } from 'bun';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
-import { createOpencodeClient, type Part, type AssistantMessage } from '@opencode-ai/sdk/v2';
+import { OpenCode } from '@opencode/client';
+import type { Part, AssistantMessage } from '@/lib/opencode/model';
 import { I18nProvider, useI18nStore } from '@/lib/i18n';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
@@ -44,15 +45,17 @@ const runtimeApis: RuntimeAPIs = {
     get settings() { return unavailable(); },
     get permissions() { return unavailable(); },
     get notifications() { return unavailable(); },
-    get tools() { return unavailable(); },
 };
-const sdk = createOpencodeClient({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
+const sdk = OpenCode.make({ baseUrl: 'http://localhost', fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) });
+// The answer's action bar also has an aria-expanded button, the branch menu
+// trigger, so the changed-file toggle is the one that opens no popup.
+const changedFilesToggle = () => document.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]:not([aria-haspopup])');
 let MessageBody: typeof import('../message/MessageBody').default;
 
-function assistant(id: string, parts: Part[], finish?: string): ChatMessageEntry {
+function assistant(id: string, parts: Part[], finish?: AssistantMessage['finish']): ChatMessageEntry {
     const info: AssistantMessage = {
-        id, sessionID: 'session', role: 'assistant', parentID: 'user', time: { created: 2, completed: finish ? 3 : undefined },
-        modelID: 'model', providerID: 'provider', mode: 'build', agent: 'build', path: { cwd: '/project', root: '/project' },
+        id, sessionID: 'session', role: 'assistant', time: { created: 2, completed: finish ? 3 : undefined },
+        modelID: 'model', providerID: 'provider', agent: 'build',
         cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }, finish,
     };
     return { info, parts };
@@ -62,11 +65,11 @@ function text(id: string, content: string): Part {
 }
 const readPart: Part = {
     type: 'tool', tool: 'read', id: 'read', callID: 'read', sessionID: 'session', messageID: 'progress',
-    state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', title: 'Read', metadata: {}, time: { start: 1, end: 2 } },
+    state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: 'code', metadata: {}, time: { start: 1, end: 2 } },
 };
 function turn(messages: ChatMessageEntry[]): TurnRecord {
     return projectTurnRecords([{
-        info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 }, agent: 'build', model: { providerID: 'provider', modelID: 'model' } },
+        info: { id: 'user', sessionID: 'session', role: 'user', time: { created: 1 } },
         parts: [text('request', 'Request')],
     }, ...messages]).turns[0];
 }
@@ -104,6 +107,11 @@ function Harness({ record, retired = false, changedFiles, isLatestTurn = true }:
         </SyncProvider>
     </RuntimeAPIContext.Provider>;
 }
+
+// The first test pays for loading the real message body and for its first
+// render. Under the full parallel suite that crossed the 5 second default on
+// Windows; later tests take well under a second.
+setDefaultTimeout(30_000);
 
 describe('live Activity with the real message body', () => {
     let root: Root;
@@ -190,7 +198,7 @@ describe('live Activity with the real message body', () => {
     test('keeps file statistics visible when expanded and uses an ASCII minus', async () => {
         const edit: Part = {
             type: 'tool', tool: 'edit', id: 'edit', callID: 'edit', sessionID: 'session', messageID: 'progress',
-            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: '', title: 'Edit',
+            state: { status: 'completed', input: { filePath: '/project/source.ts' }, output: '',
                 metadata: { diff: '@@ -1,1 +1,2 @@\n-old\n+new\n+added' }, time: { start: 1, end: 2 } },
         };
         await act(async () => root.render(<Harness record={turn([
@@ -205,47 +213,49 @@ describe('live Activity with the real message body', () => {
         expect(header?.textContent).toContain('+2/-1');
     });
 
-    test('shows at most four changed files until expanded, including at the threshold', async () => {
+    test('shows at most four changed files and folds the rest into one chip, including at the threshold', async () => {
         const record = turn([assistant('final', [text('answer', 'Done')], 'stop')]);
         for (const count of [0, 1, 3, 4, 5, 100]) {
             const files = Array.from({ length: count }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
             await act(async () => root.render(<Harness record={record} changedFiles={files} />));
             expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(Math.min(count, 4));
-            const trigger = container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]');
+            const toggle = changedFilesToggle();
             if (count <= 4) {
-                expect(trigger).toBeNull();
+                expect(toggle).toBeNull();
             } else {
-                expect(trigger?.textContent).toBe(`Show more (${count - 4})`);
-                expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+                expect(toggle?.textContent).toBe(`+${count - 4}`);
+                expect(toggle?.getAttribute('aria-label')).toBe(`Other changed files (${count - 4})`);
+                expect(toggle?.getAttribute('aria-expanded')).toBe('false');
                 expect(container.textContent).not.toContain('file-4.ts');
             }
         }
     });
 
-    test('expands in source order, preserves state on updates and locale changes, then collapses with focus intact', async () => {
+    test('reveals the rest in source order, keeps them through updates and locale changes, then hides them with focus intact', async () => {
         const record = turn([assistant('final', [text('answer', 'Done')], 'stop')]);
         const files = Array.from({ length: 100 }, (_, index) => ({ file: `src/file-${index}.ts`, additions: 1, deletions: 0 }));
         await act(async () => root.render(<Harness record={record} changedFiles={files} />));
-        const trigger = container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]');
-        if (!trigger) throw new Error('Missing changed-file disclosure');
-        trigger.focus();
-        await act(async () => trigger.click());
-        expect(trigger.getAttribute('aria-expanded')).toBe('true');
-        expect(trigger.textContent).toBe('Collapse');
+        const toggle = changedFilesToggle();
+        if (!toggle) throw new Error('Missing changed-file toggle');
+        toggle.focus();
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
+        expect(toggle.getAttribute('aria-label')).toBe('Show fewer files');
         expect(Array.from(container.querySelectorAll('button[aria-label^="Open src/file-"]'), (button) => button.getAttribute('title')))
             .toEqual(files.map((file) => file.file));
-        expect(document.getElementById(trigger.getAttribute('aria-controls') ?? '')?.textContent).toContain('file-99.ts');
+        expect(toggle.previousElementSibling?.getAttribute('title')).toBe('src/file-99.ts');
         await act(async () => root.render(<Harness record={record} changedFiles={[...files]} />));
-        expect(trigger.getAttribute('aria-expanded')).toBe('true');
+        expect(toggle.getAttribute('aria-expanded')).toBe('true');
         await act(async () => {
             useI18nStore.getState().setLocale('uk');
             await import('@/lib/i18n/messages/uk');
         });
-        expect(trigger.textContent).toBe('Згорнути');
-        await act(async () => trigger.click());
-        expect(trigger.getAttribute('aria-expanded')).toBe('false');
-        expect(trigger.textContent).toBe('Показати ще (96)');
-        expect(document.activeElement).toBe(trigger);
+        expect(toggle.getAttribute('aria-label')).toBe('Показати менше файлів');
+        await act(async () => toggle.click());
+        expect(toggle.getAttribute('aria-expanded')).toBe('false');
+        expect(toggle.textContent).toBe('+96');
+        expect(toggle.getAttribute('aria-label')).toBe('Інші змінені файли (96)');
+        expect(document.activeElement).toBe(toggle);
         expect(container.textContent).not.toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Відкрити src/file-"]')).toHaveLength(4);
     });
@@ -270,7 +280,7 @@ describe('live Activity with the real message body', () => {
         expect(container.textContent).not.toContain('file-0.ts');
         await act(async () => root.render(<Harness record={turn([assistant('final', final.parts, 'stop')])} changedFiles={files} isLatestTurn={false} />));
         expect(container.textContent).toContain('file-0.ts');
-        await act(async () => container.querySelector<HTMLButtonElement>('[data-fixture-message="final"] button[aria-expanded]')?.click());
+        await act(async () => changedFilesToggle()?.click());
         expect(container.textContent).toContain('file-4.ts');
         expect(container.querySelectorAll('button[aria-label^="Open src/file-"]')).toHaveLength(0);
     });

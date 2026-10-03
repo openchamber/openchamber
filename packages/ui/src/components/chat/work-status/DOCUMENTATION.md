@@ -107,7 +107,7 @@ which requests only providers enabled for this panel.
 | Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
-| Pinned messages | `getContextObligatoryMessages` + `state.part` | see below |
+| Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
 | Todos | live `state.todo[sessionId]`, persisted fallback | live channel wins |
 
 ### Turn stats
@@ -137,6 +137,10 @@ Either rate above 5,000 tok/s is reported as unknown. No provider streams that
 fast, so such a value means the measured window is broken: a tool that runs
 for nearly the whole step leaves a residual of a millisecond, and a text
 interval can be equally short. The row is omitted rather than shown wrong.
+
+Elapsed time is wall-clock time from the first user message in the turn through
+the final assistant completion. It includes model waits, tool execution,
+compaction, and other gaps; it is not used as a throughput denominator.
 
 Metric labels stay short. Every row is a single hover and keyboard-focus target
 for a shared tooltip, with a 750ms hover delay and a portal outside the panel's
@@ -171,6 +175,16 @@ subscribes to `currentProviderId` / `currentModelId` for the limits.
 `contextUsage.test.ts` pins the arithmetic — notably that the *latest*
 reporting assistant turn is the answer, not a sum across turns.
 
+Which message is "latest" is decided by `findLatestContextFill` in
+`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+mobile metadata and context sidebar. A finished compaction's own record (a
+`compaction` message with `status: 'completed'`) is not a reading: its tokens
+describe the summarizing request,
+whose input is the pre-compaction history. Until a later response reports
+tokens, the fill is `compacted` and every surface shows a dash, never the older
+pre-compaction number. A compaction still running, or one that failed, has not
+changed the window, so the previous reading stays.
+
 Two further rules on this readout:
 
 - The displayed percentage is computed **unrounded**. `clampPercent` applies
@@ -187,10 +201,11 @@ for it.
 ### Pinned messages load only what they need
 
 Pins are most useful on a long session — which is exactly when the pinned
-message has scrolled far enough back not to be loaded, leaving the row with a
-placeholder. The section materialises the session, but only when a pin actually
-resolves to nothing: having pins is not a reason to fetch a session, and
-neither is something being unloaded in general.
+message sits before the loaded part of the transcript. Session metadata keeps
+only the pin's id, time and role, so a pin that is not loaded reads its one
+message from OpenCode (`opencodeClient.getSessionMessage`) for the row's text.
+No session is materialised for it, a loaded pin costs nothing, and a failed
+read leaves the placeholder until the section mounts again.
 
 ### PR status is deliberately read-only
 
@@ -239,7 +254,7 @@ The default order is by durability:
    throughput, duration, TTFT, cache hit rate) — true for as long as the session
    is open. Usage sits here rather than lower down because a spent quota stops the
    work outright;
-2. **Subagents**, **Tasks** — what is happening right now;
+2. **Subagents** — what is happening right now;
 3. **MCP**, **Pinned messages**, **Context sources** — supporting material.
 
 The sections dialog has drag handles for changing this order, including hidden
@@ -264,6 +279,41 @@ hidden and empty sections do not claim that space. Both heading variants expose
 `data-work-status-heading`; only the heading is inset, leaving body rows at full
 width. Heading summaries truncate within a bounded share of the available width
 so project names and usage summaries cannot push actions under settings.
+
+## Extension sections
+
+An installed extension can add its own section (`contributes.statusSection`,
+see `packages/sdk/DOCUMENTATION.md`). `WorkStatusExtensionSection` draws the
+header from the extension's `statusTitle` (else its name) and panel icon, and
+its body is a `PluginPane` with `surface="status"`: the same sandboxed iframe,
+guest-scoped token, context, grants and pause gates as a rail panel.
+
+Cost is bounded by mounting. The frame exists only while the panel's content is
+mounted, the section is visible, and the section is expanded; the collapsible
+drops its children when folded. `PluginPane` itself is lazy-loaded, so a panel
+without extension sections never loads it. The frame's height starts at the
+manifest `height` (default 120px) and follows the guest's `setHeight`, clamped
+to 24..320px; taller content scrolls inside the frame, never the host. The last
+requested height is remembered per extension id and version for the app
+session (a module-level map, one number per installed extension), so folding
+and reopening a section does not jump back to the manifest default.
+
+`useWorkStatusExtensionSections` lists active guests with a `statusEntry` from
+the catalog store (`useGuestStatusSections`). It is empty on VS Code and
+mobile, which load no guests; the panel is hidden there anyway, but the empty
+list is explicit rather than an accident of visibility. The rail owns loading
+the catalog.
+
+Section ids are `ext:<extension id>` and share the persisted order and hidden
+lists with built-in ids. Sanitizing keeps well-formed `ext:` ids even when that
+extension is not installed, because settings load before the catalog and a
+paused or reinstalled extension should come back where the user put it.
+`resolveWorkStatusSectionOrder` drops unavailable extension ids from what the
+panel and the dialog show and appends available ones the saved order does not
+know. A drag in the dialog writes the shown order followed by the saved ids it
+did not show. "All hidden" and "Show all" count only sections that can
+actually be shown. Extension rows carry an "Extension" label and no settings
+search anchor (they are dynamic entities).
 
 ## Switching it off
 
@@ -310,27 +360,6 @@ Its expanded list is capped at eight rows and scrolls independently, so a
 session with many subagents does not crowd every section below it out of the
 panel.
 
-## Tasks
-
-Icons and strike-through match the composer's todo dropdown, so one list does
-not read as two. Two deliberate differences:
-
-- **Completed items stay.** The dropdown is a queue to work through; this is a
-  record of the session.
-- **Sorted by status** — in progress, then pending, then completed — and stable
-  within each rank, since the agent's own ordering carries meaning.
-
-Rows truncate at this width, so each carries a delayed tooltip with the full
-task text.
-
-Tasks starts expanded and stores its collapsed state under the `tasks` section
-id. Collapsed, it keeps the heading and completion count, followed by only the
-first `in_progress` task in the agent's order. Without an active task, including
-pending-only and all-completed lists, it shows no preview row. Live updates
-replace the preview without expanding the section. An authoritative empty todo
-list clears the section rather than restoring old persisted tasks; persistence
-is used only while the scoped live list is missing.
-
 ## Collapsed Usage headline
 
 Collapsed, the Usage section shows one quota rather than a mode word: the
@@ -374,11 +403,13 @@ the goal strip's. The two disagree today — the strip paints `paused` muted and
 `blocked` warning, the button paints them info and error — and the button is
 where this panel's reader last saw the goal. Unifying them is a separate change.
 
-Jumping to a message goes through the `#message-<id>` URL hash, which
-`useChatTurnNavigation` listens for inside `ChatContainer`. It is the only
-cross-component jump the chat exposes; there is no store action or ref
-registry. An unchanged hash fires no event, so the panel clears it first to make
-a repeat press work.
+Jumping to a message is a message-link request (`requestMessageFocus`,
+`lib/router/messageFocus.ts`), the same one links and search use: the timeline
+loads older history until the message is there and opens a collapsed turn
+around it, so a pin far back in a long session is reachable. While older history
+loads, the pin's row shows a spinner: `readMessageFocusInFlight` names the
+message a request is still bringing to the screen, and the timeline marks it
+shown (`markMessageFocusShown`) once it lands; settling or expiry clears it too.
 
 Opening a subagent takes the same branch as the transcript's Task tool: an
 embedded panel, mobile, or VS Code navigates to the session instead of nesting
@@ -395,10 +426,13 @@ something other than "tools available".
 
 ### Linked issues and pull requests
 
-Written by the flows that already attach a thread — the composer's issue/PR
-pickers, and session creation from an issue or PR in `NewWorktreeDialog` and
-`GitHubIssuePickerDialog`. There is no manual "link this" control: attaching a
-thread to the work *is* the act of linking it.
+Written by the flows that already attach a thread — sending a message with
+issues, PRs or guest items attached in the composer, and session creation from
+an issue or PR in `NewWorktreeDialog`. There is no manual "link this" control:
+attaching a thread to the work *is* the act of linking it. A message's
+references are written in one metadata patch (`sessionActions.addLinkedIssues`):
+each write replaces the whole list, so one write per item would keep only the
+last.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
 `openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as

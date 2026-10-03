@@ -1,0 +1,41 @@
+---
+title: Werken met Git en GitHub
+description: Stage wijzigingen, maak commits en beheer branches vanuit OpenChamber.
+---
+
+# Werken met Git en GitHub
+
+OpenChamber heeft een ingebouwde Git-weergave om wijzigingen te beoordelen, commits te maken en branches te beheren zonder naar een terminal te wisselen. Open het tabblad **Git** in de rechterzijbalk.
+
+## Wijzigingen beoordelen en committen
+
+De Git-weergave verdeelt wijzigingen in **gestaged** en **niet gestaged**:
+
+- klik bij een bestand op **+** om het te stagen of op **−** om het uit de staging te halen
+- stage alle bestanden in een groep tegelijk of haal ze er allemaal uit
+- klik op een bestand om de diff te bekijken
+
+Schrijf daarna een commitbericht en maak de commit. U kunt OpenChamber een **commitbericht laten genereren** op basis van de gestagede wijzigingen. Daarvoor wordt het model van de huidige sessie gebruikt, dus er moet een sessie openstaan.
+
+## Branches en geschiedenis
+
+De Git-weergave biedt ook de andere dagelijkse Git-handelingen:
+
+- branches aanmaken, wisselen, hernoemen en verwijderen
+- pushen, pullen en fetchen
+- de geschiedenis en de diff per commit bekijken
+- wijzigingen stashen en terugzetten
+
+## Pull requests
+
+Verbind GitHub zoals beschreven bij [GitHub-issues en PR's](/nl/github/). In het tabblad **PR** kunt u vervolgens een pull request openen, bijwerken, gereed voor review melden of mergen. De titel en beschrijving kunt u op dezelfde manier laten genereren als commitberichten.
+
+## Conflicten oplossen
+
+Als een merge, rebase of integratie op een conflict stuit, laat OpenChamber zien wat vastloopt en kunt u het oplossen. U kunt het conflict ook aan de agent overdragen.
+
+## Zie ook
+
+- [GitHub-issues en PR's](/nl/github/) om GitHub te verbinden en vanuit issues te werken
+- [Worktree-sessies](/nl/worktrees/) om een branch in een eigen map te gebruiken
+- [Git-identiteiten](/nl/git-identities/) om per repository met de juiste naam te committen

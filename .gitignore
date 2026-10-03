@@ -41,6 +41,9 @@ docs/personal/*
 SECURITY_HARDENING_IMPLEMENTATION_PLAN.md
 
 # Build outputs
+packages/web/server/built-in-extensions/
+packages/web/server/built-in-extensions.previous-*/
+packages/web/server/.builtin-build-*/
 build/
 .gradle/
 .*.bun-build

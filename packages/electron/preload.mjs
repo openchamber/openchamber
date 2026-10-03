@@ -189,6 +189,7 @@ const desktopBridge = {
 };
 
 if (isLocalPage) {
+  desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
   desktopBridge.relayDevTunnelListen = (handler) => {
     relayDevTunnelHandler = typeof handler === 'function' ? handler : null;
   };
