@@ -476,20 +476,26 @@ describe('OpenChamber web update route on Windows', () => {
     // Every preamble line is an echo; none is left to run as a command.
     expect(lines.filter((line) => line.startsWith('currentVersion=') || line.startsWith('restartCommand='))).toEqual([]);
     expect(lines).toContain('echo packageManager=npm');
-    expect(lines).toContain('echo restartCommand=^("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897 --ui-password "pa%%ss"^) ^|^| ^(openchamber serve --port 7897 --ui-password "pa%%ss"^)');
+    expect(lines).toContain('echo restartCommand=^("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897^) ^|^| ^(openchamber serve --port 7897^)');
+    // The UI password is never part of the script or its log.
+    expect(script).not.toContain('pa%');
     // A .cmd shim (npm, pnpm, yarn) must be `call`ed or the script ends there.
     expect(lines).toContain('call npm install -g @openchamber/web@latest');
     expect(lines).toContain('ping -n 3 127.0.0.1 >nul');
     expect(lines.some((line) => line.startsWith('timeout '))).toBe(false);
     expect(lines).toContain('if %ERRORLEVEL% EQU 0 (');
     expect(lines.at(-2)).toBe('del "%~f0"');
-    // A `%` in the password survives batch expansion only when doubled.
-    expect(lines).toContain('  ("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897 --ui-password "pa%%ss") || (openchamber serve --port 7897 --ui-password "pa%%ss")');
+    expect(lines).toContain('  ("C:\\Program Files\\nodejs\\node.exe" "/opt/openchamber/bin/cli.js" serve --port 7897) || (openchamber serve --port 7897)');
 
+    // The restarted server reads the password from its environment.
     expect(childProcess.spawn).toHaveBeenCalledWith(
       'C:\\Windows\\system32\\cmd.exe',
       ['/c', scriptPath],
-      expect.objectContaining({ detached: true, windowsHide: true }),
+      expect.objectContaining({
+        detached: true,
+        windowsHide: true,
+        env: expect.objectContaining({ OPENCHAMBER_UI_PASSWORD: 'pa%ss' }),
+      }),
     );
     // The listener is closed before the batch is spawned, so the detached
     // child cannot inherit the socket and hold the port against the restart.

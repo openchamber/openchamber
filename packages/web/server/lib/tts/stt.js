@@ -31,8 +31,11 @@ export async function transcribeAudio({ audioBuffer, mimeType, model, baseURL, a
     throw new Error('Custom server URL is required');
   }
 
+  // Only the key the user typed for this server goes to it. The server's own
+  // OPENAI_API_KEY belongs to whoever runs it and must not follow a URL that
+  // any signed-in user can set (TTS draws the same line in service.js).
   const clientOpts = {
-    apiKey: apiKey || process.env.OPENAI_API_KEY || 'not-required',
+    apiKey: apiKey || 'not-required',
   };
   clientOpts.baseURL = normalizedBaseURL;
 

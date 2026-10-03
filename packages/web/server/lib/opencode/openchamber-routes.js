@@ -45,7 +45,7 @@ const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
   // npm, pnpm and yarn are .cmd shims on Windows. Without `call`, a batch
   // file hands control to them for good and the restart below never runs.
   // Read from a file, cmd expands `%x%` and drops a lone `%`, so a `%` in a
-  // host or UI password would change the restart command. Doubling keeps it.
+  // host would change the restart command. Doubling keeps it.
   `call ${updateCmd.replace(/%/g, '%%')}`,
   'if %ERRORLEVEL% EQU 0 (',
   '  echo Update successful, restarting OpenChamber...',
@@ -53,9 +53,8 @@ const buildWindowsUpdateScript = ({ logPreamble, updateCmd, restartCmd }) => [
   ') else (',
   '  echo Update failed',
   ')',
-  // The restart command carries the server's own flags, `--ui-password`
-  // included, so the file does not outlive the run. Deleting the running
-  // batch file on its last line is safe: cmd has already read it.
+  // The file has no use after the run. Deleting the running batch file on
+  // its last line is safe: cmd has already read it.
   'del "%~f0"',
   '',
 ].join('\r\n');
@@ -355,17 +354,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             restartCmdFallback += ` --host '${escapedHost}'`;
           }
         }
-        if (storedOptions.uiPassword) {
-          if (isWindows) {
-            const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
-            restartCmdPrimary += ` --ui-password "${escapedPw}"`;
-            restartCmdFallback += ` --ui-password "${escapedPw}"`;
-          } else {
-            const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
-            restartCmdPrimary += ` --ui-password '${escapedPw}'`;
-            restartCmdFallback += ` --ui-password '${escapedPw}'`;
-          }
-        }
+        // The UI password reaches the restarted server through the update
+        // child's environment (OPENCHAMBER_UI_PASSWORD), never as a flag: the
+        // command line shows in the process list and is written to the log.
         if (storedOptions.apiOnly === true) {
           restartCmdPrimary += ' --api-only';
           restartCmdFallback += ' --api-only';
@@ -463,7 +454,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
           stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
-          env: process.env,
+          env: storedOptions.uiPassword
+            ? { ...process.env, OPENCHAMBER_UI_PASSWORD: storedOptions.uiPassword }
+            : process.env,
           windowsHide: true,
         });
         child.unref();

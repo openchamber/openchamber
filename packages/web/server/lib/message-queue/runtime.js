@@ -331,7 +331,8 @@ export function createMessageQueueRuntime({
       .then(async () => {
         await fs.promises.mkdir(dataDir, { recursive: true });
         const tmpPath = `${filePath}.${process.pid}.tmp`;
-        await fs.promises.writeFile(tmpPath, payload, 'utf8');
+        // Queued prompts are conversation content: readable by the owner only.
+        await fs.promises.writeFile(tmpPath, payload, { encoding: 'utf8', mode: 0o600 });
         await fs.promises.rename(tmpPath, filePath);
       })
       .catch((error) => {
