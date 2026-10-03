@@ -21,6 +21,10 @@ Hasło do interfejsu w przeglądarce. Ustaw je przy dostępie spoza localhost, t
 
 Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Originy, które mogą pokazywać OpenChamber w ramce na własnej stronie, rozdzielone spacjami, np. `https://dash.example.com`. `*` dopuszcza dowolną stronę. Domyślnie osadzać go mogą tylko sam OpenChamber i jego aplikacje desktopowe i mobilne, więc żadna inna strona nie nałoży niczego na jego przyciski.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Nadpisuje katalog danych OpenChamber. Domyślnie jest to `~/.config/openchamber`.

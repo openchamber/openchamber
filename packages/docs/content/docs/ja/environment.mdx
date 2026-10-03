@@ -21,6 +21,10 @@ OpenChamber Web サーバーのバインドアドレスです。他のマシン�
 
 `true` または `1` に設定すると、OpenChamber をヘッドレスモードで起動します。デスクトップおよびモバイルクライアント向けの API ルートは利用できますが、ブラウザ UI は配信されません。
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+自分のページのフレーム内に OpenChamber を表示できるオリジンをスペース区切りで指定します（例: `https://dash.example.com`）。`*` はすべてのサイトを許可します。既定では OpenChamber 自身とそのデスクトップ・モバイルアプリだけが埋め込めるため、他のサイトがボタンの上に重ねることはできません。
+
 ### `OPENCHAMBER_DATA_DIR`
 
 OpenChamber のデータディレクトリを上書きします。デフォルトは `~/.config/openchamber` です。

@@ -21,6 +21,10 @@ OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机�
 
 设置为 `true` 或 `1` 时，以 headless 模式启动 OpenChamber。桌面和移动客户端仍可使用 API 路由，但不会提供浏览器 UI。
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+允许在自己页面的框架中显示 OpenChamber 的源，用空格分隔，例如 `https://dash.example.com`。`*` 允许任何站点。默认只有 OpenChamber 本身及其桌面和移动应用可以嵌入它，其他站点无法在它的按钮上叠加内容。
+
 ### `OPENCHAMBER_DATA_DIR`
 
 覆盖 OpenChamber 数据目录。默认是 `~/.config/openchamber`。

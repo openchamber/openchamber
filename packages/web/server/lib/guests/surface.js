@@ -23,7 +23,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { WebSocketServer } from 'ws';
-import { isOpaqueOriginRequest } from '../security/request-security.js';
+import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 import {
   SURFACE_AGENT_ACTIVE_HEADER,
@@ -582,6 +582,10 @@ export const createGuestSurfaceRuntime = ({
     const handleUpgrade = async () => {
       try {
         if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
+        if (!uiAuthController?.enabled && !await isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;
         }

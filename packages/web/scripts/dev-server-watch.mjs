@@ -40,6 +40,8 @@ export function createDevServerWatchCommand(options = {}) {
       env: {
         ...env,
         OPENCHAMBER_RELAY_HOST: env.OPENCHAMBER_RELAY_HOST || 'off',
+        // The dev UI runs on its own loopback port (Vite); see allowsLocalDevOrigins.
+        OPENCHAMBER_ALLOW_DEV_ORIGINS: '1',
       },
       windowsHide: true,
     },

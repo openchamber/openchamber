@@ -18,7 +18,7 @@ import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.j
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
 import { createNgrokTunnelProvider } from './lib/tunnels/providers/ngrok.js';
-import { createRequestSecurityRuntime } from './lib/security/request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isLocalDevClientOrigin } from './lib/security/request-security.js';
 import {
   getUnauthenticatedLanErrorMessage,
   isLoopbackBindHost,
@@ -67,6 +67,7 @@ import { createThemeRuntime } from './lib/opencode/theme-runtime.js';
 import { createFeatureRoutesRuntime } from './lib/opencode/feature-routes-runtime.js';
 import { parseServeCliOptions } from './lib/opencode/cli-options.js';
 import {
+  isRequestAuthorized,
   registerAuthAndAccessRoutes,
   registerCommonRequestMiddleware,
   registerServerStatusRoutes,
@@ -443,6 +444,7 @@ const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
+  allowLocalDevOrigins: allowsLocalDevOrigins(process.env),
 });
 
 const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
@@ -1255,6 +1257,8 @@ const staticRoutesRuntime = createStaticRoutesRuntime({
   readSettingsFromDiskMigrated,
   normalizePwaAppName,
   normalizePwaOrientation,
+  // uiAuthController is created at startup, after this runtime: read it per request.
+  isRequestAuthorized: (req, res) => isRequestAuthorized(req, res, { tunnelAuthController, uiAuthController }),
 });
 const remoteClientAuthRuntime = createRemoteClientAuthRuntime({
   fsPromises,
@@ -2037,14 +2041,34 @@ async function main(options = {}) {
     'http://localhost',
     'https://localhost',
   ]);
-  const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
-  app.set('trust proxy', true);
+  const allowLocalDevOrigins = allowsLocalDevOrigins(process.env);
+  // Keeps other sites from framing the app (clickjacking). Routes that serve
+  // untrusted documents set a Content-Security-Policy of their own, which
+  // replaces this one.
+  const frameAncestorsPolicy = buildFrameAncestorsPolicy({
+    allowLocalDevOrigins,
+    extra: process.env.OPENCHAMBER_FRAME_ANCESTORS,
+  });
+  // Forwarded headers are believed only from a proxy on this machine or a
+  // private network (cloudflared, Docker, a LAN reverse proxy). From anyone
+  // else they are the client's own words, and the login rate limit keys on
+  // req.ip, so a client must not be able to name its own address.
+  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
   // Keep self-hosted instances out of search engines. The app shell is served
   // publicly (it loads before prompting for the UI password), so without this
   // even a password-protected instance gets crawled and indexed. Applies to
   // every response; the robots.txt route makes the intent explicit for crawlers.
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    // The preview proxy relays a dev server's own pages, whose types and
+    // referrer behaviour are that app's business. Everything else is ours:
+    // served with real types, and its address (a tunnel host, short-lived
+    // auth tokens, session ids) never follows a link out as a Referer.
+    if (!req.path.startsWith('/api/preview/proxy/')) {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'same-origin');
+      res.setHeader('Content-Security-Policy', frameAncestorsPolicy);
+    }
     next();
   });
   app.get('/robots.txt', (_req, res) => {
@@ -2052,7 +2076,7 @@ async function main(options = {}) {
   });
   app.use((req, res, next) => {
     const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-    if (packagedClientOrigins.has(origin) || isLocalDevClientOrigin(origin)) {
+    if (packagedClientOrigins.has(origin) || (allowLocalDevOrigins && isLocalDevClientOrigin(origin))) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');

@@ -103,6 +103,9 @@ describe('project icon routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.getHeader('Content-Type')).toBe('image/jpeg');
     expect(res.body).toBe(jpgBytes);
+    // A repository icon opened as a page must stay inert.
+    expect(res.getHeader('Content-Security-Policy')).toContain('sandbox');
+    expect(res.getHeader('X-Content-Type-Options')).toBe('nosniff');
   });
 
   it('discovers a favicon at a Windows project root', async () => {

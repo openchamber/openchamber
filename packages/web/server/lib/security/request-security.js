@@ -11,8 +11,51 @@ export const isOpaqueOriginRequest = (req) => {
   return String(value ?? '').trim() === 'null';
 };
 
+/**
+ * Development servers run the UI on its own loopback port (Vite, the Electron
+ * HMR window) and call the API across origins. Only a server started that way
+ * believes such origins; a released one never does, because any page served
+ * from a local port (another dev server, a preview) would otherwise reach the
+ * API with the user's cookie.
+ */
+export const allowsLocalDevOrigins = (env) => env.OPENCHAMBER_ELECTRON_DEV === '1' || env.OPENCHAMBER_ALLOW_DEV_ORIGINS === '1';
+export const isLocalDevClientOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+
+const PACKAGED_FRAME_ANCESTORS = ['openchamber-ui://app', 'capacitor://localhost', 'https://localhost'];
+const FRAME_ANCESTOR_SOURCE = /^(?:\*|https?:\/\/[a-z0-9.-]+(?::(?:\d{1,5}|\*))?)$/i;
+
+/**
+ * The `frame-ancestors` list for the app's own responses: the app itself and
+ * its packaged shells, which frame extension panels and HTML previews from the
+ * server, and on a development server the HMR window's loopback ports.
+ * `OPENCHAMBER_FRAME_ANCESTORS` adds sources for people who embed OpenChamber
+ * in a page of their own (`*` allows any); a source that is not a plain
+ * origin is ignored rather than spliced into the policy.
+ */
+export const buildFrameAncestorsPolicy = ({ allowLocalDevOrigins = false, extra = '' } = {}) => {
+  const sources = ["'self'", ...PACKAGED_FRAME_ANCESTORS];
+  if (allowLocalDevOrigins) sources.push('http://127.0.0.1:*', 'http://localhost:*');
+  for (const source of String(extra).split(/[\s,]+/)) {
+    if (source && FRAME_ANCESTOR_SOURCE.test(source)) sources.push(source);
+  }
+  return `frame-ancestors ${sources.join(' ')}`;
+};
+
+/**
+ * With no UI password nothing else stands between a page open in the user's
+ * browser and a socket (a terminal among them). A browser always names the
+ * page in `Origin`; a client that sends none is not a page. So a socket that
+ * names an origin is accepted only from one the server trusts.
+ */
+export const isPasswordlessSocketOriginAllowed = async (req, isRequestOriginAllowed) => {
+  const header = req?.headers?.origin;
+  const origin = String((Array.isArray(header) ? header[0] : header) ?? '').trim();
+  if (!origin) return true;
+  return Boolean(await isRequestOriginAllowed(req));
+};
+
 export const createRequestSecurityRuntime = (deps) => {
-  const { readSettingsFromDiskMigrated } = deps;
+  const { readSettingsFromDiskMigrated, allowLocalDevOrigins = false } = deps;
   // Origins of packaged (non-browser) clients whose WebView origin never
   // matches the server host: the desktop shell, the iOS Capacitor WebView
   // (capacitor://localhost), and the Android Capacitor WebView, which uses
@@ -125,6 +168,9 @@ export const createRequestSecurityRuntime = (deps) => {
     }
 
     if (packagedClientOrigins.has(originHeader)) {
+      return true;
+    }
+    if (allowLocalDevOrigins && isLocalDevClientOrigin(originHeader)) {
       return true;
     }
 

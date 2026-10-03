@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { isOpaqueOriginRequest } from '../security/request-security.js';
+import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 import { parseRequestPathname } from '../terminal/terminal-ws-protocol.js';
 import {
@@ -143,6 +143,10 @@ export function createMessageStreamWsRuntime({
     const handleUpgrade = async () => {
       try {
         if (isOpaqueOriginRequest(req)) {
+          rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+          return;
+        }
+        if (!uiAuthController?.enabled && !await isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed)) {
           rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
           return;
         }

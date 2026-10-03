@@ -21,6 +21,10 @@ Passwort für die Browser-Oberfläche. Verwende es, wenn du außerhalb von local
 
 Startet OpenChamber im Headless-Modus, wenn auf `true` oder `1` gesetzt. API-Routen bleiben für Desktop- und Mobile-Clients verfügbar, aber die Browser-Oberfläche wird nicht ausgeliefert.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Origins, die OpenChamber in einem Frame auf ihrer eigenen Seite zeigen dürfen, durch Leerzeichen getrennt, zum Beispiel `https://dash.example.com`. `*` erlaubt jede Seite. Standardmäßig dürfen nur OpenChamber selbst und seine Desktop- und Mobile-Apps es einbetten, damit keine fremde Seite seine Schaltflächen überlagern kann.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Überschreibt das OpenChamber-Datenverzeichnis. Standard ist `~/.config/openchamber`.

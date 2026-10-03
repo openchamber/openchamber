@@ -252,6 +252,11 @@ export const registerProjectIconRoutes = (app, dependencies) => {
             ? metadataMime
             : projectIconExtensionToMime[ext] || 'application/octet-stream';
           const contentType = resolvedMime === 'image/svg+xml' ? 'image/svg+xml; charset=utf-8' : resolvedMime;
+          // Icons come from repositories. Opened as a page, an SVG would run
+          // its scripts on the app's origin; the sandbox keeps it inert and
+          // changes nothing where it is drawn as an <img>.
+          res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+          res.setHeader('X-Content-Type-Options', 'nosniff');
 
           if (resolvedMime === 'image/svg+xml' && requestedThemeVariant) {
             const svgMarkup = data.toString('utf8');

@@ -26,7 +26,7 @@
  */
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
-import { isOpaqueOriginRequest } from '../security/request-security.js';
+import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 const DEV_TUNNEL_WS_PATH = '/api/dev-tunnel';
 /** One page load opens many sockets; the cap is per host, not per page. */
@@ -193,6 +193,10 @@ export function createDevTunnelRuntime({
     void (async () => {
       try {
         if (isOpaqueOriginRequest(req)) {
+          refuse(403, 'Invalid origin');
+          return;
+        }
+        if (!uiAuthController?.enabled && !await isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed)) {
           refuse(403, 'Invalid origin');
           return;
         }

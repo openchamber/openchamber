@@ -12,7 +12,7 @@ import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-re
 import { buildTerminalShellLaunch, createTerminalShellResolver, normalizeTerminalShell } from './shells.js';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv, resolvePosixPtyLaunch } from '../inherited-env.js';
 import { shutdownTerminalProcesses } from './shutdown.js';
-import { isOpaqueOriginRequest } from '../security/request-security.js';
+import { isOpaqueOriginRequest, isPasswordlessSocketOriginAllowed } from '../security/request-security.js';
 
 const MAX_SESSIONS = 20;
 const MAX_HISTORY_BYTES = 512 * 1024;
@@ -421,7 +421,13 @@ export function createTerminalRuntime({
       } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
     };
     if (isOpaqueOriginRequest(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
-    if (!uiAuthController?.enabled) { accept(); return; }
+    if (!uiAuthController?.enabled) {
+      void isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed).then((allowed) => {
+        if (allowed) accept();
+        else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+      }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
+      return;
+    }
     try {
       const result = uiAuthController.ensureSessionToken(req, null);
       if (!(result instanceof Promise)) {

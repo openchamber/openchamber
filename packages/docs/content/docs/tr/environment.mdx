@@ -21,6 +21,10 @@ Tarayıcı arayüzü için parola. Bunu localhost dışına bind ederken, tünel
 
 `true` ya da `1` olarak ayarlandığında OpenChamber'ı headless modda başlatır. API rotaları masaüstü ve mobil istemciler için açık kalır, ama tarayıcı arayüzü sunulmaz.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+OpenChamber'ı kendi sayfalarındaki bir çerçevede gösterebilecek origin'ler, boşlukla ayrılmış, örneğin `https://dash.example.com`. `*` her siteye izin verir. Varsayılan olarak yalnızca OpenChamber'ın kendisi ve masaüstü ile mobil uygulamaları onu gömebilir; böylece başka siteler düğmelerinin üstüne bir şey yerleştiremez.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 OpenChamber veri dizinini geçersiz kılar. Varsayılan `~/.config/openchamber`.

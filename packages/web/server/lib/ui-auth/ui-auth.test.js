@@ -457,3 +457,31 @@ describe('ui auth port-scoped session cookies (issue #2377)', () => {
     expect(rightRes.body.authenticated).toBe(true);
   });
 });
+
+describe('ui auth login rate limit', () => {
+  it('keys failed logins on the connection, not on a client-chosen X-Forwarded-For', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret' });
+    const attempt = async (index) => {
+      // A rotated header is a deliberate spoof: without a trusted proxy in
+      // front, Express leaves req.ip at the socket address.
+      const req = {
+        method: 'POST',
+        ip: '198.51.100.7',
+        headers: { host: '127.0.0.1:3000', 'x-forwarded-for': `203.0.113.${index}` },
+        body: { password: 'wrong' },
+      };
+      const res = createResponse();
+      await auth.handleSessionCreate(req, res);
+      return res.statusCode;
+    };
+
+    const statuses = [];
+    for (let index = 0; index < 12; index += 1) {
+      statuses.push(await attempt(index));
+    }
+
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses.slice(10)).toEqual([429, 429]);
+  });
+});

@@ -21,6 +21,10 @@ Contraseña para la interfaz del navegador. Úsala cuando no te limites a localh
 
 Inicia OpenChamber en modo headless cuando vale `true` o `1`. Las rutas API siguen disponibles para clientes de escritorio y móviles, pero no se sirve la UI del navegador.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Orígenes que pueden mostrar OpenChamber dentro de un frame en su propia página, separados por espacios, por ejemplo `https://dash.example.com`. `*` permite cualquier sitio. Por defecto solo OpenChamber y sus apps de escritorio y móvil pueden incrustarlo, para que ningún otro sitio pueda superponer sus botones.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Cambia el directorio de datos de OpenChamber. Por defecto es `~/.config/openchamber`.

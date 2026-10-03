@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createRequestSecurityRuntime } from './request-security.js';
+import { allowsLocalDevOrigins, buildFrameAncestorsPolicy, createRequestSecurityRuntime, isPasswordlessSocketOriginAllowed } from './request-security.js';
 
 const createRuntime = () => createRequestSecurityRuntime({
   readSettingsFromDiskMigrated: async () => ({}),
@@ -116,5 +116,39 @@ describe('request security runtime', () => {
     const runtime = createRuntime();
     const req = { headers: { host: '192.168.0.1:3000', cookie: 'theme=dark; oc_url_token=x' } };
     expect(runtime.getUiSessionTokenFromRequest(req)).toBeNull();
+  });
+
+  test('believes another loopback port only on a development server', async () => {
+    const devPage = { headers: { origin: 'http://127.0.0.1:5180', host: '127.0.0.1:3902' }, socket: {} };
+    expect(await createRuntime().isRequestOriginAllowed(devPage)).toBe(false);
+    const devRuntime = createRequestSecurityRuntime({ readSettingsFromDiskMigrated: async () => ({}), allowLocalDevOrigins: true });
+    expect(await devRuntime.isRequestOriginAllowed(devPage)).toBe(true);
+
+    expect(allowsLocalDevOrigins({})).toBe(false);
+    expect(allowsLocalDevOrigins({ OPENCHAMBER_ALLOW_DEV_ORIGINS: '1' })).toBe(true);
+    expect(allowsLocalDevOrigins({ OPENCHAMBER_ELECTRON_DEV: '1' })).toBe(true);
+  });
+
+  test('without a UI password, refuses a socket a foreign page opens and keeps non-browser clients', async () => {
+    const runtime = createRuntime();
+    const allowed = (headers) => isPasswordlessSocketOriginAllowed({ headers, socket: {} }, runtime.isRequestOriginAllowed);
+
+    // Any website open in the browser can aim at the loopback port.
+    expect(await allowed({ origin: 'https://evil.example.com', host: '127.0.0.1:3000' })).toBe(false);
+    // So can a dev server on another local port.
+    expect(await allowed({ origin: 'http://localhost:5173', host: '127.0.0.1:3000' })).toBe(false);
+    // The app itself, the desktop shell and the relay host's loopback dial pass.
+    expect(await allowed({ origin: 'http://127.0.0.1:3000', host: '127.0.0.1:3000' })).toBe(true);
+    expect(await allowed({ origin: 'openchamber-ui://app', host: '127.0.0.1:3000' })).toBe(true);
+    // A client that is not a page sends no origin.
+    expect(await allowed({ host: '127.0.0.1:3000' })).toBe(true);
+  });
+
+  test('lets only the app, its shells and named embedders frame it', () => {
+    expect(buildFrameAncestorsPolicy()).toBe("frame-ancestors 'self' openchamber-ui://app capacitor://localhost https://localhost");
+    expect(buildFrameAncestorsPolicy({ allowLocalDevOrigins: true })).toContain('http://127.0.0.1:*');
+    expect(buildFrameAncestorsPolicy({ extra: 'https://dash.example.com, *' })).toMatch(/ https:\/\/dash\.example\.com \*$/);
+    // Anything that is not a plain origin stays out of the policy.
+    expect(buildFrameAncestorsPolicy({ extra: "https://a.test; script-src 'unsafe-inline'" })).not.toContain('script-src');
   });
 });

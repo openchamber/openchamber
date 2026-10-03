@@ -21,6 +21,10 @@ OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 �
 
 `true` 또는 `1`이면 OpenChamber를 headless 모드로 시작합니다. 데스크톱과 모바일 클라이언트용 API route는 계속 사용할 수 있지만 브라우저 UI는 제공하지 않습니다.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+자신의 페이지 안 프레임에 OpenChamber를 표시할 수 있는 origin을 공백으로 구분해 지정합니다. 예: `https://dash.example.com`. `*`는 모든 사이트를 허용합니다. 기본값에서는 OpenChamber 자신과 데스크톱·모바일 앱만 임베드할 수 있어, 다른 사이트가 버튼 위에 덮어씌울 수 없습니다.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 OpenChamber 데이터 디렉터리를 바꿉니다. 기본값은 `~/.config/openchamber`입니다.

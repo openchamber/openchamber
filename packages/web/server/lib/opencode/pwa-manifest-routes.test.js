@@ -57,6 +57,7 @@ describe('PWA manifest route', () => {
         readSettingsFromDiskMigrated: async () => ({}),
         normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
         normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        isRequestAuthorized: async () => true,
       });
 
       const handler = routes.get('/manifest.webmanifest');
@@ -112,6 +113,7 @@ describe('PWA manifest route', () => {
         readSettingsFromDiskMigrated: async () => ({}),
         normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
         normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        isRequestAuthorized: async () => true,
       });
 
       const handler = routes.get('/manifest.webmanifest');
@@ -127,6 +129,49 @@ describe('PWA manifest route', () => {
         url: '/?session=root-child',
         icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('leaves session titles out for a caller without credentials and ignores its directory', async () => {
+    const routes = new Map();
+    const app = {
+      get(route, handler) {
+        routes.set(route, handler);
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const fetchCalls = [];
+    globalThis.fetch = async (url) => {
+      fetchCalls.push(String(url));
+      return { ok: true, json: async () => [{ id: 'secret', title: 'Private', directory: '/workspace/app', time: { updated: 1 } }] };
+    };
+    const resolvedFrom = [];
+
+    try {
+      registerPwaManifestRoute(app, {
+        process: { platform: 'darwin' },
+        resolveProjectDirectory: async (req) => {
+          resolvedFrom.push(req);
+          return { directory: '/workspace/app' };
+        },
+        buildOpenCodeUrl: (route) => route,
+        getOpenCodeAuthHeaders: () => ({}),
+        readSettingsFromDiskMigrated: async () => ({}),
+        normalizePwaAppName: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        normalizePwaOrientation: (value, fallback) => typeof value === 'string' && value.trim() ? value.trim() : fallback,
+        isRequestAuthorized: async () => false,
+      });
+
+      const handler = routes.get('/manifest.webmanifest');
+      const res = createResponse();
+      await handler({ query: { directory: '/etc' } }, res);
+
+      const manifest = JSON.parse(res.body);
+      expect(fetchCalls).toEqual([]);
+      expect(resolvedFrom).toEqual([]);
+      expect(manifest.shortcuts.map((shortcut) => shortcut.url)).toEqual(['/?settings=appearance']);
     } finally {
       globalThis.fetch = originalFetch;
     }

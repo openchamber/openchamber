@@ -900,6 +900,8 @@ describe('client auth routes', () => {
     })).toBe('unknown-public');
   });
 
+  const signedIn = { resolveAuthContext: async () => ({ type: 'session' }) };
+
   it('reports null port and tunnel URL on /api/system/info when no getters are wired', async () => {
     const app = express();
     registerServerStatusRoutes(app, {
@@ -910,6 +912,7 @@ describe('client auth routes', () => {
       openchamberVersion: '1.0.0',
       runtimeName: 'test',
       express,
+      uiAuthController: signedIn,
     });
 
     const response = await request(app).get('/api/system/info');
@@ -934,11 +937,35 @@ describe('client auth routes', () => {
       express,
       getServerPort: () => 9988,
       getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+      uiAuthController: signedIn,
     });
 
     const response = await request(app).get('/api/system/info');
     expect(response.status).toBe(200);
     expect(response.body.port).toBe(9988);
     expect(response.body.tunnelUrl).toBe('https://worktree-a.example.trycloudflare.com');
+  });
+
+  it('keeps the pid but not where the server is reachable on /api/system/info before login', async () => {
+    const app = express();
+    registerServerStatusRoutes(app, {
+      process,
+      serverStartedAt: '2026-01-01T00:00:00.000Z',
+      gracefulShutdown: vi.fn(async () => {}),
+      getHealthSnapshot: () => ({ status: 'ok' }),
+      openchamberVersion: '1.0.0',
+      runtimeName: 'test',
+      express,
+      getServerPort: () => 9988,
+      getTunnelUrl: () => 'https://worktree-a.example.trycloudflare.com',
+      uiAuthController: { resolveAuthContext: async () => null },
+    });
+
+    const response = await request(app).get('/api/system/info');
+    expect(response.status).toBe(200);
+    // The CLI identifies its own server by pid before it has any credential.
+    expect(response.body.pid).toBe(process.pid);
+    expect(response.body).not.toHaveProperty('port');
+    expect(response.body).not.toHaveProperty('tunnelUrl');
   });
 });

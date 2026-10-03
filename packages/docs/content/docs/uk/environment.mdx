@@ -21,6 +21,10 @@ OpenChamber читає ці змінні під час запуску. Для st
 
 Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Origins, яким дозволено показувати OpenChamber у фреймі на своїй сторінці, через пробіл, наприклад `https://dash.example.com`. `*` дозволяє будь-який сайт. Типово вбудовувати його можуть лише сам OpenChamber і його desktop- та mobile-застосунки, тож інші сайти не можуть перекрити його кнопки.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Перевизначає директорію даних OpenChamber. Типово це `~/.config/openchamber`.

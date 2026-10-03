@@ -18,14 +18,17 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
+    isRequestAuthorized,
   } = dependencies;
 
   const recentPwaSessionsCache = new Map();
 
-  const getRecentPwaSessionShortcuts = async (req) => {
+  const getRecentPwaSessionShortcuts = async () => {
     const now = Date.now();
 
-    const resolvedDirectoryResult = await resolveProjectDirectory(req).catch(() => ({ directory: null }));
+    // The manifest is served without API auth, so the caller cannot pick the
+    // directory: an empty request resolves to the directory the UI last used.
+    const resolvedDirectoryResult = await resolveProjectDirectory({}).catch(() => ({ directory: null }));
     const preferredDirectory = typeof resolvedDirectoryResult?.directory === 'string'
       ? resolvedDirectoryResult.directory
       : null;
@@ -214,7 +217,10 @@ export const registerPwaManifestRoute = (app, dependencies) => {
     );
 
     const shortName = appName.length > 30 ? appName.slice(0, 30) : appName;
-    const recentSessionShortcuts = await getRecentPwaSessionShortcuts(req);
+    // Session titles are private: only a caller /api would accept gets them.
+    const recentSessionShortcuts = await isRequestAuthorized(req, res).catch(() => false)
+      ? await getRecentPwaSessionShortcuts()
+      : [];
 
     const manifest = {
       name: appName,

@@ -1,4 +1,16 @@
+import path from 'path';
 import { buildAppliedResponse } from './config-mutation-response.js';
+
+// Agent and command names become file paths (`<dir>/<name>.md`), and Express
+// decodes `%2F` in a param. A nested name (`group/name`) is fine; one that
+// climbs out of the directory or names an absolute path is not.
+const isSafeEntityName = (name) => (
+  name.length > 0
+  && !name.includes('\\')
+  && !name.includes('\0')
+  && !path.isAbsolute(name)
+  && name.split('/').every((segment) => segment && segment !== '.' && segment !== '..')
+);
 
 export const registerConfigEntityRoutes = (app, dependencies) => {
   const {
@@ -38,6 +50,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       result,
     ));
   };
+
+  app.use(['/api/config/agents/:name', '/api/config/commands/:name'], (req, res, next) => {
+    if (!isSafeEntityName(req.params.name)) {
+      return res.status(400).json({ error: 'Invalid name' });
+    }
+    return next();
+  });
 
   app.get('/api/config/agents/:name', async (req, res) => {
     try {

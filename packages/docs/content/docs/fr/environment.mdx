@@ -21,6 +21,10 @@ Mot de passe pour l’UI navigateur. Utilisez-le lorsque vous écoutez hors de l
 
 Démarre OpenChamber en mode headless lorsqu’il vaut `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.
 
+### `OPENCHAMBER_FRAME_ANCESTORS`
+
+Origines autorisées à afficher OpenChamber dans un cadre sur leur propre page, séparées par des espaces, par exemple `https://dash.example.com`. `*` autorise n’importe quel site. Par défaut, seuls OpenChamber et ses apps desktop et mobile peuvent l’intégrer, ce qui empêche d’autres sites de superposer ses boutons.
+
 ### `OPENCHAMBER_DATA_DIR`
 
 Remplace le dossier de données OpenChamber. La valeur par défaut est `~/.config/openchamber`.

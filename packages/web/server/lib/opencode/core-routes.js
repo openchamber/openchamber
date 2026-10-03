@@ -26,6 +26,19 @@ const parseLoopbackUrl = (rawUrl) => {
   return url;
 };
 
+/**
+ * Whether a request carries credentials /api would accept, without refusing
+ * it: routes open before login use this to leave private details out.
+ */
+export const isRequestAuthorized = async (req, res, { tunnelAuthController, uiAuthController }) => {
+  const scope = tunnelAuthController?.classifyRequestScope?.(req);
+  if (scope === 'tunnel' || scope === 'unknown-public') {
+    return Boolean(tunnelAuthController.getTunnelSessionFromRequest(req));
+  }
+  if (!uiAuthController) return false;
+  return Boolean(await uiAuthController.resolveAuthContext(req, res, { allowUrlToken: false }));
+};
+
 export const registerServerStatusRoutes = (app, dependencies) => {
   const {
     express,
@@ -325,15 +338,21 @@ export const registerServerStatusRoutes = (app, dependencies) => {
     }
   });
 
-  app.get('/api/system/info', (_req, res) => {
-    res.json({
+  app.get('/api/system/info', async (req, res) => {
+    // Open before login: the CLI matches `pid` against its pid file to tell
+    // its own server from whatever else holds the port. Where this server is
+    // reachable (port, tunnel address) is for signed-in callers only.
+    const info = {
       openchamberVersion,
       runtime: runtimeName,
       pid: process.pid,
       startedAt: serverStartedAt,
-      port: getServerPort(),
-      tunnelUrl: getTunnelUrl(),
-    });
+    };
+    if (await isRequestAuthorized(req, res, { tunnelAuthController, uiAuthController }).catch(() => false)) {
+      info.port = getServerPort();
+      info.tunnelUrl = getTunnelUrl();
+    }
+    res.json(info);
   });
 
   // Allocates a best-effort free TCP port hint on 127.0.0.1.

@@ -13,6 +13,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
     readSettingsFromDiskMigrated,
     normalizePwaAppName,
     normalizePwaOrientation,
+    isRequestAuthorized,
   } = dependencies;
 
   const resolveDistPath = () => {
@@ -53,6 +54,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
         readSettingsFromDiskMigrated,
         normalizePwaAppName,
         normalizePwaOrientation,
+        isRequestAuthorized,
       });
 
       app.get(/^(?!\/api|\/linear|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (_req, res) => {
