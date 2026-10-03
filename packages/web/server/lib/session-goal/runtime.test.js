@@ -279,7 +279,7 @@ describe('session goal tick and subagents', () => {
       childPages: [[child('ses_child_1')]],
     });
     const seam = wired({ openchamber: { goal: activeGoal() } });
-    const generate = vi.fn(async () => ({ text: '{"verdict":"complete","note":"done"}' }));
+    const generate = vi.fn(async () => ({ text: smallModelSays({ all_done: true }) }));
     const { runtime } = makeRuntime({
       ...seam,
       getSmallModelService: async () => ({ generateSmallModelText: generate }),
@@ -294,7 +294,10 @@ describe('session goal tick and subagents', () => {
 
     delete active.ses_child_1;
     await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
-    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'complete', note: 'done' });
+    // The verdict is persisted after the audit resolves, a tick later.
+    await vi.waitFor(() => {
+      expect(seam.persistSessionGoal.mock.calls.at(-1)?.[2]).toMatchObject({ status: 'complete' });
+    });
   });
 
   it('audits once every subagent is idle', async () => {
@@ -523,5 +526,27 @@ describe('session goal runtime', () => {
       type: 'session.idle',
       properties: { sessionID: SESSION_ID, aborted: true, reason: 'user' },
     })).not.toThrow();
+  });
+
+  it('rejects an HTML continuation response on the v2 prompt route', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    v2OpenCode({ messages: [assistantRecord({ finish: 'length' })] });
+    const upstream = globalThis.fetch;
+    const fetchMock = vi.fn(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/prompt')) {
+        return new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html' } });
+      }
+      return upstream(input, init);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { runtime } = makeRuntime(wired({ openchamber: { goal: activeGoal() } }));
+    await runTick(runtime);
+    expect(fetchMock.mock.calls.some(([url]) => new URL(url).pathname.endsWith('/prompt'))).toBe(true);
+    expect(warning).toHaveBeenCalledWith(
+      '[session-goal] tick failed:',
+      expect.stringContaining('runtime returned HTML instead of an API response'),
+    );
+    runtime.stop();
+    warning.mockRestore();
   });
 });

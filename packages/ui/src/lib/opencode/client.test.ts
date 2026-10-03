@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { z } from "zod"
+import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 
 // The generated `@opencode/client` runs for real here; only the runtime
 // transport (`runtimeFetch`) and runtime identity are replaced. That keeps
@@ -99,6 +100,56 @@ beforeEach(() => {
   runtimeKey = "test-runtime"
   opencodeClient.setDirectory(undefined)
   opencodeClient.clearConfigCache()
+})
+
+describe('runtime routing responses', () => {
+  const routingFailureSchema = z.object({ message: z.string(), status: z.number() })
+  const html = () => new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } })
+  const rejectedMessage = async (params: Parameters<typeof opencodeClient.sendMessage>[0]) => {
+    try {
+      await opencodeClient.sendMessage(params)
+    } catch (error) {
+      return { error, data: routingFailureSchema.parse(error) }
+    }
+    throw new Error('Expected the prompt to be rejected')
+  }
+
+  test('rejects an HTML prompt acknowledgement as a definite failure', async () => {
+    responses.push(html())
+    const error = await rejectedMessage({ id: 'ses_1', providerID: 'routing-html', text: 'hello' })
+    expect(error.error).toBeInstanceOf(OpencodeApiError)
+    expect(error.data.message).toContain('returned a web page instead of an API response')
+    expect(error.data.status).toBe(200)
+    expect(isAmbiguousSendFailure(error.error)).toBe(false)
+  })
+
+  test('rejects an HTML slash-command acknowledgement', async () => {
+    responses.push(html())
+    await expect(opencodeClient.sendCommand({ id: 'ses_1', command: 'review' })).rejects.toThrow('returned a web page instead of an API response')
+  })
+
+  test('does not cache an HTML configuration response', async () => {
+    responses.push(html())
+    await expect(opencodeClient.getConfig('/repo/html')).rejects.toThrow('returned a web page instead of an API response')
+    responses.push(json([]))
+    expect(await opencodeClient.getConfig('/repo/html')).toEqual({})
+    expect(requests).toHaveLength(2)
+  })
+
+  test('a packaged routing 503 is definite and never trips the provider circuit', async () => {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      responses.push(new Response('{"error":{"code":"runtime_unavailable"}}', {
+        status: 503, headers: { 'content-type': 'application/json', 'x-openchamber-error': 'runtime-unavailable' },
+      }))
+      const error = await rejectedMessage({ id: 'ses_1', providerID: 'routing-unavailable', text: 'hello' })
+      expect(error.data.message).toContain('runtime_unavailable')
+      expect(error.data.status).toBe(503)
+      expect(isAmbiguousSendFailure(error.error)).toBe(false)
+    }
+    responses.push(json({ data: { id: 'msg_accepted' } }))
+    expect(await opencodeClient.sendMessage({ id: 'ses_1', providerID: 'routing-unavailable', text: 'hello', messageId: 'msg_accepted' })).toBe('msg_accepted')
+    expect(requests).toHaveLength(7)
+  })
 })
 
 describe("request fidelity", () => {

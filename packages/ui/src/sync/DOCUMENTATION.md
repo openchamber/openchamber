@@ -499,6 +499,8 @@ Initial loads use smaller requests on constrained VS Code/mobile surfaces and pu
 
 ## Failed-turn diagnostics
 
+Successful HTML responses and the packaged protocol's `runtime-unavailable` response are definite routing failures. The SDK boundary rejects them before decoding and marks the normalized error through `lib/relay/transport-error.ts`. Send-failure classification uses that authority before HTTP timeout heuristics, so even the packaged `503` uses normal optimistic rollback. These failures do not count against a model provider's circuit. Requests whose outcome the transport cannot confirm remain ambiguous and are not retried as definite rejections.
+
 A `session.error` event is the only account of a turn OpenCode stopped, and
 it can arrive with no assistant message to attach to. `session-error-log.ts`
 keeps the last 20 of them in memory (`recordSessionError`, fed from the

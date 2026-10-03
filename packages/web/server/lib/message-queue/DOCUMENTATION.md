@@ -140,6 +140,8 @@ persisted "sending" flag would strand a message forever.
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.
 6. The next item goes out after the next busy → idle cycle.
 
+A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff. Project knowledge is recorded as delivered only after the prompt or command is accepted.
+
 ## Holds
 
 Auto-review is driven from the UI and bounces the original session through

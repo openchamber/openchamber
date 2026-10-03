@@ -134,4 +134,21 @@ describe('context obligatory runtime', () => {
 
     expect(log).not.toHaveBeenCalled();
   });
+
+  it('does not record the compaction cursor when synthetic context returns HTML', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { fetchMock } = fakeOpenCode();
+    const upstream = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (new URL(input).pathname.endsWith('/synthetic')) {
+        return new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html' } });
+      }
+      return upstream(input, init);
+    });
+    const persistContextCursor = vi.fn(async () => undefined);
+    const { runtime } = makeRuntime({ readSessionMetadata: async () => pinnedMetadata(), persistContextCursor });
+    await runtime.processPayload(compactionEvent(), '/repo');
+    expect(fetchMock.mock.calls.some(([url]) => new URL(url).pathname.endsWith('/synthetic'))).toBe(true);
+    expect(persistContextCursor).not.toHaveBeenCalled();
+  });
 });

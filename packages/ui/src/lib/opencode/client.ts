@@ -25,7 +25,7 @@ import type {
 import { z } from "zod"
 import type { FilesAPI } from "../api/types"
 import { getDesktopHomeDirectory } from "../desktop"
-import { isAmbiguousTransportFailure, markAmbiguousTransportFailure } from "@/lib/relay/transport-error"
+import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
@@ -136,6 +136,23 @@ export class OpencodeApiError extends Error {
 
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
 
+class RuntimeRoutingResponseError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+    this.name = 'RuntimeRoutingResponseError'
+  }
+}
+
+const validateRuntimeResponse = (response: Response): Response => {
+  const unavailable = response.headers.get('x-openchamber-error') === 'runtime-unavailable'
+  const html = response.ok && (response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
+  if (!unavailable && !html) return response
+  void response.body?.cancel().catch(() => undefined)
+  throw new RuntimeRoutingResponseError(response.status, unavailable
+    ? 'runtime_unavailable'
+    : 'the runtime returned a web page instead of an API response')
+}
+
 /**
  * Turns whatever the generated client threw into an `OpencodeApiError` with a
  * status the rest of the app can branch on. Transport failures keep their
@@ -144,6 +161,13 @@ const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optio
  */
 export function normalizeOpencodeError(operation: string, error: unknown): OpencodeApiError {
   if (error instanceof OpencodeApiError) return error
+  const routingError = error instanceof RuntimeRoutingResponseError ? error
+    : error instanceof ClientError && error.cause instanceof RuntimeRoutingResponseError ? error.cause : null
+  if (routingError) {
+    return markDefiniteTransportFailure(new OpencodeApiError(operation, routingError.message, {
+      status: routingError.status, cause: error,
+    }))
+  }
   if (error instanceof ClientError) {
     if (error.reason === "UnexpectedStatus") {
       const status = (error.cause as { status?: unknown } | undefined)?.status
@@ -297,7 +321,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
-        return runtimeFetch(input, init)
+        return validateRuntimeResponse(await runtimeFetch(input, init))
       }
       const timeout = createTimeoutSignal(requestTimeoutMs)
       const callerSignal = init?.signal !== undefined
@@ -341,6 +365,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       let responseHasBody = false
       try {
         const response = await runtimeFetch(input, { ...init, signal })
+        validateRuntimeResponse(response)
         responseHasBody = response.body !== null
         return response
       } catch (error) {
@@ -1174,7 +1199,9 @@ class OpencodeService {
       // Do not retry a prompt after a transport failure: through a remote
       // tunnel the POST may already be running server-side even though the
       // client lost the response.
-      recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
+      if (!(error instanceof Error && isDefiniteTransportFailure(error))) {
+        recordProviderError(params.providerID, error instanceof OpencodeApiError ? error.status : undefined)
+      }
       throw error
     }
 

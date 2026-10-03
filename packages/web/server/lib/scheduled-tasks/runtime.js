@@ -4,6 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
+import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -276,7 +277,11 @@ export const createScheduledTasksRuntime = (deps) => {
       ...getOpenCodeAuthHeaders(),
       ...(directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
     },
-    fetch,
+    fetch: async (...args) => {
+      const response = await fetch(...args);
+      assertOpenCodeApiResponse(response);
+      return response;
+    },
   });
 
   let started = false;

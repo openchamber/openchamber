@@ -51,6 +51,7 @@ import {
   wasEarlyWindowClosed,
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
+import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
@@ -1054,6 +1055,17 @@ const hardenBrowserPanelSession = () => {
 const registerPackagedUiProtocol = () => {
   if (!shouldUsePackagedUi()) return;
   installPackagedUiRequestHandler(async (request) => {
+    if (isPackagedUiRuntimeRequest(request.url)) {
+      // Runtime requests must already target the per-window injected HTTP base.
+      // A shared protocol handler cannot infer which window/runtime owns a
+      // relative request, so fail closed instead of serving the app shell or
+      // forwarding credentials to the wrong host.
+      return Response.json(
+        { error: { code: 'runtime_unavailable' } },
+        { status: 503, headers: { 'x-openchamber-error': 'runtime-unavailable' } },
+      );
+    }
+
     const distPath = resolveWebDistDir();
     let requestedPath = '/index.html';
     try {

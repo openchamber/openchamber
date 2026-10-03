@@ -13,6 +13,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
 
@@ -397,6 +398,9 @@ export function createMessageQueueRuntime({
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw httpError(`OpenCode ${method} ${fetchPath} failed with ${response.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`, response.status);
+    }
+    if (method === 'POST') {
+      await assertPromptResponse(response, 'OpenCode dispatch');
     }
     return unwrapOpenCodeResponse(await response.json().catch(() => null));
   };

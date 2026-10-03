@@ -42,6 +42,7 @@ const createOpenCode = () => {
     sent: [],
     switched: [],
     failNext: null,
+    htmlNext: null,
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
   // `{ data, cursor }` and lists newest first.
@@ -52,6 +53,10 @@ const createOpenCode = () => {
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
       return new Response('boom', { status: 500 });
+    }
+    if (method === 'POST' && state.htmlNext?.test(pathname)) {
+      state.htmlNext = null;
+      return new Response('<!doctype html><title>OpenChamber</title>', { status: 200, headers: { 'content-type': 'text/html' } });
     }
     // Real shape: `{ data }` without a `location`, unlike directory-scoped routes.
     if (pathname === '/api/session/active') return Response.json({ data: state.active });
@@ -304,6 +309,35 @@ describe('message queue runtime', () => {
     await settle(40);
     expect(openCode.state.sent).toHaveLength(1);
     expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
+  });
+
+  it('keeps a queued prompt when the runtime returns an HTML app shell', async () => {
+    const { runtime, openCode, emit, promptSent } = createRuntime({ retryDelayMs: () => 1_000 });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    openCode.state.htmlNext = /prompt$/;
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    expect(promptSent).toEqual([]);
+    runtime.stop();
+  });
+
+  it('keeps a queued command when the runtime returns an HTML app shell', async () => {
+    const { runtime, openCode, emit, promptSent } = createRuntime({ retryDelayMs: () => 1_000 });
+    runtime.start();
+    openCode.state.commands = [{ name: 'review' }];
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src' }));
+    openCode.state.htmlNext = /command$/;
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    expect(promptSent).toEqual([]);
+    runtime.stop();
   });
 
   it('holds delivery briefly after a user abort', async () => {

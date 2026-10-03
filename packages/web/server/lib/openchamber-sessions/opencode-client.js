@@ -1,4 +1,5 @@
 import { OpenCode } from '@opencode/client';
+import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 
 /**
  * OpenCode rejects non-ASCII header values; the official client sends this
@@ -18,5 +19,9 @@ export const createOpenCodeClient = ({ baseUrl, headers, directory }) => OpenCod
   baseUrl,
   headers: { ...headers, ...buildDirectoryHeaders(directory) },
   // Resolved per call so a test (or a runtime that swaps the global) is honoured.
-  fetch: (...args) => globalThis.fetch(...args),
+  fetch: async (...args) => {
+    const response = await globalThis.fetch(...args);
+    assertOpenCodeApiResponse(response);
+    return response;
+  },
 });

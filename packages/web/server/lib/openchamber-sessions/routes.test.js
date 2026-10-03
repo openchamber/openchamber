@@ -634,6 +634,33 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Run this' });
   });
 
+  it('rejects a successful HTML response instead of reporting the prompt as dispatched', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).endsWith('/prompt')) {
+        return new Response('<!doctype html><title>OpenChamber</title>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        });
+      }
+      throw new Error('Unexpected transport request');
+    });
+    sessionPromptMock.mockImplementationOnce(async () => {
+      const options = clientOptions.at(-1);
+      await options.fetch(`${options.baseUrl}/api/session/ses_123/prompt`, { method: 'POST', body: '{"text":"Run this"}' });
+    });
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' })
+        .expect(500);
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('creates goal metadata before dispatching the initial goal prompt', async () => {
     const createSessionGoal = vi.fn(async () => undefined);
     const { app } = createApp({ createSessionGoal });
@@ -1137,5 +1164,32 @@ describe('openchamber session service directory resolution', () => {
       .rejects.toMatchObject({ statusCode: 400, message: 'Directory not found' });
     const unreadable = await createService({ readSettingsFromDiskMigrated: async () => { throw new Error('settings unreadable'); } });
     await expect(unreadable.resolveDirectory({ projectId: 'proj_1' })).rejects.toThrow('settings unreadable');
+  });
+
+  it('rejects a slash command SDK failure without falling back to a prompt', async () => {
+    sessionCommandMock.mockClear();
+    sessionPromptMock.mockClear();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (url) => selectionInputResponse(url));
+    commandListMock.mockResolvedValue({ data: [{ name: 'review' }] });
+    sessionCommandMock.mockRejectedValueOnce(new Error('command rejected'));
+    globalThis.fetch = fetchMock;
+    try {
+      const { app } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions/ses_source/send')
+        .send({
+          directory: '/repo/app',
+          prompt: '/review fix this',
+          model: 'openai/gpt-5.5',
+          agent: 'build',
+        })
+        .expect(500);
+
+      expect(sessionCommandMock).toHaveBeenCalledTimes(1);
+      expect(sessionPromptMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
