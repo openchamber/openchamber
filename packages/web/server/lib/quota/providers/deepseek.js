@@ -59,8 +59,16 @@ export const fetchQuota = async () => {
 
     const payload = await response.json();
     const balanceInfos = Array.isArray(payload?.balance_infos) ? payload.balance_infos : [];
-    const balanceInfo = balanceInfos.find((info) => info?.currency === 'USD')
+    const positiveBalances = balanceInfos.filter((info) => {
+      const num = toNumber(info?.total_balance);
+      return typeof num === 'number' && num > 0;
+    });
+    const balanceInfo = positiveBalances.find((info) => info?.currency === 'USD')
+      ?? positiveBalances.find((info) => info?.currency === 'CNY')
+      ?? positiveBalances[0]
+      ?? balanceInfos.find((info) => info?.currency === 'USD')
       ?? balanceInfos.find((info) => info?.currency === 'CNY')
+      ?? balanceInfos[0]
       ?? null;
     const rawBalance = balanceInfo?.total_balance;
     const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))

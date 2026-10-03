@@ -1154,6 +1154,36 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
   });
 
+  test('selects CNY entry when USD balance is zero and CNY balance is positive', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '0.00', granted_balance: '0.00', topped_up_balance: '0.00' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
+  });
+
+  test('prefers USD entry when both USD and CNY have positive balance', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'CNY', total_balance: '100.00', granted_balance: '0.00', topped_up_balance: '100.00' },
+        { currency: 'USD', total_balance: '3.55', granted_balance: '0.00', topped_up_balance: '3.55' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$3.55');
+  });
+
   test('maps 401 to session-expired', async () => {
     stubFetchFailing(async () => ({}), { ok: false, status: 401 });
 
