@@ -69,7 +69,10 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const rootLength = rootLengthOf(value);
       if (rootLength === 0) return value;
       const root = value.slice(0, rootLength);
-      const segments = value.slice(rootLength).split(/[\\/]+/).filter(Boolean);
+      // Only Windows treats a backslash as a separator; on macOS it is a legal
+      // name character, so `A\\B` must stay one segment.
+      const separator = processLike.platform === 'win32' ? /[\\/]+/ : /\/+/;
+      const segments = value.slice(rootLength).split(separator).filter(Boolean);
       let current = root;
       for (const segment of segments) {
         let entries;
@@ -92,20 +95,23 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
     return result;
   };
 
-  // Resolve symlinks and canonical case, falling back to the original on failure.
+  // Resolve symlinks and canonical case. A path realpath cannot resolve
+  // (missing, no permission) is kept exactly as stored: recovering its case
+  // could land on a different, existing sibling such as /volume/Foo for a
+  // missing /volume/foo.
   const safeRealpathSync = (value) => {
     if (typeof value !== 'string' || !value) {
       return value;
     }
-    const resolved = realpathSync
-      ? (() => {
-        try {
-          return realpathSync(value);
-        } catch {
-          return value;
-        }
-      })()
-      : value;
+    if (!realpathSync) {
+      return canonicalizePathCase(value);
+    }
+    let resolved;
+    try {
+      resolved = realpathSync(value);
+    } catch {
+      return value;
+    }
     return canonicalizePathCase(resolved);
   };
 

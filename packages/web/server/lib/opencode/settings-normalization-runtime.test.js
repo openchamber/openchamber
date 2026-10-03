@@ -230,6 +230,39 @@ describe('settings normalization runtime - case-insensitive filesystem casing (#
       .toBe('/Users/me/Desktop/nonexistent/app');
   });
 
+  it('keeps a path realpath cannot resolve instead of recovering a sibling\'s case', () => {
+    for (const code of ['ENOENT', 'EACCES']) {
+      const runtime = createTestRuntime({
+        path: posixPath,
+        processLike: { platform: 'darwin', env: {} },
+        realpathSync: () => { throw Object.assign(new Error(code), { code }); },
+        readdirSync,
+      });
+      expect(runtime.normalizePathForPersistence('/users/me/desktop/vcfiles/app'))
+        .toBe('/users/me/desktop/vcfiles/app');
+    }
+  });
+
+  it('treats a backslash as part of a name on macOS', () => {
+    const tree = {
+      '/': ['Users'],
+      '/Users': ['me'],
+      '/Users/me': ['A\\B', 'A'],
+      '/Users/me/A': ['B'],
+      '/Users/me/A\\B': [],
+    };
+    const runtime = createTestRuntime({
+      path: posixPath,
+      processLike: { platform: 'darwin', env: {} },
+      realpathSync: (p) => p,
+      readdirSync: (dir) => {
+        if (!Object.prototype.hasOwnProperty.call(tree, dir)) throw new Error('ENOENT');
+        return tree[dir];
+      },
+    });
+    expect(runtime.normalizePathForPersistence('/Users/me/A\\B')).toBe('/Users/me/A\\B');
+  });
+
   it('never rewrites case on a case-sensitive filesystem (linux)', () => {
     const runtime = createTestRuntime({
       path: posixPath,
