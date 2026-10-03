@@ -74,6 +74,23 @@ describe("tool input and metadata", () => {
 })
 
 describe("tool row description", () => {
+  test("OpenChamber tools show their action and the detail that tells calls apart", () => {
+    expect(toolDescription("openchamber", {
+      action: "session.link",
+      parameters: { sessionId: "ses_1", link: { identifier: "#3998", title: "Keep PR badges after rebases", url: "https://x", kind: "change" } },
+    }, undefined)).toEqual({ kind: "text", value: "session.link · #3998 Keep PR badges after rebases" })
+    expect(toolDescription("openchamber", {
+      action: "session.send",
+      parameters: { sessionId: "ses_1", prompt: "Addition from the maintainer\nmore" },
+    }, undefined)).toEqual({ kind: "text", value: "session.send · Addition from the maintainer" })
+    expect(toolDescription("openchamber_memory", { action: "memory.save", parameters: { title: "Drafts rule" } }, undefined))
+      .toEqual({ kind: "text", value: "memory.save · Drafts rule" })
+    expect(toolDescription("openchamber_web", { action: "browser.snapshot", parameters: {} }, undefined))
+      .toEqual({ kind: "text", value: "browser.snapshot" })
+    expect(toolDescription("openchamber_notify", { title: "Review ready" }, undefined))
+      .toEqual({ kind: "text", value: "Review ready" })
+  })
+
   test("shell shows the first line of the command", () => {
     expect(toolDescription("shell", { command: "git status\ngit log" }, undefined)).toEqual({
       kind: "text",
