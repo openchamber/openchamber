@@ -53,6 +53,31 @@ function splitOptionToken(arg) {
   };
 }
 
+// Flags that only one family of commands reads. Passing one to any other
+// command used to be ignored silently (`serve --daily 09:30` just started a
+// server), so it is rejected instead. Flags missing here are global or shared
+// and stay accepted everywhere.
+const SCHEDULE = ['schedule'];
+const SESSION = ['session'];
+const SESSION_OR_SCHEDULE = ['session', 'schedule'];
+const TUNNEL = ['tunnel'];
+const LOGS = ['logs'];
+const COMMAND_OWNED_FLAGS = new Map([
+  ['daily', SCHEDULE], ['weekly', SCHEDULE], ['once', SCHEDULE], ['time', SCHEDULE], ['cron', SCHEDULE],
+  ['timezone', SCHEDULE], ['disabled', SCHEDULE], ['task', SCHEDULE],
+  ['role', SESSION], ['last', SESSION], ['last-assistant', SESSION], ['wait', SESSION], ['timeout', SESSION],
+  ['with-status', SESSION], ['worktree', SESSION], ['branch', SESSION], ['start-ref', SESSION], ['base', SESSION],
+  ['upstream', SESSION], ['no-upstream', SESSION], ['title', SESSION],
+  ['session', SESSION_OR_SCHEDULE], ['message', SESSION_OR_SCHEDULE], ['prompt', SESSION_OR_SCHEDULE],
+  ['model', SESSION_OR_SCHEDULE], ['agent', SESSION_OR_SCHEDULE], ['variant', SESSION_OR_SCHEDULE],
+  ['goal', SESSION_OR_SCHEDULE], ['goal-token-budget', SESSION_OR_SCHEDULE], ['project', SESSION_OR_SCHEDULE],
+  ['dir', SESSION_OR_SCHEDULE], ['directory', SESSION_OR_SCHEDULE],
+  ['provider', TUNNEL], ['mode', TUNNEL], ['profile', TUNNEL], ['config', TUNNEL], ['token', TUNNEL],
+  ['token-file', TUNNEL], ['token-stdin', TUNNEL], ['connect-ttl', TUNNEL], ['session-ttl', TUNNEL],
+  ['show-secrets', TUNNEL], ['dry-run', TUNNEL], ['force', TUNNEL],
+  ['lines', LOGS], ['no-follow', LOGS],
+]);
+
 function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const options = {
@@ -117,6 +142,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   };
 
   const removedFlagErrors = [];
+  const seenLongFlags = [];
   const positional = [];
   let helpRequested = false;
   let versionRequested = false;
@@ -141,6 +167,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
 
     const { name, inlineValue, long } = parsedToken;
+    if (long) seenLongFlags.push(name);
     switch (name) {
       case 'port':
       case 'p': {
@@ -533,6 +560,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
 
   const command = positional[0] || 'serve';
+  for (const name of new Set(seenLongFlags)) {
+    const owners = COMMAND_OWNED_FLAGS.get(name);
+    if (owners && !owners.includes(command)) {
+      removedFlagErrors.push(`Unknown option for ${command}: --${name} (used by: ${owners.join(', ')})`);
+    }
+  }
   const subcommand = command === 'tunnel' ? (positional[1] || 'help') : null;
   const tunnelAction = command === 'tunnel' ? (positional[2] || null) : null;
   const startupAction = command === 'startup' ? (positional[1] || 'status') : null;

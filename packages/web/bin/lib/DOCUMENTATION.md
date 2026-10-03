@@ -72,6 +72,7 @@ These modules hold reusable, non-presentational logic for commands.
 
 - `cli-args.js`
   - Argument parsing, defaults, help text, completion script generation, and typo suggestions.
+  - `COMMAND_OWNED_FLAGS` lists flags only one family of commands reads (schedule, session, tunnel, logs). Such a flag on any other command is an `Unknown option for <command>` error in every output mode instead of being ignored; global and shared flags are not listed and stay accepted everywhere. Add a new command-specific flag there.
 
 - `cli-errors.js`
   - CLI exit codes and typed tunnel CLI errors.

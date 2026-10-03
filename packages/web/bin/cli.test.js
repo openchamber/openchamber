@@ -206,6 +206,27 @@ describe('cli args', () => {
     expect(parseArgs(['serve', '-d']).removedFlagErrors).toEqual([]);
   });
 
+  it('rejects a flag that only another command reads', () => {
+    expect(parseArgs(['serve', '--daily', '09:30']).removedFlagErrors).toEqual([
+      'Unknown option for serve: --daily (used by: schedule)',
+    ]);
+    expect(parseArgs(['--port', '8080', '--lines', '5']).removedFlagErrors).toEqual([
+      'Unknown option for serve: --lines (used by: logs)',
+    ]);
+    expect(parseArgs(['status', '--token', 'x']).removedFlagErrors).toEqual([
+      'Unknown option for status: --token (used by: tunnel)',
+    ]);
+  });
+
+  it('accepts command-owned flags on their own commands and global flags anywhere', () => {
+    expect(parseArgs(['schedule', 'create', '--daily', '09:30', '--prompt', 'hi', '--project', 'p']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['session', 'send', '--session', 's', '--message', 'hi', '--wait', '--timeout', '30']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['tunnel', 'start', '--provider', 'cloudflare', '--mode', 'quick', '--dry-run']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['logs', '--lines', '20', '--no-follow']).removedFlagErrors).toEqual([]);
+    expect(parseArgs(['--port', '8080']).command).toBe('serve');
+    expect(parseArgs(['serve', '--hostname', 'h', '--port', '3000', '--json', '--quiet']).removedFlagErrors).toEqual([]);
+  });
+
   it('parses explicit connect-url server overrides', () => {
     const parsed = parseArgs(['connect-url', '--server', 'https://openchamber.example.com', '--port', '3002']);
 
