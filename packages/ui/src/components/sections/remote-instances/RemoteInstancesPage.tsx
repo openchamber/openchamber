@@ -71,6 +71,7 @@ import {
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
@@ -509,6 +510,27 @@ export const RemoteInstancesPage: React.FC = () => {
   const [addDeviceTransport, setAddDeviceTransport] = React.useState<'local' | 'lan' | 'relay'>('relay');
   const [addDeviceFallback, setAddDeviceFallback] = React.useState(true);
   const [transportOptions, setTransportOptions] = React.useState<{ localUrl: string | null; lanUrl: string | null; relayAvailable: boolean } | null>(null);
+  const lanBlockedByEnterprise = useEnterprisePolicyStore((state) => state.networkAccessBlocked);
+  // Why "Home network only" is unavailable depends on who owns the listening
+  // address: a local desktop can open it in Desktop Network Access (unless
+  // enterprise mode keeps it closed), a plain web server needs a restart with a
+  // LAN bind address, and a desktop connected to another server can change
+  // neither from here.
+  const lanTransportHint = (() => {
+    if (!transportOptions || transportOptions.lanUrl) {
+      return t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint');
+    }
+    if (!isDesktopShell()) {
+      return t('settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableServerHint');
+    }
+    if (!isDesktopLocalOriginActive()) {
+      return t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint');
+    }
+    if (lanBlockedByEnterprise) {
+      return t('settings.openchamber.desktopNetwork.field.enterpriseBlocked');
+    }
+    return t('settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint');
+  })();
   const revokedClientCount = React.useMemo(() => remoteClients.filter((client) => Boolean(client.revokedAt)).length, [remoteClients]);
   const [sshAddDialogOpen, setSshAddDialogOpen] = React.useState(false);
   const [sshAddMode, setSshAddMode] = React.useState<'saved' | 'manual'>('saved');
@@ -1887,7 +1909,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   <div role="radiogroup" aria-label={t('settings.remoteInstances.clientAuth.addDevice.transportLabel')} className="space-y-1.5">
                     {([
                       { key: 'relay' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.relay'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.relayHint'), available: Boolean(transportOptions?.relayAvailable) },
-                      { key: 'lan' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.lan'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint'), available: Boolean(transportOptions?.lanUrl) },
+                      { key: 'lan' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.lan'), hint: lanTransportHint, available: Boolean(transportOptions?.lanUrl) },
                       { key: 'local' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.local'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.localHint'), available: Boolean(transportOptions?.localUrl) },
                     ]).map((option) => {
                       const selected = addDeviceTransport === option.key;

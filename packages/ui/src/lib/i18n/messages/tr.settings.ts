@@ -354,6 +354,8 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': 'Aynı makinede çalışan uygulamalar için.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': 'Yalnızca ev ağı',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Wi-Fi üzerinden doğrudan bağlanır. Bu ağın dışında çalışmaz.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'Bu seçeneği kullanmak için Ayarlar > Masaüstü Ağ Erişimi\'ne gidin, bir masaüstü arayüzü parolası belirleyin ve yerel ağınızdaki diğer cihazların bu uygulamayı açmasına izin verin.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableServerHint': 'Bu sunucu yalnızca bu bilgisayarda dinliyor. Ağınızdaki cihazların bağlanabilmesi için `--host 0.0.0.0` ile yeniden başlatın.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'Her yerden',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': 'Evde ve evin dışında çalışır. Evin dışındayken trafik OpenChamber Private Relay üzerinden geçer — uçtan uca şifreli bir tunnel. Kurulum gerekmez.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': 'Evin dışındayken şifreli relay\'e de izin ver',

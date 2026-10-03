@@ -355,6 +355,8 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': 'Voor apps die op deze machine draaien.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': 'Alleen thuisnetwerk',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Maakt rechtstreeks verbinding via uw wifi. Werkt niet buiten dit netwerk.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': 'Om deze optie te gebruiken, ga naar Instellingen > Toegang via desktopnetwerk, stel een wachtwoord voor de desktop-UI in en sta andere apparaten op je lokale netwerk toe deze app te openen.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableServerHint': 'Deze server luistert alleen op deze computer. Start hem opnieuw met `--host 0.0.0.0` zodat apparaten in je netwerk verbinding kunnen maken.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': 'Overal',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': 'Werkt thuis en onderweg. Verkeer van buiten loopt via OpenChamber Private Relay — een end-to-end versleutelde tunnel. Geen installatie nodig.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': 'De versleutelde relay ook toestaan als u niet thuis bent',

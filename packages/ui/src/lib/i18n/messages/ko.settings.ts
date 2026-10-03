@@ -322,6 +322,8 @@ export const settingsDict = {
   'settings.remoteInstances.clientAuth.addDevice.transport.localHint': '같은 컴퓨터의 앱을 위한 옵션입니다.',
   'settings.remoteInstances.clientAuth.addDevice.transport.lan': '집 네트워크 전용',
   'settings.remoteInstances.clientAuth.addDevice.transport.lanHint': 'Wi-Fi로 직접 연결합니다. 이 네트워크 밖에서는 작동하지 않습니다.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableDesktopHint': '이 옵션을 사용하려면 설정 > 데스크톱 네트워크 액세스에서 데스크톱 UI 비밀번호를 설정하고 로컬 네트워크의 다른 기기가 이 앱을 열 수 있도록 허용하세요.',
+  'settings.remoteInstances.clientAuth.addDevice.transport.lanUnavailableServerHint': '이 서버는 이 컴퓨터에서만 수신합니다. 네트워크의 기기가 연결할 수 있도록 `--host 0.0.0.0`으로 다시 시작하세요.',
   'settings.remoteInstances.clientAuth.addDevice.transport.relay': '어디서나',
   'settings.remoteInstances.clientAuth.addDevice.transport.relayHint': '집과 밖 어디서나 작동합니다. 밖에서는 종단간 암호화 터널인 OpenChamber Private Relay를 통해 연결됩니다. 설정이 필요 없습니다.',
   'settings.remoteInstances.clientAuth.addDevice.fallback.relay': '밖에서는 암호화 릴레이 연결도 허용',
