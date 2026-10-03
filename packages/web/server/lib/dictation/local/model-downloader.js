@@ -62,20 +62,40 @@ async function downloadToFile(url, outputPath, onProgress) {
   }
 }
 
+/**
+ * The error to show for a failed `tar` run. GNU tar hands .tar.bz2 to an
+ * external `bzip2` program; minimal Linux images often lack it, and the bare
+ * exit code gave no hint (#2887). bsdtar on macOS and Windows decompresses
+ * bzip2 itself.
+ */
+export function describeTarFailure(code, stderr) {
+  const detail = String(stderr || '').trim();
+  if (/bzip2/i.test(detail)) {
+    return 'Extracting voice models needs the bzip2 program. Install it (for example: apt-get install bzip2) and try again.';
+  }
+  const lastLine = detail.split(/\r?\n/).filter(Boolean).pop();
+  return lastLine ? `tar exited with code ${code}: ${lastLine}` : `tar exited with code ${code}`;
+}
+
 async function extractTarArchive(archivePath, destDir) {
   await mkdir(destDir, { recursive: true });
 
   await new Promise((resolve, reject) => {
     const child = spawn('tar', ['xf', archivePath, '-C', destDir], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
     });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      // Only the tail matters for the message; keep memory bounded.
+      stderr = (stderr + chunk.toString()).slice(-4096);
+    });
     child.on('error', reject);
-    child.on('exit', (code) => {
+    child.on('close', (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`tar exited with code ${code}`));
+        reject(new Error(describeTarFailure(code, stderr)));
       }
     });
   });
