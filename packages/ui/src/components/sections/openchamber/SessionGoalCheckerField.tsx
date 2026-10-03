@@ -1,10 +1,21 @@
 import React from 'react';
-import { SettingsChipGroup, SettingsFieldRow, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import {
+  SettingsChipGroup,
+  SettingsFieldRow,
+  SETTINGS_HELPER_CLASS,
+  SETTINGS_ICON_BUTTON_CLASS,
+  SETTINGS_NUMBER_INPUT_CLASS,
+  SETTINGS_NUMBER_STEPPER_ROW_CLASS,
+} from '@/components/sections/shared/SettingsSection';
+import { Icon } from '@/components/icon/Icon';
+import { Button } from '@/components/ui/button';
+import { NumberInput } from '@/components/ui/number-input';
 import { JevAccessNote, SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
 import { openClassificationProviders } from '@/components/sections/classification/classifierSources';
 import { useI18n } from '@/lib/i18n';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
+import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, SESSION_GOAL_MAX_AUTO_TURNS_LIMIT } from '@/lib/sessionGoalTurnLimit';
 import { useUIStore, type SessionGoalChecker } from '@/stores/useUIStore';
 
 const openSmallModelSettings = (): void => {
@@ -63,3 +74,43 @@ export const SessionGoalCheckerField: React.FC<{ disabled?: boolean }> = ({ disa
     </div>
   );
 };
+
+/** How many automatic turns a goal takes before it stops and hands back to the user. */
+export const SessionGoalMaxTurnsField: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
+  const { t } = useI18n();
+  const maxTurns = useUIStore((state) => state.sessionGoalMaxAutoTurns);
+  const setMaxTurns = useUIStore((state) => state.setSessionGoalMaxAutoTurns);
+
+  return (
+    <SettingsFieldRow
+      settingsItem="chat.session-goal-max-turns"
+      label={t('settings.openchamber.visual.goal.maxTurnsLabel')}
+      info={t('settings.openchamber.visual.goal.maxTurnsInfo')}
+    >
+      <div className={SETTINGS_NUMBER_STEPPER_ROW_CLASS}>
+        <NumberInput
+          value={maxTurns}
+          onValueChange={(value) => setMaxTurns(Math.floor(value))}
+          min={1}
+          max={SESSION_GOAL_MAX_AUTO_TURNS_LIMIT}
+          step={1}
+          disabled={disabled}
+          className={SETTINGS_NUMBER_INPUT_CLASS}
+          aria-label={t('settings.openchamber.visual.goal.maxTurnsLabel')}
+        />
+        <Button size="sm"
+          type="button"
+          variant="ghost"
+          onClick={() => setMaxTurns(DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS)}
+          disabled={disabled || maxTurns === DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS}
+          className={SETTINGS_ICON_BUTTON_CLASS}
+          aria-label={t('settings.openchamber.visual.goal.maxTurnsResetAria')}
+          title={t('settings.common.actions.reset')}
+        >
+          <Icon name="restart" className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </SettingsFieldRow>
+  );
+};
+

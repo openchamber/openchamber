@@ -256,6 +256,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'chat.session-goal-max-turns',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.goal.maxTurnsLabel',
+    keywords: ['goal', 'turns', 'limit', 'continuations', 'safety'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'chat.session-goal-budget',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.goal.budgetLabel',

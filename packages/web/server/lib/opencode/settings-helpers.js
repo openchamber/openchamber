@@ -437,6 +437,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionGoalChecker === 'classifier' || candidate.sessionGoalChecker === 'small-model') {
       result.sessionGoalChecker = candidate.sessionGoalChecker;
     }
+    if (Number.isInteger(candidate.sessionGoalMaxAutoTurns) && candidate.sessionGoalMaxAutoTurns >= 1 && candidate.sessionGoalMaxAutoTurns <= 200) {
+      result.sessionGoalMaxAutoTurns = candidate.sessionGoalMaxAutoTurns;
+    }
     if (typeof candidate.sessionGoalDefaultBudgetEnabled === 'boolean') {
       result.sessionGoalDefaultBudgetEnabled = candidate.sessionGoalDefaultBudgetEnabled;
     }

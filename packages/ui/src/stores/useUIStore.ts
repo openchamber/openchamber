@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS, isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
@@ -941,6 +942,8 @@ interface UIStore {
   sessionGoalEnabled: boolean;
   /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
+  /** Automatic continuations a goal may take before it stops for the user (1–200). */
+  sessionGoalMaxAutoTurns: number;
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
@@ -1190,6 +1193,7 @@ interface UIStore {
   setSessionWorkAutoOpen: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
+  setSessionGoalMaxAutoTurns: (value: number) => void;
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
@@ -1397,6 +1401,7 @@ export const useUIStore = create<UIStore>()(
         sessionWorkAutoOpen: true,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
+        sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
@@ -2320,6 +2325,11 @@ export const useUIStore = create<UIStore>()(
 
         setSessionGoalChecker: (value) => {
           set({ sessionGoalChecker: value });
+        },
+
+        setSessionGoalMaxAutoTurns: (value) => {
+          if (!isSessionGoalMaxAutoTurns(value)) return;
+          set({ sessionGoalMaxAutoTurns: value });
         },
 
         setSessionGoalDefaultBudgetEnabled: (value) => {
@@ -3327,6 +3337,7 @@ export const useUIStore = create<UIStore>()(
           sessionWorkAutoOpen: state.sessionWorkAutoOpen,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
+          sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,

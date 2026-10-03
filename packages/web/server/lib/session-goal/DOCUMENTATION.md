@@ -18,7 +18,7 @@ the web server and survives UI disconnects.
   tokensUsed,              // tokensCommitted + current segment (snapshot - baseline)
   tokensBaseline,          // segment start snapshot (pre-goal turn; 0 after compaction)
   tokensCommitted,         // closed segments' total (one segment per compaction)
-  turnsUsed,               // auto-continuations sent (capped at MAX_AUTO_TURNS)
+  turnsUsed,               // auto-continuations sent (capped at the Settings turn limit)
   auditFailStreak,         // consecutive progress checks that could not run
   statusReason,            // why settled; 'resumed' is a kickoff signal from UI
   evaluationProviderID,    // provider of the latest check; '' when Jev answered
@@ -130,7 +130,7 @@ before touching the filesystem). Rationale: metadata rides every
      tail skips the audit and goes straight to a continuation nudge;
     - terminal checks, cheapest first: assistant turn error → `blocked`;
       `tokensUsed >= tokenBudget` → `budgetLimited`;
-      `turnsUsed >= MAX_AUTO_TURNS` (20) → `blocked`;
+      `turnsUsed >= ` the turn limit (Settings → Goal, `sessionGoalMaxAutoTurns`, 1–200, default 20; read on every tick) → `blocked`;
     - error classification is independent of `finish`: `MessageAbortedError`
       keeps the pause/resume behavior; only a `finish: "length"` with no
       error, or `MessageOutputLengthError`, is an in-progress truncation that

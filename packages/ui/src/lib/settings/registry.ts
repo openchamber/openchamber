@@ -32,6 +32,7 @@ import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
+import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
 import {
   fromSchema,
@@ -503,6 +504,12 @@ export const SETTINGS_REGISTRY = {
     surfaces: ['web', 'desktop', 'mobile'],
     parse: parseOneOf(['classifier', 'small-model']),
     ui: uiStore('sessionGoalChecker', (v) => useUIStore.getState().setSessionGoalChecker(v)),
+  }),
+  sessionGoalMaxAutoTurns: field({
+    scope: 'profile',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.number().refine(isSessionGoalMaxAutoTurns)),
+    ui: uiStore('sessionGoalMaxAutoTurns', (v) => useUIStore.getState().setSessionGoalMaxAutoTurns(v)),
   }),
   sessionGoalDefaultBudgetEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('sessionGoalDefaultBudgetEnabled', (v) => useUIStore.getState().setSessionGoalDefaultBudgetEnabled(v)) }),
   sessionGoalDefaultBudget: field({ scope: 'profile', parse: parsePositiveInteger, ui: uiStore('sessionGoalDefaultBudget', (v) => useUIStore.getState().setSessionGoalDefaultBudget(v)) }),

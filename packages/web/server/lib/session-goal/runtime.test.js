@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createSessionGoalRuntime } from './runtime.js';
+import { createSessionGoalRuntime, normalizeMaxAutoTurns } from './runtime.js';
 
 /**
  * The goal record — status, turns, token accounting — lives in
@@ -166,6 +166,52 @@ describe('session goal tick on v2 messages', () => {
       [`/api/session/${SESSION_ID}/prompt`, { text: expect.stringContaining('Finish the task') }],
     ]);
     runtime.stop();
+  });
+
+  it('takes the turn cap from Settings for both the prompt and the stop', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({
+      messages: [
+        { id: 'msg_u1', sessionID: SESSION_ID, type: 'user', text: 'Finish the task', time: { created: 1 } },
+        assistantRecord(),
+      ],
+    });
+    const seam = wired({ openchamber: { goal: activeGoal() } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      getMaxAutoTurns: () => 7,
+    });
+
+    await runTick(runtime);
+
+    const prompt = calls.find((call) => call.method === 'POST')?.body.text;
+    expect(prompt).toContain('Auto-continuations used: 1 of 7.');
+    runtime.stop();
+  });
+
+  it('blocks the goal once it has used the turns Settings allows', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { calls } = v2OpenCode({ messages: [assistantRecord()] });
+    const seam = wired({ openchamber: { goal: activeGoal({ turnsUsed: 3 }) } });
+    const generate = vi.fn(async () => ({ text: smallModelSays({ remaining: true }) }));
+    const { runtime } = makeRuntime({
+      ...seam,
+      getSmallModelService: async () => ({ generateSmallModelText: generate }),
+      getMaxAutoTurns: () => 3,
+    });
+
+    await runTick(runtime);
+
+    expect(seam.persistSessionGoal.mock.calls.at(-1)[2]).toMatchObject({ status: 'blocked', statusReason: 'auto-continuation limit reached' });
+    expect(calls.filter((call) => call.method === 'POST')).toEqual([]);
+    runtime.stop();
+  });
+
+  it('falls back to 20 turns for a missing or out-of-range setting', () => {
+    expect([undefined, 0, -5, 2.5, '50', 201].map(normalizeMaxAutoTurns)).toEqual([20, 20, 20, 20, 20, 20]);
+    expect([1, 50, 200].map(normalizeMaxAutoTurns)).toEqual([1, 50, 200]);
   });
 
   it('settles the goal as complete when the report says all is done, without a continuation', async () => {
