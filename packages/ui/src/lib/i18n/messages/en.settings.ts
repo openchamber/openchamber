@@ -2137,6 +2137,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.terminalShell.auto': 'Auto',
   'settings.openchamber.visual.field.editorFontSize': 'Editor Font Size',
   'settings.openchamber.visual.field.codeFont': 'Code Font',
+  'settings.openchamber.visual.field.webFontsEnterprise': 'Enterprise mode uses system fonts: the others load from a public CDN.',
   'settings.openchamber.visual.field.selectCodeFontAria': 'Select code font',
   'settings.openchamber.visual.actions.resetCodeFontAria': 'Reset code font',
   'settings.openchamber.visual.actions.resetTerminalFontSizeAria': 'Reset terminal font size',

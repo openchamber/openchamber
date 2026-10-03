@@ -429,33 +429,10 @@
     <meta name="application-name" content="OpenChamber" />
     <meta name="apple-mobile-web-app-title" content="OpenChamber" />
 
-    <!-- Inline CSS for loading screen and Nerd Fonts (before Tailwind loads) -->
+    <!-- Inline CSS for the loading screen (before Tailwind loads). Terminal
+         prompt symbols come from the bundled Symbols Nerd Font (lib/ghostty),
+         never from a CDN. -->
     <style>
-      /* Nerd Font @font-face declarations for terminal icon support */
-      @font-face {
-        font-family: 'JetBrainsMono Nerd Font';
-        src:
-          local('JetBrainsMono Nerd Font'),
-          url('https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff2') format('woff2'),
-          url('https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/JetBrainsMonoNerdFont-Regular.woff') format('woff');
-        font-weight: normal;
-        font-style: normal;
-        font-display: swap;
-        unicode-range: U+E000-F8FF, U+F0000-FFFFF;
-      }
-
-      @font-face {
-        font-family: 'FiraCode Nerd Font';
-        src:
-          local('FiraCode Nerd Font'),
-          url('https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2') format('woff2'),
-          url('https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff') format('woff');
-        font-weight: normal;
-        font-style: normal;
-        font-display: swap;
-        unicode-range: U+E000-F8FF, U+F0000-FFFFF;
-      }
-
       :root {
         --splash-background-dark: #151313;
         --splash-stroke-dark: #CECDC3;

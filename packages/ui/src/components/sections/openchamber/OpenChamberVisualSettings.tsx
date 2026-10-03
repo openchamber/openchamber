@@ -34,6 +34,8 @@ import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { useI18n, type Locale } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
+import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { normalizeMobileKeyboardMode, supportsMobileKeyboardResizeContent, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import {
     setDirectoryShowHidden,
@@ -60,6 +62,7 @@ import {
     SETTINGS_NUMBER_INPUT_CLASS,
     SETTINGS_FIELDS_STACK_CLASS,
     SETTINGS_OPTION_STACK_CLASS,
+    SETTINGS_HELPER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -382,10 +385,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setTerminalLoginShells = useUIStore(state => state.setTerminalLoginShells);
     const editorFontSize = useUIStore(state => state.editorFontSize);
     const setEditorFontSize = useUIStore(state => state.setEditorFontSize);
-    const uiFont = useUIStore(state => state.uiFont);
+    // The fonts in effect: enterprise mode shows the system font where the
+    // stored choice would load from a CDN (useFontPreferences).
+    const { uiFont, monoFont } = useFontPreferences();
     const setUiFont = useUIStore(state => state.setUiFont);
-    const monoFont = useUIStore(state => state.monoFont);
     const setMonoFont = useUIStore(state => state.setMonoFont);
+    const webFontsBlocked = useEnterpriseMode();
     const padding = useUIStore(state => state.padding);
     const setPadding = useUIStore(state => state.setPadding);
     const inputBarOffset = useUIStore(state => state.inputBarOffset);
@@ -1288,7 +1293,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {UI_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
+                                                    <SelectItem key={option.id} value={option.id} disabled={webFontsBlocked && Boolean(option.source)}>
                                                         <span style={{ fontFamily: option.stack }}>{option.label}</span>
                                                     </SelectItem>
                                                 ))}
@@ -1318,7 +1323,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {CODE_FONT_OPTIONS.map((option) => (
-                                                    <SelectItem key={option.id} value={option.id}>
+                                                    <SelectItem key={option.id} value={option.id} disabled={webFontsBlocked && Boolean(option.source)}>
                                                         <span style={{ fontFamily: option.stack }}>{option.label}</span>
                                                     </SelectItem>
                                                 ))}
@@ -1338,6 +1343,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </SettingsStackedField>
                                 )}
                             </SettingsTwoColumn>
+                        ) : null}
+                        {webFontsBlocked && ((shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize')) ? (
+                            <p className={SETTINGS_HELPER_CLASS}>{t('settings.openchamber.visual.field.webFontsEnterprise')}</p>
                         ) : null}
 
                         {(shouldShow('fontSize') && !isMobile) || shouldShow('terminalFontSize') || shouldShow('editorFontSize') ? (

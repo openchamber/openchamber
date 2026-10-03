@@ -2137,6 +2137,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.terminalShell.auto': 'Auto',
   'settings.openchamber.visual.field.editorFontSize': 'Lettergrootte van de editor',
   'settings.openchamber.visual.field.codeFont': 'Lettertype voor code',
+  'settings.openchamber.visual.field.webFontsEnterprise': 'De enterprise-modus gebruikt systeemlettertypen: de andere worden van een openbaar CDN geladen.',
   'settings.openchamber.visual.field.selectCodeFontAria': 'Kies het lettertype voor code',
   'settings.openchamber.visual.actions.resetCodeFontAria': 'Lettertype voor code terugzetten',
   'settings.openchamber.visual.actions.resetTerminalFontSizeAria': 'Lettergrootte van de terminal terugzetten',

@@ -43,6 +43,11 @@ import { z } from 'zod';
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
+ * - The draw.io diagram editor, diagrams.net's own page in a frame, is not
+ *   loaded; a .drawio file opens as its XML (`packages/ui` FilesView). The
+ *   crossing happens in the browser, so the UI is where it is held back.
+ * - Web fonts that load from a public CDN fall back to the system fonts
+ *   (`packages/ui` useFontPreferences); the stored choice is kept.
  * - The server listens only on this machine unless network access is allowed
  *   (`allowNetworkAccess` / `OPENCHAMBER_ALLOW_NETWORK_ACCESS`): it refuses
  *   to start on a network address and drops connections from other machines

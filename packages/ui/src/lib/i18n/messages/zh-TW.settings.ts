@@ -2019,6 +2019,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.terminalShell.auto': '自動',
   'settings.openchamber.visual.field.editorFontSize': '編輯器字體大小',
   'settings.openchamber.visual.field.codeFont': '程式碼字體',
+  'settings.openchamber.visual.field.webFontsEnterprise': '企業模式使用系統字型：其他字型需從公開 CDN 載入。',
   'settings.openchamber.visual.field.selectCodeFontAria': '選擇程式碼字體',
   'settings.openchamber.visual.actions.resetCodeFontAria': '重設程式碼字體',
   'settings.openchamber.visual.actions.resetTerminalFontSizeAria': '重設終端機字體大小',

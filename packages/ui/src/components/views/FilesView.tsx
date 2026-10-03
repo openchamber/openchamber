@@ -88,6 +88,7 @@ import { TableArtifact } from './files/previews/TableArtifact';
 import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 import { useHtmlPreviewUrl } from './files/useHtmlPreviewUrl';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -2640,12 +2641,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     ? matchedGuestFileEditor
     : null;
   const claimedByGuest = guestFileEditor !== null;
+  const enterpriseMode = useEnterpriseMode();
   const binaryCanvas = guestFileEditor?.editor.content === 'binary';
   binaryCanvasRef.current = binaryCanvas;
   const isMarkdown = !claimedByGuest && Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = !claimedByGuest && Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = !claimedByGuest && Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
-  const isDrawio = !claimedByGuest && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
+  // The draw.io editor is diagrams.net's own page in a frame, and the diagram
+  // is handed to it. Enterprise mode keeps file contents away from third
+  // parties, so there a .drawio file opens as its XML like any text file.
+  const isDrawio = !claimedByGuest && !enterpriseMode && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
   const isMermaid = !claimedByGuest && Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
   const isTable = !claimedByGuest && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
   const hasCanvas = claimedByGuest;

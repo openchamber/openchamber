@@ -2019,6 +2019,7 @@ export const settingsDict = {
   'settings.openchamber.visual.option.terminalShell.auto': 'Automatique',
   'settings.openchamber.visual.field.editorFontSize': 'Taille de la police de l\'éditeur',
   'settings.openchamber.visual.field.codeFont': 'Police de code',
+  'settings.openchamber.visual.field.webFontsEnterprise': 'Le mode entreprise utilise les polices du système : les autres se chargent depuis un CDN public.',
   'settings.openchamber.visual.field.selectCodeFontAria': 'Sélectionnez la police du code',
   'settings.openchamber.visual.actions.resetCodeFontAria': 'Réinitialiser la police du code',
   'settings.openchamber.visual.actions.resetTerminalFontSizeAria': 'Réinitialiser la taille de la police du terminal',
