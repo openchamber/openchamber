@@ -73,6 +73,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isCapacitorApp } from '@/lib/platform';
+import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -3088,6 +3089,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // dirty from the whole timeline mounting, so the focus call would pay
         // for that layout inside the commit; a frame later it is nearly free.
         const frame = window.requestAnimationFrame(() => {
+            // A side-panel chat finishes loading on its own time, often while the
+            // user already types in the main chat; focusing then would pull the
+            // keystrokes into the panel. It takes focus only when the user is
+            // already working inside it (e.g. opened a subtask from there).
+            if (isEmbeddedSessionChat() && !document.hasFocus()) return;
             composerRef.current?.focus();
         });
         return () => window.cancelAnimationFrame(frame);
