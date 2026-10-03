@@ -40,6 +40,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import {
+  addSelectionToChat,
   dismissActiveSelectionToolbar,
   getActiveSelectionToolbarVersion,
   hasActiveSelectionToolbar,
@@ -222,7 +223,7 @@ export const useKeyboardShortcuts = () => {
       const state = useUIStore.getState();
       state.setSettingsDialogOpen(!state.isSettingsDialogOpen);
     },
-    add_selection_to_chat: invokeActiveSelectionAddToChat,
+    add_selection_to_chat: () => addSelectionToChat({ focusWhenEmpty: false }),
     toggle_sidebar: () => {
       const state = useUIStore.getState();
       if (state.isMobile) state.setSessionSwitcherOpen(!state.isSessionSwitcherOpen);
