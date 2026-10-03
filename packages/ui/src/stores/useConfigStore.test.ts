@@ -877,6 +877,27 @@ describe('useConfigStore provider persistence', () => {
     expect(state.directoryScoped[DIRECTORY]?.currentVariant).toBe('high');
   });
 
+  test('following a session agent switch keeps Auto and the effort on screen', () => {
+    useSessionUIStore.setState({ currentSessionId: 'ses_follow_agent' });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('openai', 'gpt-5.5', ['low', 'high'])],
+      agents: [testAgent('plan', { model: { providerID: 'openai', modelID: 'gpt-5.5' } })],
+      currentProviderId: 'openchamber',
+      currentModelId: 'auto',
+      currentVariant: 'low',
+      currentVariantSelection: { override: 'low', inherited: undefined },
+      directoryScoped: {},
+    });
+
+    useConfigStore.getState().setAgent('plan', { keepModel: true });
+
+    const state = useConfigStore.getState();
+    expect(state.currentAgentName).toBe('plan');
+    expect([state.currentProviderId, state.currentModelId, state.currentVariant]).toEqual(['openchamber', 'auto', 'low']);
+    expect(useSelectionStore.getState().getSessionAgentSelection('ses_follow_agent')).toBe('plan');
+  });
+
   test('a model without a variants list reads as having no thinking levels', () => {
     const withoutVariants = provider('openai', 'gpt-legacy');
     // A stored snapshot or a live catalog can carry a model without `variants`.

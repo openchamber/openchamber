@@ -1329,7 +1329,13 @@ interface ConfigStore {
     setCurrentVariantOverride: (override: string | null | undefined, inherited: string | undefined) => void;
     cycleCurrentVariant: () => string | undefined;
     getCurrentModelVariants: () => string[];
-    setAgent: (agentName: string | undefined) => void;
+    /**
+     * `keepModel` switches the agent alone. It is for following a switch the
+     * session already made: OpenCode keeps a session on its own model when the
+     * agent changes, so resolving the agent's model would show one the session
+     * does not run on (and would replace Auto).
+     */
+    setAgent: (agentName: string | undefined, options?: { keepModel?: boolean }) => void;
     applyDefaultModelAgentSelection: (options?: { projectDefaultAgent?: string; projectDefaultModel?: string; projectDefaultVariant?: string }) => void;
     /** Replaces an `openchamber/auto` selection this server cannot honour with the default model. */
     dropStaleAutoSelection: () => void;
@@ -2902,7 +2908,7 @@ export const useConfigStore = create<ConfigStore>()(
                     set({ modelsMetadata: new Map<string, ModelMetadata>() });
                 },
 
-                setAgent: (agentName: string | undefined) => {
+                setAgent: (agentName: string | undefined, options?: { keepModel?: boolean }) => {
                     const {
                         agents,
                         providers,
@@ -2963,7 +2969,7 @@ export const useConfigStore = create<ConfigStore>()(
                         }
                     }
 
-                    if (agentName) {
+                    if (agentName && !options?.keepModel) {
                         const { currentSessionId } = useSessionUIStore.getState();
 
                         // Writes the effort alongside the model, because the two are one

@@ -280,9 +280,11 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           },
         },
       ]
+    // OpenCode stamps the session's update time with the switch, so a session
+    // read that left the server before it cannot roll the record back.
     case "session.agent.selected":
       return [
-        sessionEvent(event.data.sessionID, { agent: event.data.agent }),
+        sessionEvent(event.data.sessionID, { agent: event.data.agent, time: { updated: event.created } }),
         {
           type: "message.updated",
           properties: {
@@ -299,7 +301,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
       ]
     case "session.model.selected":
       return [
-        sessionEvent(event.data.sessionID, { model: event.data.model }),
+        sessionEvent(event.data.sessionID, { model: event.data.model, time: { updated: event.created } }),
         {
           type: "message.updated",
           properties: {

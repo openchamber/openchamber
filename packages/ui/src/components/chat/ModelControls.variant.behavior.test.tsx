@@ -44,6 +44,8 @@ const provider = { id: PROVIDER_ID, name: PROVIDER_ID, models: [model] };
 const agent = { id: AGENT, name: AGENT, displayName: 'Build', mode: 'primary' as const, hidden: false, request: { settings: {}, headers: {}, body: {} }, permissions: [] };
 /** v2 pins an agent's model, and its effort, in one model reference. */
 type TestAgent = typeof agent & { model?: { providerID: string; id: string; variant?: string } };
+const planAgent: TestAgent = { ...agent, id: 'plan', name: 'plan', displayName: 'Plan' };
+const reviewAgent: TestAgent = { ...agent, id: 'review', name: 'review', displayName: 'Review' };
 
 let latestUserChoice: UserModelChoice | null = null;
 /** Models and agents another directory's catalog lists, for the display fallback. */
@@ -75,7 +77,7 @@ type ConfigState = {
   setProvider: (providerId: string) => void;
   setSelectedProvider: (providerId: string) => void;
   setModel: (modelId: string) => void;
-  setAgent: (agentName: string) => void;
+  setAgent: (agentName: string, options?: { keepModel?: boolean }) => void;
   setCurrentVariant: (variant: string | undefined) => void;
   setCurrentVariantOverride: (override: VariantChoice, inherited: string | undefined) => void;
   getCurrentProvider: () => typeof provider | undefined;
@@ -103,7 +105,12 @@ const useConfigStore = create<ConfigState>((set, get) => ({
   setProvider: (providerId) => set({ currentProviderId: providerId }),
   setSelectedProvider: () => undefined,
   setModel: (modelId) => set({ currentModelId: modelId }),
-  setAgent: (agentName) => set({ currentAgentName: agentName }),
+  // Like the real store, picking an agent also records it for the open session.
+  setAgent: (agentName) => {
+    set({ currentAgentName: agentName });
+    const sessionId = useSessionUIStore.getState().currentSessionId;
+    if (sessionId) useSelectionStore.getState().saveSessionAgentSelection(sessionId, agentName);
+  },
   // Mirrors the real store, including its no-op guard: without that guard an
   // unchanged write returns a fresh state object every render and the
   // component's variant effects never settle.
@@ -134,12 +141,17 @@ const useConfigStore = create<ConfigState>((set, get) => ({
 type SelectionState = {
   savedVariant: VariantChoice;
   sessionAgentSelections: Map<string, string>;
+  sessionFollowedAgents: Map<string, string>;
+  sessionFollowedModels: Map<string, string>;
   getSessionModelSelection: () => { providerId: string; modelId: string } | null;
-  getSessionAgentSelection: () => string | null;
-  getAgentModelForSession: () => { providerId: string; modelId: string } | null;
+  getSessionAgentSelection: (sessionId: string) => string | null;
+  followSessionAgent: (sessionId: string, agent: string) => boolean;
+  isSessionModelSwitched: (sessionId: string, model: string) => boolean;
+  markSessionModelFollowed: (sessionId: string, model: string) => void;
+  getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null;
   getAgentModelVariantForSession: () => VariantChoice;
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;
-  saveSessionAgentSelection: () => void;
+  saveSessionAgentSelection: (sessionId: string, agentName: string) => void;
   saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void;
   saveAgentModelVariantForSession: (
     sessionId: string,
@@ -153,12 +165,32 @@ type SelectionState = {
 const useSelectionStore = create<SelectionState>((set, get) => ({
   savedVariant: undefined,
   sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
+  sessionFollowedAgents: new Map(),
+  sessionFollowedModels: new Map(),
   getSessionModelSelection: () => ({ providerId: PROVIDER_ID, modelId: MODEL_ID }),
-  getSessionAgentSelection: () => AGENT,
+  getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
+  // The real transition: only a record agent not followed yet moves the pick.
+  followSessionAgent: (sessionId, agentName) => {
+    if (get().sessionFollowedAgents.get(sessionId) === agentName) return false;
+    set((state) => ({
+      sessionFollowedAgents: new Map(state.sessionFollowedAgents).set(sessionId, agentName),
+      sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
+    }));
+    return true;
+  },
+  isSessionModelSwitched: (sessionId, modelKey) => {
+    const followed = get().sessionFollowedModels.get(sessionId);
+    return followed !== undefined && followed !== modelKey;
+  },
+  markSessionModelFollowed: (sessionId, modelKey) => set((state) => ({
+    sessionFollowedModels: new Map(state.sessionFollowedModels).set(sessionId, modelKey),
+  })),
   getAgentModelForSession: () => ({ providerId: PROVIDER_ID, modelId: MODEL_ID }),
   getAgentModelVariantForSession: () => get().savedVariant,
   saveSessionModelSelection: () => undefined,
-  saveSessionAgentSelection: () => undefined,
+  saveSessionAgentSelection: (sessionId, agentName) => set((state) => ({
+    sessionAgentSelections: new Map(state.sessionAgentSelections).set(sessionId, agentName),
+  })),
   saveAgentModelForSession: () => undefined,
   saveAgentModelVariantForSession: (_sessionId, _agentName, _providerId, _modelId, variant) => {
     variantWrites.push(variant);
@@ -227,11 +259,13 @@ mock.module('@/stores/contextStore', () => ({
 
 // The session record the composer restores its selection from; a test sets
 // it to drive the "open a historical session" path.
-let sessionRecord: { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string } } | undefined;
+type SessionRecord = { id: string; agent?: string; model?: { providerID: string; id: string; variant?: string } };
+const useSessionRecordStore = create<{ record: SessionRecord | undefined }>(() => ({ record: undefined }));
+const setSessionRecord = (record: SessionRecord | undefined) => useSessionRecordStore.setState({ record });
 mock.module('@/sync/sync-context', () => ({
   useSessionMessages: () => [],
   useSessionRenderable: () => true,
-  useSession: () => sessionRecord,
+  useSession: () => useSessionRecordStore((state) => state.record),
 }));
 mock.module('@/sync/use-sync', () => ({ useSync: () => ({ sessions: [] }) }));
 mock.module('@/sync/sync-refs', () => ({ getSyncParts: () => [] }));
@@ -373,11 +407,16 @@ describe('ModelControls effort restore', () => {
     overrideWrites.length = 0;
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
-    sessionRecord = undefined;
+    setSessionRecord(undefined);
     forcePreserveManualOverride = null;
     useSessionUIStore.setState({ currentSessionId: SESSION_ID });
     useUIStore.setState({ isMobile: false, isModelSelectorOpen: false });
-    useSelectionStore.setState({ savedVariant: undefined });
+    useSelectionStore.setState({
+      savedVariant: undefined,
+      sessionAgentSelections: new Map([[SESSION_ID, AGENT]]),
+      sessionFollowedAgents: new Map(),
+      sessionFollowedModels: new Map(),
+    });
     useConfigStore.setState({
       providers: [provider],
       agents: [agent],
@@ -462,7 +501,7 @@ describe('ModelControls effort restore', () => {
     // OpenCode 2 keeps model, variant and agent on the session itself; a
     // historical session opens on that selection even when its messages
     // are not in memory yet and the last reply says nothing.
-    sessionRecord = { id: SESSION_ID, agent: AGENT, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' } };
+    setSessionRecord({ id: SESSION_ID, agent: AGENT, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' } });
     latestUserChoice = null;
 
     const { cleanup } = await renderModelControls();
@@ -476,7 +515,7 @@ describe('ModelControls effort restore', () => {
   });
 
   test('the session record outranks an older reply in the transcript', async () => {
-    sessionRecord = { id: SESSION_ID, agent: AGENT, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' } };
+    setSessionRecord({ id: SESSION_ID, agent: AGENT, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' } });
     latestUserChoice = { id: 'msg-1', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID, variant: 'low' };
 
     const { cleanup } = await renderModelControls();
@@ -800,4 +839,147 @@ describe('ModelControls effort restore', () => {
       }
     });
   }
+
+  describe('following the session agent', () => {
+    const OTHER_MODEL_ID = 'gpt-other';
+    const recordOn = (agentName: string) => ({
+      id: SESSION_ID, agent: agentName, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' },
+    });
+    const agentLabel = (container: HTMLElement) => container.querySelector('.model-controls__agent-label')?.textContent;
+    /** The picker writes both stores, like `handleAgentChange`. */
+    const pickAgent = (agentName: string) => useConfigStore.getState().setAgent(agentName);
+    const switchSession = (sessionId: string) => act(async () => useSessionUIStore.setState({ currentSessionId: sessionId }));
+
+    beforeEach(() => {
+      useConfigStore.setState({ agents: [agent, planAgent, reviewAgent] });
+    });
+
+    test('a switch another client or a plugin made moves the picker, and keeps the session model', async () => {
+      setSessionRecord(recordOn(AGENT));
+      const selections = useSelectionStore.getState();
+      // What the session last ran on with Plan is not what it runs on now.
+      const getAgentModel = spyOn(selections, 'getAgentModelForSession');
+      getAgentModel.mockImplementation((_sessionId: string, agentName: string) => (
+        agentName === 'plan' ? { providerId: PROVIDER_ID, modelId: OTHER_MODEL_ID } : { providerId: PROVIDER_ID, modelId: MODEL_ID }
+      ));
+      useConfigStore.setState({ providers: [{ ...provider, models: [model, { ...model, id: OTHER_MODEL_ID, name: OTHER_MODEL_ID }] }] });
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        expect(agentLabel(dom.container)).toBe('Build');
+
+        await act(async () => setSessionRecord(recordOn('plan')));
+        // The agent-change effect waits 50ms before it applies a remembered model.
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+
+        expect(agentLabel(dom.container)).toBe('Plan');
+        expect(useConfigStore.getState().currentAgentName).toBe('plan');
+        expect(useSelectionStore.getState().getSessionAgentSelection(SESSION_ID)).toBe('plan');
+        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
+      } finally {
+        getAgentModel.mockRestore();
+        await cleanup();
+      }
+    });
+
+    test('a pick made after the session record survives reopening the session', async () => {
+      setSessionRecord(recordOn(AGENT));
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await act(async () => pickAgent('plan'));
+        await switchSession('ses_other');
+        await switchSession(SESSION_ID);
+
+        expect(agentLabel(dom.container)).toBe('Plan');
+        expect(useConfigStore.getState().currentAgentName).toBe('plan');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('a newer switch wins over a pick that was not sent', async () => {
+      setSessionRecord(recordOn(AGENT));
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await act(async () => pickAgent('plan'));
+        await act(async () => setSessionRecord(recordOn('review')));
+
+        expect(agentLabel(dom.container)).toBe('Review');
+        expect(useConfigStore.getState().currentAgentName).toBe('review');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    test('the picker follows a switch while a manual model choice is kept', async () => {
+      setSessionRecord(recordOn(AGENT));
+      forcePreserveManualOverride = true;
+      useConfigStore.setState({ selectionSource: 'manual' });
+      const { dom, cleanup } = await renderModelControls();
+      try {
+        await act(async () => setSessionRecord(recordOn('plan')));
+
+        expect(agentLabel(dom.container)).toBe('Plan');
+        expect(useConfigStore.getState().currentAgentName).toBe('plan');
+      } finally {
+        await cleanup();
+      }
+    });
+
+    const THIRD_MODEL_ID = 'gpt-third';
+    const recordWith = (modelId: string, agentName = AGENT) => ({
+      id: SESSION_ID, agent: agentName, model: { providerID: PROVIDER_ID, id: modelId },
+    });
+    const withModels = () => useConfigStore.setState({
+      providers: [{ ...provider, models: [model, ...[OTHER_MODEL_ID, THIRD_MODEL_ID].map((id) => ({ ...model, id, name: id }))] }],
+    });
+
+    test('a model switch made elsewhere wins over a model picked here, an unchanged record does not', async () => {
+      withModels();
+      // The picker holds a model the session has not been sent with yet.
+      useConfigStore.setState({ selectionSource: 'manual' });
+      setSessionRecord(recordWith(OTHER_MODEL_ID));
+      const { cleanup } = await renderModelControls();
+      try {
+        expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
+
+        await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
+        expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);
+      } finally {
+        await cleanup();
+      }
+    });
+
+    for (const change of ['agent', 'model'] as const) {
+      test(`Auto stays on screen when the session switches ${change}`, async () => {
+        withModels();
+        const selections = useSelectionStore.getState();
+        const auto = { providerId: AUTO_PROVIDER_ID, modelId: AUTO_MODEL_ID };
+        const spies = [spyOn(selections, 'getSessionModelSelection'), spyOn(selections, 'getAgentModelForSession')];
+        for (const spy of spies) spy.mockReturnValue(auto);
+        const saveModel = spyOn(selections, 'saveSessionModelSelection');
+        useRoutingStore.setState({ available: true, autoReady: true });
+        useConfigStore.setState({ currentProviderId: AUTO_PROVIDER_ID, currentModelId: AUTO_MODEL_ID });
+        setSessionRecord(recordWith(OTHER_MODEL_ID));
+        const { cleanup } = await renderModelControls();
+        try {
+          await act(async () => setSessionRecord(change === 'agent'
+            ? recordWith(OTHER_MODEL_ID, 'plan')
+            // The router moving the session to another model each turn.
+            : recordWith(THIRD_MODEL_ID)));
+          await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+
+          const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState();
+          expect([currentProviderId, currentModelId]).toEqual([AUTO_PROVIDER_ID, AUTO_MODEL_ID]);
+          expect(saveModel.mock.calls.some(([, providerId, modelId]) => !isAutoModel(providerId, modelId))).toBe(false);
+          // Auto hides the agent picker; the agent still follows for sends.
+          if (change === 'agent') expect(currentAgentName).toBe('plan');
+        } finally {
+          await cleanup();
+          for (const spy of [...spies, saveModel]) spy.mockRestore();
+          useSelectionStore.setState(selections);
+          useRoutingStore.setState({ available: false, autoReady: false });
+        }
+      });
+    }
+  });
 });

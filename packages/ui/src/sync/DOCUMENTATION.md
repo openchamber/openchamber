@@ -229,7 +229,14 @@ agent choices. Both a named effort and explicit `Default` survive reload, with
 the same 150-session persistence bound as the existing selections. Old payloads
 without effort entries remain valid; malformed effort entries grant no authority.
 Session deletion clears these entries. A saved effort choice precedes older
-message history so a reload cannot undo an unsent picker change.
+message history so a reload cannot undo an unsent picker change, unless the
+session record has since switched to another model and effort. The store also
+persists, per session, the session-record agent and model the composer last
+followed; a different record value is a newer switch and replaces the pick
+(Auto excepted), while an unchanged one keeps an unsent pick
+(`packages/ui/src/stores/DOCUMENTATION.md`).
+Agent and model switch events stamp the session's `time.updated`, as OpenCode's
+own record does.
 
 ### Layout-mounted session-list lifecycle
 
