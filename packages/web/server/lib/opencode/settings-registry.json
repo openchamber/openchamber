@@ -406,6 +406,9 @@
     "largeTextPasteBehavior": {
       "scope": "profile"
     },
+    "locale": {
+      "scope": "profile"
+    },
     "followUpBehavior": {
       "scope": "profile"
     },
