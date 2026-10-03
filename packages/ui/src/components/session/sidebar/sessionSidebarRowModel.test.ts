@@ -528,6 +528,19 @@ describe('buildSessionSidebarRowModel', () => {
       ]);
     });
 
+    test('a timeline run row carries the sessions that block its lanes', () => {
+      const input = args([]);
+      input.viewMode = 'timeline';
+      input.runIndex = runIndex;
+      input.timelineItems = [
+        timelineItem('lane-1', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-1', 'lane-1-subagent'] }] }),
+        timelineItem('lane-2', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-2'] }] }),
+      ];
+      const run = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'run');
+
+      expect(run?.kind === 'run' && [...run.blockingSessionIds]).toEqual(['lane-1', 'lane-1-subagent', 'lane-2']);
+    });
+
     test('timeline items collapse into one run row', () => {
       const input = args([]);
       input.viewMode = 'timeline';

@@ -36,8 +36,12 @@ export function CollapsedActivityIndicator({
   return <SessionActivityIndicator state={state === 'active' ? 'running' : 'unread'} className={className} />;
 }
 
-export const CollapsedSessionActivityIndicator: React.FC<{ nodes: SessionNode[]; includeUnreadSubtasks: boolean }> = ({ nodes, includeUnreadSubtasks }) => {
-  const resolved = useCollapsedSessionActivityState({ nodes, includeUnreadSubtasks });
+export const CollapsedSessionActivityIndicator: React.FC<{
+  nodes: SessionNode[];
+  blockingSessionIds?: readonly string[];
+  includeUnreadSubtasks: boolean;
+}> = ({ nodes, blockingSessionIds, includeUnreadSubtasks }) => {
+  const resolved = useCollapsedSessionActivityState({ nodes, blockingSessionIds, includeUnreadSubtasks });
   if (!resolved) return null;
   return <CollapsedActivityIndicator state={resolved} />;
 };

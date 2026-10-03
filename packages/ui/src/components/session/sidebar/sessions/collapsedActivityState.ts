@@ -62,6 +62,9 @@ export const getSessionNodesActivityState = (
 
 type SessionActivityProps = {
   nodes: readonly SessionNode[];
+  // Sessions not present as nodes whose pending requests still count, such as
+  // the hidden subagents of timeline rows.
+  blockingSessionIds?: readonly string[];
   includeUnreadSubtasks: boolean;
 };
 
@@ -79,10 +82,15 @@ const collectActivityIds = (nodes: readonly SessionNode[], includeUnreadSubtasks
 
 export const useCollapsedSessionActivityState = ({
   nodes,
+  blockingSessionIds,
   includeUnreadSubtasks,
   enabled = true,
 }: SessionActivityProps & { enabled?: boolean }): CollapsedActivityState => {
   const ids = React.useMemo(() => collectActivityIds(enabled ? nodes : [], includeUnreadSubtasks), [enabled, includeUnreadSubtasks, nodes]);
+  const blockingIds = React.useMemo(
+    () => (blockingSessionIds && blockingSessionIds.length > 0 ? new Set([...ids.active, ...blockingSessionIds]) : ids.active),
+    [blockingSessionIds, ids.active],
+  );
   const active = useGlobalSessionStatusStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     for (const sessionId of ids.active) {
@@ -113,13 +121,13 @@ export const useCollapsedSessionActivityState = ({
   const blocked = useGlobalBlockingRequestsStore(React.useCallback((state): CollapsedActivityState => {
     if (!enabled) return null;
     let result: CollapsedActivityState = null;
-    for (const sessionId of ids.active) {
+    for (const sessionId of blockingIds) {
       const pending = state.bySession.get(sessionId);
       if (!pending) continue;
       if (pending.permissions.length > 0) return 'permission';
       if (pending.forms.length > 0) result = 'form';
     }
     return result;
-  }, [enabled, ids.active]));
+  }, [enabled, blockingIds]));
   return blocked ?? active ?? waitingOnShell ?? unread;
 };

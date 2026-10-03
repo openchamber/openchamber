@@ -58,7 +58,7 @@ export type SessionSidebarRow =
   // A multi-run: one derived parent row over its member sessions. It is not a
   // session, so it never enters selection, and its lanes render as session
   // rows one level deeper when it is expanded.
-  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; blockingSessionIds: readonly string[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'group' | 'archived'; group?: SessionGroup; projectId?: string | null })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number });
@@ -335,6 +335,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const expanded = options.renderContext !== 'timeline' && (search || args.expandedParents.has(expansionKey));
     const firstLaneId = entry.lanes[0]?.session.id;
     const meta = firstLaneId && options.getSecondaryMeta ? options.getSecondaryMeta(firstLaneId) : options.secondaryMeta;
+    // Activity lanes come without their subagent rows, so the sessions whose
+    // requests block a lane (the lane and its hidden subagents) ride along for
+    // the run row's badge.
+    const blockingSessionIds = Object.freeze([...new Set(entry.lanes.flatMap((lane) => (
+      options.getBlockingBadgeSessionScopes?.(lane.session.id) ?? []
+    ).flatMap((scope) => scope.sessionIDs)))]);
     push({
       kind: 'run',
       key: keyFor(`${options.containerKey}:run:${entry.run.key}`),
@@ -342,6 +348,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       run: entry.run,
       depth: options.baseDepth ?? 0,
       laneNodes: Object.freeze([...entry.lanes]),
+      blockingSessionIds,
       projectId: options.projectId,
       projectLabel: meta?.projectLabel ?? null,
       groupDirectory: options.groupDirectory,

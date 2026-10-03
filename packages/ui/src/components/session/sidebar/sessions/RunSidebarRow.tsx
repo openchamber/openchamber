@@ -24,6 +24,8 @@ type Props = {
   run: MultiRunSummary;
   depth: number;
   laneNodes: readonly SessionNode[];
+  // Sessions whose pending requests block a lane, hidden subagents included.
+  blockingSessionIds: readonly string[];
   renderContext: SessionSidebarRenderContext;
   projectId: string | null;
   projectLabel: string | null;
@@ -50,6 +52,7 @@ function RunSidebarRowComponent({
   run,
   depth,
   laneNodes,
+  blockingSessionIds,
   renderContext,
   projectId,
   projectLabel,
@@ -70,7 +73,7 @@ function RunSidebarRowComponent({
     ? t('sessions.sidebar.run.laneCountSingle', { count: laneCount })
     : t('sessions.sidebar.run.laneCountPlural', { count: laneCount });
   const activityNodes = React.useMemo(() => [...laneNodes], [laneNodes]);
-  const activity = <CollapsedSessionActivityIndicator nodes={activityNodes} includeUnreadSubtasks={notifyOnSubtasks} />;
+  const activity = <CollapsedSessionActivityIndicator nodes={activityNodes} blockingSessionIds={blockingSessionIds} includeUnreadSubtasks={notifyOnSubtasks} />;
   const titleClassName = isActive ? 'text-interactive-selection-foreground' : 'text-foreground/80';
   const openOverview = () => useUIStore.getState().setRunOverviewKey(run.key);
 

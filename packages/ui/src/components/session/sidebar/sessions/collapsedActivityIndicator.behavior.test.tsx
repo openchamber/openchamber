@@ -78,4 +78,32 @@ describe('collapsed activity scalar selector', () => {
       dom.restore();
     }
   });
+
+  test('counts a request from a session that is listed only as blocking, such as a hidden subagent', async () => {
+    const dom = installHookTestDom();
+    const root = createRoot(dom.container);
+    replaceGlobalSessionStatusById(new Map());
+    const capture: { state: string | null } = { state: null };
+    const Harness = () => {
+      capture.state = useCollapsedSessionActivityState({
+        nodes: [node('lane')],
+        blockingSessionIds: ['lane', 'lane-subagent'],
+        includeUnreadSubtasks: true,
+      });
+      return null;
+    };
+    try {
+      await act(async () => root.render(React.createElement(Harness)));
+      expect(capture.state).toBeNull();
+      await act(async () => applyGlobalBlockingRequestEvents('/workspace', [{
+        type: 'permission.asked',
+        properties: { id: 'p-sub', sessionID: 'lane-subagent', action: 'bash', resources: [] },
+      }]));
+      expect(capture.state).toBe('permission');
+    } finally {
+      await act(async () => root.unmount());
+      resetGlobalBlockingRequests();
+      dom.restore();
+    }
+  });
 });
