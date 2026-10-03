@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
-import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
+import { selectAgentsForDirectory, useAgentsStore, isAgentBuiltIn, isAgentManageable, type AgentScope, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@/lib/opencode/model';
@@ -164,6 +164,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       top_p: body?.top_p,
       mode: envelope.config.mode ?? extAgent.mode,
       permissions: envelope.config.permissions ?? undefined,
+      hidden: envelope.config.hidden,
     });
     setSelectedAgent(newName);
     onItemSelect?.();
@@ -239,9 +240,9 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
   };
 
-  // Filter out hidden agents (internal agents like title, compaction, summary)
-  const visibleAgents = agents.filter((agent) => !isAgentHidden(agent));
-  const shownAgents = visibleAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
+  // Hidden custom agents stay manageable here even though pickers exclude them.
+  const manageableAgents = agents.filter(isAgentManageable);
+  const shownAgents = manageableAgents.filter((agent) => matchesRankQuery([agent.name, agent.description], query));
   const builtInAgents = shownAgents.filter(isAgentBuiltIn);
   const customAgents = shownAgents.filter((agent) => !isAgentBuiltIn(agent));
 
@@ -270,7 +271,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.agents.sidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: visibleAgents.length })}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.agents.sidebar.total', { count: manageableAgents.length })}</span>
           <Button size="sm"
             data-settings-item="agents.create"
             variant="ghost"
@@ -280,11 +281,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         </div>
-        {visibleAgents.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
+        {manageableAgents.length > 0 ? <SettingsSidebarSearch value={query} onChange={setQuery} /> : null}
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
-        {visibleAgents.length === 0 ? (
+        {manageableAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <Icon name="robot-2" className="mx-auto mb-3 h-10 w-10 opacity-50" />
             <p className="typography-ui-label font-medium">{t('settings.agents.sidebar.empty.title')}</p>

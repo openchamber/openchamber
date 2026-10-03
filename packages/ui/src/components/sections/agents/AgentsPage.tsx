@@ -300,6 +300,7 @@ export const AgentsPage: React.FC = () => {
     };
     if (trimmedDescription) config.description = trimmedDescription;
     if (isNewAgent && draftScope) config.scope = draftScope;
+    if (isNewAgent && agentDraft?.hidden !== undefined) config.hidden = agentDraft.hidden;
     // A duplicate carries the source agent's rules; the permissions editor only
     // appears once the agent exists, so this is the one path that writes them
     // at creation time.

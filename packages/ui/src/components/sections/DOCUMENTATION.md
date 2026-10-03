@@ -128,6 +128,8 @@ the documented way to keep a server configured but inactive, and the page's
 
 ### Agent permissions
 
+Settings lists hidden custom agents so their files remain editable, renameable, and deletable. Hidden built-in agents stay out of Settings, and all hidden agents stay out of the composer pickers. Duplicate and rename read the stored entry and preserve its `hidden` flag.
+
 OpenCode 2 replaced the v1 `permission` map (`bash`/`task`/`list`/`lsp` keys with
 allow/deny/ask per pattern) with an ORDERED list of `{ action, resource, effect }`
 rules where the LAST match wins. The user does not think in ordered rules, so
