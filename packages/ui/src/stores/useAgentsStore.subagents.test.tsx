@@ -97,7 +97,8 @@ describe('Settings hidden custom subagents', () => {
 
   test('keeps a hidden agent out when its config lookup fails', async () => {
     // v2 lists agents without a built-in flag; only the config lookup supplies it.
-    const { native: _native, ...unflaggedTitle } = agent('title', true);
+    const unflaggedTitle = agent('title', true);
+    Reflect.deleteProperty(unflaggedTitle, 'native');
     listedAgents = [agent('build', false, true), unflaggedTitle, agent('hidden-custom', true)];
     failingConfigLookups = new Set(['title']);
     const warn = spyOn(console, 'warn').mockImplementation(() => {});
