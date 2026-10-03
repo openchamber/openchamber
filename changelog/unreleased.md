@@ -53,7 +53,7 @@ title: One picker for issues and PRs, and security fixes
 - Translations: French polished (thanks to @pascalandr), Chinese completed (thanks to @brushax and @xianshi3).
 
 ### Fixes
-- **Security:** fixes from a private security report. A remote server's page in the desktop app can no longer plant code or read other servers' tokens, a password no longer leaks through self-update logs, HTML file previews and theme files cannot run code in the app, sandboxed pages cannot open terminal connections, and remote images in agent output show as links.
+- **Security:** fixes from a private security report. A remote server's page in the desktop app can no longer plant code or read other servers' tokens, a password no longer leaks through self-update logs, HTML file previews and theme files cannot run code in the app, sandboxed pages cannot open terminal connections, and remote images in agent output show as links (thanks to [Raindrops.dev](https://www.raindrops.dev) for the report).
 - Notifications: push notifications on phones are encrypted end to end, and the session name no longer passes through the relay.
 - MCP: servers start only for the project you are in, not for every project, every chat you opened or your home folder, so far fewer background processes pile up.
 - Git: git commands get the environment OpenChamber prepares, so hooks run cleanly in the Linux AppImage and git no longer waits on a hidden password prompt on Windows.
