@@ -33,6 +33,14 @@ describe('parseSessionLink', () => {
         expect(parseSessionLink(href, [])).toBeNull();
     });
 
+    test('reads a link that is just a session id', () => {
+        expect(parseSessionLink('ses_efdbcde57ffeWPNoQ8p0LyWi3X', [])).toEqual({ sessionId: 'ses_efdbcde57ffeWPNoQ8p0LyWi3X', messageId: null });
+        expect(parseSessionLink('/ses_a', [])).toEqual({ sessionId: 'ses_a', messageId: null });
+        expect(parseSessionLink('docs/ses_a', [])).toBeNull();
+        expect(parseSessionLink('ses_a.md', [])).toBeNull();
+        expect(isSessionDeepLink('ses_a')).toBe(false);
+    });
+
     test('ignores other routes and malformed IDs', () => {
         expect(parseSessionLink('openchamber://connect?v=2&p=x', [])).toBeNull();
         expect(parseSessionLink('openchamber://session/ses_a/extra', [])).toBeNull();

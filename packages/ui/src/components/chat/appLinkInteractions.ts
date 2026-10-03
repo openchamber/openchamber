@@ -49,15 +49,15 @@ const isPlainPrimaryClick = (event: MouseEvent): boolean => (
 );
 
 // A session link opens in place. A web session link clicked with a modifier
-// keeps the browser's own meaning (a new tab); the native deep link has no
-// other place to open.
+// keeps the browser's own meaning (a new tab); the native deep link and a bare
+// session id have no other place to open.
 const interceptSessionLink = (event: MouseEvent, options: AppLinkInteractionOptions): boolean => {
   const openSessionLink = options.openSessionLink;
   if (!openSessionLink || event.defaultPrevented) return false;
   const href = findLink(event)?.getAttribute('href') ?? '';
   const target = parseSessionLink(href, options.ownOrigins ?? []);
   if (!target) return false;
-  if (!href.toLowerCase().startsWith('openchamber:') && !isPlainPrimaryClick(event)) return false;
+  if (isExternalHttpUrl(href) && !isPlainPrimaryClick(event)) return false;
 
   event.preventDefault();
   event.stopPropagation();

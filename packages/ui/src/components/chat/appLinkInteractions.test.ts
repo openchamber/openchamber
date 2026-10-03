@@ -107,6 +107,17 @@ describe('app link interactions', () => {
     expect(httpLinks).toEqual([]);
   });
 
+  test('opens a bare session id link in place, with or without a modifier', () => {
+    const { container, sessionLinks } = setup();
+
+    expect(container.dispatch('click', 'ses_a').defaultPrevented).toBe(true);
+    expect(container.dispatch('click', 'ses_a', { metaKey: true }).defaultPrevented).toBe(true);
+    expect(sessionLinks).toEqual([
+      { sessionId: 'ses_a', messageId: null },
+      { sessionId: 'ses_a', messageId: null },
+    ]);
+  });
+
   test('leaves a modifier click on a web session link and other origins to the browser path', () => {
     const { container, sessionLinks, httpLinks } = setup();
 

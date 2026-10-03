@@ -2340,8 +2340,13 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       });
       return { action: 'deny' };
     }
+    // A page of this app opened into a new window would be a bare browser
+    // window: no desktop runtime, no window chrome, no credentials. A link to
+    // a session here moves this window to it; any other app page stays put.
     if (isAllowedNavigationUrl(url, { includeHosts: false })) {
-      return { action: 'allow' };
+      const route = sessionRouteFromUrl(url);
+      if (route) emitToWindow(browserWindow, 'openchamber:open-session', route);
+      return { action: 'deny' };
     }
     void shell.openExternal(url).catch(() => {});
     return { action: 'deny' };

@@ -36,6 +36,11 @@ export const buildMessageLink = (sessionId: string, messageId: string, form: Mes
     return url.toString();
 };
 
+// An agent that knows only a session id writes it as the whole link
+// (`[read it](ses_…)`). Left alone, the page resolves it against its own
+// address: a dead route on the web, a bare page of the app on desktop.
+const BARE_SESSION_ID_RE = /^\/?(ses_[A-Za-z0-9_-]+)$/;
+
 const parseTarget = (sessionId: string | null | undefined, messageId: string | null): SessionLinkTarget | null => {
     if (!sessionId || !isLinkIdentifier(sessionId)) return null;
     if (messageId === null) return { sessionId, messageId: null };
@@ -46,9 +51,13 @@ const parseTarget = (sessionId: string | null | undefined, messageId: string | n
  * Reads a session or message link, as found in chat content. `ownOrigins` are
  * the addresses that serve this instance (the page, and the instance the app
  * is connected to): web links count only when they point at one of them.
- * Anything else, including other native deep links, is not a session link.
+ * A link that is just a session id counts too. Anything else, including other
+ * native deep links, is not a session link.
  */
 export const parseSessionLink = (href: string, ownOrigins: readonly string[]): SessionLinkTarget | null => {
+    const bareSessionId = BARE_SESSION_ID_RE.exec(href.trim())?.[1];
+    if (bareSessionId) return parseTarget(bareSessionId, null);
+
     let url: URL;
     try {
         url = new URL(href);
