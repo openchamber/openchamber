@@ -2221,6 +2221,880 @@ describe('git remote arguments with option-like names', () => {
 // ---------------------------------------------------------------------------
 
 describe('removeWorktree', () => {
+  const createRemovalWorktree = () => {
+    const repo = fs.realpathSync(createTempDir());
+    const worktree = path.join(fs.realpathSync(createTempDir()), 'linked');
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'init']);
+    runGit(repo, ['worktree', 'add', '-b', 'feature/remove', worktree]);
+    const gitEntry = path.join(worktree, '.git');
+    const metadata = fs.realpathSync(fs.readFileSync(gitEntry, 'utf8').slice('gitdir: '.length).trim());
+    return { repo, worktree, gitEntry, metadata };
+  };
+
+  const installGitDirectoryLink = ({ worktree, gitEntry, metadata }, absolute = false) => {
+    const linkTarget = absolute ? metadata : path.relative(worktree, metadata);
+    fs.unlinkSync(gitEntry);
+    fs.symlinkSync(linkTarget, gitEntry, 'dir');
+    return linkTarget;
+  };
+
+  const interceptGitFileReplacement = (gitEntry, afterReplacement) => {
+    const link = fs.promises.link.bind(fs.promises);
+    let intercepted = false;
+    return vi.spyOn(fs.promises, 'link').mockImplementation(async (source, destination) => {
+      await link(source, destination);
+      if (destination === gitEntry && !intercepted) {
+        intercepted = true;
+        afterReplacement();
+      }
+    });
+  };
+
+  it('removes a registered worktree with a relative .git directory symlink', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      deleteLocalBranch: true,
+    })).resolves.toBe(true);
+
+    expect(fs.existsSync(fixture.worktree)).toBe(false);
+    expect(fs.existsSync(fixture.metadata)).toBe(false);
+    expect(() => runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toThrow();
+    expect(runGit(fixture.repo, ['worktree', 'list', '--porcelain'])).not.toContain(fixture.worktree);
+  });
+
+  it('removes an absolute .git directory symlink only after instance disposal', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const linkTarget = installGitDirectoryLink(fixture, true);
+    const disposalStates = [];
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      disposeInstance: async (directory) => {
+        disposalStates.push({
+          directory,
+          linkTarget: fs.readlinkSync(fixture.gitEntry),
+          metadataExists: fs.existsSync(fixture.metadata),
+          branch: runGit(directory, ['rev-parse', '--abbrev-ref', 'HEAD']).trim(),
+        });
+      },
+    })).resolves.toBe(true);
+
+    expect(disposalStates).toEqual([{
+      directory: fixture.worktree,
+      linkTarget,
+      metadataExists: true,
+      branch: 'feature/remove',
+    }]);
+    expect(fs.existsSync(fixture.worktree)).toBe(false);
+    expect(fs.existsSync(fixture.metadata)).toBe(false);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each([false, true])('removes a standard .git file with deleteLocalBranch=%s', async (deleteLocalBranch) => {
+    if (!canRunGit()) return;
+    const fixture = createRemovalWorktree();
+    expect(fs.lstatSync(fixture.gitEntry).isFile()).toBe(true);
+    const renameSpy = vi.spyOn(fs.promises, 'rename');
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch,
+      })).resolves.toBe(true);
+      expect(renameSpy).not.toHaveBeenCalled();
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(fixture.worktree)).toBe(false);
+    expect(fs.existsSync(fixture.metadata)).toBe(false);
+    if (deleteLocalBranch) {
+      expect(() => runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toThrow();
+    } else {
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+    }
+  });
+
+  it.each(['file', 'symlink'])('preserves a concurrent .git %s installed before conversion claims the entry', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const originalTarget = installGitDirectoryLink(fixture);
+    const concurrentContents = kind === 'file'
+      ? `gitdir: ${fixture.metadata}\nconcurrent entry must survive\n`
+      : `./${originalTarget}`;
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const branchHead = runGit(fixture.repo, ['rev-parse', 'feature/remove']).trim();
+    const rename = fs.promises.rename.bind(fs.promises);
+    let injected = false;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      const changesGitEntry = (source === fixture.gitEntry && destination.startsWith(`${fixture.gitEntry}.openchamber-`))
+        || (destination === fixture.gitEntry && source.startsWith(`${fixture.gitEntry}.openchamber-`));
+      if (!injected && changesGitEntry && fs.lstatSync(fixture.gitEntry).isSymbolicLink()) {
+        injected = true;
+        execFileSync(process.execPath, ['-e', `
+          const fs = require('node:fs');
+          const [entry, kind, contents] = process.argv.slice(1);
+          const staged = entry + '.concurrent';
+          if (kind === 'file') fs.writeFileSync(staged, contents, { flag: 'wx' });
+          else fs.symlinkSync(contents, staged, 'dir');
+          fs.renameSync(staged, entry);
+        `, fixture.gitEntry, kind, concurrentContents], { stdio: 'pipe', timeout: 10_000 });
+      }
+      await rename(source, destination);
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow();
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    expect(injected).toBe(true);
+    const entry = fs.lstatSync(fixture.gitEntry);
+    if (kind === 'file') {
+      expect(entry.isFile()).toBe(true);
+      expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe(concurrentContents);
+    } else {
+      expect(entry.isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(fixture.gitEntry)).toBe(concurrentContents);
+    }
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(runGit(fixture.repo, ['rev-parse', 'feature/remove']).trim()).toBe(branchHead);
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+  });
+
+  it.each(['file', 'symlink'])('preserves a newer .git %s created during exclusive installation', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const originalTarget = installGitDirectoryLink(fixture);
+    const concurrentContents = kind === 'file' ? 'newest concurrent gitdir file\n' : `./${originalTarget}`;
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const link = fs.promises.link.bind(fs.promises);
+    let injected = false;
+    const linkSpy = vi.spyOn(fs.promises, 'link').mockImplementation(async (source, destination) => {
+      if (!injected && destination === fixture.gitEntry) {
+        injected = true;
+        if (kind === 'file') fs.writeFileSync(destination, concurrentContents, { flag: 'wx' });
+        else fs.symlinkSync(concurrentContents, destination, 'dir');
+      }
+      await link(source, destination);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow();
+      expect(injected).toBe(true);
+      if (kind === 'file') expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe(concurrentContents);
+      else expect(fs.readlinkSync(fixture.gitEntry)).toBe(concurrentContents);
+      const claims = fs.readdirSync(fixture.worktree).filter(name => name.startsWith('.git.openchamber-'));
+      expect(claims).toHaveLength(1);
+      const claim = path.join(fixture.worktree, claims[0]);
+      expect(fs.readlinkSync(claim)).toBe(originalTarget);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claim));
+      expect(fs.existsSync(fixture.metadata)).toBe(true);
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+    } finally {
+      linkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('leaves the original .git entry untouched when preparation cannot claim it', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const originalTarget = installGitDirectoryLink(fixture);
+    const rename = fs.promises.rename.bind(fs.promises);
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === fixture.gitEntry) throw new Error('claim denied');
+      await rename(source, destination);
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow();
+    } finally {
+      renameSpy.mockRestore();
+    }
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(originalTarget);
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('retains the claimed symlink when preparation cannot install or restore .git', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const originalTarget = installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const installationError = new Error('installation denied');
+    const linkSpy = vi.spyOn(fs.promises, 'link').mockRejectedValue(installationError);
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockRejectedValue(new Error('restoration denied'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toBe(installationError);
+      expect(fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false })).toBeUndefined();
+      const claims = fs.readdirSync(fixture.worktree).filter(name => name.startsWith('.git.openchamber-'));
+      expect(claims).toHaveLength(1);
+      const claim = path.join(fixture.worktree, claims[0]);
+      expect(fs.readlinkSync(claim)).toBe(originalTarget);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claim));
+      expect(fs.existsSync(fixture.metadata)).toBe(true);
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+    } finally {
+      linkSpy.mockRestore();
+      symlinkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it.each(['worktree', 'metadata'])('does not recreate a %s removed after the preparation claim', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const originalTarget = installGitDirectoryLink(fixture);
+    const removedPath = kind === 'worktree' ? fixture.worktree : fixture.metadata;
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      const claimsSymlink = source === fixture.gitEntry && fs.lstatSync(source).isSymbolicLink();
+      await rename(source, destination);
+      if (claimsSymlink) {
+        claimedEntry = destination;
+        fs.rmSync(removedPath, { recursive: true, force: true });
+      }
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow();
+      expect(claimedEntry).toBeDefined();
+      expect(fs.existsSync(removedPath)).toBe(false);
+      expect(fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false })).toBeUndefined();
+      if (kind === 'metadata') expect(fs.readlinkSync(claimedEntry)).toBe(originalTarget);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claimedEntry));
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+    } finally {
+      renameSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  it.each([false, true])('restores the exact .git symlink target after locked removal fails, absolute=%s', async (absolute) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    let linkTarget = installGitDirectoryLink(fixture, absolute);
+    if (!absolute) {
+      fs.unlinkSync(fixture.gitEntry);
+      linkTarget = `.//${linkTarget}`;
+      fs.symlinkSync(linkTarget, fixture.gitEntry, 'dir');
+    }
+    const branchHead = runGit(fixture.repo, ['rev-parse', 'feature/remove']).trim();
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+
+    const replacementStates = [];
+    const recordReplacement = () => replacementStates.push({
+      kind: fs.lstatSync(fixture.gitEntry).isSymbolicLink() ? 'symlink' : 'file',
+      metadataExists: fs.existsSync(fixture.metadata),
+    });
+    const link = fs.promises.link.bind(fs.promises);
+    const linkSpy = vi.spyOn(fs.promises, 'link').mockImplementation(async (source, destination) => {
+      await link(source, destination);
+      if (destination === fixture.gitEntry) recordReplacement();
+    });
+    const symlink = fs.promises.symlink.bind(fs.promises);
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockImplementation(async (target, destination, type) => {
+      await symlink(target, destination, type);
+      if (destination === fixture.gitEntry) recordReplacement();
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+    } finally {
+      linkSpy.mockRestore();
+      symlinkSpy.mockRestore();
+    }
+
+    expect(replacementStates).toEqual([
+      { kind: 'file', metadataExists: true },
+      { kind: 'symlink', metadataExists: true },
+    ]);
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(fs.readFileSync(path.join(fixture.metadata, 'commondir'), 'utf8')).toBe('../..\n');
+    expect(fs.readFileSync(path.join(fixture.metadata, 'gitdir'), 'utf8').trim()).toBe(fixture.gitEntry);
+    expect(fs.readFileSync(path.join(fixture.worktree, 'README.md'), 'utf8')).toBe('# Test\n');
+    expect(runGit(fixture.repo, ['rev-parse', 'feature/remove']).trim()).toBe(branchHead);
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+  });
+
+  it.each(['edited file', 'replacement file', 'symlink'])('does not overwrite a concurrent .git %s after removal fails', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    let concurrentEntry;
+    let concurrentContents;
+    const renameSpy = interceptGitFileReplacement(fixture.gitEntry, () => {
+      const contents = fs.readFileSync(fixture.gitEntry, 'utf8');
+      expect(contents).toBe(`gitdir: ${fixture.metadata}\n`);
+      if (kind === 'edited file') {
+        fs.writeFileSync(fixture.gitEntry, `${contents}concurrent change\n`);
+      } else if (kind === 'replacement file') {
+        const replacement = path.join(fixture.worktree, 'replacement');
+        fs.writeFileSync(replacement, contents);
+        fs.renameSync(replacement, fixture.gitEntry);
+      } else {
+        fs.unlinkSync(fixture.gitEntry);
+        fs.symlinkSync(fixture.metadata, fixture.gitEntry, 'dir');
+      }
+      concurrentEntry = fs.lstatSync(fixture.gitEntry);
+      concurrentContents = kind === 'symlink'
+        ? fs.readlinkSync(fixture.gitEntry) : fs.readFileSync(fixture.gitEntry, 'utf8');
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    expect(fs.lstatSync(fixture.gitEntry).ino).toBe(concurrentEntry.ino);
+    expect(kind === 'symlink' ? fs.readlinkSync(fixture.gitEntry) : fs.readFileSync(fixture.gitEntry, 'utf8')).toBe(concurrentContents);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+  });
+
+  it.each(['worktree', 'metadata', '.git'])('does not recreate a %s deleted during failed removal', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const removedPath = kind === 'worktree' ? fixture.worktree
+      : kind === 'metadata' ? fixture.metadata : fixture.gitEntry;
+    const renameSpy = interceptGitFileReplacement(fixture.gitEntry, () => {
+      fs.rmSync(removedPath, { recursive: true, force: true });
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow();
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(removedPath)).toBe(false);
+    if (kind === 'metadata') {
+      expect(fs.lstatSync(fixture.gitEntry).isFile()).toBe(true);
+      expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe(`gitdir: ${fixture.metadata}\n`);
+    }
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('does not overwrite a .git edit made while rollback is being prepared', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const symlink = fs.promises.symlink.bind(fs.promises);
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockImplementation(async (target, destination, type) => {
+      if (path.dirname(destination) === fixture.worktree) {
+        fs.writeFileSync(fixture.gitEntry, 'concurrent gitdir file\n');
+      }
+      await symlink(target, destination, type);
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+    } finally {
+      symlinkSpy.mockRestore();
+    }
+
+    expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe('concurrent gitdir file\n');
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each(['edit', 'delete'])('preserves a concurrent .git %s at the rollback rename boundary', async (change) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let injected = false;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      const claimsEntry = source === fixture.gitEntry && fs.lstatSync(source).isFile();
+      if (!injected && claimsEntry) {
+        injected = true;
+        if (change === 'edit') fs.writeFileSync(fixture.gitEntry, 'concurrent gitdir contents\n');
+        else fs.unlinkSync(fixture.gitEntry);
+      }
+      await rename(source, destination);
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+    } finally {
+      renameSpy.mockRestore();
+    }
+
+    expect(injected).toBe(true);
+    const entry = fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false });
+    if (change === 'edit') {
+      expect(entry?.isFile()).toBe(true);
+      expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe('concurrent gitdir contents\n');
+    } else {
+      expect(entry).toBeUndefined();
+    }
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(change === 'edit' ? ['.git', 'README.md'] : ['README.md']);
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each(['directory', 'file', 'dangling'])('restores a claimed concurrent %s symlink when hardlinks follow source symlinks', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const target = kind === 'directory' ? fixture.metadata : path.join(fixture.repo, 'concurrent.gitdir');
+    const contents = `gitdir: ${fixture.metadata}\n`;
+    if (kind === 'file') fs.writeFileSync(target, contents);
+    const linkTarget = Buffer.from(`.//${path.relative(fixture.worktree, target)}`);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === fixture.gitEntry && fs.lstatSync(source).isFile()) {
+        claimedEntry = destination;
+        fs.unlinkSync(source);
+        fs.symlinkSync(linkTarget, source, kind === 'directory' ? 'dir' : 'file');
+      }
+      await rename(source, destination);
+    });
+    const link = fs.promises.link.bind(fs.promises);
+    // Darwin link(2) follows its source symlink; use real filesystem operations
+    // with that behaviour so this recovery case runs on Linux too.
+    const linkSpy = vi.spyOn(fs.promises, 'link').mockImplementation(async (source, destination) => {
+      await link(await fs.promises.realpath(source), destination);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(claimedEntry).toBeDefined();
+      expect(fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false })?.isSymbolicLink()).toBe(true);
+      expect(fs.readlinkSync(fixture.gitEntry, { encoding: 'buffer' })).toEqual(linkTarget);
+      expect(fs.lstatSync(claimedEntry, { throwIfNoEntry: false })).toBeUndefined();
+      expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+      if (kind === 'file') {
+        expect(fs.statSync(target).nlink).toBe(1);
+        expect(fs.readFileSync(target, 'utf8')).toBe(contents);
+      }
+      if (kind === 'dangling') expect(fs.existsSync(target)).toBe(false);
+      else expect(runGit(fixture.worktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature/remove');
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      renameSpy.mockRestore();
+      linkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+  });
+
+  it('retains a claimed concurrent symlink when symlink restoration fails', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const linkTarget = Buffer.from(`.//${path.relative(fixture.worktree, fixture.metadata)}`);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === fixture.gitEntry && fs.lstatSync(source).isFile()) {
+        claimedEntry = destination;
+        fs.unlinkSync(source);
+        fs.symlinkSync(linkTarget, source, 'dir');
+      }
+      await rename(source, destination);
+    });
+    const restoreError = new Error('concurrent symlink restoration denied');
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockRejectedValue(restoreError);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(claimedEntry).toBeDefined();
+      expect(fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false })).toBeUndefined();
+      expect(fs.readlinkSync(claimedEntry, { encoding: 'buffer' })).toEqual(linkTarget);
+      expect(fs.existsSync(fixture.metadata)).toBe(true);
+      expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claimedEntry));
+    } finally {
+      renameSpy.mockRestore();
+      symlinkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+  });
+
+  it.each(['file', 'symlink'])('retains a claimed symlink changed to a %s while its target is restored', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const linkTarget = Buffer.from(`.//${path.relative(fixture.worktree, fixture.metadata)}`);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === fixture.gitEntry && fs.lstatSync(source).isFile()) {
+        claimedEntry = destination;
+        fs.unlinkSync(source);
+        fs.symlinkSync(linkTarget, source, 'dir');
+      }
+      await rename(source, destination);
+    });
+    const symlink = fs.promises.symlink.bind(fs.promises);
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockImplementation(async (target, destination, type) => {
+      await symlink(target, destination, type);
+      if (destination === fixture.gitEntry) {
+        fs.unlinkSync(claimedEntry);
+        if (kind === 'file') fs.writeFileSync(claimedEntry, 'concurrent recovery contents\n');
+        else fs.symlinkSync('other-concurrent-target', claimedEntry);
+      }
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(fs.readlinkSync(fixture.gitEntry, { encoding: 'buffer' })).toEqual(linkTarget);
+      expect(fs.lstatSync(claimedEntry, { throwIfNoEntry: false })).toBeDefined();
+      if (kind === 'file') expect(fs.readFileSync(claimedEntry, 'utf8')).toBe('concurrent recovery contents\n');
+      else expect(fs.readlinkSync(claimedEntry)).toBe('other-concurrent-target');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claimedEntry));
+    } finally {
+      renameSpy.mockRestore();
+      symlinkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each(['file', 'symlink'])('retains a claimed concurrent .git %s when a newer entry prevents putting it back', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      const claimsTemporaryEntry = source === fixture.gitEntry && fs.lstatSync(source).isFile();
+      if (claimsTemporaryEntry) {
+        claimedEntry = destination;
+        if (kind === 'file') {
+          fs.writeFileSync(source, 'older concurrent gitdir file\n');
+        } else {
+          fs.unlinkSync(source);
+          fs.symlinkSync(fixture.metadata, source, 'dir');
+        }
+      }
+      await rename(source, destination);
+      if (claimsTemporaryEntry) fs.writeFileSync(source, 'newest concurrent gitdir file\n');
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(claimedEntry).toBeDefined();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claimedEntry));
+    } finally {
+      renameSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe('newest concurrent gitdir file\n');
+    if (kind === 'file') expect(fs.readFileSync(claimedEntry, 'utf8')).toBe('older concurrent gitdir file\n');
+    else expect(fs.readlinkSync(claimedEntry)).toBe(fixture.metadata);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('retains a claimed concurrent directory at the logged recovery path', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const rename = fs.promises.rename.bind(fs.promises);
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      if (source === fixture.gitEntry && fs.lstatSync(source).isFile()) {
+        claimedEntry = destination;
+        fs.unlinkSync(source);
+        fs.mkdirSync(source);
+        fs.writeFileSync(path.join(source, 'canary'), 'concurrent directory contents\n');
+      }
+      await rename(source, destination);
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(claimedEntry).toBeDefined();
+      expect(fs.lstatSync(fixture.gitEntry, { throwIfNoEntry: false })).toBeUndefined();
+      expect(fs.readFileSync(path.join(claimedEntry, 'canary'), 'utf8')).toBe('concurrent directory contents\n');
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(claimedEntry));
+    } finally {
+      renameSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each(['worktree', 'metadata'])('does not recreate a %s removed after the rollback claim', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const rename = fs.promises.rename.bind(fs.promises);
+    const removedPath = kind === 'worktree' ? fixture.worktree : fixture.metadata;
+    let claimedEntry;
+    const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (source, destination) => {
+      const claimsTemporaryEntry = source === fixture.gitEntry && fs.lstatSync(source).isFile();
+      await rename(source, destination);
+      if (claimsTemporaryEntry) {
+        claimedEntry = destination;
+        fs.rmSync(removedPath, { recursive: true, force: true });
+      }
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+    } finally {
+      renameSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(claimedEntry).toBeDefined();
+    expect(fs.existsSync(removedPath)).toBe(false);
+    expect(fs.existsSync(fixture.gitEntry)).toBe(false);
+    if (kind === 'metadata') expect(fs.readFileSync(claimedEntry, 'utf8')).toBe(`gitdir: ${fixture.metadata}\n`);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('preserves the native removal error and gitdir file when symlink restoration fails', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    installGitDirectoryLink(fixture);
+    runGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+    const restoreError = new Error('symlink restoration denied');
+    const symlinkSpy = vi.spyOn(fs.promises, 'symlink').mockRejectedValue(restoreError);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow(/locked/);
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Failed to restore worktree .git symlink after removal failed:',
+        restoreError,
+      );
+    } finally {
+      symlinkSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+
+    expect(fs.lstatSync(fixture.gitEntry).isFile()).toBe(true);
+    expect(fs.readFileSync(fixture.gitEntry, 'utf8')).toBe(`gitdir: ${fixture.metadata}\n`);
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+    expect(runGit(fixture.worktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature/remove');
+  });
+
+  it('restores the original .git symlink when exclusive installation fails', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const linkTarget = installGitDirectoryLink(fixture);
+    const link = fs.promises.link.bind(fs.promises);
+    const linkSpy = vi.spyOn(fs.promises, 'link').mockImplementation(async (source, destination) => {
+      if (destination === fixture.gitEntry) throw new Error('replacement denied');
+      await link(source, destination);
+    });
+    try {
+      await expect(removeWorktree(fixture.repo, {
+        directory: fixture.worktree,
+        deleteLocalBranch: true,
+      })).rejects.toThrow('replacement denied');
+    } finally {
+      linkSpy.mockRestore();
+    }
+
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(fs.readdirSync(fixture.worktree).sort()).toEqual(['.git', 'README.md']);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each(['primary', 'foreign', 'escaped'])('rejects a .git symlink to %s metadata without deleting the worktree or branch', async (kind) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    let target;
+    if (kind === 'primary') {
+      target = path.join(fixture.repo, '.git');
+    } else if (kind === 'foreign') {
+      target = createRemovalWorktree().metadata;
+    } else {
+      const outside = path.join(createTempDir(), 'metadata');
+      fs.cpSync(fixture.metadata, outside, { recursive: true });
+      target = path.join(path.dirname(fixture.metadata), 'escaped');
+      fs.symlinkSync(outside, target, 'dir');
+    }
+    const linkTarget = installGitDirectoryLink({ ...fixture, metadata: target }, true);
+    const canary = path.join(target, 'canary');
+    fs.writeFileSync(canary, 'untouched\n');
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      deleteLocalBranch: true,
+    })).rejects.toThrow('outside this repository\'s worktree metadata');
+
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(fs.readFileSync(canary, 'utf8')).toBe('untouched\n');
+    expect(fs.readFileSync(path.join(fixture.worktree, 'README.md'), 'utf8')).toBe('# Test\n');
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('rejects a .git symlink whose metadata has a different commondir', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const linkTarget = installGitDirectoryLink(fixture);
+    const foreignCommonDirectory = path.join(createRemovalWorktree().repo, '.git');
+    fs.writeFileSync(path.join(fixture.metadata, 'commondir'), `${foreignCommonDirectory}\n`);
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      deleteLocalBranch: true,
+    })).rejects.toThrow('different common directory');
+
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('rejects a metadata backlink to another registered worktree', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const otherWorktree = path.join(createTempDir(), 'other');
+    runGit(fixture.repo, ['worktree', 'add', '-b', 'feature/other', otherWorktree]);
+    const otherGitEntry = path.join(otherWorktree, '.git');
+    const otherMetadata = fs.readFileSync(otherGitEntry, 'utf8').slice('gitdir: '.length).trim();
+    const linkTarget = installGitDirectoryLink({ ...fixture, metadata: otherMetadata }, true);
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      deleteLocalBranch: true,
+    })).rejects.toThrow('backlink does not name this worktree');
+
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(runGit(otherWorktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('feature/other');
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it('rejects a metadata backlink to a different entry that resolves to the same directory', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const metadata = path.join(path.dirname(fixture.metadata), 'wrong-backlink');
+    const otherGitEntry = path.join(fixture.worktree, '.git.other');
+    fs.cpSync(fixture.metadata, metadata, { recursive: true });
+    fs.writeFileSync(path.join(metadata, 'gitdir'), `${otherGitEntry}\n`);
+    fs.symlinkSync(metadata, otherGitEntry, 'dir');
+    const linkTarget = installGitDirectoryLink({ ...fixture, metadata }, true);
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.worktree,
+      deleteLocalBranch: true,
+    })).rejects.toThrow('backlink does not name this worktree');
+
+    expect(fs.readlinkSync(fixture.gitEntry)).toBe(linkTarget);
+    expect(fs.readlinkSync(otherGitEntry)).toBe(metadata);
+    expect(runGit(fixture.repo, ['show-ref', '--verify', 'refs/heads/feature/remove'])).toContain('refs/heads/feature/remove');
+  });
+
+  it.each([false, true])('protects the primary workspace with a .git directory symlink, absolute=%s', async (absolute) => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const gitEntry = path.join(fixture.repo, '.git');
+    const metadata = path.join(fixture.repo, 'git-metadata');
+    fs.renameSync(gitEntry, metadata);
+    const linkTarget = absolute ? metadata : 'git-metadata';
+    fs.symlinkSync(linkTarget, gitEntry, 'dir');
+    const disposeInstance = vi.fn();
+
+    await expect(removeWorktree(fixture.repo, {
+      directory: fixture.repo,
+      deleteLocalBranch: true,
+      disposeInstance,
+    })).rejects.toThrow('Cannot remove the primary workspace');
+
+    expect(disposeInstance).not.toHaveBeenCalled();
+    expect(fs.readlinkSync(gitEntry)).toBe(linkTarget);
+    expect(runGit(fixture.repo, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe('main');
+    expect(fs.readFileSync(path.join(fixture.repo, 'README.md'), 'utf8')).toBe('# Test\n');
+  });
+
+  it('leaves an unregistered unmanaged directory and its .git symlink untouched', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const fixture = createRemovalWorktree();
+    const orphan = createTempDir();
+    const gitEntry = path.join(orphan, '.git');
+    fs.symlinkSync(fixture.metadata, gitEntry, 'dir');
+    const disposeInstance = vi.fn();
+
+    await expect(removeWorktree(fixture.repo, { directory: orphan, disposeInstance })).resolves.toBe(true);
+
+    expect(disposeInstance).not.toHaveBeenCalled();
+    expect(fs.readlinkSync(gitEntry)).toBe(fixture.metadata);
+    expect(fs.existsSync(fixture.metadata)).toBe(true);
+    expect(fs.existsSync(fixture.worktree)).toBe(true);
+  });
+
   it('forgets unmanaged orphan worktree entries without deleting files', async () => {
     if (!canRunGit()) return;
 
@@ -2395,6 +3269,144 @@ describe('removeWorktree', () => {
 
     await expect(removeWorktree(repo, { directory: worktree })).resolves.toBe(true);
     expect(fs.existsSync(metadata)).toBe(false);
+  });
+
+  const canRunGitAnnex = () => {
+    try {
+      execFileSync('git-annex', ['version'], { stdio: 'ignore', timeout: 10_000 });
+      return true;
+    } catch (error) {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    }
+  };
+
+  describe.skipIf(process.platform === 'win32' || !canRunGit() || !canRunGitAnnex())('git-annex integration', () => {
+    const payload = 'git-annex worktree removal test payload\n';
+    const annexGit = (cwd, args) => execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 30_000,
+    });
+
+    const allowFixtureCleanup = (directory) => {
+      // Annex object directories are read-only. Only visit owned directories,
+      // never targets of symlinks within the fixture.
+      fs.chmodSync(directory, 0o700);
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (entry.isDirectory()) allowFixtureCleanup(path.join(directory, entry.name));
+      }
+    };
+
+    const withAnnexWorktree = async (check) => {
+      const root = fs.realpathSync(createTempDir());
+      const repo = path.join(root, 'repository');
+      const worktree = path.join(root, 'linked');
+      const home = path.join(root, 'home');
+      fs.mkdirSync(repo);
+      fs.mkdirSync(home);
+
+      try {
+        for (const name of Object.keys(process.env)) {
+          if (name.startsWith('GIT_')) vi.stubEnv(name, undefined);
+        }
+        vi.stubEnv('HOME', home);
+        vi.stubEnv('XDG_CONFIG_HOME', path.join(home, 'config'));
+        vi.stubEnv('XDG_DATA_HOME', path.join(home, 'data'));
+        vi.stubEnv('XDG_CACHE_HOME', path.join(home, 'cache'));
+        vi.stubEnv('GIT_CONFIG_GLOBAL', os.devNull);
+        vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+        vi.stubEnv('GIT_TERMINAL_PROMPT', '0');
+        // A nonempty path keeps these local operations from discovering GnuPG.
+        vi.stubEnv('SSH_AUTH_SOCK', path.join(home, 'unused-agent.sock'));
+
+        annexGit(repo, ['init', '-b', 'main']);
+        annexGit(repo, ['config', 'user.email', 'test@example.com']);
+        annexGit(repo, ['config', 'user.name', 'Test User']);
+        annexGit(repo, ['annex', 'init', 'removal test primary']);
+        fs.writeFileSync(path.join(repo, 'README.md'), '# Annex removal test\n');
+        fs.writeFileSync(path.join(repo, 'payload.dat'), payload);
+        annexGit(repo, ['add', 'README.md']);
+        annexGit(repo, ['annex', 'add', 'payload.dat']);
+        annexGit(repo, ['commit', '-m', 'annex fixture']);
+        const branch = 'feature/annex-remove';
+        annexGit(repo, ['worktree', 'add', '-b', branch, worktree]);
+        annexGit(worktree, ['annex', 'init', 'removal test linked']);
+
+        const gitEntry = path.join(worktree, '.git');
+        expect(fs.lstatSync(gitEntry).isSymbolicLink()).toBe(true);
+        expect(fs.statSync(gitEntry).isDirectory()).toBe(true);
+        const linkTarget = fs.readlinkSync(gitEntry, { encoding: 'buffer' });
+        const metadata = fs.realpathSync(gitEntry);
+        const branchHead = annexGit(repo, ['rev-parse', branch]).trim();
+        expect(fs.readFileSync(path.join(worktree, 'payload.dat'), 'utf8')).toBe(payload);
+        expect(annexGit(repo, ['worktree', 'list', '--porcelain'])).toContain(worktree);
+
+        await check({ repo, worktree, gitEntry, metadata, linkTarget, branch, branchHead });
+      } finally {
+        try {
+          allowFixtureCleanup(root);
+        } finally {
+          vi.unstubAllEnvs();
+        }
+      }
+    };
+
+    it.each([false, true])('removes a worktree initialized by git-annex with deleteLocalBranch=%s', async (deleteLocalBranch) => {
+      await withAnnexWorktree(async (fixture) => {
+        const disposals = [];
+        await expect(removeWorktree(fixture.repo, {
+          directory: fixture.worktree,
+          deleteLocalBranch,
+          disposeInstance: async (directory) => {
+            disposals.push({
+              directory,
+              linkTarget: fs.readlinkSync(fixture.gitEntry, { encoding: 'buffer' }),
+            });
+          },
+        })).resolves.toBe(true);
+
+        expect(disposals).toEqual([{ directory: fixture.worktree, linkTarget: fixture.linkTarget }]);
+        expect(fs.existsSync(fixture.worktree)).toBe(false);
+        expect(fs.existsSync(fixture.metadata)).toBe(false);
+        expect(annexGit(fixture.repo, ['worktree', 'list', '--porcelain'])).not.toContain(fixture.worktree);
+        if (deleteLocalBranch) {
+          expect(() => annexGit(fixture.repo, ['show-ref', '--verify', `refs/heads/${fixture.branch}`])).toThrow();
+        } else {
+          expect(annexGit(fixture.repo, ['rev-parse', fixture.branch]).trim()).toBe(fixture.branchHead);
+        }
+        expect(fs.readFileSync(path.join(fixture.repo, 'payload.dat'), 'utf8')).toBe(payload);
+        annexGit(fixture.repo, ['annex', 'fsck', 'payload.dat']);
+      });
+    }, 60_000);
+
+    it('restores the git-annex symlink and preserves the branch and annex content after locked removal fails', async () => {
+      await withAnnexWorktree(async (fixture) => {
+        const entries = fs.readdirSync(fixture.worktree).sort();
+        annexGit(fixture.repo, ['worktree', 'lock', fixture.worktree]);
+        const metadataEntries = fs.readdirSync(fixture.metadata).sort();
+        const gitdir = fs.readFileSync(path.join(fixture.metadata, 'gitdir'));
+        const commondir = fs.readFileSync(path.join(fixture.metadata, 'commondir'));
+
+        await expect(removeWorktree(fixture.repo, {
+          directory: fixture.worktree,
+          deleteLocalBranch: true,
+        })).rejects.toThrow(/locked/);
+
+        expect(fs.readdirSync(fixture.metadata).sort()).toEqual(metadataEntries);
+        expect(fs.readFileSync(path.join(fixture.metadata, 'gitdir'))).toEqual(gitdir);
+        expect(fs.readFileSync(path.join(fixture.metadata, 'commondir'))).toEqual(commondir);
+        expect(fs.lstatSync(fixture.gitEntry).isSymbolicLink()).toBe(true);
+        expect(fs.readlinkSync(fixture.gitEntry, { encoding: 'buffer' })).toEqual(fixture.linkTarget);
+        expect(fs.statSync(fixture.metadata).isDirectory()).toBe(true);
+        expect(annexGit(fixture.repo, ['rev-parse', fixture.branch]).trim()).toBe(fixture.branchHead);
+        expect(annexGit(fixture.worktree, ['rev-parse', '--abbrev-ref', 'HEAD']).trim()).toBe(fixture.branch);
+        expect(fs.readdirSync(fixture.worktree).sort()).toEqual(entries);
+        expect(fs.readFileSync(path.join(fixture.worktree, 'payload.dat'), 'utf8')).toBe(payload);
+        annexGit(fixture.worktree, ['annex', 'fsck', 'payload.dat']);
+      });
+    }, 60_000);
   });
 });
 
