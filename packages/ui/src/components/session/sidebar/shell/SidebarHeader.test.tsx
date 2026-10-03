@@ -113,6 +113,30 @@ describe('SidebarHeader', () => {
     expect(input.value).toBe('');
   });
 
+  test('compact variant applies the query on Enter, not on every keystroke', async () => {
+    const submitted: string[] = [];
+    await act(async () => root.render(
+      <I18nProvider>
+        <TooltipProvider>
+          <SidebarHeader {...baseProps} hideDirectoryControls setSessionSearchQuery={(value) => submitted.push(value)} />
+        </TooltipProvider>
+      </I18nProvider>,
+    ));
+
+    const input = document.querySelector('input')!;
+    const setValue = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setValue.call(input, 'abc');
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }));
+    });
+    expect(submitted).toEqual([]);
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(submitted).toEqual(['abc']);
+  });
+
   test('full variant renders directory controls and hides the search input until opened', async () => {
     await act(async () => root.render(
       <I18nProvider>
