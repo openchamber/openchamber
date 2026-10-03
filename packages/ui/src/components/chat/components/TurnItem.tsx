@@ -55,7 +55,7 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, stickyUserHeader = true, rend
                 renderMessage(turn.userMessage)
             )}
 
-            {assistantContent ?? <TurnAssistantBlock assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />}
+            {assistantContent ?? <TurnAssistantBlock turnId={turn.turnId} assistantMessages={turn.assistantMessages} renderMessage={renderMessage} />}
         </section>
     );
 };
