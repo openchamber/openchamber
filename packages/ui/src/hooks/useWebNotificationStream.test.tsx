@@ -1,12 +1,21 @@
 import React, { act } from 'react';
-import { expect, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import { useWebNotificationStream } from './useWebNotificationStream';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { NotificationPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
 import { createWebNotificationsAPI } from '../../../web/src/api/notifications';
+
+const infoToasts: Array<{ title: string; id?: string; description?: string }> = [];
+
+mock.module('@/components/ui', () => ({
+  toast: {
+    info: (title: string, options?: { id?: string; description?: string }) => {
+      infoToasts.push({ title, id: options?.id, description: options?.description });
+    },
+  },
+}));
 
 class EventSourceFixture {
   static CLOSED = 2;
@@ -43,10 +52,12 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
   EventSourceFixture.instances = [];
+  infoToasts.length = 0;
   const notifications = createWebNotificationsAPI();
   Object.defineProperty(window, '__OPENCHAMBER_RUNTIME_APIS__', { value: { notifications }, configurable: true });
   useUIStore.setState({ nativeNotificationsEnabled: true, notificationMode: 'always' });
   const { createRoot } = await import('react-dom/client');
+  const { useWebNotificationStream } = await import('./useWebNotificationStream');
   const root = createRoot(document.body.appendChild(document.createElement('div')));
   function Probe({ enabled }: { enabled: boolean }) {
     useWebNotificationStream({ enabled });
@@ -67,6 +78,13 @@ test('shares one control stream, deduplicates main-stream delivery, and retires 
       await notifications.notifyAgentCompletion(payload);
     });
     expect(delivered).toEqual(['Done']);
+    expect(infoToasts).toEqual([]);
+
+    const pluginPayload = { title: 'Build done', body: 'Ready to review', kind: 'plugin', tag: 'plugin-build', requireHidden: true, showWhenFocused: true };
+    await act(async () => source.emit(pluginPayload));
+    expect(delivered).toEqual(['Done']);
+    expect(infoToasts).toEqual([{ title: 'Build done', id: 'plugin-build', description: 'Ready to review' }]);
+
     source.emit({ title: 123 });
     expect(delivered).toEqual(['Done']);
 

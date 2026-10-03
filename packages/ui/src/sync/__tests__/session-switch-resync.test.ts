@@ -386,6 +386,14 @@ describe("OpenChamber-native frames", () => {
     infoToasts.length = 0
     agentCompletions.length = 0
     autoAcceptSnapshots.length = 0
+    Object.defineProperty(globalThis, "document", {
+      value: { visibilityState: "visible", hasFocus: () => true },
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "document")
   })
 
   test("raises the restart-interrupted toast and dispatches the agent-completion notification", () => {
@@ -418,6 +426,38 @@ describe("OpenChamber-native frames", () => {
         requireHidden: false,
       })
       // A global frame must not materialize a directory store on its way through.
+      expect(childStores.children.size).toBe(0)
+    } finally {
+      childStores.disposeAll()
+    }
+  })
+
+  test("raises an in-app toast for plugin notifications", () => {
+    const childStores = new ChildStoreManager()
+    const routingIndex = createEventRoutingIndex()
+    const event: SyncEvent = {
+      type: "openchamber.notification",
+      properties: {
+        kind: "plugin",
+        title: "Build done",
+        body: "Ready to review",
+        tag: "plugin-build-done",
+        requireHidden: true,
+        showWhenFocused: true,
+      },
+    }
+
+    try {
+      handleEvent("global", event, childStores, routingIndex, getRuntimeKey())
+
+      expect(infoToasts).toEqual([{ title: "Build done", id: "plugin-build-done" }])
+      expect(agentCompletions[0]).toMatchObject({
+        title: "Build done",
+        body: "Ready to review",
+        tag: "plugin-build-done",
+        kind: "plugin",
+        requireHidden: true,
+      })
       expect(childStores.children.size).toBe(0)
     } finally {
       childStores.disposeAll()

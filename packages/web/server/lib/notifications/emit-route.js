@@ -73,7 +73,8 @@ export const createPluginNotificationEmitter = (dependencies) => {
       kind: 'plugin',
       sessionId: parsed.data.sessionId,
       directory: parsed.data.directory,
-      requireHidden: parsed.data.showWhenFocused !== true && settings.notificationMode !== 'always',
+      requireHidden: true,
+      showWhenFocused: parsed.data.showWhenFocused === true || settings.notificationMode === 'always',
     };
     const desktopNotificationDelivered = emitDesktopNotification(payload) === true;
     broadcastUiNotification(payload, { desktopNotificationDelivered });

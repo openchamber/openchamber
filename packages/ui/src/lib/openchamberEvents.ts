@@ -133,6 +133,7 @@ const notificationPropertiesSchema = z.object({
   sessionId: z.string().optional(),
   directory: z.string().optional(),
   requireHidden: z.boolean().optional(),
+  showWhenFocused: z.boolean().optional(),
 });
 
 type OpenChamberEvent =

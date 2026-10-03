@@ -164,6 +164,7 @@ export type OpenchamberNotification = {
   body?: string
   tag?: string
   requireHidden?: boolean
+  showWhenFocused?: boolean
   desktopNotificationDelivered?: boolean
   desktopStdoutActive?: boolean
 }

@@ -48,6 +48,7 @@ describe('POST /api/notifications/emit', () => {
         sessionId: 'ses_1',
         directory: undefined,
         requireHidden: true,
+        showWhenFocused: false,
       },
       options: { desktopNotificationDelivered: false },
     }]);
@@ -102,11 +103,13 @@ describe('POST /api/notifications/emit', () => {
 
     const always = createApp({ settings: { nativeNotificationsEnabled: true, notificationMode: 'always' } });
     await request(always.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send({ body: 'x' }).expect(200);
-    expect(always.delivered[0].payload.requireHidden).toBe(false);
+    expect(always.delivered[0].payload.requireHidden).toBe(true);
+    expect(always.delivered[0].payload.showWhenFocused).toBe(true);
 
     const focused = createApp();
     await request(focused.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send({ body: 'x', showWhenFocused: true }).expect(200);
-    expect(focused.delivered[0].payload.requireHidden).toBe(false);
+    expect(focused.delivered[0].payload.requireHidden).toBe(true);
+    expect(focused.delivered[0].payload.showWhenFocused).toBe(true);
     await request(focused.app).post('/api/notifications/emit').set('Authorization', PLUGIN_TOKEN).send({ body: 'x', showWhenFocused: 'yes' }).expect(400);
   });
 });
