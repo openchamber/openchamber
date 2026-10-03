@@ -91,6 +91,18 @@ describe('DeepSeek quota provider', () => {
     expect(result.usage.windows.credits_balance.valueLabel).toBe('¥100.00');
   });
 
+  it('reports no quota data instead of guessing a currency it does not know', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
+      is_available: true,
+      balance_infos: [{ currency: 'EUR', total_balance: '12.00', granted_balance: '0.00', topped_up_balance: '12.00' }],
+    })));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('No quota data in response');
+  });
+
   it('tolerates a numeric total_balance', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       is_available: true,

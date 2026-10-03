@@ -3149,10 +3149,8 @@ const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
     });
     const balanceInfo = positiveBalances.find((info) => info?.currency === 'USD')
       ?? positiveBalances.find((info) => info?.currency === 'CNY')
-      ?? positiveBalances[0]
       ?? balanceInfos.find((info) => info?.currency === 'USD')
       ?? balanceInfos.find((info) => info?.currency === 'CNY')
-      ?? balanceInfos[0]
       ?? null;
     const rawBalance = balanceInfo?.total_balance;
     const totalBalance = (typeof rawBalance === 'number' || (typeof rawBalance === 'string' && rawBalance.trim() !== ''))

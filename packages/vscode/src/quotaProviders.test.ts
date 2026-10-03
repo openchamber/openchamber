@@ -1425,6 +1425,20 @@ describe('DeepSeek quota provider (VS Code parity)', () => {
     assert.equal(result.usage!.windows.credits_balance!.valueLabel, '¥100.00');
   });
 
+  test('reports no quota data instead of guessing a currency it does not know', async () => {
+    stubFetchReturning(() => Promise.resolve(mockResponse({
+      is_available: true,
+      balance_infos: [
+        { currency: 'EUR', total_balance: '12.00', granted_balance: '0.00', topped_up_balance: '12.00' },
+      ],
+    })));
+
+    const result = await fetchQuotaForProvider('deepseek');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'No quota data in response');
+  });
+
   test('selects CNY entry when USD balance is zero and CNY balance is positive', async () => {
     stubFetchReturning(() => Promise.resolve(mockResponse({
       is_available: true,
