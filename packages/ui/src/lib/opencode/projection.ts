@@ -197,18 +197,23 @@ export function projectAssistantContent(
   const parts: Part[] = []
   let textOrdinal = 0
   let reasoningOrdinal = 0
-  for (const item of content) {
+  for (const [index, item] of content.entries()) {
     switch (item.type) {
       case "text": {
         const ordinal = textOrdinal
         textOrdinal += 1
+        // A text item that something else follows is finished even while the
+        // message is still open (the model moved on to a tool such as a
+        // question). Sealing it keeps its last line visible after a reload,
+        // the same as the live text-ended event does.
+        const followed = index < content.length - 1
         parts.push({
           id: partIds.text(owner.messageID, ordinal),
           sessionID: owner.sessionID,
           messageID: owner.messageID,
           type: "text",
           text: item.text,
-          time: compact({ start: owner.created, end: owner.completed }),
+          time: compact({ start: owner.created, end: owner.completed ?? (followed ? owner.created : undefined) }),
         })
         break
       }
