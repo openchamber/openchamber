@@ -701,7 +701,7 @@ export const usageStatsI18n = {
     'usageStats.empty.title': '此期间没有活动',
     'usageStats.empty.description': '你运行的会话会显示在这里。',
     'usageStats.metric.sessions': '会话',
-    'usageStats.metric.subagents': '子代理：{count}',
+    'usageStats.metric.subagents': '子智能体：{count}',
     'usageStats.metric.prompts': '提示',
     'usageStats.metric.tokens': '令牌',
     'usageStats.metric.tokensBreakdown': '输入 {input} · 输出 {output} · 缓存 {cache}',
