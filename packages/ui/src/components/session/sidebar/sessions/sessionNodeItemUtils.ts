@@ -22,6 +22,7 @@ export type SessionNodeChildRenderExtras = {
   subtreeContainsEditing: Set<string>;
   menuOpenSessionId: string | null;
   nodeStructureKey: string;
+  blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   /**
    * Bumped once a minute by the owning list so rows that render a relative
    * timestamp ("5m") re-render and recompute it. Only the Recent list
@@ -83,7 +84,7 @@ export const nodeContainsSessionId = (node: SessionNode, sessionId: string | nul
   return false;
 };
 
-export type FormBadgeSessionScope = {
+export type BlockingBadgeSessionScope = {
   directory: string;
   sessionIDs: string[];
 };
@@ -114,18 +115,16 @@ export const getSessionWorktreeMenuDisabled = ({
 }): boolean => !sessionDirectory || isStreaming || isMovingToWorktree;
 
 /**
- * Choose which (directory, sessionIDs) scopes a sidebar row's pending-question
- * badge should count. An expanded row counts only its own session; a collapsed
+ * Choose which (directory, sessionIDs) scopes a sidebar row's blocking-request
+ * badges should count. An expanded row counts only its own session; a collapsed
  * parent row additionally rolls up the hidden descendants of its subtree,
- * grouped by the directory store each descendant actually lives in, so badges
- * stay correct for worktree/subtask sessions without bootstrapping their
- * directory stores.
+ * grouped by the directory store each descendant actually lives in.
  */
-export const selectFormBadgeSessionScopes = (
+export const selectBlockingBadgeSessionScopes = (
   node: SessionNode,
   isExpanded: boolean,
   fallbackDirectory: string | null,
-): FormBadgeSessionScope[] => {
+): BlockingBadgeSessionScope[] => {
   const sessionIDsByDirectory = new Map<string, string[]>();
   const visit = (current: SessionNode): void => {
     const directory = resolveGlobalSessionDirectory(current.session)

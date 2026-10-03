@@ -24,6 +24,7 @@ import {
   ChildStoreManager,
   markDirectorySessionPartChanged,
   subscribeDirectoryPermission,
+  subscribeDirectoryPermissions,
   subscribeDirectoryForms,
   subscribeDirectorySessionMessages,
   type DirectoryBootstrapContext,
@@ -3221,19 +3222,27 @@ export function useSessionForms(sessionID: string, directory?: string) {
   )
 }
 
+type SessionBlockingRequestCounts = {
+  permissionCount: number
+  formCount: number
+}
+
+const EMPTY_SESSION_BLOCKING_REQUEST_COUNTS: SessionBlockingRequestCounts = {
+  permissionCount: 0,
+  formCount: 0,
+}
+
 /**
- * Total number of pending forms across the given session scopes. Each
- * scope names a directory store plus the session IDs to count inside it, so
- * collapsed subtree rows can roll up pending forms of hidden descendants
- * from their owning directory stores without bootstrapping them.
- *
- * Subscribes through the per-session form sidecar channel, so unrelated
- * streaming or session activity does not re-render rows.
+ * Count pending permissions and forms across exact session buckets grouped
+ * by owning directory. This lets collapsed rows cover hidden descendants
+ * without bootstrapping their stores or subscribing to unrelated updates.
  */
-export function useSessionFormCount(scopes: readonly { directory: string; sessionIDs: readonly string[] }[]) {
+export function useSessionBlockingRequestCounts(
+  scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
+): SessionBlockingRequestCounts {
   // Runtime only: the current directory is not an input here, and reading the
   // directory-bearing context would re-render every sidebar row that counts
-  // forms whenever the user switches projects.
+  // blocking requests whenever the user switches projects.
   const { childStores } = useSyncRuntime()
   const scopedStores = React.useMemo(() => scopes.map((scope) => ({
     sessionIDs: scope.sessionIDs,
@@ -3245,18 +3254,30 @@ export function useSessionFormCount(scopes: readonly { directory: string; sessio
       for (const scope of scopes) childStores.unpin(scope.directory)
     }
   }, [childStores, scopes])
+  const snapshotRef = useRef(EMPTY_SESSION_BLOCKING_REQUEST_COUNTS)
   const getSnapshot = React.useCallback(() => {
-    let count = 0
+    let permissionCount = 0
+    let formCount = 0
     for (const { sessionIDs, store } of scopedStores) {
-      const forms = store.getState().form
-      for (const sessionID of sessionIDs) count += forms[sessionID]?.length ?? 0
+      const { permission: permissions, form: forms } = store.getState()
+      for (const sessionID of sessionIDs) {
+        permissionCount += permissions[sessionID]?.length ?? 0
+        formCount += forms[sessionID]?.length ?? 0
+      }
     }
-    return count
+    const previous = snapshotRef.current
+    if (previous.permissionCount === permissionCount && previous.formCount === formCount) {
+      return previous
+    }
+    const next = { permissionCount, formCount }
+    snapshotRef.current = next
+    return next
   }, [scopedStores])
   const subscribe = React.useCallback((notify: () => void) => {
-    const unsubscribers = scopedStores.map(({ sessionIDs, store }) => (
-      subscribeDirectoryForms(store, sessionIDs, notify)
-    ))
+    const unsubscribers = scopedStores.flatMap(({ sessionIDs, store }) => [
+      subscribeDirectoryPermissions(store, sessionIDs, notify),
+      subscribeDirectoryForms(store, sessionIDs, notify),
+    ])
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
     }

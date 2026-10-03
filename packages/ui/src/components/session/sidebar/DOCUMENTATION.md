@@ -127,6 +127,8 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
+Session-row permission and form badges read the relevant directory-store buckets. A collapsed row counts its own pending requests and those of the descendants it hides; an expanded row counts only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. Counting never bootstraps a directory; an unbootstrapped directory contributes zero until live state arrives.
+
 Session menus share `SessionAiRenameMenuItem` with header tabs and the
 single-session header. AI renaming uses the same leading spinner as a worktree
 move; the pending operation survives closing the menu or selecting another

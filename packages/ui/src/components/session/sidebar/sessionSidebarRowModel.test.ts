@@ -116,6 +116,31 @@ describe('buildSessionSidebarRowModel', () => {
     expect(sessions).toEqual(['timeline:working', 'timeline:other']);
   });
 
+  test('keeps badge scopes for hidden timeline descendants without adding child rows', () => {
+    const input = args([]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('root', {
+      blockingBadgeSessionScopes: [
+        { directory: '/repo', sessionIDs: ['root'] },
+        { directory: '/worktree', sessionIDs: ['child'] },
+      ],
+    })];
+    input.workItems = [timelineItem('working', {
+      blockingBadgeSessionScopes: [
+        { directory: '/repo', sessionIDs: ['working'] },
+        { directory: '/worktree', sessionIDs: ['worker'] },
+      ],
+    })];
+    input.workSessionIds = new Set(['working']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const rows = model.rows.filter((row) => row.kind === 'session');
+    expect(rows.map((row) => row.node.session.id)).toEqual(['working', 'root']);
+    expect(rows.map((row) => row.blockingBadgeSessionScopes?.[1]?.sessionIDs)).toEqual([['worker'], ['child']]);
+    expect(rows.every((row) => row.node.children.length === 0)).toBe(true);
+    expect(model.selectionEntries.map((entry) => entry.id)).toEqual(['working', 'root']);
+  });
+
   test('search counts a subsession of a session in work once, and the moved tree leaves its group', () => {
     const parent = node('ses_parent', [node('ses_child'), node('ses_other')]);
     const main = group([parent]);
