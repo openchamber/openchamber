@@ -28,13 +28,16 @@ export const GuestPopover: React.FC<GuestPopoverProps> = ({ position, focused, l
   }, [focused]);
   React.useEffect(() => {
     if (!ownerFrame || guestPopoverOwnerBlocked(ownerFrame)) { onClose('outside'); return; }
+    // Keys pressed inside the owner or preview frame stay in those documents.
+    // Any key reaching the host means the user works elsewhere, such as typing
+    // in the composer the preview may cover.
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (document.activeElement === ownerFrame || overlayRef.current?.contains(document.activeElement)) {
+      const insideGuest = document.activeElement === ownerFrame || overlayRef.current?.contains(document.activeElement);
+      if (event.key === 'Escape' && insideGuest) {
         event.preventDefault();
         event.stopPropagation();
         onClose('escape');
-      } else onClose('outside');
+      } else if (event.key === 'Escape' || !insideGuest) onClose('outside');
     };
     const onPointerDown = (event: PointerEvent) => {
       const overlay = overlayRef.current;

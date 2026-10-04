@@ -161,6 +161,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       // The header toggle closes it on its own; letting this fire too would
       // close and immediately reopen.
       if (target?.closest('[data-work-status-toggle]')) return;
+      // Section menus render in a portal outside the panel; picking an item
+      // in one is still a click inside the panel.
+      if (target?.closest('[data-work-status-popup]')) return;
       setOverlayOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {

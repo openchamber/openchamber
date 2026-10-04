@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
-test('a real Base UI modal retires a guest preview without relying on aria-modal or autofocus', async () => {
+const withDom = async (run: () => Promise<void>) => {
   const dom = new Window({ url: 'http://localhost', settings: { disableIframePageLoading: true } });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -17,6 +17,18 @@ test('a real Base UI modal retires a guest preview without relying on aria-modal
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  try {
+    await run();
+  } finally {
+    await dom.happyDOM.close();
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  }
+};
+
+test('a real Base UI modal retires a guest preview without relying on aria-modal or autofocus', () => withDom(async () => {
   const { createRoot } = await import('react-dom/client');
   const { Dialog } = await import('@base-ui/react/dialog');
   const { GuestPopover } = await import('./GuestPopover');
@@ -62,10 +74,37 @@ test('a real Base UI modal retires a guest preview without relying on aria-modal
     await act(async () => root.unmount());
     frame.remove();
     container.remove();
-    await dom.happyDOM.close();
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
   }
-});
+}));
+
+test('typing in host UI retires a preview the user is not using', () => withDom(async () => {
+  const { createRoot } = await import('react-dom/client');
+  const { GuestPopover } = await import('./GuestPopover');
+  const frame = document.createElement('iframe');
+  document.body.append(frame);
+  const composer = document.createElement('textarea');
+  document.body.append(composer);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const closed: string[] = [];
+  try {
+    await act(async () => {
+      root.render(<GuestPopover
+        position={{ left: 20, top: 20, width: 240, height: 120, side: 'left' }}
+        focused={false} label="Extension preview" ownerFrame={frame}
+        onClose={(reason) => { closed.push(reason); }}
+        onEnter={() => {}} onLeave={() => {}} onOutsideHover={() => {}}
+      ><div>Guest content</div></GuestPopover>);
+    });
+    composer.focus();
+    closed.length = 0;
+    await act(async () => { composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true })); });
+    expect(closed).toEqual(['outside']);
+  } finally {
+    await act(async () => root.unmount());
+    frame.remove();
+    composer.remove();
+    container.remove();
+  }
+}));

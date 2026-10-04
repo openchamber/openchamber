@@ -285,17 +285,17 @@ export const updateExtensionStore = (persistPath, mutate) => (
 export const ensureGuestStorageIds = async (persistPath, descriptors) => {
   const resolved = {};
   await updateExtensionStore(persistPath, (current) => {
-  const storageIds = { ...current.storageIds };
-  let changed = false;
+    const storageIds = { ...current.storageIds };
+    let changed = false;
     for (const { id, storedPath, builtIn } of descriptors) {
       if (!builtIn && (storedPath === null || !current.paths.includes(storedPath))) continue;
       if (!storageIds[id]) {
         storageIds[id] = randomUUID();
-      changed = true;
-    }
+        changed = true;
+      }
       resolved[id] = storageIds[id];
-  }
-  return changed ? { ...current, storageIds } : null;
+    }
+    return changed ? { ...current, storageIds } : null;
   });
   return resolved;
 };
