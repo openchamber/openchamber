@@ -44,8 +44,9 @@ import {
 // of two mutually exclusive modes is active and, when a mode calls for it,
 // issues ONE deterministic scroll command:
 //
-//   • `following-end`      — pinned to the live edge. The list keeps us there
-//     through `maintainScrollAtEnd`; we only re-assert after a data change.
+//   • `following-end`      — pinned to the live edge. This hook keeps us
+//     there: an instant write at rest, a glide while output streams. The
+//     list's own `maintainScrollAtEnd` is off so only one writer moves it.
 //   • `free-scrolling`     — the user took over. Nothing moves until they opt
 //     back in by returning to the end.
 //
@@ -161,6 +162,10 @@ const REMEMBERED_POSITION_HISTORY_BATCHES = 3;
 const MESSAGE_LINK_GAP_PX = 12;
 // Matches the animation length in typography.css.
 const MESSAGE_LINK_HIGHLIGHT_MS = 1200;
+// How long after a send growth glides before the session reports working.
+const SEND_GLIDE_WINDOW_MS = 2000;
+// How long a just-issued follow glide counts as moving before it has moved.
+const GLIDE_START_GRACE_MS = 50;
 
 const messageLinkOffsetTop = (node: HTMLElement): number => {
     const fade = Number.parseFloat(getComputedStyle(node).getPropertyValue('--scroll-shadow-size'));
@@ -202,6 +207,11 @@ export const useChatTimelineScroll = ({
 }: UseChatTimelineScrollOptions): UseChatTimelineScrollResult => {
     const sessionIsWorkingRef = React.useRef(sessionIsWorking);
     sessionIsWorkingRef.current = sessionIsWorking;
+    // A sent message lands before the server reports the session as working.
+    // For a short window after a send its growth glides like live output
+    // instead of snapping; the window ends on its own if no turn starts.
+    const sendGlideUntilRef = React.useRef(0);
+    const isLive = () => sessionIsWorkingRef.current || performance.now() < sendGlideUntilRef.current;
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
     const listRef = React.useRef<TimelineListHandle | null>(null);
 
@@ -233,6 +243,10 @@ export const useChatTimelineScroll = ({
     // yields while the glide holds the viewport.
     const followGlideRef = React.useRef<KeyboardFollowGlide | null>(null);
     const followGlideHeld = () => followGlideRef.current?.isHeld() === true;
+    // The live follow's smooth scroll in flight: where it is heading and
+    // where the viewport stood when last checked. A gesture interrupts it, so
+    // it is forgotten then.
+    const glideRef = React.useRef<{ target: number; lastTop: number; issuedAt: number } | null>(null);
     // Size of the list footer, reported by the list as it is measured; the
     // real content end sits below the last row by this much.
     const listFooterSizeRef = React.useRef(0);
@@ -276,6 +290,7 @@ export const useChatTimelineScroll = ({
         userGenerationRef.current += 1;
         modeRef.current = 'free-scrolling';
         liveFollowGenerationRef.current = null;
+        glideRef.current = null;
         setUserOwnsScroll(true);
         // The reader took the viewport: a link already shown is done with and
         // must not pull them back if the session is entered again.
@@ -389,8 +404,14 @@ export const useChatTimelineScroll = ({
         // A reply the reader just asked for outranks a position still being
         // looked up in older history.
         restoreRef.current?.cancel();
+        if (streamingAutoFollowEnabledRef.current) {
+            sendGlideUntilRef.current = performance.now() + SEND_GLIDE_WINDOW_MS;
+            // Already following the end: the sent row arrives as growth and
+            // glides in. A jump here would snap it into view instead.
+            if (modeRef.current === 'following-end' && isAtEndRef.current && isLiveFollowActive()) return;
+        }
         goToBottom('instant');
-    }, [goToBottom]);
+    }, [goToBottom, isLiveFollowActive]);
 
     // The reader is back where they left: nothing follows the end until they
     // return to it, and the pill offers the way back.
@@ -726,6 +747,12 @@ export const useChatTimelineScroll = ({
         return () => {
             observer.disconnect();
             if (quietTimer !== null) clearTimeout(quietTimer);
+            // The quiet timer is what ends a resize. Cancelled here with the
+            // flag still up (the list remounted mid-resize, which session
+            // entry does), the flag stayed up for good: every growth after it
+            // was pinned as a resize, one instant write per step, and the
+            // whole conversation followed its output in visible jumps.
+            widthResizingRef.current = false;
         };
     }, [scrollNode]);
 
@@ -738,21 +765,55 @@ export const useChatTimelineScroll = ({
     // scrollToEnd bookkeeping roughly doubled frame production when measured.
     // A user gesture interrupts the native smooth scroll on its own, and the
     // gesture handler drops live follow so no later correction re-engages.
+    //
+    // Live glides are measured once per frame: growth is reported from inside
+    // the list's layout pass, where the scroll node's height can transiently
+    // be thousands of pixels off, and a jump computed from it landed as a
+    // visible snap. A glide still moving toward the current end is left to
+    // finish, because re-issuing it restarts the animation from rest; one
+    // that stopped short (another scroll write cancels it, such as a turn
+    // window holding its anchor) is issued again.
+    const followFrameRef = React.useRef<number | null>(null);
     const followEnd = React.useCallback(() => {
         const node = scrollRef.current;
         if (!node) return;
         if (followGlideHeld()) return;
-        const end = node.scrollHeight - node.clientHeight;
-        const distance = end - node.scrollTop;
-        if (distance <= 1) return;
-        if (!sessionIsWorkingRef.current) {
-            node.scrollTop = end;
+        if (!isLive()) {
+            const end = node.scrollHeight - node.clientHeight;
+            if (end - node.scrollTop > 1) node.scrollTop = end;
             return;
         }
-        if (distance > node.clientHeight) {
-            node.scrollTop = end - node.clientHeight;
-        }
-        node.scrollTo({ top: end, behavior: 'smooth' });
+        if (followFrameRef.current !== null) return;
+        followFrameRef.current = window.requestAnimationFrame(() => {
+            followFrameRef.current = null;
+            if (scrollRef.current !== node || followGlideHeld()) return;
+            // A gesture may have landed between the report and this frame.
+            if (!isLiveFollowActive() || modeRef.current !== 'following-end') return;
+            const end = node.scrollHeight - node.clientHeight;
+            const distance = end - node.scrollTop;
+            if (distance <= 1) {
+                glideRef.current = null;
+                return;
+            }
+            const glide = glideRef.current;
+            // A smooth scroll starts moving a frame or two after it is issued.
+            const inFlight = glide !== null && Math.abs(glide.target - end) <= 1 && (
+                Math.abs(node.scrollTop - glide.lastTop) > 0.5
+                || performance.now() - glide.issuedAt < GLIDE_START_GRACE_MS
+            );
+            if (glide && inFlight) {
+                glide.lastTop = node.scrollTop;
+                return;
+            }
+            if (distance > node.clientHeight) {
+                node.scrollTop = end - node.clientHeight;
+            }
+            glideRef.current = { target: end, lastTop: node.scrollTop, issuedAt: performance.now() };
+            node.scrollTo({ top: end, behavior: 'smooth' });
+        });
+    }, [isLiveFollowActive]);
+    React.useEffect(() => () => {
+        if (followFrameRef.current !== null) window.cancelAnimationFrame(followFrameRef.current);
     }, []);
 
     const onTimelineDataChange = React.useCallback(() => {
@@ -1045,9 +1106,10 @@ export const useChatTimelineScroll = ({
     // "At the end" is an invariant, not a one-time scroll: while the reader
     // sits on the end of a session that is not producing output, any growth
     // of the content (a footer that decides to render, a row re-measured)
-    // keeps the end in view with one instant write. Output growth belongs to
-    // followEnd, which glides. A width resize is the one case handled for a
-    // streaming reader as well — see the resize observer above.
+    // keeps the end in view with one instant write. While the session is
+    // live, the same signals hand over to followEnd, which glides. A width
+    // resize is handled for a live reader as well — see the resize observer
+    // above.
     React.useEffect(() => {
         if (!scrollNode || typeof MutationObserver === 'undefined') return;
         const content = scrollNode.firstElementChild;
@@ -1073,7 +1135,12 @@ export const useChatTimelineScroll = ({
                 }
                 return;
             }
-            if (sessionIsWorkingRef.current) return;
+            if (isLive()) {
+                // Live output glides, including when the viewport itself
+                // shrinks mid-stream; with auto-follow off it does not move.
+                if (streamingAutoFollowEnabledRef.current) followEnd();
+                return;
+            }
             const end = scrollNode.scrollHeight - scrollNode.clientHeight;
             if (end - scrollNode.scrollTop > 1) scrollNode.scrollTop = end;
         };
@@ -1093,7 +1160,7 @@ export const useChatTimelineScroll = ({
             mutations.disconnect();
             resizes?.disconnect();
         };
-    }, [scrollNode]);
+    }, [followEnd, scrollNode]);
 
     // Suppress the overlay scrollbar thumb while automatic movement owns the
     // scroll position, so it does not jump on each correction.

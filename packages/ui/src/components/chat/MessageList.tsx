@@ -828,51 +828,12 @@ const TimelineList = React.memo(({
     rowContext,
 }: TimelineListProps) => {
     const listRef = React.useRef<LegendListRef | null>(null);
-    // With streaming auto-follow off, content growth must never move the
-    // viewport; explicit commands (the scroll-to-bottom pill, session open)
-    // still scroll through the imperative handle.
-    const streamingAutoFollowEnabled = useUIStore((state) => state.streamingAutoFollowEnabled);
     const isAtEndRef = React.useRef(true);
 
     const setListRef = React.useCallback((list: LegendListRef | null) => {
         listRef.current = list;
         registerList(list);
     }, [registerList]);
-
-    // A width change re-wraps every row. Suspend the list's end maintenance
-    // while the owning hook holds the measured end and decides whether to
-    // release the pin once the resize settles.
-    const [isWidthResizing, setIsWidthResizing] = React.useState(false);
-    React.useEffect(() => {
-        const node = listRef.current?.getScrollableNode();
-        if (!node) return;
-        let lastWidth: number | null = null;
-        let quietTimer: ReturnType<typeof setTimeout> | null = null;
-        const observer = new ResizeObserver((observerEntries) => {
-            const width = observerEntries[observerEntries.length - 1]?.contentRect.width;
-            if (typeof width !== 'number') return;
-            if (lastWidth === null) {
-                lastWidth = width;
-                return;
-            }
-            if (Math.abs(width - lastWidth) < 1) return;
-            lastWidth = width;
-            setIsWidthResizing(true);
-            if (quietTimer !== null) clearTimeout(quietTimer);
-            // Released after the owning hook's 350ms settle decision — while a
-            // pin release is still pending, re-enabled end maintenance would
-            // snap the viewport back before the hook can let it go.
-            quietTimer = setTimeout(() => {
-                quietTimer = null;
-                setIsWidthResizing(false);
-            }, 400);
-        });
-        observer.observe(node);
-        return () => {
-            observer.disconnect();
-            if (quietTimer !== null) clearTimeout(quietTimer);
-        };
-    }, []);
 
     // The list reports scroll continuously; only end-crossings are interesting,
     // so the edge is debounced to a state transition here rather than pushing a
@@ -910,21 +871,13 @@ const TimelineList = React.memo(({
                 // carry that state across.
                 recycleItems={false}
                 contentInsetEndAdjustment={composerOverlayHeight}
-                // Live only while the session streams: outside a stream the
-                // owning hook keeps a pinned reader on the end with same-frame
-                // writes, and the list's own correction runs a frame later
-                // against a content length that can still be stale (a
-                // re-wrap, a late measurement) — that is the visible bounce
-                // an idle reader saw on every panel toggle. Also off while the
-                // width resizes, where the hook holds the measured end itself.
-                maintainScrollAtEnd={!streamingAutoFollowEnabled || !rowContext.sessionIsWorking || isWidthResizing || endPinningReleased
-                    ? false
-                    // Animated: the block-step growth turns each correction
-                    // into a glide and reveal + scroll read as one motion.
-                    : {
-                        animated: true,
-                        on: { dataChange: true, itemLayout: true, layout: true, footerLayout: true },
-                    }}
+                // Off: the owning hook (useChatTimelineScroll) is the only
+                // writer that keeps the end in view, instantly at rest and as
+                // a glide while output streams. With the list following too,
+                // two writers issued competing scrolls for every growth step,
+                // one of them against a content length the list had not
+                // settled yet.
+                maintainScrollAtEnd={false}
                 // A prepend first positions rows using estimated heights;
                 // later measurements must preserve the same visible row too.
                 // Keep size compensation active while reading history, including
