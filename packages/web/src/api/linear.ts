@@ -29,7 +29,6 @@ import type {
   LinearWorkspaceSummary,
 } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
-import { z } from 'zod';
 
 
 type LinearJson = {

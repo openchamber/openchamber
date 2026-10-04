@@ -2,10 +2,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import type {
   ChangeRequestStatus,
   GitHubPullRequestLiveSummary,
-  GitHubPullRequestRef,
   GitHubPullRequestStatus,
   RuntimeAPIs,
-  SourceControlAPI,
   SourceControlReadContext,
 } from "@/lib/api/types"
 import { getBoundSourceControlReadContexts } from "@/lib/source-control/identity"

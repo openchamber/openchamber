@@ -8,7 +8,6 @@ import type {
   ChangeRequestStatus,
   CI,
   CISummary,
-  GitHubIssueLiveSummary,
   GitHubPullRequestLiveSummary,
   Project,
   RuntimeAPIs,
@@ -22,7 +21,6 @@ import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { trackedItemKey, type TrackedItemState, type TrackedThread } from '@/lib/trackedItems/model';
 import type { LinkedGitHubPullRequest } from '@/lib/linkedIssues';
-import { useShallow } from 'zustand/react/shallow';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
 const PR_BOOTSTRAP_RETRY_DELAYS_MS = [2_000, 5_000] as const;
