@@ -5,14 +5,16 @@ import { Window } from 'happy-dom';
 import type { AssistantMessage } from '@/lib/opencode/model';
 import type { ChatMessageEntry } from '../lib/turns/types';
 import {
-    TURN_MESSAGE_WINDOW_TAIL,
+    FULL_MESSAGE_WINDOW,
+    TURN_MESSAGE_WINDOW_SIZE,
     TURN_MESSAGE_WINDOW_THRESHOLD,
     TurnMessageWindowContext,
     createTurnMessageWindowStore,
+    openedFoldMessageWindow,
     shouldHoldRevealAnchor,
     type TurnMessageWindowStore,
 } from '../lib/turns/turnMessageWindow';
-import { TurnMessageWindow } from './TurnMessageWindow';
+import { TurnMessageWindow, isReaderAtTimelineEnd } from './TurnMessageWindow';
 
 function assistant(id: string): ChatMessageEntry {
     const info: AssistantMessage = {
@@ -58,18 +60,19 @@ describe('turn message window', () => {
         restore();
     });
 
-    const render = (store: TurnMessageWindowStore | null, messages: ChatMessageEntry[], mountAll = false) => act(async () => root.render(
+    const render = (store: TurnMessageWindowStore | null, messages: ChatMessageEntry[]) => act(async () => root.render(
         <TurnMessageWindowContext.Provider value={store}>
-            <TurnMessageWindow turnId="turn" messages={messages} renderMessage={renderMessage} mountAll={mountAll} />
+            <TurnMessageWindow turnId="turn" messages={messages} renderMessage={renderMessage} />
         </TurnMessageWindowContext.Provider>,
     ));
     const mountedIds = () => Array.from(container.querySelectorAll('[data-message-id]'), (node) => node.getAttribute('data-message-id'));
-    const spacer = () => container.querySelector('[data-turn-message-spacer]');
+    const spacer = () => container.querySelector('[data-turn-message-spacer="head"]');
+    const tailSpacer = () => container.querySelector('[data-turn-message-spacer="tail"]');
 
     test('a long turn mounts only its newest messages behind a spacer', async () => {
         const messages = steps(100);
         await render(createTurnMessageWindowStore(), messages);
-        expect(mountedIds()).toEqual(messages.slice(-TURN_MESSAGE_WINDOW_TAIL).map((message) => message.info.id));
+        expect(mountedIds()).toEqual(messages.slice(-TURN_MESSAGE_WINDOW_SIZE).map((message) => message.info.id));
         expect(spacer()).not.toBeNull();
     });
 
@@ -89,14 +92,14 @@ describe('turn message window', () => {
         const store = createTurnMessageWindowStore();
         await render(store, steps(100));
         await render(store, steps(110));
-        expect(mountedIds()).toHaveLength(TURN_MESSAGE_WINDOW_TAIL + 10);
+        expect(mountedIds()).toHaveLength(TURN_MESSAGE_WINDOW_SIZE + 10);
         expect(mountedIds().at(-1)).toBe('step-109');
     });
 
     test('a remounted turn keeps the messages the reader already revealed', async () => {
         const store = createTurnMessageWindowStore();
         await render(store, steps(100));
-        await act(async () => store.setHiddenCount('turn', 40));
+        await act(async () => store.setRange('turn', { hiddenHead: 40, hiddenTail: 0 }));
         await act(async () => root.unmount());
         root = createRoot(container);
         await render(store, steps(100));
@@ -107,14 +110,86 @@ describe('turn message window', () => {
     test('navigation mounts the whole turn through the store', async () => {
         const store = createTurnMessageWindowStore();
         await render(store, steps(100));
-        await act(async () => store.setHiddenCount('turn', 0));
+        await act(async () => store.setRange('turn', FULL_MESSAGE_WINDOW));
         expect(mountedIds()).toHaveLength(100);
         expect(spacer()).toBeNull();
     });
 
-    test('a turn the reader opened mounts every message', async () => {
-        await render(createTurnMessageWindowStore(), steps(100), true);
-        expect(mountedIds()).toHaveLength(100);
+    test('a fold opened away from the end mounts its first steps above a tail spacer', async () => {
+        const store = createTurnMessageWindowStore();
+        store.setRange('turn', openedFoldMessageWindow(100, false));
+        const messages = steps(100);
+        await render(store, messages);
+        expect(mountedIds()).toEqual(messages.slice(0, TURN_MESSAGE_WINDOW_SIZE).map((message) => message.info.id));
+        expect(spacer()).toBeNull();
+        expect(tailSpacer()).not.toBeNull();
+    });
+
+    test('a fold opened on the end mounts its newest steps below a head spacer', async () => {
+        const store = createTurnMessageWindowStore();
+        store.setRange('turn', openedFoldMessageWindow(100, true));
+        const messages = steps(100);
+        await render(store, messages);
+        expect(mountedIds()).toEqual(messages.slice(-TURN_MESSAGE_WINDOW_SIZE).map((message) => message.info.id));
+        expect(spacer()).not.toBeNull();
+        expect(tailSpacer()).toBeNull();
+    });
+
+    test('revealing the tail mounts the steps below the window', async () => {
+        const store = createTurnMessageWindowStore();
+        store.setRange('turn', openedFoldMessageWindow(100, false));
+        await render(store, steps(100));
+        await act(async () => store.setRange('turn', { hiddenHead: 0, hiddenTail: 40 }));
+        expect(mountedIds()).toHaveLength(60);
+        expect(mountedIds().at(-1)).toBe('step-59');
+    });
+});
+
+describe('opened fold window', () => {
+    test('a short fold opens whole from either end', () => {
+        expect(openedFoldMessageWindow(TURN_MESSAGE_WINDOW_THRESHOLD, true)).toEqual(FULL_MESSAGE_WINDOW);
+        expect(openedFoldMessageWindow(TURN_MESSAGE_WINDOW_THRESHOLD, false)).toEqual(FULL_MESSAGE_WINDOW);
+    });
+
+    test('a long fold keeps the end that stays on screen', () => {
+        const hidden = TURN_MESSAGE_WINDOW_THRESHOLD + 1 - TURN_MESSAGE_WINDOW_SIZE;
+        expect(openedFoldMessageWindow(TURN_MESSAGE_WINDOW_THRESHOLD + 1, true)).toEqual({ hiddenHead: hidden, hiddenTail: 0 });
+        expect(openedFoldMessageWindow(TURN_MESSAGE_WINDOW_THRESHOLD + 1, false)).toEqual({ hiddenHead: 0, hiddenTail: hidden });
+    });
+});
+
+describe('reader at the timeline end', () => {
+    const scrollerWith = (scrollTop: number) => {
+        const scroller = document.createElement('div');
+        scroller.setAttribute('data-scrollbar', 'chat');
+        Object.defineProperty(scroller, 'scrollHeight', { value: 3000 });
+        Object.defineProperty(scroller, 'clientHeight', { value: 800 });
+        scroller.scrollTop = scrollTop;
+        const header = document.createElement('button');
+        scroller.append(header);
+        document.body.append(scroller);
+        return header;
+    };
+    let restore: () => void;
+    beforeEach(() => {
+        const win = new Window({ url: 'http://localhost' });
+        const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+        Object.defineProperty(globalThis, 'document', { value: win.document, configurable: true, writable: true });
+        restore = () => {
+            if (previous) Object.defineProperty(globalThis, 'document', previous);
+            else Reflect.deleteProperty(globalThis, 'document');
+        };
+    });
+    afterEach(() => restore());
+
+    test('on the end, within the follow band, and away from it', () => {
+        expect(isReaderAtTimelineEnd(scrollerWith(2200))).toBe(true);
+        expect(isReaderAtTimelineEnd(scrollerWith(2170))).toBe(true);
+        expect(isReaderAtTimelineEnd(scrollerWith(1500))).toBe(false);
+    });
+
+    test('outside a chat timeline is not on its end', () => {
+        expect(isReaderAtTimelineEnd(document.createElement('button'))).toBe(false);
     });
 });
 

@@ -14,7 +14,7 @@ import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/tu
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
-import { TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
+import { FULL_MESSAGE_WINDOW, TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
 import { getNormalizedMessageForDisplay } from './lib/messageDisplayNormalization';
 import { attachSyntheticContext } from './lib/attachSyntheticContext';
 import { useUIStore } from '@/stores/useUIStore';
@@ -1325,7 +1325,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const mountWindowedMessage = React.useCallback((messageId: string): void => {
         if (!turnMessageWindowEnabled) return;
         const turnId = turnByAssistantMessageId.get(messageId);
-        if (turnId) turnMessageWindow.setHiddenCount(turnId, 0);
+        if (turnId) turnMessageWindow.setRange(turnId, FULL_MESSAGE_WINDOW);
     }, [turnByAssistantMessageId, turnMessageWindow, turnMessageWindowEnabled]);
 
     /**
