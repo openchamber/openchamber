@@ -92,6 +92,11 @@ type ReasoningTimelineBlockProps = {
     actions?: React.ReactNode;
     /** Override the initial expanded state. Defaults to `isStreaming`. */
     defaultExpanded?: boolean;
+    /**
+     * Opens while it streams and folds when it ends. Off keeps a streaming
+     * block folded to its header, so a block closing does not move the chat.
+     */
+    expandWhileStreaming?: boolean;
     /** Opens the block whenever it changes to a new non-zero value (a search hit in it). */
     revealRequest?: number;
     /** The message this reasoning belongs to; search finds and highlights the block by it. */
@@ -125,13 +130,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     isStreaming = false,
     actions,
     defaultExpanded,
+    expandWhileStreaming = true,
     revealRequest = 0,
     reasoningMessageId,
     presentation,
 }) => {
     const { t } = useI18n();
     const hasEnded = typeof time?.end === 'number';
-    const canAutoExpand = isStreaming && !hasEnded;
+    const canAutoExpand = expandWhileStreaming && isStreaming && !hasEnded;
     const [expansion, setExpansion] = React.useState<ExpansionState>(() => {
         if (defaultExpanded === true) {
             return { expanded: true, source: 'user' };
@@ -511,6 +517,7 @@ const ReasoningPart = React.memo(({
     streamPhase,
 }: ReasoningPartProps) => {
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+    const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
     const revealRequest = useReasoningReveal(messageId);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
@@ -546,6 +553,7 @@ const ReasoningPart = React.memo(({
             blockId={part.id || `${messageId}-reasoning`}
             time={time}
             isStreaming={isStreaming}
+            expandWhileStreaming={expandWhileStreaming}
             revealRequest={revealRequest}
             reasoningMessageId={messageId}
         />

@@ -948,6 +948,8 @@ interface UIStore {
   sessionGoalDefaultBudgetEnabled: boolean;
   sessionGoalDefaultBudget: number;
   collapsibleThinkingBlocks: boolean;
+  /** A collapsible reasoning block opens while its model thinks. Off: it stays folded to its header. */
+  expandReasoningWhileStreaming: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
@@ -1199,6 +1201,7 @@ interface UIStore {
   setSessionGoalDefaultBudgetEnabled: (value: boolean) => void;
   setSessionGoalDefaultBudget: (value: number) => void;
   setCollapsibleThinkingBlocks: (value: boolean) => void;
+  setExpandReasoningWhileStreaming: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
@@ -1408,6 +1411,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
+        expandReasoningWhileStreaming: false,
         chatRenderMode: 'live',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
@@ -2346,6 +2350,10 @@ export const useUIStore = create<UIStore>()(
 
         setCollapsibleThinkingBlocks: (value) => {
           set({ collapsibleThinkingBlocks: value });
+        },
+
+        setExpandReasoningWhileStreaming: (value) => {
+          set({ expandReasoningWhileStreaming: value });
         },
 
         setChatRenderMode: (value) => {
@@ -3356,6 +3364,7 @@ export const useUIStore = create<UIStore>()(
           sessionGoalDefaultBudgetEnabled: state.sessionGoalDefaultBudgetEnabled,
           sessionGoalDefaultBudget: state.sessionGoalDefaultBudget,
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
+          expandReasoningWhileStreaming: state.expandReasoningWhileStreaming,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,

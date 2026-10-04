@@ -352,6 +352,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setStreamingAutoFollowEnabled = useUIStore(state => state.setStreamingAutoFollowEnabled);
     const collapsibleThinkingBlocks = useUIStore(state => state.collapsibleThinkingBlocks);
     const setCollapsibleThinkingBlocks = useUIStore(state => state.setCollapsibleThinkingBlocks);
+    const expandReasoningWhileStreaming = useUIStore(state => state.expandReasoningWhileStreaming);
+    const setExpandReasoningWhileStreaming = useUIStore(state => state.setExpandReasoningWhileStreaming);
     const animatedActivityIndicators = useSessionDisplayStore((s) => s.animatedActivityIndicators);
     const setAnimatedActivityIndicators = useSessionDisplayStore((s) => s.setAnimatedActivityIndicators);
 
@@ -2006,6 +2008,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 onChange={setCollapsibleThinkingBlocks}
                                                 label={t('settings.openchamber.visual.field.collapsibleThinkingBlocks')}
                                                 ariaLabel={t('settings.openchamber.visual.field.collapsibleThinkingBlocksAria')}
+                                            />
+                                        )}
+                                        {/* Only a collapsible block can fold while it streams. */}
+                                        {showReasoningTraces && collapsibleThinkingBlocks && (
+                                            <SettingsCheckboxRow
+                                                checked={expandReasoningWhileStreaming}
+                                                onChange={setExpandReasoningWhileStreaming}
+                                                label={t('settings.openchamber.visual.field.expandReasoningWhileStreaming')}
+                                                ariaLabel={t('settings.openchamber.visual.field.expandReasoningWhileStreamingAria')}
+                                                info={t('settings.openchamber.visual.field.expandReasoningWhileStreamingInfo')}
                                             />
                                         )}
                                     </SettingsSection>

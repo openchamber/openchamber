@@ -410,6 +410,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.streamingAutoFollowEnabled === 'boolean') {
       result.streamingAutoFollowEnabled = candidate.streamingAutoFollowEnabled;
     }
+    if (typeof candidate.expandReasoningWhileStreaming === 'boolean') {
+      result.expandReasoningWhileStreaming = candidate.expandReasoningWhileStreaming;
+    }
     if (typeof candidate.codeBlockLineWrap === 'boolean') {
       result.codeBlockLineWrap = candidate.codeBlockLineWrap;
     }

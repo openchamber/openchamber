@@ -279,7 +279,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: 'chat.reasoning',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.section.reasoning',
-    keywords: ['thinking', 'traces'],
+    keywords: ['thinking', 'traces', 'collapse', 'expand', 'streaming'],
   },
   {
     id: 'chat.streaming',
