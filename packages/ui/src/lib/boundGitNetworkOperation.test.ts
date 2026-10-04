@@ -26,6 +26,7 @@ import {
   GitOperationResultError,
   refreshGitOperation,
   type GitOperationRead,
+  describeGitSyncOutcome,
 } from './boundGitNetworkOperation';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -159,6 +160,23 @@ const withoutSubtle = async <T>(run: () => Promise<T>): Promise<T> => {
     else Reflect.deleteProperty(globalThis, 'crypto');
   }
 };
+
+describe('sync outcome', () => {
+  const finished = (pull: 'succeeded' | 'skipped', push: 'succeeded' | 'skipped'): GitNetworkOperation => ({
+    ...plan, state: 'succeeded', stepResults: [
+      { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: pull }, { step: 'push', status: push },
+    ],
+  });
+
+  test('says what the sync did, step by step', () => {
+    expect(describeGitSyncOutcome(finished('skipped', 'skipped'))).toEqual({ kind: 'up-to-date' });
+    expect(describeGitSyncOutcome(finished('succeeded', 'skipped'))).toEqual({ kind: 'pulled', remoteName: syncTarget.fetch.name });
+    expect(describeGitSyncOutcome(finished('skipped', 'succeeded'))).toEqual({ kind: 'pushed', remoteName: syncTarget.push.name });
+    expect(describeGitSyncOutcome(finished('succeeded', 'succeeded'))).toEqual({ kind: 'synced' });
+    // Without step results (another runtime, a contributor push) it stays generic.
+    expect(describeGitSyncOutcome(null)).toEqual({ kind: 'synced' });
+  });
+});
 
 describe('managed push announcement', () => {
   // Changes and walkthrough refresh a published pull request diff on this

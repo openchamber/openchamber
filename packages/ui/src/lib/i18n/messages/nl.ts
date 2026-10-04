@@ -1293,6 +1293,7 @@ export const dict = {
   'gitView.toast.mergedIntoBranch': '{branch} gemerged in {currentBranch}',
   'gitView.toast.pushedToUpstream': 'Gepusht naar {name}',
   'gitView.toast.syncedChanges': 'Wijzigingen gesynchroniseerd',
+  'gitView.toast.alreadyUpToDate': 'Al bijgewerkt',
   'gitView.toast.rebaseAborted': 'Rebase afgebroken',
   'gitView.toast.rebaseConflictsDetected': 'Rebaseconflicten gedetecteerd',
   'gitView.toast.rebaseStepCompleted': 'Rebasestap voltooid',

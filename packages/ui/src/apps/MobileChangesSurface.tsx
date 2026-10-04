@@ -66,7 +66,7 @@ import {
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation } from '@/lib/boundGitNetworkOperation';
+import { BoundGitNetworkOperationError, GitOperationResultError, runBoundGitNetworkOperation, describeGitSyncOutcome, type GitSyncOutcome } from '@/lib/boundGitNetworkOperation';
 import { useGitOperationRecovery } from '@/components/views/git/useGitOperationRecovery';
 import { GitOperationStatus } from '@/components/views/git/GitOperationStatus';
 import { PendingGitOperationError } from '@/lib/source-control/git-operation-recovery';
@@ -576,10 +576,11 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     if (!recovery) return;
     setSyncAction(action);
     const actionLabel = t(action === 'fetch' ? 'gitView.sync.fetch' : action === 'pull' ? 'gitView.sync.pull' : action === 'publish' ? 'gitView.publish.title' : 'gitView.sync.syncChanges');
+    let syncOutcome: GitSyncOutcome | null = null;
     try {
       if (action === 'sync' || action === 'publish') {
         const execute = await publishChooser.prepare(action === 'publish' ? 'push' : 'sync', { forceChoose, onOperation: recovery.onOperation });
-        await execute();
+        syncOutcome = describeGitSyncOutcome(await execute());
       } else if (remote && status) {
         await runBoundGitNetworkOperation({
           action, directory: currentDirectory, remoteName: remote.name, status, sourceControl, git, onOperation: recovery.onOperation,
@@ -594,7 +595,14 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       } else if (action === 'pull' && remote) {
         toast.success(t('gitView.toast.pulledFromRemote', { name: remote.name }));
       } else if (action === 'sync') {
-        toast.success(t('gitView.toast.syncedChanges'));
+        // Say what happened, as `git` does: nothing, a pull, a push, or both.
+        toast.success(syncOutcome?.kind === 'up-to-date'
+          ? t('gitView.toast.alreadyUpToDate')
+          : syncOutcome?.kind === 'pulled'
+            ? t('gitView.toast.pulledFromRemote', { name: syncOutcome.remoteName })
+            : syncOutcome?.kind === 'pushed'
+              ? t('gitView.toast.pushedToUpstream', { name: syncOutcome.remoteName })
+              : t('gitView.toast.syncedChanges'));
       } else if (action === 'publish') {
         toast.success(t('gitView.publish.succeeded'));
       }

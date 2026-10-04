@@ -1298,6 +1298,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.mergedIntoBranch': '{branch}を{currentBranch}にマージしました',
   'gitView.toast.pushedToUpstream': '{name}にプッシュしました',
   'gitView.toast.syncedChanges': '変更を同期しました',
+  'gitView.toast.alreadyUpToDate': 'すでに最新です',
   'gitView.toast.rebaseAborted': 'リベースを中止しました',
   'gitView.toast.rebaseConflictsDetected': 'リベースの競合が検出されました',
   'gitView.toast.rebaseStepCompleted': 'リベースのステップが完了しました',

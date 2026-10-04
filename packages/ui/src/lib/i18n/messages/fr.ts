@@ -1110,6 +1110,7 @@ export const dict = {
   'gitView.toast.pushedToUpstream': 'Poussé vers {name}',
 
   'gitView.toast.syncedChanges': 'Modifications synchronisées',
+  'gitView.toast.alreadyUpToDate': 'Déjà à jour',
   'gitView.toast.rebaseAborted': 'Rebase abandonné',
   'gitView.toast.rebaseConflictsDetected': 'Conflits de rebase détectés',
   'gitView.toast.rebaseStepCompleted': 'Étape de rebase terminée',

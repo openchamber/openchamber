@@ -1671,6 +1671,11 @@ export function createNetworkOperations({
         () => resolveRefImpl(plan.directory, fetchPlan.target.destinationRef, { controls, deadline }), controls, deadline,
       )).trim();
       if (!SHA_PATTERN.test(fetchedSha)) throw operationError('STALE_CONFIG', 'Fetched ref is invalid', 409);
+      // What the branch was before integrating, so the result can say whether
+      // the pull brought anything in.
+      const headBefore = String(await awaitPhase(
+        () => resolveRefImpl(plan.directory, headPlan.target.destinationRef, { controls, deadline }), controls, deadline,
+      )).trim().toLowerCase();
       mergeStarted = true;
       await controls.markIntegrationStarted();
       await commandResult(fetchPlan, controls, ['rebase', '--no-verify', '--no-autostash', fetchedSha], integrationContext, deadline);
@@ -1682,7 +1687,12 @@ export function createNetworkOperations({
         step('pull', hydrated.state === 'cancelled' ? 'cancelled' : 'failed', hydrated.error);
         return completion(hydrated.state === 'cancelled' ? 'cancelled' : 'partial', hydrated.error);
       }
-      step('pull', 'succeeded');
+      // `skipped` here means there was nothing to bring in: the rebase left
+      // the branch where it was.
+      const headAfter = String(await awaitPhase(
+        () => resolveRefImpl(plan.directory, headPlan.target.destinationRef, { controls, deadline }), controls, deadline,
+      )).trim().toLowerCase();
+      step('pull', headAfter === headBefore ? 'skipped' : 'succeeded');
 
       activeStep = 'push';
       const blockedPush = phaseError(controls, deadline);
@@ -1691,6 +1701,15 @@ export function createNetworkOperations({
         () => resolveRefImpl(plan.directory, pushPlan.target.sourceRef, { controls, deadline }), controls, deadline,
       )).toLowerCase();
       if (!SHA_PATTERN.test(pushSha)) throw operationError('STALE_CONFIG', 'Git push source ref is invalid', 409);
+      // The fetch just read the push destination itself (same endpoint, same
+      // ref) and it already holds this commit: there is nothing to publish, so
+      // no second connection to the remote is opened for it.
+      if (pushSha === fetchedSha.toLowerCase() && !pushPlan.target.forceWithLease
+        && pushPlan.rawEndpoint === fetchPlan.rawEndpoint
+        && pushPlan.target.destinationRef === fetchPlan.target.sourceRef) {
+        step('push', 'skipped');
+        return completion('succeeded');
+      }
       pushPlan = { ...pushPlan, sourceSha: pushSha };
       // The pull just moved HEAD, and the transport revision hashes what HEAD
       // says about submodules, LFS and attributes. A change the merge brought

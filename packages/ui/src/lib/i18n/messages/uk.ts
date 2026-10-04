@@ -1290,6 +1290,7 @@ export const dict: Record<I18nKey, string> = {
   "gitView.toast.mergeConflictsDetected": "Виявлено конфлікти злиття",
   "gitView.toast.mergedIntoBranch": "Злито {branch} в {currentBranch}",
   "gitView.toast.syncedChanges": "Зміни синхронізовано",
+  "gitView.toast.alreadyUpToDate": "Вже актуально",
   "gitView.toast.rebaseAborted": "Перебазування перервано",
   "gitView.toast.rebaseConflictsDetected": "Виявлено конфлікти перебазування",
   "gitView.toast.rebaseStepCompleted": "Етап перебазування завершено",

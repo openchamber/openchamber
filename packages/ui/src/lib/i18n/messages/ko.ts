@@ -1302,6 +1302,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.mergedIntoBranch': '{branch}을(를) {currentBranch}에 병합했습니다',
   'gitView.toast.pushedToUpstream': '{name}에 푸시했습니다',
   'gitView.toast.syncedChanges': '변경 사항을 동기화했습니다',
+  'gitView.toast.alreadyUpToDate': '이미 최신 상태입니다',
   'gitView.toast.rebaseAborted': 'rebase 중단됨',
   'gitView.toast.rebaseConflictsDetected': '리베이스 충돌이 감지되었습니다',
   'gitView.toast.rebaseStepCompleted': '리베이스 단계 완료됨',

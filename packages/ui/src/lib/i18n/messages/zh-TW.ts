@@ -1314,6 +1314,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.toast.mergedIntoBranch': '已將 {branch} 合併到 {currentBranch}',
   'gitView.toast.pushedToUpstream': '已推送到上游',
   'gitView.toast.syncedChanges': '已同步變更',
+  'gitView.toast.alreadyUpToDate': '已是最新狀態',
   'gitView.toast.rebaseAborted': 'Rebase 已中止',
   'gitView.toast.rebaseConflictsDetected': '偵測到 Rebase 衝突',
   'gitView.toast.rebaseStepCompleted': 'Rebase 步驟已完成',

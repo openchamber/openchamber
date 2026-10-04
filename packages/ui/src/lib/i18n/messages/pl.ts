@@ -3398,6 +3398,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.pr.checks.label': 'Sprawdzenia',
   'gitView.pullRequest.availableOnFeatureBranches': 'Dostępne na gałęziach feature',
   'gitView.toast.syncedChanges': 'Zmiany zsynchronizowane',
+  'gitView.toast.alreadyUpToDate': 'Już masz najnowszą wersję',
   'filesView.editor.autoSaveOn': 'Autozapis włączony',
   'filesView.editor.manualSave': 'Zapis ręczny',
   'filesView.editor.saveNowManualTitle': 'Zapisz teraz (tryb ręczny)',

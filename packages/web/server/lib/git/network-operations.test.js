@@ -2201,6 +2201,51 @@ process.exit(safe ? 0 : 1);
     }
   }, 20_000);
 
+  it.each([
+    ['nothing new on either side', false, 'skipped'],
+    ['only incoming commits', true, 'succeeded'],
+  ])('skips the push when the fetched branch already holds the result: %s', async (_label, incoming, pullStatus) => {
+    const { directory, env, git } = await createLocalRepository();
+    let remoteHead = await git('rev-parse', 'HEAD');
+    if (incoming) {
+      await git('checkout', '-b', 'incoming');
+      await fs.writeFile(path.join(directory, 'incoming.txt'), 'incoming\n');
+      await git('add', '.');
+      await git('commit', '-m', 'incoming');
+      remoteHead = await git('rev-parse', 'HEAD');
+      await git('checkout', 'published');
+    }
+    const calls = [];
+    const operations = createNetworkOperations({
+      validateGitTransportContext: async () => ({ endpoint: ENDPOINT, endpointFingerprint: fingerprintRemoteUrl(ENDPOINT),
+        transportMode: 'system', transportRevision: 'one' }),
+      credentialResolver: { resolve: async () => { throw new Error('system transport needs no credential'); } },
+      credentialBroker: { start: vi.fn(async () => {}), issue: vi.fn(), revoke: vi.fn() },
+      inheritedEnv: env,
+      runtimeIdentity: { id: 'fixture', platform: 'web' },
+      spawnImpl: (binary, args, options) => {
+        calls.push(args);
+        // The fetch writes what the remote holds; nothing else leaves the machine.
+        const transfer = args.indexOf('fetch');
+        if (transfer >= 0) return spawn(binary, [...args.slice(0, transfer), 'update-ref', args.at(-1).split(':')[1], remoteHead], options);
+        return spawn(binary, args, options);
+      },
+    });
+    const remote = { name: 'origin', endpoint: { displayUrl: ENDPOINT, fingerprint: fingerprintRemoteUrl(ENDPOINT) } };
+    const plan = await operations.plan(syncRequest({
+      directory,
+      fetch: { remote, sourceRef: 'refs/heads/published', destinationRef: 'refs/remotes/origin/published', transportMode: 'system' },
+      push: { remote, sourceRef: 'refs/heads/published', destinationRef: 'refs/heads/published', transportMode: 'system' },
+    }));
+    const result = await operations.execute(plan.operationId);
+
+    expect(result, JSON.stringify(result)).toMatchObject({ state: 'succeeded', stepResults: [
+      { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: pullStatus }, { step: 'push', status: 'skipped' },
+    ] });
+    expect(await git('rev-parse', 'HEAD')).toBe(remoteHead);
+    expect(calls.some((args) => args.includes('push'))).toBe(false);
+  });
+
   it.each(['smudge', 'process'])('prevents managed sync %s filters and hooks from contacting a network listener', async (filter) => {
     const { parent, directory, env, git } = await createLocalRepository();
     await git('checkout', '-b', 'incoming');
@@ -2709,7 +2754,8 @@ process.exit(safe ? 0 : 1);
     const changed = syncWith(() => ({ transportRevision: 'transport_after_merge' }));
     const plan = await changed.service.plan(syncRequest());
     expect(await changed.service.execute(plan.operationId)).toMatchObject({ state: 'succeeded', stepResults: [
-      { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: 'succeeded' }, { step: 'push', status: 'succeeded' },
+      // The fixture's branch never moves, so the pull brought nothing in.
+      { step: 'fetch', status: 'succeeded' }, { step: 'pull', status: 'skipped' }, { step: 'push', status: 'succeeded' },
     ] });
 
     const moved = syncWith((_authority, endpointKind) => (endpointKind === 'push'
@@ -2746,7 +2792,8 @@ process.exit(safe ? 0 : 1);
       state: 'succeeded',
       stepResults: [
         { step: 'fetch', status: 'succeeded' },
-        { step: 'pull', status: 'succeeded' },
+        // The fixture's branch never moves, so the pull brought nothing in.
+        { step: 'pull', status: 'skipped' },
         { step: 'push', status: 'succeeded' },
       ],
     });
@@ -2771,7 +2818,8 @@ process.exit(safe ? 0 : 1);
       error: { code: 'TRANSPORT_FAILED' },
       stepResults: [
         { step: 'fetch', status: 'succeeded' },
-        { step: 'pull', status: 'succeeded' },
+        // The fixture's branch never moves, so the pull brought nothing in.
+        { step: 'pull', status: 'skipped' },
         { step: 'push', status: 'failed' },
       ],
     });

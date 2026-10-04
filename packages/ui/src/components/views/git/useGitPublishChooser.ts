@@ -100,7 +100,7 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
           const binding = await sourceControl.repositoryBinding(directory);
           assertCurrent();
           const remote = effectiveRepositoryBinding(binding).remotes.find((entry) => current.tracking?.startsWith(`${entry.name}/`));
-          await runContributorAwareSync({
+          return runContributorAwareSync({
             directory, remoteName: remote?.name ?? '', status: current, git, sourceControl,
             choose: chooseContributor, onOperation: options.onOperation,
           });
@@ -109,6 +109,7 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
             directory, branch: current.current, remoteName: '', git, sourceControl,
             choose: chooseContributor, onOperation: options.onOperation,
           });
+          return null;
         }
       };
     }
@@ -142,7 +143,7 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
     return async () => {
       assertCurrent();
       confirmed.current = null;
-      await runPreparedGitPublish({ selection, git, sourceControl, allowNewCommit: options.beforeCommit, assertCurrent, onOperation: options.onOperation });
+      const operation = await runPreparedGitPublish({ selection, git, sourceControl, allowNewCommit: options.beforeCommit, assertCurrent, onOperation: options.onOperation });
       assertCurrent();
       // A failed post-push read cannot undo a completed publication or retain reusable authority.
       const current = await readGitPublishContext({ action, directory, git, sourceControl }).catch(() => null);
@@ -158,6 +159,7 @@ export function useGitPublishChooser({ directory, branch, chooseContributor }: {
           || (!selection.status.tracking && current.status.tracking === `${selection.targets.push.remoteName}/${selection.targets.push.ref.slice(11)}`))) {
         confirmed.current = { ...current, targets: selection.targets };
       }
+      return operation;
     };
   };
 

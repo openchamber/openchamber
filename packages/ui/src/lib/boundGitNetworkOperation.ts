@@ -841,3 +841,25 @@ export const runContributorAwarePush = async ({
     onOperation,
   });
 };
+
+/**
+ * What a finished sync did, for the message that reports it. The server marks
+ * a step `skipped` when there was nothing for it to do: a pull that brought
+ * nothing in, or a push of a commit the remote already held.
+ */
+export type GitSyncOutcome =
+  | { kind: 'up-to-date' }
+  | { kind: 'pulled'; remoteName: string }
+  | { kind: 'pushed'; remoteName: string }
+  | { kind: 'synced' };
+
+export const describeGitSyncOutcome = (operation: GitNetworkOperation | null): GitSyncOutcome => {
+  if (!operation || operation.target.operation !== 'sync' || !operation.stepResults) return { kind: 'synced' };
+  const did = (step: 'pull' | 'push') => operation.stepResults?.find((entry) => entry.step === step)?.status === 'succeeded';
+  const pulled = did('pull');
+  const pushed = did('push');
+  if (!pulled && !pushed) return { kind: 'up-to-date' };
+  if (pulled && !pushed) return { kind: 'pulled', remoteName: operation.target.fetch.name };
+  if (pushed && !pulled) return { kind: 'pushed', remoteName: operation.target.push.name };
+  return { kind: 'synced' };
+};
