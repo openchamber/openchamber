@@ -1,3 +1,23 @@
+## [2.1.1] - 2026-10-04
+
+### New
+
+- **Git:** generate a commit message from the Source Control title bar, and the Generate button in the Git panel fills the message (thanks to @hd-o).
+- Sessions: search the sessions list (thanks to @franzudev).
+- Composer: paste large text a second time within a second to attach it as a file (thanks to @MltStephane).
+
+### Improvements
+
+- New session in an editor tab asks which workspace folder to use when you have several (thanks to @mmospanenko).
+- Settings in a global `opencode.jsonc` apply in VS Code too.
+- Git: upstream tracking matches the web app (thanks to @bashrusakh).
+- Chat: reasoning stays folded while it streams, so the transcript stops jumping. Settings > Chat > Reasoning brings back the old behaviour.
+- Chat: sessions whose last turn ran many tools open faster, and that turn's activity opens at once when you expand it.
+
+### Fixes
+
+- Chat: the chat no longer jumps line by line while a reply streams, and a message you send slides smoothly into view.
+
 ## [2.1.0] - 2026-10-01
 
 ### New
