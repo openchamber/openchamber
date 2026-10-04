@@ -1487,12 +1487,19 @@ export const Header: React.FC = () => {
                 </span>
               )}
               {showHeaderMetaRow ? (
-                <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                // A draft has no title of its own, so its project and branch
+                // are the title: title-sized, not a caption under nothing.
+                <span className={cn(
+                  'flex min-w-0 max-w-full items-center gap-1.5 truncate font-normal leading-tight',
+                  isNewSessionDraftOpen
+                    ? 'typography-ui-label text-[14px] text-foreground'
+                    : 'typography-micro text-[10.5px] text-muted-foreground/75',
+                )}>
                   {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
-                      <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                      <span className="truncate">{currentBranchLabel}</span>
+                      <Icon name="git-branch" className={cn('flex-shrink-0 text-muted-foreground/70', isNewSessionDraftOpen ? 'h-3.5 w-3.5' : 'h-3 w-3')} />
+                      <span className={cn('truncate', isNewSessionDraftOpen && 'text-muted-foreground')}>{currentBranchLabel}</span>
                     </span>
                   ) : null}
                   {!isNewSessionDraftOpen && worktreeBadgeKind ? (
