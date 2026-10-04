@@ -67,6 +67,9 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   const isPrimaryDisabled = disabled || syncAction !== null || isRemovingRemote || detached || (!publish && blocksRebaseSync);
   const isDropdownDisabled = disabled || syncAction !== null || isRemovingRemote || remotes.length === 0;
   const isPullDisabled = !trackingRemote || hasUncommittedChanges;
+  // A tracked branch with nothing ahead has nothing to push; the same count
+  // the sync button shows. A branch without upstream can always be published.
+  const isPushDisabled = detached || (hasTracking && aheadCount === 0);
   const hasKnownSyncWork = aheadCount > 0 || behindCount > 0;
   const primaryLabel = [
     t(publish ? 'gitView.publish.title' : 'gitView.sync.sync'),
@@ -136,7 +139,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
         </DropdownMenuTrigger>
         {/* Anchored to the trailing edge so the menu stays inside the pane instead of running past it. */}
         <DropdownMenuContent align="end" className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
-          <DropdownMenuItem disabled={detached} onSelect={onPublish}>
+          <DropdownMenuItem disabled={isPushDisabled} onSelect={onPublish}>
             <Icon name="arrow-up" className="size-4 text-muted-foreground" />
             {/* A branch with an upstream is pushed there; only a new one is published. */}
             {t(hasTracking ? 'gitView.sync.push' : 'gitView.publish.title')}

@@ -27,7 +27,7 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
   document.body.append(container);
   const root = createRoot(container);
   const calls: string[] = [];
-  const render = (hasUncommittedChanges: boolean) => act(async () => root.render(
+  const render = (hasUncommittedChanges: boolean, aheadCount = 1) => act(async () => root.render(
     <I18nProvider>
       <SyncActions
         syncAction={null}
@@ -40,7 +40,7 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
         currentBranch="main"
         hasTracking
         disabled={false}
-        aheadCount={1}
+        aheadCount={aheadCount}
         behindCount={2}
         trackingRemoteName="origin"
         trackingBranch="origin/main"
@@ -72,6 +72,14 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
     expect(calls).toEqual(['pull:origin']);
     const fetchItems = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter((entry) => entry.textContent?.includes('Fetch from'));
     expect(fetchItems.map((entry) => entry.getAttribute('aria-disabled'))).toEqual([null, null]);
+    const pushItem = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.startsWith('Push'));
+    expect(pushItem()?.getAttribute('aria-disabled')).toBeNull();
+
+    // Nothing ahead of the tracked branch: nothing to push, as the sync button shows no count.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    await render(false, 0);
+    await openMenu();
+    expect(pushItem()?.getAttribute('aria-disabled')).toBe('true');
   } finally {
     await act(async () => root.unmount());
     for (const [name, descriptor] of originals) {
