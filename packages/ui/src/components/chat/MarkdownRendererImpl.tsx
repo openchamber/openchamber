@@ -42,6 +42,7 @@ import {
   type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
+import type { RenderedCopyFormat } from './markdown/selectionMarkdown';
 import { findTextPosition } from './markdown/textPosition';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
@@ -808,6 +809,10 @@ const mermaidColorsFromTheme = (theme: Theme) => ({
   font: 'system-ui, sans-serif',
 });
 
+const readCopyFormat = (): RenderedCopyFormat => (
+  useUIStore.getState().copyMessagesAsPlainText ? 'plain' : 'markdown'
+);
+
 const useDecorateContext = (
   currentTheme: Theme,
   deferCodeLineNumberSync: boolean,
@@ -850,7 +855,7 @@ const useDecorateContext = (
           return {};
         }
       });
-    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
+    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback, getCopyFormat: readCopyFormat };
   }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
 };
 

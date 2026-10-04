@@ -38,7 +38,14 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
   };
 }
 
-export async function copyMarkdownToClipboard(markdown: string, html: string): Promise<ClipboardCopyResult> {
+// `plainText` replaces the Markdown source in `text/plain` for users who copy
+// messages as plain text; the Markdown flavor is then left out entirely.
+export async function copyMarkdownToClipboard(
+  markdown: string,
+  html: string,
+  options: { plainText?: string } = {},
+): Promise<ClipboardCopyResult> {
+  const text = options.plainText ?? markdown;
   if (
     typeof navigator !== 'undefined'
     && navigator.clipboard?.write
@@ -46,18 +53,18 @@ export async function copyMarkdownToClipboard(markdown: string, html: string): P
   ) {
     try {
       const payload: Record<string, Blob> = {
-        'text/plain': new Blob([markdown], { type: 'text/plain' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
         'text/html': new Blob([html], { type: 'text/html' }),
       };
-      if (typeof ClipboardItem.supports === 'function' && ClipboardItem.supports('text/markdown')) {
+      if (options.plainText === undefined && typeof ClipboardItem.supports === 'function' && ClipboardItem.supports('text/markdown')) {
         payload['text/markdown'] = new Blob([markdown], { type: 'text/markdown' });
       }
       await navigator.clipboard.write([new ClipboardItem(payload)]);
       return { ok: true, method: 'clipboard' };
     } catch {
-      // Fall back to plain Markdown when rich clipboard writes are unavailable.
+      // Fall back to text only when rich clipboard writes are unavailable.
     }
   }
 
-  return copyTextToClipboard(markdown);
+  return copyTextToClipboard(text);
 }

@@ -416,6 +416,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.codeBlockLineWrap === 'boolean') {
       result.codeBlockLineWrap = candidate.codeBlockLineWrap;
     }
+    if (typeof candidate.copyMessagesAsPlainText === 'boolean') {
+      result.copyMessagesAsPlainText = candidate.copyMessagesAsPlainText;
+    }
     if (typeof candidate.autoSaveEnabled === 'boolean') {
       result.autoSaveEnabled = candidate.autoSaveEnabled;
     }

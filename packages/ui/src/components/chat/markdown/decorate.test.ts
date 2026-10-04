@@ -105,3 +105,43 @@ describe('Markdown table actions', () => {
     }
   });
 });
+
+describe('Markdown selection copy', () => {
+  const copySelection = async (getCopyFormat: DecorateContext['getCopyFormat']): Promise<string[]> => {
+    const copied: string[] = [];
+    Object.defineProperty(win.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text: string) => { copied.push(text); } },
+    });
+    Object.assign(globalThis, { navigator: win.navigator });
+
+    const root = document.createElement('div');
+    root.setAttribute('data-markdown-content', '');
+    root.innerHTML = '<h2>Setup</h2><ul><li>Install <strong><code>playwright</code></strong></li></ul>';
+    document.body.appendChild(root);
+    const detach = attachMarkdownInteractions(root, { ...context, getCopyFormat });
+
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      win.dispatchEvent(new win.Event('openchamber:copy', { cancelable: true }));
+      await Promise.resolve();
+      return copied;
+    } finally {
+      document.getSelection()?.removeAllRanges();
+      detach();
+      root.remove();
+    }
+  };
+
+  test('copies Markdown source by default', async () => {
+    expect(await copySelection(undefined)).toEqual(['## Setup\n\n- Install **`playwright`**']);
+  });
+
+  test('copies the visible text when the user chose plain text', async () => {
+    expect(await copySelection(() => 'plain')).toEqual(['Setup\n\n• Install playwright']);
+  });
+});

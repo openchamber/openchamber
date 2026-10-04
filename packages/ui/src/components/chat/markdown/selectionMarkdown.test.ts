@@ -8,7 +8,7 @@ Object.assign(globalThis, {
   HTMLElement: dom.HTMLElement,
 });
 
-const { getMarkdownSelectionText, serializeRenderedMarkdown } = await import('./selectionMarkdown');
+const { getMarkdownSelectionText, renderedMarkdownHtmlToPlainText, serializeRenderedMarkdown } = await import('./selectionMarkdown');
 
 afterEach(() => document.body.replaceChildren());
 afterAll(() => dom.happyDOM.close());
@@ -149,4 +149,40 @@ test('selections outside one markdown root are left to the browser', () => {
 
   expect(getMarkdownSelectionText(selectionOf(textIn(first, 'p'), 0, textIn(second, 'p'), 3))).toBeNull();
   expect(getMarkdownSelectionText(selectionOf(plain, 0, plain, 5))).toBeNull();
+});
+
+test('the plain reading drops Markdown syntax but keeps structure', () => {
+  const root = render([
+    '<h2>Plan</h2>',
+    '<p>Run <code>bun test</code> and read <a href="https://example.com/docs">the docs</a>, <strong>not</strong> <em>guess</em>.</p>',
+    '<ul><li>first</li><li>second<ul><li>nested</li></ul></li></ul>',
+    '<ol start="3"><li>three</li><li>four</li></ol>',
+    '<blockquote><p>quoted</p></blockquote>',
+    '<hr>',
+    '<pre><code class="language-ts">const a = 1;\n</code></pre>',
+    '<table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>a|b</td><td><code>1</code></td></tr></tbody></table>',
+  ].join(''));
+
+  expect(serializeRenderedMarkdown(root, 'plain')).toBe([
+    'Plan',
+    'Run bun test and read the docs, not guess.',
+    '• first\n• second\n  • nested',
+    '3. three\n4. four',
+    'quoted',
+    'const a = 1;',
+    'Name\tValue\na|b\t1',
+  ].join('\n\n'));
+});
+
+test('a plain selection across list items keeps the visible bullets', () => {
+  const root = render('<ul><li>alpha <strong>one</strong></li><li>beta two</li></ul>');
+  const range = selectionOf(textIn(root, 'li:nth-child(1)'), 0, textIn(root, 'li:nth-child(2)'), 4);
+
+  expect(getMarkdownSelectionText(range, 'plain')).toBe('• alpha one\n• beta');
+});
+
+test('rendered HTML from the copy button reads as plain text', () => {
+  const html = '<h1>Title</h1><p>Use <strong>bold</strong> and <a href="https://example.com">a link</a>.</p><pre><code>x = 1\n</code></pre>';
+
+  expect(renderedMarkdownHtmlToPlainText(html, document)).toBe('Title\n\nUse bold and a link.\n\nx = 1');
 });

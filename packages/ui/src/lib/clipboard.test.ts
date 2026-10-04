@@ -57,6 +57,40 @@ describe('copyMarkdownToClipboard', () => {
     expect(await writtenItem?.data['text/html']?.text()).toBe('<p><strong>bold</strong></p>');
   });
 
+  test('puts plain text in text/plain and leaves Markdown out when asked', async () => {
+    let writtenItem: { data: Record<string, Blob> } | undefined;
+    class FakeClipboardItem {
+      static supports(type: string): boolean {
+        return type === 'text/markdown';
+      }
+
+      readonly data: Record<string, Blob>;
+
+      constructor(data: Record<string, Blob>) {
+        this.data = data;
+      }
+    }
+
+    Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: FakeClipboardItem });
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        clipboard: {
+          write: async (items: Array<{ data: Record<string, Blob> }>) => {
+            writtenItem = items[0];
+          },
+        },
+      },
+    });
+
+    const result = await copyMarkdownToClipboard('**bold**', '<p><strong>bold</strong></p>', { plainText: 'bold' });
+
+    expect(result).toEqual({ ok: true, method: 'clipboard' });
+    expect(Object.keys(writtenItem?.data ?? {}).sort()).toEqual(['text/html', 'text/plain']);
+    expect(await writtenItem?.data['text/plain']?.text()).toBe('bold');
+    expect(await writtenItem?.data['text/html']?.text()).toBe('<p><strong>bold</strong></p>');
+  });
+
   test('falls back to plain Markdown when a rich clipboard write fails', async () => {
     let fallbackText = '';
     class FakeClipboardItem {

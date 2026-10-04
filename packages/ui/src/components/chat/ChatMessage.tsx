@@ -620,7 +620,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             result = await copyTextToClipboard(messageTextContent);
         } else {
             const { renderMarkdownSync } = await import('./markdown/markdownCore');
-            result = await copyMarkdownToClipboard(messageTextContent, renderMarkdownSync(messageTextContent));
+            const html = renderMarkdownSync(messageTextContent);
+            const plainText = useUIStore.getState().copyMessagesAsPlainText
+                ? (await import('./markdown/selectionMarkdown')).renderedMarkdownHtmlToPlainText(html, document)
+                : undefined;
+            result = await copyMarkdownToClipboard(messageTextContent, html, { plainText });
         }
         if (!result.ok) {
             return false;

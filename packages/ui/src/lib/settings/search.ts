@@ -331,6 +331,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['code', 'wrap', 'line wrap', 'markdown'],
   },
   {
+    id: 'chat.copy-plain-text',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.copyMessagesAsPlainText',
+    descriptionKey: 'settings.openchamber.visual.field.copyMessagesAsPlainTextInfo',
+    keywords: ['copy', 'clipboard', 'plain text', 'markdown', 'selection'],
+  },
+  {
     id: 'chat.inline-assistant-actions',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.showSplitAssistantMessageActions',

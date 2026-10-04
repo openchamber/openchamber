@@ -5,7 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from '../message/imageExport';
 import { getMermaidViewerController } from './mermaidViewer';
 import { getMarkdownCodeText } from './codeText';
-import { getMarkdownSelectionText } from './selectionMarkdown';
+import { getMarkdownSelectionText, type RenderedCopyFormat } from './selectionMarkdown';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -44,6 +44,9 @@ export type DecorateContext = {
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
   onPreviewLoopback?: (url: string) => void;
+  // Read at copy time: whether a prose selection copies as Markdown or as the
+  // text the reader sees. Markdown when absent.
+  getCopyFormat?: () => RenderedCopyFormat;
 };
 
 const ICONS = {
@@ -733,6 +736,7 @@ const getMarkdownCodeSelectionText = (range: Range): string | null => {
 
 type MarkdownCopyState = {
   registrations: number;
+  getCopyFormat?: () => RenderedCopyFormat;
   handler: (event: ClipboardEvent) => void;
   menuHandler: (event: Event) => void;
 };
@@ -740,9 +744,10 @@ type MarkdownCopyState = {
 const markdownCopyStates = new WeakMap<Document, MarkdownCopyState>();
 
 // Copying a selection inside rendered markdown writes its source form: code
-// as the exact code text, anything else as Markdown. The markdown path keeps
-// the selected HTML too, so rich editors still paste formatted text.
-const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
+// as the exact code text, anything else as Markdown, or as plain text when the
+// user chose that. The prose path keeps the selected HTML too, so rich editors
+// still paste formatted text.
+const registerMarkdownCodeCopy = (doc: Document, getCopyFormat: (() => RenderedCopyFormat) | undefined): (() => void) => {
   let state = markdownCopyStates.get(doc);
   if (!state) {
     const getSelectedCopy = (): { text: string; html: string | null } | null => {
@@ -751,11 +756,11 @@ const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
       const range = selection.getRangeAt(0);
       const code = getMarkdownCodeSelectionText(range);
       if (code !== null) return { text: code, html: null };
-      const markdown = getMarkdownSelectionText(range);
-      if (markdown === null) return null;
+      const text = getMarkdownSelectionText(range, state?.getCopyFormat?.() ?? 'markdown');
+      if (text === null) return null;
       const holder = doc.createElement('div');
       holder.appendChild(range.cloneContents());
-      return { text: markdown, html: holder.innerHTML };
+      return { text, html: holder.innerHTML };
     };
     const handler = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
@@ -778,6 +783,7 @@ const registerMarkdownCodeCopy = (doc: Document): (() => void) => {
     doc.defaultView?.addEventListener('openchamber:copy', menuHandler);
   }
   state.registrations += 1;
+  if (getCopyFormat) state.getCopyFormat = getCopyFormat;
 
   return () => {
     const current = markdownCopyStates.get(doc);
@@ -799,7 +805,7 @@ export const attachMarkdownInteractions = (
   container: HTMLElement,
   ctx: DecorateContext,
 ): (() => void) => {
-  const unregisterCodeCopy = registerMarkdownCodeCopy(container.ownerDocument);
+  const unregisterCodeCopy = registerMarkdownCodeCopy(container.ownerDocument, ctx.getCopyFormat);
   const handleClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
