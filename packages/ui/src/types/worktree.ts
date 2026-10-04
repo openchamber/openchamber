@@ -1,4 +1,5 @@
 export interface WorktreeMetadata {
+  provenance?: import('@/lib/api/types').GitContributorWorktreeProvenance;
 
   /**
    * Worktree origin.

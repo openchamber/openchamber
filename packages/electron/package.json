@@ -59,7 +59,10 @@
     "appId": "dev.openchamber.desktop",
     "productName": "OpenChamber",
     "asarUnpack": [
-      "node_modules/@openchamber/web/server/built-in-extensions/**/*"
+      "node_modules/@openchamber/web/server/built-in-extensions/**/*",
+      "node_modules/@openchamber/web/server/lib/git/credential-helper.js",
+      "node_modules/@openchamber/web/server/lib/git/ssh-wrapper.js",
+      "node_modules/@openchamber/web/server/lib/git/repository-credential-helper.js"
     ],
     "files": [
       "dist-bundle/entry.mjs",

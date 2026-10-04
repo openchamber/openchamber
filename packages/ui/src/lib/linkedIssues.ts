@@ -3,18 +3,27 @@ import { isJsonValue, type JsonValue } from '@openchamber/sdk';
 import { getSessionMetadata, type SessionMetadataRecord } from './sessionReviewMetadata';
 
 /**
- * Issues and pull requests a user has linked to a session.
+ * Source-control issues and change requests, and tracker issues, a user has
+ * linked to a session.
  *
  * Stored as a **snapshot**, not a reference: identifier or number, title, author
  * and avatar only. Enough to render a row and open the thing, and nothing more.
+ * The body, comments and state of an issue belong to its provider, and mirroring
+ * them here would mean owning their staleness. The stored title can drift from
+ * the real one; that is the accepted cost of a storage that never needs
+ * refreshing.
  *
  * Rides the same session-metadata channel as pinned messages
  * (`contextObligatoryMessages`), so it inherits their persistence and sync for
  * free.
  */
 
-export type LinkedGitHubIssue = {
-  /** `owner/repo#number`, unique per session and stable across renames. */
+export type LinkedRepositoryIssue = {
+  /**
+   * `owner/repo#number` on github.com, `host:owner/repo#number` on any other
+   * instance, unique per session and stable across renames. Entries stored
+   * before the host was added carry the bare shape whatever their instance.
+   */
   id: string;
   number: number;
   title: string;
@@ -77,12 +86,12 @@ export type LinkedExternalItem = {
   linkedAt: number;
 };
 
-export type LinkedIssue = LinkedGitHubIssue | LinkedLinearIssue | LinkedGuestIssue | LinkedExternalItem;
+export type LinkedIssue = LinkedRepositoryIssue | LinkedLinearIssue | LinkedGuestIssue | LinkedExternalItem;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
-const isLinkedGitHubIssue = (value: unknown): value is LinkedGitHubIssue => (
+const isLinkedRepositoryIssue = (value: unknown): value is LinkedRepositoryIssue => (
   isRecord(value)
   && typeof value.id === 'string'
   && value.id.length > 0
@@ -143,7 +152,7 @@ const isLinkedExternalItem = (value: unknown): value is LinkedExternalItem => (
 );
 
 const isLinkedIssue = (value: unknown): value is LinkedIssue => (
-  isLinkedGitHubIssue(value) || isLinkedLinearIssue(value) || isLinkedGuestIssue(value) || isLinkedExternalItem(value)
+  isLinkedRepositoryIssue(value) || isLinkedLinearIssue(value) || isLinkedGuestIssue(value) || isLinkedExternalItem(value)
 );
 
 /** A linked thread that is a code change under review rather than an issue. */
@@ -174,11 +183,28 @@ export const buildLinkedIssue = (input: {
   kind: 'issue' | 'pull';
   author?: { login?: string; avatarUrl?: string } | null;
   linkedAt: number;
-}): LinkedGitHubIssue => {
-  const match = /github\.com\/([^/]+)\/([^/]+)\//.exec(input.url);
-  const id = match
-    ? buildLinkedIssueId(match[1], match[2], input.number)
-    : `${input.url}#${input.number}`;
+}): LinkedRepositoryIssue => {
+  let project: { host: string; owner: string; name: string } | null = null;
+  try {
+    const parsed = new URL(input.url);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const threadIndex = segments.findIndex((segment) => (
+      segment === 'issues' || segment === 'pull'
+    ));
+    const projectNameIndex = segments[threadIndex - 1] === '-' ? threadIndex - 2 : threadIndex - 1;
+    const owner = segments.slice(0, projectNameIndex).join('/');
+    const name = segments[projectNameIndex];
+    if (threadIndex > 1 && owner && name) project = { host: parsed.hostname.toLowerCase(), owner, name };
+  } catch {
+    // The URL itself remains a stable fallback id for malformed provider data.
+  }
+  // github.com keeps the bare shape every stored GitHub link already has; any
+  // other instance names its host, so team/repo#12 there is not the GitHub one.
+  const id = !project
+    ? `${input.url}#${input.number}`
+    : project.host === 'github.com' || project.host === 'www.github.com'
+      ? buildLinkedIssueId(project.owner, project.name, input.number)
+      : `${project.host}:${buildLinkedIssueId(project.owner, project.name, input.number)}`;
 
   return {
     id,
@@ -290,6 +316,9 @@ export type GitHubThreadRef = { key: string; owner: string; repo: string; number
  */
 export const getGitHubThreadRef = (entry: LinkedIssue): GitHubThreadRef | null => {
   if (entry.kind === 'issue' || entry.kind === 'pull') {
+    // GitLab issues and merge requests share these kinds and the same id
+    // shape; only a github.com address is a GitHub thread.
+    if (!GITHUB_THREAD_URL_PATTERN.test(entry.url)) return null;
     const match = LINKED_ISSUE_ID_PATTERN.exec(entry.id);
     if (!match || Number(match[3]) !== entry.number) return null;
     return { key: entry.id, owner: match[1], repo: match[2], number: entry.number, thread: entry.kind };
@@ -339,15 +368,19 @@ export type LinkedSidebarChange = { key: string; identifier: string; url: string
 
 /**
  * Pull and merge requests linked from services other than GitHub (an
- * extension's PR, an agent's GitLab merge request), in link order. The sidebar
+ * extension's PR, a GitLab merge request attached in the composer or linked by
+ * an agent), in link order. The sidebar
  * lists them beside GitHub PRs, by identifier and without a state colour.
  */
 export const getLinkedSidebarChanges = (session: Session | null | undefined): LinkedSidebarChange[] => (
-  getLinkedIssues(session).flatMap((entry) => (
-    (entry.kind === 'guest' || entry.kind === 'external') && isLinkedChange(entry) && !getGitHubThreadRef(entry)
+  getLinkedIssues(session).flatMap((entry) => {
+    if (!isLinkedChange(entry) || getGitHubThreadRef(entry)) return [];
+    // A merge request attached from a GitLab repository.
+    if (entry.kind === 'pull') return [{ key: entry.id, identifier: `!${entry.number}`, url: entry.url, title: entry.title }];
+    return entry.kind === 'guest' || entry.kind === 'external'
       ? [{ key: entry.id, identifier: entry.identifier, url: entry.url, title: entry.title }]
-      : []
-  ))
+      : [];
+  })
 );
 
 /** An issue linked to a session, as the sidebar shows it. */
@@ -358,7 +391,7 @@ export type LinkedSidebarIssue =
 /**
  * Issues linked to a session, in link order. GitHub issues carry their
  * repository (read from the entry id) so their state can be looked up;
- * Linear and extension trackers are shown by identifier only. Pull requests,
+ * GitLab issues, Linear and extension trackers are shown by identifier only. Pull requests,
  * including extension ones, are not issues here.
  */
 export const getLinkedSidebarIssues = (session: Session | null | undefined): LinkedSidebarIssue[] => {
@@ -370,7 +403,11 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined): Lin
       const unique = githubIssues.get(entry.id);
       return unique ? [{ source: 'github', key: unique.key, owner: unique.owner, repo: unique.repo, number: unique.number, url: entry.url, title: entry.title }] : [];
     }
-    if (entry.kind === 'issue' || entry.kind === 'pull') return [];
+    if (entry.kind === 'pull') return [];
+    // An issue attached from a GitLab repository: no live state here yet.
+    if (entry.kind === 'issue') {
+      return [{ source: 'external', key: entry.id, identifier: `#${entry.number}`, url: entry.url, title: entry.title }];
+    }
     if (entry.kind === 'linear') {
       return [{ source: 'linear', key: entry.id, identifier: entry.identifier, url: entry.url, title: entry.title }];
     }
@@ -384,6 +421,20 @@ export const getLinkedSidebarIssues = (session: Session | null | undefined): Lin
   });
 };
 
+const normalizedThreadUrl = (url: string): string => url.trim().replace(/\/+$/, '').toLowerCase();
+
+/**
+ * Whether two entries name the same thread. A repository entry stored before
+ * ids carried the host matches its new id by its address instead.
+ */
+const isSameLinkedEntry = (entry: LinkedIssue, issue: LinkedIssue): boolean => {
+  if (entry.id === issue.id) return true;
+  return (entry.kind === 'issue' || entry.kind === 'pull')
+    && entry.kind === issue.kind
+    && entry.number === issue.number
+    && normalizedThreadUrl(entry.url) === normalizedThreadUrl(issue.url);
+};
+
 export const withLinkedIssue = (
   metadata: SessionMetadataRecord,
   issue: LinkedIssue,
@@ -393,7 +444,7 @@ export const withLinkedIssue = (
   const current = Array.isArray(openchamber.linked_issues)
     ? openchamber.linked_issues.filter(isLinkedIssue)
     : [];
-  const withoutIssue = current.filter((entry) => entry.id !== issue.id);
+  const withoutIssue = current.filter((entry) => !isSameLinkedEntry(entry, issue));
   // Re-linking an existing entry replaces it, so a stale title can be refreshed
   // by linking again.
   const next = linked ? [...withoutIssue, issue] : withoutIssue;

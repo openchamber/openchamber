@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
+import type { SessionMetadataRecord } from './sessionReviewMetadata';
 import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
-type LinkedGitHubIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
+type LinkedRepositoryIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
-const issue = (overrides: Partial<LinkedGitHubIssue> = {}): LinkedGitHubIssue => ({
+const issue = (overrides: Partial<LinkedRepositoryIssue> = {}): LinkedRepositoryIssue => ({
   id: 'owner/repo#12',
   number: 12,
   title: 'Rail badge count',
@@ -53,6 +54,45 @@ describe('buildLinkedIssue', () => {
     expect(built.kind).toBe('pull');
   });
 
+  test('derives the id from a GitLab issue with nested groups', () => {
+    const built = buildLinkedIssue({
+      url: 'https://gitlab.example.com/platform/tools/repo/-/issues/9',
+      number: 9,
+      title: 'Fix',
+      kind: 'issue',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('gitlab.example.com:platform/tools/repo#9');
+  });
+
+  test('keeps the same path on different instances apart', () => {
+    const github = buildLinkedIssue({ url: 'https://github.com/team/repo/issues/12', number: 12, title: 'A', kind: 'issue', linkedAt: 1 });
+    const gitlab = buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'B', kind: 'issue', linkedAt: 2 });
+    const selfManaged = buildLinkedIssue({ url: 'https://git.example.com/team/repo/-/issues/12', number: 12, title: 'C', kind: 'issue', linkedAt: 3 });
+    const metadata = [github, gitlab, selfManaged].reduce<SessionMetadataRecord>((current, issue) => withLinkedIssue(current, issue, true), {});
+    // SAFETY: withLinkedIssue always writes openchamber.linked_issues as a LinkedIssue array.
+    expect((metadata.openchamber as { linked_issues: LinkedIssue[] }).linked_issues.map((entry) => entry.title)).toEqual(['A', 'B', 'C']);
+  });
+
+  test('re-linking a GitLab thread stored before ids carried the host replaces it', () => {
+    const legacy = { ...buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'Old', kind: 'issue', linkedAt: 1 }), id: 'team/repo#12' };
+    const fresh = buildLinkedIssue({ url: 'https://gitlab.com/team/repo/-/issues/12', number: 12, title: 'New', kind: 'issue', linkedAt: 2 });
+    const metadata = withLinkedIssue({ openchamber: { linked_issues: [legacy] } }, fresh, true);
+    // SAFETY: withLinkedIssue always writes openchamber.linked_issues as a LinkedIssue array.
+    expect((metadata.openchamber as { linked_issues: LinkedIssue[] }).linked_issues.map((entry) => entry.title)).toEqual(['New']);
+  });
+
+  test('keeps GitLab merge requests distinct from issues with the same number', () => {
+    const built = buildLinkedIssue({
+      url: 'https://gitlab.example.com/platform/tools/repo/-/merge_requests/9',
+      number: 9,
+      title: 'Fix',
+      kind: 'pull',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('https://gitlab.example.com/platform/tools/repo/-/merge_requests/9#9');
+  });
+
   test('falls back to a url-based id for an unparseable url', () => {
     const built = buildLinkedIssue({
       url: 'https://ghe.internal/x',
@@ -62,6 +102,17 @@ describe('buildLinkedIssue', () => {
       linkedAt: 5,
     });
     expect(built.id).toBe('https://ghe.internal/x#3');
+  });
+
+  test('falls back without throwing for a malformed url', () => {
+    const built = buildLinkedIssue({
+      url: 'not a url',
+      number: 3,
+      title: 'Internal',
+      kind: 'issue',
+      linkedAt: 5,
+    });
+    expect(built.id).toBe('not a url#3');
   });
 
   test('omits author fields when the flow has none', () => {

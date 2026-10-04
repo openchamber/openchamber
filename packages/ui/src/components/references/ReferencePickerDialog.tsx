@@ -44,6 +44,7 @@ import {
     useGitHubReferenceDetail,
     useGitHubReferenceList,
     useGitHubSourceStatus,
+    useRepositoryReferenceProvider,
     useLinearIssueDetail,
     useLinearReferenceList,
     useLinearSourceStatus,
@@ -107,7 +108,9 @@ function ReferencePickerSurface({
     const [now] = React.useState(() => Date.now());
     const searchRef = React.useRef<HTMLInputElement>(null);
 
-    const githubStatus = useGitHubSourceStatus();
+    const githubStatus = useGitHubSourceStatus(directory);
+    // A GitLab project lists in the same tabs, as merge requests, open items only.
+    const isGitLab = useRepositoryReferenceProvider(directory) === 'gitlab';
     const linearStatus = useLinearSourceStatus();
     const sourceStatus = source === 'github' ? githubStatus : linearStatus;
 
@@ -115,7 +118,7 @@ function ReferencePickerSurface({
         enabled: source === 'github' && githubStatus === 'ready',
         directory,
         kind: githubKind,
-        filter: githubFilter,
+        filter: isGitLab ? 'open' : githubFilter,
         query: debouncedQuery,
     });
     const linearList = useLinearReferenceList({
@@ -129,7 +132,7 @@ function ReferencePickerSurface({
         enabled: source === 'github' && githubStatus === 'ready',
         directory,
         kind: otherGitHubKind,
-        filter: lastGitHubFilter.get(otherGitHubKind) ?? 'open',
+        filter: isGitLab ? 'open' : lastGitHubFilter.get(otherGitHubKind) ?? 'open',
         query: '',
     });
     const list = source === 'github' ? githubList : linearList;
@@ -265,7 +268,9 @@ function ReferencePickerSurface({
     }, [hasMore, loadMore, items.length]);
 
     const title = t(source === 'github'
-        ? (purpose === 'worktree' ? 'references.picker.title.github.worktree' : 'references.picker.title.github.attach')
+        ? (isGitLab
+            ? (purpose === 'worktree' ? 'references.picker.title.gitlab.worktree' : 'references.picker.title.gitlab.attach')
+            : (purpose === 'worktree' ? 'references.picker.title.github.worktree' : 'references.picker.title.github.attach'))
         : (purpose === 'worktree' ? 'references.picker.title.linear.worktree' : 'references.picker.title.linear.attach'));
 
     const openSettings = () => {
@@ -280,7 +285,7 @@ function ReferencePickerSurface({
             <SortableTabsStrip
                 items={[
                     { id: 'issue', label: t('references.picker.tab.issues'), icon: <Icon name="record-circle" className="size-3.5" /> },
-                    { id: 'pull', label: t('references.picker.tab.pulls'), icon: <Icon name="git-pull-request" className="size-3.5" /> },
+                    { id: 'pull', label: t(isGitLab ? 'references.picker.tab.mergeRequests' : 'references.picker.tab.pulls'), icon: <Icon name="git-pull-request" className="size-3.5" /> },
                 ]}
                 activeId={githubKind}
                 onSelect={(id) => selectGitHubKind(id === 'pull' ? 'pull' : 'issue')}
@@ -291,7 +296,7 @@ function ReferencePickerSurface({
     ) : null;
 
     const filters = source === 'github'
-        ? GITHUB_FILTERS[githubKind].map((filter) => ({
+        ? (isGitLab ? [] : GITHUB_FILTERS[githubKind]).map((filter) => ({
             id: filter,
             label: t(FILTER_LABEL_KEYS[filter]),
             active: githubFilter === filter,
@@ -317,8 +322,8 @@ function ReferencePickerSurface({
                         setHighlightedKey(null);
                     }}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder={t(source === 'github' ? 'references.picker.search.github' : 'references.picker.search.linear')}
-                    aria-label={t(source === 'github' ? 'references.picker.search.github' : 'references.picker.search.linear')}
+                    placeholder={t(source === 'linear' ? 'references.picker.search.linear' : isGitLab ? 'references.picker.search.gitlab' : 'references.picker.search.github')}
+                    aria-label={t(source === 'linear' ? 'references.picker.search.linear' : isGitLab ? 'references.picker.search.gitlab' : 'references.picker.search.github')}
                     className="h-9 w-full pl-9 pr-14"
                 />
                 <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
@@ -364,7 +369,8 @@ function ReferencePickerSurface({
     const emptyText = () => {
         if (debouncedQuery.trim()) return t('references.picker.empty.search');
         if (source === 'linear') return t('references.picker.empty.linear');
-        return t(githubKind === 'pull' ? 'references.picker.empty.pulls' : 'references.picker.empty.issues');
+        if (githubKind === 'issue') return t('references.picker.empty.issues');
+        return t(isGitLab ? 'references.picker.empty.mergeRequests' : 'references.picker.empty.pulls');
     };
 
     const centered = (children: React.ReactNode) => (
@@ -543,7 +549,7 @@ function ReferencePickerSurface({
                 <div className="flex shrink-0 flex-col gap-3 border-b border-border/60 px-5 pb-3 pt-4">
                     <div className="flex items-center gap-3 pr-8">
                         <DialogTitle className="flex shrink-0 items-center gap-2 typography-ui-header">
-                            <Icon name={source === 'github' ? 'github' : 'linear'} className="size-5" />
+                            <Icon name={source === 'linear' ? 'linear' : isGitLab ? 'gitlab' : 'github'} className="size-5" />
                             {title}
                         </DialogTitle>
                         <DialogDescription className="sr-only">

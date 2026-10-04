@@ -16,10 +16,19 @@ export type ReferencePickerSelection =
 
 export type LinearReferenceFilter = 'open' | 'assigned';
 
+/** `#12` for an issue or a GitHub PR, `!12` for a GitLab merge request. */
+export const referenceNumberLabel = (reference: GitHubReference): string => (
+    reference.kind === 'pull' && reference.provider === 'gitlab' ? `!${reference.number}` : `#${reference.number}`
+);
+
 export const referencePickerItemKey = (item: ReferencePickerItem | ReferencePickerSelection): string => {
     if (item.source === 'linear') return `linear:${item.issue.identifier.toUpperCase()}`;
-    const { sourceRepo, number } = item.reference;
-    return `github:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}#${number}`;
+    const { sourceRepo, number, kind, provider } = item.reference;
+    // GitLab numbers issues (#1) and merge requests (!1) separately, so the
+    // kind is part of the key; on GitHub both share one number space.
+    const host = provider ?? 'github';
+    const marker = host === 'gitlab' && kind === 'pull' ? '!' : '#';
+    return `${host}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${marker}${number}`;
 };
 
 export const GITHUB_FILTERS = {

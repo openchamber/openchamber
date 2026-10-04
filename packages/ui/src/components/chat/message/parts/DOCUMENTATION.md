@@ -267,8 +267,8 @@ Why: only navigation tools use the compact static path; all other tools need obs
   annotations, PR comments/checks): `UserContextPart.tsx`. `UserTextPart`
   routes to it when the part's metadata carries an `openchamberContext`
   payload (see `lib/messages/contextParts.ts`, which owns both the send-time
-  builder and the read-back parser). Linked GitHub issues/PRs and Linear
-  issues are instead converted to link file-parts in
+  builder and the read-back parser). Linked source-control issues/change
+  requests and Linear issues are instead converted to link file-parts in
   `normalizeUserDisplayParts.ts`. Legacy pre-metadata messages still render
   via text sniffing (`<terminal_context>` blocks, `GitHub issue context (JSON)`
   and `Linear issue context (JSON)` prefixes).

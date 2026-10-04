@@ -15,6 +15,7 @@
 
 import type { JsonValue } from '@openchamber/sdk';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import type { SourceControlProvider } from '@/lib/api/types';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import type { QueuedContextPart } from '@/stores/messageQueueStore';
 import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata, type ContextPartPayload } from '@/lib/messages/contextParts';
@@ -58,8 +59,8 @@ export interface QueuedInput {
 
 /** An issue, PR or tracker item attached to the composer, as it is sent. */
 export type ComposerContextReference =
-    | { kind: 'github-issue'; number: number; title: string; url: string; contextText: string }
-    | { kind: 'github-pr'; number: number; title: string; url: string; context: string }
+    | { kind: 'repository-issue'; number: number; title: string; url: string; contextText: string }
+    | { kind: 'change-request'; provider: SourceControlProvider; number: number; title: string; url: string; context: string }
     | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
     | {
         kind: 'guest';
@@ -213,14 +214,14 @@ export function buildComposerContext(
 
     for (const reference of input.references) {
         switch (reference.kind) {
-            case 'github-issue': {
+            case 'repository-issue': {
                 const { number, title, url, contextText } = reference;
-                attach(createContextPart({ kind: 'github-issue', number, title, url }, contextText));
+                attach(createContextPart({ kind: 'repository-issue', number, title, url }, contextText));
                 break;
             }
-            case 'github-pr': {
-                const { number, title, url, context: prContext } = reference;
-                attach(createContextPart({ kind: 'github-pr', number, title, url }, prContext));
+            case 'change-request': {
+                const { provider, number, title, url, context: prContext } = reference;
+                attach(createContextPart({ kind: 'change-request', provider, number, title, url }, prContext));
                 break;
             }
             case 'linear-issue': {

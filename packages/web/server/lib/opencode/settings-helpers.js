@@ -398,6 +398,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.githubScopes = trimmed;
       }
     }
+    if (typeof candidate.gitlabClientId === 'string') {
+      const trimmed = candidate.gitlabClientId.trim();
+      if (trimmed.length > 0) {
+        result.gitlabClientId = trimmed;
+      }
+    }
     if (typeof candidate.showReasoningTraces === 'boolean') {
       result.showReasoningTraces = candidate.showReasoningTraces;
     }

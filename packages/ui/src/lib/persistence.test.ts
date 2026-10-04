@@ -846,6 +846,7 @@ describe('updateDesktopSettings', () => {
         recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
         recentAgents: ['build'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
+        customProviderIcons: {},
       });
     } finally {
       stop();
@@ -872,6 +873,7 @@ describe('updateDesktopSettings', () => {
         recentModels: [],
         recentAgents: [],
         recentEfforts: {},
+        customProviderIcons: {},
       }]);
     } finally {
       stop();
@@ -1475,6 +1477,7 @@ describe('unload lifecycle flush (#2197)', () => {
         recentModels: [],
         recentAgents: [],
         recentEfforts: {},
+        customProviderIcons: {},
       }]);
     } finally {
       stopModelPrefs();

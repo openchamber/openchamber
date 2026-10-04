@@ -4,6 +4,7 @@ import type { LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState, getPrStatusLabelKey } from './sessionPrSummaries';
 
 const summary = (number: number, visualState: string, overrides: Partial<PrVisualSummary> = {}): PrVisualSummary => ({
+  provider: 'github',
   number,
   visualState,
   prState: visualState === 'merged' || visualState === 'closed' ? visualState : 'open',

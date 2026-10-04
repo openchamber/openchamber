@@ -36,6 +36,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       setupProxy,
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
+      onListenerReady = null,
       staticRoutesRuntime,
       process,
       crypto,
@@ -137,6 +138,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       durationMs: performance.now() - pipelineStartedAt,
     });
     tunnelRuntimeContext.setActivePort(startupResult.activePort);
+    if (onListenerReady) await onListenerReady();
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
 

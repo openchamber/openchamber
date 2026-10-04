@@ -12,8 +12,10 @@ interface Entry {
 export class PullRequestSnapshotCache {
   private entries = new Map<string, Entry>();
 
-  load(scope: string, source: PullRequestSource, fetch: () => Promise<Snapshot>, force = false): Promise<Snapshot> {
-    const key = JSON.stringify([scope, source]);
+  load(scope: string, source: PullRequestSource, fetch: () => Promise<Snapshot>, force = false, authority = ''): Promise<Snapshot> {
+    // The bound read context is part of a snapshot's identity: the same pull
+    // request read under another binding must not be served from this entry.
+    const key = JSON.stringify([scope, source, authority]);
     const existing = this.entries.get(key);
     if (existing && (!force || existing.files === null)) return existing.pending;
     const entry: Entry = { scope, pending: fetch(), files: null, bytes: 0 };

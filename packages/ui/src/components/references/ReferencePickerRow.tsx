@@ -13,6 +13,7 @@ import {
     linearStateLook,
     relativeTimeOf,
     type ReferencePickerItem,
+    referenceNumberLabel,
 } from './referencePickerItems';
 
 type Label = { name: string; color: string | null };
@@ -104,7 +105,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     const { t } = useI18n();
     const look = item.source === 'github' ? githubStateLook(item.reference) : linearStateLook(item.issue);
     const title = item.source === 'github' ? item.reference.title : item.issue.title;
-    const id = item.source === 'github' ? `#${item.reference.number}` : item.issue.identifier;
+    const id = item.source === 'github' ? referenceNumberLabel(item.reference) : item.issue.identifier;
     const updated = relativeTimeOf(item.source === 'github' ? item.reference.updatedAt : item.issue.updatedAt, now);
     const labels = toLabels(item.source === 'github' ? item.reference.labels : item.issue.labels);
     const rowRef = React.useRef<HTMLDivElement>(null);

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { sourceControlReadContextParts } from '@/lib/source-control/identity';
 import {
   cancelWalkthroughGeneration,
   fetchWalkthrough,
@@ -14,12 +15,8 @@ import {
   type WalkthroughResult,
   type WalkthroughSource,
   type WalkthroughStage,
+  type WalkthroughTarget,
 } from '@/lib/walkthrough/types';
-
-// Walkthroughs live on the server, keyed by repository and source. This store
-// is a view cache over that, keyed the same way plus the runtime, so switching
-// between a local and a remote runtime never shows one runtime's walkthrough
-// for the other's code.
 
 export type WalkthroughEntryStatus = 'idle' | 'loading' | 'generating' | 'ready' | 'error';
 
@@ -31,8 +28,6 @@ export interface WalkthroughEntry {
   error: {
     message: string;
     code?: WalkthroughError['code'];
-    // Carried through so a blocker can name the model that was actually tried
-    // rather than the one that happens to be resolved now.
     model?: WalkthroughModel;
     requiredChars?: number;
     availableChars?: number;
@@ -54,8 +49,27 @@ export const walkthroughSourceKey = (source: WalkthroughSource): string => {
   return source.sourceRepo ? `pr:${source.sourceRepo.owner}/${source.sourceRepo.repo}:${source.number}` : `pr:${source.number}`;
 };
 
-const entryKey = (directory: string, source: WalkthroughSource): string =>
-  `${getRuntimeKey()}\u0000${directory}\u0000${walkthroughSourceKey(source)}`;
+const walkthroughTargetKey = (target: WalkthroughTarget): string => {
+  if (!('context' in target)) return walkthroughSourceKey(target.source);
+  const { context, source } = target;
+  // The named repository keeps equal numbers in different repositories apart,
+  // even under one binding: the server refuses the one that is not bound, and
+  // that refusal must not be cached under the other's key.
+  return JSON.stringify([
+    'pr',
+    source.number,
+    source.sourceRepo ? `${source.sourceRepo.owner}/${source.sourceRepo.repo}` : null,
+    ...sourceControlReadContextParts(context),
+  ]);
+};
+
+const entryKey = (directory: string, target: WalkthroughTarget): string => JSON.stringify([
+  getRuntimeKey(),
+  directory,
+  walkthroughTargetKey(target),
+]);
+
+const requestKey = (directory: string): string => JSON.stringify([getRuntimeKey(), directory]);
 
 const toError = (error: unknown): WalkthroughEntry['error'] => {
   if (error instanceof WalkthroughError) {
@@ -72,71 +86,51 @@ const toError = (error: unknown): WalkthroughEntry['error'] => {
 
 interface WalkthroughState {
   entries: Record<string, WalkthroughEntry>;
-  /**
-   * Source an entry point asked the surface to open with, keyed by directory.
-   * Entry points outside the surface (the diff toolbar, a pull request) need a
-   * way to say *what* to review; the surface consumes this on mount and the
-   * user's own scope choice replaces it.
-   */
-  requestedSource: Record<string, WalkthroughSource>;
-  /**
-   * Model the user picked for a specific review, keyed like the entries.
-   * Deliberately not persisted: on reopen the model that produced the cached
-   * walkthrough is the better default, and it is already stored with it.
-   */
+  requestedTargets: Record<string, WalkthroughTarget>;
   selectedModel: Record<string, string>;
-  /**
-   * Language the user picked for a specific review, keyed like the entries.
-   * Not persisted, for the same reason the model is not: the language of the
-   * walkthrough on screen is stored with it, and that is the better default on
-   * reopen than any remembered preference.
-   */
   selectedLanguage: Record<string, string>;
 }
 
 interface WalkthroughActions {
-  getEntry: (directory: string, source: WalkthroughSource) => WalkthroughEntry;
+  getEntry: (directory: string, target: WalkthroughTarget) => WalkthroughEntry;
   /**
-   * Load whatever the server already has. Never generates, never costs tokens.
-   *
-   * `language` is the fully resolved choice — the store cannot resolve it
-   * itself, because the fallback is the interface locale and locale state
-   * belongs to `@/lib/i18n`, not here. `providerID` is the composer's
-   * provider: without a model of its own the walkthrough stays on it.
+   * `providerID` is the composer's provider: without a model of its own the
+   * walkthrough stays on it.
    */
-  load: (directory: string, source: WalkthroughSource, options?: { language?: string; providerID?: string }) => Promise<void>;
+  load: (directory: string, target: WalkthroughTarget, options?: { language?: string; providerID?: string }) => Promise<void>;
   generate: (
     directory: string,
-    source: WalkthroughSource,
+    target: WalkthroughTarget,
     options?: { force?: boolean; language?: string; providerID?: string }
   ) => Promise<void>;
-  cancel: (directory: string, source: WalkthroughSource) => void;
-  requestSource: (directory: string, source: WalkthroughSource) => void;
-  selectModel: (directory: string, source: WalkthroughSource, model: string | null) => void;
-  getSelectedModel: (directory: string, source: WalkthroughSource) => string | undefined;
-  selectLanguage: (directory: string, source: WalkthroughSource, language: string | null) => void;
-  getSelectedLanguage: (directory: string, source: WalkthroughSource) => string | undefined;
-  clearRequestedSource: (directory: string) => void;
+  cancel: (directory: string, target: WalkthroughTarget) => void;
+  requestTarget: (directory: string, target: WalkthroughTarget) => void;
+  getRequestedTarget: (directory: string) => WalkthroughTarget | undefined;
+  clearRequestedTarget: (directory: string) => void;
+  selectModel: (directory: string, target: WalkthroughTarget, model: string | null) => void;
+  getSelectedModel: (directory: string, target: WalkthroughTarget) => string | undefined;
+  selectLanguage: (directory: string, target: WalkthroughTarget, language: string | null) => void;
+  getSelectedLanguage: (directory: string, target: WalkthroughTarget) => string | undefined;
   reset: () => void;
 }
 
-// Kept outside the store: an AbortController is not state anyone renders, and
-// putting it in the store would make every abort a re-render.
 const inFlight = new Map<string, AbortController>();
-const stagePollers = new Map<string, ReturnType<typeof setInterval>>();
-
+const stagePollers = new Map<string, {
+  controller: AbortController;
+  timer: ReturnType<typeof setInterval>;
+}>();
 const STAGE_POLL_MS = 1_000;
 
 export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>()(
   devtools(
     (set, get) => ({
       entries: {},
-      requestedSource: {},
+      requestedTargets: {},
       selectedModel: {},
       selectedLanguage: {},
 
-      selectLanguage: (directory, source, language) => {
-        const key = entryKey(directory, source);
+      selectLanguage: (directory, target, language) => {
+        const key = entryKey(directory, target);
         set((state) => {
           const next = { ...state.selectedLanguage };
           if (language) next[key] = language;
@@ -145,10 +139,10 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         });
       },
 
-      getSelectedLanguage: (directory, source) => get().selectedLanguage[entryKey(directory, source)],
+      getSelectedLanguage: (directory, target) => get().selectedLanguage[entryKey(directory, target)],
 
-      selectModel: (directory, source, model) => {
-        const key = entryKey(directory, source);
+      selectModel: (directory, target, model) => {
+        const key = entryKey(directory, target);
         set((state) => {
           const next = { ...state.selectedModel };
           if (model) next[key] = model;
@@ -157,29 +151,31 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         });
       },
 
-      getSelectedModel: (directory, source) => get().selectedModel[entryKey(directory, source)],
+      getSelectedModel: (directory, target) => get().selectedModel[entryKey(directory, target)],
 
-      requestSource: (directory, source) => {
-        set((state) => ({ requestedSource: { ...state.requestedSource, [directory]: source } }));
+      requestTarget: (directory, target) => {
+        const key = requestKey(directory);
+        set((state) => ({ requestedTargets: { ...state.requestedTargets, [key]: target } }));
       },
 
-      clearRequestedSource: (directory) => {
+      getRequestedTarget: (directory) => get().requestedTargets[requestKey(directory)],
+
+      clearRequestedTarget: (directory) => {
+        const key = requestKey(directory);
         set((state) => {
-          if (!state.requestedSource[directory]) return state;
-          const next = { ...state.requestedSource };
-          delete next[directory];
-          return { requestedSource: next };
+          if (!state.requestedTargets[key]) return state;
+          const next = { ...state.requestedTargets };
+          delete next[key];
+          return { requestedTargets: next };
         });
       },
 
-      getEntry: (directory, source) => get().entries[entryKey(directory, source)] ?? EMPTY_ENTRY,
+      getEntry: (directory, target) => get().entries[entryKey(directory, target)] ?? EMPTY_ENTRY,
 
-      load: async (directory, source, options = {}) => {
+      load: async (directory, target, options = {}) => {
         if (!directory) return;
-        const key = entryKey(directory, source);
+        const key = entryKey(directory, target);
         const current = get().entries[key];
-        // A generation in flight owns this entry; a background load must not
-        // overwrite its result with the pre-generation state.
         if (current?.status === 'generating') return;
 
         inFlight.get(key)?.abort();
@@ -194,7 +190,7 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         }));
 
         try {
-          const result = await fetchWalkthrough(directory, source, {
+          const result = await fetchWalkthrough(directory, target, {
             model: get().selectedModel[key],
             providerID: options.providerID,
             language: options.language,
@@ -208,18 +204,11 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
             },
           }));
 
-          // The server is already generating for this source — the user started
-          // it and then reloaded or came back. Re-attach so the result lands
-          // here instead of being silently completed and forgotten.
           if (result.generating) {
-            // The running job already has its own language; this only decides
-            // what a request that does *not* attach would ask for.
-            void get().generate(directory, source, { language: options.language, providerID: options.providerID });
+            void get().generate(directory, target, { language: options.language, providerID: options.providerID });
           }
         } catch (error) {
           if (controller.signal.aborted) return;
-          // Keep whatever was on screen: a failed read is not evidence that the
-          // walkthrough is gone.
           set((state) => ({
             entries: {
               ...state.entries,
@@ -236,9 +225,9 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         }
       },
 
-      generate: async (directory, source, options = {}) => {
+      generate: async (directory, target, options = {}) => {
         if (!directory) return;
-        const key = entryKey(directory, source);
+        const key = entryKey(directory, target);
 
         inFlight.get(key)?.abort();
         const controller = new AbortController();
@@ -252,15 +241,16 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         }));
 
         const stopPolling = () => {
-          const timer = stagePollers.get(key);
-          if (timer === undefined) return;
-          clearInterval(timer);
+          const poller = stagePollers.get(key);
+          if (!poller || poller.controller !== controller) return;
+          clearInterval(poller.timer);
           stagePollers.delete(key);
         };
 
-        stopPolling();
-        stagePollers.set(key, setInterval(() => {
-          void fetchWalkthroughStage(directory, source)
+        const previousPoller = stagePollers.get(key);
+        if (previousPoller) clearInterval(previousPoller.timer);
+        const timer = setInterval(() => {
+          void fetchWalkthroughStage(directory, target, controller.signal)
             .then((stage) => {
               if (!stage || controller.signal.aborted) return;
               set((state) => {
@@ -269,13 +259,12 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
                 return { entries: { ...state.entries, [key]: { ...entry, stage } } };
               });
             })
-            .catch(() => {
-              // A missed poll is not worth surfacing; the next one recovers.
-            });
-        }, STAGE_POLL_MS));
+            .catch(() => {});
+        }, STAGE_POLL_MS);
+        stagePollers.set(key, { controller, timer });
 
         try {
-          const result = await generateWalkthrough(directory, source, {
+          const result = await generateWalkthrough(directory, target, {
             force: options.force,
             model: get().selectedModel[key],
             providerID: options.providerID,
@@ -314,15 +303,16 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
         }
       },
 
-      cancel: (directory, source) => {
-        const key = entryKey(directory, source);
-        // Server-side work outlives this request, so dropping the connection is
-        // not enough — cancelling has to be said out loud.
-        void cancelWalkthroughGeneration(directory, source).catch(() => {
-          // The job may have finished a moment ago; nothing to stop.
-        });
+      cancel: (directory, target) => {
+        const key = entryKey(directory, target);
+        void cancelWalkthroughGeneration(directory, target).catch(() => {});
         inFlight.get(key)?.abort();
         inFlight.delete(key);
+        const poller = stagePollers.get(key);
+        if (poller) {
+          clearInterval(poller.timer);
+          stagePollers.delete(key);
+        }
         set((state) => {
           const entry = state.entries[key];
           if (!entry) return state;
@@ -338,9 +328,9 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
       reset: () => {
         for (const controller of inFlight.values()) controller.abort();
         inFlight.clear();
-        for (const timer of stagePollers.values()) clearInterval(timer);
+        for (const poller of stagePollers.values()) clearInterval(poller.timer);
         stagePollers.clear();
-        set({ entries: {}, requestedSource: {}, selectedModel: {}, selectedLanguage: {} });
+        set({ entries: {}, requestedTargets: {}, selectedModel: {}, selectedLanguage: {} });
       },
     }),
     { name: 'walkthrough-store' }

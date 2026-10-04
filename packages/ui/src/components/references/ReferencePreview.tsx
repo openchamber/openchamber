@@ -17,6 +17,7 @@ import {
     linearStateLook,
     relativeTimeOf,
     type ReferencePickerItem,
+    referenceNumberLabel,
 } from './referencePickerItems';
 
 export type ReferencePreviewPurpose = 'attach' | 'worktree';
@@ -232,7 +233,7 @@ const GitHubPreview: React.FC<{
                 <div className="flex items-center gap-2">
                     <StatePill icon={look.icon} color={look.color} label={t(look.labelKey)} />
                     <span className="truncate typography-meta text-muted-foreground">
-                        {reference.sourceRepo.owner}/{reference.sourceRepo.repo} #{reference.number}
+                        {reference.sourceRepo.owner}/{reference.sourceRepo.repo} {referenceNumberLabel(reference)}
                     </span>
                     <a
                         href={reference.url}

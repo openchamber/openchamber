@@ -10,7 +10,7 @@ import {
 } from './composerReferences';
 
 const issue = (number: number, title = `Issue ${number}`): ComposerReference => ({
-    kind: 'github-issue',
+    kind: 'repository-issue',
     number,
     title,
     url: `https://github.com/acme/app/issues/${number}`,
@@ -18,7 +18,8 @@ const issue = (number: number, title = `Issue ${number}`): ComposerReference => 
 });
 
 const pull: ComposerReference = {
-    kind: 'github-pr',
+    kind: 'change-request',
+    provider: 'github',
     number: 7,
     title: 'Fix login',
     url: 'https://github.com/acme/app/pull/7',
@@ -44,11 +45,11 @@ const guest: ComposerReference = {
 test('references from every source sit side by side in attach order', () => {
     const list = withComposerReferences([issue(1)], [pull, linear, guest, issue(2)]);
     expect(list.map(composerReferenceKey)).toEqual([
-        'github:https://github.com/acme/app/issues/1',
-        'github:https://github.com/acme/app/pull/7',
+        'repository:https://github.com/acme/app/issues/1',
+        'repository:https://github.com/acme/app/pull/7',
         'linear:ENG-3',
         'guest:jira:OPS-2',
-        'github:https://github.com/acme/app/issues/2',
+        'repository:https://github.com/acme/app/issues/2',
     ]);
 });
 
@@ -62,11 +63,11 @@ test('attaching an item again replaces it where it stands', () => {
 
 test('removing one keeps the rest', () => {
     const list = withoutComposerReference([issue(1), pull, linear], composerReferenceKey(pull));
-    expect(list.map(composerReferenceKey)).toEqual(['github:https://github.com/acme/app/issues/1', 'linear:ENG-3']);
+    expect(list.map(composerReferenceKey)).toEqual(['repository:https://github.com/acme/app/issues/1', 'linear:ENG-3']);
 });
 
 test('a reference sends its text and identity, and a guest keeps its data', () => {
-    expect(toContextReference(pull)).toEqual({ kind: 'github-pr', number: 7, title: 'Fix login', url: 'https://github.com/acme/app/pull/7', context: 'pr 7' });
+    expect(toContextReference(pull)).toEqual({ kind: 'change-request', provider: 'github', number: 7, title: 'Fix login', url: 'https://github.com/acme/app/pull/7', context: 'pr 7' });
     expect(toContextReference(guest)).toEqual({ kind: 'guest', providerId: 'jira', id: 'OPS-2', title: 'Ops', url: 'https://jira/OPS-2', contextText: 'jira', thread: 'issue', data: { status: 'open' } });
 });
 

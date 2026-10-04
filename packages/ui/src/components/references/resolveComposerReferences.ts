@@ -2,22 +2,22 @@
  * Turning what the picker chose into composer chips.
  *
  * The list shows enough to choose; what the agent receives is read fresh at
- * attach time: a GitHub issue with all its comments, a PR with its comments,
- * review comments, files, checks and optionally its diff, a Linear issue with
- * its comments. Each choice resolves on its own, so one that fails is reported
+ * attach time, with the repository's account: a GitHub issue with all its
+ * comments, a PR with its comments, review comments, files, checks and
+ * optionally its diff, a Linear issue with its comments. Each choice resolves on its own, so one that fails is reported
  * by key while the others still attach.
  */
 
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
-import type { GitHubAPI, GitHubPullRequestContextResult, LinearIssue } from '@/lib/api/types';
+import type { ChangeRequestContext, Issue, IssueComment, LinearIssue, SourceControlAPI, SourceControlReadContext } from '@/lib/api/types';
 import { buildIssueContextText as buildLinearContextText } from '@/lib/linearStartSession';
 
 import { referencePickerItemKey, type ReferencePickerSelection } from './referencePickerItems';
 
 export type ReferenceResolveDeps = {
-    github: GitHubAPI | undefined;
-    /** The project the GitHub items belong to. */
-    directory: string | null;
+    sourceControl: Pick<SourceControlAPI, 'issueGet' | 'issueComments' | 'changeRequestContext'>;
+    /** The GitHub read context of the project the items belong to. */
+    context: SourceControlReadContext | null;
     /** A Linear issue with its comments, by Linear id; the preview's cache. */
     readLinearDetail: (issueId: string) => Promise<LinearIssue>;
 };
@@ -27,11 +27,11 @@ export type ResolvedReferences = {
     failures: Array<{ key: string; label: string; error: string }>;
 };
 
-const buildGitHubIssueContextText = (payload: { repo: unknown; issue: unknown; comments: unknown }) =>
-    `GitHub issue context (JSON)\n${JSON.stringify(payload, null, 2)}`;
+const buildIssueContextText = (issue: Issue, comments: IssueComment[]) =>
+    `Source control issue context (JSON)\n${JSON.stringify({ project: issue.project, issue, comments }, null, 2)}`;
 
-const buildPullRequestContextText = (payload: GitHubPullRequestContextResult) =>
-    `GitHub pull request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
+const buildChangeRequestContextText = (payload: ChangeRequestContext) =>
+    `Source control change request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
 
 const selectionLabel = (selection: ReferencePickerSelection): string => (
     selection.source === 'linear' ? selection.issue.identifier : `#${selection.reference.number}`
@@ -51,41 +51,45 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
         };
     }
 
-    const { github, directory } = deps;
-    if (!github || !directory) throw new Error('GitHub is not available here');
+    const { sourceControl, context } = deps;
+    if (!context) throw new Error('GitHub is not available here');
     const { reference } = selection;
-    const sourceRepo = { owner: reference.sourceRepo.owner, repo: reference.sourceRepo.repo };
+    const project = { owner: reference.sourceRepo.owner, name: reference.sourceRepo.repo };
     const author = reference.author ? { login: reference.author.login, avatarUrl: reference.author.avatarUrl } : undefined;
 
     if (reference.kind === 'issue') {
-        const [issueRes, commentsRes] = await Promise.all([
-            github.issueGet(directory, reference.number, { sourceRepo }),
-            github.issueComments(directory, reference.number, { sourceRepo }),
+        const [issue, comments] = await Promise.all([
+            sourceControl.issueGet(context, reference.number, project),
+            sourceControl.issueComments(context, reference.number, project),
         ]);
-        if (issueRes.connected === false || commentsRes.connected === false) throw new Error('GitHub is not connected');
-        if (!issueRes.issue) throw new Error('Issue not found');
+        if (!issue) throw new Error('Issue not found');
         return {
-            kind: 'github-issue',
-            number: issueRes.issue.number,
-            title: issueRes.issue.title,
-            url: issueRes.issue.url,
-            contextText: buildGitHubIssueContextText({ repo: issueRes.repo ?? null, issue: issueRes.issue, comments: commentsRes.comments ?? [] }),
+            kind: 'repository-issue',
+            number: issue.number,
+            title: issue.title,
+            url: issue.url,
+            contextText: buildIssueContextText(issue, comments),
             author,
         };
     }
 
-    const context = await github.prContext(directory, reference.number, { includeDiff: selection.includeDiff, includeCheckDetails: false, sourceRepo });
-    if (context.connected === false) throw new Error('GitHub is not connected');
-    if (!context.pr) throw new Error('Pull request not found');
-    return {
-        kind: 'github-pr',
-        number: context.pr.number,
-        title: context.pr.title,
-        url: context.pr.url,
-        head: context.pr.head,
-        base: context.pr.base,
+    const changeRequestContext = await sourceControl.changeRequestContext(context, reference.number, {
         includeDiff: selection.includeDiff,
-        contextText: buildPullRequestContextText(context),
+        includeCIDetails: false,
+        project,
+    });
+    const changeRequest = changeRequestContext.changeRequest;
+    if (!changeRequest) throw new Error('Pull request not found');
+    return {
+        kind: 'change-request',
+        provider: changeRequest.provider,
+        number: changeRequest.number,
+        title: changeRequest.title,
+        url: changeRequest.url,
+        head: changeRequest.head,
+        base: changeRequest.base,
+        includeDiff: selection.includeDiff,
+        contextText: buildChangeRequestContextText(changeRequestContext),
         author,
     };
 }

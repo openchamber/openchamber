@@ -13,7 +13,7 @@ const status: GitStatus = {
   isClean: true,
 }
 
-const withRuntimeGit = async (git: GitAPI, callback: () => Promise<void>) => {
+const withRuntimeGit = async (git: Partial<GitAPI>, callback: () => Promise<void>) => {
   const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -41,7 +41,7 @@ describe("getGitStatus", () => {
         received = { directory, options }
         return status
       },
-    } as Partial<GitAPI> as GitAPI
+    }
 
     await withRuntimeGit(runtimeGit, async () => {
       await getGitStatus("/repo", { mode: "light" })
@@ -58,7 +58,7 @@ describe("git index mutations", () => {
       stageGitFiles: async (directory: string, paths: string[]) => {
         received = { directory, paths }
       },
-    } as Partial<GitAPI> as GitAPI
+    }
 
     await withRuntimeGit(runtimeGit, async () => {
       await stageGitFiles("/repo", ["a.ts", "b.ts"])
@@ -73,7 +73,7 @@ describe("git index mutations", () => {
       unstageGitFiles: async (directory: string, paths: string[]) => {
         received = { directory, paths }
       },
-    } as Partial<GitAPI> as GitAPI
+    }
 
     await withRuntimeGit(runtimeGit, async () => {
       await unstageGitFiles("/repo", ["a.ts", "b.ts"])
@@ -88,7 +88,7 @@ describe("git index mutations", () => {
       stageGitFile: async (directory: string, path: string) => {
         received = { directory, path }
       },
-    } as Partial<GitAPI> as GitAPI
+    }
 
     await withRuntimeGit(runtimeGit, async () => {
       await stageGitFile("/repo", "a.ts")
@@ -103,7 +103,7 @@ describe("git index mutations", () => {
       unstageGitFile: async (directory: string, path: string) => {
         received = { directory, path }
       },
-    } as Partial<GitAPI> as GitAPI
+    }
 
     await withRuntimeGit(runtimeGit, async () => {
       await unstageGitFile("/repo", "a.ts")

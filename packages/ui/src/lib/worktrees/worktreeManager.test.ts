@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { Window } from 'happy-dom';
-import type { GitWorktreeCreateResult } from '@/lib/api/types';
+import type { GitNetworkOperation, GitNetworkOperationPlan, GitWorktreeCreateResult, RemoveGitWorktreePayload, SourceControlBindingRead } from '@/lib/api/types';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -30,6 +30,7 @@ let createdWorktreeResult: GitWorktreeCreateResult = createdWorktree;
 const bootstrapWatcherCalls: string[] = [];
 const bootstrapWatcherOptions: Array<{ onReady?: () => void }> = [];
 const warningToasts: string[] = [];
+const removeCalls: Array<{ directory: string; payload: RemoveGitWorktreePayload }> = [];
 
 const sessionState = {
   availableWorktreesByProject: new Map<string, WorktreeMetadata[]>(),
@@ -111,16 +112,23 @@ mock.module('@/lib/gitApi', () => ({
         validatePayloads.push(payload);
         return Promise.resolve({ ok: true, errors: [] });
       }),
-      remove: mock(() => removeImplementation?.() ?? Promise.resolve({ success: true })),
+      remove: mock((directory: string, payload: RemoveGitWorktreePayload) => {
+        removeCalls.push({ directory, payload });
+        return removeImplementation?.() ?? Promise.resolve({ success: true });
+      }),
     },
   },
 }));
 
-// The manager subscribes to runtime switches at import, which needs a window.
+// The manager subscribes to runtime switches at import, which needs a window;
+// pending Git operations are recorded in its session storage.
 const dom = new Window({ url: 'http://instance-a.test' });
 for (const [name, value] of Object.entries({ window: dom, CustomEvent: dom.CustomEvent })) {
   Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
 }
+beforeEach(() => {
+  dom.sessionStorage.clear();
+});
 
 const {
   createWorktree,
@@ -156,6 +164,7 @@ describe('worktreeManager list invalidation', () => {
     bootstrapWatcherCalls.length = 0;
     bootstrapWatcherOptions.length = 0;
     warningToasts.length = 0;
+    removeCalls.length = 0;
     createdWorktreeResult = createdWorktree;
     sessionState.availableWorktreesByProject = new Map();
     sessionState.availableWorktrees = [];
@@ -791,42 +800,95 @@ describe('worktreeManager fork remote payload wiring', () => {
     attachmentState.attachments = new Map();
   });
 
-  test('validate and create forward ensureRemoteName/Url for a fork head', async () => {
+  test('validate and create forward only the exact change-request source request', async () => {
     const project = { id: 'project-1', path: '/repo' };
     const args = {
       mode: 'existing' as const,
       branchName: 'feature/login',
       worktreeName: 'pr-42',
       existingBranch: 'remotes/pr-alice/feature/login',
-      setUpstream: true as const,
-      upstreamRemote: 'pr-alice',
-      upstreamBranch: 'feature/login',
-      ensureRemoteName: 'pr-alice',
-      ensureRemoteUrl: 'https://github.com/alice/openchamber.git',
+      changeRequestSource: {
+        context: { provider: 'github' as const, instance: 'github.com', directory: '/repo', repositoryId: 'repo_one', accountId: 'account_one', bindingRevision: 2, primaryRemote: 'origin' },
+        project: { id: 'acme/app', owner: 'acme', name: 'app' },
+        number: 42,
+        expectedHeadSha: '1111111111111111111111111111111111111111',
+        requestedRemoteName: 'pr-alice',
+      },
+      expectedRevision: '1111111111111111111111111111111111111111',
     };
 
     const validation = await validateWorktreeCreate(project, args);
     expect(validation.ok).toBe(true);
     expect(validatePayloads).toHaveLength(1);
-    const validated = validatePayloads[0] as Record<string, unknown>;
-    expect(validated.mode).toBe('existing');
-    expect(validated.existingBranch).toBe('remotes/pr-alice/feature/login');
-    expect(validated.ensureRemoteName).toBe('pr-alice');
-    expect(validated.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
-    expect('pullRequest' in validated).toBe(false);
+    expect(validatePayloads[0]).toEqual(args);
 
     await createWorktree(project, {
       ...args,
       returnAfterDirectoryCreated: true,
     });
     expect(createPayloads).toHaveLength(1);
-    const created = createPayloads[0] as Record<string, unknown>;
-    expect(created.existingBranch).toBe('remotes/pr-alice/feature/login');
-    expect(created.ensureRemoteName).toBe('pr-alice');
-    expect(created.ensureRemoteUrl).toBe('https://github.com/alice/openchamber.git');
-    expect(created.setUpstream).toBe(true);
-    expect('pullRequest' in created).toBe(false);
+    expect(createPayloads[0]).toEqual({ ...args, returnAfterDirectoryCreated: true });
   });
+});
+
+describe('worktreeManager remote deletion ordering', () => {
+  const endpoint = { displayUrl: 'https://example.com/team/repo.git', fingerprint: 'a'.repeat(64) };
+  const bindingRead: SourceControlBindingRead = {
+    status: 'bound',
+    repository: {
+      repositoryId: 'repository-one', configRevision: 'config-one', bare: false,
+      remotes: [{ name: 'origin', fetch: endpoint, push: endpoint }],
+    },
+    revision: 3,
+    binding: {
+      repositoryId: 'repository-one', revision: 3, state: 'bound', configRevision: 'config-one',
+      providers: [], auxiliary: [],
+      remotes: [{ name: 'origin', fetch: endpoint, push: endpoint, mode: 'managed', credentialId: 'credential-one', readiness: 'ready' }],
+    },
+  };
+  const plan: GitNetworkOperationPlan = {
+    operationId: 'operation-delete',
+    runtimeIdentity: { id: 'runtime-one', platform: 'web' },
+    transport: { mode: 'managed', verification: { status: 'verified', method: 'credential' } },
+    target: {
+      operation: 'delete-remote-branch', repositoryId: 'repository-one', bindingRevision: 3,
+      configRevision: 'config-one', remote: { name: 'origin', endpoint },
+      destinationRef: 'refs/heads/feature/delete-me',
+    },
+    completedSteps: [],
+    state: 'planned',
+  };
+
+  beforeEach(() => {
+    removeCalls.length = 0;
+  });
+
+  for (const state of ['failed', 'outcome-unknown'] as const) {
+    test(`does not remove the local worktree after ${state} remote deletion`, async () => {
+      const terminalOperation = (): GitNetworkOperation => state === 'failed'
+        ? { ...plan, state, error: { code: 'TRANSPORT_FAILED', message: 'Remote deletion did not complete' } }
+        : { ...plan, state, error: { code: 'OUTCOME_UNKNOWN', message: 'Remote deletion did not complete' } };
+      await expect(removeProjectWorktree(
+        { id: 'project-one', path: '/repo' },
+        { path: '/repo-feature', branch: 'feature/delete-me', projectDirectory: '/repo', label: 'delete-me' },
+        {
+          deleteRemoteBranch: true,
+          deleteLocalBranch: true,
+          remoteName: 'origin',
+          network: {
+            sourceControl: { repositoryBinding: async () => bindingRead },
+            git: {
+              planNetworkOperation: async () => plan,
+              executeNetworkOperation: async () => terminalOperation(),
+              getNetworkOperation: async () => terminalOperation(),
+            },
+          },
+        },
+      )).rejects.toThrow('Remote deletion did not complete');
+
+      expect(removeCalls).toEqual([]);
+    });
+  }
 });
 
 describe('worktreeManager missing worktrees', () => {
