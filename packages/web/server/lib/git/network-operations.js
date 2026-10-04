@@ -12,7 +12,7 @@ import { createNetworkOperationPlanner } from './network-operation-plan.js';
 import { createNetworkOperationRegistry } from './network-operation-registry.js';
 import { createGitRedactor, redactGitText } from './redaction.js';
 import { parseSubmoduleManifest, SUBMODULE_DISCOVERY_LIMITS } from './submodule-discovery.js';
-import { discoverLfs, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
+import { discoverLfs, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
 import { resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from '../source-control/url-redaction.js';
 
@@ -45,6 +45,13 @@ const isString = (value) => Object.prototype.toString.call(value) === '[object S
 
 const operationError = (code, message, status = 500, details = {}) => Object.assign(new Error(message), { code, status, ...details });
 const publicError = (code, message) => ({ code, message });
+// `ls-tree -l` adds each object's size before the tab; the submodule parser
+// reads gitlinks in the short form, so their size column (always `-`) goes.
+const readTreeListing = (treeOutput) => ({
+  gitlinks: treeOutput.split('\0').filter((record) => record.startsWith('160000 '))
+    .map((record) => `${record.replace(/^(160000 commit [0-9a-f]+) +-\t/, '$1\t')}\0`).join(''),
+  treeObjects: parseTreeObjects(treeOutput),
+});
 const terminal = (state, code, message) => ({ state, error: publicError(code, message) });
 const fileIdentity = (stats) => `${stats.dev}:${stats.ino}`;
 // Linux reuses an inode number when a directory is removed and recreated in the
@@ -982,9 +989,9 @@ export function createNetworkOperations({
     const configOutput = await localGit(directory, [
       'config', '--blob', 'HEAD:.gitmodules', '--null', '--get-regexp', '^submodule\\..*\\.(path|url|update)$',
     ], controls, deadline, { allowedCodes: [0, 1, 128] });
-    const treeOutput = await localGit(directory, ['ls-tree', '-rz', '--full-tree', 'HEAD'], controls, deadline,
-      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes });
-    const gitlinks = treeOutput.split('\0').filter((record) => record.startsWith('160000 ')).map((record) => `${record}\0`).join('');
+    // One listing serves both: gitlinks for submodules, and object sizes for the LFS scan.
+    const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
+      { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
     const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: 0 });
     const children = manifest.modules.map((module) => {
       if (!parentEndpoint || !parentRemoteName) return { path: module.path, gitlink: module.gitlink };
@@ -996,7 +1003,7 @@ export function createNetworkOperations({
     const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
       { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
     const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
-      { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path));
+      { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
     if ((scan.attributesOutput || scan.pointerSamples.length || !scan.pointerScanComplete)
       && (!parentEndpoint || !parentRemoteName)) {
       sourceRequired = true;
@@ -1125,9 +1132,9 @@ export function createNetworkOperations({
       const configOutput = await localGit(directory, [
         'config', '--blob', 'HEAD:.gitmodules', '--null', '--get-regexp', '^submodule\\..*\\.(path|url|update)$',
       ], controls, deadline, { allowedCodes: [0, 1, 128] });
-      const treeOutput = await localGit(directory, ['ls-tree', '-rz', '--full-tree', 'HEAD'], controls, deadline,
-        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes });
-      const gitlinks = treeOutput.split('\0').filter((record) => record.startsWith('160000 ')).map((record) => `${record}\0`).join('');
+      // One listing serves both: gitlinks for submodules, and object sizes for the LFS scan.
+      const { gitlinks, treeObjects } = readTreeListing(await localGit(directory, ['ls-tree', '-rz', '-l', '--full-tree', 'HEAD'], controls, deadline,
+        { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes }));
       const manifest = parseSubmoduleManifest({ gitmodulesConfig: configOutput, gitlinks, recursionDepth: depth });
       for (const module of hydrationPlan.hydrateSubmodules === false ? [] : manifest.modules) {
         if (phaseError(controls, deadline)) throw phaseError(controls, deadline);
@@ -1223,7 +1230,7 @@ export function createNetworkOperations({
       const filesOutput = await localGit(directory, ['ls-files', '-z'], controls, deadline,
         { maxOutputBytes: LFS_DISCOVERY_LIMITS.maxFilesBytes, rawOutput: true });
       const scan = await scanLfsFiles(filesOutput, (args, input) => localGit(directory, args, controls, deadline,
-        { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path));
+        { input, maxOutputBytes: LFS_DISCOVERY_LIMITS.maxBatchBytes, rawOutput: true }), manifest.modules.map((module) => module.path), treeObjects);
       const lfsPath = prefix || '.';
       if (!scan.attributesOutput && !scan.pointerSamples.length && scan.pointerScanComplete) {
         lfs.push({ path: lfsPath, status: 'not-needed' });

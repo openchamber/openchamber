@@ -1,4 +1,5 @@
 import fsSync from 'node:fs';
+import { LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -2415,14 +2416,15 @@ process.exit(safe ? 0 : 1);
       expect((await fs.readdir(destination)).filter((name) => name !== '.git')).toHaveLength(count);
     }
     expect(calls.filter((args) => args.includes('show'))).toHaveLength(0);
-    expect(calls.length).toBeLessThanOrEqual(3 * Math.ceil(count / 128) + 12);
+    expect(calls.length).toBeLessThanOrEqual(3 * Math.ceil(count / LFS_DISCOVERY_LIMITS.fileBatchSize) + 12);
   }, 90_000);
 
   it.each(['CANCELLED', 'CANCELLED_ACTIVE', 'TIMEOUT', 'overflow'])('stops LFS discovery across batches on %s without publication', async (interruption) => {
     const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-lfs-interruption-'));
     temporaryDirectories.push(parent);
     const destination = path.join(parent, 'checkout');
-    const files = Array.from({ length: 257 }, (_, index) => `file-${index}`);
+    // Enough files for three discovery batches, so the interruption lands between them.
+    const files = Array.from({ length: 2 * LFS_DISCOVERY_LIMITS.fileBatchSize + 1 }, (_, index) => `file-${index}`);
     const content = 'ordinary';
     let metadataBatches = 0;
     let plan;

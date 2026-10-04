@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { discoverLfs, parseLfsPointer, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
+import { discoverLfs, parseLfsPointer, parseTreeObjects, scanLfsFiles, scanLfsPushObjects, resolveLfsPushConfig, LFS_DISCOVERY_LIMITS } from './lfs-discovery.js';
 
 const OID = 'a'.repeat(64);
 const pointer = (size = 42) => [
@@ -45,7 +45,14 @@ const scanFixture = (files, { attribute = () => 'unspecified', transform = (_arg
     expect(output.length).toBeLessThanOrEqual(LFS_DISCOVERY_LIMITS.maxBatchBytes);
     return transform(args, output, calls.length);
   };
-  return { calls, run: () => scanLfsFiles(Buffer.from(files.map((file) => `${file.path}\0`).join('')), query),
+  const filesOutput = () => Buffer.from(files.map((file) => `${file.path}\0`).join(''));
+  // `ls-tree -rz -l` for the given paths, in Git's own record shape.
+  const treeListing = (paths) => paths.map((path) => {
+    const { oid, file } = byPath.get(path);
+    return `100644 blob ${oid} ${String(Buffer.byteLength(file.content)).padStart(7)}\t${path}\0`;
+  }).join('');
+  return { calls, treeListing, run: () => scanLfsFiles(filesOutput(), query),
+    runWithTree: (listing) => scanLfsFiles(filesOutput(), query, [], parseTreeObjects(listing)),
     runPush: () => scanLfsPushObjects(Buffer.from([...objects.keys()].map((oid) => `${oid}\n`).join('')), query) };
 };
 
@@ -56,7 +63,7 @@ describe('LFS publication discovery', () => {
     files[9_999].content = pointer();
     const fixture = scanFixture(files);
     expect(await fixture.runPush()).toEqual([{ oid: OID, size: 42 }]);
-    expect(fixture.calls).toHaveLength(2 * Math.ceil(10_000 / 128));
+    expect(fixture.calls).toHaveLength(2 * Math.ceil(10_000 / LFS_DISCOVERY_LIMITS.fileBatchSize));
   });
 
   it('does not read large blobs or non-blob objects and tolerates small binary content', async () => {
@@ -107,10 +114,37 @@ describe('LFS publication discovery', () => {
 });
 
 describe('incremental LFS file discovery', () => {
+  it('reads sizes from the tree listing and asks Git only for paths it lacks', async () => {
+    const files = Array.from({ length: 2_000 }, (_, index) => ({ path: `file-${index}`, content: `ordinary ${index}` }));
+    files.push({ path: 'late-pointer', content: pointer() });
+    const fixture = scanFixture(files);
+    const listed = await fixture.runWithTree(fixture.treeListing(files.map((file) => file.path)));
+    expect(listed.pointerSamples.map((sample) => sample.path)).toEqual(['late-pointer']);
+    expect(fixture.calls.filter((call) => call.args.includes('--batch-check'))).toHaveLength(0);
+
+    // A path the listing lacks is still resolved by Git, with the same result.
+    const partial = scanFixture(files);
+    const result = await partial.runWithTree(partial.treeListing(files.slice(0, 10).map((file) => file.path)));
+    expect(result.pointerSamples.map((sample) => sample.path)).toEqual(['late-pointer']);
+    expect(partial.calls.filter((call) => call.args.includes('--batch-check')).length).toBeGreaterThan(0);
+  });
+
+  it('parses long and short tree records and rejects anything else', () => {
+    const oid = 'a'.repeat(40);
+    const entries = parseTreeObjects([
+      `100644 blob ${oid}      12\tsrc/a.ts`, `160000 commit ${oid}       -\tvendor/child`, `100644 blob ${oid}\tshort`,
+    ].map((record) => `${record}\0`).join(''));
+    expect(entries.get('src/a.ts')).toEqual({ type: 'blob', oid, size: 12 });
+    expect(entries.get('vendor/child')).toEqual({ type: 'commit', oid, size: 0 });
+    // A short record carries no size; that path is left to Git.
+    expect(entries.has('short')).toBe(false);
+    expect(() => parseTreeObjects('garbage\0')).toThrow();
+  });
+
   it('covers 10000 ordinary paths with bounded batches and no retained samples', async () => {
     const fixture = scanFixture(Array.from({ length: 10_000 }, (_, index) => ({ path: `file-${index}`, content: `ordinary ${index}` })));
     expect(await fixture.run()).toEqual({ attributesOutput: '', pointerSamples: [], pointerScanComplete: true });
-    expect(fixture.calls).toHaveLength(3 * Math.ceil(10_000 / 128));
+    expect(fixture.calls).toHaveLength(3 * Math.ceil(10_000 / LFS_DISCOVERY_LIMITS.fileBatchSize));
     expect(fixture.calls.every((call) => call.bytes <= LFS_DISCOVERY_LIMITS.maxBatchBytes)).toBe(true);
   });
 
@@ -124,7 +158,8 @@ describe('incremental LFS file discovery', () => {
     expect(result.needed).toBe(true);
     expect(result.pointers).toEqual([{ path: 'late-pointer', oid: OID, size: 42 }]);
     expect(result.attributePaths).toEqual(withAttributes ? ['file 0'] : []);
-    expect(fixture.calls).toHaveLength(27);
+    // Two file batches (1024 + 2), three Git calls each: attributes, sizes, small blob contents.
+    expect(fixture.calls).toHaveLength(6);
   });
 
   it('skips large blobs and absent superproject gitlink objects without fetching content', async () => {

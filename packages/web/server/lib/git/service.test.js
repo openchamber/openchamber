@@ -19,6 +19,8 @@ import {
   createWorktree,
   getWorktreeBootstrapStatus,
   getBranches,
+  getRepositoryRemoteUrls,
+  parseRemoteListing,
   getRepositoryRoot,
   getUnpushedBranchCounts,
   getRangeDiff,
@@ -4552,6 +4554,47 @@ describe.runIf(canRunGit())('getBranches', () => {
     // A fetch here changes the tracking refs, so the remote is read again.
     runGit(repository, ['fetch', 'origin']);
     expect((await getBranches(repository)).all).toContain('remotes/origin/later');
+  });
+});
+
+describe('parseRemoteListing', () => {
+  it('reads CRLF output as Git for Windows may print it', () => {
+    const listing = [
+      'origin\tgit@github.com:owner/repo.git (fetch)',
+      'origin\tgit@github.com:owner/push.git (push)',
+      'mirror\thttps://example.com/a b.git (fetch)',
+      'mirror\thttps://example.com/a b.git (push)',
+      'bare\t',
+      '',
+    ].join('\r\n');
+    expect(parseRemoteListing(['bare', 'mirror', 'origin'], listing)).toEqual([
+      { name: 'bare', fetchUrl: 'bare', pushUrl: 'bare' },
+      { name: 'mirror', fetchUrl: 'https://example.com/a b.git', pushUrl: 'https://example.com/a b.git' },
+      { name: 'origin', fetchUrl: 'git@github.com:owner/repo.git', pushUrl: 'git@github.com:owner/push.git' },
+    ]);
+  });
+});
+
+describe.runIf(canRunGit())('getRepositoryRemoteUrls', () => {
+  it('reports each remote as `git remote get-url [--push]` does, from one listing', async () => {
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    runGit(repository, ['remote', 'set-url', '--push', 'origin', 'git@github.com:owner/push.git']);
+    runGit(repository, ['remote', 'add', 'rewritten', 'gh:other/repo.git']);
+    runGit(repository, ['config', 'url.https://github.com/.insteadOf', 'gh:']);
+    runGit(repository, ['config', 'remote.bare.fetch', '+refs/heads/*:refs/remotes/bare/*']);
+
+    const remotes = await getRepositoryRemoteUrls(repository);
+    const expected = remotes.map(({ name }) => {
+      const read = (args) => { try { return runGit(repository, args).trim(); } catch { return ''; } };
+      const fetchUrl = read(['remote', 'get-url', name]);
+      return { name, fetchUrl, pushUrl: read(['remote', 'get-url', '--push', name]) || fetchUrl };
+    });
+
+    expect(remotes).toEqual(expected);
+    expect(remotes.find((remote) => remote.name === 'rewritten')?.fetchUrl).toBe('https://github.com/other/repo.git');
+    expect(remotes.find((remote) => remote.name === 'origin')?.pushUrl).toBe('git@github.com:owner/push.git');
   });
 });
 

@@ -1431,10 +1431,44 @@ export async function resolveRepositoryGitPaths(directory) {
   };
 }
 
+/**
+ * Each listed remote's fetch and push URL from `git remote -v` output, as
+ * `git remote get-url [--push]` reports them: the first URL of several, and a
+ * remote with no URL read as a URL equal to its name, as Git does. Lines may
+ * end in CRLF (Git for Windows); a kept `\r` would match no line and read
+ * every remote as URL-less.
+ */
+export function parseRemoteListing(names, listing) {
+  const urls = new Map();
+  for (const line of String(listing || '').split(/\r?\n/)) {
+    const match = line.match(/^([^\t]+)\t(.*) \((fetch|push)\)$/);
+    if (!match) continue;
+    const entry = urls.get(match[1]) ?? {};
+    if (entry[match[3]] === undefined) entry[match[3]] = match[2];
+    urls.set(match[1], entry);
+  }
+  return names.map((name) => {
+    const fetchUrl = urls.get(name)?.fetch ?? name;
+    return { name, fetchUrl, pushUrl: urls.get(name)?.push ?? fetchUrl };
+  });
+}
+
+/**
+ * Each remote's fetch and push URL as `git remote get-url [--push]` reports
+ * them (`insteadOf` rewrites applied), read with one `git remote -v` instead
+ * of two Git processes per remote: repository identity is resolved several
+ * times per Git operation, and a repository with many remotes spent most of
+ * that time starting processes. When the listing itself fails, each remote is
+ * asked on its own, so a failure never reads as URL-less remotes.
+ */
 export async function getRepositoryRemoteUrls(directory) {
-  const result = await runGitCommand(directory, ['remote']);
-  if (!result.success) return [];
-  const names = String(result.stdout || '').split('\n').map((name) => name.trim()).filter(Boolean).sort();
+  const [namesResult, listResult] = await Promise.all([
+    runGitCommand(directory, ['remote']),
+    runGitCommand(directory, ['remote', '-v']),
+  ]);
+  if (!namesResult.success) return [];
+  const names = String(namesResult.stdout || '').split(/\r?\n/).map((name) => name.trim()).filter(Boolean).sort();
+  if (listResult.success) return parseRemoteListing(names, listResult.stdout);
   return Promise.all(names.map(async (name) => {
     const [fetchResult, pushResult] = await Promise.all([
       runGitCommand(directory, ['remote', 'get-url', name]),
