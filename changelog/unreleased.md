@@ -1,5 +1,5 @@
 ---
-title: GitLab support and security fixes
+title: GitLab support and performance fixes
 ---
 
 ## App
@@ -37,7 +37,7 @@ title: GitLab support and security fixes
 - Sidebar: PR, merge request and issue states show right after the app starts and update within about a minute.
 - Chat: chats in the side panel (Open in side panel, subtasks, reviews) open at once and keep their own model, agent, draft and status.
 - Chat: reasoning stays folded while it streams, so the transcript stops jumping. Settings > Chat > Reasoning brings back the old behaviour.
-- Chat: sessions whose last turn ran many tools open faster.
+- Chat: sessions whose last turn ran many tools open faster, and that turn's activity opens at once when you expand it.
 - New Worktree dialog: it keeps one size while you switch tabs, opens from any draft including Timeline mode, and never sends a prompt on its own. Setup commands now live only in project settings.
 - Files: the file tree updates by itself after an agent creates, deletes or moves files.
 - Composer: it follows agent and model switches made by a plugin or by another device.
@@ -64,8 +64,9 @@ title: GitLab support and security fixes
 
 ### Fixes
 - **Security:** fixes from a private security report. A remote server's page in the desktop app can no longer plant code or read other servers' tokens, a password no longer leaks through self-update logs, HTML file previews and theme files cannot run code in the app, sandboxed pages cannot open terminal connections, and remote images in agent output show as links (thanks to [Raindrops.dev](https://www.raindrops.dev) for the report).
+- Chat: the chat no longer jumps line by line while a reply streams, and a message you send slides smoothly into view.
 - Notifications: push notifications on phones are encrypted end to end, and the session name no longer passes through the relay.
-- MCP: servers start only for the project you are in, not for every project, every chat you opened or your home folder, so far fewer background processes pile up.
+- MCP: servers start only for the project you are in and stop soon after you leave a chat or worktree, so far fewer background processes pile up.
 - Git: git commands get the environment OpenChamber prepares, so hooks run cleanly in the Linux AppImage and git no longer waits on a hidden password prompt on Windows.
 - Git: Continue for a rebase or merge works again (thanks to @anandghegde), MSYS2 git paths on Windows work (thanks to @Zhanyuanium), and worktrees in git-annex repositories can be deleted (thanks to @domkm).
 - Desktop: HTML file previews open again (thanks to @IbrahimKhan12), and copy and paste work in the browser panel (thanks to @wpbiggs).
@@ -103,6 +104,12 @@ title: GitLab support and security fixes
 - Multi-run works when OpenChamber is opened over plain HTTP on your network (thanks to @manhngodh).
 - Docker: voice model downloads work in the Docker image.
 
+### SDK
+- Storage: `host.storage` with `{ scope: 'device' }` keeps an extension's preferences per device (thanks to @mattv8).
+- Work Status: `setStatusControls` puts up to four buttons and selects in the section header, and `onStatusControl` reports when one is used (thanks to @mattv8).
+- Popovers: `openPopover` shows a card outside the extension's frame, anchored to an element, and `mountPopoverAnchor` from `@openchamber/sdk/ui` opens it on hover and from the keyboard (thanks to @mattv8).
+- Themes: the ready context carries the app's syntax colors, such as `syntaxKeyword` and `syntaxString` (thanks to @mattv8).
+
 ### Misc
 - Bundled OpenCode updated to 2.0.22.
 
@@ -118,3 +125,7 @@ title: GitLab support and security fixes
 - Settings in a global `opencode.jsonc` apply in VS Code too.
 - Git: upstream tracking matches the web app (thanks to @bashrusakh).
 - Chat: reasoning stays folded while it streams, so the transcript stops jumping. Settings > Chat > Reasoning brings back the old behaviour.
+- Chat: sessions whose last turn ran many tools open faster, and that turn's activity opens at once when you expand it.
+
+### Fixes
+- Chat: the chat no longer jumps line by line while a reply streams, and a message you send slides smoothly into view.
