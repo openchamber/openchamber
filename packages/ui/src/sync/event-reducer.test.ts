@@ -422,25 +422,52 @@ describe("ordering and trimming", () => {
     expect(draft.part.msg_a).toEqual([legacyPart, currentPart])
   })
 
+  // OpenCode session ids descend with time: a newer session sorts first.
+  const older = () => session({ id: "ses_9", title: "Older", time: { created: 1, updated: 1 } })
+  const newest = () => session({ id: "ses_1", title: "Newest", time: { created: 2, updated: 2 } })
+
   test("trimming past the limit spares a session that still has a pending permission", () => {
-    const older = session({ id: "ses_0", title: "Older" })
     const draft = state({
-      session: [older],
+      session: [older()],
       limit: 1,
-      permission: { ses_0: [permission("perm_1", "ses_0")] },
+      permission: { ses_9: [permission("perm_1", "ses_9")] },
     })
 
-    apply(draft, { type: "session.created", properties: { info: session({ id: "ses_2", title: "Newest" }) } })
+    apply(draft, { type: "session.created", properties: { info: newest() } })
 
-    expect(draft.session.map((item) => item.id)).toEqual(["ses_0", "ses_2"])
+    expect(draft.session.map((item) => item.id)).toEqual(["ses_1", "ses_9"])
   })
 
-  test("trimming past the limit drops the oldest session with nothing pending", () => {
-    const draft = state({ session: [session({ id: "ses_0", title: "Older" })], limit: 1 })
+  test("trimming past the limit spares a session that still has a pending form", () => {
+    const draft = state({
+      session: [older()],
+      limit: 1,
+      form: { ses_9: [{ id: "frm_1", sessionID: "ses_9", title: "Pick", fields: [{ key: "answer", type: "boolean" }] }] },
+    })
 
-    apply(draft, { type: "session.created", properties: { info: session({ id: "ses_2", title: "Newest" }) } })
+    apply(draft, { type: "session.created", properties: { info: newest() } })
 
-    expect(draft.session.map((item) => item.id)).toEqual(["ses_2"])
+    expect(draft.session.map((item) => item.id)).toEqual(["ses_1", "ses_9"])
+  })
+
+  test("trimming past the limit drops the oldest session, not the one just created", () => {
+    const draft = state({ session: [older()], limit: 1 })
+
+    apply(draft, { type: "session.created", properties: { info: newest() } })
+
+    expect(draft.session.map((item) => item.id)).toEqual(["ses_1"])
+  })
+
+  test("a just-created subagent survives trimming so its parent can find it", () => {
+    const parent = session({ id: "ses_5", title: "Parent", time: { created: 5, updated: 5 } })
+    const draft = state({ session: [parent, older()], limit: 2 })
+
+    apply(draft, {
+      type: "session.created",
+      properties: { info: session({ id: "ses_1", parentID: "ses_5", time: { created: 6, updated: 6 } }) },
+    })
+
+    expect(draft.session.map((item) => item.id)).toEqual(["ses_1", "ses_5"])
   })
 })
 

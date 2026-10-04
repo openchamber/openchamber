@@ -34,7 +34,8 @@ import { buildLinkedIssue } from '@/lib/linkedIssues';
 import { normalizePath } from '@/lib/pathNormalization';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { getSourceControlStatusKey, useGitHubPrStatusStore, type SourceControlStatus } from '@/stores/useGitHubPrStatusStore';
+import { getSourceControlStatusKey, useBranchTrackedPulls, useGitHubPrStatusStore, type SourceControlStatus } from '@/stores/useGitHubPrStatusStore';
+import { useTrackedItems } from '@/lib/trackedItems/interest';
 import { getChangeRequestContextKey, useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import type {
   CIRun,
@@ -51,6 +52,7 @@ import { formatChangeRequestReference, getSourceControlBaseUrl, getSourceControl
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { getDetectedUpstreamContextKey, loadDetectedUpstreamRepo } from './detectedUpstreamRepo';
+import type { SourceControlProvider } from '@/lib/source-control/types';
 import {
   hasUnknownMutationOutcomeCode,
   reconcileUnknownMutationOutcome,
@@ -311,6 +313,11 @@ export const PullRequestSection: React.FC<{
     (key: I18nKey, params?: I18nParams) => translate(changeRequestCopy(key, repositoryHost?.provider), params),
     [repositoryHost?.provider, translate],
   );
+  // How the attached comment or job names its change request: GitLab's `!N`, GitHub's `PR #N`.
+  const changeRequestNumberLabel = React.useCallback(
+    (number: number | undefined) => (repositoryHost?.provider === 'gitlab' ? `!${number ?? ''}` : `PR #${number ?? ''}`),
+    [repositoryHost?.provider],
+  );
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const openSourceControlSettings = useOpenSourceControlSettings();
   const { sourceControl } = useRuntimeAPIs();
@@ -458,6 +465,10 @@ export const PullRequestSection: React.FC<{
     capturedRuntimeKey === getRuntimeKey() && capturedStatusKey === mutationScopeKeyRef.current
   ), []);
   const statusEntry = useGitHubPrStatusStore((state) => state.entries[prStatusKey]);
+  // The open change request shown here is followed by the server, which pushes
+  // its state and checks; nothing here polls.
+  const followedKeys = React.useMemo(() => (prStatusKey ? [prStatusKey] : []), [prStatusKey]);
+  useTrackedItems(useBranchTrackedPulls(followedKeys));
 
   const isLoading = statusEntry?.isLoading ?? false;
   const status = sourceControlAuth.connected ? statusEntry?.status ?? null : null;
@@ -853,14 +864,15 @@ export const PullRequestSection: React.FC<{
     const location = comment.path ? ` · ${comment.path}${comment.line ? `:${comment.line}` : ''}` : '';
     useInlineCommentDraftStore.getState().addDraft(target, {
       source: 'pr-comment',
-      fileLabel: `PR #${pr?.number ?? ''} ${authorLabel}${location}`,
+      fileLabel: `${changeRequestNumberLabel(pr?.number)} ${authorLabel}${location}`,
+      ...(repositoryHost?.provider ? { provider: repositoryHost.provider } : {}),
       startLine: comment.line ?? 0,
       endLine: comment.line ?? 0,
       code: comment.body,
       language: 'markdown',
       text: '',
     });
-  }, [pr?.number]);
+  }, [changeRequestNumberLabel, pr?.number, repositoryHost?.provider]);
 
   const renderCheckRunSummary = React.useCallback((run: CIRun, options?: { hideHeader?: boolean }) => {
     const status = run.status || 'unknown';
@@ -1044,7 +1056,8 @@ export const PullRequestSection: React.FC<{
         ].filter(Boolean).join('\n\n');
         draftStore.addDraft(target, {
           source: 'pr-check',
-          fileLabel: `PR #${pr.number} · ${run.name}`,
+          fileLabel: `${changeRequestNumberLabel(pr.number)} · ${run.name}`,
+          ...(repositoryHost?.provider ? { provider: repositoryHost.provider } : {}),
           startLine: 0,
           endLine: 0,
           code: payload,
@@ -1058,7 +1071,7 @@ export const PullRequestSection: React.FC<{
     } finally {
       setIsAttachingChecks(false);
     }
-  }, [directory, ensurePrContext, pr, projectSelector, readContext, resolveDraftTarget, sourceControl, t]);
+  }, [changeRequestNumberLabel, directory, ensurePrContext, pr, projectSelector, readContext, repositoryHost?.provider, resolveDraftTarget, sourceControl, t]);
 
   const sendCommentsToChat = React.useCallback(async () => {
     if (!directory || !pr || !readContext) return;
@@ -1274,9 +1287,10 @@ export const PullRequestSection: React.FC<{
         : readContext
           ? `${readContext.primaryRemote}/${targetBaseBranch}`
           : targetBaseBranch;
-      const payload: { base: string; head: string; context?: string; files?: string[] } = {
+      const payload: { base: string; head: string; context?: string; files?: string[]; changeRequestProvider?: SourceControlProvider } = {
         base: baseRef,
         head: branch,
+        ...(readContext?.provider ? { changeRequestProvider: readContext.provider } : {}),
       };
       if (additionalContext) {
         payload.context = additionalContext;
@@ -1565,7 +1579,9 @@ export const PullRequestSection: React.FC<{
   const prStatusText = pr
     ? [
         `${pr.state}${pr.draft ? ' (draft)' : ''}`,
-        pr.mergeable === false ? t('gitView.pr.notMergeable') : null,
+        // Whether it can merge is a question for an open one only: GitLab reports
+        // a merged or closed merge request as not mergeable.
+        pr.state === 'open' && pr.mergeable === false ? t('gitView.pr.notMergeable') : null,
         pr.state === 'open' && typeof pr.mergeableState === 'string' && pr.mergeableState && pr.mergeableState !== 'unknown'
           ? pr.mergeableState
           : null,

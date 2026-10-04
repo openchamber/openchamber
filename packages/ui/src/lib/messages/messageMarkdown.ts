@@ -41,9 +41,9 @@ function formatContext(payload: ContextPartPayload, originalText: string, fieldL
     case 'browser-annotation':
       return quoteContext(`Browser annotation on ${payload.pageUrl}:`, payload.prompt, payload.text, fieldLimit);
     case 'pr-comment':
-      return quoteContext(`GitHub PR comment, ${payload.label}:`, payload.body, payload.text, fieldLimit);
+      return quoteContext(`${payload.provider === 'gitlab' ? 'GitLab merge request' : 'GitHub PR'} comment, ${payload.label}:`, payload.body, payload.text, fieldLimit);
     case 'pr-check':
-      return quoteContext(`GitHub PR check, ${payload.label}:`, payload.output, payload.text, fieldLimit, '');
+      return quoteContext(`${payload.provider === 'gitlab' ? 'GitLab merge request pipeline job' : 'GitHub PR check'}, ${payload.label}:`, payload.output, payload.text, fieldLimit, '');
     case 'terminal':
       return quoteContext(`Terminal ${payload.terminalLabel}, lines ${payload.startLine}-${payload.endLine}:`, payload.output, '', fieldLimit, '');
     case 'repository-issue':

@@ -36,6 +36,11 @@ describe('combineSessionPrSummaries', () => {
     const combined = combineSessionPrSummaries(null, [summary(7, 'open'), summary(7, 'open', { repo: { owner: 'acme', repo: 'web' } })]);
     expect(combined).toHaveLength(2);
   });
+
+  test('keeps a GitHub PR and a GitLab merge request with the same path and number apart', () => {
+    const combined = combineSessionPrSummaries(null, [summary(7, 'open'), summary(7, 'open', { provider: 'gitlab' })]);
+    expect(combined.map((entry) => entry.provider)).toEqual(['github', 'gitlab']);
+  });
 });
 
 describe('findLinkedPrsWithoutState', () => {

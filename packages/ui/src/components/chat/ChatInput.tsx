@@ -232,6 +232,7 @@ import {
     mergeSessionInputHistory,
 } from './inputHistory';
 import { useScopedBlockingForms, useScopedBlockingPermissions, useUserMessageHistory } from '@/sync/sync-context';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -1421,7 +1422,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (part.kind !== 'context') continue;
             const payload = part.metadata[CONTEXT_METADATA_KEY];
             if (payload.kind === 'repository-issue') {
-                restored.push({ kind: 'repository-issue', number: payload.number, title: payload.title, url: payload.url, contextText: part.text });
+                restored.push({
+                    kind: 'repository-issue',
+                    ...(payload.provider ? { provider: payload.provider } : {}),
+                    number: payload.number,
+                    title: payload.title,
+                    url: payload.url,
+                    contextText: part.text,
+                });
             } else if (payload.kind === 'change-request') {
                 // The captured context is final: whatever diff it includes is
                 // already in the text, and the branches were not captured.
@@ -3648,8 +3656,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                                 url={reference.url}
                                 author={reference.author}
                                 branches={reference.head && reference.base ? { head: reference.head, base: reference.base } : undefined}
-                                openInBrowserLabel={t('chat.chatInput.linked.pr.openInBrowserAria')}
-                                removeLabel={t('chat.chatInput.linked.pr.removeAria')}
+                                openInBrowserLabel={t(changeRequestCopy('chat.chatInput.linked.pr.openInBrowserAria', reference.provider))}
+                                removeLabel={t(changeRequestCopy('chat.chatInput.linked.pr.removeAria', reference.provider))}
                                 onReopenPicker={() => setReferencePicker({ source: 'github', kind: 'pull' })}
                                 onRemove={remove}
                             />

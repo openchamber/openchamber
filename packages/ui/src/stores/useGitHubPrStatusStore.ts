@@ -1,3 +1,4 @@
+import React from 'react';
 import { create } from 'zustand';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { persist } from 'zustand/middleware';
@@ -9,7 +10,6 @@ import type {
   CISummary,
   GitHubIssueLiveSummary,
   GitHubPullRequestLiveSummary,
-  GitHubPullRequestRef,
   Project,
   RuntimeAPIs,
   SourceControlIdentity,
@@ -20,16 +20,12 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 import { hasSameSourceControlReadContext } from '@/lib/source-control/identity';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import { trackedItemKey, type TrackedItemState, type TrackedThread } from '@/lib/trackedItems/model';
 import type { LinkedGitHubPullRequest } from '@/lib/linkedIssues';
 import { useShallow } from 'zustand/react/shallow';
 
 const PR_REVALIDATE_TTL_MS = 90_000;
-const PR_REVALIDATE_INTERVAL_MS = 15_000;
-const PR_DISCOVERY_INTERVAL_MS = 5 * 60_000;
 const PR_BOOTSTRAP_RETRY_DELAYS_MS = [2_000, 5_000] as const;
-const PR_OPEN_BUSY_INTERVAL_MS = 60_000;
-const PR_OPEN_DEFAULT_INTERVAL_MS = 2 * 60_000;
-const PR_OPEN_STABLE_INTERVAL_MS = 5 * 60_000;
 const PR_STATUS_REFRESH_CONCURRENCY = 4;
 const PR_PERSIST_TTL_MS = 12 * 60 * 60_000;
 const PR_STATUS_STORAGE_KEY = 'openchamber.source-control-status';
@@ -37,7 +33,6 @@ const LEGACY_PR_STATUS_STORAGE_KEY = 'openchamber.github-pr-status';
 const PR_MAX_ENTRIES = 200;
 // Refs per live-summary request; the server splits them into GraphQL
 // documents of 25.
-const PR_LIVE_SUMMARY_BATCH_SIZE = 100;
 
 const GITHUB_IDENTITY: SourceControlIdentity = { provider: 'github', instance: 'github.com' };
 const statusKeySchema = z.union([
@@ -95,20 +90,6 @@ const withStatusAliases = (status: ChangeRequestStatus): SourceControlStatus => 
 });
 
 const isTerminalPrState = (state: string | null | undefined): boolean => state === 'closed' || state === 'merged';
-const isPendingChecks = (status: SourceControlStatus | null): boolean => {
-  const checks = status?.checks;
-  if (!checks) {
-    return false;
-  }
-  return checks.state === 'pending' || checks.pending > 0;
-};
-
-const getOpenPrRefreshInterval = (status: SourceControlStatus | null): number => {
-  if (isPendingChecks(status)) return PR_OPEN_BUSY_INTERVAL_MS;
-  if (status?.checks && status.checks.state !== 'pending') return PR_OPEN_STABLE_INTERVAL_MS;
-  return PR_OPEN_DEFAULT_INTERVAL_MS;
-};
-
 export const getGitHubPrStatusKey = (directory: string, branch: string, remoteName?: string | null): string =>
   JSON.stringify([getRuntimeKey(), GITHUB_IDENTITY.provider, GITHUB_IDENTITY.instance, directory, branch, remoteName ?? 'auto']);
 
@@ -246,17 +227,14 @@ type SourceControlStatusStore = {
   setParams: (key: string, params: PrRuntimeParams) => void;
   startWatching: (key: string) => void;
   stopWatching: (key: string) => void;
+  /** An agent turn finished in `directory`: its watched branches may have a new pull request. */
+  noteBranchActivity: (directory: string) => void;
+  /** The user came back to the window: watched branches whose answer aged past the floor are asked again. */
+  noteWindowReturned: () => void;
   refresh: (key: string, options?: RefreshOptions) => Promise<void>;
   refreshTargets: (targets: PrTrackingTarget[], options?: RefreshOptions) => Promise<void>;
-  /** Live status of PRs linked to sessions, keyed like live-summary batches. Runtime-only. */
-  linkedSummaries: Record<string, GitHubPullRequestLiveSummary>;
-  /** Live state of GitHub issues linked to sessions, keyed like live-summary batches. Runtime-only. */
-  linkedIssueSummaries: Record<string, GitHubIssueLiveSummary>;
-  syncOpenPrSummaries: (
-    keys: string[],
-    sourceControl: Pick<RuntimeAPIs['sourceControl'], 'githubSummaries'>,
-    options: { minAgeMs: number; linkedRefs?: GitHubPullRequestRef[]; linkedIssueRefs?: GitHubPullRequestRef[] },
-  ) => Promise<void>;
+  /** Applies live states the server pushed for branches' open pull requests. */
+  applyTrackedPulls: (records: ReadonlyArray<{ key: string; record: TrackedItemState }>) => void;
   updateStatus: (key: string, updater: (prev: SourceControlStatus | null) => SourceControlStatus | null) => void;
   clearDirectoryStatus: (directory: string) => void;
   resetForRuntimeSwitch: () => void;
@@ -269,8 +247,6 @@ const lastRefreshBySignature = new Map<string, number>();
 // When each open PR last went out in a live-summary batch, keyed by runtime,
 // account and PR. Failed batches count too, so an outage waits for the next
 // cadence.
-const liveSummaryCheckedAt = new Map<string, number>();
-let liveSummarySyncInFlight = false;
 let prRuntimeGeneration = 0;
 let activeContextsRequestId = 0;
 const activeContextsRequestsByDirectory = new Map<string, Map<string, number>>();
@@ -800,34 +776,25 @@ const createPrStatusStorage = () => {
   };
 };
 
-// Linked PRs and issues belong to no repository binding, so they are read with
-// the current github.com account: their keys carry no account.
-const getLiveSummaryPrKey = (runtimeKey: string, accountId: string | null, ref: GitHubPullRequestRef): string =>
-  JSON.stringify([runtimeKey, accountId ?? '', ref.owner.toLowerCase(), ref.repo.toLowerCase(), ref.number]);
-
-const getLiveSummaryIssueKey = (runtimeKey: string, ref: GitHubPullRequestRef): string =>
-  JSON.stringify(['issue', runtimeKey, ref.owner.toLowerCase(), ref.repo.toLowerCase(), ref.number]);
 
 const getStatusChangeRequest = (status: SourceControlStatus | null | undefined) => status?.changeRequest ?? status?.pr ?? null;
 const getStatusChecks = (status: SourceControlStatus | null | undefined): CISummary | null => status?.ci?.summary ?? status?.checks ?? null;
 
-// The open GitHub PR of an entry that list surfaces keep live through batched
-// summaries, with the account it was read with. Watched entries are skipped:
-// their watcher already runs full refreshes, which carry more than a summary
-// does.
-const getLiveSummaryTarget = (
-  entry: PrStatusEntry | undefined,
-): { accountId: string; ref: GitHubPullRequestRef } | null => {
+/**
+ * The open pull or merge request of an entry, as the item the server follows
+ * for it, read with the account the repository is bound to. A closed or merged
+ * one is history: finding the branch's next one is discovery's job.
+ */
+export const getBranchTrackedPull = (entry: PrStatusEntry | undefined): TrackedThread<'pull'> | null => {
   const identity = getIdentityFromEntry(entry);
   const pr = getStatusChangeRequest(entry?.status);
   const project = entry?.status?.project;
   const owner = project?.owner ?? entry?.status?.repo?.owner;
   const repo = project?.name ?? entry?.status?.repo?.repo;
-  if (!entry || entry.watchers > 0 || identity?.provider !== 'github' || !identity.accountId
-    || !pr || pr.state !== 'open' || !owner || !repo) {
-    return null;
-  }
-  return { accountId: identity.accountId, ref: { owner, repo, number: pr.number } };
+  if (!entry || !identity?.accountId || !pr || pr.state !== 'open' || !owner || !repo) return null;
+  const thread = { kind: 'pull' as const, owner, repo, number: pr.number, accountId: identity.accountId };
+  if (identity.provider === 'gitlab') return identity.instance ? { provider: 'gitlab', instance: identity.instance, ...thread } : null;
+  return identity.provider === 'github' ? { provider: 'github', ...thread } : null;
 };
 
 const sameChecks = (left: CISummary | null | undefined, right: CISummary | null | undefined): boolean => (
@@ -840,17 +807,6 @@ const sameChecks = (left: CISummary | null | undefined, right: CISummary | null 
     && left.pending === right.pending)
 );
 
-const sameLiveSummary = (
-  left: GitHubPullRequestLiveSummary | undefined,
-  right: GitHubPullRequestLiveSummary,
-): boolean => Boolean(left
-  && left.state === right.state
-  && left.draft === right.draft
-  && left.title === right.title
-  && left.mergeable === right.mergeable
-  && left.mergeableState === right.mergeableState
-  && left.headSha === right.headSha
-  && sameChecks(left.checks, right.checks));
 
 /**
  * Status with the summary's live fields, or null when nothing changed. Both the
@@ -911,12 +867,14 @@ const boundEntries = (entries: Record<string, PrStatusEntry>, retainedKey: strin
   return Object.fromEntries([...protectedEntries, ...recentEntries]);
 };
 
+// A watched branch is refreshed again on a signal (`noteBranchActivity`,
+// `noteWindowReturned`) when its last answer is older than this on return.
+const WATCH_RETURN_FLOOR_MS = 60_000;
+
 export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
   persist(
     (set, get) => ({
       entries: {},
-      linkedSummaries: {},
-      linkedIssueSummaries: {},
       activeContextRegistrations: {},
       activeRequestCount: 0,
       totalRequestCount: 0,
@@ -931,11 +889,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         lastRefreshBySignature.clear();
         activeContextsRequestsByDirectory.clear();
         activeContextsCommitByDirectory.clear();
-        liveSummaryCheckedAt.clear();
-        liveSummarySyncInFlight = false;
         set((state) => ({
-          linkedSummaries: {},
-          linkedIssueSummaries: {},
           activeRequestCount: 0,
           activeContextRegistrations: {},
           entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, {
@@ -1105,55 +1059,27 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
         PR_BOOTSTRAP_RETRY_DELAYS_MS.forEach((delay) => runBootstrapRefresh(delay));
 
-        const timerId = window.setInterval(() => {
-          if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-            return;
-          }
+        // Nothing polls a watched entry: its open pull request is followed by
+        // the server (`getBranchTrackedPull`), and finding a new one waits for
+        // what can bring one (`noteBranchActivity`, `noteWindowReturned`).
+        timers.set(key, 0);
+      },
 
-          const entry = get().entries[key];
-          if (!entry || entry.watchers <= 0) {
-            return;
-          }
-
-          const hasPr = Boolean(entry.status?.pr);
-          // A closed/merged PR is history, not live status. It stays on the
-          // discovery cadence like a branch with no PR at all, so a newer open
-          // PR — or an authoritative empty result — replaces it on its own.
-          const isTerminal = isTerminalPrState(entry.status?.pr?.state);
-          if (!hasPr || isTerminal) {
-            const now = Date.now();
-            if (now - entry.lastDiscoveryPollAt < PR_DISCOVERY_INTERVAL_MS) {
-              return;
-            }
-            set((state) => {
-              const current = state.entries[key];
-              if (!current) {
-                return state;
-              }
-              return {
-                entries: {
-                  ...state.entries,
-                  [key]: {
-                    ...current,
-                    lastDiscoveryPollAt: now,
-                  },
-                },
-              };
-            });
+      noteBranchActivity: (directory) => {
+        for (const [key, entry] of Object.entries(get().entries)) {
+          if (entry.watchers > 0 && getIdentityFromEntry(entry)?.directory === directory) {
             void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
-            return;
           }
+        }
+      },
 
-          const elapsed = Date.now() - entry.lastRefreshAt;
-          const nextInterval = getOpenPrRefreshInterval(entry.status);
-          if (elapsed < nextInterval) {
-            return;
+      noteWindowReturned: () => {
+        const floor = Date.now() - WATCH_RETURN_FLOOR_MS;
+        for (const [key, entry] of Object.entries(get().entries)) {
+          if (entry.watchers > 0 && Math.max(entry.lastRefreshAt, entry.lastDiscoveryPollAt) < floor) {
+            void get().refresh(key, { force: true, silent: true, markInitialResolved: true });
           }
-
-          void get().refresh(key, { force: true, onlyExistingPr: true, silent: true, markInitialResolved: true });
-        }, PR_REVALIDATE_INTERVAL_MS);
-
-        timers.set(key, timerId);
+        }
       },
 
       stopWatching: (key) => {
@@ -1459,164 +1385,26 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         await mapWithConcurrency(keys, PR_STATUS_REFRESH_CONCURRENCY, (key) => get().refresh(key, options));
       },
 
-      syncOpenPrSummaries: async (keys, sourceControl, { minAgeMs, linkedRefs = [], linkedIssueRefs = [] }) => {
-        if (liveSummarySyncInFlight) {
-          return;
+      applyTrackedPulls: (records) => {
+        const states = new Map<string, { state: GitHubPullRequestLiveSummary; fetchedAt: number }>();
+        for (const { key, record } of records) {
+          if (record.type === 'pull' && record.item.accountId && record.state) states.set(key, { state: record.state, fetchedAt: record.fetchedAt });
         }
-        const runtimeKey = getRuntimeKey();
-        const runtimeGeneration = prRuntimeGeneration;
-        const now = Date.now();
-        const { entries, linkedSummaries } = get();
-        // Several keys (remote variants, worktrees on one branch) and linked
-        // sessions can share a PR; it goes out once per account and its answer
-        // lands on all of them.
-        type Candidate = { accountId: string | null; ref: GitHubPullRequestRef; keys: string[]; linked: boolean; lastRefreshAt: number };
-        const candidates = new Map<string, Candidate>();
-        // A linked PR that is also a shown branch's PR rides that entry's
-        // account instead of going out twice.
-        const candidateKeyByRef = new Map<string, string>();
-        const addCandidate = (accountId: string | null, ref: GitHubPullRequestRef, key: string | null, lastRefreshAt: number) => {
-          const refKey = getLiveSummaryPrKey(runtimeKey, null, ref);
-          const prKey = key ? getLiveSummaryPrKey(runtimeKey, accountId, ref) : candidateKeyByRef.get(refKey) ?? refKey;
-          if (!candidateKeyByRef.has(refKey)) candidateKeyByRef.set(refKey, prKey);
-          const candidate = candidates.get(prKey) ?? { accountId, ref, keys: [], linked: false, lastRefreshAt };
-          if (key) {
-            candidate.keys.push(key);
-          } else {
-            candidate.linked = true;
+        if (states.size === 0) return;
+        set((prev) => {
+          let nextEntries: Record<string, PrStatusEntry> | null = null;
+          for (const [key, entry] of Object.entries(prev.entries)) {
+            const target = getBranchTrackedPull(entry);
+            const live = target ? states.get(trackedItemKey(target)) : undefined;
+            // A full refresh newer than the server's answer is authoritative.
+            if (!live || !entry.status || (entry.status.fetchedAt ?? 0) > live.fetchedAt) continue;
+            const status = applyLiveSummary(entry.status, live.state, live.fetchedAt);
+            if (!status) continue;
+            nextEntries = nextEntries ?? { ...prev.entries };
+            nextEntries[key] = { ...entry, status, lastRefreshAt: Date.now() };
           }
-          candidate.lastRefreshAt = Math.min(candidate.lastRefreshAt, lastRefreshAt);
-          candidates.set(prKey, candidate);
-        };
-        for (const key of keys) {
-          const entry = entries[key];
-          const target = getLiveSummaryTarget(entry);
-          if (entry && target) {
-            addCandidate(target.accountId, target.ref, key, entry.lastRefreshAt);
-          }
-        }
-        for (const ref of linkedRefs) {
-          // A merged PR cannot change any more; a closed one can reopen.
-          if (linkedSummaries[getLiveSummaryPrKey(runtimeKey, null, ref)]?.state !== 'merged') {
-            addCandidate(null, ref, null, 0);
-          }
-        }
-        const isDue = (checkKey: string, lastRefreshAt: number) => {
-          if (now - Math.max(liveSummaryCheckedAt.get(checkKey) ?? 0, lastRefreshAt) < minAgeMs) {
-            return false;
-          }
-          liveSummaryCheckedAt.set(checkKey, now);
-          return true;
-        };
-        type BatchEntry = { kind: 'pull' | 'issue'; ref: GitHubPullRequestRef };
-        const due = new Map<string, { keys: string[]; linked: boolean }>();
-        const batchesByAccount = new Map<string | null, BatchEntry[]>();
-        const addToBatch = (accountId: string | null, entry: BatchEntry) => {
-          const batch = batchesByAccount.get(accountId) ?? [];
-          batch.push(entry);
-          batchesByAccount.set(accountId, batch);
-        };
-        candidates.forEach((candidate, prKey) => {
-          if (!isDue(prKey, candidate.lastRefreshAt)) {
-            return;
-          }
-          due.set(prKey, { keys: candidate.keys, linked: candidate.linked });
-          addToBatch(candidate.accountId, { kind: 'pull', ref: candidate.ref });
+          return nextEntries ? { entries: nextEntries } : prev;
         });
-        // Issues stay on the cadence whatever their state: any of them can reopen.
-        const dueIssueKeys = new Set<string>();
-        for (const ref of linkedIssueRefs) {
-          const issueKey = getLiveSummaryIssueKey(runtimeKey, ref);
-          if (dueIssueKeys.has(issueKey) || !isDue(issueKey, 0)) {
-            continue;
-          }
-          dueIssueKeys.add(issueKey);
-          addToBatch(null, { kind: 'issue', ref });
-        }
-        if (batchesByAccount.size === 0) {
-          return;
-        }
-
-        liveSummarySyncInFlight = true;
-        try {
-          for (const [accountId, batchEntries] of batchesByAccount) {
-            for (let start = 0; start < batchEntries.length; start += PR_LIVE_SUMMARY_BATCH_SIZE) {
-              const batch = batchEntries.slice(start, start + PR_LIVE_SUMMARY_BATCH_SIZE);
-              const prRefs = batch.filter((entry) => entry.kind === 'pull').map((entry) => entry.ref);
-              const issueRefs = batch.filter((entry) => entry.kind === 'issue').map((entry) => entry.ref);
-              await acquirePrStatusNetworkSlot();
-              let result: Awaited<ReturnType<typeof sourceControl.githubSummaries>>;
-              try {
-                result = await runBackgroundNetworkTask(() => sourceControl.githubSummaries(accountId, prRefs, issueRefs))
-                  .finally(releasePrStatusNetworkSlot);
-              } catch {
-                // Keep the last known status; the next cadence retries. One
-                // account failing leaves the others' batches to run.
-                continue;
-              }
-              if (runtimeGeneration !== prRuntimeGeneration) {
-                return;
-              }
-              if (!result.connected) {
-                continue;
-              }
-              const { fetchedAt, summaries, issueSummaries } = result;
-              set((prev) => {
-                let nextEntries: Record<string, PrStatusEntry> | null = null;
-                let nextLinked: Record<string, GitHubPullRequestLiveSummary> | null = null;
-                let nextIssues: Record<string, GitHubIssueLiveSummary> | null = null;
-                for (const summary of summaries) {
-                  const target = due.get(getLiveSummaryPrKey(runtimeKey, accountId, summary));
-                  if (!target) {
-                    continue;
-                  }
-                  const linkedKey = getLiveSummaryPrKey(runtimeKey, null, summary);
-                  if (target.linked && !sameLiveSummary(prev.linkedSummaries[linkedKey], summary)) {
-                    nextLinked = nextLinked ?? { ...prev.linkedSummaries };
-                    nextLinked[linkedKey] = summary;
-                  }
-                  for (const key of target.keys) {
-                    const current = (nextEntries ?? prev.entries)[key];
-                    // A watcher may have started, or a full refresh landed,
-                    // while this batch was in flight; both are authoritative.
-                    if (!current?.status || !getLiveSummaryTarget(current)
-                      || (current.status.fetchedAt ?? 0) > fetchedAt) {
-                      continue;
-                    }
-                    const status = applyLiveSummary(current.status, summary, fetchedAt);
-                    if (!status) {
-                      continue;
-                    }
-                    nextEntries = nextEntries ?? { ...prev.entries };
-                    nextEntries[key] = { ...current, status, lastRefreshAt: Date.now() };
-                  }
-                }
-                for (const summary of issueSummaries) {
-                  const issueKey = getLiveSummaryIssueKey(runtimeKey, summary);
-                  const current = prev.linkedIssueSummaries[issueKey];
-                  if (!dueIssueKeys.has(issueKey)
-                    || (current && current.state === summary.state && current.title === summary.title)) {
-                    continue;
-                  }
-                  nextIssues = nextIssues ?? { ...prev.linkedIssueSummaries };
-                  nextIssues[issueKey] = summary;
-                }
-                if (!nextEntries && !nextLinked && !nextIssues) {
-                  return prev;
-                }
-                const next: Partial<SourceControlStatusStore> = {};
-                if (nextEntries) next.entries = nextEntries;
-                if (nextLinked) next.linkedSummaries = nextLinked;
-                if (nextIssues) next.linkedIssueSummaries = nextIssues;
-                return next;
-              });
-            }
-          }
-        } finally {
-          if (runtimeGeneration === prRuntimeGeneration) {
-            liveSummarySyncInFlight = false;
-          }
-        }
       },
 
       updateStatus: (key, updater) => {
@@ -1853,29 +1641,19 @@ export const getLinkedChangeRequestVisualSummary = (
   identity: SourceControlIdentity,
 ): PrVisualSummary | null => getCachedPrSummary(`linked:${cacheKey}`, linkedPrStatus(link, summary, identity));
 
-/**
- * Live state of the GitHub issues linked to a session, in link order; an
- * issue whose state has not arrived yet maps to null.
- */
-export const useLinkedIssueStates = (
-  refs: readonly GitHubPullRequestRef[],
-): Array<GitHubIssueLiveSummary | null> => {
-  const runtimeKey = getRuntimeKey();
-  return useGitHubPrStatusStore(useShallow((state) => refs.map(
-    (ref) => state.linkedIssueSummaries[getLiveSummaryIssueKey(runtimeKey, ref)] ?? null,
-  )));
-};
 
 /**
- * Visual summaries of the PRs linked to a session, in link order. A PR whose
- * live state has not arrived yet is left out rather than shown as unknown.
+ * The open pull and merge requests of these entries, as the items the server
+ * should follow. Read as one stable value so a row re-renders only when the
+ * set of followed requests changes.
  */
-export const useLinkedPrVisualSummaries = (links: readonly LinkedGitHubPullRequest[]): PrVisualSummary[] => {
-  const runtimeKey = getRuntimeKey();
-  return useGitHubPrStatusStore(useShallow((state) => links.flatMap((link) => {
-    const prKey = getLiveSummaryPrKey(runtimeKey, null, link);
-    const summary = state.linkedSummaries[prKey];
-    const visual = summary ? getCachedPrSummary(`linked:${prKey}`, linkedPrStatus(link, summary)) : null;
-    return visual ? [visual] : [];
-  })));
+export const useBranchTrackedPulls = (keys: readonly string[]): TrackedThread<'pull'>[] => {
+  const followed = (entries: Record<string, PrStatusEntry>) => keys.flatMap((key) => {
+    const target = getBranchTrackedPull(entries[key]);
+    return target ? [target] : [];
+  });
+  const signature = useGitHubPrStatusStore((state) => followed(state.entries).map(trackedItemKey).join('\n'));
+  // `signature` names exactly what `followed` returns for the current entries.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return React.useMemo(() => followed(useGitHubPrStatusStore.getState().entries), [keys, signature]);
 };

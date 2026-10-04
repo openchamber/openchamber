@@ -59,7 +59,8 @@ const linkAttachmentPart = (part: TextPart): FilePart | null => {
             return {
                 ...identity,
                 type: 'file',
-                mime: 'application/vnd.github.issue-link',
+                // GitLab's has its own type so the chip shows GitLab's mark, not GitHub's.
+                mime: payload.provider === 'gitlab' ? 'application/vnd.openchamber.gitlab-issue-link' : 'application/vnd.github.issue-link',
                 filename: `Issue #${payload.number}: ${payload.title}`,
                 url: payload.url,
             };

@@ -1093,6 +1093,41 @@ describe('source-control binding service', () => {
     })).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
   });
 
+  it('lets a mutation through a remote added beside the bound ones, not through a granted remote that moved', async () => {
+    const grant = { name: 'origin', fetch: repository.remotes[0].fetch, push: repository.remotes[0].push, mode: 'system', readiness: 'ready' };
+    const binding = {
+      repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', remotes: [grant], auxiliary: [],
+      providers: [readyProvider({ provider: 'github', instance: 'github.com', accountId: 'github.com#1', primaryRemote: 'origin' })],
+    };
+    const input = {
+      directory: '/repository', repositoryId: 'repo_one', provider: 'github', instance: 'github.com',
+      accountId: 'github.com#1', bindingRevision: 3, primaryRemote: 'origin', idempotencyKey: 'request-one',
+      target: { project: { owner: 'owner', name: 'repo' } },
+    };
+    const serviceFor = (resolved) => createBindingService({
+      store: { read: vi.fn(async () => ({ revision: 3, binding })), compareAndSwap: vi.fn() },
+      resolveRepository: async () => resolved,
+    });
+    const withFork = {
+      ...repository,
+      configRevision: 'config_two',
+      remotes: [...repository.remotes, {
+        name: 'pr-alice',
+        fetch: { displayUrl: 'https://github.com/alice/repo.git', fingerprint: 'alice' },
+        push: { displayUrl: 'https://github.com/alice/repo.git', fingerprint: 'alice' },
+      }],
+    };
+    await expect(serviceFor(withFork).validateMutationContext(input)).resolves.toMatchObject({ primaryRemote: 'origin' });
+
+    const pushMoved = {
+      ...repository,
+      configRevision: 'config_three',
+      remotes: [{ ...repository.remotes[0], push: { displayUrl: 'git@github.com:other/repo.git', fingerprint: 'other' } }],
+    };
+    await expect(serviceFor(pushMoved).validateMutationContext(input))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_STALE', status: 409 });
+  });
+
   it('preserves binding mismatch errors for mutation context', async () => {
     const service = createBindingService({
       store: { read: vi.fn(), compareAndSwap: vi.fn() },

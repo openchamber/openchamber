@@ -531,7 +531,11 @@ export function createBindingService({
         ?? (repositoryRemote ? inheritedRemoteGrant(current.binding, repositoryRemote) : null)
       : (repositoryRemote ? implicitSystemRemote(repositoryRemote) : null);
     if (!repositoryRemote || !boundRemote) throw conflict('Git transport remote binding changed');
-    if (boundRemote.readiness !== 'ready') throw conflict('Git transport remote binding needs attention');
+    // Not a binding that moved under the caller: the grant's account is gone
+    // or needs confirming, so the user has to act, and retrying cannot help.
+    if (boundRemote.readiness !== 'ready') {
+      throw Object.assign(conflict('Git transport remote binding needs attention'), { reason: 'needs-attention' });
+    }
     const endpoint = repositoryRemote[endpointKind];
     const boundEndpoint = boundRemote[endpointKind];
     if (!endpoint?.rawUrl || !endpoint.fingerprint || boundEndpoint?.fingerprint !== endpoint.fingerprint) {
@@ -609,12 +613,15 @@ export function createBindingService({
     validateReadContext: (input) => validateAuthority(input, invalidReadInput, bindingInputError),
     validateMutationContext: async (input) => {
       const context = await validateAuthority(input, mutationContextError);
-      // A write goes to the provider on the repository's behalf, so the
-      // binding it was made against must still describe the repository's
-      // remotes; a read tolerates that drift, a mutation does not.
+      // A write goes to the provider on the repository's behalf, so what the
+      // binding granted must still describe the repository: the provider's
+      // remote (checked above) and every remote with a transport grant, none
+      // moved or gone. A remote added beside them (an upstream, a fork a
+      // change request was checked out from) grants nothing and changes
+      // nothing the write relies on, so it does not block it.
       const repository = await resolve(context.directory);
       const current = await readCurrent(repository);
-      if (current.binding && current.binding.configRevision !== repository.configRevision) {
+      if (current.binding?.remotes.some((grant) => grant.readiness === 'config-changed')) {
         throw staleBindingError('Source control repository remotes changed', current);
       }
       return {
@@ -1064,6 +1071,20 @@ export function createBindingService({
       if (latest.repositoryId !== context.repositoryId || latest.configRevision !== context.configRevision) throw conflict();
       const record = await store.compareAndSwap(context.repositoryId, expectedRevision, null);
       return { repository: publicContext(context), ...record };
+    },
+    /** A newly connected account takes over what its user's gone account held (`adoptAccount`). */
+    accountConnected: async (identity) => {
+      if (!isPlainObject(identity)) throw bindingInputError('account identity is required');
+      const provider = requiredString(identity.provider, 'provider');
+      if (provider !== 'github' && provider !== 'gitlab') throw bindingInputError('provider is unsupported');
+      if (!(store.adoptAccount instanceof Function)) return [];
+      return store.adoptAccount({
+        provider,
+        instance: normalizeProviderInstance(provider, identity.instance),
+        accountId: requiredString(identity.accountId, 'accountId'),
+        credentialRevision: identity.credentialRevision,
+        providerUserId: requiredString(identity.providerUserId, 'providerUserId'),
+      });
     },
     accountUnavailable: async (identity) => {
       if (!isPlainObject(identity)) throw bindingInputError('account identity is required');

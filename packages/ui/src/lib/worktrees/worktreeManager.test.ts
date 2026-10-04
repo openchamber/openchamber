@@ -52,7 +52,7 @@ mock.module('@/components/ui', () => ({
 }));
 
 mock.module('@/lib/i18n', () => ({
-  formatMessage: () => 'session.newWorktree.toast.fetchSourceFailed',
+  formatMessage: (_dictionary: unknown, key: string) => key,
   useI18nStore: { getState: () => ({ dictionary: {} }) },
 }));
 
@@ -181,6 +181,17 @@ describe('worktreeManager list invalidation', () => {
     });
 
     expect(warningToasts).toEqual(['session.newWorktree.toast.fetchSourceFailed']);
+  });
+
+  test('says the repository access needs attention when that is why the fetch failed', async () => {
+    createdWorktreeResult = { ...createdWorktree, sourceFetchFailed: true, sourceFetchReason: 'access' };
+
+    await createWorktree({ id: 'project-fetch-access', path: '/repo' }, {
+      branchName: 'feature',
+      worktreeName: 'feature',
+    });
+
+    expect(warningToasts).toEqual(['session.newWorktree.toast.fetchSourceAccess']);
   });
 
   test('retries an in-flight list when a worktree is created before it resolves', async () => {

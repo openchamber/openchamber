@@ -182,6 +182,8 @@ const appendBounded = (chunks, chunk, state, limit) => {
 };
 
 const authorityCode = (error) => {
+  // A grant whose account needs attention is an access problem the user fixes.
+  if (error?.reason === 'needs-attention') return 'AUTHENTICATION_REQUIRED';
   if (error?.code === 'SOURCE_CONTROL_BINDING_STALE') return 'STALE_BINDING';
   if (error?.code === 'UNSUPPORTED_SOURCE_CONTROL_REPOSITORY') return 'STALE_REPOSITORY';
   if (error?.code === 'INVALID_GIT_TRANSPORT_CONTEXT') return 'INVALID_REQUEST';

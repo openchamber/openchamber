@@ -4,7 +4,6 @@ import type {
   GitHubPullRequestLiveSummary,
   GitHubPullRequestRef,
   GitHubPullRequestStatus,
-  GitHubPullRequestSummariesResult,
   RuntimeAPIs,
   SourceControlAPI,
   SourceControlReadContext,
@@ -14,7 +13,9 @@ import { getBoundSourceControlReadContexts } from "@/lib/source-control/identity
 let runtimeKey = "runtime-a"
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => runtimeKey }))
 
+const { trackedItemKey } = await import("@/lib/trackedItems/model")
 const {
+  getBranchTrackedPull,
   getFreshestPrStatusForBranch,
   getFreshestActiveSourceControlStatusForBranch,
   getFreshestSourceControlStatusForBranch,
@@ -670,6 +671,12 @@ describe("GitHub PR status stale terminal associations", () => {
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
   })
 
+  const ageEntry = (key: string) => {
+    useGitHubPrStatusStore.setState((state) => ({
+      entries: { ...state.entries, [key]: { ...state.entries[key]!, lastRefreshAt: 0, lastDiscoveryPollAt: 0 } },
+    }))
+  }
+
   afterEach(() => {
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
     globalThis.setInterval = originalSetInterval
@@ -784,10 +791,12 @@ describe("GitHub PR status stale terminal associations", () => {
     }
     expect(requestCount).toBe(1)
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.number).toBe(12)
-    expect(intervalCallbacks).toHaveLength(1)
+    // Nothing polls a watched entry any more.
+    expect(intervalCallbacks).toHaveLength(0)
 
-    // Discovery poll for terminal state (lastDiscoveryPollAt starts at 0).
-    intervalCallbacks[0]!()
+    // Coming back to the window rediscovers a branch whose answer aged past the floor.
+    ageEntry(key)
+    useGitHubPrStatusStore.getState().noteWindowReturned()
     for (let i = 0; i < 50 && useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.number !== 15; i += 1) {
       await Promise.resolve()
     }
@@ -825,7 +834,8 @@ describe("GitHub PR status stale terminal associations", () => {
     expect(requestCount).toBe(1)
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.number).toBe(12)
 
-    intervalCallbacks[0]!()
+    ageEntry(key)
+    useGitHubPrStatusStore.getState().noteBranchActivity("/repo")
     for (let i = 0; i < 50 && useGitHubPrStatusStore.getState().entries[key]?.status?.pr != null; i += 1) {
       await Promise.resolve()
     }
@@ -1194,7 +1204,7 @@ describe("GitHub PR status stale terminal associations", () => {
   })
 })
 
-describe("open PR live summaries", () => {
+describe("branch PR live state pushed by the server", () => {
   const openStatus = (overrides: Partial<GitHubPullRequestStatus> = {}): GitHubPullRequestStatus => ({
     connected: true,
     fetchedAt: 1,
@@ -1218,23 +1228,6 @@ describe("open PR live summaries", () => {
     ...overrides,
   })
 
-  const summariesApi = (answer: (refs: GitHubPullRequestRef[]) => Promise<GitHubPullRequestSummariesResult>) => {
-    const calls: GitHubPullRequestRef[][] = []
-    const issueCalls: GitHubPullRequestRef[][] = []
-    const accounts: Array<string | null> = []
-    const sourceControl: Pick<SourceControlAPI, "githubSummaries"> = {
-      githubSummaries: async (accountId, refs, issueRefs = []) => {
-        accounts.push(accountId)
-        calls.push(refs)
-        issueCalls.push(issueRefs)
-        return answer(refs)
-      },
-    }
-    return { sourceControl, calls, issueCalls, accounts }
-  }
-
-  // Entries are bound: the batch goes out with the account each was read with.
-  const keyTargets = new Map<string, { branch: string; context: SourceControlReadContext }>()
   const liveContext = (primaryRemote = "origin", accountId = "github.com#1"): SourceControlReadContext => ({
     provider: "github",
     instance: "github.com",
@@ -1244,6 +1237,7 @@ describe("open PR live summaries", () => {
     directory: "/repo",
     primaryRemote,
   })
+  const keyTargets = new Map<string, { branch: string; context: SourceControlReadContext }>()
   const boundKey = (branch: string, remote = "origin", accountId = "github.com#1") => {
     const context = liveContext(remote, accountId)
     const key = getSourceControlStatusKey(context, branch)
@@ -1251,7 +1245,7 @@ describe("open PR live summaries", () => {
     return key
   }
 
-  const seed = (key: string, status: GitHubPullRequestStatus, lastRefreshAt = 0) => {
+  const seed = (key: string, status: GitHubPullRequestStatus) => {
     const target = keyTargets.get(key)
     if (!target) throw new Error(`unknown test key ${key}`)
     useGitHubPrStatusStore.getState().ensureEntry(key)
@@ -1264,233 +1258,74 @@ describe("open PR live summaries", () => {
       readContext: target.context,
     })
     useGitHubPrStatusStore.getState().updateStatus(key, () => status)
-    useGitHubPrStatusStore.setState((state) => ({
-      entries: { ...state.entries, [key]: { ...state.entries[key]!, lastRefreshAt } },
-    }))
+  }
+
+  // The record the server pushes for the pull request this entry follows.
+  const pushFor = (key: string, summary: GitHubPullRequestLiveSummary, fetchedAt = 10) => {
+    const item = getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])
+    if (!item) throw new Error("entry follows no pull request")
+    useGitHubPrStatusStore.getState().applyTrackedPulls([{ key: trackedItemKey(item), record: { type: "pull", item, state: summary, fetchedAt } }])
   }
 
   beforeEach(() => {
     runtimeKey = "runtime-a"
-    useGitHubPrStatusStore.setState({ entries: {}, linkedSummaries: {}, linkedIssueSummaries: {}, activeRequestCount: 0, totalRequestCount: 0 })
+    useGitHubPrStatusStore.setState({ entries: {}, activeRequestCount: 0, totalRequestCount: 0 })
     useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
   })
 
-  test("a PR merged on GitHub turns merged and drops its checks", async () => {
+  test("an entry's open PR is followed with the account the repository is bound to", () => {
+    const key = boundKey("feature", "origin", "github.com#7")
+    seed(key, openStatus())
+    expect(getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])).toEqual({
+      provider: "github", kind: "pull", owner: "acme", repo: "app", number: 7, accountId: "github.com#7",
+    })
+    seed(key, openStatus({ pr: { ...openStatus().pr!, state: "merged" } }))
+    expect(getBranchTrackedPull(useGitHubPrStatusStore.getState().entries[key])).toBeNull()
+  })
+
+  test("a PR merged on GitHub turns merged and drops its checks", () => {
     const key = boundKey("feature")
     seed(key, openStatus())
-    const { sourceControl } = summariesApi(async () => ({
-      connected: true,
-      fetchedAt: Date.now(),
-      issueSummaries: [],
-      summaries: [liveSummary({ state: "merged", mergeable: null, mergeableState: "unknown", checks: null })],
-    }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
+    pushFor(key, liveSummary({ state: "merged", mergeable: null, mergeableState: "unknown", checks: null }))
     const status = useGitHubPrStatusStore.getState().entries[key]?.status
     expect(status?.pr?.state).toBe("merged")
     expect(status?.checks).toBe(null)
     expect(status?.canMerge).toBe(false)
   })
 
-  test("failing checks reach the entry", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus())
-    const failing = { state: "failure" as const, total: 2, success: 1, failure: 1, pending: 0, inProgress: 0, queued: 0 }
-    const { sourceControl } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ checks: failing })] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.checks?.state).toBe("failure")
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.canMerge).toBe(true)
-  })
-
-  test("an unchanged PR leaves the store untouched", async () => {
+  test("failing checks reach the entry, and an unchanged state leaves the store untouched", () => {
     const key = boundKey("feature")
     seed(key, openStatus())
     const before = useGitHubPrStatusStore.getState().entries
-    const { sourceControl } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary()] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
+    pushFor(key, liveSummary())
     expect(useGitHubPrStatusStore.getState().entries).toBe(before)
+    const failing = { state: "failure" as const, total: 2, success: 1, failure: 1, pending: 0, inProgress: 0, queued: 0 }
+    pushFor(key, liveSummary({ checks: failing }))
+    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.checks?.state).toBe("failure")
   })
 
-  test("a PR shared by several keys goes out once and updates every key", async () => {
-    const automatic = boundKey("feature", "upstream")
-    const origin = boundKey("feature", "origin")
+  test("a PR shared by several keys updates every key; another account's entry stays", () => {
+    const automatic = boundKey("feature", "origin")
+    const upstream = boundKey("feature", "upstream")
+    const otherAccount = boundKey("feature", "fork", "github.com#2")
     seed(automatic, openStatus())
-    seed(origin, openStatus())
-    const { sourceControl, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "closed", checks: null })] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([automatic, origin], sourceControl, { minAgeMs: 0 })
-
-    expect(calls).toEqual([[{ owner: "acme", repo: "app", number: 7 }]])
-    expect(useGitHubPrStatusStore.getState().entries[automatic]?.status?.pr?.state).toBe("closed")
-    expect(useGitHubPrStatusStore.getState().entries[origin]?.status?.pr?.state).toBe("closed")
+    seed(upstream, openStatus())
+    seed(otherAccount, openStatus())
+    pushFor(automatic, liveSummary({ state: "closed", checks: null }))
+    const entries = useGitHubPrStatusStore.getState().entries
+    expect(entries[automatic]?.status?.pr?.state).toBe("closed")
+    expect(entries[upstream]?.status?.pr?.state).toBe("closed")
+    expect(entries[otherAccount]?.status?.pr?.state).toBe("open")
   })
 
-  test("skips closed, missing, watched and recently checked entries", async () => {
-    const closed = boundKey("closed")
-    const none = boundKey("none")
-    const watched = boundKey("watched")
-    const fresh = boundKey("fresh")
-    seed(closed, openStatus({ pr: { ...openStatus().pr!, state: "closed" } }))
-    seed(none, openStatus({ pr: null }))
-    seed(watched, openStatus())
-    useGitHubPrStatusStore.setState((state) => ({
-      entries: { ...state.entries, [watched]: { ...state.entries[watched]!, watchers: 1 } },
-    }))
-    seed(fresh, openStatus(), Date.now())
-    const { sourceControl, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([closed, none, watched, fresh], sourceControl, { minAgeMs: 60_000 })
-
-    expect(calls).toEqual([])
-  })
-
-  test("a PR asked about recently waits for its cadence", async () => {
+  test("a full refresh newer than the pushed state wins, and a linked item's state never lands on an entry", () => {
     const key = boundKey("feature")
-    seed(key, openStatus())
-    const { sourceControl, calls } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary()] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 60_000 })
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 60_000 })
-
-    expect(calls).toHaveLength(1)
-  })
-
-  test("a failed batch keeps the last known status", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus())
-    const { sourceControl } = summariesApi(async () => { throw new Error("GitHub rate limited") })
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
+    seed(key, openStatus({ fetchedAt: 50 }))
+    pushFor(key, liveSummary({ state: "merged", checks: null }), 20)
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
-  })
 
-  test("a PR GitHub did not resolve keeps its status", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus())
-    const { sourceControl } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
+    const linked = { provider: "github" as const, kind: "pull" as const, owner: "acme", repo: "app", number: 7 }
+    useGitHubPrStatusStore.getState().applyTrackedPulls([{ key: trackedItemKey(linked), record: { type: "pull", item: linked, state: liveSummary({ state: "merged" }), fetchedAt: 100 } }])
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
-  })
-
-  test("a full refresh newer than the batch wins", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus({ fetchedAt: Date.now() + 60_000 }))
-    const { sourceControl } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "merged", checks: null })] }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
-  })
-
-  test("a PR linked to a session goes out once, with the branch PR it shares and on its account", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus())
-    const { sourceControl, calls, accounts } = summariesApi(async () => ({
-      connected: true,
-      fetchedAt: Date.now(),
-      issueSummaries: [],
-      summaries: [liveSummary({ state: "merged", checks: null }), liveSummary({ number: 9, title: "Linked", checks: null })],
-    }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, {
-      minAgeMs: 0,
-      linkedRefs: [{ owner: "acme", repo: "app", number: 7 }, { owner: "Acme", repo: "App", number: 9 }],
-    })
-
-    expect(calls).toEqual([[{ owner: "acme", repo: "app", number: 7 }], [{ owner: "Acme", repo: "App", number: 9 }]])
-    expect(accounts).toEqual(["github.com#1", null])
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("merged")
-    const linked = Object.values(useGitHubPrStatusStore.getState().linkedSummaries)
-    expect(linked.map((summary) => [summary.number, summary.state])).toEqual([[7, "merged"], [9, "open"]])
-  })
-
-  test("a merged linked PR is not asked about again", async () => {
-    const { sourceControl, calls } = summariesApi(async () => ({
-      connected: true,
-      fetchedAt: Date.now(),
-      issueSummaries: [],
-      summaries: [liveSummary({ number: 9, state: "merged", checks: null })],
-    }))
-    const linkedRefs = [{ owner: "acme", repo: "app", number: 9 }]
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], sourceControl, { minAgeMs: 0, linkedRefs })
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], sourceControl, { minAgeMs: 0, linkedRefs })
-
-    expect(calls).toHaveLength(1)
-  })
-
-  test("a runtime switch forgets linked PR status", async () => {
-    const { sourceControl } = summariesApi(async () => ({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ number: 9 })] }))
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], sourceControl, { minAgeMs: 0, linkedRefs: [{ owner: "acme", repo: "app", number: 9 }] })
-
-    useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
-
-    expect(useGitHubPrStatusStore.getState().linkedSummaries).toEqual({})
-  })
-
-  test("linked issues ride the same batch and keep asking after they close", async () => {
-    const issueRef = { owner: "acme", repo: "app", number: 11 }
-    const { sourceControl, calls, issueCalls } = summariesApi(async () => ({
-      connected: true,
-      fetchedAt: Date.now(),
-      summaries: [],
-      issueSummaries: [{ ...issueRef, title: "Bug", state: "completed" }],
-    }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], sourceControl, { minAgeMs: 0, linkedIssueRefs: [issueRef, issueRef] })
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([], sourceControl, { minAgeMs: 0, linkedIssueRefs: [issueRef] })
-
-    expect(calls).toEqual([[], []])
-    expect(issueCalls).toEqual([[issueRef], [issueRef]])
-    expect(Object.values(useGitHubPrStatusStore.getState().linkedIssueSummaries).map((issue) => issue.state)).toEqual(["completed"])
-  })
-
-  test("a batch from before a runtime switch is dropped", async () => {
-    const key = boundKey("feature")
-    seed(key, openStatus())
-    const request = deferred<GitHubPullRequestSummariesResult>()
-    const { sourceControl } = summariesApi(() => request.promise)
-
-    const syncing = useGitHubPrStatusStore.getState().syncOpenPrSummaries([key], sourceControl, { minAgeMs: 0 })
-    useGitHubPrStatusStore.getState().resetForRuntimeSwitch()
-    request.resolve({ connected: true, fetchedAt: Date.now(), issueSummaries: [], summaries: [liveSummary({ state: "merged", checks: null })] })
-    await syncing
-
-    expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
-  })
-
-  test("entries read with different accounts go out in separate batches", async () => {
-    const first = boundKey("feature", "origin", "github.com#1")
-    const second = boundKey("other", "origin", "github.com#2")
-    seed(first, openStatus())
-    seed(second, openStatus({ pr: { ...openStatus().pr!, number: 8 } }))
-    const { sourceControl, calls, accounts } = summariesApi(async (refs) => ({
-      connected: true,
-      fetchedAt: Date.now(),
-      issueSummaries: [],
-      summaries: refs.map((ref) => liveSummary({ number: ref.number, state: "closed", checks: null })),
-    }))
-
-    await useGitHubPrStatusStore.getState().syncOpenPrSummaries([first, second], sourceControl, {
-      minAgeMs: 0,
-      linkedRefs: [{ owner: "acme", repo: "app", number: 12 }],
-    })
-
-    expect(accounts).toEqual(["github.com#1", "github.com#2", null])
-    expect(calls).toEqual([
-      [{ owner: "acme", repo: "app", number: 7 }],
-      [{ owner: "acme", repo: "app", number: 8 }],
-      [{ owner: "acme", repo: "app", number: 12 }],
-    ])
-    expect(useGitHubPrStatusStore.getState().entries[first]?.status?.pr?.state).toBe("closed")
-    expect(useGitHubPrStatusStore.getState().entries[second]?.status?.pr?.state).toBe("closed")
   })
 })

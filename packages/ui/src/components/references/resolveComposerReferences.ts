@@ -65,6 +65,7 @@ async function resolveOne(selection: ReferencePickerSelection, deps: ReferenceRe
         if (!issue) throw new Error('Issue not found');
         return {
             kind: 'repository-issue',
+            provider: issue.provider,
             number: issue.number,
             title: issue.title,
             url: issue.url,

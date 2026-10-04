@@ -61,7 +61,8 @@ const checkPullRequestSelection = async (mobile: boolean, tablet = false) => {
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
   const { createWebAPIs } = await import('../../../../../web/src/api/index');
-  const { usePullRequestComparison } = await import('@/hooks/usePullRequestComparison');
+  const { forgetSharedPullRequestLists, usePullRequestComparison } = await import('@/hooks/usePullRequestComparison');
+  forgetSharedPullRequestLists();
   const { usePullRequestSelectionStore } = await import('@/stores/usePullRequestSelectionStore');
   usePullRequestSelectionStore.setState({ selections: new Map() });
   const { getSourceControlAuthKey, useSourceControlAuthStore } = await import('@/stores/useSourceControlAuthStore');

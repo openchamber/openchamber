@@ -1,5 +1,5 @@
 /**
- * A linked GitHub issue, pull request, or Linear issue, shown as a chip
+ * A linked issue or change request (GitHub, GitLab) or Linear issue, shown as a chip
  * inside the composer next to the attached files.
  *
  * Linking one attaches its body — and for a PR its diff — as context on the

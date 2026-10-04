@@ -27,6 +27,8 @@ import {
   WorkStatusValue,
 } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 
 type Props = {
   sessionId: string | null;
@@ -356,15 +358,15 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
               <WorkStatusRow
                 icon="git-pull-request"
                 onClick={directory ? () => openSurface('pr') : undefined}
-                ariaLabel={t('chat.workStatus.action.openPr')}
+                ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prSummary.provider))}
                 iconColor={`var(--pr-${prSummary.visualState})`}
-                label={prSummary.title ?? t('chat.workStatus.pr.untitled')}
+                label={prSummary.title ?? t(changeRequestCopy('chat.workStatus.pr.untitled', prSummary.provider))}
                 value={(
                   <WorkStatusPill
                     color={`var(--pr-${prSummary.visualState})`}
                     background={`color-mix(in srgb, var(--pr-${prSummary.visualState}) 18%, transparent)`}
                   >
-                    {prSummary.draft ? t('chat.workStatus.pr.draft') : `#${prSummary.number}`}
+                    {prSummary.draft ? t('chat.workStatus.pr.draft') : formatChangeRequestReference(prSummary.provider, prSummary.number)}
                   </WorkStatusPill>
                 )}
               />
@@ -372,7 +374,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 <WorkStatusRow
                   icon="checkbox-circle"
                   onClick={directory ? () => openSurface('pr') : undefined}
-                  ariaLabel={t('chat.workStatus.action.openPr')}
+                  ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prSummary.provider))}
                   label={t('chat.workStatus.pr.checks')}
                   muted
                   value={(

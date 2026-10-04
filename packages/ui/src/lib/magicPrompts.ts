@@ -103,7 +103,10 @@ Selected files:
     title: 'PR Generation Visible Prompt',
     group: 'Git',
     description: 'Visible user message for PR title/body generation.',
-    template: 'You are drafting GitHub Pull Request title and body using session context, commit list, and changed files.',
+    placeholders: [
+      { key: 'change_request', description: 'What the change request is called where it lives: "GitHub pull request" or "GitLab merge request".' },
+    ],
+    template: 'You are drafting a {{change_request}} title and body using session context, commit list, and changed files.',
   },
   {
     id: 'git.pr.generate.instructions',
@@ -116,7 +119,7 @@ Selected files:
       { key: 'commits', description: 'Bullet list of commits in base...head.' },
       { key: 'changed_files', description: 'Bullet list of changed files in base...head.' },
       { key: 'additional_context_block', description: 'Optional Additional context block (already formatted).' },
-      { key: 'pr_template_block', description: 'Optional repository pull request template block (already formatted, empty when the repo has none).' },
+      { key: 'pr_template_block', description: 'Optional repository pull/merge request template block (already formatted, empty when the repo has none).' },
     ],
     template: `Return exactly one JSON object and nothing else. Do not include prose, markdown outside JSON, explanations, or code fences.
 
@@ -125,7 +128,7 @@ The JSON object must have exactly this shape:
 
 Rules:
 - title: concise, outcome-first, conventional style
-- body, when a repository pull request template is included below: reuse the template as the body. Keep its headings, their order, its wording and its checklists, drop its HTML comments, and fill every section from the commits and changed files. Leave a section empty rather than inventing content for it
+- body, when a repository description template is included below: reuse the template as the body. Keep its headings, their order, its wording and its checklists, drop its HTML comments, and fill every section from the commits and changed files. Leave a section empty rather than inventing content for it
 - body, when no template is included: markdown with sections ## Summary, ## Why, ## Testing
 - keep output concrete and user-facing
 - put all markdown inside the body string

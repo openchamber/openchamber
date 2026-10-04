@@ -34,6 +34,22 @@ type PullRequestList =
 const NO_PULL_REQUESTS: ChangeRequest[] = [];
 const NO_PROJECT_IDS: string[] = [];
 
+type ReadyList = Extract<PullRequestList, { status: 'ready' }>;
+
+// Lists already read, shared by every comparison surface (Changes, Walkthrough,
+// mobile Changes): reopening one shows the last list at once, and one older
+// than this is read again in the background, replaced when the answer lands.
+const LIST_FRESH_MS = 60_000;
+const MAX_SHARED_LISTS = 30;
+const sharedLists = new Map<string, { list: ReadyList; readAt: number }>();
+/** Forgets every shared list; for scenarios that must start from nothing. */
+export const forgetSharedPullRequestLists = () => sharedLists.clear();
+const rememberList = (list: ReadyList) => {
+  sharedLists.delete(list.key);
+  sharedLists.set(list.key, { list, readAt: Date.now() });
+  while (sharedLists.size > MAX_SHARED_LISTS) sharedLists.delete(sharedLists.keys().next().value ?? '');
+};
+
 const sourceOf = (pr: ChangeRequest): PullRequestSource => ({
   kind: 'pr', number: pr.number, sourceRepo: { owner: pr.project.owner, repo: pr.project.name },
 });
@@ -93,7 +109,7 @@ export function usePullRequestComparison(
   const [query, setQuery] = useState('');
   const search = useDebouncedValue(query, 350).trim();
   const key = JSON.stringify([selectionKey, search, contextKey]);
-  const [list, setList] = useState<PullRequestList | null>(null);
+  const [list, setList] = useState<PullRequestList | null>(() => sharedLists.get(key)?.list ?? null);
   const listRef = useRef(list);
   listRef.current = list;
   const [loadingMore, setLoadingMore] = useState(false);
@@ -141,17 +157,18 @@ export function usePullRequestComparison(
     if (preferredSource) acceptHandoff(selectionKey, preferredSource);
   }, [acceptHandoff, preferredSource, selectionKey]);
 
-  const refresh = useCallback(async (previous?: Extract<PullRequestList, { status: 'ready' }>) => {
+  const refresh = useCallback(async (previous?: ReadyList) => {
     if (!directory || !enabled || owner.current.key !== key || !owner.current.enabled) return;
     const id = ++requestId.current;
     const runtime = getRuntimeKey();
     const shownList = listRef.current;
-    const shown = previous?.prs
-      ?? (shownList?.key === key && shownList.status === 'ready' ? shownList.prs : NO_PULL_REQUESTS);
+    const shownReady = shownList?.key === key && shownList.status === 'ready' ? shownList : null;
+    const shown = previous?.prs ?? shownReady?.prs ?? NO_PULL_REQUESTS;
     if (previous) setLoadingMore(true);
     else {
       setLoadingMore(false);
-      setList({ key, status: 'loading' });
+      // A list already on screen stays while it is read again.
+      if (!shownReady) setList({ key, status: 'loading' });
     }
     try {
       const context = contextRef.current;
@@ -161,7 +178,9 @@ export function usePullRequestComparison(
       const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined });
       if (requestId.current !== id || getRuntimeKey() !== runtime || owner.current.key !== key || !owner.current.enabled) return;
       const merged = mergePullRequestPage(shown, result, Boolean(previous));
-      setList({ key, status: 'ready', ...merged, page, hasMore: result.hasMore, error: null });
+      const ready: ReadyList = { key, status: 'ready', ...merged, page, hasMore: result.hasMore, error: null };
+      rememberList(ready);
+      setList(ready);
     } catch (error) {
       if (requestId.current === id && getRuntimeKey() === runtime && owner.current.key === key && owner.current.enabled) {
         const message = error instanceof Error ? error.message : t(changeRequestCopy('session.githubPrPicker.toast.loadMoreFailed', provider));
@@ -172,10 +191,18 @@ export function usePullRequestComparison(
     }
   }, [auth.connected, directory, enabled, key, provider, search, sourceControl, t]);
 
-  useEffect(() => {
-    if (listRef.current?.key !== key || listRef.current.status !== 'ready') void refresh();
-    return () => { requestId.current += 1; };
+  // Shows a list another surface read, and reads again only what is stale.
+  const revalidate = useCallback(() => {
+    const shared = sharedLists.get(key);
+    if (shared && listRef.current !== shared.list) setList(shared.list);
+    if (shared && Date.now() - shared.readAt < LIST_FRESH_MS) return Promise.resolve();
+    return refresh();
   }, [key, refresh]);
+
+  useEffect(() => {
+    if (listRef.current?.key !== key || listRef.current.status !== 'ready' || sharedLists.has(key)) void revalidate();
+    return () => { requestId.current += 1; };
+  }, [key, revalidate]);
   const current = list?.key === key ? list : null;
   return {
     enabled,
@@ -191,7 +218,10 @@ export function usePullRequestComparison(
     /** Projects whose pull requests failed to load; non-empty means the list is partial. */
     incompleteProjectIds: current?.status === 'ready' ? current.incompleteProjectIds : NO_PROJECT_IDS,
     error: current?.status === 'error' ? current.message : current?.status === 'ready' ? current.error : null,
+    /** Reads the list again now: retry and refresh buttons. */
     refresh: () => refresh(),
+    /** Opening the picker: shows what is known and reads again only when stale. */
+    revalidate,
     loadMore: () => current?.status === 'ready' && current.hasMore && !loadingMore ? refresh(current) : Promise.resolve(),
     select: (pr: ChangeRequest) => saveSelection(selectionKey, sourceOf(pr)),
   };

@@ -291,6 +291,41 @@ describe('source-control binding storage', () => {
     await expect(store.reconcileAccount(account)).resolves.toEqual([]);
   });
 
+  it('moves what a gone account held to the same user\'s new account, and nothing else', async () => {
+    const { store } = await makeStore();
+    const gone = { provider: 'gitlab', instance: 'https://gitlab.example.com', accountId: 'credential-old' };
+    const other = { ...gone, accountId: 'credential-other' };
+    const reference = (identity, providerUserId) => createHttpsCredentialReference({
+      provider: identity.provider, instance: identity.instance, credentialId: identity.accountId,
+      credentialRevision: 1, providerUserId,
+    });
+    const binding = bindingFor(gone.provider, gone.instance, gone.accountId);
+    binding.remotes = [
+      { ...binding.remotes[0], mode: 'managed', credentialId: reference(gone, 'https://gitlab.example.com#7') },
+      { ...binding.remotes[0], name: 'colleague', mode: 'managed', credentialId: reference(other, 'https://gitlab.example.com#9') },
+    ];
+    await store.compareAndSwap('repo_one', 0, binding);
+    await store.reconcileAccount(gone);
+    await store.reconcileAccount(other);
+
+    const changed = await store.adoptAccount({
+      provider: 'gitlab', instance: 'https://gitlab.example.com', accountId: 'credential-new', credentialRevision: 1,
+      providerUserId: 'https://gitlab.example.com#7',
+    });
+
+    expect(changed).toHaveLength(1);
+    const adopted = await store.read('repo_one');
+    expect(adopted.binding.providers[0]).toMatchObject({ accountId: 'credential-new', readiness: 'ready' });
+    expect(adopted.binding.remotes[0]).toMatchObject({ readiness: 'ready', credentialId: reference({ ...gone, accountId: 'credential-new' }, 'https://gitlab.example.com#7') });
+    // Another user's grant stays as it was.
+    expect(adopted.binding.remotes[1]).toMatchObject({ readiness: 'confirmation-required', credentialId: reference(other, 'https://gitlab.example.com#9') });
+    // Running it again finds nothing more to move.
+    await expect(store.adoptAccount({
+      provider: 'gitlab', instance: 'https://gitlab.example.com', accountId: 'credential-new', credentialRevision: 1,
+      providerUserId: 'https://gitlab.example.com#7',
+    })).resolves.toEqual([]);
+  });
+
   it.each([
     ['credential-bearing HTTPS', { displayUrl: 'https://token@github.com/team/repo.git', fingerprint: 'safe' }],
     ['unsupported local file', { displayUrl: 'file:///private/repo.git', fingerprint: 'safe' }],

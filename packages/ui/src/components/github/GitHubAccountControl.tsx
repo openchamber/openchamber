@@ -65,7 +65,7 @@ export const GitHubAccountControl: React.FC<{ className?: string; identity?: Sou
   const avatar = avatarUrl ? (
     <img
       src={avatarUrl}
-      alt={login ? t('header.github.avatarWithLogin', { login }) : t('header.github.avatar')}
+      alt={login ? t('header.github.avatarWithLogin', { login }) : t(gitlab ? 'header.gitlab.avatar' : 'header.github.avatar')}
       className="h-full w-full object-cover"
       loading="lazy"
       referrerPolicy="no-referrer"
@@ -117,7 +117,7 @@ export const GitHubAccountControl: React.FC<{ className?: string; identity?: Sou
               {accountUser?.avatarUrl ? (
                 <img
                   src={accountUser.avatarUrl}
-                  alt={accountUser.username ? t('header.github.avatarWithLogin', { login: accountUser.username }) : t('header.github.avatar')}
+                  alt={accountUser.username ? t('header.github.avatarWithLogin', { login: accountUser.username }) : t(gitlab ? 'header.gitlab.avatar' : 'header.github.avatar')}
                   className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
                   loading="lazy"
                   referrerPolicy="no-referrer"

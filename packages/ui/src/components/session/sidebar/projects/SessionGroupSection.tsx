@@ -1,6 +1,6 @@
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
-import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
-import { useGitLabIssueStates } from '@/stores/useGitLabLinkedStateStore';
+import { useTrackedIssueStates, useTrackedLinearStates } from '@/stores/useTrackedItemsStore';
+import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@/lib/opencode/model';
@@ -35,7 +35,6 @@ import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 
 type FolderScope = { scopeKey: string; directory: string | null };
-import { useLinkedIssueStates } from '@/stores/useGitHubPrStatusStore';
 import { getLinkedSidebarIssues, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems } from '../sessions/sessionPrSummaries';
 import { openExternalUrl } from '@/lib/url';
@@ -54,6 +53,7 @@ import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -381,8 +381,9 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const groupPrSummary = useFreshestSourceControlVisualSummaryForBranch(groupPrDirectory, groupPrBranch);
   const groupPrColor = groupPrSummary ? `var(--pr-${groupPrSummary.visualState})` : undefined;
   const groupPrStatusLabel = getPrStatusLabel(groupPrSummary, t);
+  const groupPrReference = groupPrSummary ? formatChangeRequestReference(groupPrSummary.provider, groupPrSummary.number) : '';
   const groupPrLabel = groupPrSummary
-    ? (groupPrStatusLabel ? `#${groupPrSummary.number} · ${groupPrStatusLabel}` : `#${groupPrSummary.number}`)
+    ? (groupPrStatusLabel ? `${groupPrReference} · ${groupPrStatusLabel}` : groupPrReference)
     : undefined;
   const childStores = useChildStoreManager();
   const bootstrapDirectories = React.useMemo(() => {
@@ -663,21 +664,21 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     }
     return byKey.size > 0 ? [...byKey.values()] : EMPTY_GROUP_ISSUES;
   }, [allGroupSessions, group.isArchivedBucket, group.isMain, groupPrSummary, hideGroupLabel]);
-  const groupIssueRefs = React.useMemo(
-    () => groupIssues.flatMap((issue) => (issue.source === 'github' ? [{ owner: issue.owner, repo: issue.repo, number: issue.number }] : [])),
+  const groupGitHubIssueItems = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'github' ? [githubThread('issue', issue)] : [])),
     [groupIssues],
   );
-  const groupIssueStates = useLinkedIssueStates(groupIssueRefs);
-  const groupLinearIdentifiers = React.useMemo(
-    () => groupIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
+  const groupIssueStates = useTrackedIssueStates(groupGitHubIssueItems);
+  const groupLinearItems = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'linear' ? [linearIssue(issue.identifier)] : [])),
     [groupIssues],
   );
-  const groupLinearStates = useLinearIssueStates(groupLinearIdentifiers);
-  const groupGitLabIssueRefs = React.useMemo(
-    () => groupIssues.flatMap((issue) => (issue.source === 'gitlab' ? [issue.ref] : [])),
+  const groupLinearStates = useTrackedLinearStates(groupLinearItems);
+  const groupGitLabIssueItems = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'gitlab' ? [gitlabThread('issue', issue.ref)] : [])),
     [groupIssues],
   );
-  const groupGitLabIssueStates = useGitLabIssueStates(groupGitLabIssueRefs);
+  const groupGitLabIssueStates = useTrackedIssueStates(groupGitLabIssueItems);
   const groupIssueItems = React.useMemo(
     () => buildSessionIssueItems(groupIssues, groupIssueStates, groupLinearStates, groupGitLabIssueStates).map((item) => ({
       ...item,
@@ -928,7 +929,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
   const groupPrLinks: SidebarRefLink[] = groupPrSummary && groupPrStatusLabel ? [{
     key: `pr:${groupPrSummary.number}`,
     icon: 'git-pull-request',
-    text: `#${groupPrSummary.number} · ${groupPrStatusLabel}`,
+    text: `${groupPrReference} · ${groupPrStatusLabel}`,
     title: groupPrSummary.title,
     color: groupPrColor,
     url: groupPrSummary.url,
@@ -1181,7 +1182,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                         if (groupPrSummary.url) void openExternalUrl(groupPrSummary.url);
                       }}
                     >
-                      #{groupPrSummary.number}
+                      {groupPrReference}
                     </button>
                   ) : primaryGroupIssue ? (
                     // Same contract as the PR number: opens the issue, keeps

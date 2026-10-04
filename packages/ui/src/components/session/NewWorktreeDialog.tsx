@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
 import { formatChangeRequestReference, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -36,7 +37,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { ReferencePickerDialog, type ReferencePickerConfirmFailure } from '@/components/references/ReferencePickerDialog';
 import { referencePickerItemKey, type ReferencePickerSelection } from '@/components/references/referencePickerItems';
-import { readLinearIssueDetail, useGitHubReadContext } from '@/components/references/referenceSources';
+import { readLinearIssueDetail, useGitHubReadContext, useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { resolveComposerReferences } from '@/components/references/resolveComposerReferences';
 import { usePendingComposerReferences } from '@/components/chat/composer/pendingComposerReferences';
 import { useInputStore } from '@/sync/input-store';
@@ -46,7 +47,7 @@ import type { SourceControlReadContext } from '@/lib/api/types';
 import { resolvePrWorktreeConfig, type PrWorktreeSource } from './prWorktreeConfig';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import type { CreateWorktreeArgs, ProjectRef } from '@/lib/worktrees/worktreeManager';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 
 /** The dialog's tabs: a fresh branch, a branch that exists, or the branch of an issue or PR. */
 type Mode = 'new-branch' | 'existing-branch' | 'from-item';
@@ -223,6 +224,12 @@ export function NewWorktreeDialog({
   const linkedPr = mode === 'from-item' && linked?.kind === 'pr' ? linked.pr : null;
   const linkedPrContext = mode === 'from-item' && linked?.kind === 'pr' ? linked.context : null;
   const githubContext = useGitHubReadContext(open ? projectDirectory : null);
+  // A GitLab project's items are merge requests: the PR-or-issue copy says so.
+  const itemProvider = useRepositoryReferenceProvider(open ? projectDirectory : null);
+  const tItem = React.useCallback(
+    (key: I18nKey) => t(changeRequestCopy(key, itemProvider)),
+    [itemProvider, t],
+  );
   // The fields the visible tab edits.
   const draft = mode === 'from-item' ? itemBranch : newBranch;
   const setDraft = mode === 'from-item' ? setItemBranch : setNewBranch;
@@ -406,7 +413,7 @@ export function NewWorktreeDialog({
       let sourceLabel = '';
       const args: CreateWorktreeArgs = (() => {
         if (linkedPr) {
-          if (!linkedPrContext) throw new Error(t('session.newWorktree.error.changeRequestAuthorityMissing'));
+          if (!linkedPrContext) throw new Error(tItem('session.newWorktree.error.changeRequestAuthorityMissing'));
           // The server fetches the PR's head through the repository's account
           // and checks it is still the revision the picker showed.
           const prConfig = resolvePrWorktreeConfig(linkedPr, linkedPrContext, branches?.branches ?? {});
@@ -523,7 +530,7 @@ export function NewWorktreeDialog({
       }
     }
     if (!githubContext || githubContext === 'missing') {
-      return { failedKeys: [referencePickerItemKey(choice)], message: t('session.newWorktree.error.changeRequestAuthorityMissing') };
+      return { failedKeys: [referencePickerItemKey(choice)], message: tItem('session.newWorktree.error.changeRequestAuthorityMissing') };
     }
     const pr: PrWorktreeSource & { title: string; url: string } = {
       number: reference.number,
@@ -678,8 +685,8 @@ export function NewWorktreeDialog({
         selected={mode === 'from-item'}
         onSelect={() => handleModeChange('from-item')}
         disabled={!canLinkItems}
-        label={t('session.newWorktree.mode.fromItem')}
-        description={canLinkItems ? t('session.newWorktree.start.fromItemHint') : t('session.newWorktree.start.fromItemUnavailable')}
+        label={tItem('session.newWorktree.mode.fromItem')}
+        description={canLinkItems ? tItem('session.newWorktree.start.fromItemHint') : tItem('session.newWorktree.start.fromItemUnavailable')}
       />
     </SettingsRadioGroup>
   );
@@ -777,7 +784,7 @@ export function NewWorktreeDialog({
   const choiceBlocks = (
     <>
       {fieldBlock(t('session.newWorktree.start.title'), startOptions)}
-      {canLinkItems ? fieldBlock(t('session.newWorktree.item.title'), itemPicker) : null}
+      {canLinkItems ? fieldBlock(tItem('session.newWorktree.item.title'), itemPicker) : null}
     </>
   );
   const branchBlocks = (

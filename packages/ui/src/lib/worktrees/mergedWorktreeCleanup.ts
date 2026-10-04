@@ -1,12 +1,15 @@
 import type { Session } from '@/lib/opencode/model';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { SourceControlProvider } from '@/lib/source-control/types';
 
-/** A linked worktree whose branch PR GitHub reports as merged. */
+/** A linked worktree whose branch's PR (GitHub) or merge request (GitLab) is reported merged. */
 export type MergedWorktreeCandidate = {
   worktree: WorktreeMetadata;
   project: { id: string; path: string };
   prNumber: number;
+  /** Where the change request lives; GitLab's toasts say merge request. */
+  provider?: SourceControlProvider | null;
   /** Last commit of the merged PR; null when the status did not carry it. */
   mergedHeadSha: string | null;
 };

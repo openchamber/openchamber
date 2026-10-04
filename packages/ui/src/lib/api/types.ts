@@ -957,6 +957,8 @@ export interface GitWorktreeCreateResult {
   directoryCreated?: true;
   bootstrapStatus?: GitWorktreeBootstrapStatus;
   sourceFetchFailed?: true;
+  /** Set when the failed fetch was the repository's access: an account that needs attention, refused credentials. */
+  sourceFetchReason?: 'access';
   provenance?: GitContributorWorktreeProvenance;
 }
 
@@ -1559,16 +1561,6 @@ export type GitHubIssueLiveSummary = GitHubPullRequestRef & {
   state: 'open' | 'completed' | 'not_planned';
 };
 
-export type GitHubPullRequestSummariesResult =
-  | { connected: false }
-  | {
-      connected: true;
-      /** Server-side stamp of when GitHub was asked (ms epoch). */
-      fetchedAt: number;
-      /** PRs and issues GitHub could not resolve are absent: unknown, not closed. */
-      summaries: GitHubPullRequestLiveSummary[];
-      issueSummaries: GitHubIssueLiveSummary[];
-    };
 
 export type GitHubIssueLabel = {
   name: string;
@@ -1826,25 +1818,6 @@ export interface SourceControlAPI {
   githubReferences(context: SourceControlReadContext, options: GitHubReferencesOptions): Promise<GitHubReferencesResult>;
   /** GitHub only: comments of one item the picker previews, and a PR's size, review and checks. Throws on failure. */
   githubReferenceDetail(context: SourceControlReadContext, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
-  /**
-   * GitHub only: live state of PRs and issues already known by number, read
-   * with `accountId`, or with the current github.com account when it is null.
-   */
-  githubSummaries(
-    accountId: string | null,
-    refs: GitHubPullRequestRef[],
-    issueRefs?: GitHubPullRequestRef[],
-  ): Promise<GitHubPullRequestSummariesResult>;
-  /**
-   * GitLab: live state of merge requests and issues already known by number,
-   * read with the instance's current account. `owner` is the project's
-   * namespace path, subgroups included; the answer has GitHub's shape.
-   */
-  gitlabSummaries(
-    instance: string,
-    refs: GitHubPullRequestRef[],
-    issueRefs?: GitHubPullRequestRef[],
-  ): Promise<GitHubPullRequestSummariesResult>;
 }
 
 export interface RemoteClientRecord {
@@ -2065,10 +2038,6 @@ export type LinearIssueLiveSummary = {
   state: { name: string; type: LinearStateType };
 };
 
-/** Issues the current workspace does not have are left out. */
-export type LinearIssueSummariesResult =
-  | { connected: false }
-  | { connected: true; issues: LinearIssueLiveSummary[] };
 
 export type LinearIssueStatesResult = {
   connected: boolean;
@@ -2133,8 +2102,6 @@ export interface LinearAPI {
   authActivate(organizationId: string): Promise<LinearAuthStatus>;
   issuesList(options?: LinearIssuesListOptions): Promise<LinearIssuesListResult>;
   issueGet(id: string): Promise<LinearIssueGetResult>;
-  /** At most 50 identifiers. Throws on failure; disconnected is `{ connected: false }`. */
-  issueSummaries(identifiers: string[]): Promise<LinearIssueSummariesResult>;
   issueStates(teamId: string): Promise<LinearIssueStatesResult>;
   issueUpdate(input: LinearIssueUpdateInput): Promise<LinearIssueUpdateResult>;
   mappingGet(): Promise<LinearMappingResult>;

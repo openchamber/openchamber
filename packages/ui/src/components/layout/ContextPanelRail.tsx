@@ -45,6 +45,7 @@ import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { useGuestBadgeStore } from '@/lib/guests/badge-store';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { ContextRailSurfacesDialog } from './ContextRailSurfacesDialog';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 
 const RAIL_TOOLTIP_DELAY_MS = 150;
 // Hold the surface-switch modifier for this long before revealing the order
@@ -339,7 +340,7 @@ export const ContextPanelRail: React.FC = () => {
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {surfaces.map((surface, index) => {
-            const label = surface.label ?? t(surface.labelKey);
+            const label = surface.label ?? t(changeRequestCopy(surface.labelKey, repositoryProvider));
             // Git shows a numeric badge instead of the old activity dot.
             // Other surfaces never inherit git's changed-files signal.
             // The work-status panel reports the same count in words a few
@@ -359,7 +360,7 @@ export const ContextPanelRail: React.FC = () => {
                 isActive={activeMode === surface.mode}
                 showActivityDot={false}
                 label={label}
-                description={t(surface.descriptionKey)}
+                description={t(changeRequestCopy(surface.descriptionKey, repositoryProvider))}
                 badgeCount={badgeCount}
                 badgeAriaLabel={badgeCount !== null
                   ? t(

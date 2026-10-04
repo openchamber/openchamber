@@ -304,9 +304,9 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
             case 'preview-annotation':
                 return t('chat.message.context.browserAnnotation', { page: draft.fileLabel });
             case 'pr-comment':
-                return t('chat.message.context.prComment', { label: draft.fileLabel });
+                return t(draft.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: draft.fileLabel });
             case 'pr-check':
-                return t('chat.message.context.prCheck', { label: draft.fileLabel });
+                return t(draft.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: draft.fileLabel });
             case 'chat-quote':
                 return t('chat.message.context.chatQuote');
             case 'file-quote':
@@ -351,8 +351,13 @@ export function ComposerContextChips({ draftTarget, colors }: ComposerContextChi
             });
         }
         byKind('review', 'chat-1', t('chat.chatInput.reviewComments'), (draft) => REVIEW_SOURCES.includes(draft.source));
-        byKind('pr-comment', 'git-pull-request', t('chat.chatInput.prCommentContext'), (draft) => draft.source === 'pr-comment');
-        byKind('pr-check', 'close-circle', t('chat.chatInput.prCheckContext'), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
+        // GitLab's own words only when every attached item is from GitLab.
+        const allGitLab = (source: InlineCommentDraft['source']) => {
+            const matched = drafts.filter((draft) => draft.source === source);
+            return matched.length > 0 && matched.every((draft) => draft.provider === 'gitlab');
+        };
+        byKind('pr-comment', 'git-pull-request', t(allGitLab('pr-comment') ? 'chat.chatInput.mrCommentContext' : 'chat.chatInput.prCommentContext'), (draft) => draft.source === 'pr-comment');
+        byKind('pr-check', 'close-circle', t(allGitLab('pr-check') ? 'chat.chatInput.mrCheckContext' : 'chat.chatInput.prCheckContext'), (draft) => draft.source === 'pr-check', 'text-[var(--status-error)]');
         byKind('chat-quote', 'chat-1', t('chat.chatInput.chatQuoteContext'), (draft) => draft.source === 'chat-quote');
         byKind('annotation', 'global', t('chat.chatInput.previewAnnotations'), (draft) => draft.source === 'preview-annotation');
         return result;

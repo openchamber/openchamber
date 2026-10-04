@@ -59,7 +59,7 @@ export interface QueuedInput {
 
 /** An issue, PR or tracker item attached to the composer, as it is sent. */
 export type ComposerContextReference =
-    | { kind: 'repository-issue'; number: number; title: string; url: string; contextText: string }
+    | { kind: 'repository-issue'; provider?: SourceControlProvider; number: number; title: string; url: string; contextText: string }
     | { kind: 'change-request'; provider: SourceControlProvider; number: number; title: string; url: string; context: string }
     | { kind: 'linear-issue'; identifier: string; title: string; url: string; contextText: string }
     | {
@@ -215,8 +215,8 @@ export function buildComposerContext(
     for (const reference of input.references) {
         switch (reference.kind) {
             case 'repository-issue': {
-                const { number, title, url, contextText } = reference;
-                attach(createContextPart({ kind: 'repository-issue', number, title, url }, contextText));
+                const { provider, number, title, url, contextText } = reference;
+                attach(createContextPart({ kind: 'repository-issue', ...(provider ? { provider } : {}), number, title, url }, contextText));
                 break;
             }
             case 'change-request': {

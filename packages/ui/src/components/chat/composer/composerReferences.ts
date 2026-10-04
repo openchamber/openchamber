@@ -22,6 +22,8 @@ export type ComposerReferenceAuthor = { login: string; avatarUrl?: string };
 export type ComposerReference =
     | {
         kind: 'repository-issue';
+        /** Absent on issues restored from messages written before GitLab: those are GitHub. */
+        provider?: SourceControlProvider;
         number: number;
         title: string;
         url: string;
@@ -139,7 +141,14 @@ export const toLinkedIssue = (reference: ComposerReference, linkedAt: number): L
 export const toContextReference = (reference: ComposerReference): ComposerContextReference => {
     switch (reference.kind) {
         case 'repository-issue':
-            return { kind: 'repository-issue', number: reference.number, title: reference.title, url: reference.url, contextText: reference.contextText };
+            return {
+                kind: 'repository-issue',
+                ...(reference.provider ? { provider: reference.provider } : {}),
+                number: reference.number,
+                title: reference.title,
+                url: reference.url,
+                contextText: reference.contextText,
+            };
         case 'change-request':
             return {
                 kind: 'change-request',

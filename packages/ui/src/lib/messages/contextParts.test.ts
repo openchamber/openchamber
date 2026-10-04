@@ -82,6 +82,13 @@ describe('model-facing text', () => {
         expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', fileLabel: 'CI / build', code: 'boom', text: 'why?' }))))
             .toBe('Attached failed GitHub PR check (CI / build):\n```\nboom\n```\n\nwhy?');
     });
+
+    test('a GitLab merge request comment and pipeline job say so', () => {
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-comment', provider: 'gitlab', fileLabel: '!7 @octo', code: 'the comment', text: '' }))))
+            .toBe('Attached GitLab merge request comment (!7 @octo):\n\nthe comment');
+        expect(formatContextText(contextPayloadFromDraft(draft({ source: 'pr-check', provider: 'gitlab', fileLabel: '!7 · build', code: 'boom', text: '' }))))
+            .toBe('Attached failed GitLab merge request pipeline job (!7 · build):\n```\nboom\n```');
+    });
 });
 
 describe('round-trip through part metadata', () => {

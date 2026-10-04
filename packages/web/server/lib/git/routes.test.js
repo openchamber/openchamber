@@ -12,6 +12,7 @@ const gitLibraries = {
   getCurrentIdentity: vi.fn(),
   getRemoteUrl: vi.fn(),
   getRemotes: vi.fn(),
+  getRepositoryRemoteUrls: vi.fn(),
   getProfiles: vi.fn(),
   createProfile: vi.fn(),
   updateProfile: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('./index.js', () => ({
   getCurrentIdentity: gitLibraries.getCurrentIdentity,
   getRemoteUrl: gitLibraries.getRemoteUrl,
   getRemotes: gitLibraries.getRemotes,
+  getRepositoryRemoteUrls: gitLibraries.getRepositoryRemoteUrls,
   getProfiles: gitLibraries.getProfiles,
   createProfile: gitLibraries.createProfile,
   updateProfile: gitLibraries.updateProfile,
@@ -421,6 +423,47 @@ describe('contributor worktree authority', () => {
       contributorFork: true, ensureRemoteName: 'pr-alice',
       ensureRemoteUrl: 'https://github.com/alice/app.git', contributorTransferComplete: true,
     }), expect.objectContaining({ contributorProvenance, contributorSource: resolvedSource }));
+  });
+
+  it('fetches a same-repository change request onto the primary remote it already has', async () => {
+    gitLibraries.getRepositoryRemoteUrls.mockResolvedValue([
+      { name: 'origin', fetchUrl: 'git@github.com:acme/app.git', pushUrl: 'git@github.com:acme/app.git' },
+    ]);
+    const sameRepository = {
+      ...resolvedSource,
+      sourceProject: sourceRequest.project,
+      classification: 'same-repository',
+      endpoint: 'https://github.com/acme/app.git',
+    };
+    const transferContributorHead = vi.fn(async () => ({ state: 'succeeded' }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, {
+      resolveChangeRequestSource: vi.fn(async () => sameRepository),
+      resolveSourceControlAccount: vi.fn(async () => ({
+        credentialId: resolvedSource.context.accountId, credentialRevision: 3,
+        providerUserId: 'github.com#42', status: 'valid',
+      })),
+      createHttpsCredentialReference: vi.fn(() => 'credential_reference'),
+      networkOperations: {
+        transferContributorHead,
+        hydrateBoundCheckout: vi.fn(async () => ({ status: 'not-needed', submodules: [], lfs: [] })),
+      },
+      contributorProvenance: { compareAndSwap: vi.fn() },
+      worktreeBootstrapStore: { read: vi.fn(), write: vi.fn() },
+    });
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/worktrees')({
+      query: { directory: '/repo' },
+      body: { mode: 'existing', worktreeName: 'pr-42', branchName: 'feature', changeRequestSource: sourceRequest },
+    }, response);
+
+    expect(response.statusCode).toBe(200);
+    // The head still comes from the provider's endpoint; no second remote names the same project.
+    expect(transferContributorHead).toHaveBeenCalledWith(expect.objectContaining({ destinationRef: 'refs/remotes/origin/feature' }));
+    expect(gitLibraries.createWorktree).toHaveBeenCalledWith('/repo', expect.objectContaining({
+      contributorFork: false, ensureRemoteName: 'origin', ensureRemoteUrl: 'git@github.com:acme/app.git',
+    }), expect.anything());
   });
 
   it('passes the exact contributor source to hydration', async () => {

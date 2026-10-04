@@ -24,6 +24,11 @@ import { registerConfigEntityRoutes } from './config-entity-routes.js';
 import { registerSettingsUtilityRoutes } from './core-routes.js';
 import { registerProjectIconRoutes } from './project-icon-routes.js';
 import { registerScheduledTaskRoutes } from '../scheduled-tasks/routes.js';
+import { createTrackedItemsService } from '../tracked-items/service.js';
+import { createProviderReadCache } from '../provider-read-cache/index.js';
+import { createTrackedItemReaders } from '../tracked-items/readers.js';
+import { createTrackedItemsPersistence } from '../tracked-items/persistence.js';
+import { registerTrackedItemsRoutes } from '../tracked-items/routes.js';
 import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes.js';
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
@@ -224,6 +229,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       worktreeBootstrapStore,
       messageQueueRuntime,
       routingRuntime,
+      globalEventHub,
       openchamberVersion,
     } = routeDependencies;
 
@@ -449,6 +455,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       }
       await configureRepositoryTransport(directory, { credentialHelper, sshCommand });
     };
+    // Shared short-lived answers for provider reads; registered before the
+    // GitHub, GitLab and Linear routes it fronts.
+    const providerReadCache = createProviderReadCache();
+    app.use(providerReadCache.middleware);
     walkthroughBindingService = registerSourceControlRoutes(app, {
       onRepositoryTransportChanged: syncRepositoryTransport,
       validateManagedSshCredential: managedSshInventory.assertAvailable,
@@ -475,6 +485,62 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getWalkthroughService,
       validateReadContext: walkthroughBindingService.validateReadContext,
     });
+    // Live state of the linked pull requests, merge requests and issues the
+    // clients show, refreshed here and pushed over the event stream.
+    const findEventClient = (connectionId) => {
+      for (const client of getOpenChamberEventClients()) {
+        if (client.openchamberConnectionId === connectionId) return client;
+      }
+      return null;
+    };
+    const trackedItemsService = createTrackedItemsService({
+      readers: createTrackedItemReaders({ readGitLabLiveSummaries: walkthroughBindingService.readGitLabLiveSummaries }),
+      persistence: createTrackedItemsPersistence({ dataDir: openchamberDataDir }),
+      isConnectionOpen: (connectionId) => findEventClient(connectionId) !== null,
+      send: (connectionId, event) => {
+        const client = findEventClient(connectionId);
+        if (!client) return false;
+        try {
+          writeSseEvent(client, event);
+          return true;
+        } catch {
+          getOpenChamberEventClients().delete(client);
+          return false;
+        }
+      },
+    });
+    // A finished agent turn may have pushed a branch or opened a pull request.
+    // Followed items refresh on the server; clients are told which directory
+    // to look at again for branches that had no pull request. Bursts of idle
+    // events around a turn boundary are coalesced per directory.
+    const TURN_SETTLE_MS = 3000;
+    const settlingDirectories = new Map();
+    const announceTurnFinished = (directory) => {
+      if (settlingDirectories.has(directory)) return;
+      settlingDirectories.set(directory, setTimeout(() => {
+        settlingDirectories.delete(directory);
+        const clients = getOpenChamberEventClients();
+        for (const client of clients) {
+          try {
+            writeSseEvent(client, { type: 'openchamber:source-control.activity', properties: { directory } });
+          } catch {
+            clients.delete(client);
+          }
+        }
+      }, TURN_SETTLE_MS));
+    };
+    // The hub translates v2 wire events into the server's vocabulary once.
+    globalEventHub?.subscribeEvent((event) => {
+      for (const payload of event?.translated?.() ?? []) {
+        if (payload?.type === 'session.idle' || (payload?.type === 'session.status' && payload.properties?.status?.type === 'idle')) {
+          trackedItemsService.noteTurnFinished();
+          providerReadCache.clear();
+          if (event.directory && event.directory !== 'global') announceTurnFinished(event.directory);
+          return;
+        }
+      }
+    });
+    registerTrackedItemsRoutes(app, { service: trackedItemsService });
     const resolveGitIdentity = async (identityId) => {
       if (identityId === 'global') {
         const identity = await getGlobalIdentity();

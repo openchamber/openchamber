@@ -59,6 +59,8 @@ type PrCommentContext = {
     label: string;
     body: string;
     text: string;
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
 };
 
 type PrCheckContext = {
@@ -66,10 +68,14 @@ type PrCheckContext = {
     label: string;
     output: string;
     text: string;
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
 };
 
 type RepositoryIssueContext = {
     kind: 'repository-issue';
+    /** Absent on messages from before GitLab: those are GitHub. */
+    provider?: SourceControlProvider;
     number: number;
     title: string;
     url: string;
@@ -190,7 +196,7 @@ export function formatContextText(payload: ContextPartPayload): string {
         case 'browser-annotation':
             return payload.text ? `${payload.prompt}\n\n${payload.text}` : payload.prompt;
         case 'pr-comment':
-            return `Attached GitHub PR comment (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached ${payload.provider === 'gitlab' ? 'GitLab merge request' : 'GitHub PR'} comment (${payload.label}):\n\n${payload.body}${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'file-quote': {
             const location = payload.startLine != null && payload.endLine != null
                 ? ` lines ${payload.startLine}-${payload.endLine}`
@@ -203,7 +209,7 @@ export function formatContextText(payload: ContextPartPayload): string {
             return `Comment on this fragment of an earlier message in this conversation:\n${quoted}${payload.text ? `\n\n${payload.text}` : ''}`;
         }
         case 'pr-check':
-            return `Attached failed GitHub PR check (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
+            return `Attached failed ${payload.provider === 'gitlab' ? 'GitLab merge request pipeline job' : 'GitHub PR check'} (${payload.label}):\n\`\`\`\n${payload.output}\n\`\`\`${payload.text ? `\n\n${payload.text}` : ''}`;
         case 'repository-issue':
         case 'change-request':
         case 'linear-issue':
@@ -263,9 +269,9 @@ export function contextPayloadFromDraft(draft: InlineCommentDraft): ContextPartP
                 text: draft.text,
             };
         case 'pr-comment':
-            return { kind: 'pr-comment', label: draft.fileLabel, body: draft.code, text: draft.text };
+            return { kind: 'pr-comment', label: draft.fileLabel, body: draft.code, text: draft.text, ...(draft.provider ? { provider: draft.provider } : {}) };
         case 'pr-check':
-            return { kind: 'pr-check', label: draft.fileLabel, output: draft.code, text: draft.text };
+            return { kind: 'pr-check', label: draft.fileLabel, output: draft.code, text: draft.text, ...(draft.provider ? { provider: draft.provider } : {}) };
         case 'file-quote': {
             const payload: FileQuoteContext = { kind: 'file-quote', fileLabel: draft.fileLabel, quote: draft.code, text: draft.text };
             if (draft.startLine > 0 && draft.endLine > 0) {
@@ -334,12 +340,14 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
         label: z.string(),
         body: z.string(),
         text: z.string(),
+        provider: z.enum(['github', 'gitlab']).optional(),
     }),
     z.object({
         kind: z.literal('pr-check'),
         label: z.string(),
         output: z.string(),
         text: z.string(),
+        provider: z.enum(['github', 'gitlab']).optional(),
     }),
     z.object({
         kind: z.literal('file-quote'),
@@ -358,6 +366,7 @@ const canonicalContextPayloadSchema = z.discriminatedUnion('kind', [
     }),
     z.object({
         kind: z.literal('repository-issue'),
+        provider: z.enum(['github', 'gitlab']).optional(),
         number: z.number().int().positive(),
         title: z.string(),
         url: z.string(),
@@ -528,9 +537,9 @@ export function draftFromContextPayload(
                 text: payload.text,
             };
         case 'pr-comment':
-            return { source: 'pr-comment', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.body, language: '', text: payload.text };
+            return { source: 'pr-comment', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.body, language: '', text: payload.text, ...(payload.provider ? { provider: payload.provider } : {}) };
         case 'pr-check':
-            return { source: 'pr-check', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.output, language: '', text: payload.text };
+            return { source: 'pr-check', fileLabel: payload.label, startLine: 0, endLine: 0, code: payload.output, language: '', text: payload.text, ...(payload.provider ? { provider: payload.provider } : {}) };
         case 'file-quote':
             return {
                 source: 'file-quote',

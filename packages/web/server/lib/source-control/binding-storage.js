@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { withSourceControlFileLock } from './file-lock.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { bindingSummary, parseBinding, parseBindingStore } from './binding-contract.js';
-import { parseGitCredentialReference } from '../git/credential-resolver.js';
+import { createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
 
 const invalidState = (cause) => Object.assign(new Error('Source control binding storage is invalid', { cause }), {
   code: 'INVALID_SOURCE_CONTROL_BINDINGS',
@@ -140,5 +140,61 @@ export function createBindingStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }
     return changed;
   });
 
-  return { read, listRemoteGrants, compareAndSwap, reconcileAccount };
+  /**
+   * The reverse of `reconcileAccount`: an account connected for a user whose
+   * earlier account on that host is gone (signed in again as a new credential,
+   * the old one removed) takes over what the gone one held. Only grants and
+   * providers already marked unavailable move, and only from the same user on
+   * the same host, read from the credential reference the grant carries; a
+   * binding to another live account is never touched.
+   */
+  const adoptAccount = ({ provider, instance, accountId, credentialRevision, providerUserId }) => enqueueWrite(async () => {
+    const state = await readState();
+    const changed = [];
+    const credentialId = createHttpsCredentialReference({ provider, instance, credentialId: accountId, credentialRevision, providerUserId });
+    const sameUserGone = (candidate) => {
+      if (candidate.mode !== 'managed' || !candidate.credentialId || candidate.readiness !== 'confirmation-required') return null;
+      try {
+        const reference = parseGitCredentialReference(candidate.credentialId);
+        return reference.transport === 'https' && reference.provider === provider
+          && providerInstancesMatch(provider, reference.instance, instance)
+          && reference.providerUserId === providerUserId && reference.credentialId !== accountId
+          ? reference.credentialId
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    for (const [repositoryId, current] of Object.entries(state.repositories)) {
+      const binding = current.binding;
+      if (!binding) continue;
+      // Accounts this binding knew as this user, from the grants that name them.
+      const goneAccounts = new Set();
+      const adoptGrant = (candidate) => {
+        const gone = sameUserGone(candidate);
+        if (!gone) return candidate;
+        goneAccounts.add(gone);
+        return { ...candidate, credentialId, readiness: 'ready' };
+      };
+      const remotes = binding.remotes.map(adoptGrant);
+      const auxiliary = binding.auxiliary.map(adoptGrant);
+      const providers = binding.providers.map((candidate) => (
+        candidate.provider === provider && providerInstancesMatch(provider, candidate.instance, instance)
+          && candidate.readiness === 'account-unavailable' && goneAccounts.has(candidate.accountId)
+          ? { ...candidate, accountId, readiness: 'ready' }
+          : candidate
+      ));
+      if (goneAccounts.size === 0) continue;
+      const revision = current.revision + 1;
+      const nextBinding = { ...binding, providers, remotes, auxiliary, revision };
+      nextBinding.state = bindingSummary(nextBinding);
+      const record = { revision, binding: nextBinding };
+      state.repositories[repositoryId] = record;
+      changed.push(record);
+    }
+    if (changed.length) await writeState(state);
+    return changed;
+  });
+
+  return { read, listRemoteGrants, compareAndSwap, reconcileAccount, adoptAccount };
 }

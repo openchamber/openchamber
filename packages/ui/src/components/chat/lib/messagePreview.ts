@@ -39,9 +39,9 @@ const contextSummary = (payload: ContextPartPayload, t: Translate): string => {
         case 'browser-annotation':
             return t('chat.message.context.browserAnnotation', { page: payload.pageUrl });
         case 'pr-comment':
-            return t('chat.message.context.prComment', { label: payload.label });
+            return t(payload.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: payload.label });
         case 'pr-check':
-            return t('chat.message.context.prCheck', { label: payload.label });
+            return t(payload.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: payload.label });
         case 'file-quote': {
             const file = basename(payload.fileLabel);
             if (payload.startLine == null || payload.endLine == null) {

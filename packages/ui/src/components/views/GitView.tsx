@@ -2471,6 +2471,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
             onOpenUpdateBranch={canShowBranchWorkflows ? () => setIsUpdateBranchDialogOpen(true) : undefined}
             onOpenReintegrateCommits={integrateCommitsProps ? () => setIsIntegrateCommitsDialogOpen(true) : undefined}
             pullRequest={prChipStatus?.changeRequest ?? prChipStatus?.pr ?? null}
+            pullRequestProvider={prChipStatus?.changeRequest?.provider ?? null}
             prChecks={prChipStatus?.ci?.summary ?? prChipStatus?.checks ?? null}
             onOpenPullRequest={
               gitDirectory ? () => openContextSurface(gitDirectory, 'pr') : undefined

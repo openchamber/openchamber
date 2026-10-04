@@ -755,18 +755,21 @@ export function applyDirectoryEvent(
 
 function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
-  // Keep sessions that have pending permissions (they need to stay visible)
-  const hasPermission = new Set(
-    Object.entries(draft.permission ?? {})
-      .filter(([, perms]) => perms && perms.length > 0)
-      .map(([sessionID]) => sessionID),
-  )
-  while (draft.session.length > draft.limit) {
-    // Remove from the beginning (oldest by sorted ID)
-    const candidate = draft.session[0]
-    if (hasPermission.has(candidate.id)) break
-    draft.session.shift()
-  }
+  // Sessions with a pending permission or form stay and do not count toward
+  // the limit: the composer finds a subagent's requests through its parent
+  // link in this list.
+  const isBlocking = (sessionID: string) =>
+    (draft.permission[sessionID]?.length ?? 0) > 0 || (draft.form[sessionID]?.length ?? 0) > 0
+  // Drop the oldest by creation time. The array is sorted by id, and session
+  // ids descend with time, so its head holds the newest session: trimming by
+  // position evicted a just-created subagent before its requests arrived.
+  const trimmable = draft.session
+    .filter((session) => !isBlocking(session.id))
+    .sort((a, b) => a.time.created - b.time.created)
+  const excess = trimmable.length - draft.limit
+  if (excess <= 0) return
+  const dropped = new Set(trimmable.slice(0, excess).map((session) => session.id))
+  draft.session = draft.session.filter((session) => !dropped.has(session.id))
 }
 
 function cleanupSessionCaches(draft: State, sessionID: string) {

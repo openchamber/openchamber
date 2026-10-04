@@ -1116,6 +1116,7 @@ export function registerGitHubRoutes(app, options = {}) {
         options.onAccountConnected?.({
           account,
           user,
+          credential: { credentialRevision: credential.credentialRevision, providerUserId: credential.providerUserId },
           renews: superseded.map((candidate) => ({ ...account, accountId: candidate.id })),
         });
       }
@@ -1525,49 +1526,6 @@ export function registerGitHubRoutes(app, options = {}) {
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR status' });
     } finally {
       if (writeToken) pendingPrStatusWrites.delete(writeToken);
-    }
-  });
-
-  // Batched live status for PRs and issues the client already knows by
-  // number. The sidebar polls this instead of re-resolving every branch.
-  // `accountId` names the account the entries were read with; without one the
-  // current github.com account answers, which is how links outside any bound
-  // repository are read.
-  app.post(canonicalGitHubRoutePath('/pr/summaries'), async (req, res) => {
-    const { parseSummaryRefs, fetchPrSummaries, isGraphqlRateLimitError, MAX_SUMMARY_REFS } = await import('./pr-summaries.js');
-    const refs = parseSummaryRefs(req.body?.refs);
-    const issueRefs = parseSummaryRefs(req.body?.issueRefs ?? []);
-    if (!refs || !issueRefs || refs.length + issueRefs.length > MAX_SUMMARY_REFS) {
-      return res.status(400).json({ error: 'refs and issueRefs must be lists of { owner, repo, number }, at most 100 in total' });
-    }
-    try {
-      const octokit = (await getOctokitForRequest(req))?.octokit;
-      if (!octokit) {
-        return res.json({ connected: false });
-      }
-      const { isGitHubRateLimited } = await import('./rate-limit.js');
-      if (isGitHubRateLimited()) {
-        return res.status(503).json({ error: 'GitHub rate limited' });
-      }
-      const fetchedAt = Date.now();
-      const { summaries, issueSummaries } = refs.length + issueRefs.length > 0
-        ? await fetchPrSummaries({ octokit, refs, issueRefs })
-        : { summaries: [], issueSummaries: [] };
-      return res.json({ connected: true, fetchedAt, summaries, issueSummaries });
-    } catch (error) {
-      const accountError = sendExactAccountError(res, error);
-      if (accountError) return accountError;
-      if (error?.status === 401) {
-        await invalidateRequestAccount(error);
-        return res.json({ connected: false });
-      }
-      const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
-      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
-        noteGitHubRateLimit(error);
-        return res.status(503).json({ error: 'GitHub rate limited' });
-      }
-      console.error('Failed to load GitHub PR summaries:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load GitHub PR summaries' });
     }
   });
 

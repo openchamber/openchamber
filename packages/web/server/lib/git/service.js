@@ -2186,7 +2186,7 @@ const queueWorktreeBootstrap = (args) => {
           : WORKTREE_BOOTSTRAP_PHASE_DIRECTORY_CREATED,
         publicMessage,
         error?.hydration,
-        error?.hydration ? error?.code : pathLengthFailure ? 'PATH_LENGTH_LIMIT' : 'UNKNOWN',
+        bootstrapFailureCode(error, pathLengthFailure),
         bootstrapStore,
       ).catch(() => {});
       console.warn('Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
@@ -4745,7 +4745,10 @@ export async function validateWorktreeCreate(directory, input = {}) {
         });
       }
     }
-    const contributorNeedsTransfer = contributorFork && input?.contributorTransferComplete !== true;
+    // A change request's head (a fork's or this repository's own) is fetched
+    // after validation, so its ref cannot be checked before that.
+    const contributorNeedsTransfer = (contributorFork || input?.changeRequestTransfer === true)
+      && input?.contributorTransferComplete !== true;
 
     let localBranch = '';
     let inferredUpstream = null;
@@ -5226,13 +5229,23 @@ const resolvePublishedLocalBranchUpstream = async (primaryWorktree, startRef) =>
  * commits after the fetch (a force-push), keeps the local ref; a failed fetch
  * keeps it too and says so.
  */
+// Why a fetch for a new worktree failed, when the user can do something about
+// it: the repository's access (an account that needs attention, refused
+// credentials). Anything else is left unnamed.
+const sourceFetchFailure = (error) => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const access = error?.reason === 'needs-attention' || error?.code === 'AUTHENTICATION_REQUIRED'
+    || /authentication failed|could not read username|permission denied/i.test(message);
+  return access ? { sourceFetchFailed: true, sourceFetchReason: 'access' } : { sourceFetchFailed: true };
+};
+
 const preparePublishedLocalBranchSource = async (context, input, startRef) => {
   const upstream = await resolvePublishedLocalBranchUpstream(context.primaryWorktree, startRef);
   if (!upstream) return { input, sourceFetchFailed: false };
   try {
     await fetchRemoteBranchRef(context.primaryWorktree, upstream.remote, upstream.branch);
-  } catch {
-    return { input, sourceFetchFailed: true };
+  } catch (error) {
+    return { input, ...sourceFetchFailure(error) };
   }
   if (!(await isAncestorRef(context.primaryWorktree, upstream.localRef, upstream.trackingRef))) {
     return { input, sourceFetchFailed: false };
@@ -5271,7 +5284,7 @@ const prepareWorktreeCreateSource = async (context, input = {}) => {
     if (canFallbackToLocal) {
       return {
         input: { ...input, startRef: status.current },
-        sourceFetchFailed: true,
+        ...sourceFetchFailure(error),
       };
     }
 
@@ -5368,13 +5381,27 @@ export async function createWorktree(directory, input = {}, serverOptions = {}) 
     };
     if (prepared.sourceFetchFailed) {
       result.sourceFetchFailed = true;
+      if (prepared.sourceFetchReason) result.sourceFetchReason = prepared.sourceFetchReason;
     }
     return result;
   }
 
   const result = await attachGitWorktreeToCandidate(context, candidate, preparedInput, serverOptions);
-  return prepared.sourceFetchFailed ? { ...result, sourceFetchFailed: true } : result;
+  if (!prepared.sourceFetchFailed) return result;
+  return prepared.sourceFetchReason
+    ? { ...result, sourceFetchFailed: true, sourceFetchReason: prepared.sourceFetchReason }
+    : { ...result, sourceFetchFailed: true };
 }
+
+// The code a failed bootstrap is recorded with, which decides what the user is
+// told. A known cause is never recorded as unknown: a repository grant whose
+// account needs attention reads as the access problem it is.
+const bootstrapFailureCode = (error, pathLengthFailure) => {
+  if (error?.hydration) return error.code;
+  if (pathLengthFailure) return 'PATH_LENGTH_LIMIT';
+  if (error?.reason === 'needs-attention' || error?.code === 'AUTHENTICATION_REQUIRED') return 'AUTHENTICATION_REQUIRED';
+  return 'UNKNOWN';
+};
 
 const inspectWorktreeBootstrapRecovery = async (directory) => {
   const attached = await runGitCommand(directory, ['rev-parse', '--is-inside-work-tree']);

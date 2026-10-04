@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
@@ -230,6 +231,20 @@ const patchIssueInList = (issues: LinearIssueSummary[], next: LinearIssue): Line
   return issues.map((issue) => (issue.id === next.id ? summary : issue));
 };
 
+
+// The first page of each list the panel showed, kept for the page's life:
+// reopening the panel shows it at once, and one older than this is read again
+// in the background.
+const LIST_FRESH_MS = 60_000;
+const MAX_LIST_SNAPSHOTS = 20;
+type ListSnapshot = { issues: LinearIssueSummary[]; cursor: string | null; hasMore: boolean; readAt: number };
+const listSnapshots = new Map<string, ListSnapshot>();
+const rememberListSnapshot = (key: string, snapshot: Omit<ListSnapshot, 'readAt'>) => {
+  listSnapshots.delete(key);
+  listSnapshots.set(key, { ...snapshot, readAt: Date.now() });
+  while (listSnapshots.size > MAX_LIST_SNAPSHOTS) listSnapshots.delete(listSnapshots.keys().next().value ?? '');
+};
+
 export const LinearIssuesView: React.FC = () => {
   const { t } = useI18n();
   const { linear } = useRuntimeAPIs();
@@ -333,20 +348,34 @@ export const LinearIssuesView: React.FC = () => {
       return;
     }
 
+    const snapshotKey = JSON.stringify([getRuntimeKey(), currentWorkspaceId, listQuery]);
+    const snapshot = listSnapshots.get(snapshotKey);
+    if (snapshot) {
+      // The list read last time shows at once; a fresh one is not read again.
+      setConnected(true);
+      setIssues(snapshot.issues);
+      setCursor(snapshot.cursor);
+      setHasMore(snapshot.hasMore);
+      setError(null);
+      if (Date.now() - snapshot.readAt < LIST_FRESH_MS) return;
+    }
+
     const requestId = listRequestId.current + 1;
     listRequestId.current = requestId;
-    setIsLoading(true);
+    if (!snapshot) setIsLoading(true);
     setError(null);
     try {
       const next = await linear.issuesList(listQuery);
       if (requestId !== listRequestId.current) return;
       setConnected(next.connected !== false);
       if (next.connected === false) {
+        listSnapshots.delete(snapshotKey);
         setIssues([]);
         setHasMore(false);
         setCursor(null);
         return;
       }
+      rememberListSnapshot(snapshotKey, { issues: next.issues ?? [], cursor: next.cursor ?? null, hasMore: Boolean(next.hasMore) });
       setIssues(next.issues ?? []);
       setCursor(next.cursor ?? null);
       setHasMore(Boolean(next.hasMore));
@@ -358,7 +387,7 @@ export const LinearIssuesView: React.FC = () => {
         setIsLoading(false);
       }
     }
-  }, [linear, linearAuthChecked, linearAuthStatus, listQuery, t]);
+  }, [currentWorkspaceId, linear, linearAuthChecked, linearAuthStatus, listQuery, t]);
 
   React.useEffect(() => {
     if (linear && !linearAuthChecked) {
@@ -500,6 +529,8 @@ export const LinearIssuesView: React.FC = () => {
   const applyUpdatedIssue = React.useCallback((issue: LinearIssue) => {
     setSelectedIssue(issue);
     setIssues((prev) => patchIssueInList(prev, issue));
+    // Kept lists show the change too when the panel opens again.
+    for (const [key, snapshot] of listSnapshots) listSnapshots.set(key, { ...snapshot, issues: patchIssueInList(snapshot.issues, issue) });
   }, []);
 
   const updateIssueState = React.useCallback(async (stateId: string, failedKey: 'contextPanel.linear.toast.statusUpdateFailed' | 'contextPanel.linear.toast.closeFailed') => {

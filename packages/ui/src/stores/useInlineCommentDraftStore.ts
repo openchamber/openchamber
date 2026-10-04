@@ -1,3 +1,4 @@
+import type { SourceControlProvider } from '@/lib/source-control/types';
 import { create } from 'zustand';
 import { z } from 'zod';
 import { devtools, persist } from 'zustand/middleware';
@@ -28,6 +29,8 @@ export interface InlineCommentDraft {
   terminalId?: string;
   /** Where the quote sits in its message; set only for `source: 'chat-quote'`. */
   anchor?: ChatQuoteAnchor;
+  /** Whose change request it came from; set only for `pr-comment` and `pr-check`, absent means GitHub. */
+  provider?: SourceControlProvider;
   createdAt: number;
 }
 
@@ -187,6 +190,7 @@ const persistedDraftSchema = z.object({
   text: z.string(),
   terminalId: z.string().optional(),
   anchor: chatQuoteAnchorSchema.optional(),
+  provider: z.enum(['github', 'gitlab']).optional(),
   createdAt: z.number(),
 });
 

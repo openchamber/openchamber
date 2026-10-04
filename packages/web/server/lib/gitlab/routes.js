@@ -128,6 +128,7 @@ export function registerGitLabRoutes(app, options = {}) {
     options.onAccountConnected?.({
       account,
       user,
+      credential: { credentialRevision: credential.credentialRevision, providerUserId: credential.providerUserId },
       renews: superseded.map((candidate) => ({ ...account, accountId: candidate.id })),
     });
   };
@@ -849,45 +850,6 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
-  // Each ref is one GitLab call, so a batch stays well under the GitHub one.
-  const MAX_LIVE_SUMMARY_REFS = 50;
-  const parseLiveSummaryRefs = (value) => {
-    if (!Array.isArray(value)) return null;
-    const refs = [];
-    for (const item of value) {
-      const owner = requestText(item?.owner);
-      const repo = requestText(item?.repo);
-      if (!owner || !repo || repo.includes('/') || !Number.isSafeInteger(item?.number) || item.number < 1) return null;
-      refs.push({ owner, repo, number: item.number });
-    }
-    return refs;
-  };
-
-  // Live state of merge requests and issues linked to sessions, read with the
-  // instance's current account, the way the GitHub summaries read linked PRs.
-  app.post('/api/source-control/gitlab/summaries', async (req, res) => {
-    try {
-      const refs = parseLiveSummaryRefs(req.body?.refs);
-      const issueRefs = parseLiveSummaryRefs(req.body?.issueRefs ?? []);
-      if (!refs || !issueRefs || refs.length + issueRefs.length > MAX_LIVE_SUMMARY_REFS) {
-        return res.status(400).json({ error: `refs and issueRefs must be lists of { owner, repo, number }, at most ${MAX_LIVE_SUMMARY_REFS} in total` });
-      }
-      const origin = requestOrigin(req);
-      let service;
-      try {
-        service = await getResourceService(origin);
-      } catch (error) {
-        if (error?.sourceControlAccountUnavailable) return res.json({ connected: false });
-        throw error;
-      }
-      const fetchedAt = Date.now();
-      const { summaries, issueSummaries } = await service.liveSummaries({ refs, issueRefs });
-      return res.json({ connected: true, fetchedAt, summaries, issueSummaries });
-    } catch (error) {
-      return sendResourceError(res, error);
-    }
-  });
-
   app.get('/api/source-control/gitlab/issues/get', async (req, res) => {
     try {
       const number = requestIssueNumber(req.query?.number);
@@ -988,6 +950,17 @@ export function registerGitLabRoutes(app, options = {}) {
 
   return {
     listInstances: async () => store.listInstances?.() ?? [],
+    /** Live state of known merge requests and issues, read with the instance's current account. */
+    readLiveSummaries: async ({ instance, accountId = null, refs, issueRefs }) => {
+      let service;
+      try {
+        service = await getResourceService(normalizeGitLabInstance(instance), accountId ?? '');
+      } catch (error) {
+        if (error?.sourceControlAccountUnavailable) return { connected: false };
+        throw error;
+      }
+      return { connected: true, ...(await service.liveSummaries({ refs, issueRefs })) };
+    },
     readChangeRequestPatch: ({ context, number, sourceRepo }) => readWithBoundAccount(context, (service) => service
       .changeRequestPatch(context.directory, number, { project: projectSelector(sourceRepo), remote: context.primaryRemote })),
     readChangeRequestFile: ({ context, number, sourceRepo, path: filePath, previousPath, status }) => readWithBoundAccount(context, (service) => service

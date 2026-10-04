@@ -28,6 +28,9 @@ import { identityDisplayName } from '@/lib/source-control/identity';
 import { cn } from '@/lib/utils';
 import { describeIdentityApplicability, type IdentityApplicability } from '@/lib/source-control/applyIdentity';
 import { useDeviceInfo } from '@/lib/device';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import type { SourceControlProvider } from '@/lib/source-control/types';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -67,6 +70,8 @@ interface GitHeaderProps {
   onOpenUpdateBranch?: () => void;
   onOpenReintegrateCommits?: () => void;
   pullRequest?: GitHubPullRequest | null;
+  /** Whose change request `pullRequest` is; GitLab's reads `!N` and "merge request". */
+  pullRequestProvider?: SourceControlProvider | null;
   prChecks?: GitHubChecksSummary | null;
   onOpenPullRequest?: () => void;
   // Nested repository picker: shown when the Git tab operates on a repository
@@ -340,6 +345,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onOpenUpdateBranch,
   onOpenReintegrateCommits,
   pullRequest,
+  pullRequestProvider,
   prChecks,
   onOpenPullRequest,
   repositoryOptions,
@@ -449,7 +455,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
             className="size-3.5"
             style={{ color: `var(--pr-${prVisualState})` }}
           />
-          <span className="tabular-nums text-foreground/80">{t('gitView.pr.numberLabel', { number: pullRequest.number })}</span>
+          <span className="tabular-nums text-foreground/80">{pullRequestProvider === 'gitlab' ? formatChangeRequestReference('gitlab', pullRequest.number) : t('gitView.pr.numberLabel', { number: pullRequest.number })}</span>
           {prChecksColor ? (
             <span
               aria-hidden="true"
@@ -459,7 +465,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
           ) : null}
         </Button>
       </TooltipTrigger>
-      <TooltipContent sideOffset={8}>{t('gitView.header.openPullRequest')}</TooltipContent>
+      <TooltipContent sideOffset={8}>{t(changeRequestCopy('gitView.header.openPullRequest', pullRequestProvider))}</TooltipContent>
     </Tooltip>
   ) : null;
 

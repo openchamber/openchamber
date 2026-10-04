@@ -8,7 +8,6 @@
  */
 import type {
   GitHubPullRequestRef,
-  GitHubPullRequestSummariesResult,
   GitHubReferenceDetailResult,
   GitHubReferencesOptions,
   GitHubReferencesResult,
@@ -30,32 +29,6 @@ const checksSummarySchema = z.object({
   startedAt: z.string().optional(),
 });
 
-const prSummariesResultSchema = z.discriminatedUnion('connected', [
-  z.object({ connected: z.literal(false) }),
-  z.object({
-    connected: z.literal(true),
-    fetchedAt: z.number(),
-    summaries: z.array(z.object({
-      owner: z.string(),
-      repo: z.string(),
-      number: z.number(),
-      state: z.enum(['open', 'closed', 'merged']),
-      draft: z.boolean(),
-      title: z.string(),
-      headSha: z.string().optional(),
-      mergeable: z.boolean().nullable(),
-      mergeableState: z.string().nullable(),
-      checks: checksSummarySchema.nullable(),
-    })),
-    issueSummaries: z.array(z.object({
-      owner: z.string(),
-      repo: z.string(),
-      number: z.number(),
-      title: z.string(),
-      state: z.enum(['open', 'completed', 'not_planned']),
-    })),
-  }),
-]);
 
 const referenceFields = {
   number: z.number(),
@@ -134,13 +107,6 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
 
 const errorSchema = z.object({ error: z.string() });
 
-/** Without `accountId` the server answers with the current github.com account. */
-type SummariesRequest = {
-  accountId?: string;
-  refs: GitHubPullRequestRef[];
-  issueRefs: GitHubPullRequestRef[];
-};
-
 const readContextQuery = (context: SourceControlReadContext): URLSearchParams => new URLSearchParams({
   directory: context.directory,
   instance: context.instance,
@@ -189,36 +155,4 @@ export const fetchGitHubReferenceDetail = async (
   query.set('number', String(item.number));
   const response = await fetch('/api/source-control/github/references/detail', { query, headers: { Accept: 'application/json' } });
   return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
-};
-
-export const fetchGitHubSummaries = async (
-  fetch: GitHubFetch,
-  accountId: string | null,
-  refs: GitHubPullRequestRef[],
-  issueRefs: GitHubPullRequestRef[] = [],
-): Promise<GitHubPullRequestSummariesResult> => {
-  const body: SummariesRequest = { refs, issueRefs };
-  if (accountId) body.accountId = accountId;
-  const response = await fetch('/api/source-control/github/pr/summaries', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return readPayload(response, prSummariesResultSchema, 'Failed to load PR summaries');
-};
-
-/** GitLab's merge requests and issues answer in the same summary shape. */
-export const fetchGitLabSummaries = async (
-  fetch: GitHubFetch,
-  instance: string,
-  refs: GitHubPullRequestRef[],
-  issueRefs: GitHubPullRequestRef[] = [],
-): Promise<GitHubPullRequestSummariesResult> => {
-  const response = await fetch('/api/source-control/gitlab/summaries', {
-    method: 'POST',
-    query: new URLSearchParams({ instance }),
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ refs, issueRefs }),
-  });
-  return readPayload(response, prSummariesResultSchema, 'Failed to load merge request summaries');
 };

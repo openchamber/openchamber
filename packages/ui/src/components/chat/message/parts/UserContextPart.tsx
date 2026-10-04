@@ -176,7 +176,7 @@ const UserContextPart: React.FC<{
             return (
                 <ContextCard
                     icon="git-pull-request"
-                    summary={t('chat.message.context.prComment', { label: payload.label })}
+                    summary={t(payload.provider === 'gitlab' ? 'chat.message.context.mrComment' : 'chat.message.context.prComment', { label: payload.label })}
                     body={payload.body}
                     text={payload.text}
                     {...shared}
@@ -186,7 +186,7 @@ const UserContextPart: React.FC<{
             return (
                 <ContextCard
                     icon="close-circle"
-                    summary={t('chat.message.context.prCheck', { label: payload.label })}
+                    summary={t(payload.provider === 'gitlab' ? 'chat.message.context.mrCheck' : 'chat.message.context.prCheck', { label: payload.label })}
                     body={payload.output}
                     text={payload.text}
                     mono

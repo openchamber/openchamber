@@ -27,7 +27,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   const label = t('pullRequestComparison.select');
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (next && !comparison.loading) void comparison.refresh();
+    if (next && !comparison.loading) void comparison.revalidate();
     if (!next) comparison.setQuery('');
   };
   const selected = comparison.selectedSource;

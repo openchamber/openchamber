@@ -287,6 +287,22 @@ describe('Git network operations', () => {
     expect(operation.credentialResolver.resolve).not.toHaveBeenCalled();
   });
 
+  it('reports a grant whose account needs attention as authentication required', async () => {
+    let attention = false;
+    const operation = setup({
+      authorityFor: () => {
+        if (!attention) return undefined;
+        throw Object.assign(new Error('Git transport remote binding needs attention'), {
+          code: 'SOURCE_CONTROL_BINDING_STALE', reason: 'needs-attention', status: 409,
+        });
+      },
+    });
+    const plan = await operation.service.plan(request('fetch'));
+    attention = true;
+    expect(await operation.service.execute(plan.operationId)).toMatchObject({ error: { code: 'AUTHENTICATION_REQUIRED' } });
+    expect(operation.calls).toHaveLength(0);
+  });
+
   it.each([false, true])('does not reuse anonymous parent authority for a submodule, exact grant=%s', async (granted) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-anonymous-submodule-'));
     temporaryDirectories.push(directory);

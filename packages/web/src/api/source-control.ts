@@ -65,7 +65,7 @@ import type {
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
 import { isSafeRepositoryEndpoint, parseBindingResponse, resolveBindingReadiness } from '../../server/lib/source-control/binding-contract.js';
-import { fetchGitHubReferenceDetail, fetchGitHubReferences, fetchGitHubSummaries, fetchGitLabSummaries } from './github-references';
+import { fetchGitHubReferenceDetail, fetchGitHubReferences } from './github-references';
 
 interface ErrorResponse {
   error?: string;
@@ -1657,7 +1657,5 @@ export const createWebSourceControlAPI = (options: WebSourceControlAPIOptions = 
     },
     githubReferences: (context, referenceOptions) => fetchGitHubReferences(fetch, context, referenceOptions),
     githubReferenceDetail: (context, item) => fetchGitHubReferenceDetail(fetch, context, item),
-    githubSummaries: (accountId, refs, issueRefs) => fetchGitHubSummaries(fetch, accountId, refs, issueRefs),
-    gitlabSummaries: (instance, refs, issueRefs) => fetchGitLabSummaries(fetch, instance, refs, issueRefs),
   };
 };

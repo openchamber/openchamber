@@ -14,8 +14,10 @@ const VISUAL_STATE_PRIORITY = new Map([
 
 const priorityOf = (summary: PrVisualSummary): number => VISUAL_STATE_PRIORITY.get(summary.visualState) ?? VISUAL_STATE_PRIORITY.size;
 
+// The provider is part of who a change request is: GitHub's octo/repo#7 and
+// GitLab's octo/repo!7 are different things.
 const identityOf = (summary: PrVisualSummary): string =>
-  `${summary.repo?.owner.toLowerCase() ?? ''}/${summary.repo?.repo.toLowerCase() ?? ''}#${summary.number}`;
+  `${summary.provider ?? 'github'}:${summary.repo?.owner.toLowerCase() ?? ''}/${summary.repo?.repo.toLowerCase() ?? ''}#${summary.number}`;
 
 /**
  * Every PR a session row shows: its worktree branch's PR and the PRs linked to
@@ -48,7 +50,7 @@ export const findLinkedPrsWithoutState = (
   summaries: readonly PrVisualSummary[],
 ): LinkedGitHubPullRequest[] => {
   const known = new Set(summaries.map(identityOf));
-  return links.filter((link) => !known.has(`${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`));
+  return links.filter((link) => !known.has(`github:${link.owner.toLowerCase()}/${link.repo.toLowerCase()}#${link.number}`));
 };
 
 type PrStatusLabelKey =

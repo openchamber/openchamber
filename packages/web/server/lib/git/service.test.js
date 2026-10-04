@@ -2395,6 +2395,19 @@ exec "$REAL_GIT" "$@"
     });
   }, 30_000);
 
+  it('defers a same-repository change request branch to its transfer instead of reporting it missing', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const { repository } = createRepositoryWithRemote();
+      const input = { ...forkWorktreeInput({ fork: repository, worktreeName: 'mr-7' }), changeRequestTransfer: true };
+
+      // The head is not fetched yet; only the pending transfer is reported.
+      const validation = await validateWorktreeCreate(repository, input);
+      expect(validation.errors.map((error) => error.code)).toEqual(['contributor_transfer_unavailable']);
+    });
+  }, 30_000);
+
   it('rejects a fork branch that moved away from the requested PR head revision', async () => {
     if (!canRunGit()) return;
 

@@ -177,6 +177,7 @@ const actualReferenceSources = await import('@/components/references/referenceSo
 mock.module('@/components/references/referenceSources', () => ({
   ...actualReferenceSources,
   useGitHubReadContext: () => null,
+  useRepositoryReferenceProvider: () => 'github',
 }));
 mock.module('@/components/references/ReferencePickerDialog', () => ({
   ReferencePickerDialog: ({ onConfirm }: { onConfirm: ReferenceConfirm }) => {

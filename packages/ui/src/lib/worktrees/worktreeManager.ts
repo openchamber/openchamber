@@ -637,9 +637,11 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   const created = await git.worktree.create(projectDirectory, payload);
   assertCurrent();
   if (created?.sourceFetchFailed) {
-    toast.warning(
-      formatMessage(useI18nStore.getState().dictionary, 'session.newWorktree.toast.fetchSourceFailed'),
-    );
+    // Say why when the user can fix it: the repository's access.
+    toast.warning(formatMessage(
+      useI18nStore.getState().dictionary,
+      created.sourceFetchReason === 'access' ? 'session.newWorktree.toast.fetchSourceAccess' : 'session.newWorktree.toast.fetchSourceFailed',
+    ));
   }
   const returnedName = typeof created?.name === 'string' ? created.name : '';
   const returnedBranch = typeof created?.branch === 'string' ? created.branch : '';

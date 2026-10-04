@@ -231,25 +231,6 @@ export function registerLinearRoutes(app) {
     }
   });
 
-  // Live state of the Linear issues linked to sessions on screen, for the
-  // sidebar and the chat's Linked section. `ids` is comma-separated.
-  app.get('/api/linear/issues/summaries', async (req, res) => {
-    try {
-      const ids = queryValue(req, 'ids').split(',').map((value) => value.trim()).filter(Boolean);
-      const { getLinearIssueSummaries, MAX_SUMMARY_IDENTIFIERS } = await getLinearLibraries();
-      if (ids.length === 0) {
-        return res.status(400).json({ error: 'ids is required' });
-      }
-      if (ids.length > MAX_SUMMARY_IDENTIFIERS) {
-        return res.status(400).json({ error: `At most ${MAX_SUMMARY_IDENTIFIERS} ids per request` });
-      }
-      return res.json(await getLinearIssueSummaries(ids));
-    } catch (error) {
-      console.error('Failed to load Linear issue states:', error);
-      return res.status(500).json({ error: error.message || 'Failed to load Linear issue states' });
-    }
-  });
-
   app.get('/api/linear/issues/states', async (req, res) => {
     try {
       const teamId = queryValue(req, 'teamId');
