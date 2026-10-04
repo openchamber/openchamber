@@ -10,11 +10,12 @@ import {
     TURN_MESSAGE_WINDOW_THRESHOLD,
     TurnMessageWindowContext,
     createTurnMessageWindowStore,
+    isReaderAtTimelineEnd,
     openedFoldMessageWindow,
     shouldHoldRevealAnchor,
     type TurnMessageWindowStore,
 } from '../lib/turns/turnMessageWindow';
-import { TurnMessageWindow, isReaderAtTimelineEnd } from './TurnMessageWindow';
+import { TurnMessageWindow } from './TurnMessageWindow';
 
 function assistant(id: string): ChatMessageEntry {
     const info: AssistantMessage = {

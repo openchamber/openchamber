@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { TIMELINE_FOLLOW_REARM_THRESHOLD_PX } from '../scroll/timelineScrollAnchoring';
+
 // A turn's assistant messages are one row of the virtualized timeline, so a
 // long agentic turn mounted every step at once whenever any part of it was on
 // screen. Past this many messages a turn mounts only a window of its steps
@@ -43,6 +45,13 @@ export const openedFoldMessageWindow = (messageCount: number, readerAtEnd: boole
         ? { hiddenHead: windowedCount(messageCount), hiddenTail: 0 }
         : { hiddenHead: 0, hiddenTail: windowedCount(messageCount) }
 );
+
+/** Whether the chat timeline holding `element` is scrolled to its end. */
+export const isReaderAtTimelineEnd = (element: Element): boolean => {
+    const scroller = element.closest('[data-scrollbar="chat"]');
+    if (!scroller) return false;
+    return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
+};
 
 /**
  * Whether mounting a batch in place of the head spacer must hold the first

@@ -9,7 +9,6 @@ import {
     shouldHoldRevealAnchor,
     type TurnMessageWindowRange,
 } from '../lib/turns/turnMessageWindow';
-import { TIMELINE_FOLLOW_REARM_THRESHOLD_PX } from '../lib/scroll/timelineScrollAnchoring';
 
 // Stands in for a not yet mounted message until it mounts and measures.
 const ESTIMATED_MESSAGE_HEIGHT_PX = 64;
@@ -21,13 +20,6 @@ const CHAT_SCROLLER_SELECTOR = '[data-scrollbar="chat"]';
 const READER_INPUT_EVENTS = ['touchstart', 'pointerdown', 'keydown'] as const;
 
 const subscribeNowhere = () => () => {};
-
-/** Whether the chat timeline holding `element` is scrolled to its end. */
-export const isReaderAtTimelineEnd = (element: Element): boolean => {
-    const scroller = element.closest(CHAT_SCROLLER_SELECTOR);
-    if (!scroller) return false;
-    return scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
-};
 
 /**
  * Keeps the message the reader is looking at where it was across a batch

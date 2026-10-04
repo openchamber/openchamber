@@ -7,8 +7,8 @@ import { getLiveFinalMessage } from '../lib/turns/liveActivity';
 import { summarizeLiveActivity } from '../lib/turns/liveActivitySummary';
 import { LiveActivityCollapse } from './LiveActivityCollapse';
 import { LiveFinalActivityContext } from './liveActivityContext';
-import { TurnMessageWindow, isReaderAtTimelineEnd } from './TurnMessageWindow';
-import { TurnMessageWindowContext, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
+import { TurnMessageWindow } from './TurnMessageWindow';
+import { TurnMessageWindowContext, isReaderAtTimelineEnd, openedFoldMessageWindow } from '../lib/turns/turnMessageWindow';
 
 interface LiveTurnActivityProps {
     turn: TurnRecord;
