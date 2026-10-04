@@ -118,7 +118,7 @@ const jobKey = (repoRoot, sourceKeyValue, readContext) => readContext
 const readContextForSource = (source, readContext) => {
   if (source.kind !== 'pr') return undefined;
   const valid = readContext
-    && readContext.provider === 'github'
+    && (readContext.provider === 'github' || readContext.provider === 'gitlab')
     && isString(readContext.instance)
     && isString(readContext.accountId)
     && isString(readContext.repositoryId)
@@ -126,7 +126,7 @@ const readContextForSource = (source, readContext) => {
     && isString(readContext.directory)
     && isString(readContext.primaryRemote);
   if (!valid) {
-    throw fail('A trusted GitHub read context is required for pull request walkthroughs', 400, {
+    throw fail('A trusted GitHub or GitLab read context is required for pull request walkthroughs', 400, {
       code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT',
     });
   }

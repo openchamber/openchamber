@@ -4,8 +4,10 @@ import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, getGitHubThreadRef, isLinkedChange } from '@/lib/linkedIssues';
+import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange } from '@/lib/linkedIssues';
 import { useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGitHubPrStatusStore';
+import { useGitLabIssueStates, useGitLabMergeRequestVisualSummaries } from '@/stores/useGitLabLinkedStateStore';
+import { useGitLabLinkedStateSync } from '@/hooks/useGitLabLinkedStateSync';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
 import { useOpenPrSummarySync } from '@/hooks/useOpenPrSummarySync';
@@ -188,6 +190,20 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   );
   useLinearIssueStateSync(linkedLinearIdentifiers, linear);
   const linkedLinearStates = useLinearIssueStates(linkedLinearIdentifiers);
+  // GitLab merge requests and issues, from their instance on the same cadence.
+  const linkedGitLab = React.useMemo(() => getLinkedGitLabThreads(session), [session]);
+  useGitLabLinkedStateSync(linkedGitLab, sourceControl);
+  const linkedGitLabChanges = React.useMemo(() => {
+    const byKey = new Map(linked.flatMap((entry) => {
+      const ref = getGitLabThreadRef(entry);
+      return ref ? [[ref.key, entry] as const] : [];
+    }));
+    return linkedGitLab.filter((ref) => ref.thread === 'pull')
+      .map((ref) => ({ ref, url: byKey.get(ref.key)?.url ?? '', title: byKey.get(ref.key)?.title ?? '' }));
+  }, [linked, linkedGitLab]);
+  const linkedGitLabIssues = React.useMemo(() => linkedGitLab.filter((ref) => ref.thread === 'issue'), [linkedGitLab]);
+  const gitlabChangeSummaries = useGitLabMergeRequestVisualSummaries(linkedGitLabChanges);
+  const gitlabIssueStates = useGitLabIssueStates(linkedGitLabIssues);
   // Entry id (`owner/repo#number`, lowercased) -> the coloured status line.
   const liveLookById = React.useMemo(() => {
     const looks = new Map<string, { color: string; text: string }>();
@@ -216,8 +232,23 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
         text: `${identifier} · ${state.state.name}`,
       });
     });
+    linkedGitLabChanges.forEach(({ ref }, index) => {
+      const summary = gitlabChangeSummaries[index];
+      if (!summary) return;
+      const label = getPrStatusLabel(summary, t);
+      looks.set(ref.key, {
+        color: `var(--pr-${summary.visualState})`,
+        text: label ? `!${ref.number} · ${label}` : `!${ref.number}`,
+      });
+    });
+    linkedGitLabIssues.forEach((ref, index) => {
+      const state = gitlabIssueStates[index];
+      if (!state) return;
+      const look = getIssueStateLook(state.state);
+      looks.set(ref.key, { color: look.color, text: `#${ref.number} · ${t(look.statusKey)}` });
+    });
     return looks;
-  }, [linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, t]);
+  }, [gitlabChangeSummaries, gitlabIssueStates, linkedGitLabChanges, linkedGitLabIssues, linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, t]);
   const openLinkedIssue = React.useCallback((entry: (typeof linked)[number]) => {
     if (
       entry.kind === 'linear'
@@ -296,12 +327,17 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const liveLookOf = (entry: (typeof linked)[number]) => {
     if (entry.kind === 'linear') return liveLookById.get(entry.id.toLowerCase());
     const ref = getGitHubThreadRef(entry);
-    return ref ? liveLookById.get(ref.key.toLowerCase()) : undefined;
+    if (ref) return liveLookById.get(ref.key.toLowerCase());
+    const gitlab = getGitLabThreadRef(entry);
+    return gitlab ? liveLookById.get(gitlab.key) : undefined;
   };
   const renderLinkedLabel = (entry: (typeof linked)[number]) => {
     const ref = getGitHubThreadRef(entry);
     const look = liveLookOf(entry);
-    const identifier = ref ? `#${ref.number}` : entry.kind === 'linear' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
+    const gitlab = ref ? null : getGitLabThreadRef(entry);
+    const identifier = ref ? `#${ref.number}`
+      : gitlab ? `${gitlab.thread === 'pull' ? '!' : '#'}${gitlab.number}`
+        : entry.kind === 'linear' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
     return (
       <>
         <span className="tabular-nums" style={look ? { color: look.color } : undefined}>{look ? look.text : identifier}</span>

@@ -48,6 +48,8 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
 import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import type { SourceControlProvider } from '@/lib/api/types';
 import { buildDiffTreeRows } from './diffFileTree';
 import { fileDiffFromPatch, isBinaryPatch, extractHunkPatch, haveMatchingPatchVersions, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -224,6 +226,8 @@ interface ChangeScopeSelectorProps {
     prCount: number | null;
     showCommitOption: boolean;
     showBranchOption: boolean;
+    /** The host of the project's change requests, for the pull/merge request wording. */
+    changeRequestProvider?: SourceControlProvider | null;
     onScopeChange?: (scope: PendingDiffScope) => void;
 }
 
@@ -237,12 +241,13 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
     prCount,
     showCommitOption,
     showBranchOption,
+    changeRequestProvider,
     onScopeChange,
 }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const currentCount = scope === 'pr' ? (prCount ?? 0) : scope === 'staged' ? stagedCount : scope === 'turn' ? turnCount : scope === 'branch' ? (branchCount ?? 0) : scope === 'commit' ? (commitCount ?? 0) : workingCount;
-    const currentLabel = scope === 'pr' ? t('session.githubIntegration.tabs.pullRequests') : scope === 'staged'
+    const currentLabel = scope === 'pr' ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider)) : scope === 'staged'
         ? t('diffView.scope.staged')
         : scope === 'turn'
             ? t('diffView.scope.lastTurn')
@@ -310,7 +315,7 @@ const ChangeScopeSelector = React.memo<ChangeScopeSelectorProps>(({
                     )}
                     {showCommitOption && <DropdownMenuRadioItem value="pr">
                         <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-                            <span>{t('session.githubIntegration.tabs.pullRequests')}</span>
+                            <span>{t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider))}</span>
                             <span className="typography-meta text-muted-foreground">{prCount ?? '…'}</span>
                         </span>
                     </DropdownMenuRadioItem>}
@@ -1352,7 +1357,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     // ----- Branch scope (all changes on this branch vs its base) -----
     const currentBranch = status?.current ?? null;
-    const pullRequestContext = binding.contexts[0]?.provider === 'github' ? binding.contexts[0] : null;
+    const pullRequestContext = binding.contexts[0]?.provider === 'github' || binding.contexts[0]?.provider === 'gitlab'
+        ? binding.contexts[0]
+        : null;
     const prComparison = usePullRequestComparison(effectiveDirectory ?? null, currentBranch, pullRequestContext, visible && activeDiffScope === 'pr' && !isVSCodeRuntime());
     const selectedPr = prComparison.selectedSource;
     const commitComparison = useCommitComparison(effectiveDirectory ?? null, currentBranch, visible && activeDiffScope === 'commit' && !isVSCodeRuntime());
@@ -1463,7 +1470,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         }
         return null;
     }, [activeDiffScope, qualifiedBranchBase, currentBranch, selectedCommitHash, selectedPr]);
-    const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext);
+    const comparison = useGitComparison(effectiveDirectory ?? null, comparisonSource, visible && !isVSCodeRuntime(), activeDiffScope === 'branch' ? branchRevision : '', prComparison.readContext, prComparison.provider);
     const { fetchDiff: loadComparisonDiff, fetchFullFile: loadComparisonFullFile } = comparison;
     const commitFiles = activeDiffScope === 'commit' ? comparison.files : null;
     const commitFilesError = activeDiffScope === 'commit' ? comparison.error : null;
@@ -2364,7 +2371,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
             if (!selectedPr || comparison.error) {
                 return <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
                     <p className="typography-meta text-muted-foreground">{comparison.error ?? prComparison.error ?? (prComparison.loading
-                        ? t('session.githubPrPicker.loading.pullRequests') : t('pullRequestComparison.select'))}</p>
+                        ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', prComparison.provider))
+                        : t(changeRequestCopy('pullRequestComparison.select', prComparison.provider)))}</p>
                     {(comparison.error || prComparison.error) && <Button variant="outline" size="sm" onClick={() => {
                         if (selectedPr) void comparison.refresh();
                         else void prComparison.refresh();
@@ -2482,6 +2490,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             prCount={activeDiffScope === 'pr' ? comparison.files?.length ?? null : null}
                             showCommitOption={!isVSCodeRuntime()}
                             showBranchOption={showBranchOption}
+                            changeRequestProvider={prComparison.provider}
                             onScopeChange={(scope) => {
                                 setActiveDiffScope(scope);
                                 onDiffScopeChange?.(scope);

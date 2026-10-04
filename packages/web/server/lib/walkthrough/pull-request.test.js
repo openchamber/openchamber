@@ -230,3 +230,32 @@ describe('getPullRequestFileContents', () => {
     await expect(read({ owner: 'o', repo: 'r' }, { path: 'a.ts', status: 'M' })).rejects.toMatchObject({ code: 'file-too-large', statusCode: 413 });
   });
 });
+
+describe('GitLab merge requests', () => {
+  const context = {
+    provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'occred:v1:gitlab:abc:r1',
+    repositoryId: 'repo-1', bindingRevision: 2, directory: '/repo', primaryRemote: 'origin',
+  };
+
+  it('hands the validated context to the GitLab reader and keeps the empty-diff rule', async () => {
+    const readGitLabChangeRequestPatch = vi.fn(async () => ({ patch: PATCH, meta: { owner: 'o', repo: 'r', number: 3 } }));
+    const sourceRepo = { owner: 'o', repo: 'r' };
+    await expect(getPullRequestDiff('/repo', 3, context, { sourceRepo, readGitLabChangeRequestPatch }))
+      .resolves.toEqual({ patch: PATCH, meta: { owner: 'o', repo: 'r', number: 3 } });
+    expect(readGitLabChangeRequestPatch).toHaveBeenCalledWith({ context, number: 3, sourceRepo });
+
+    const empty = vi.fn(async () => ({ patch: '', meta: { owner: 'o', repo: 'r', number: 4 } }));
+    await expect(getPullRequestDiff('/repo', 4, context, { readGitLabChangeRequestPatch: empty }))
+      .rejects.toMatchObject({ code: 'empty-diff', message: 'Merge request !4 has no diff' });
+    await expect(getPullRequestDiff('/repo', 4, context, { allowEmpty: true, readGitLabChangeRequestPatch: empty }))
+      .resolves.toMatchObject({ patch: '' });
+  });
+
+  it('reads one file through the GitLab reader and fails plainly without one', async () => {
+    const readGitLabChangeRequestFile = vi.fn(async () => ({ original: 'a', modified: 'b' }));
+    await expect(getPullRequestFileContents('/repo', 3, context, { path: 'a.ts', status: 'M', readGitLabChangeRequestFile }))
+      .resolves.toEqual({ original: 'a', modified: 'b' });
+    expect(readGitLabChangeRequestFile).toHaveBeenCalledWith({ context, number: 3, sourceRepo: null, path: 'a.ts', previousPath: undefined, status: 'M' });
+    await expect(getPullRequestDiff('/repo', 3, context)).rejects.toMatchObject({ statusCode: 501 });
+  });
+});

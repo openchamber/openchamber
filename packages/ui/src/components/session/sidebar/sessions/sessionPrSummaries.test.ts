@@ -104,3 +104,21 @@ describe('buildSessionIssueItems', () => {
     expect(item).toMatchObject({ label: 'ENG-1', icon: 'linear', color: null, statusKey: null });
   });
 });
+
+describe('GitLab issues on a session row', () => {
+  test('take their colour from their own live state, in order', () => {
+    const ref = (number: number) => ({ key: `https://gitlab.com/team/app#${number}`, instance: 'https://gitlab.com', owner: 'team', repo: 'app', number, thread: 'issue' as const });
+    const items = buildSessionIssueItems([
+      { source: 'gitlab', key: 'a', ref: ref(1), identifier: '#1', url: 'u1', title: 'One' },
+      { source: 'gitlab', key: 'b', ref: ref(2), identifier: '#2', url: 'u2', title: 'Two' },
+    ], [], [], [
+      { owner: 'team', repo: 'app', number: 1, title: 'One', state: 'completed' },
+      { owner: 'team', repo: 'app', number: 2, title: 'Two', state: 'open' },
+    ]);
+    expect(items.map((item) => [item.label, item.color, item.statusKey])).toEqual([
+      ['#2', 'var(--pr-open)', 'sessions.sidebar.group.issue.status.open'],
+      ['#1', 'var(--pr-merged)', 'sessions.sidebar.group.issue.status.completed'],
+    ]);
+  });
+});
+

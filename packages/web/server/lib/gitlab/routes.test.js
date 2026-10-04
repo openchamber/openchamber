@@ -1085,3 +1085,27 @@ describe('GitLab routes', () => {
     expect(active.body).toMatchObject({ connected: true, cli: { available: true, active: true } });
   });
 });
+
+describe('GitLab live summaries route', () => {
+  it('reads linked items with the current account, refuses malformed refs, and answers disconnected without one', async () => {
+    const liveSummaries = vi.fn(async ({ refs }) => ({ summaries: refs.map((ref) => ({ ...ref, state: 'open' })), issueSummaries: [] }));
+    const connected = appWith({
+      store: makeStore({ id: `${origin}#9`, token: 'pat-token', source: 'pat', user: { id: 9, login: 'me' } }),
+      createClient: vi.fn(() => ({})),
+      createResourceService: vi.fn(() => ({ liveSummaries })),
+    });
+    const body = { refs: [{ owner: 'group/sub', repo: 'app', number: 3 }], issueRefs: [] };
+    const answered = await request(connected).post('/api/source-control/gitlab/summaries').query({ instance: origin }).send(body).expect(200);
+    expect(answered.body).toMatchObject({ connected: true, summaries: [{ owner: 'group/sub', repo: 'app', number: 3, state: 'open' }], issueSummaries: [] });
+    expect(liveSummaries).toHaveBeenCalledWith({ refs: body.refs, issueRefs: [] });
+
+    await request(connected).post('/api/source-control/gitlab/summaries').query({ instance: origin })
+      .send({ refs: [{ owner: 'team', repo: 'a/b', number: 1 }] }).expect(400);
+    await request(connected).post('/api/source-control/gitlab/summaries').query({ instance: origin })
+      .send({ refs: Array.from({ length: 51 }, (_, index) => ({ owner: 'team', repo: 'app', number: index + 1 })) }).expect(400);
+
+    const signedOut = appWith({ store: makeStore() });
+    const disconnected = await request(signedOut).post('/api/source-control/gitlab/summaries').query({ instance: origin }).send(body).expect(200);
+    expect(disconnected.body).toEqual({ connected: false });
+  });
+});

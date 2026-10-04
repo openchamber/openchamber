@@ -24,6 +24,7 @@ import { useChangeRequestContextStore } from '@/stores/useChangeRequestContextSt
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useLinearIssueStateStore } from '@/stores/useLinearIssueStateStore';
+import { useGitLabLinkedStateStore } from '@/stores/useGitLabLinkedStateStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
@@ -120,6 +121,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useLinearAuthStore.getState().resetForRuntimeSwitch();
   useSourceControlAuthStore.getState().resetForRuntimeSwitch();
   useLinearIssueStateStore.getState().resetForRuntimeSwitch();
+  useGitLabLinkedStateStore.getState().resetForRuntimeSwitch();
   // Work-status readouts served from the instance: quotas, MCP servers, skills
   // and agent memory. All were cached globally or by directory alone, so they
   // reported the previous instance until something happened to refetch.

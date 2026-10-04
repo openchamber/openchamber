@@ -3,7 +3,7 @@ import type { SourceControlProvider } from '@/lib/api/types';
 
 /**
  * GitLab calls a change request a merge request and numbers it with `!`. The
- * Git view's change-request copy is written for GitHub; this names the GitLab
+ * change-request copy (Git view, comparison, walkthrough) is written for GitHub; this names the GitLab
  * wording for each of those messages so one component speaks both.
  */
 const mergeRequestCopy = new Map<I18nKey, I18nKey>([
@@ -45,6 +45,17 @@ const mergeRequestCopy = new Map<I18nKey, I18nKey>([
   ['gitView.pr.toast.updatePrFailed', 'gitView.mr.toast.updateMrFailed'],
   ['gitView.pullRequest.availableOnFeatureBranches', 'gitView.mergeRequest.availableOnFeatureBranches'],
   ['gitView.pullRequest.title', 'gitView.mergeRequest.title'],
+  ['session.githubIntegration.tabs.pullRequests', 'gitView.mr.comparison.mode'],
+  ['pullRequestComparison.select', 'gitView.mr.comparison.select'],
+  ['pullRequestComparison.partial', 'gitView.mr.comparison.partial'],
+  ['session.githubPrPicker.searchPlaceholder', 'gitView.mr.comparison.searchPlaceholder'],
+  ['session.githubPrPicker.loading.pullRequests', 'gitView.mr.comparison.loading'],
+  ['session.githubPrPicker.empty.noPullRequestsFound', 'gitView.mr.comparison.empty'],
+  ['session.githubPrPicker.empty.notConnected', 'gitView.mr.comparison.notConnected'],
+  ['session.githubPrPicker.error.runtimeUnavailable', 'gitView.mr.comparison.runtimeUnavailable'],
+  ['session.githubPrPicker.toast.loadMoreFailed', 'gitView.mr.comparison.loadMoreFailed'],
+  ['walkthrough.scope.pullRequest', 'gitView.mr.walkthroughScope'],
+  ['gitView.pullRequest.createHint', 'gitView.mr.createHint'],
 ]);
 
 /**

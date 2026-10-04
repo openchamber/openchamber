@@ -57,8 +57,8 @@ export function registerWalkthroughRoutes(app, { getWalkthroughService, validate
       bindingRevision: Number(input?.bindingRevision),
       primaryRemote: input?.primaryRemote,
     });
-    if (readContext.provider !== 'github') {
-      throw Object.assign(new Error('Pull request walkthroughs currently support GitHub only'), {
+    if (readContext.provider !== 'github' && readContext.provider !== 'gitlab') {
+      throw Object.assign(new Error('Pull request walkthroughs support GitHub and GitLab only'), {
         statusCode: 422,
         code: 'UNSUPPORTED_WALKTHROUGH_PROVIDER',
       });

@@ -50,7 +50,9 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openExternalUrl } from '@/lib/url';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
-import { useFreshestSourceControlVisualSummaryForBranch, useLinkedIssueStates, useLinkedPrVisualSummaries } from '@/stores/useGitHubPrStatusStore';
+import { useFreshestSourceControlVisualSummaryForBranch, useLinkedIssueStates, useLinkedPrVisualSummaries, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
+import { useGitLabIssueStates, useGitLabMergeRequestVisualSummaries } from '@/stores/useGitLabLinkedStateStore';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -428,18 +430,37 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [isVSCode, session],
   );
   const linkedPrSummaries = useLinkedPrVisualSummaries(linkedPullRequests);
-  // The branch's PR and the PRs linked to the session; the row leads with
-  // the one that needs attention first.
-  const prSummaries = React.useMemo(
-    () => combineSessionPrSummaries(branchPrSummary, linkedPrSummaries),
-    [branchPrSummary, linkedPrSummaries],
-  );
-  // Merge and pull requests on other services have no state here yet: they
-  // follow the GitHub ones, by identifier, uncoloured.
+  // Merge and pull requests on other services follow the GitHub ones. GitLab
+  // merge requests carry live state once it arrives; the rest show by
+  // identifier, uncoloured.
   const linkedChanges = React.useMemo(
     () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session)),
     [isVSCode, session],
   );
+  const linkedGitLabChanges = React.useMemo(
+    () => linkedChanges.flatMap((change) => (change.gitlab ? [{ ref: change.gitlab, url: change.url, title: change.title }] : [])),
+    [linkedChanges],
+  );
+  const gitlabChangeSummaries = useGitLabMergeRequestVisualSummaries(linkedGitLabChanges);
+  // The branch's PR and the PRs and merge requests linked to the session; the
+  // row leads with the one that needs attention first.
+  const prSummaries = React.useMemo(
+    () => combineSessionPrSummaries(branchPrSummary, [
+      ...linkedPrSummaries,
+      ...gitlabChangeSummaries.filter((summary): summary is PrVisualSummary => summary !== null),
+    ]),
+    [branchPrSummary, gitlabChangeSummaries, linkedPrSummaries],
+  );
+  // GitLab merge requests whose state is known are among the PR lines above.
+  const uncolouredChanges = React.useMemo(() => {
+    let gitlabIndex = 0;
+    return linkedChanges.filter((change) => {
+      if (!change.gitlab) return true;
+      const known = gitlabChangeSummaries[gitlabIndex] !== null;
+      gitlabIndex += 1;
+      return !known;
+    });
+  }, [gitlabChangeSummaries, linkedChanges]);
   const linkedPrsWithoutState = React.useMemo(
     () => findLinkedPrsWithoutState(linkedPullRequests, prSummaries),
     [linkedPullRequests, prSummaries],
@@ -460,6 +481,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [linkedIssues],
   );
   const linkedIssueStates = useLinkedIssueStates(linkedGitHubIssueRefs);
+  const linkedGitLabIssueRefs = React.useMemo(
+    () => linkedIssues.flatMap((issue) => (issue.source === 'gitlab' ? [issue.ref] : [])),
+    [linkedIssues],
+  );
+  const linkedGitLabIssueStates = useGitLabIssueStates(linkedGitLabIssueRefs);
   const linkedLinearIdentifiers = React.useMemo(
     () => linkedIssues.flatMap((issue) => (issue.source === 'linear' ? [issue.identifier] : [])),
     [linkedIssues],
@@ -467,17 +493,18 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const linkedLinearStates = useLinearIssueStates(linkedLinearIdentifiers);
   // What the row's badge and tooltips list: its PRs, or else its issues.
   const refLines = React.useMemo((): SessionRefLine[] => {
-    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || linkedChanges.length > 0) {
+    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || uncolouredChanges.length > 0) {
       const githubLines = prSummaries.map((summary): SessionRefLine => {
         const label = getPrStatusLabel(summary, t);
+        const reference = formatChangeRequestReference(summary.provider, summary.number);
         return {
-          key: `${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
+          key: `${summary.provider ?? ''}:${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
           icon: 'git-pull-request',
-          label: `#${summary.number}`,
+          label: reference,
           color: `var(--pr-${summary.visualState})`,
           url: summary.url,
           title: summary.title,
-          text: label ? `#${summary.number} · ${label}` : `#${summary.number}`,
+          text: label ? `${reference} · ${label}` : reference,
         };
       });
       const pendingLines = linkedPrsWithoutState.map((link): SessionRefLine => ({
@@ -488,7 +515,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         title: link.title,
         text: `#${link.number}`,
       }));
-      const otherLines = linkedChanges.map((change): SessionRefLine => ({
+      const otherLines = uncolouredChanges.map((change): SessionRefLine => ({
         key: change.key,
         icon: 'git-pull-request',
         label: change.identifier,
@@ -498,7 +525,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       }));
       return [...githubLines, ...pendingLines, ...otherLines];
     }
-    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates).map((item) => ({
+    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates, linkedGitLabIssueStates).map((item) => ({
       key: item.key,
       icon: item.icon,
       label: item.label,
@@ -507,7 +534,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       title: item.title,
       text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     }));
-  }, [linkedChanges, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t]);
+  }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');

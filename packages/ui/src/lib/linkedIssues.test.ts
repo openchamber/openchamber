@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
 type LinkedRepositoryIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
@@ -415,7 +415,36 @@ describe('getLinkedSidebarChanges', () => {
     ]);
     expect(getLinkedSidebarChanges(session)).toEqual([
       { key: 'guest:gitea:5', identifier: '5', url: 'https://gitea/x', title: 'Guest PR' },
-      { key: 'link:https://gitlab.com/a/b/-/merge_requests/42', identifier: '!42', url: 'https://gitlab.com/a/b/-/merge_requests/42', title: 'Fix' },
+      {
+        key: 'link:https://gitlab.com/a/b/-/merge_requests/42', identifier: '!42', url: 'https://gitlab.com/a/b/-/merge_requests/42', title: 'Fix',
+        gitlab: { key: 'https://gitlab.com/a/b!42', instance: 'https://gitlab.com', owner: 'a', repo: 'b', number: 42, thread: 'pull' },
+      },
+    ]);
+  });
+});
+
+describe('GitLab threads', () => {
+  test('reads the instance, subgroup path and number from the address, and leaves GitHub alone', () => {
+    const mergeRequest = issue({ id: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3#3', number: 3, kind: 'pull', url: 'https://gitlab.example.com/g/sub/app/-/merge_requests/3' });
+    expect(getGitLabThreadRef(mergeRequest)).toEqual({
+      key: 'https://gitlab.example.com/g/sub/app!3', instance: 'https://gitlab.example.com', owner: 'g/sub', repo: 'app', number: 3, thread: 'pull',
+    });
+    const gitlabIssue = issue({ id: 'gitlab.com:team/app#8', number: 8, kind: 'issue', url: 'https://gitlab.com/team/app/-/issues/8' });
+    expect(getGitLabThreadRef(gitlabIssue)).toMatchObject({ owner: 'team', repo: 'app', number: 8, thread: 'issue' });
+    expect(getGitLabThreadRef(issue({ id: 'acme/app#7', number: 7, kind: 'pull', url: 'https://github.com/acme/app/pull/7' }))).toBeNull();
+    expect(getGitLabThreadRef(issue({ id: 'x', number: 1, kind: 'issue', url: 'https://example.com/not/a/thread' }))).toBeNull();
+  });
+
+  test('lists each linked merge request and issue once and gives sidebar issues their thread', () => {
+    const url = 'https://gitlab.com/team/app/-/issues/8';
+    const session = sessionWith([
+      issue({ id: 'gitlab.com:team/app#8', number: 8, kind: 'issue', url }),
+      { id: `link:${url}`, kind: 'external', thread: 'issue', identifier: '#8', title: 'Same issue', url, linkedAt: 2 },
+      issue({ id: 'mr', number: 3, kind: 'pull', url: 'https://gitlab.com/team/app/-/merge_requests/3' }),
+    ]);
+    expect(getLinkedGitLabThreads(session).map((ref) => ref.key)).toEqual(['https://gitlab.com/team/app#8', 'https://gitlab.com/team/app!3']);
+    expect(getLinkedSidebarIssues(session)).toMatchObject([
+      { source: 'gitlab', identifier: '#8', ref: { number: 8, thread: 'issue' } },
     ]);
   });
 });

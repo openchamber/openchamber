@@ -1818,9 +1818,13 @@ export const useFreshestSourceControlVisualSummaryForBranch = (
 };
 
 // A linked PR's live summary in the status shape the badge derivation reads.
-const linkedPrStatus = (link: LinkedGitHubPullRequest, summary: GitHubPullRequestLiveSummary): SourceControlStatus => ({
+const linkedPrStatus = (
+  link: LinkedGitHubPullRequest,
+  summary: GitHubPullRequestLiveSummary,
+  identity: SourceControlIdentity = GITHUB_IDENTITY,
+): SourceControlStatus => ({
   connected: true,
-  identity: GITHUB_IDENTITY,
+  identity,
   repo: { owner: link.owner, repo: link.repo, url: '' },
   pr: {
     number: summary.number,
@@ -1836,6 +1840,18 @@ const linkedPrStatus = (link: LinkedGitHubPullRequest, summary: GitHubPullReques
   },
   checks: summary.checks,
 });
+
+/**
+ * The badge of a change request linked from another host (a GitLab merge
+ * request), from its live summary: the same colour and status rule GitHub
+ * PRs follow, so orange means the same thing everywhere.
+ */
+export const getLinkedChangeRequestVisualSummary = (
+  cacheKey: string,
+  link: LinkedGitHubPullRequest,
+  summary: GitHubPullRequestLiveSummary,
+  identity: SourceControlIdentity,
+): PrVisualSummary | null => getCachedPrSummary(`linked:${cacheKey}`, linkedPrStatus(link, summary, identity));
 
 /**
  * Live state of the GitHub issues linked to a session, in link order; an

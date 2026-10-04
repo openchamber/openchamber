@@ -77,6 +77,35 @@ export async function getPullRequestDiff(directory, number, readContext, {
   allowEmpty = false,
   ...options
 } = {}) {
+  const { patch, meta } = readContext?.provider === 'gitlab'
+    ? await readGitLab(options.readGitLabChangeRequestPatch, { context: readContext, number, sourceRepo: options.sourceRepo ?? null })
+    : await readGitHubPullRequestDiff(directory, number, readContext, options);
+  if (!allowEmpty && !patch.trim()) {
+    const label = readContext?.provider === 'gitlab' ? `Merge request !${number}` : `Pull request #${number}`;
+    throw Object.assign(new Error(`${label} has no diff`), {
+      statusCode: 404,
+      code: 'empty-diff',
+    });
+  }
+  return { patch, meta };
+}
+
+/**
+ * GitLab merge requests are read by the GitLab module, which owns the
+ * account, the project network and the patch shape; the runtime hands its
+ * readers in. Without them a GitLab context is not served here.
+ */
+async function readGitLab(reader, input) {
+  if (!(reader instanceof Function)) {
+    throw Object.assign(new Error('GitLab merge request reads are unavailable'), {
+      statusCode: 501,
+      code: 'SOURCE_CONTROL_BINDING_UNAVAILABLE',
+    });
+  }
+  return reader(input);
+}
+
+async function readGitHubPullRequestDiff(directory, number, readContext, options) {
   const { octokit, repo: target } = await resolvePullRequestRepo(directory, number, readContext, options);
 
   const response = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
@@ -87,15 +116,7 @@ export async function getPullRequestDiff(directory, number, readContext, {
   });
 
   assert.match(response.data, /^(?:diff --git |\s*$)/, 'GitHub returned an invalid pull request diff');
-  const patch = response.data;
-  if (!allowEmpty && !patch.trim()) {
-    throw Object.assign(new Error(`Pull request #${number} has no diff`), {
-      statusCode: 404,
-      code: 'empty-diff',
-    });
-  }
-
-  return { patch, meta: { owner: target.owner, repo: target.repo, number } };
+  return { patch: response.data, meta: { owner: target.owner, repo: target.repo, number } };
 }
 
 /** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */
@@ -112,6 +133,11 @@ const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
  * base repository (`refs/pull/<n>/head`), so every read goes to one repo.
  */
 export async function getPullRequestFileContents(directory, number, readContext, { path, previousPath, status, ...options }) {
+  if (readContext?.provider === 'gitlab') {
+    return readGitLab(options.readGitLabChangeRequestFile, {
+      context: readContext, number, sourceRepo: options.sourceRepo ?? null, path, previousPath, status,
+    });
+  }
   const { octokit, repo } = await resolvePullRequestRepo(directory, number, readContext, options);
   const pull = await octokit.request('GET /repos/{owner}/{repo}/pulls/{pull_number}', {
     owner: repo.owner, repo: repo.repo, pull_number: number,

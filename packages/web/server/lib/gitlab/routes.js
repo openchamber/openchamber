@@ -268,7 +268,10 @@ export function registerGitLabRoutes(app, options = {}) {
     const identity = identityFor(origin, accountId);
     const resourceOptions = {
       origin,
-      client: createClient({ origin, token, tokenType: active?.source === 'oauth' ? 'oauth' : 'token' }),
+      // Only a stored personal access token goes as PRIVATE-TOKEN. OAuth
+      // sign-ins, and the glab login (an OAuth token on gitlab.com, a personal
+      // token elsewhere), go as a bearer token, which GitLab accepts for both.
+      client: createClient({ origin, token, tokenType: active?.source === 'pat' ? 'token' : 'oauth' }),
       canonicalReads,
     };
     if (options.resolveProjects) resourceOptions.resolveProjects = options.resolveProjects;
@@ -846,6 +849,45 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  // Each ref is one GitLab call, so a batch stays well under the GitHub one.
+  const MAX_LIVE_SUMMARY_REFS = 50;
+  const parseLiveSummaryRefs = (value) => {
+    if (!Array.isArray(value)) return null;
+    const refs = [];
+    for (const item of value) {
+      const owner = requestText(item?.owner);
+      const repo = requestText(item?.repo);
+      if (!owner || !repo || repo.includes('/') || !Number.isSafeInteger(item?.number) || item.number < 1) return null;
+      refs.push({ owner, repo, number: item.number });
+    }
+    return refs;
+  };
+
+  // Live state of merge requests and issues linked to sessions, read with the
+  // instance's current account, the way the GitHub summaries read linked PRs.
+  app.post('/api/source-control/gitlab/summaries', async (req, res) => {
+    try {
+      const refs = parseLiveSummaryRefs(req.body?.refs);
+      const issueRefs = parseLiveSummaryRefs(req.body?.issueRefs ?? []);
+      if (!refs || !issueRefs || refs.length + issueRefs.length > MAX_LIVE_SUMMARY_REFS) {
+        return res.status(400).json({ error: `refs and issueRefs must be lists of { owner, repo, number }, at most ${MAX_LIVE_SUMMARY_REFS} in total` });
+      }
+      const origin = requestOrigin(req);
+      let service;
+      try {
+        service = await getResourceService(origin);
+      } catch (error) {
+        if (error?.sourceControlAccountUnavailable) return res.json({ connected: false });
+        throw error;
+      }
+      const fetchedAt = Date.now();
+      const { summaries, issueSummaries } = await service.liveSummaries({ refs, issueRefs });
+      return res.json({ connected: true, fetchedAt, summaries, issueSummaries });
+    } catch (error) {
+      return sendResourceError(res, error);
+    }
+  });
+
   app.get('/api/source-control/gitlab/issues/get', async (req, res) => {
     try {
       const number = requestIssueNumber(req.query?.number);
@@ -921,8 +963,37 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  /**
+   * A read for another module (the comparison view, walkthroughs) with the
+   * account of a context its caller has already validated. GitLab refusing
+   * the token writes the account off the same way a route read does, and the
+   * upstream status travels with the error.
+   */
+  const readWithBoundAccount = async (context, read) => {
+    const service = await getResourceService(context.instance, context.accountId, true);
+    try {
+      return await read(service);
+    } catch (error) {
+      const upstreamStatus = error?.cause?.response?.status ?? error?.response?.status ?? error?.status;
+      if (upstreamStatus === 401 && !error?.sourceControlAccountUnavailable && error?.sourceControlIdentity?.accountId) {
+        const identity = error.sourceControlIdentity;
+        if (error.sourceControlPersistedAccount) await invalidateAccount(identity.instance, identity.accountId);
+        else await options.onAccountInvalidated?.(identity);
+      }
+      if (Number.isInteger(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus < 600) error.statusCode = upstreamStatus;
+      throw error;
+    }
+  };
+  const projectSelector = (sourceRepo) => (sourceRepo ? { owner: sourceRepo.owner, name: sourceRepo.repo } : undefined);
+
   return {
     listInstances: async () => store.listInstances?.() ?? [],
+    readChangeRequestPatch: ({ context, number, sourceRepo }) => readWithBoundAccount(context, (service) => service
+      .changeRequestPatch(context.directory, number, { project: projectSelector(sourceRepo), remote: context.primaryRemote })),
+    readChangeRequestFile: ({ context, number, sourceRepo, path: filePath, previousPath, status }) => readWithBoundAccount(context, (service) => service
+      .changeRequestFileContents(context.directory, number, {
+        project: projectSelector(sourceRepo), remote: context.primaryRemote, path: filePath, previousPath, status,
+      })),
     resolveChangeRequestSource: async ({ context, project, number, expectedHeadSha, requestedRemoteName }) => {
       const trusted = await options.validateReadContext(context);
       const service = await getResourceService(trusted.instance, trusted.accountId, true);

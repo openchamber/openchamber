@@ -20,8 +20,9 @@ has to ask for it.
   `PROMPT_VERSION`.
 - `schema.js` — response schema, response normalization, tolerant JSON parsing.
 - `store.js` — content-addressed cache entries plus mutable pointers.
-- `pull-request.js` — PR diffs and per-file contents via the shared GitHub
-  octokit helper.
+- `pull-request.js` — PR diffs and per-file contents: GitHub through the
+  shared octokit helper, GitLab merge requests through the readers the runtime
+  injects from the GitLab module (`readGitLabChangeRequestPatch`/`File`).
 - `model-settings.js` — the feature's own model override.
 - `languages.js` — the languages the prose may be written in.
 - `index.js` — orchestration.
@@ -107,14 +108,17 @@ request. The PR panel forwards the project of the pull request it shows.
 to PRs, and the same bound read-context fields as the other walkthrough routes.
 It validates that context against the binding and reads with its exact account;
 without one it reads nothing. It returns GitHub's complete published diff as
-text, with no model readiness checks or generation. Successful empty patches return 200; auth,
+text, with no model readiness checks or generation. A GitLab context returns
+the merge request's diff, rebuilt by `gitlab/resources.js` into the same git
+patch shape from GitLab's per-file hunks (GitLab diffs against the merge base,
+like GitHub). Successful empty patches return 200; auth,
 GitHub and malformed-response failures remain errors. Walkthrough generation
 keeps its existing empty-diff refusal. UI comparison behavior is documented in
 `packages/ui/src/components/views/DOCUMENTATION.md`.
 
 `GET /api/walkthrough/pr-file` takes the same `directory` and PR `source` plus
 `path`, optional `previousPath`, and `status`, and returns `{ original, modified }`
-for that one file as GitHub has it: the base side at the PR's merge base, the
+for that one file as the provider has it: the base side at the PR's merge base, the
 head side at the PR head. This is how the comparison view expands collapsed
 context for a PR: its patch arrives at fixed context and its commits may not be
 on disk, so the working tree is never read. Files above 5 MB answer `413`
@@ -441,7 +445,8 @@ For a PR source, all four routes also require flat `provider`, `instance`,
 query or JSON body. They do not accept a nested context object. The source-control
 binding service validates these immutable fields before walkthrough service,
 cache, job, credential, repository-coordinate, or provider work. The server
-currently accepts only a validated GitHub context. It resolves the exact bound
+accepts a validated GitHub or GitLab context and refuses any other provider with
+`422 UNSUPPORTED_WALKTHROUGH_PROVIDER`. It resolves the exact bound
 account and trusted primary remote, with no active-account or default-remote
 fallback, and every successful PR response echoes the trusted `readContext`.
 An exact-account `401` reconciles the account through the source-control binding

@@ -70,4 +70,5 @@ export const createVSCodeSourceControlAPI = (): SourceControlAPI => ({
   githubReferences: unsupported,
   githubReferenceDetail: unsupported,
   githubSummaries: unsupported,
+  gitlabSummaries: unsupported,
 });

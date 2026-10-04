@@ -41,7 +41,10 @@ describe('GitLab provider mappers', () => {
 
   it('maps diffs and aggregates pipeline jobs', () => {
     expect(mapGitLabDiff({ new_path: 'src/new.ts', old_path: 'src/old.ts', renamed_file: true, diff: '@@' }))
-      .toEqual({ path: 'src/new.ts', status: 'renamed', patch: '@@' });
+      .toEqual({ path: 'src/new.ts', status: 'renamed', patch: '@@', additions: 0, deletions: 0 });
+    // Hunks arrive without file headers, so a line starting `+++` is content.
+    expect(mapGitLabDiff({ new_path: 'a.md', old_path: 'a.md', diff: '@@ -1,2 +1,3 @@\n context\n-old\n+new\n+++ added\n\\ No newline at end of file\n' }))
+      .toMatchObject({ additions: 2, deletions: 1 });
     expect(mapGitLabCI({ id: 9, status: 'running', started_at: '2026-01-01T00:00:00Z' }, [
       { id: 1, name: 'test', status: 'success' }, { id: 2, name: 'lint', status: 'running' },
     ], identity)).toMatchObject({ summary: { state: 'pending', total: 2, success: 1, failure: 0, pending: 1 }, runs: [{ name: 'test' }, { name: 'lint' }] });

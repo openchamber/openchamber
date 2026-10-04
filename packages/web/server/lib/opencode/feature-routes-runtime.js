@@ -118,13 +118,25 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           directory,
           number,
           readContext,
-          { allowEmpty, sourceRepo, onAccountUnavailable: walkthroughBindingService?.accountUnavailable },
+          {
+            allowEmpty,
+            sourceRepo,
+            onAccountUnavailable: walkthroughBindingService?.accountUnavailable,
+            readGitLabChangeRequestPatch: walkthroughBindingService?.readGitLabChangeRequestPatch,
+          },
         ),
         getPullRequestFileContents: (directory, number, readContext, { path, previousPath, status, sourceRepo }) => pullRequest.getPullRequestFileContents(
           directory,
           number,
           readContext,
-          { path, previousPath, status, sourceRepo, onAccountUnavailable: walkthroughBindingService?.accountUnavailable },
+          {
+            path,
+            previousPath,
+            status,
+            sourceRepo,
+            onAccountUnavailable: walkthroughBindingService?.accountUnavailable,
+            readGitLabChangeRequestFile: walkthroughBindingService?.readGitLabChangeRequestFile,
+          },
         ),
       };
     }

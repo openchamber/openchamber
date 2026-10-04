@@ -1835,6 +1835,16 @@ export interface SourceControlAPI {
     refs: GitHubPullRequestRef[],
     issueRefs?: GitHubPullRequestRef[],
   ): Promise<GitHubPullRequestSummariesResult>;
+  /**
+   * GitLab: live state of merge requests and issues already known by number,
+   * read with the instance's current account. `owner` is the project's
+   * namespace path, subgroups included; the answer has GitHub's shape.
+   */
+  gitlabSummaries(
+    instance: string,
+    refs: GitHubPullRequestRef[],
+    issueRefs?: GitHubPullRequestRef[],
+  ): Promise<GitHubPullRequestSummariesResult>;
 }
 
 export interface RemoteClientRecord {

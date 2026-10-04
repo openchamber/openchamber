@@ -250,6 +250,10 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   return Object.freeze({
     ...bindingService,
     backfillConnectedIdentities,
+    // GitLab merge request reads for the comparison view and walkthroughs; the
+    // caller passes a read context it has already validated.
+    readGitLabChangeRequestPatch: (input) => gitlab.readChangeRequestPatch(input),
+    readGitLabChangeRequestFile: (input) => gitlab.readChangeRequestFile(input),
     resolveChangeRequestSource: async (input) => {
       const provider = input?.context?.provider;
       if (provider === 'github') return github.resolveChangeRequestSource(input);

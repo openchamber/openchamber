@@ -1,5 +1,6 @@
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import { useLinearIssueStates } from '@/stores/useLinearIssueStateStore';
+import { useGitLabIssueStates } from '@/stores/useGitLabLinkedStateStore';
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Session } from '@/lib/opencode/model';
@@ -672,12 +673,17 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     [groupIssues],
   );
   const groupLinearStates = useLinearIssueStates(groupLinearIdentifiers);
+  const groupGitLabIssueRefs = React.useMemo(
+    () => groupIssues.flatMap((issue) => (issue.source === 'gitlab' ? [issue.ref] : [])),
+    [groupIssues],
+  );
+  const groupGitLabIssueStates = useGitLabIssueStates(groupGitLabIssueRefs);
   const groupIssueItems = React.useMemo(
-    () => buildSessionIssueItems(groupIssues, groupIssueStates, groupLinearStates).map((item) => ({
+    () => buildSessionIssueItems(groupIssues, groupIssueStates, groupLinearStates, groupGitLabIssueStates).map((item) => ({
       ...item,
       text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     })),
-    [groupIssueStates, groupIssues, groupLinearStates, t],
+    [groupGitLabIssueStates, groupIssueStates, groupIssues, groupLinearStates, t],
   );
   const primaryGroupIssue = groupIssueItems[0] ?? null;
 

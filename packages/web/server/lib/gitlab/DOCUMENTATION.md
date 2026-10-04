@@ -51,6 +51,7 @@ This module owns GitLab instance validation, authentication, remote resolution, 
 - `repo.js`: instance-bound remote parsing, ranking, and directory resolution.
 - `mappers.js`: GitLab payload validation and provider-neutral DTO conversion.
 - `resources.js`: project, issue, merge-request, and CI orchestration.
+  It also serves the comparison view and walkthroughs: `changeRequestPatch` rebuilds a git patch (`diff --git`, mode, rename and `---`/`+++` headers) around the hunks GitLab's diff list returns, and `changeRequestFileContents` reads one file at the merge request's `diff_refs.base_sha` (the merge base) and `head_sha` from the target project. Both require the merge request to belong to the bound repository's network; `routes.js` exposes them as `readChangeRequestPatch`/`readChangeRequestFile` for callers that already validated the read context.
 - `routes.js`: thin HTTP registration and auth/resource orchestration.
 
 `GET /api/source-control/gitlab/auth/accounts?instance=...` returns persisted account metadata without tokens. The existing auth status route carries the same inventory for connected and disconnected states.

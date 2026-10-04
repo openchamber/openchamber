@@ -5,7 +5,9 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { useTabletLayout } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
@@ -14,7 +16,10 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   comparison: ReturnType<typeof usePullRequestComparison>;
   mobile?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t: translate } = useI18n();
+  // GitLab's own words and `!` numbers on a GitLab project.
+  const t = (key: I18nKey) => translate(changeRequestCopy(key, comparison.provider));
+  const reference = (number: number) => formatChangeRequestReference(comparison.provider, number);
   const tablet = useTabletLayout();
   const sheet = mobile && !tablet.enabled;
   const [open, setOpen] = useState(false);
@@ -30,8 +35,8 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     data-mobile-comparison-trigger={mobile || undefined}
     onClick={sheet ? () => changeOpen(true) : undefined}
     aria-haspopup={sheet ? 'dialog' : undefined} aria-expanded={sheet ? open : undefined}
-    aria-label={label} title={selected?.sourceRepo ? `${selected.sourceRepo.owner}/${selected.sourceRepo.repo} #${selected.number}` : label}>
-    <span className="truncate">{selected ? `#${selected.number}` : label}</span>
+    aria-label={label} title={selected?.sourceRepo ? `${selected.sourceRepo.owner}/${selected.sourceRepo.repo} ${reference(selected.number)}` : label}>
+    <span className="truncate">{selected ? reference(selected.number) : label}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
   const picker = <Command shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
@@ -50,7 +55,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
           return <CommandItem key={key} value={key} className={mobile ? 'min-h-11' : undefined}
             onSelect={() => { comparison.select(pr); changeOpen(false); }}>
             <div className="min-w-0 flex-1">
-              <div className="truncate typography-ui-label" title={pr.title}>#{pr.number} {pr.title}</div>
+              <div className="truncate typography-ui-label" title={pr.title}>{reference(pr.number)} {pr.title}</div>
               <div className="truncate typography-meta text-muted-foreground">{pr.project.owner}/{pr.project.name} · {pr.head} → {pr.base}</div>
             </div>
             {selected?.number === pr.number && selected.sourceRepo?.owner === pr.project.owner && selected.sourceRepo?.repo === pr.project.name

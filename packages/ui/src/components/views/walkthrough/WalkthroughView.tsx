@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, type Locale } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { openExternalUrl } from '@/lib/url';
 import { buildWalkthroughView } from '@/lib/walkthrough/model';
 import { qualifyBaseRef } from '@/components/views/git/baseBranch';
@@ -291,9 +292,12 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const prComparison = usePullRequestComparison(directory || null, currentBranch, readContext, visible && isPrScope,
     requestedTarget?.source.kind === 'pr' ? requestedTarget.source : undefined);
   const selectedPr = prComparison.selectedSource;
+  // Pull requests on GitHub and merge requests on GitLab both have a published diff to walk through.
+  const readsChangeRequests = readContext?.provider === 'github' || readContext?.provider === 'gitlab';
+  const changeRequestProvider = prComparison.provider;
 
   const target = useMemo<WalkthroughTarget>(
-    () => isPrScope && selectedPr && readContext?.provider === 'github'
+    () => isPrScope && selectedPr && readsChangeRequests && readContext
       ? { source: selectedPr, context: readContext }
       : isCommitScope && selectedCommitHash
         ? { source: { kind: 'commit', hash: selectedCommitHash } }
@@ -327,7 +331,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const cancel = useWalkthroughStore((state) => state.cancel);
   const requestTarget = useWalkthroughStore((state) => state.requestTarget);
   useEffect(() => {
-    if (!choosingPr || !selectedPr || readContext?.provider !== 'github') return;
+    if (!choosingPr || !selectedPr || !readsChangeRequests || !readContext) return;
     requestTarget(directory, { source: selectedPr, context: readContext });
     setPendingSourceSelection(null);
   }, [choosingPr, directory, readContext, requestTarget, selectedPr]);
@@ -421,10 +425,10 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
   const sourceValue = isPrScope ? 'pr' : isCommitScope ? 'commit' : isBranchScope ? 'branch' : source.kind === 'working-tree' ? source.scope : source.kind;
-  const sourceLabel = isPrScope ? t('session.githubIntegration.tabs.pullRequests') : isCommitScope ? t('commitComparison.mode') : isBranchScope
+  const sourceLabel = isPrScope ? t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider)) : isCommitScope ? t('commitComparison.mode') : isBranchScope
     ? t('walkthrough.scope.branch')
     : source.kind === 'pr'
-      ? t('walkthrough.scope.pullRequest', { number: source.number })
+      ? t(changeRequestCopy('walkthrough.scope.pullRequest', changeRequestProvider), { number: source.number })
       : scope === 'all'
         ? t('walkthrough.scope.all')
         : scope === 'staged'
@@ -670,9 +674,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
               <DropdownMenuRadioItem value="commit">
                 {t('commitComparison.mode')}
               </DropdownMenuRadioItem>
-              {readContext?.provider === 'github' && (
+              {readsChangeRequests && (
                 <DropdownMenuRadioItem value="pr">
-                  {t('session.githubIntegration.tabs.pullRequests')}
+                  {t(changeRequestCopy('session.githubIntegration.tabs.pullRequests', changeRequestProvider))}
                 </DropdownMenuRadioItem>
               )}
             </DropdownMenuRadioGroup>
@@ -932,7 +936,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         {prNeedsSelection ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
             <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
-              ? t('session.githubPrPicker.loading.pullRequests') : t('pullRequestComparison.select'))}</p>
+              ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestProvider))
+              : t(changeRequestCopy('pullRequestComparison.select', changeRequestProvider)))}</p>
             {!prComparison.loading && <PullRequestComparisonSelector comparison={prComparison} />}
           </div>
         ) : commitNeedsSelection ? (

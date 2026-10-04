@@ -31,9 +31,12 @@ while previewing, so same-length edits in the middle invalidate cached output.
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`
-and the selection owned by `usePullRequestComparison`. PR mode reads GitHub's
-published patch through `/api/walkthrough/pr-diff`, always through the checkout's
-bound GitHub context; without one, PR mode is not offered and reads nothing. It includes no local edits
+and the selection owned by `usePullRequestComparison`. PR mode reads the
+published patch of a GitHub pull request or a GitLab merge request through
+`/api/walkthrough/pr-diff`, always through the checkout's bound read context;
+without one, PR mode is not offered and reads nothing. On GitLab projects the
+mode, picker and messages use merge-request wording and `!` numbers through
+`changeRequestCopy`. It includes no local edits
 or unpushed commits. `lib/diff/pullRequestDiff.ts` splits the response once;
 `useGitComparison` serves file patches from that same snapshot. Snapshot revisions
 invalidate the view's patch cache atomically, including edits with unchanged

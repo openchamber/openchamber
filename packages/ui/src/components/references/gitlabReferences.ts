@@ -132,7 +132,8 @@ export const fetchGitLabReferenceDetail = async (
         const comments = (await reads.issueComments(context, reference.number, project)).map(toComment).sort(byCreation);
         return { number: reference.number, comments: comments.slice(-50), commentTotal: comments.length, pull: null };
     }
-    const changeRequestContext = await reads.changeRequestContext(context, reference.number, { project });
+    // The size comes from the changed files, which GitLab only lists with their diffs.
+    const changeRequestContext = await reads.changeRequestContext(context, reference.number, { project, includeDiff: true });
     const comments = [...changeRequestContext.issueComments, ...changeRequestContext.reviewComments].map(toComment).sort(byCreation);
     return {
         number: reference.number,

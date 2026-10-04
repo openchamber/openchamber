@@ -183,6 +183,12 @@ describe('GitLab resource service', () => {
     await expect(service.listIssues('/repo', { remote: 'upstream' })).resolves.toMatchObject({ items: [{ number: 3 }] });
     await expect(service.getIssue('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream')).resolves.toMatchObject({ number: 3 });
     await expect(service.issueComments('/repo', 3, { owner: 'team', name: 'repo' }, 'upstream')).resolves.toMatchObject([{ body: 'Comment' }]);
+    // GitBeaker reads a bare first argument as a global issue id; the project's
+    // issue number goes first with the project beside it.
+    for (const [number, options] of client.Issues.show.mock.calls) {
+      expect(number).toBe(3);
+      expect(options).toMatchObject({ projectId: expect.anything() });
+    }
     await expect(service.projectUpstream('/repo', 'upstream')).resolves.toMatchObject({ isFork: true, upstream: { id: '2' } });
     await expect(service.projectBranches('/repo', { owner: 'team', name: 'repo' }, 'upstream')).resolves.toEqual(['main', 'feature']);
     await expect(service.getIssue('/repo', 3, { owner: 'other', name: 'secret' }, 'upstream')).rejects.toMatchObject({ status: 404 });
@@ -536,5 +542,99 @@ describe('GitLab resource service', () => {
     const moved = Object.assign(new Error('SHA does not match HEAD of source branch'), { cause: { response: { status: 409 } } });
     const rejected = setup({ MergeRequests: { ...setup().client.MergeRequests, merge: vi.fn(async () => { throw moved; }) } });
     await expect(rejected.service.mergeChangeRequest(payload)).rejects.toMatchObject({ code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409 });
+  });
+});
+
+describe('GitLab merge request comparison reads', () => {
+  const diffRefs = { base_sha: 'a'.repeat(40), head_sha: 'b'.repeat(40), start_sha: 'c'.repeat(40) };
+
+  it('rebuilds git file headers around the hunks GitLab sends', async () => {
+    const { service, client } = setup({
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        allDiffs: list([
+          { old_path: 'a.ts', new_path: 'a.ts', a_mode: '100644', b_mode: '100644', diff: '@@ -1 +1 @@\n-old\n+new\n' },
+          { old_path: 'new.md', new_path: 'new.md', a_mode: '0', b_mode: '100644', new_file: true, diff: '@@ -0,0 +1 @@\n+hello' },
+          { old_path: 'gone.txt', new_path: 'gone.txt', a_mode: '100644', b_mode: '0', deleted_file: true, diff: '@@ -1 +0,0 @@\n-bye\n' },
+          { old_path: 'old/name.ts', new_path: 'new/name.ts', a_mode: '100644', b_mode: '100644', renamed_file: true, diff: '' },
+          { old_path: 'run.sh', new_path: 'run.sh', a_mode: '100644', b_mode: '100755', diff: '' },
+        ]),
+      },
+    });
+    const { patch, meta } = await service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' });
+    expect(meta).toEqual({ owner: 'team', repo: 'repo', number: 5 });
+    expect(patch).toBe([
+      'diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1 +1 @@', '-old', '+new',
+      'diff --git a/new.md b/new.md', 'new file mode 100644', '--- /dev/null', '+++ b/new.md', '@@ -0,0 +1 @@', '+hello',
+      'diff --git a/gone.txt b/gone.txt', 'deleted file mode 100644', '--- a/gone.txt', '+++ /dev/null', '@@ -1 +0,0 @@', '-bye',
+      'diff --git a/old/name.ts b/new/name.ts', 'rename from old/name.ts', 'rename to new/name.ts',
+      'diff --git a/run.sh b/run.sh', 'old mode 100644', 'new mode 100755',
+      '',
+    ].join('\n'));
+    expect(client.MergeRequests.allDiffs).toHaveBeenCalledWith('2', 5, expect.objectContaining({ showExpanded: true }));
+  });
+
+  it('reads both sides of a file at the merge base and the head', async () => {
+    const showRaw = vi.fn(async (_project, path, ref) => `${path}@${ref.slice(0, 1)}`);
+    const { service } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ ...openMR, diff_refs: diffRefs })) },
+      RepositoryFiles: { showRaw },
+    });
+    const project = { owner: 'team', name: 'repo' };
+    await expect(service.changeRequestFileContents('/repo', 5, { project, remote: 'origin', path: 'b.ts', previousPath: 'a.ts', status: 'R' }))
+      .resolves.toEqual({ original: 'a.ts@a', modified: 'b.ts@b' });
+    await expect(service.changeRequestFileContents('/repo', 5, { project, remote: 'origin', path: 'new.ts', status: 'A' }))
+      .resolves.toEqual({ original: '', modified: 'new.ts@b' });
+    expect(showRaw).toHaveBeenCalledWith('2', 'a.ts', diffRefs.base_sha);
+  });
+
+  it('refuses a merge request outside the bound repository network', async () => {
+    const { service, client } = setup({
+      MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => ({ ...openMR, target_project_id: 99 })) },
+    });
+    await expect(service.changeRequestPatch('/repo', 5, { project: { owner: 'team', name: 'repo' }, remote: 'origin' }))
+      .rejects.toThrow();
+    expect(client.MergeRequests.allDiffs).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('GitLab live summaries', () => {
+  it('maps merge request and issue state onto the shared badge shape and skips what GitLab cannot answer', async () => {
+    const byNumber = {
+      1: { ...openMR, iid: 1, has_conflicts: true, detailed_merge_status: 'conflict', head_pipeline: { status: 'success' } },
+      2: { ...openMR, iid: 2, detailed_merge_status: 'not_approved', head_pipeline: { status: 'failed' } },
+      3: { ...openMR, iid: 3, detailed_merge_status: 'mergeable', head_pipeline: { status: 'running' }, draft: true },
+      4: { ...openMR, iid: 4, state: 'merged', detailed_merge_status: 'not_open', head_pipeline: { status: 'success' } },
+    };
+    const { service, client } = setup({
+      MergeRequests: {
+        ...setup().client.MergeRequests,
+        show: vi.fn(async (_path, number) => {
+          if (!byNumber[number]) throw Object.assign(new Error('404 Not Found'), { cause: { response: { status: 404 } } });
+          return byNumber[number];
+        }),
+      },
+      Issues: { ...setup().client.Issues, show: vi.fn(async (number) => ({ iid: number, title: 'Bug', state: number === 8 ? 'closed' : 'opened' })) },
+    });
+    const ref = (number) => ({ owner: 'group/sub', repo: 'app', number });
+    const { summaries, issueSummaries } = await service.liveSummaries({ refs: [1, 2, 3, 4, 5].map(ref), issueRefs: [7, 8].map(ref) });
+
+    expect(summaries.map((s) => [s.number, s.state, s.draft, s.mergeable, s.mergeableState, s.checks?.state ?? null])).toEqual([
+      [1, 'open', false, false, 'dirty', 'success'],
+      // Waiting for approval is nothing to fix: no `blocked` state, so the open colour.
+      [2, 'open', false, null, null, 'failure'],
+      [3, 'open', true, true, 'clean', 'pending'],
+      [4, 'merged', false, null, null, null],
+    ]);
+    expect(issueSummaries.map((s) => [s.number, s.state])).toEqual([[7, 'open'], [8, 'completed']]);
+    expect(client.MergeRequests.show).toHaveBeenCalledWith('group/sub/app', 1);
+    expect(client.Issues.show).toHaveBeenCalledWith(7, { projectId: 'group/sub/app' });
+  });
+
+  it('fails the whole read when GitLab refuses the token', async () => {
+    const refused = Object.assign(new Error('401 Unauthorized'), { cause: { response: { status: 401 } } });
+    const { service } = setup({ MergeRequests: { ...setup().client.MergeRequests, show: vi.fn(async () => { throw refused; }) } });
+    await expect(service.liveSummaries({ refs: [{ owner: 'team', repo: 'app', number: 1 }] })).rejects.toBe(refused);
   });
 });

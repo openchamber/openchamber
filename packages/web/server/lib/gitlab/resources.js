@@ -7,6 +7,7 @@ import { isPlainObject, isString } from './validation.js';
 const DRAFT_TITLE_PREFIX = /^\s*(?:\[draft\]|\(draft\)|draft:)\s*/i;
 const asDraftTitle = (title) => (DRAFT_TITLE_PREFIX.test(title) ? title : `Draft: ${title}`);
 const asReadyTitle = (title) => title.replace(DRAFT_TITLE_PREFIX, '');
+const text = (value) => (isString(value) && value ? value : '');
 
 const PER_PAGE = 20;
 // Collections a view shows in full (notes, diffs, branches) are read to the
@@ -44,6 +45,101 @@ async function readCollection(load, message) {
 function projectPath(owner, name) {
   return `${owner}/${name}`;
 }
+
+/**
+ * One changed file as git prints it. GitLab's diff list carries only the
+ * hunks; the `diff --git` header, mode, rename and `---`/`+++` lines are
+ * rebuilt from its flags so the comparison view reads GitLab like GitHub. A
+ * file GitLab sends without hunks (binary, or too large to diff) keeps its
+ * header alone, the way git shows a metadata-only change.
+ */
+function gitPatchForDiff(file) {
+  const oldPath = text(file.old_path) || file.new_path;
+  const newPath = text(file.new_path) || file.old_path;
+  const lines = [`diff --git a/${oldPath} b/${newPath}`];
+  if (file.new_file === true) lines.push(`new file mode ${text(file.b_mode) || '100644'}`);
+  else if (file.deleted_file === true) lines.push(`deleted file mode ${text(file.a_mode) || '100644'}`);
+  else if (text(file.a_mode) && text(file.b_mode) && file.a_mode !== file.b_mode) lines.push(`old mode ${file.a_mode}`, `new mode ${file.b_mode}`);
+  if (file.renamed_file === true) lines.push(`rename from ${oldPath}`, `rename to ${newPath}`);
+  const body = isString(file.diff) ? file.diff : '';
+  if (body.startsWith('@@')) {
+    lines.push(`--- ${file.new_file === true ? '/dev/null' : `a/${oldPath}`}`);
+    lines.push(`+++ ${file.deleted_file === true ? '/dev/null' : `b/${newPath}`}`);
+  }
+  const header = `${lines.join('\n')}\n`;
+  if (!body) return header;
+  return `${header}${body.endsWith('\n') ? body : `${body}\n`}`;
+}
+
+// How many merge requests and issues one live-state read asks GitLab about at
+// once; each is one REST call, so a sidebar full of links stays a short burst.
+const LIVE_SUMMARY_CONCURRENCY = 4;
+const PIPELINE_PENDING = new Set(['created', 'waiting_for_resource', 'preparing', 'pending', 'running', 'manual', 'scheduled']);
+
+const upstreamStatusOf = (error) => error?.cause?.response?.status ?? error?.response?.status ?? error?.status;
+
+async function mapLimited(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
+ * A merge request's live state in the shape GitHub's summaries use, so one
+ * badge rule colours both: orange only for a failed pipeline or a conflict,
+ * and a merge request still waiting for approval keeps the open colour.
+ */
+function liveMergeRequestSummary(ref, raw) {
+  if (!isPlainObject(raw) || !Number.isInteger(raw.iid)) return null;
+  const state = raw.state === 'opened' ? 'open' : raw.state === 'merged' ? 'merged' : 'closed';
+  const conflicts = raw.has_conflicts === true;
+  const ready = raw.detailed_merge_status === 'mergeable';
+  const pipeline = text(raw.head_pipeline?.status);
+  let checks = null;
+  if (state === 'open' && pipeline) {
+    const outcome = pipeline === 'success' || pipeline === 'skipped' ? 'success'
+      : pipeline === 'failed' || pipeline === 'canceled' ? 'failure'
+        : PIPELINE_PENDING.has(pipeline) ? 'pending' : 'unknown';
+    checks = {
+      state: outcome,
+      total: 1,
+      success: outcome === 'success' ? 1 : 0,
+      failure: outcome === 'failure' ? 1 : 0,
+      pending: outcome === 'pending' ? 1 : 0,
+    };
+  }
+  const summary = {
+    owner: ref.owner,
+    repo: ref.repo,
+    number: raw.iid,
+    state,
+    draft: raw.draft === true || raw.work_in_progress === true,
+    title: isString(raw.title) ? raw.title : '',
+    mergeable: conflicts ? false : ready ? true : null,
+    mergeableState: conflicts ? 'dirty' : ready ? 'clean' : null,
+    checks,
+  };
+  if (text(raw.sha)) summary.headSha = raw.sha;
+  return summary;
+}
+
+function liveIssueSummary(ref, raw) {
+  if (!isPlainObject(raw) || !Number.isInteger(raw.iid)) return null;
+  // GitLab closes an issue without saying whether it was done or dropped.
+  return { owner: ref.owner, repo: ref.repo, number: raw.iid, title: isString(raw.title) ? raw.title : '', state: raw.state === 'opened' ? 'open' : 'completed' };
+}
+
+/** Above this the full-context view is no longer a readable diff, and the round trip is wasted. */
+const MAX_FULL_FILE_BYTES = 5 * 1024 * 1024;
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 export function createGitLabResourceService({ origin, client, resolveProjects = resolveGitLabProjectsFromDirectory, canonicalReads = false }) {
   const identity = { provider: 'gitlab', instance: origin };
@@ -588,15 +684,88 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
 
     async getIssue(directory, number, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);
-      const raw = await client.Issues.show(target.project.id, number);
+      const raw = await client.Issues.show(number, { projectId: target.project.id });
       return canonicalReads
         ? requireIssue(raw, target.project)
         : requireMapped(mapGitLabIssue(raw, identity, target.project), 'GitLab returned an invalid issue');
     },
 
+    /**
+     * A merge request's changes as one unified diff. GitLab diffs a merge
+     * request against its merge base, so, like a GitHub pull request diff,
+     * work merged in from the target branch is not part of it. The merge
+     * request must belong to the bound repository's network.
+     */
+    async changeRequestPatch(directory, number, options = {}) {
+      const { target } = await findByNumber(directory, number, options.project, {
+        constrainToPrimary: true, remote: options.remote, requireNetwork: true,
+      });
+      const diffs = await readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads');
+      if (!Array.isArray(diffs)) throw new Error('GitLab returned an invalid merge request diff list');
+      const files = diffs.filter((diff) => isPlainObject(diff) && (text(diff.new_path) || text(diff.old_path)));
+      if (files.length !== diffs.length) throw new Error('GitLab returned an invalid merge request diff');
+      return {
+        patch: files.map(gitPatchForDiff).join(''),
+        meta: { owner: target.project.owner, repo: target.project.name, number },
+      };
+    },
+
+    /**
+     * Both sides of one file as GitLab has them, for expanding collapsed
+     * context without the working tree. The base side is the merge base the
+     * diff was taken against, never the target branch tip. A fork's head
+     * commit is reachable from the target project, so every read goes there.
+     */
+    async changeRequestFileContents(directory, number, { project, remote, path, previousPath, status }) {
+      const { target, raw } = await findByNumber(directory, number, project, {
+        constrainToPrimary: true, remote, requireNetwork: true,
+      });
+      const baseSha = raw?.diff_refs?.base_sha;
+      const headSha = raw?.diff_refs?.head_sha;
+      if (!COMMIT_SHA.test(String(baseSha)) || !COMMIT_SHA.test(String(headSha))) {
+        throw new Error('GitLab returned invalid merge request refs');
+      }
+      const readFile = async (filePath, ref) => {
+        const content = await client.RepositoryFiles.showRaw(target.project.id, filePath, ref);
+        const value = content instanceof Blob ? await content.text() : content;
+        if (!isString(value)) throw new Error('GitLab returned invalid file contents');
+        if (Buffer.byteLength(value) > MAX_FULL_FILE_BYTES) {
+          throw Object.assign(new Error('This file is too large to show in full'), { status: 413, code: 'file-too-large' });
+        }
+        return value;
+      };
+      const [original, modified] = await Promise.all([
+        status === 'A' ? '' : readFile(previousPath || path, baseSha),
+        status === 'D' ? '' : readFile(path, headSha),
+      ]);
+      return { original, modified };
+    },
+
+    /**
+     * Live state of merge requests and issues already known by project path
+     * and number, for the sidebar and the session's linked items. An item
+     * GitLab cannot answer is left out, unknown rather than closed; a refused
+     * token fails the whole read so the account is reconciled.
+     */
+    async liveSummaries({ refs = [], issueRefs = [] }) {
+      const read = async (ref, load, map) => {
+        try {
+          return map(ref, await load(`${ref.owner}/${ref.repo}`, ref.number));
+        } catch (error) {
+          if (upstreamStatusOf(error) === 401) throw error;
+          return null;
+        }
+      };
+      const [summaries, issueSummaries] = await Promise.all([
+        mapLimited(refs, LIVE_SUMMARY_CONCURRENCY, (ref) => read(ref, (path, number) => client.MergeRequests.show(path, number), liveMergeRequestSummary)),
+        mapLimited(issueRefs, LIVE_SUMMARY_CONCURRENCY, (ref) => read(ref, (path, number) => client.Issues.show(number, { projectId: path }), liveIssueSummary)),
+      ]);
+      return { summaries: summaries.filter(Boolean), issueSummaries: issueSummaries.filter(Boolean) };
+    },
+
     async issueComments(directory, number, selector, remote) {
       const target = await constrainedProject(directory, selector, remote);
-      const issue = await client.Issues.show(target.project.id, number);
+      const issue = await client.Issues.show(number, { projectId: target.project.id });
       const mappedIssue = canonicalReads
         ? requireIssue(issue, target.project)
         : requireMapped(mapGitLabIssue(issue, identity, target.project), 'GitLab returned an invalid issue');

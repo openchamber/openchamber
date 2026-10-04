@@ -206,3 +206,19 @@ export const fetchGitHubSummaries = async (
   });
   return readPayload(response, prSummariesResultSchema, 'Failed to load PR summaries');
 };
+
+/** GitLab's merge requests and issues answer in the same summary shape. */
+export const fetchGitLabSummaries = async (
+  fetch: GitHubFetch,
+  instance: string,
+  refs: GitHubPullRequestRef[],
+  issueRefs: GitHubPullRequestRef[] = [],
+): Promise<GitHubPullRequestSummariesResult> => {
+  const response = await fetch('/api/source-control/gitlab/summaries', {
+    method: 'POST',
+    query: new URLSearchParams({ instance }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ refs, issueRefs }),
+  });
+  return readPayload(response, prSummariesResultSchema, 'Failed to load merge request summaries');
+};

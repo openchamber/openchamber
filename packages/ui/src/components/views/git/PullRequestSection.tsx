@@ -1646,7 +1646,7 @@ export const PullRequestSection: React.FC<{
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              {showWalkthroughAction && readContext?.provider === 'github' ? (
+              {showWalkthroughAction && (readContext?.provider === 'github' || readContext?.provider === 'gitlab') ? (
                 <Button
                   variant="outline"
                   size="sm"

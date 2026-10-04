@@ -5,6 +5,8 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import { mergeIncompleteSourceControlPage, sourceControlReadContextParts } from '@/lib/source-control/identity';
 import type { PageResult } from '@/lib/source-control/types';
 import { useI18n } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { useRepositoryHost } from '@/components/references/referenceSources';
 import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -55,7 +57,7 @@ export const mergePullRequestPage = (
 
 /**
  * Lists and remembers the pull request a comparison reviews. Every read goes
- * through the checkout's bound GitHub context, so the list and the branch's
+ * through the checkout's bound GitHub or GitLab context, so the list and the branch's
  * own pull request come from the account and repository the binding grants,
  * never from whichever account happens to be active.
  */
@@ -69,14 +71,17 @@ export function usePullRequestComparison(
   const { sourceControl } = useRuntimeAPIs();
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
-  // Walkthrough pull request diffs are GitHub-only on the server.
-  const latestContext = readContext?.provider === 'github' ? readContext : null;
+  // The server publishes pull request diffs for GitHub and GitLab only.
+  const latestContext = readContext?.provider === 'github' || readContext?.provider === 'gitlab' ? readContext : null;
   const contextKey = latestContext ? JSON.stringify(sourceControlReadContextParts(latestContext)) : '';
   // Callers may hand over a fresh object each render; effects and callbacks key
   // on `contextKey` and read the object through this ref.
   const contextRef = useRef(latestContext);
   contextRef.current = latestContext;
   const context = latestContext;
+  // Known even with no working account, so the messages name the right host.
+  const hostProvider = useRepositoryHost(directory)?.provider;
+  const provider = context?.provider ?? hostProvider ?? null;
   // A rebind to another repository must not carry a selection across.
   const selectionKey = JSON.stringify([runtimeKey, directory, branch, context?.repositoryId ?? null]);
   const selection = usePullRequestSelectionStore((state) => state.selections.get(selectionKey) ?? null);
@@ -150,8 +155,8 @@ export function usePullRequestComparison(
     }
     try {
       const context = contextRef.current;
-      if (!sourceControl) throw new Error(t('session.githubPrPicker.error.runtimeUnavailable'));
-      if (!context || !auth.connected) throw new Error(t('session.githubPrPicker.empty.notConnected'));
+      if (!sourceControl) throw new Error(t(changeRequestCopy('session.githubPrPicker.error.runtimeUnavailable', provider)));
+      if (!context || !auth.connected) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', provider)));
       const page = previous ? previous.page + 1 : 1;
       const result = await sourceControl.changeRequestsList(context, { page, query: search || undefined });
       if (requestId.current !== id || getRuntimeKey() !== runtime || owner.current.key !== key || !owner.current.enabled) return;
@@ -159,13 +164,13 @@ export function usePullRequestComparison(
       setList({ key, status: 'ready', ...merged, page, hasMore: result.hasMore, error: null });
     } catch (error) {
       if (requestId.current === id && getRuntimeKey() === runtime && owner.current.key === key && owner.current.enabled) {
-        const message = error instanceof Error ? error.message : t('session.githubPrPicker.toast.loadMoreFailed');
+        const message = error instanceof Error ? error.message : t(changeRequestCopy('session.githubPrPicker.toast.loadMoreFailed', provider));
         setList(previous ? { ...previous, error: message } : { key, status: 'error', message });
       }
     } finally {
       if (requestId.current === id) setLoadingMore(false);
     }
-  }, [auth.connected, directory, enabled, key, search, sourceControl, t]);
+  }, [auth.connected, directory, enabled, key, provider, search, sourceControl, t]);
 
   useEffect(() => {
     if (listRef.current?.key !== key || listRef.current.status !== 'ready') void refresh();
@@ -175,6 +180,8 @@ export function usePullRequestComparison(
   return {
     enabled,
     readContext: context,
+    /** The host the change requests come from, for wording and numbering. */
+    provider,
     selectedSource: pendingPreference ?? selectedSource,
     prs: current?.status === 'ready' ? current.prs : NO_PULL_REQUESTS,
     query, setQuery,

@@ -131,7 +131,19 @@ export function mapGitLabDiff(value) {
     path: value.new_path || value.old_path,
     status: value.new_file ? 'added' : value.deleted_file ? 'removed' : value.renamed_file ? 'renamed' : 'modified',
   };
-  if (isString(value.diff)) file.patch = value.diff;
+  if (isString(value.diff)) {
+    file.patch = value.diff;
+    // GitLab sends only the hunks, without `---`/`+++` headers, so every line
+    // that opens with a sign is a changed line.
+    let additions = 0;
+    let deletions = 0;
+    for (const line of value.diff.split('\n')) {
+      if (line.startsWith('+')) additions += 1;
+      else if (line.startsWith('-')) deletions += 1;
+    }
+    file.additions = additions;
+    file.deletions = deletions;
+  }
   return file;
 }
 

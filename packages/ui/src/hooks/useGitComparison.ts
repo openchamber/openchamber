@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitDiffResponse } from '@/lib/api/types';
 import { getCommitFiles, getGitCommitDiff, getGitRangeDiff, getGitRangeFiles } from '@/lib/gitApi';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { useI18n } from '@/lib/i18n';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import type { SourceControlReadContext } from '@/lib/source-control/types';
+import type { SourceControlProvider, SourceControlReadContext } from '@/lib/source-control/types';
 import { sourceControlReadContextParts } from '@/lib/source-control/identity';
 import type { WalkthroughSource } from '@/lib/walkthrough/types';
 import { useGitStore } from '@/stores/useGitStore';
@@ -34,9 +35,12 @@ export function useGitComparison(
   enabled = true,
   revision = '',
   readContext: Readonly<SourceControlReadContext> | null = null,
+  /** The project's host, for wording when no account can read it. */
+  changeRequestProvider: SourceControlProvider | null = null,
 ) {
   const { t } = useI18n();
   const runtimeKey = useGitStore((state) => state.runtimeKey);
+  const provider = readContext?.provider ?? changeRequestProvider;
   // A pull request is read through the bound context, so that context is part
   // of what is being compared: a rebind is a different comparison.
   const authority = source?.kind === 'pr' && readContext ? JSON.stringify(sourceControlReadContextParts(readContext)) : '';
@@ -64,7 +68,7 @@ export function useGitComparison(
     try {
       let files: GitComparisonFile[];
       if (target.kind === 'pr') {
-        if (!context) throw new Error(t('session.githubPrPicker.empty.notConnected'));
+        if (!context) throw new Error(t(changeRequestCopy('session.githubPrPicker.empty.notConnected', provider)));
         files = await prCache.load(pushScope, target, () => fetchPullRequestDiff(directory, target, context), force, targetAuthority);
       } else if (target.kind === 'branch') {
         files = (await getGitRangeFiles(directory, { base: target.baseRef, head: target.headRef, includeWorkingTree: true }))
@@ -81,7 +85,7 @@ export function useGitComparison(
       if (generation.current !== request || getRuntimeKey() !== runtime) return;
       setResult({ key, status: 'error', message: error instanceof Error ? error.message : t('diffView.state.failedToLoadDiff') });
     }
-  }, [directory, enabled, key, prCache, pushScope, t]);
+  }, [directory, enabled, key, prCache, provider, pushScope, t]);
   const refresh = useCallback(() => read(true), [read]);
 
   useEffect(() => {

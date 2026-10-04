@@ -372,12 +372,20 @@ describe('walkthrough routes', () => {
     }
   });
 
-  it('rejects a validated non-GitHub PR context explicitly', async () => {
-    validateReadContext.mockResolvedValue({ ...PR_CONTEXT, directory: '/repo', provider: 'gitlab', instance: 'https://gitlab.com' });
+  it('serves a GitLab merge request through the same validated context', async () => {
+    const gitlab = { ...PR_CONTEXT, provider: 'gitlab', instance: 'https://gitlab.com', accountId: 'occred:v1:gitlab:abc:r1' };
+    validateReadContext.mockResolvedValue({ ...gitlab, directory: '/repo' });
+    const response = await prDiff({ kind: 'pr', number: 3 }, gitlab);
+    expect(response.status).toBe(200);
+    expect(lastArgs.readContext).toMatchObject({ provider: 'gitlab', accountId: gitlab.accountId });
+  });
+
+  it('rejects a validated context from a provider it cannot read', async () => {
+    validateReadContext.mockResolvedValue({ ...PR_CONTEXT, directory: '/repo', provider: 'bitbucket', instance: 'https://bitbucket.org' });
     const response = await fetch(`${base}/api/walkthrough/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory: '/repo', source: PR_SOURCE, ...PR_CONTEXT, provider: 'gitlab', instance: 'https://gitlab.com' }),
+      body: JSON.stringify({ directory: '/repo', source: PR_SOURCE, ...PR_CONTEXT, provider: 'bitbucket', instance: 'https://bitbucket.org' }),
     });
 
     expect(response.status).toBe(422);
