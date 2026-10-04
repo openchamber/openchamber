@@ -384,7 +384,9 @@ function ReferencePickerSurface({
         if (sourceStatus === 'disconnected' || list.unavailable === 'disconnected') {
             return centered(
                 <>
-                    <span>{t(source === 'github' ? 'references.picker.empty.github.notConnected' : 'references.picker.empty.linear.notConnected')}</span>
+                    <span>{t(source === 'linear'
+                        ? 'references.picker.empty.linear.notConnected'
+                        : isGitLab ? 'references.picker.empty.gitlab.notConnected' : 'references.picker.empty.github.notConnected')}</span>
                     <Button size="sm" variant="outline" onClick={openSettings}>{t('references.picker.actions.openSettings')}</Button>
                 </>,
             );

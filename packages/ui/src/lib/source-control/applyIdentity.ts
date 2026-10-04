@@ -8,7 +8,7 @@ import type {
 } from '@/lib/api/types';
 import { identityTransport } from '@/lib/api/git-identity';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { instanceHost, remoteTraits, type RemoteTraits } from './identity';
+import { instanceHost, type RemoteTraits } from './identity';
 import { repositoryBindingOwner } from './repository-binding';
 
 export type IdentityApplicability =
@@ -117,12 +117,12 @@ const transportIntent = (
 /** The words for an identity that cannot serve a remote, next to its name. */
 export const describeIdentityApplicability = (
   applicability: IdentityApplicability,
-  t: (key: 'gitView.identity.unavailableHost' | 'gitView.identity.unavailableScheme', params?: Record<string, string>) => string,
+  t: (key: 'gitView.identity.unavailableHost' | 'gitView.identity.unavailableNeedsHttps' | 'gitView.identity.unavailableNeedsSsh', params?: Record<string, string>) => string,
 ): string => {
   if (applicability.applicable) return '';
-  return applicability.reason === 'host'
-    ? t('gitView.identity.unavailableHost', { host: applicability.host })
-    : t('gitView.identity.unavailableScheme', { scheme: applicability.scheme === 'ssh' ? 'SSH' : 'HTTPS' });
+  // Said from the repository's side: what it is that this identity is not.
+  if (applicability.reason === 'host') return t('gitView.identity.unavailableHost', { host: applicability.host });
+  return t(applicability.scheme === 'ssh' ? 'gitView.identity.unavailableNeedsSsh' : 'gitView.identity.unavailableNeedsHttps');
 };
 
 /**
@@ -322,27 +322,23 @@ const applyBinding = async (
       const result = await configureTransportBinding(intent);
       if (result.status === 'configured') read = result.binding;
     }
-    // The identity is the whole answer for this repository, so every address
-    // it can serve follows it: a fork beside its upstream answers as the same
-    // person without being named twice. One it cannot serve — another
-    // instance, an address its transport cannot reach — keeps no grant, and
-    // the repository configuration offers it separately.
+    // The identity is the whole answer for this repository, so every other
+    // address follows it: the server derives their grants from this one — all
+    // of them for the System identity, those on the same host and protocol
+    // for any other. A grant an earlier identity saved on another remote
+    // would keep answering as that identity, so it is removed and the remote
+    // follows this one instead.
     for (const current of read.repository.remotes) {
       const name = current.name;
       if (name === remoteName) continue;
-      const granted = read.binding?.remotes.find((entry) => entry.name === name);
+      const granted = read.binding?.remotes.find((entry) => entry.name === name && !entry.inherited);
       // A grant whose address moved under it, or whose credential is already
       // in question, is flagged for attention on its own and cannot be
       // rewritten from here: the authority it was written against is gone.
-      if (granted && granted.readiness !== 'ready') continue;
-      const fits = identityApplicability(identity, remoteTraits(current.fetch.displayUrl)).applicable;
-      const next = fits ? transportIntent(identity, read, name, directory) : null;
+      if (!granted || granted.readiness !== 'ready') continue;
       requireRuntime();
       try {
-        if (next) {
-          const result = await configureTransportBinding(next);
-          if (result.status === 'configured') read = result.binding;
-        } else if (granted && removeTransportBinding) {
+        if (removeTransportBinding) {
           const result = await removeTransportBinding({
             directory,
             expectedRepositoryId: read.repository.repositoryId,

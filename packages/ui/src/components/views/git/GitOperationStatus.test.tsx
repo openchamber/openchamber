@@ -40,28 +40,36 @@ describe('Git operation feedback', () => {
       operationId: 'git_saved', operation: 'push', targetDigest: 'b'.repeat(64),
     }] });
     expect(html).toContain('git_saved');
-    expect(html).toContain('Operation status unavailable');
-    expect(html).toContain('Checking saved Git operation references');
+    expect(html).toContain('Status unknown');
+    expect(html).toContain('Checking the previous Git transfer');
     expect(html).not.toContain('Running');
     expect(html).not.toContain('Planned');
-    expect(html).not.toContain('Cancel operation');
+    expect(html).not.toContain('>Cancel<');
   });
-  test('renders the retained commit, completed local steps and partial result without a replay control', () => {
+  test('renders the retained commit and partial result without a replay control or internals', () => {
     const html = render(entry);
-    for (const text of ['git_original', 'Partially completed', 'Fetch', 'Pull', 'Push', 'Local repository updated', 'The local commit was created and is retained.']) expect(html).toContain(text);
-    expect(html).not.toContain('Cancel operation');
+    for (const text of ['Partly done', 'Push rejected', 'Fetch', 'Pull', 'Push', 'The commit was made locally and kept.']) expect(html).toContain(text);
+    expect(html).not.toContain('git_original');
+    expect(html).not.toContain('TRANSPORT_FAILED');
+    expect(html).not.toContain('>Cancel<');
     expect(html).not.toContain('Retry');
     expect(html).toContain('aria-live="polite"');
+  });
+
+  test('says nothing while a transfer runs or while an empty saved-operation check settles', () => {
+    const running = { ...entry.reads[0], operation: { ...entry.reads[0].operation, state: 'planned' as const } };
+    expect(render({ reads: [running], localCommit: false, executing: true, checking: false })).toBe('');
+    expect(render({ reads: [], localCommit: false, executing: false, checking: false, pending: [], problem: 'reconciling' })).toBe('');
   });
 
   test('unavailable active operations expose Refresh and Cancel, not a definite failed result', () => {
     const operation = { ...entry.reads[0].operation, state: 'running' as const };
     const html = render({ ...entry, reads: [{ ...entry.reads[0], operation, availability: 'unavailable' }] });
-    expect(html).toContain('Operation status unavailable');
-    expect(html).toContain('The outcome is unknown.');
-    expect(html).toContain('Refresh operation');
-    expect(html).toContain('Cancel operation');
-    expect(html).not.toContain('Partially completed');
+    expect(html).toContain('Status unknown');
+    expect(html).toContain('not known whether this went through');
+    expect(html).toContain('Check again');
+    expect(html).toContain('>Cancel<');
+    expect(html).not.toContain('Partly done');
   });
 
   test('renders bounded hydration details with the redacted endpoint', () => {

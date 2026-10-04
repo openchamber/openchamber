@@ -23,6 +23,7 @@ const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
@@ -505,6 +506,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
+  const repositoryProvider = useRepositoryReferenceProvider(effectiveDirectory || null);
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
@@ -1069,9 +1071,14 @@ export const ContextPanel: React.FC = () => {
         />
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-          {activeTab ? getTabIcon(activeTab, faviconByOrigin) : null}
+          {/* A GitLab project's change requests are merge requests. */}
+          {activeTab?.mode === 'pr' && repositoryProvider === 'gitlab'
+            ? <Icon name="gitlab" className="h-3.5 w-3.5" />
+            : activeTab ? getTabIcon(activeTab, faviconByOrigin) : null}
           <span className="truncate typography-ui-label text-foreground">
-            {activeTab ? getModeLabel(activeTab.mode, t) : null}
+            {activeTab?.mode === 'pr' && repositoryProvider === 'gitlab'
+              ? t('contextPanel.mode.mr')
+              : activeTab ? getModeLabel(activeTab.mode, t) : null}
           </span>
         </div>
       )}

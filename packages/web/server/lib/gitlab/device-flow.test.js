@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultGitLabClientId, exchangeGitLabDeviceCode, probeGitLabAuth } from './device-flow.js';
+import { defaultGitLabClientId, exchangeGitLabDeviceCode, probeGitLabAuth, refreshGitLabAccessToken } from './device-flow.js';
 
 const json = (body, status = 200) => Response.json(body, { status });
 
@@ -88,5 +88,31 @@ describe('GitLab device flow', () => {
     const fetch = vi.fn().mockResolvedValueOnce(json({ access_token: 'oauth-token', scope: 'api' }));
     await expect(exchangeGitLabDeviceCode({ origin: 'https://gitlab.example.com', clientId: 'client', deviceCode: 'device', fetch }))
       .resolves.toEqual({ status: 'connected', accessToken: 'oauth-token', scope: 'api' });
+  });
+
+  it('keeps what renews an OAuth sign-in and trades a refresh token for a new pair', async () => {
+    const origin = 'https://gitlab.example.com';
+    const exchange = vi.fn().mockResolvedValueOnce(json({
+      access_token: 'oauth-token', scope: 'api', refresh_token: 'refresh-1', expires_in: 7200,
+    }));
+    await expect(exchangeGitLabDeviceCode({ origin, clientId: 'client', deviceCode: 'device', fetch: exchange }))
+      .resolves.toEqual({ status: 'connected', accessToken: 'oauth-token', scope: 'api', refreshToken: 'refresh-1', expiresIn: 7200 });
+
+    const refresh = vi.fn().mockResolvedValueOnce(json({ access_token: 'oauth-token-2', refresh_token: 'refresh-2', expires_in: 7200 }));
+    await expect(refreshGitLabAccessToken({ origin, clientId: 'client', refreshToken: 'refresh-1', fetch: refresh }))
+      .resolves.toEqual({ accessToken: 'oauth-token-2', refreshToken: 'refresh-2', expiresIn: 7200 });
+    expect(refresh.mock.calls[0][0]).toBe(`${origin}/oauth/token`);
+    expect(Object.fromEntries(new URLSearchParams(String(refresh.mock.calls[0][1].body))))
+      .toEqual({ client_id: 'client', refresh_token: 'refresh-1', grant_type: 'refresh_token' });
+  });
+
+  it('tells a rejected refresh grant apart from an instance that is down', async () => {
+    const origin = 'https://gitlab.example.com';
+    const rejected = vi.fn().mockResolvedValueOnce(json({ error: 'invalid_grant' }, 400));
+    await expect(refreshGitLabAccessToken({ origin, clientId: 'client', refreshToken: 'spent', fetch: rejected }))
+      .rejects.toMatchObject({ kind: 'invalid-token' });
+    const down = vi.fn().mockResolvedValueOnce(json({ message: 'maintenance' }, 503));
+    await expect(refreshGitLabAccessToken({ origin, clientId: 'client', refreshToken: 'live', fetch: down }))
+      .rejects.toMatchObject({ kind: 'temporarily-unavailable' });
   });
 });

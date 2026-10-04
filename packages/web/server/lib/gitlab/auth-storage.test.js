@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSourceControlAuthStore } from './auth-storage.js';
 
 const execFileAsync = promisify(execFile);
@@ -109,4 +109,62 @@ describe('source-control auth storage', () => {
     await expect(store.listAccounts(origin)).resolves.toHaveLength(2);
     expect((await fs.readdir(directory)).filter((name) => name.endsWith('.lock') || name.endsWith('.tmp'))).toEqual([]);
   });
+
+  describe('OAuth renewal', () => {
+    const origin = 'https://gitlab.com';
+    const user = { id: 7, login: 'person' };
+    const renewingStore = async (refreshOAuthToken, clock) => {
+      const { filePath } = await makeStore();
+      return createSourceControlAuthStore({ filePath, refreshOAuthToken, now: () => clock.now });
+    };
+
+    it('renews an expiring token once for concurrent readers and keeps the credential id and revision', async () => {
+      const clock = { now: 1_000_000 };
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      const refresh = vi.fn(async () => { await gate; return { accessToken: 'fresh', refreshToken: 'refresh-2', expiresIn: 7200 }; });
+      const store = await renewingStore(refresh, clock);
+      const account = await store.setAccount(origin, { token: 'stale', user, source: 'oauth', scope: 'api', refreshToken: 'refresh-1', expiresIn: 7200 });
+
+      await expect(store.readAccount(origin, account.id, account.credentialRevision)).resolves.toMatchObject({ token: 'stale' });
+      expect(refresh).not.toHaveBeenCalled();
+
+      clock.now += (7200 - 60) * 1000;
+      const readers = [store.readAccount(origin, account.id, account.credentialRevision), store.readInstance(origin)];
+      release();
+      const [renewed, instance] = await Promise.all(readers);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith({ origin, refreshToken: 'refresh-1' });
+      expect(renewed).toMatchObject({ id: account.id, credentialRevision: account.credentialRevision, token: 'fresh', refreshToken: 'refresh-2' });
+      expect(instance.accounts[0]).toMatchObject({ token: 'fresh', expiresAt: clock.now + 7200 * 1000 });
+    });
+
+    it('leaves the credential alone when GitLab refuses the refresh, and personal tokens are never renewed', async () => {
+      const clock = { now: 1_000_000 };
+      const refresh = vi.fn(async () => { throw Object.assign(new Error('invalid_grant'), { kind: 'invalid-token' }); });
+      const store = await renewingStore(refresh, clock);
+      const oauth = await store.setAccount(origin, { token: 'stale', user, source: 'oauth', refreshToken: 'refresh-1', expiresIn: 60 });
+      const pat = await store.setAccount(origin, { token: 'pat', user, source: 'pat', refreshToken: 'ignored', expiresIn: 60 });
+
+      await expect(store.readAccount(origin, oauth.id)).resolves.toMatchObject({ token: 'stale', status: 'valid' });
+      await expect(store.renewAccount(origin, oauth.id)).resolves.toBe(false);
+      await expect(store.renewAccount(origin, pat.id)).resolves.toBe(false);
+      expect(pat.refreshToken).toBeUndefined();
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it('renews on demand after a refused request and survives a reload', async () => {
+      const clock = { now: 1_000_000 };
+      const refresh = vi.fn(async () => ({ accessToken: 'fresh', refreshToken: 'refresh-2', expiresIn: 7200 }));
+      const { filePath } = await makeStore();
+      const store = createSourceControlAuthStore({ filePath, refreshOAuthToken: refresh, now: () => clock.now });
+      const account = await store.setAccount(origin, { token: 'stale', user, source: 'oauth', refreshToken: 'refresh-1', expiresIn: 7200 });
+
+      await expect(store.renewAccount(origin, account.id)).resolves.toBe(true);
+      const reloaded = createSourceControlAuthStore({ filePath });
+      await expect(reloaded.readAccount(origin, account.id, account.credentialRevision))
+        .resolves.toMatchObject({ token: 'fresh', refreshToken: 'refresh-2' });
+    });
+  });
 });
+

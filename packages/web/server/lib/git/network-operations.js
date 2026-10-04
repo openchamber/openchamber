@@ -563,13 +563,17 @@ export function createNetworkOperations({
       if (!match) return false;
       gitDirectory = pathImpl.resolve(directory, match[1]);
     }
-    try {
-      await fsImpl.stat(pathImpl.join(gitDirectory, 'MERGE_HEAD'));
-      return true;
-    } catch (error) {
-      if (error?.code === 'ENOENT') return false;
-      throw error;
+    // Pull integrates by rebasing, so a stopped integration is a rebase in
+    // progress; MERGE_HEAD still counts for a merge someone started by hand.
+    for (const marker of ['rebase-merge', 'rebase-apply', 'MERGE_HEAD']) {
+      try {
+        await fsImpl.stat(pathImpl.join(gitDirectory, marker));
+        return true;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
     }
+    return false;
   });
 
   const transport = async (plan, controls, deadline) => {
@@ -1538,7 +1542,8 @@ export function createNetworkOperations({
             await recordRemoteTrackingRef(plan, controls, integrationContext, deadline, fetchedSha, plan.target.sourceRef);
             mergeStarted = true;
             await controls.markIntegrationStarted();
-            await commandResult(plan, controls, ['merge', '--no-edit', '--no-verify', fetchedSha], integrationContext, deadline);
+            // Local commits are replayed on top of the fetched ones, as pull always did here.
+            await commandResult(plan, controls, ['rebase', '--no-verify', '--no-autostash', fetchedSha], integrationContext, deadline);
             mergeStarted = false;
             await controls.markStepCompleted('updated-local-repository');
             result = { state: 'succeeded' };
@@ -1555,8 +1560,8 @@ export function createNetworkOperations({
         result = terminal('partial', 'TRANSPORT_FAILED', 'Push succeeded, but local upstream configuration failed');
       } else if (plan.target.operation === 'push' && plan.target.forceWithLease && isLeaseConflict(output)) {
         result = terminal('conflicted', 'CONFLICT', 'Push force lease no longer matches the remote ref');
-      } else if (plan.target.operation === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files/i.test(output)) {
-        result = terminal('conflicted', 'CONFLICT', 'Pull left merge conflicts in the local repository');
+      } else if (plan.target.operation === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files|could not apply/i.test(output)) {
+        result = terminal('conflicted', 'CONFLICT', 'Pull left conflicts in the local repository; resolve them and continue the rebase');
       } else if (mergeStarted && (error.cancelled || error.timedOut || controls.isCancellationRequested())) {
         let mergeInProgress = false;
         try { mergeInProgress = await hasMergeState(plan.directory); } catch {}
@@ -1659,7 +1664,7 @@ export function createNetworkOperations({
       if (!SHA_PATTERN.test(fetchedSha)) throw operationError('STALE_CONFIG', 'Fetched ref is invalid', 409);
       mergeStarted = true;
       await controls.markIntegrationStarted();
-      await commandResult(fetchPlan, controls, ['merge', '--no-edit', '--no-verify', fetchedSha], integrationContext, deadline);
+      await commandResult(fetchPlan, controls, ['rebase', '--no-verify', '--no-autostash', fetchedSha], integrationContext, deadline);
       mergeStarted = false;
       await controls.markStepCompleted('updated-local-repository');
       const hydrated = await hydrateIntegration(fetchPlan, controls, deadline);
@@ -1709,8 +1714,8 @@ export function createNetworkOperations({
       const redacted = createGitRedactor({
         secrets: [...(context?.secrets ?? []), plan.directory],
       }).error(error);
-      if (activeStep === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files/i.test(output)) {
-        const publicFailure = publicError('CONFLICT', 'Sync pull left merge conflicts in the local repository');
+      if (activeStep === 'pull' && /\bCONFLICT\b|automatic merge failed|unmerged files|could not apply/i.test(output)) {
+        const publicFailure = publicError('CONFLICT', 'Sync pull left conflicts in the local repository; resolve them and continue the rebase');
         step('pull', 'conflicted', publicFailure);
         return completion('conflicted', publicFailure);
       }

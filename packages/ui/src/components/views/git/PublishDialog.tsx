@@ -114,8 +114,6 @@ export function PublishDialog({ context, onSelect }: {
             </SettingsStackedField>
             <SettingsStackedField
               label={<label htmlFor={`${id}-branch`}>{t('gitView.publish.destinationBranch')}</label>}
-              description={<code className="break-all">{`refs/heads/${context.status.current} → ${pushRemote || '?'}:refs/heads/${pushBranch.trim()}`}</code>}
-              descriptionPlacement="after"
               controlClassName={CONTROL_CLASS}
             >
               <Input id={`${id}-branch`} list={`${id}-branches`} className="h-8 rounded-md" value={pushBranch} onChange={(event) => setPushBranch(event.target.value)} />

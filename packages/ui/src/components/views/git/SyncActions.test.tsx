@@ -52,7 +52,7 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
     const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="More sync actions"]');
     if (!trigger) throw new Error('Missing menu trigger');
     await act(async () => { trigger.click(); });
-    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.startsWith('Pull'));
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((entry) => entry.textContent?.startsWith('Pull (rebase)'));
     if (!item) throw new Error('Missing pull item');
     return item;
   };
@@ -60,7 +60,6 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
   try {
     await render(false);
     let item = await openMenu();
-    expect(item.textContent).toContain('origin/main');
     expect(item.getAttribute('aria-disabled')).toBeNull();
     await act(async () => { item.click(); });
     expect(calls).toEqual(['pull:origin']);
@@ -69,7 +68,6 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
     await render(true);
     item = await openMenu();
     expect(item.getAttribute('aria-disabled')).toBe('true');
-    expect(item.textContent).toContain('Commit or stash your changes before pulling');
     await act(async () => { item.click(); });
     expect(calls).toEqual(['pull:origin']);
     const fetchItems = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].filter((entry) => entry.textContent?.includes('Fetch from'));

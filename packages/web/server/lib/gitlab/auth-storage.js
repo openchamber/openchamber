@@ -45,7 +45,7 @@ function parseCredential(value, origin) {
   if (!isPlainObject(value)
     || !exactKeys(value, [
       'credentialId', 'revision', 'providerUserId', 'token', 'user', 'source', 'scope', 'status',
-    ], ['invalidReason'])
+    ], ['invalidReason', 'refreshToken', 'expiresAt'])
     || !validText(value.credentialId) || !Number.isSafeInteger(value.revision) || value.revision < 1
     || !validText(value.providerUserId) || !validText(value.token)
     || !['oauth', 'pat'].includes(value.source) || !isString(value.scope)
@@ -54,6 +54,8 @@ function parseCredential(value, origin) {
   if (providerUserId(origin, user.id) !== value.providerUserId) throw invalidState();
   if (value.invalidReason !== undefined && !validText(value.invalidReason)) throw invalidState();
   if (value.status === 'valid' && value.invalidReason !== undefined) throw invalidState();
+  if (value.refreshToken !== undefined && (value.source !== 'oauth' || !validText(value.refreshToken))) throw invalidState();
+  if (value.expiresAt !== undefined && (!Number.isSafeInteger(value.expiresAt) || value.expiresAt < 0)) throw invalidState();
   return runtimeCredential({ ...value, user });
 }
 
@@ -105,6 +107,8 @@ function serializeState(state) {
           status: credential.status,
         };
         if (credential.status === 'invalid') stored.invalidReason = credential.invalidReason;
+        if (credential.refreshToken) stored.refreshToken = credential.refreshToken;
+        if (credential.expiresAt !== undefined) stored.expiresAt = credential.expiresAt;
         return stored;
       }),
       cliDisabled: instance.cliDisabled,
@@ -123,7 +127,16 @@ function publicInstance(instance) {
   };
 }
 
-export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000 }) {
+// A token this close to expiring is renewed before it is handed out, so a
+// request never starts with one that dies on the way.
+const REFRESH_MARGIN_MS = 5 * 60_000;
+
+/**
+ * `refreshOAuthToken({ origin, refreshToken })` trades an OAuth refresh token
+ * for `{ accessToken, refreshToken?, expiresIn? }`. Without it, stored OAuth
+ * tokens are handed out as they are.
+ */
+export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs = 2_000, refreshOAuthToken, now = Date.now }) {
   let transactions = Promise.resolve();
   const writeState = async (state) => {
     await fsImpl.mkdir(path.dirname(filePath), { recursive: true });
@@ -174,18 +187,83 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     else instances[origin] = instance;
   };
 
+  const needsRenewal = (credential) => credential.status === 'valid' && credential.source === 'oauth'
+    && Boolean(credential.refreshToken) && credential.expiresAt !== undefined
+    && credential.expiresAt - now() < REFRESH_MARGIN_MS;
+  const renewals = new Map();
+  /**
+   * Renews one OAuth credential when it is about to expire. The network call
+   * runs outside the file lock, once per credential however many readers ask,
+   * and its result is written only if the stored refresh token is still the
+   * one that was spent: another process that renewed first wins. The
+   * credential keeps its id and revision, so bindings pinned to it keep
+   * working. A rejected refresh leaves the credential as it is; the request
+   * that then fails marks it invalid the usual way.
+   */
+  const renew = (origin, credential) => {
+    const key = `${origin}\0${credential.credentialId}`;
+    const pending = renewals.get(key);
+    if (pending) return pending;
+    const spent = credential.refreshToken;
+    const running = (async () => {
+      let renewed;
+      try {
+        renewed = await refreshOAuthToken({ origin, refreshToken: spent });
+      } catch {
+        return false;
+      }
+      if (!validText(renewed?.accessToken)) return false;
+      return mutate((state) => {
+        const current = state.providers.gitlab.instances[origin]?.credentials
+          .find((candidate) => candidate.credentialId === credential.credentialId);
+        if (!current || current.refreshToken !== spent) return { changed: false, value: false };
+        current.token = renewed.accessToken;
+        if (validText(renewed.refreshToken)) current.refreshToken = renewed.refreshToken;
+        if (Number.isFinite(renewed.expiresIn) && renewed.expiresIn > 0) current.expiresAt = now() + renewed.expiresIn * 1000;
+        else delete current.expiresAt;
+        return { changed: true, value: true };
+      });
+    })().finally(() => { renewals.delete(key); });
+    renewals.set(key, running);
+    return running;
+  };
+  const renewExpiring = async (origin, credentialId) => {
+    if (!(refreshOAuthToken instanceof Function)) return;
+    const expiring = await read((state) => (state.providers.gitlab.instances[origin]?.credentials ?? [])
+      .filter((credential) => (!credentialId || credential.credentialId === credentialId) && needsRenewal(credential)));
+    await Promise.all(expiring.map((credential) => renew(origin, credential)));
+  };
+
   return Object.freeze({
     listInstances: () => read((state) => Object.keys(state.providers.gitlab.instances)),
     listAccounts: (origin) => read((state) => state.providers.gitlab.instances[origin]?.credentials ?? []),
-    readInstance: (origin) => read((state) => publicInstance(state.providers.gitlab.instances[origin] ?? emptyInstance())),
-    readAccount: (origin, credentialId, revision) => read((state) => {
+    /**
+     * Renews an OAuth credential now, whatever its expiry says. For a request
+     * GitLab just refused: true means a fresh token is stored and the account
+     * should not be written off yet.
+     */
+    renewAccount: async (origin, credentialId) => {
+      if (!(refreshOAuthToken instanceof Function)) return false;
+      const credential = await read((state) => state.providers.gitlab.instances[origin]?.credentials
+        .find((candidate) => candidate.credentialId === credentialId) ?? null);
+      if (credential?.status !== 'valid' || !credential.refreshToken) return false;
+      return renew(origin, credential);
+    },
+    readInstance: async (origin) => {
+      await renewExpiring(origin);
+      return read((state) => publicInstance(state.providers.gitlab.instances[origin] ?? emptyInstance()));
+    },
+    readAccount: async (origin, credentialId, revision) => {
+      await renewExpiring(origin, credentialId);
+      return read((state) => {
       const credential = state.providers.gitlab.instances[origin]?.credentials
         .find((candidate) => candidate.credentialId === credentialId);
       if (!credential || credential.status !== 'valid'
         || (revision !== undefined && credential.revision !== revision)) return null;
       return credential;
-    }),
-    setAccount: (origin, { token, user, source, scope = '' }) => mutate((state) => {
+      });
+    },
+    setAccount: (origin, { token, user, source, scope = '', refreshToken, expiresIn }) => mutate((state) => {
       if (!validText(token) || !['oauth', 'pat'].includes(source) || !isString(scope)) throw invalidState();
       const parsedUser = parseUser(user);
       const credentialId = newCredentialId();
@@ -199,6 +277,8 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
         scope,
         status: 'valid',
       });
+      if (source === 'oauth' && validText(refreshToken)) credential.refreshToken = refreshToken;
+      if (source === 'oauth' && Number.isFinite(expiresIn) && expiresIn > 0) credential.expiresAt = now() + expiresIn * 1000;
       const instances = state.providers.gitlab.instances;
       const instance = instances[origin] ?? emptyInstance();
       instance.credentials.push(credential);

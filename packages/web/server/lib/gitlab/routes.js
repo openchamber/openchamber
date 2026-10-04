@@ -2,7 +2,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { createSourceControlAuthStore } from './auth-storage.js';
-import { defaultGitLabClientId, exchangeGitLabDeviceCode, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
+import { exchangeGitLabDeviceCode, resolveGitLabClientId, probeGitLabAuth, startGitLabDeviceFlow } from './device-flow.js';
 import { getGlabToken } from './glab-credential.js';
 import { normalizeGitLabInstance } from './instance.js';
 import { classifyGitLabFailure } from './network.js';
@@ -107,13 +107,7 @@ export function registerGitLabRoutes(app, options = {}) {
   const store = options.store ?? createSourceControlAuthStore({ filePath: authFile });
   const oauthFlowRegistry = options.oauthFlowRegistry ?? createOAuthFlowRegistry();
   const readSettings = options.readSettings ?? (async () => ({}));
-  const getClientId = async (origin) => {
-    const envValue = isString(process.env.OPENCHAMBER_GITLAB_CLIENT_ID) ? process.env.OPENCHAMBER_GITLAB_CLIENT_ID.trim() : '';
-    if (envValue) return envValue;
-    const settings = await readSettings();
-    const stored = isString(settings?.gitlabClientId) ? settings.gitlabClientId.trim() : '';
-    return stored || defaultGitLabClientId(origin);
-  };
+  const getClientId = (origin) => resolveGitLabClientId(origin, readSettings);
   const glabToken = (origin) => getGlabToken(origin, { execFile: options.execFile, timeoutMs: options.cliTimeoutMs });
   const verify = (origin, token) => verifyGitLabToken({ origin, token, fetch: fetchImpl, timeoutMs });
   const createClient = options.createClient ?? createGitLabClient;
@@ -138,10 +132,13 @@ export function registerGitLabRoutes(app, options = {}) {
     });
   };
   const statusCache = createChangeRequestStatusCache({ ttlMs: STATUS_CACHE_TTL_MS });
-  const invalidateAccount = async (origin, accountId) => {
+  /** Writes an account off after GitLab refused its token, unless renewing it works. Returns whether it was renewed. */
+  const invalidateAccount = async (origin, accountId, { renew = true } = {}) => {
     statusCache.invalidate({ instance: origin, accountId });
+    if (renew && await store.renewAccount?.(origin, accountId)) return true;
     await options.onAccountInvalidated?.(identityFor(origin, accountId));
     await store.markAccountInvalid(origin, accountId, 'unauthorized');
+    return false;
   };
 
   const getUsableGlab = async (origin) => {
@@ -156,7 +153,7 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   };
 
-  const buildStatus = async (origin) => {
+  const buildStatus = async (origin, renewed = false) => {
     const instance = await store.readInstance(origin);
     const activeRecord = instance.cliActive ? null : instance.accounts.find((account) => account.id === instance.activeAccountId) ?? null;
     const active = activeRecord?.status === 'invalid' ? null : activeRecord;
@@ -214,8 +211,9 @@ export function registerGitLabRoutes(app, options = {}) {
     } catch (error) {
       const kind = classifyGitLabFailure(error);
       if (error?.kind === 'invalid-token') {
-        await invalidateAccount(origin, active.id);
-        return buildStatus(origin);
+        // A renewed token gets one more try; refused again, the account is written off.
+        const renewedNow = await invalidateAccount(origin, active.id, { renew: !renewed });
+        return buildStatus(origin, renewedNow);
       }
       return { provider: 'gitlab', instance: origin, status: kind, connected: false, message: error?.message, accounts };
     }
@@ -544,7 +542,10 @@ export function registerGitLabRoutes(app, options = {}) {
       acquired = false;
       if (result.status !== 'connected') return res.json({ connected: false, status: result.error, error: result.message });
       const user = await verify(origin, result.accessToken);
-      const credential = await store.setAccount(origin, { token: result.accessToken, user, source: 'oauth', scope: result.scope });
+      const credential = await store.setAccount(origin, {
+        token: result.accessToken, user, source: 'oauth', scope: result.scope,
+        refreshToken: result.refreshToken, expiresIn: result.expiresIn,
+      });
       await announceConnectedAccount(origin, credential, user);
       return res.json({ connected: true, user, scope: result.scope });
     } catch (error) {

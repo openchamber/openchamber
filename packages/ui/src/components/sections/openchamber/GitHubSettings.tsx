@@ -218,7 +218,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
   }, [captureRuntime, refreshInstances, refreshStatus, sourceControl, stopFlow, t]);
 
   if (isLoading && !hasChecked) {
-    return null;
+    return <p className="typography-meta text-muted-foreground">{t('settings.sourceControl.status.checking')}</p>;
   }
 
   const accounts = status?.accounts ?? [];
@@ -255,7 +255,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
             ? t('settings.github.page.accountSource.cli')
             : t('settings.github.page.accountSource.oauth')}
           statusLabel={(account) => account.status === 'valid'
-            ? t('settings.sourceControl.accounts.available')
+            ? null
             : t('settings.sourceControl.accounts.needsAuthentication')}
           renderActions={(account) => (
             <>

@@ -173,6 +173,9 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.onOpenMobileSheet === next.onOpenMobileSheet
     && prev.onOpenGuestAttach === next.onOpenGuestAttach
     && prev.filesOnly === next.filesOnly
+    // The project's host is known only once its binding loads, so the link
+    // item must follow it rather than keep the GitHub default it first drew.
+    && prev.repositoryProvider === next.repositoryProvider
     && (prev.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
         === (next.attachGuests ?? []).map((guest) => `${guest.id}:${guest.name}:${guest.mode}`).join()
 ));

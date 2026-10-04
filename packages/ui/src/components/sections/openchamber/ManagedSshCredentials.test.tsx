@@ -117,25 +117,24 @@ const mount = async (initialSelection = '') => {
 };
 
 describe('managed SSH inventory UI lifecycle', () => {
-  test('mount stays idle and import requires explicit confirmation of the discovered fingerprint', async () => {
+  test('mount reads the saved keys and import requires explicit confirmation of the discovered fingerprint', async () => {
     const fixture = await mount();
-    expect(fixture.calls).toEqual([]);
-    expect(fixture.picker.disabled).toBe(true);
-    await fixture.click('Load server keys');
+    // The saved keys are read as the editor opens; the host's ~/.ssh is not.
     expect(fixture.calls).toEqual([{ operation: 'inventory' }]);
+    expect(fixture.picker.disabled).toBe(true);
     await fixture.resolve();
     expect(fixture.picker.disabled).toBe(false);
     expect(fixture.selected).toBe('');
     act(() => fixture.picker.onValueChange?.('ocgit:v1:ssh:a2V5X29uZQ'));
     expect(fixture.selected).toBe('ocgit:v1:ssh:a2V5X29uZQ');
-    await fixture.click('Discover host keys');
+    await fixture.click('Find keys in ~/.ssh');
     await fixture.resolve(discovery);
     expect(fixture.calls).toEqual([{ operation: 'inventory' }, { operation: 'discover' }]);
-    expect(fixture.button('Import key').disabled).toBe(true);
+    expect(fixture.button('Add key').disabled).toBe(true);
     expect(fixture.confirmation.checked).toBe(false);
     act(() => fixture.confirmation.onChange(true));
-    expect(fixture.button('Import key').disabled).toBe(false);
-    await fixture.click('Import key');
+    expect(fixture.button('Add key').disabled).toBe(false);
+    await fixture.click('Add key');
     expect(fixture.calls[2]).toEqual({ operation: 'import', candidateId: candidate.candidateId,
       expectedFingerprint: candidate.fingerprint, confirmed: true });
     await fixture.resolve({ status: 'imported', credentials: [...inventory.credentials, importedCredential],
@@ -146,21 +145,21 @@ describe('managed SSH inventory UI lifecycle', () => {
   test('mount keeps an identity\'s saved key until the runtime switches', async () => {
     const fixture = await mount('ocgit:v1:ssh:a2V5X29uZQ');
     expect(fixture.selected).toBe('ocgit:v1:ssh:a2V5X29uZQ');
-    expect(fixture.calls).toEqual([]);
+    await fixture.resolve();
+    expect(fixture.selected).toBe('ocgit:v1:ssh:a2V5X29uZQ');
     fixture.switchRuntime();
     expect(fixture.selected).toBe('');
   });
 
   test('runtime switching clears selection and rejects a late response without automatic reload', async () => {
     const fixture = await mount();
-    await fixture.click('Load server keys');
     await fixture.resolve();
     act(() => fixture.picker.onValueChange?.('ocgit:v1:ssh:a2V5X29uZQ'));
     fixture.switchRuntime();
     expect(fixture.selected).toBe('');
     expect(fixture.picker.disabled).toBe(true);
     expect(fixture.calls).toHaveLength(1);
-    await fixture.click('Load server keys');
+    await fixture.click('Show keys');
     fixture.switchRuntime();
     await fixture.resolve();
     expect(fixture.picker.disabled).toBe(true);
@@ -169,12 +168,14 @@ describe('managed SSH inventory UI lifecycle', () => {
 
   test('read failure disables retained data and can be retried; unmount discards late reads', async () => {
     const fixture = await mount();
-    await fixture.click('Load server keys');
-    await fixture.resolve();
-    await fixture.click('Load server keys');
     await fixture.reject();
     expect(fixture.picker.disabled).toBe(true);
-    await fixture.click('Load server keys');
+    await fixture.click('Show keys');
+    await fixture.resolve();
+    expect(fixture.picker.disabled).toBe(false);
+    expect(() => fixture.button('Show keys')).toThrow();
+    fixture.switchRuntime();
+    await fixture.click('Show keys');
     fixture.unmount();
     await fixture.resolve();
     expect(fixture.calls).toHaveLength(3);
@@ -182,14 +183,16 @@ describe('managed SSH inventory UI lifecycle', () => {
 
   test('a rejected import keeps discovery explicit and allows a fresh discovery retry', async () => {
     const fixture = await mount();
-    await fixture.click('Discover host keys');
+    await fixture.resolve();
+    await fixture.click('Find keys in ~/.ssh');
     await fixture.resolve(discovery);
     act(() => fixture.confirmation.onChange(true));
-    await fixture.click('Import key');
+    await fixture.click('Add key');
     await fixture.resolve({ status: 'rejected', reason: 'candidate-changed' });
     expect(fixture.selected).toBe('');
-    await fixture.click('Discover host keys');
+    await fixture.click('Find keys in ~/.ssh');
     expect(fixture.calls).toEqual([
+      { operation: 'inventory' },
       { operation: 'discover' },
       { operation: 'import', candidateId: candidate.candidateId, expectedFingerprint: candidate.fingerprint, confirmed: true },
       { operation: 'discover' },

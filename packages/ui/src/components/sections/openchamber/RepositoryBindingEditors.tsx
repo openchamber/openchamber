@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   identityAccountConnected,
-  identityDisplayName,
   instanceHost,
   remoteTraits,
   selectableIdentities,
@@ -27,7 +26,6 @@ import type {
 import { identityTransport, isCompleteIdentity } from '@/lib/api/git-identity';
 import {
   auxiliaryGrantIntent,
-  describeIdentityApplicability,
   grantIdentityToRemote,
   identityApplicability,
   type IdentityApplicability,
@@ -35,6 +33,7 @@ import {
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitOperationResultError, runCheckoutHydration } from '@/lib/boundGitNetworkOperation';
 import { repositoryBindingOwner, useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { useConnectedAccountIds, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useGitIdentity } from '@/stores/useGitStore';
@@ -87,13 +86,12 @@ const hydrationRequirements = (operation: GitNetworkOperation | undefined): GitC
 };
 
 /**
- * The remotes the repository's identity has not been given yet.
+ * The remotes the repository's identity does not reach.
  *
- * An identity is written for the remote it was applied to, and a grant names
- * one exact endpoint. A repository that carries a second address — a fork
- * beside its upstream — therefore has one address OpenChamber will not use,
- * and no way to say otherwise. This is that way: the remotes are listed with
- * what stands in their way, and the one the identity can serve gets a button.
+ * Every remote follows the repository's identity: the System identity reaches
+ * all of them, any other identity those on its own host and protocol. What is
+ * left — a remote on another host, or one reached over the other protocol —
+ * is listed here with a choice of the identities that can reach it.
  */
 export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps> = ({ directory, className }) => {
   const { t } = useI18n();
@@ -102,7 +100,7 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
   const gitIdentityProfiles = useGitIdentitiesStore((state) => state.profiles);
   const globalGitIdentity = useGitIdentitiesStore((state) => state.globalIdentity);
   const connectedAccountIds = useConnectedAccountIds();
-  const repositoryAuthor = useGitIdentity(directory);
+  const refreshIdentityAccounts = useSourceControlAuthStore((state) => state.refreshIdentityAccounts);
   const [pending, setPending] = React.useState('');
   const [error, setError] = React.useState(false);
   const requestRef = React.useRef(0);
@@ -120,23 +118,20 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
       (profile) => isCompleteIdentity(profile) && identityAccountConnected(profile, connectedAccountIds)),
     [connectedAccountIds, gitIdentityProfiles, globalGitIdentity],
   );
-  // The repository acts as the identity its author names; that is the one
-  // whose reach these remotes are measured against.
-  const identity = identities.find((profile) => profile.userName === repositoryAuthor?.userName
-    && profile.userEmail === repositoryAuthor?.userEmail) ?? null;
   // A grant whose address moved under it, or whose account is in question, is
-  // as unusable as none at all, and applying the identity again cannot rewrite
-  // it — the authority it was written against is gone. So it is offered here
-  // beside the addresses that never had one.
-  // The address the identity was applied to is the repository's own, and the
-  // strip beside it already says when that one needs attention.
-  const primaryRemote = read?.binding?.providers[0]?.primaryRemote
-    ?? read?.binding?.remotes[0]?.name ?? 'origin';
+  // as unusable as none at all, so it is offered here beside the remotes that
+  // never had one. The identity's own remote is the repository's, and the
+  // identity button already says when that one needs attention.
+  // A repository nobody configured uses the machine's Git for every remote,
+  // so it is read through the effective binding rather than as "no grants".
+  const effective = read ? effectiveRepositoryBinding(read) : null;
+  const primaryRemote = effective?.providers[0]?.primaryRemote
+    ?? effective?.remotes[0]?.name ?? 'origin';
   const ungranted = (read?.repository.remotes ?? []).filter((remote) => remote.name !== primaryRemote
-    && read?.binding?.remotes.find((grant) => grant.name === remote.name)?.readiness !== 'ready');
+    && effective?.remotes.find((grant) => grant.name === remote.name)?.readiness !== 'ready');
 
-  const grant = async (remoteName: string) => {
-    if (!identity || pending) return;
+  const grant = async (remoteName: string, identity: GitIdentityProfile) => {
+    if (pending) return;
     const request = requestRef.current;
     const runtimeKey = getRuntimeKey();
     const isCurrent = () => requestRef.current === request && runtimeKey === getRuntimeKey();
@@ -151,9 +146,7 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
     setPending('');
   };
 
-  // Nothing to say when the repository has no other remote, or when its
-  // identity carries no credentials to give one.
-  if (!identity || !ungranted.length || !git.configureTransportBinding) return null;
+  if (!ungranted.length || !git.configureTransportBinding) return null;
 
   return (
     <SettingsControlGroup
@@ -163,24 +156,24 @@ export const AdditionalRemoteGrants: React.FC<SourceControlBindingSettingsProps>
       contentClassName={SETTINGS_FIELDS_STACK_CLASS}
     >
       {ungranted.map((remote) => {
-        const fit = identityApplicability(identity, remoteTraits(remote.fetch.displayUrl));
+        const traits = remoteTraits(remote.fetch.displayUrl);
         return (
-          <div key={remote.name} className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="typography-ui-label text-foreground">{remote.name}</p>
-              <p className={cn(SETTINGS_HELPER_CLASS, 'break-all')}>
-                {fit.applicable
-                  ? remote.fetch.displayUrl
-                  : describeIdentityApplicability(fit, t)}
+          <div key={remote.name} className="flex min-w-0 items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate typography-ui-label text-foreground">{remote.name}</p>
+              <p className={cn(SETTINGS_HELPER_CLASS, 'truncate')} title={remote.fetch.displayUrl}>
+                {remote.fetch.displayUrl}
               </p>
             </div>
-            {fit.applicable ? (
-              <Button size="sm" variant="outline"
-                disabled={Boolean(pending)}
-                onClick={() => void grant(remote.name)}>
-                {t('gitView.remotes.grant', { identity: identityDisplayName(identity, t) })}
-              </Button>
-            ) : null}
+            <IdentityDropdown
+              activeProfile={null}
+              identities={identities}
+              onSelect={(profile) => void grant(remote.name, profile)}
+              isApplying={pending === remote.name}
+              applicability={(profile) => identityApplicability(profile, traits)}
+              triggerClassName="shrink-0 border border-border"
+              onOpen={() => void refreshIdentityAccounts(sourceControl, gitIdentityProfiles.map((profile) => profile.account))}
+            />
           </div>
         );
       })}

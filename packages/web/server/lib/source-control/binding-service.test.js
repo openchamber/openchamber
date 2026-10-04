@@ -3,7 +3,7 @@ import { createBindingService } from './binding-service.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
 import { createBindingStore } from './binding-storage.js';
 import { createHttpsCredentialReference, createSshCredentialReference, normalizeGitRemoteEndpoint } from '../git/credential-resolver.js';
-import { resolveBindingReadiness } from './binding-contract.js';
+import { parseBinding, parseBindingResponse, resolveBindingReadiness } from './binding-contract.js';
 
 const createMemoryBindingFs = () => {
   const files = new Map();
@@ -115,6 +115,53 @@ describe('explicit remote transport configuration', () => {
     for (const extra of [{ credentialId: 'secret' }, { credentialAccount: account }, { unverifiedConfirmed: true }]) {
       await expect(service.configureTransportBinding({ ...selection, transport: 'anonymous', ...extra })).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_BINDING' });
     }
+  });
+
+  it('lets remotes without their own grant follow the identity: System everywhere, an account on its own host', async () => {
+    const ssh = (url) => ({ rawUrl: url, displayUrl: redactRemoteUrl(url), fingerprint: fingerprintRemoteUrl(url) });
+    const wide = { ...context, remotes: [remote('origin'), remote('fork'), remote('elsewhere', 'gitlab.com'),
+      { name: 'ssh-fork', fetch: ssh('git@github.com:fork/repo.git'), push: ssh('git@github.com:fork/repo.git') }] };
+    const { files, fsImpl } = createMemoryBindingFs();
+    const service = createBindingService({
+      store: createBindingStore({ filePath: '/bindings.json', fsImpl }),
+      resolveRepository: async () => ({ ...wide, remotes: wide.remotes.map((entry) => ({ name: entry.name,
+        fetch: { displayUrl: entry.fetch.displayUrl, fingerprint: entry.fetch.fingerprint },
+        push: { displayUrl: entry.push.displayUrl, fingerprint: entry.push.fingerprint } })) }),
+      resolveTransportRepository: async () => structuredClone(wide),
+      readTransportAccount: async () => resolvedAccount,
+    });
+    const intent = (expectedRevision, name, selection) => {
+      const target = wide.remotes.find((entry) => entry.name === name);
+      return { directory: '/repo', expectedRepositoryId: wide.repositoryId, expectedConfigRevision: wide.configRevision,
+        expectedRevision, remote: name, expectedFetchFingerprint: target.fetch.fingerprint,
+        expectedPushFingerprint: target.push.fingerprint, ...selection };
+    };
+    const validate = (bindingRevision, name) => service.validateGitTransportContext({ directory: '/repo',
+      repositoryId: wide.repositoryId, bindingRevision, configRevision: wide.configRevision, remote: name, endpointKind: 'push' });
+
+    const system = await service.configureTransportBinding(intent(0, 'origin', { transport: 'system', unverifiedConfirmed: true }));
+    for (const name of ['fork', 'elsewhere', 'ssh-fork']) {
+      await expect(validate(system.revision, name)).resolves.toMatchObject({ transportMode: 'system', remote: name });
+    }
+    const shown = await service.get('/repo');
+    expect(shown.binding.remotes.map((entry) => [entry.name, entry.inherited ?? false]))
+      .toEqual([['origin', false], ['fork', true], ['elsewhere', true], ['ssh-fork', true]]);
+    expect(() => parseBindingResponse(shown.binding)).not.toThrow();
+    // Derived grants are what a reader sees, never what is stored.
+    expect(() => parseBinding(shown.binding)).toThrow();
+    expect(JSON.parse(files.get('/bindings.json')).repositories[wide.repositoryId].binding.remotes.map((entry) => entry.name))
+      .toEqual(['origin']);
+
+    const managed = await service.configureTransportBinding(intent(system.revision, 'origin',
+      { transport: 'https', credentialAccount: account }));
+    await expect(validate(managed.revision, 'fork')).resolves.toMatchObject({ transportMode: 'managed', credentialId: accountReference() });
+    for (const name of ['elsewhere', 'ssh-fork']) {
+      await expect(validate(managed.revision, name)).rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_STALE' });
+    }
+
+    // A remote's own grant wins over the one it would inherit.
+    const own = await service.configureTransportBinding(intent(managed.revision, 'fork', { transport: 'system', unverifiedConfirmed: true }));
+    await expect(validate(own.revision, 'fork')).resolves.toMatchObject({ transportMode: 'system' });
   });
 
   it('configures and removes one rediscovered auxiliary grant while preserving siblings', async () => {
@@ -1184,6 +1231,25 @@ describe('source-control binding service', () => {
       directory: '/repository', repositoryId: 'repo_one', provider: 'github', instance: 'github.com',
       accountId: 'github.com#other', bindingRevision: 3, primaryRemote: 'origin',
     })).rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_CONTEXT_MISMATCH' });
+  });
+
+  it('reads a host whose bound account is gone with the account signed in there now', async () => {
+    const binding = {
+      repositoryId: 'repo_one', revision: 3, state: 'needs-attention', configRevision: 'config_one', remotes: [], auxiliary: [],
+      providers: [{ provider: 'github', instance: 'github.com', accountId: 'github.com#gone', primaryRemote: 'origin', readiness: 'account-unavailable', endpoint: null }],
+    };
+    const service = createBindingService({
+      store: { read: vi.fn(async () => ({ revision: 3, binding })), compareAndSwap: vi.fn() },
+      resolveRepository: async () => repository,
+    });
+    const context = {
+      directory: '/repository', repositoryId: 'repo_one', provider: 'github', instance: 'github.com',
+      accountId: 'github.com#current', bindingRevision: 3, primaryRemote: 'origin',
+    };
+    await expect(service.validateReadContext(context)).resolves.toMatchObject({ accountId: 'github.com#current' });
+    // The gone account itself still needs attention rather than reading.
+    await expect(service.validateReadContext({ ...context, accountId: 'github.com#gone' }))
+      .rejects.toMatchObject({ code: 'SOURCE_CONTROL_BINDING_NEEDS_ATTENTION' });
   });
 
   it('rejects client-provided endpoint fields before persistence', async () => {

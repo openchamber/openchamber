@@ -61,6 +61,7 @@ import { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
 import crypto from 'node:crypto';
 import { getGitHubAuthByAccountId } from '../github/auth.js';
 import { createSourceControlAuthStore } from '../gitlab/auth-storage.js';
+import { refreshGitLabAccessToken, resolveGitLabClientId } from '../gitlab/device-flow.js';
 import { createGitCredentialResolver, createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
 import { createGitRepositoryCredentialRuntime } from '../git/repository-credential-runtime.js';
 import { managedSshCommand } from '../git/network-operations.js';
@@ -391,6 +392,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     const gitBinary = resolveGitBinaryForSpawn();
     const gitlabAuthStore = createSourceControlAuthStore({
       filePath: path.join(openchamberDataDir, 'source-control-auth.json'),
+      // GitLab OAuth tokens live two hours; the store renews them before they lapse.
+      refreshOAuthToken: async ({ origin, refreshToken }) => refreshGitLabAccessToken({
+        origin, refreshToken, clientId: await resolveGitLabClientId(origin, readSettingsFromDisk),
+      }),
     });
     const resolveSourceControlAccount = ({ provider, instance, accountId, credentialRevision }) => provider === 'github'
       ? getGitHubAuthByAccountId(accountId, credentialRevision)

@@ -256,15 +256,17 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
 
   const connected = accounts.length > 0;
   const showConnectionMethods = !connected || isAddingAccount;
-  let statusMessage: string;
+  // The accounts listed below say the instance is connected; the line under
+  // the address only speaks when something is in progress or wrong.
+  let statusMessage: string | null;
   if (authEntry?.isLoading) {
-    statusMessage = t('settings.gitlab.status.checking');
+    statusMessage = t('settings.sourceControl.status.checking');
   } else if (tokenRejected) {
     statusMessage = t('settings.gitlab.status.tokenRejected');
   } else if (operationFailed || capabilitiesFailed || status?.status === 'unreachable') {
     statusMessage = t('settings.gitlab.status.operationFailed');
   } else if (accounts.length > 0) {
-    statusMessage = t('settings.sourceControl.accounts.configured');
+    statusMessage = null;
   } else {
     statusMessage = t('settings.gitlab.status.notConnected');
   }
@@ -274,9 +276,11 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
       <div className={cn(INSTANCE_ROW_CLASS, 'flex items-start justify-between gap-4')}>
         <div className="min-w-0">
           <div className="typography-ui-label truncate text-foreground">{identity.instance}</div>
-          <div className="typography-meta mt-0.5 text-muted-foreground">
-            {statusMessage}
-          </div>
+          {statusMessage ? (
+            <div className="typography-meta mt-0.5 text-muted-foreground">
+              {statusMessage}
+            </div>
+          ) : null}
         </div>
         {capabilitiesFailed || status?.status === 'unreachable' ? (
           <Button size="sm" variant="outline" disabled={busy || authEntry?.isLoading} onClick={() => setCapabilitiesAttempt((attempt) => attempt + 1)}>
@@ -293,7 +297,7 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
             currentLabel={t('settings.sourceControl.accounts.inUse')}
             sourceLabel={(account) => t(account.source === 'cli' ? 'settings.gitlab.cli.label' : getManagedCredentialSourceLabelKey(account.source))}
             statusLabel={(account) => account.status === 'valid'
-              ? t('settings.sourceControl.accounts.available')
+              ? null
               : t('settings.sourceControl.accounts.needsAuthentication')}
             renderActions={(account) => (
               <>
@@ -449,7 +453,7 @@ export const GitLabSettings: React.FC = () => {
           className="flex w-full min-w-0 items-center gap-3 px-4 py-3 text-left hover:bg-[var(--interactive-hover)]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--interactive-focus-ring)]"
         >
           <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
-            <Icon name="gitlab-fill" className="size-5 text-foreground" />
+            <Icon name="gitlab" className="size-5 text-foreground" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-foreground">

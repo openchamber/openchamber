@@ -105,7 +105,7 @@ describe('identityApplicability', () => {
     expect(describeIdentityApplicability({ applicable: false, reason: 'host', host: 'private.gitlab.example' }, t))
       .toBe('gitView.identity.unavailableHost:{"host":"private.gitlab.example"}');
     expect(describeIdentityApplicability({ applicable: false, reason: 'scheme', scheme: 'ssh' }, t))
-      .toBe('gitView.identity.unavailableScheme:{"scheme":"SSH"}');
+      .toBe('gitView.identity.unavailableNeedsSsh:{}');
     expect(describeIdentityApplicability({ applicable: true }, t)).toBe('');
   });
 });
@@ -305,10 +305,10 @@ describe('the addresses an identity was already given', () => {
       apis,
     )).toEqual({ status: 'applied' });
 
-    // Otherwise the repository would push to one address as the person it now
-    // acts as, and to the other as the person it used to be.
-    expect(transportCalls.map((call) => [call.remote, call.transport])).toEqual([['origin', 'https'], ['fork', 'https']]);
-    expect(transportCalls[1]).toEqual({
+    // A grant the previous identity saved would keep pushing as the person
+    // the repository used to be; without it the fork follows the new one.
+    expect(transportCalls.map((call) => [call.remote, call.transport])).toEqual([['origin', 'https']]);
+    expect(removalCalls).toEqual([{
       directory: '/repo',
       expectedRepositoryId: 'repo_one',
       expectedRevision: 2,
@@ -316,23 +316,23 @@ describe('the addresses an identity was already given', () => {
       expectedFetchFingerprint: 'fork-fetch',
       expectedPushFingerprint: 'fork-push',
       remote: 'fork',
-      transport: 'https',
-      credentialAccount: next,
-    });
-    expect(removalCalls).toEqual([]);
+    }]);
   });
 
-  test('an address that was never granted is granted along with the rest', async () => {
-    // A fork beside its upstream: the identity answers for both without the
-    // second being named separately.
+  test('an address that was never granted is left to follow the identity', async () => {
+    // A fork beside its upstream: the server derives its grant from the
+    // identity's own, so nothing is written for it.
     const state = withFork('https://github.com/ada/repo.git');
-    state.binding!.remotes = [{ ...remote, mode: 'managed', credentialId: 'grant-origin', readiness: 'ready' }];
+    state.binding!.remotes = [
+      { ...remote, mode: 'managed', credentialId: 'grant-origin', readiness: 'ready' },
+      { ...fork('https://github.com/ada/repo.git'), mode: 'managed', credentialId: 'grant-origin', readiness: 'ready', inherited: true },
+    ];
     const { apis, transportCalls, removalCalls } = harness(state);
     expect(await applyIdentityToRepository(
       { directory: '/repo', remoteName: 'origin', identity: identity({ account: next, transport: 'account' }) },
       apis,
     )).toEqual({ status: 'applied' });
-    expect(transportCalls.map((call) => [call.remote, call.transport])).toEqual([['origin', 'https'], ['fork', 'https']]);
+    expect(transportCalls.map((call) => [call.remote, call.transport])).toEqual([['origin', 'https']]);
     expect(removalCalls).toEqual([]);
   });
 
@@ -394,18 +394,12 @@ describe('the addresses an identity was already given', () => {
 
   test('one that cannot follow leaves the rest written', async () => {
     const { apis, transportCalls } = harness(withFork('https://github.com/ada/repo.git'));
-    let call = 0;
-    apis.git.configureTransportBinding = async (intent: GitTransportBindingIntent) => {
-      transportCalls.push(intent);
-      call += 1;
-      if (call > 1) throw new Error('conflict');
-      return { status: 'configured' as const, binding: withFork('https://github.com/ada/repo.git') };
-    };
+    apis.git.removeTransportBinding = async () => { throw new Error('conflict'); };
     expect(await applyIdentityToRepository(
       { directory: '/repo', remoteName: 'origin', identity: identity({ account: next, transport: 'account' }) },
       apis,
     )).toEqual({ status: 'failed', reason: 'binding' });
-    expect(transportCalls.map((call) => call.remote)).toEqual(['origin', 'fork']);
+    expect(transportCalls.map((call) => call.remote)).toEqual(['origin']);
   });
 });
 

@@ -30,10 +30,11 @@ export type SourceControlTarget = {
 /**
  * The accounts a repository's change requests and issues are read with.
  *
- * A bound provider answers first. A repository nobody bound, or bound to an
- * identity that names no account, still has remotes on hosts the person is
- * signed in to; those are read with the current account of that host, the
- * way they were before bindings existed. `activeAccountFor` says which account
+ * A bound provider answers first. A repository nobody bound, bound to an
+ * identity that names no account, or bound to an account that is gone (signed
+ * out, or signed in again as a new credential), still has remotes on hosts the
+ * person is signed in to; those are read with the current account of that
+ * host, the way they were before bindings existed. `activeAccountFor` says which account
  * that is, and null when none is connected there.
  */
 export const getBoundSourceControlReadContexts = (
@@ -53,7 +54,9 @@ export const getBoundSourceControlReadContexts = (
     bindingRevision: result.revision,
     primaryRemote: provider.primaryRemote,
   }));
-  const boundInstances = new Set((result.binding?.providers ?? []).map((provider) => getSourceControlAuthKeyOf(provider)));
+  const boundInstances = new Set((result.binding?.providers ?? [])
+    .filter((provider) => provider.readiness !== 'account-unavailable')
+    .map((provider) => getSourceControlAuthKeyOf(provider)));
   const remotes = [...result.repository.remotes].sort((a, b) => (a.name === 'origin' ? -1 : b.name === 'origin' ? 1 : 0));
   for (const remote of remotes) {
     const identity = resolveSourceControlIdentity({ name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl }, knownIdentities);

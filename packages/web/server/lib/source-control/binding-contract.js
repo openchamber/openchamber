@@ -80,11 +80,15 @@ const validateBinding = (value, allowPresentation = false) => {
       || !(entry.endpoint === null && entry.readiness !== 'ready' || endpoint(entry.endpoint))) throw invalid();
   }
   for (const entry of value.remotes) {
+    // `inherited` marks a grant derived from the repository's identity in a
+    // response; persisted records never carry it.
     if (!keys(entry, ['name', 'fetch', 'push', 'mode', 'readiness'], [
       'credentialId', ...(allowPresentation && entry.mode === 'managed' ? ['presentation'] : []),
+      ...(allowPresentation ? ['inherited'] : []),
     ])
       || !text(entry.name) || !endpoint(entry.fetch) || !endpoint(entry.push) || !credentialMatches(entry)
       || entry.presentation !== undefined && !credentialPresentation(entry.presentation)
+      || entry.inherited !== undefined && (entry.inherited !== true || entry.readiness !== 'ready')
       || entry.mode === 'anonymous' && !entry.fetch.displayUrl.startsWith('https://')
       || !['ready', 'confirmation-required', 'config-changed'].includes(entry.readiness)) throw invalid();
   }

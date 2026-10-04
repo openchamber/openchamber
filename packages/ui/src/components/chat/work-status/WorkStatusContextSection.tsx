@@ -324,13 +324,13 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
           key={entry.id}
           // The kind, never the author: an agent's link has no avatar, and a
           // mix of faces and icons hid which row was a PR.
+          // An issue reads as an issue wherever it lives — GitHub, GitLab, an
+          // agent's or an extension's link — as on a sidebar row.
           icon={isLinkedChange(entry)
             ? 'git-pull-request'
             : entry.kind === 'linear'
               ? 'linear'
-              : entry.kind === 'guest' || entry.kind === 'external'
-                ? 'attachment-2'
-                : 'record-circle'}
+              : 'record-circle'}
           // The state's colour on the icon too, as on a sidebar row.
           iconColor={liveLookOf(entry)?.color}
           label={renderLinkedLabel(entry)}

@@ -62,6 +62,15 @@ The BTW sheet keeps the inline `PermissionCard` for its child session's
 requests; both render the request through `PermissionRequestContent` and
 `PermissionActions`.
 
+A read-only chat (a subagent session, an archived space) mounts no composer,
+so `ChatContainer` mounts `PermissionDock` and `FormDock` itself above the
+read-only banner. A subagent's requests then show in its own chat and in its
+parent's; both read the same store entries, so answering in one clears the
+other. The parent finds the subagent through the directory store's session
+list, which is why trimming that list never drops a session with a pending
+request and never drops the newest session first (session ids descend with
+time; the reducer trims by creation time).
+
 `SessionSuggestionChip` is not a frame: it renders as the composer's own top
 row, inside the box and inside the mobile pill, so the surface stays one
 shape. Visibility priority is BTW, then a pending form, then a nonempty

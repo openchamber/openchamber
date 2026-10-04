@@ -58,7 +58,7 @@ const PROFILE_ICONS: Array<{ key: string; Icon: IconName; label: string }> = [
   { key: 'graduation', Icon: 'graduation-cap', label: 'School' },
   { key: 'code', Icon: 'code', label: 'Code' },
   { key: 'github', Icon: 'github', label: 'GitHub' },
-  { key: 'gitlab', Icon: 'gitlab-fill', label: 'GitLab' },
+  { key: 'gitlab', Icon: 'gitlab', label: 'GitLab' },
 ];
 
 interface GitIdentityEditorDialogProps {

@@ -13,7 +13,7 @@ const baseOptions = {
   screenWidth: 1200,
   tabs: [],
   linearConnected: true,
-  githubConnected: true,
+  sourceControlConnected: true,
 } as const;
 
 describe('getVisibleContextRailSurfaces', () => {
@@ -74,8 +74,8 @@ describe('getVisibleContextRailSurfaces', () => {
   });
 
   test('hides the pull request surface until GitHub is connected', () => {
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: false }).some((s) => s.id === 'pr')).toBe(false);
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, githubConnected: true }).some((s) => s.id === 'pr')).toBe(true);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: false }).some((s) => s.id === 'pr')).toBe(false);
+    expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: true }).some((s) => s.id === 'pr')).toBe(true);
   });
 
   test('hides Linear until a workspace is connected', () => {

@@ -21,7 +21,7 @@ test('every locale supplies checkout hydration repair copy', async () => {
     for (const key of keys) {
       const messageKey = `gitView.hydration.${key}` as const;
       expect(dict[messageKey]).toBeTruthy();
-      if (locale !== 'en' && !['kind.lfs'].includes(key)) expect(dict[messageKey]).not.toBe(english[messageKey]);
+      if (locale !== 'en' && !['kind.lfs', 'parentRemote', 'endpoint'].includes(key)) expect(dict[messageKey]).not.toBe(english[messageKey]);
     }
   }
 });
@@ -30,13 +30,11 @@ test('every locale supplies the copy for a repository\u2019s other remotes', asy
   const { dict: english } = await import('../../../lib/i18n/messages/en.ts');
   for (const locale of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pl', 'pt-BR', 'tr', 'uk', 'zh-CN', 'zh-TW']) {
     const { dict } = await import(`../../../lib/i18n/messages/${locale}.ts`);
-    for (const key of ['title', 'description', 'grant'] as const) {
+    for (const key of ['title', 'description'] as const) {
       const messageKey = `gitView.remotes.${key}` as const;
       expect(dict[messageKey]).toBeTruthy();
       if (locale !== 'en') expect(dict[messageKey]).not.toBe(english[messageKey]);
     }
-    // The button names the identity it would answer as.
-    expect(dict['gitView.remotes.grant']).toContain('{identity}');
     // The hydration editor asks for an identity per endpoint, and says what a
     // stopped run needs; Turkish is covered here because the older lists above
     // exempt it over Git terms it keeps untranslated.

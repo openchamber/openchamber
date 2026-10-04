@@ -24,10 +24,17 @@ const obviousPublishTargets = (context: GitPublishContext): GitPublishTargets | 
       ? { push: { remoteName: tracked.name, ref }, fetch: { remoteName: tracked.name, ref } }
       : { push: { remoteName: tracked.name, ref } };
   }
-  if (context.action === 'push' && remotes.length === 1) {
-    return { push: { remoteName: remotes[0].name, ref: `refs/heads/${branch}` } };
-  }
-  return null;
+  if (context.action !== 'push') return null;
+  // A new branch goes where the repository's identity points: the remote its
+  // account answers for, or the one remote it holds a grant of its own for.
+  // Remotes reached through that identity are fetchable forks, not where a
+  // branch is published unless someone picks them.
+  const binding = effectiveRepositoryBinding(context.bindingRead);
+  const own = remotes.filter((remote) => !remote.inherited);
+  const home = remotes.find((remote) => remote.name === binding.providers[0]?.primaryRemote)
+    ?? (own.length === 1 ? own[0] : null)
+    ?? (remotes.length === 1 ? remotes[0] : null);
+  return home ? { push: { remoteName: home.name, ref: `refs/heads/${branch}` } } : null;
 };
 
 export function useGitPublishChooser({ directory, branch, chooseContributor }: {

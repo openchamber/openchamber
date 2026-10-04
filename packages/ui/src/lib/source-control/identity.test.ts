@@ -109,8 +109,11 @@ describe('source-control binding read contexts', () => {
       provider: 'github', instance: 'github.com', accountId: 'github.com#current', primaryRemote: 'origin',
       directory: '/repo', repositoryId: 'repo-one', bindingRevision: 0,
     }]);
-    // A host the binding already answers for keeps its bound account, even when it needs attention.
-    expect(getBoundSourceControlReadContexts(bindingRead('needs-attention'), '/repo', active)).toEqual([]);
+    // A bound account that is gone (signed out, or signed in again as a new
+    // credential) gives the host back to the account signed in there now.
+    expect(getBoundSourceControlReadContexts(bindingRead('needs-attention'), '/repo', active).map((context) => context.accountId))
+      .toEqual(['github.com#current']);
+    // A host the binding answers for keeps its bound account.
     expect(getBoundSourceControlReadContexts(bindingRead('bound'), '/repo', active).map((context) => context.accountId)).toEqual(['github.com#7']);
   });
 });

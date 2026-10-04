@@ -36,8 +36,9 @@ import {
 import { cn } from '@/lib/utils';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useGitStatus } from '@/stores/useGitStore';
-import { useSourceControlAuthEntry } from '@/stores/useSourceControlAuthStore';
+import { useSourceControlAuthEntry, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { useRepositoryReferenceProvider } from '@/components/references/referenceSources';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useGuestSurfaces } from '@/hooks/useGuestSurfaces';
@@ -182,7 +183,11 @@ export const ContextPanelRail: React.FC = () => {
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
   const githubAuthChecked = (useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY)?.hasChecked ?? false);
-  const githubConnected = (useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY)?.status?.status === 'connected');
+  // Change requests come from GitHub or GitLab, whichever the project lives on,
+  // so the surface is there when either kind of account is connected.
+  const sourceControlConnected = useSourceControlAuthStore((state) => Object.values(state.entries)
+    .some((entry) => entry.status?.status === 'connected'));
+  const repositoryProvider = useRepositoryReferenceProvider(directoryKey || null);
   const { screenWidth } = useDeviceInfo();
   const gitStatus = useGitStatus(directoryKey || null);
 
@@ -283,10 +288,10 @@ export const ContextPanelRail: React.FC = () => {
       screenWidth,
       tabs,
       linearConnected,
-      githubConnected,
+      sourceControlConnected,
       extras: guestSurfaces,
-    });
-  }, [contextRailHiddenSurfaces, contextRailOrder, githubConnected, guestSurfaces, linearConnected, planModeEnabled, screenWidth, tabs]);
+    }).map((surface) => (surface.id === 'pr' && repositoryProvider === 'gitlab' ? { ...surface, icon: 'gitlab' as const } : surface));
+  }, [contextRailHiddenSurfaces, contextRailOrder, guestSurfaces, linearConnected, planModeEnabled, repositoryProvider, screenWidth, sourceControlConnected, tabs]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
@@ -298,11 +303,11 @@ export const ContextPanelRail: React.FC = () => {
   }, [activeMode, closeContextPanel, directoryKey, linearAuthChecked, linearConnected]);
 
   React.useEffect(() => {
-    if (!directoryKey || !githubAuthChecked || githubConnected || activeMode !== 'pr') {
+    if (!directoryKey || !githubAuthChecked || sourceControlConnected || activeMode !== 'pr') {
       return;
     }
     closeContextPanel(directoryKey);
-  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, githubConnected]);
+  }, [activeMode, closeContextPanel, directoryKey, githubAuthChecked, sourceControlConnected]);
 
   const [isSurfacesDialogOpen, setIsSurfacesDialogOpen] = React.useState(false);
 

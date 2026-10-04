@@ -129,6 +129,25 @@ describe('Git network operation planner', () => {
     }
   });
 
+  it('clones a GitLab repository from its .git address, which GitLab serves without a redirect', async () => {
+    const plan = (remoteUrl, extra = {}) => makePlanner().planNetworkOperation({
+      operation: 'clone', remoteUrl, destinationPath: '/new/repo', transportMode: 'anonymous', ...extra,
+    });
+    const selfHosted = { provider: 'gitlab', instance: 'https://git.example.org', accountId: 'gitlab-one' };
+    const cases = [
+      [await plan('https://gitlab.com/owner/repository'), 'https://gitlab.com/owner/repository.git'],
+      [await plan('https://gitlab.com/owner/repository.git'), 'https://gitlab.com/owner/repository.git'],
+      [await plan('https://git.example.org/team/repository', { providerAccount: selfHosted }), 'https://git.example.org/team/repository.git'],
+      // Other hosts may serve a repository only under its own name.
+      [await plan('https://git.example.org/team/repository'), 'https://git.example.org/team/repository'],
+      [await plan('https://github.com/owner/repository'), 'https://github.com/owner/repository'],
+    ];
+    for (const [plans, endpoint] of cases) {
+      expect(plans.internalPlan.rawEndpoint).toBe(endpoint);
+      expect(plans.publicPlan.target.remote).toEqual({ displayUrl: endpoint, fingerprint: fingerprintRemoteUrl(endpoint) });
+    }
+  });
+
   it('requires separate System consent for every clone auxiliary grant and keeps grants private', async () => {
     const endpoint = { displayUrl: 'https://modules.example/child.git', fingerprint: fingerprintRemoteUrl('https://modules.example/child.git') };
     const input = {

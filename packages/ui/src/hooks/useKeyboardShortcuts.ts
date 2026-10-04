@@ -33,8 +33,7 @@ import { getVisibleContextRailSurfaces } from '@/lib/surfaces/registry';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSourceControlAuthStore, getSourceControlAuthKey } from '@/stores/useSourceControlAuthStore';
-import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
@@ -539,7 +538,7 @@ export const useKeyboardShortcuts = () => {
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
             linearConnected: useLinearAuthStore.getState().status?.connected === true,
-            githubConnected: useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)]?.status?.status === 'connected',
+            sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
             extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });
           const target = visibleSurfaces[switchSurfaceDigit - 1];

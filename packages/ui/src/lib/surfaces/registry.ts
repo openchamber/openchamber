@@ -220,10 +220,10 @@ type VisibleRailSurfacesOptions = {
   tabs: readonly { mode: ContextPanelMode }[];
   /** Linear's rail icon stays off until a workspace is connected. */
   linearConnected: boolean;
-  /** The pull-request rail icon stays off until GitHub is connected (OAuth
-      or a detected `gh` CLI login). GitHub is connected from Settings, so
-      hiding the surface removes no entry point. */
-  githubConnected: boolean;
+  /** The pull-request rail icon stays off until a GitHub or GitLab account is
+      connected (OAuth, a token, or a detected `gh`/`glab` login). Accounts are
+      connected from Settings, so hiding the surface removes no entry point. */
+  sourceControlConnected: boolean;
   /** Installed guest panels. Empty on VS Code and when the catalog has not
       loaded or failed. */
   extras?: readonly ContextSurfaceDescriptor[];
@@ -264,7 +264,7 @@ export const getVisibleContextRailSurfaces = (options: VisibleRailSurfacesOption
     if (surface.id === 'linear' && !options.linearConnected) {
       return false;
     }
-    if (surface.id === 'pr' && !options.githubConnected) {
+    if (surface.id === 'pr' && !options.sourceControlConnected) {
       return false;
     }
     if (surface.availability === 'has-content') {

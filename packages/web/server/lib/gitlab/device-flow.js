@@ -22,6 +22,15 @@ const HOSTED_GITLAB_CLIENT_ID = 'b5db9852a2368e2fd232a9945d94123fb61cf4af67e7eca
 
 export const defaultGitLabClientId = (origin) => (origin === HOSTED_GITLAB_ORIGIN ? HOSTED_GITLAB_CLIENT_ID : '');
 
+/** The OAuth application an instance signs in with: env, then settings, then ours on gitlab.com. */
+export async function resolveGitLabClientId(origin, readSettings) {
+  const envValue = isString(process.env.OPENCHAMBER_GITLAB_CLIENT_ID) ? process.env.OPENCHAMBER_GITLAB_CLIENT_ID.trim() : '';
+  if (envValue) return envValue;
+  const settings = await readSettings?.();
+  const stored = isString(settings?.gitlabClientId) ? settings.gitlabClientId.trim() : '';
+  return stored || defaultGitLabClientId(origin);
+}
+
 function requestDeviceAuthorization(origin, clientId, fetchImpl, timeoutMs) {
   return fetchWithTimeout(fetchImpl, `${origin}/oauth/authorize_device`, {
     method: 'POST',
@@ -98,5 +107,37 @@ export async function exchangeGitLabDeviceCode({ origin, clientId, deviceCode, f
   if (payload?.error === 'authorization_pending' || payload?.error === 'slow_down') return { status: payload.error };
   if (!response.ok) return { status: 'error', error: payload?.error || 'provider_error', message: payload?.error_description || 'GitLab authentication failed' };
   if (!isString(payload?.access_token) || !payload.access_token) throw new GitLabRequestError('provider-error', 'Missing access_token from GitLab');
-  return { status: 'connected', accessToken: payload.access_token, scope: isString(payload.scope) ? payload.scope : '' };
+  return { status: 'connected', accessToken: payload.access_token, scope: isString(payload.scope) ? payload.scope : '', ...renewal(payload) };
+}
+
+/**
+ * What keeps an OAuth sign-in alive. GitLab access tokens expire after two
+ * hours; the refresh token trades for a new pair before then. Absent fields
+ * mean a token that does not expire.
+ */
+function renewal(payload) {
+  const result = {};
+  if (isString(payload?.refresh_token) && payload.refresh_token) result.refreshToken = payload.refresh_token;
+  if (Number.isFinite(payload?.expires_in) && payload.expires_in > 0) result.expiresIn = payload.expires_in;
+  return result;
+}
+
+/**
+ * Trades a refresh token for a new access token. GitLab rotates the refresh
+ * token too, so the old one is spent once this succeeds. A rejected grant is
+ * an invalid sign-in; anything else is the instance being unavailable.
+ */
+export async function refreshGitLabAccessToken({ origin, clientId, refreshToken, fetch: fetchImpl = fetch, timeoutMs = 10_000 }) {
+  const response = await fetchWithTimeout(fetchImpl, `${origin}/oauth/token`, {
+    method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form({ client_id: clientId, refresh_token: refreshToken, grant_type: 'refresh_token' }),
+  }, timeoutMs);
+  const payload = await readJson(response);
+  if (!response.ok) {
+    const rejected = response.status === 400 || response.status === 401;
+    throw new GitLabRequestError(rejected ? 'invalid-token' : 'temporarily-unavailable',
+      payload?.error_description || payload?.error || 'GitLab token refresh failed', response.status);
+  }
+  if (!isString(payload?.access_token) || !payload.access_token) throw new GitLabRequestError('provider-error', 'Missing access_token from GitLab');
+  return { accessToken: payload.access_token, ...renewal(payload) };
 }

@@ -103,6 +103,13 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       }
     }
   };
+  // The saved key is an opaque reference the field can only name once the
+  // list is read, so it is read as the editor opens rather than on request.
+  const sendRef = React.useRef(send);
+  sendRef.current = send;
+  React.useEffect(() => {
+    void sendRef.current({ operation: 'inventory' });
+  }, [git]);
   const credentialReason = (credential: GitManagedSshCredential) => {
     if (credential.capability.status === 'ready') return '';
     if (credential.capability.reason === 'unreadable') return t('settings.sourceControl.ssh.unreadable');
@@ -143,10 +150,14 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
       </SelectItem>)}</SelectContent>
     </Select>
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void send({ operation: 'inventory' })}>
-        {t('settings.sourceControl.ssh.load')}
-      </Button>
-      <Button size="sm" variant="ghost" disabled={controlsDisabled} onClick={() => void send({ operation: 'discover' })}>
+      {/* The list loads as the editor opens; this only brings it back after
+          a failed read or a runtime switch. */}
+      {state.status === 'idle' || state.status === 'error' ? (
+        <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void send({ operation: 'inventory' })}>
+          {t('settings.sourceControl.ssh.load')}
+        </Button>
+      ) : null}
+      <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void send({ operation: 'discover' })}>
         {t('settings.sourceControl.ssh.discover')}
       </Button>
     </div>

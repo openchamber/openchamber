@@ -20,14 +20,23 @@ import type {
     LinearAPI,
     LinearIssue,
     LinearIssueSummary,
+    SourceControlIdentity,
     SourceControlProvider,
     SourceControlReadContext,
 } from '@/lib/api/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
+import { GITHUB_SOURCE_CONTROL_IDENTITY, resolveSourceControlIdentity } from '@/lib/source-control/identity';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { normalizeProjectPath, resolveProjectForSessionDirectory } from '@/lib/projectResolution';
+import {
+    rememberedRepositoryProvider,
+    rememberRepositoryProvider,
+    subscribeRepositoryProviderMemory,
+} from '@/lib/source-control/repositoryProviderMemory';
 
 
 import { fetchGitLabReferenceDetail, fetchGitLabReferencePage } from './gitlabReferences';
@@ -41,43 +50,129 @@ const githubDetails = createValueCache<GitHubReferenceDetail>();
 
 export type ReferenceSourceStatus = 'ready' | 'disconnected' | 'unsupported';
 
+const BUILT_IN_IDENTITIES: SourceControlIdentity[] = [
+    GITHUB_SOURCE_CONTROL_IDENTITY,
+    { provider: 'gitlab', instance: 'https://gitlab.com' },
+];
+
+/**
+ * The project's binding and every host it lives on: the providers it is bound
+ * to and the hosts its remotes point at, whether or not an account there works.
+ */
+function useRepositoryHosts(directory: string | null) {
+    const { sourceControl } = useRuntimeAPIs();
+    const binding = useRepositoryBinding(directory, sourceControl, Boolean(directory));
+    const knownIdentities = useSourceControlAuthStore((state) => state.identities);
+    const hosts = React.useMemo(() => {
+        const read = binding.read;
+        if (!read) return [];
+        const found = new Map<string, SourceControlIdentity>();
+        const add = (identity: SourceControlIdentity) => found.set(getSourceControlAuthKey(identity), identity);
+        for (const provider of read.binding?.providers ?? []) add({ provider: provider.provider, instance: provider.instance });
+        const identities = [...knownIdentities, ...BUILT_IN_IDENTITIES];
+        for (const remote of read.repository.remotes) {
+            const identity = resolveSourceControlIdentity(
+                { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl },
+                identities,
+            );
+            if (identity) add(identity);
+        }
+        return [...found.values()];
+    }, [binding.read, knownIdentities]);
+    return { binding, hosts };
+}
+
+/**
+ * The host whose account reads the project: its read context's, else the host
+ * its remotes point at, GitHub first. Known even while no account there works,
+ * so a surface can name GitLab and ask for that account instead of GitHub's.
+ * Null while the binding loads or when the project lives on neither.
+ */
+export function useRepositoryHost(directory: string | null): SourceControlIdentity | null {
+    const { binding, hosts } = useRepositoryHosts(directory);
+    const context = binding.contexts[0] ?? null;
+    const provider = context?.provider ?? null;
+    const instance = context?.instance ?? null;
+    return React.useMemo(() => {
+        if (provider && instance) return { provider, instance };
+        return hosts.find((host) => host.provider === 'github') ?? hosts.find((host) => host.provider === 'gitlab') ?? null;
+    }, [hosts, instance, provider]);
+}
+
 /**
  * The read context a project's issues and change requests come from, once its
  * binding has been read: GitHub's when the project has one, else GitLab's.
- * Null while it loads, and `missing` when the project has no remote on a
- * connected host.
+ * Null while the binding or an account on one of its hosts is still loading,
+ * and `missing` when no account can read it: no remote on a supported host, or
+ * none of its hosts has a working account.
  */
 export function useGitHubReadContext(directory: string | null): SourceControlReadContext | 'missing' | null {
-    const { sourceControl } = useRuntimeAPIs();
-    const binding = useRepositoryBinding(directory, sourceControl, Boolean(directory));
+    const { binding, hosts } = useRepositoryHosts(directory);
+    const hostPending = useSourceControlAuthStore((state) => hosts
+        .some((host) => !state.entries[getSourceControlAuthKey(host)]?.hasChecked));
     const context = binding.contexts.find((candidate) => candidate.provider === 'github')
         ?? binding.contexts.find((candidate) => candidate.provider === 'gitlab')
         ?? null;
     if (context) return context;
-    return binding.status === 'ready' || binding.status === 'error' ? 'missing' : null;
-}
-
-/** The host a project's items come from; GitHub until its binding says otherwise. */
-export function useRepositoryReferenceProvider(directory: string | null): SourceControlProvider {
-    const context = useGitHubReadContext(directory);
-    return context && context !== 'missing' ? context.provider : 'github';
+    if (binding.status === 'error') return 'missing';
+    return binding.status === 'ready' && !hostPending ? 'missing' : null;
 }
 
 /**
- * Whether the project's issues and change requests can be listed: a project
- * with no readable remote, while no GitHub or GitLab account is connected at
- * all, reads as disconnected.
+ * The host a project's items come from.
+ *
+ * Read contexts name it once the binding and the accounts have both loaded,
+ * but either can still be loading, and a binding nobody watches goes stale
+ * with no contexts. The project's remotes say where it lives in all of those
+ * moments, so they answer meanwhile; GitHub only when nothing says otherwise.
+ * GitHub wins over GitLab when a project has both, as the read context does.
+ */
+export function useRepositoryReferenceProvider(directory: string | null): SourceControlProvider {
+    const { binding, hosts } = useRepositoryHosts(directory);
+    // A worktree shares its project's host, so the answer is kept per project.
+    const projects = useProjectsStore((state) => state.projects);
+    const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+    const projectPath = React.useMemo(() => {
+        if (!directory) return null;
+        const project = resolveProjectForSessionDirectory(projects, worktreesByProject, directory);
+        return normalizeProjectPath(project?.path ?? directory);
+    }, [directory, projects, worktreesByProject]);
+    const runtimeKey = getRuntimeKey();
+    const remembered = React.useSyncExternalStore(
+        subscribeRepositoryProviderMemory,
+        () => rememberedRepositoryProvider(runtimeKey, projectPath),
+    );
+    // What the project itself says, or null while nothing has loaded that could.
+    const known = React.useMemo((): SourceControlProvider | null => {
+        const providers = new Set<SourceControlProvider>(binding.contexts.map((context) => context.provider));
+        if (!providers.size) for (const host of hosts) providers.add(host.provider);
+        if (providers.has('github')) return 'github';
+        return providers.has('gitlab') ? 'gitlab' : null;
+    }, [binding.contexts, hosts]);
+    React.useEffect(() => {
+        if (known) rememberRepositoryProvider(runtimeKey, projectPath, known);
+    }, [known, projectPath, runtimeKey]);
+    return known ?? remembered ?? 'github';
+}
+
+/**
+ * Whether the project's issues and change requests can be listed. A project
+ * that lives on GitHub or GitLab but no account there can read it is
+ * disconnected, and so is a project with no remote at all while no account is
+ * connected anywhere.
  */
 export function useGitHubSourceStatus(directory: string | null): ReferenceSourceStatus {
     const { runtime } = useRuntimeAPIs();
     const context = useGitHubReadContext(directory);
+    const { hosts } = useRepositoryHosts(directory);
     const anyConnected = useSourceControlAuthStore((state) => Object.values(state.entries)
         .some((entry) => entry.status?.connected === true));
     const githubChecked = useSourceControlAuthStore((state) => Boolean(
         state.entries[getSourceControlAuthKey(GITHUB_SOURCE_CONTROL_IDENTITY)]?.hasChecked,
     ));
     if (runtime.isVSCode) return 'unsupported';
-    return context === 'missing' && githubChecked && !anyConnected ? 'disconnected' : 'ready';
+    if (context !== 'missing') return 'ready';
+    return hosts.length > 0 || (githubChecked && !anyConnected) ? 'disconnected' : 'ready';
 }
 
 export function useLinearSourceStatus(): ReferenceSourceStatus {

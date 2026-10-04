@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import type { SourceControlAuthAccount, SourceControlAuthStatus } from '@/lib/api/types';
+import type { SourceControlAuthAccount, SourceControlAuthStatus, SourceControlIdentity } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { getManagedCredentialSourceLabelKey, GITHUB_SOURCE_CONTROL_IDENTITY } from '@/lib/source-control/identity';
@@ -21,14 +21,21 @@ const AVATAR_CLASS = 'flex h-6 w-6 items-center justify-center overflow-hidden r
 
 
 /**
- * The connected GitHub account: an avatar, and a switcher when more than one
- * account is signed in (OAuth and `gh` CLI logins). Renders nothing while
- * GitHub is disconnected — connecting happens in Settings → Integrations.
+ * The connected account of the project's host: an avatar, and a switcher when
+ * more than one account is signed in (OAuth, token and `gh`/`glab` CLI
+ * logins). GitHub unless a GitLab project names its instance. Renders nothing
+ * while that host is disconnected — connecting happens in Settings →
+ * Integrations.
  */
-export const GitHubAccountControl: React.FC<{ className?: string }> = ({ className }) => {
+export const GitHubAccountControl: React.FC<{ className?: string; identity?: SourceControlIdentity }> = ({
+  className,
+  identity = GITHUB_SOURCE_CONTROL_IDENTITY,
+}) => {
   const { t } = useI18n();
   const { sourceControl } = useRuntimeAPIs();
-  const entry = useSourceControlAuthEntry(GITHUB_SOURCE_CONTROL_IDENTITY);
+  const entry = useSourceControlAuthEntry(identity);
+  const gitlab = identity.provider === 'gitlab';
+  const providerIcon = gitlab ? 'gitlab' : 'github-fill';
   const status: SourceControlAuthStatus | null = entry?.status ?? null;
   const setStatus = useSourceControlAuthStore((state) => state.setStatus);
   const [isSwitching, setIsSwitching] = React.useState(false);
@@ -37,13 +44,13 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
     if (!accountId || isSwitching) return;
     setIsSwitching(true);
     try {
-      setStatus(GITHUB_SOURCE_CONTROL_IDENTITY, await sourceControl.authActivate(GITHUB_SOURCE_CONTROL_IDENTITY, accountId));
+      setStatus(identity, await sourceControl.authActivate(identity, accountId));
     } catch (error) {
-      console.error('Failed to switch GitHub account:', error);
+      console.error('Failed to switch source control account:', error);
     } finally {
       setIsSwitching(false);
     }
-  }, [isSwitching, setStatus, sourceControl]);
+  }, [identity, isSwitching, setStatus, sourceControl]);
 
   if (status?.status !== 'connected') {
     return null;
@@ -52,7 +59,9 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
   const login = status.user.username || null;
   const avatarUrl = status.user.avatarUrl ?? null;
   const accounts: GitHubAccount[] = status.accounts;
-  const title = login ? t('header.github.connectedWithLogin', { login }) : t('header.github.connected');
+  const title = gitlab
+    ? login ? t('header.gitlab.connectedWithLogin', { login }) : t('header.gitlab.connected')
+    : login ? t('header.github.connectedWithLogin', { login }) : t('header.github.connected');
   const avatar = avatarUrl ? (
     <img
       src={avatarUrl}
@@ -62,7 +71,7 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
       referrerPolicy="no-referrer"
     />
   ) : (
-    <Icon name="github-fill" className="h-3.5 w-3.5 text-foreground" />
+    <Icon name={providerIcon} className="h-3.5 w-3.5 text-foreground" />
   );
 
   if (accounts.length <= 1) {
@@ -87,7 +96,7 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
-          {t('header.github.accountsTitle')}
+          {t(gitlab ? 'header.gitlab.accountsTitle' : 'header.github.accountsTitle')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {accounts.map((account) => {
@@ -115,12 +124,12 @@ export const GitHubAccountControl: React.FC<{ className?: string }> = ({ classNa
                 />
               ) : (
                 <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
-                  <Icon name="github-fill" className="h-3 w-3 text-muted-foreground" />
+                  <Icon name={providerIcon} className="h-3 w-3 text-muted-foreground" />
                 </div>
               )}
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate typography-ui-label text-foreground">
-                  {accountUser?.name?.trim() || accountUser.username || 'GitHub'}
+                  {accountUser?.name?.trim() || accountUser.username || (gitlab ? 'GitLab' : 'GitHub')}
                 </span>
                 {accountUser.username ? (
                   <span className="truncate typography-micro text-muted-foreground">

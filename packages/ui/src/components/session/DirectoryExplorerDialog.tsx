@@ -137,6 +137,13 @@ const displayPathToAbsolutePath = (value: string, homeDirectory: string): string
   return trimmed;
 };
 
+// The folder name `git clone` gives a checkout: the URL's last segment without `.git`.
+const cloneDirectoryName = (remoteUrl: string): string => {
+  const withoutQuery = remoteUrl.trim().split(/[?#]/, 1)[0] ?? '';
+  const name = withoutQuery.match(/([^/:]+?)(?:\.git)?\/?$/)?.[1]?.trim() ?? '';
+  return name === '.' || name === '..' ? '' : name;
+};
+
 const isPrimaryModifierPressed = (event: React.KeyboardEvent<HTMLInputElement>): boolean => {
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
   return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
@@ -379,12 +386,26 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     ));
   }, []);
 
-  const normalizedTargetPath = normalizeDirectoryPath(targetPath);
-  const isAlreadyAdded = Boolean(normalizedTargetPath && addedProjectPaths.has(normalizedTargetPath));
   const exactEntry = React.useMemo(() => {
     if (!browseFilterQuery) return null;
     return filteredEntries.find((entry) => entry.name === browseFilterQuery) ?? null;
   }, [browseFilterQuery, filteredEntries]);
+  // A clone never lands in a folder that exists: one the path field points at
+  // is where the checkout goes, under the repository's own name, as with
+  // `git clone`. A path that does not exist yet is the checkout itself.
+  const cloneDestination = React.useMemo(() => {
+    if (!isCloneMode || !targetPath || isLoading) return '';
+    const pointsAtExistingFolder = hasTrailingPathSeparator(query)
+      ? !isBrowseDirectoryMissing && browseErrorReason === null
+      : exactEntry !== null;
+    if (!pointsAtExistingFolder) return targetPath;
+    const name = cloneDirectoryName(cloneRemoteUrl);
+    if (!name) return '';
+    return isRootPath(targetPath) ? `/${name}` : `${targetPath}/${name}`;
+  }, [browseErrorReason, cloneRemoteUrl, exactEntry, isBrowseDirectoryMissing, isCloneMode, isLoading, query, targetPath]);
+  const submitTarget = isCloneMode ? cloneDestination : targetPath;
+  const normalizedTargetPath = normalizeDirectoryPath(submitTarget);
+  const isAlreadyAdded = Boolean(normalizedTargetPath && addedProjectPaths.has(normalizedTargetPath));
   const shouldCreateTarget = Boolean(
     targetPath
     && !isAlreadyAdded
@@ -399,7 +420,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     && browseErrorReason !== 'os-permission'
     && browseErrorReason !== 'invalid-response'
     && browseErrorReason !== 'unknown'
-    && ((!isCloneMode && selectionPaths.length > 0) || (!isAlreadyAdded && Boolean(targetPath)));
+    && ((!isCloneMode && selectionPaths.length > 0) || (!isAlreadyAdded && Boolean(submitTarget)));
   // Adding a directory that is already a repository: read what its own .git
   // states so the association can be offered instead of asked for. Nothing is
   // written until the project is added with the proposal still selected.
@@ -726,7 +747,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       // browsing a directory (trailing slash or no filter typing). When
       // the input is in path-entry mode, Space is a literal character
       // and must reach the input value.
-      if (hasTrailingPathSeparator(query)) {
+      if (hasTrailingPathSeparator(query) && !isCloneMode) {
         event.preventDefault();
         if (highlightedRow && highlightedRow.type === 'directory' && !highlightedRow.disabled) {
           togglePathSelection(highlightedRow.path);
@@ -737,7 +758,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     if (event.key === 'Enter') {
       event.preventDefault();
       if (isPrimaryModifierPressed(event)) {
-        void finalizeSelection(targetPath);
+        void finalizeSelection(submitTarget);
         return;
       }
       if (hasHighlightedBrowseItem) {
@@ -749,7 +770,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       event.preventDefault();
       handleClose();
     }
-  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, query, rows.length, targetPath, togglePathSelection]);
+  }, [executeRow, finalizeSelection, handleClose, hasHighlightedBrowseItem, highlightedRow, isCloneMode, query, rows.length, submitTarget, togglePathSelection]);
 
   const showHiddenToggle = (
     <button
@@ -839,7 +860,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             className="absolute right-1.5 top-1/2 h-7 -translate-y-1/2 gap-1 px-2 typography-meta"
             disabled={isCloneMode ? !canSubmitClone : !canAddProject}
             onMouseDown={(event) => event.preventDefault()}
-            onClick={() => void finalizeSelection(targetPath)}
+            onClick={() => void finalizeSelection(submitTarget)}
             title={submitActionLabel}
           >
             {submitActionLabel}
@@ -850,7 +871,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   );
 
   const resultsSection = (
-    <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border/60 bg-[var(--surface-elevated)] shadow-sm">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-[var(--surface-elevated)] shadow-sm">
       <ScrollableOverlay outerClassName="max-h-[min(28rem,58vh)]" className="p-2">
         <div className="px-2 pb-1 pt-0.5 typography-meta font-medium uppercase tracking-wide text-muted-foreground/80">
           {t('directoryExplorerDialog.browse.directories')}
@@ -919,7 +940,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
                     <span className="rounded-full border border-border/60 px-2 py-0.5 typography-meta text-muted-foreground">
                       {t('directoryExplorerDialog.browse.addedBadge')}
                     </span>
-                  ) : row.type === 'directory' ? (
+                  ) : row.type === 'directory' && !isCloneMode ? (
                     <>
                       <button
                         type="button"
@@ -997,7 +1018,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           {isCloneMode ? t('directoryExplorerDialog.actions.addLocalProject') : t('directoryExplorerDialog.actions.cloneRepository')}
         </Button>
         {isMobile ? (
-          <Button size="xs" onClick={() => void finalizeSelection(targetPath)} disabled={isCloneMode ? !canSubmitClone : !canAddProject} className="flex-1">
+          <Button size="xs" onClick={() => void finalizeSelection(submitTarget)} disabled={isCloneMode ? !canSubmitClone : !canAddProject} className="flex-1">
             {submitActionLabel}
           </Button>
         ) : null}
@@ -1040,7 +1061,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
             {showHiddenToggle}
           </div>
         </DialogHeader>
-        <div className="min-h-0 flex-1 px-2 pb-0">{content}</div>
+        <div className="flex min-h-0 flex-1 flex-col px-2 pb-0">{content}</div>
         <DialogFooter className="flex w-full flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           {renderFooter()}
         </DialogFooter>

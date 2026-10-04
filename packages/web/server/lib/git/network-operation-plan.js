@@ -266,6 +266,19 @@ const parseCloneEndpoint = (value) => {
   }
   return endpoint;
 };
+/**
+ * GitLab answers an HTTPS repository address without `.git` with a redirect,
+ * and managed and anonymous transfers never follow one, so a clone from a
+ * GitLab instance uses the `.git` address GitLab itself offers. Other hosts
+ * keep the address as given: some serve a repository only under its own name.
+ */
+const gitLabCloneEndpoint = (endpoint, gitLabInstances) => {
+  if (!endpoint.startsWith('https://')) return endpoint;
+  const parsed = new URL(endpoint);
+  const onGitLab = gitLabInstances.some((instance) => new URL(instance).host === parsed.host);
+  if (!onGitLab || /\.git$/i.test(parsed.pathname)) return endpoint;
+  return `${endpoint}.git`;
+};
 const pathExists = async (target, fsImpl) => {
   try {
     await fsImpl.stat(target);
@@ -674,6 +687,7 @@ export function createNetworkOperationPlanner({
     )) throw planError('Git clone input is invalid');
     const endpoint = parseCloneEndpoint(input.remoteUrl);
     const transportMode = parseTransportMode(input.transportMode);
+    const gitLabInstances = ['https://gitlab.com'];
     let credentialId;
     if (transportMode === 'system') {
       if (input.unverifiedConfirmed !== true || input.credentialAccount !== undefined || Object.hasOwn(input, 'sshCredentialId')) {
@@ -702,6 +716,7 @@ export function createNetworkOperationPlanner({
         const origin = new URL(account.provider === 'github' ? 'https://github.com' : instance);
         if (origin.protocol !== 'https:' || origin.hostname !== parsedEndpoint.host
           || Number(origin.port || 443) !== parsedEndpoint.port) throw planError('Credential account does not match the HTTPS endpoint');
+        if (account.provider === 'gitlab') gitLabInstances.push(instance);
         const accountId = requiredString(account.accountId, 'credential accountId');
         if (accountId !== account.accountId || /[\0\r\n]/.test(accountId)) throw planError('Credential account is invalid');
         if (!(resolveSourceControlAccount instanceof Function)) {
@@ -733,6 +748,8 @@ export function createNetworkOperationPlanner({
     if (await pathExists(destination, fsImpl)) throw planError('Clone destination already exists');
     if (await pathExists(temporaryDirectory, fsImpl)) throw planError('Clone temporary directory already exists');
     const providerAccount = parseCloneProviderAccount(input.providerAccount, normalizeGitRemoteEndpoint(endpoint));
+    if (providerAccount?.provider === 'gitlab') gitLabInstances.push(providerAccount.instance);
+    const transferEndpoint = gitLabCloneEndpoint(endpoint, gitLabInstances);
     const internal = { destination, temporaryDirectory, transportMode, auxiliaryGrants: parseAuxiliaryGrants(input.auxiliaryGrants) };
     if (providerAccount) internal.providerAccount = providerAccount;
     if (transportMode === 'system') internal.unverifiedConfirmed = true;
@@ -740,13 +757,13 @@ export function createNetworkOperationPlanner({
     if (input.gitIdentityId !== undefined) internal.gitIdentityId = requiredString(input.gitIdentityId, 'gitIdentityId');
     return bundlePlans({
       operationId,
-      endpoint,
+      endpoint: transferEndpoint,
       transportMode,
       target: {
         operation: 'clone',
         remote: {
-          displayUrl: redactRemoteUrl(endpoint),
-          fingerprint: fingerprintRemoteUrl(endpoint),
+          displayUrl: redactRemoteUrl(transferEndpoint),
+          fingerprint: fingerprintRemoteUrl(transferEndpoint),
         },
         destination: {
           displayName: pathImpl.basename(destination),

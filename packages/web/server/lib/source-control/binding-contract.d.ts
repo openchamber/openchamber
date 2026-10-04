@@ -1,7 +1,7 @@
 import type { SourceControlRepositoryBinding, SourceControlRepositoryContext } from '../../../../ui/src/lib/source-control/types';
 
 type StoredRemote = SourceControlRepositoryBinding['remotes'][number] extends infer Remote
-  ? Remote extends { presentation?: unknown } ? Omit<Remote, 'presentation'> : Remote
+  ? Remote extends unknown ? Omit<Remote, 'presentation' | 'inherited'> : never
   : never;
 type StoredBinding = Omit<SourceControlRepositoryBinding, 'remotes'> & { remotes: StoredRemote[] };
 

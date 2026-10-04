@@ -25,6 +25,7 @@ import { useOpenSourceControlSettings } from '@/hooks/useOpenSourceControlSettin
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { GitHubAccountControl } from '@/components/github/GitHubAccountControl';
+import { useRepositoryHost } from '@/components/references/referenceSources';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -44,7 +45,8 @@ import type {
   SourceControlExistingMutationTarget,
   SourceControlReadContext,
 } from '@/lib/api/types';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey, type I18nParams } from '@/lib/i18n';
+import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference, getSourceControlBaseUrl, getSourceControlProviderLabel } from '@/lib/source-control/identity';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -299,7 +301,16 @@ export const PullRequestSection: React.FC<{
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
 }> = ({ directory, branch, baseBranch, trackingBranch, remoteBranches = [], onGeneratedDescription }) => {
-  const { t } = useI18n();
+  const { t: translate } = useI18n();
+  // Named even when no account there can read the project, so a GitLab
+  // project with a lapsed account asks for GitLab, not GitHub.
+  const repositoryHost = useRepositoryHost(directory);
+  // Every change-request message in this section speaks the host's wording:
+  // merge requests on GitLab, pull requests elsewhere.
+  const t = React.useCallback(
+    (key: I18nKey, params?: I18nParams) => translate(changeRequestCopy(key, repositoryHost?.provider), params),
+    [repositoryHost?.provider, translate],
+  );
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const openSourceControlSettings = useOpenSourceControlSettings();
   const { sourceControl } = useRuntimeAPIs();
@@ -372,6 +383,9 @@ export const PullRequestSection: React.FC<{
   }, [beginActiveSourceControlContextsLoad, binding.contexts, binding.scope.runtimeKey, commitActiveSourceControlContexts, directory, releaseActiveSourceControlContexts, sourceControlAuthEntries, sourceControlContextsOwnerId]);
   const readContexts = binding.contexts;
   const readContext = readContexts[0] ?? null;
+  const hostAuthChecked = useSourceControlAuthStore((state) => repositoryHost
+    ? state.entries[getSourceControlAuthKey(repositoryHost)]?.hasChecked === true
+    : false);
   const selectedRemoteName = readContext?.primaryRemote ?? null;
   const sourceControlAuthKey = React.useMemo(
     () => readContext ? getSourceControlAuthKey(readContext) : '',
@@ -1510,8 +1524,10 @@ export const PullRequestSection: React.FC<{
       <section className="border-0 bg-transparent rounded-none">
         <div className="space-y-1 pt-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="typography-ui-header font-semibold text-foreground">{t('gitView.pullRequest.title')}</div>
-            <GitHubAccountControl />
+            <div className="typography-ui-header font-semibold text-foreground">
+              {t('gitView.pullRequest.title')}
+            </div>
+            <GitHubAccountControl identity={repositoryHost ?? undefined} />
           </div>
           <div className="typography-micro text-muted-foreground">
             {t('gitView.pullRequest.availableOnFeatureBranches')}
@@ -1531,8 +1547,12 @@ export const PullRequestSection: React.FC<{
     && mergeMethods.includes(mergeMethod),
   );
   const isConnected = Boolean(status?.connected);
-  const shouldShowConnectionNotice = Boolean(statusIdentity && sourceControlAuthChecked && status?.connected === false);
-  const providerName = statusIdentity ? getSourceControlProviderLabel(statusIdentity.provider) : null;
+  // A project on a host where no account can read it gets the same notice as
+  // one whose account dropped mid-way.
+  const hostUnreadable = Boolean(!readContext && repositoryHost && binding.status === 'ready' && hostAuthChecked);
+  const shouldShowConnectionNotice = Boolean(statusIdentity && sourceControlAuthChecked && status?.connected === false) || hostUnreadable;
+  const noticeIdentity = statusIdentity ?? repositoryHost;
+  const providerName = noticeIdentity ? getSourceControlProviderLabel(noticeIdentity.provider) : null;
   const prVisualState = getPrVisualState(status);
   const prColorVar = prVisualState ? `var(--pr-${prVisualState})` : 'var(--status-info)';
   const prStateIconName = prVisualState === 'draft'

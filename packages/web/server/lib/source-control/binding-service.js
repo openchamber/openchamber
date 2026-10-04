@@ -184,6 +184,60 @@ const inheritedAuxiliaryGrant = (binding, parentRemote, rawEndpoint) => {
     : { mode: parent.mode, readiness: 'ready' };
 };
 
+/**
+ * The remote grant that stands for the repository's identity: the one its
+ * provider association names, else `origin`, else the first ready one.
+ */
+const identityRemoteGrant = (binding) => {
+  const ready = binding.remotes.filter((entry) => entry.readiness === 'ready');
+  const primary = binding.providers[0]?.primaryRemote;
+  return ready.find((entry) => entry.name === primary)
+    ?? ready.find((entry) => entry.name === 'origin')
+    ?? ready[0] ?? null;
+};
+
+const endpointAuthority = (url) => {
+  try {
+    const { protocol, host, port } = normalizeGitRemoteEndpoint(url);
+    return `${protocol}://${host}:${port}`;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The grant a remote without its own record inherits from the repository's
+ * identity.
+ *
+ * An identity answers for the repository rather than for one address. The
+ * System identity reaches every remote the way the machine's Git does; an
+ * account, a key or an anonymous read reaches every remote on the host and
+ * protocol it was granted for, a fork beside its upstream included. A remote
+ * elsewhere, or one its transport cannot speak, stays without a grant until
+ * it is given its own. A remote's own record always wins, and inherited
+ * grants are never persisted: they follow the identity as it changes.
+ */
+const inheritedRemoteGrant = (binding, remote) => {
+  const parent = identityRemoteGrant(binding);
+  if (!parent || !remote.fetch || !remote.push) return null;
+  if (parent.mode !== 'system') {
+    const origin = endpointAuthority(parent.fetch.displayUrl);
+    const reachable = [remote.fetch, remote.push]
+      .every((endpoint) => origin && endpointAuthority(endpoint.rawUrl ?? endpoint.displayUrl) === origin);
+    if (!reachable) return null;
+  }
+  const grant = {
+    name: remote.name,
+    fetch: { displayUrl: remote.fetch.displayUrl, fingerprint: remote.fetch.fingerprint },
+    push: { displayUrl: remote.push.displayUrl, fingerprint: remote.push.fingerprint },
+    mode: parent.mode,
+    readiness: 'ready',
+    inherited: true,
+  };
+  if (parent.mode === 'managed') grant.credentialId = parent.credentialId;
+  return Object.freeze(grant);
+};
+
 /** The grant an unconfigured repository holds for one of its remotes. */
 const implicitSystemRemote = (remote) => Object.freeze({
   name: remote.name, mode: 'system', readiness: 'ready',
@@ -340,8 +394,18 @@ export function createBindingService({
       return unavailablePresentation();
     }
   };
-  const presentRead = async (read) => {
-    if (!read.binding) return read;
+  const presentRead = async (stored) => {
+    if (!stored.binding) return stored;
+    // Inherited grants are part of what a reader sees, never of what a
+    // mutation writes back, so they are added only to the presented read.
+    const granted = new Set(stored.binding.remotes.map((remote) => remote.name));
+    const inherited = (stored.repository?.remotes ?? [])
+      .filter((remote) => !granted.has(remote.name))
+      .map((remote) => inheritedRemoteGrant(stored.binding, remote))
+      .filter(Boolean);
+    const read = inherited.length
+      ? { ...stored, binding: { ...stored.binding, remotes: [...stored.binding.remotes, ...inherited] } }
+      : stored;
     const managed = [...new Set(read.binding.remotes
       .filter((remote) => remote.mode === 'managed')
       .map((remote) => remote.credentialId))];
@@ -390,11 +454,13 @@ export function createBindingService({
       && candidate.accountId === accountId
       && candidate.primaryRemote === primaryRemote);
     if (!boundProvider) {
-      // A repository nobody bound to this host, or bound to an identity that
-      // names no account, is read with the account the client is signed in
-      // to, as it was before bindings existed. The remote must really be on
-      // that host; whether the account exists, the provider route decides.
+      // A repository nobody bound to this host, bound to an identity that
+      // names no account, or bound to an account that is gone, is read with
+      // the account the client is signed in to, as it was before bindings
+      // existed. The remote must really be on that host; whether the account
+      // exists, the provider route decides.
       const boundToHost = providers.some((candidate) => candidate.provider === provider
+        && candidate.readiness !== 'account-unavailable'
         && normalizeProviderInstance(candidate.provider, candidate.instance) === instance);
       const remote = context.remotes.find((candidate) => candidate.name === primaryRemote);
       const remoteHost = remote ? hostOf(remote.fetch.displayUrl) : null;
@@ -462,6 +528,7 @@ export function createBindingService({
     // made against the unbound state.
     const boundRemote = current.binding
       ? current.binding.remotes.find((candidate) => candidate.name === remote)
+        ?? (repositoryRemote ? inheritedRemoteGrant(current.binding, repositoryRemote) : null)
       : (repositoryRemote ? implicitSystemRemote(repositoryRemote) : null);
     if (!repositoryRemote || !boundRemote) throw conflict('Git transport remote binding changed');
     if (boundRemote.readiness !== 'ready') throw conflict('Git transport remote binding needs attention');

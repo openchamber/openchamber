@@ -89,7 +89,7 @@ const IDENTITY_ICON_MAP: Record<string, IconName> = {
   fingerprint: 'fingerprint',
   // Identities made from a connected account carry the provider's mark.
   github: 'github',
-  gitlab: 'gitlab-fill',
+  gitlab: 'gitlab',
 };
 
 const IDENTITY_COLOR_MAP: Record<string, string> = {
@@ -206,7 +206,9 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent sideOffset={8}>{attention ?? t('gitView.header.identityTooltip')}</TooltipContent>
+        <TooltipContent sideOffset={8}>
+          {attention ?? (iconOnly && activeProfile ? identityDisplayName(activeProfile, t) : t('gitView.header.identityTooltip'))}
+        </TooltipContent>
       </Tooltip>
       {/* The list grows with the person's identities, and a trigger low on a
           form leaves little room beneath it, so the menu scrolls inside
@@ -493,10 +495,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   ) : null;
 
-  // The identity names the whole configuration a repository acts as, so the
-  // button says which one rather than only marking that there is one.
+  // The header keeps the identity to its icon; the menu and the tooltip name it.
   const identityControl = (
     <IdentityDropdown
+      iconOnly
       activeProfile={activeIdentityProfile}
       identities={availableIdentities}
       onSelect={onSelectIdentity}

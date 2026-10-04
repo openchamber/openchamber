@@ -114,10 +114,18 @@ repository as it is signed today, its own local author included, and writes
 nothing unless the person picked an identity themselves: adding a directory
 never rewrites an author or binds an account on its own.
 
-Applying an identity grants every remote it can serve, so a fork answers
-beside its upstream without being named twice; an address the identity cannot
+Applying an identity grants its own remote; every other remote follows it
+through a grant the server derives on each read and transfer (`inherited: true`
+on the binding read, never persisted): all of them for the System identity,
+those on the identity's host and protocol for any other, so a fork answers
+beside its upstream without being named twice and a remote added later is
+covered too. Applying an identity removes grants an earlier identity saved on
+other remotes so they follow the new one. An address the identity cannot
 reach — another instance, a scheme its transport does not speak — keeps no
-grant and is offered in the repository configuration. System Git needs no
+grant and is offered in the repository configuration with a choice of the
+identities that can reach it; a remote's own grant wins over the derived one.
+A new branch is pushed to the identity's remote unless someone picks another
+in the publish dialog. System Git needs no
 confirmation: it is what a repository uses until something else is chosen.
 Git in a terminal or the agent's shell follows the same grants through the
 repository's own `.git/config`, which the server writes; the UI records no
@@ -266,7 +274,8 @@ demand, mutation overlays, aliases, scope invalidation, conflict reconciliation
 and retention. The 100-consumer regression permits one initial request and no
 additional requests or notifications for 10,000 warm snapshot reads.
 `applyIdentity.test.ts` covers the provider/transport/author writes an identity
-produces, that every remote the identity can serve follows it, and instance and scheme applicability;
+produces, that grants an earlier identity saved on other remotes are removed so
+they follow the new one, and instance and scheme applicability;
 `identity.test.ts` covers remote traits and host proposal. Account cases in
 `sourceControlOAuthPolling.test.tsx` cover localized retry and runtime switching.
 These tests do not validate a packaged runtime, real credentials or browser paint.

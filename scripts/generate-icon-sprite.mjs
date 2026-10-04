@@ -336,6 +336,10 @@ for (const file of allSrcFiles) {
   while ((nm = iconNameRegex.exec(content)) !== null) {
     addKebabIcon(nm[1] || nm[2])
   }
+  // And every literal of a conditional name, e.g. name={pending ? "loader-4" : "gift"}.
+  for (const expression of content.matchAll(/<Icon\b[^>]*?\bname=\{([^{}]*)\}/g)) {
+    for (const literal of expression[1].matchAll(/["']([a-z][a-z0-9-]*)["']/g)) addKebabIcon(literal[1])
+  }
 
   // Also scan for icon: 'kebab-name' / Icon: 'kebab-name' in object literals.
   const iconPropRegex = /\b[Ii]con:\s*["']([a-z][a-z0-9-]*)["']/g

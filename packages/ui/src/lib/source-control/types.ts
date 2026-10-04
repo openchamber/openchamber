@@ -72,7 +72,15 @@ export interface SourceControlRepositoryBinding {
     readiness: 'ready' | 'confirmation-required' | 'account-unavailable' | 'config-changed';
     endpoint: SourceControlRepositoryEndpoint | null;
   }>; 
-  remotes: Array<SourceControlRepositoryRemote & { readiness: 'ready' | 'confirmation-required' | 'config-changed' } & (
+  remotes: Array<SourceControlRepositoryRemote & {
+    readiness: 'ready' | 'confirmation-required' | 'config-changed';
+    /**
+     * Derived from the repository's identity rather than saved for this
+     * remote: the System identity reaches every remote, any other identity
+     * every remote on its own host and protocol. Never a mutation target.
+     */
+    inherited?: true;
+  } & (
     | { mode: 'managed'; credentialId: string; presentation?: SourceControlManagedCredentialPresentation }
     | { mode: 'system'; credentialId?: never }
     | { mode: 'anonymous'; credentialId?: never }

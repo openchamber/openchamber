@@ -11,6 +11,7 @@ import {
 import { Icon } from "@/components/icon/Icon";
 import type { GitRemote } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -52,7 +53,6 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   aheadCount = 0,
   behindCount = 0,
   trackingRemoteName,
-  trackingBranch,
   hasUncommittedChanges = false,
 }) => {
   const { t } = useI18n();
@@ -95,13 +95,17 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex" tabIndex={blocksRebaseSync || detached ? 0 : undefined}>
-            <Button
+            {/* The two halves are plain buttons inside one rounded frame: the
+                shared Button brings its own squircle corners, which made each
+                half read as a separate round button. */}
+            <button
               type="button"
-              variant="ghost"
-              size="sm"
               onClick={handleSync}
               disabled={isPrimaryDisabled}
-              className="rounded-none"
+              className={cn(
+                'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
+                'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+              )}
               aria-label={t(publish ? 'gitView.publish.title' : 'gitView.sync.syncChanges')}
             >
               {syncAction === 'sync' || syncAction === 'publish' ? (
@@ -110,7 +114,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                 <Icon name="refresh" className="size-4" />
               )}
               <span className="whitespace-nowrap tabular-nums">{primaryLabel}</span>
-            </Button>
+            </button>
           </span>
         </TooltipTrigger>
         <TooltipContent sideOffset={8}>{tooltipLabel}</TooltipContent>
@@ -118,26 +122,24 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button
+          <button
             type="button"
-            variant="ghost"
-            size="sm"
-            className="rounded-none border-l border-[var(--interactive-border)] text-muted-foreground"
+            className={cn(
+              'inline-flex h-7 w-6 items-center justify-center border-l border-[var(--interactive-border)] text-muted-foreground',
+              'transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+            )}
             disabled={isDropdownDisabled}
             aria-label={t('gitView.sync.moreActionsAria')}
           >
             <Icon name="arrow-down-s" className="size-4" />
-          </Button>
+          </button>
         </DropdownMenuTrigger>
         {/* Anchored to the trailing edge so the menu stays inside the pane instead of running past it. */}
         <DropdownMenuContent align="end" className="w-[min(360px,calc(100vw-2rem))] max-h-[320px] overflow-y-auto">
           <DropdownMenuItem disabled={detached} onSelect={onPublish}>
             <Icon name="arrow-up" className="size-4 text-muted-foreground" />
-            {t('gitView.publish.title')}
-          </DropdownMenuItem>
-          <DropdownMenuItem disabled={detached || hasUncommittedChanges} onSelect={onChooseSyncTargets}>
-            <Icon name="refresh" className="size-4 text-muted-foreground" />
-            {t('gitView.publish.syncTitle')}
+            {/* A branch with an upstream is pushed there; only a new one is published. */}
+            {t(hasTracking ? 'gitView.sync.push' : 'gitView.publish.title')}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={isPullDisabled}
@@ -145,17 +147,8 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
               if (trackingRemote) onPull(trackingRemote);
             }}
           >
-            <div className="flex w-full items-center gap-2">
-              <Icon name="arrow-down" className="size-4 text-muted-foreground" />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="typography-ui-label text-foreground">{t('gitView.sync.pull')}</span>
-                <span className="typography-meta text-muted-foreground truncate">
-                  {hasUncommittedChanges
-                    ? t('gitView.sync.pullRebaseBlocked')
-                    : trackingBranch || trackingRemote?.name || t('gitView.sync.noRemoteTooltip')}
-                </span>
-              </div>
-            </div>
+            <Icon name="arrow-down" className="size-4 text-muted-foreground" />
+            {t('gitView.sync.pullRebase')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {remotes.map((remote) => (
