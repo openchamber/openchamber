@@ -12,6 +12,7 @@ import type { FormRequest } from '@/lib/opencode/model';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
+import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { FormFieldControl } from './FormFieldControl';
@@ -94,7 +95,9 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
 const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form, waiting }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
-    const sessions = useSessions();
+    // The sessions of the chat this dock belongs to, which may be a chat of
+    // another project pinned in the side panel.
+    const sessions = useSessions(useChatSessionSelection().directory ?? undefined);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
     const fields = form.fields;

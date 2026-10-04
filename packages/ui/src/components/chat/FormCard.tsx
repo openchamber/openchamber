@@ -47,8 +47,8 @@ export const FormCard: React.FC<FormCardProps> = ({ form }) => {
 const GenericFormCard: React.FC<FormCardProps> = ({ form }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
-    const currentSessionId = useChatSessionSelection().sessionId;
-    const sessions = useSessions();
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
+    const sessions = useSessions(currentSessionDirectory ?? undefined);
 
     const isFromSubagent = React.useMemo(() => {
         if (!currentSessionId || form.sessionID === currentSessionId) return false;

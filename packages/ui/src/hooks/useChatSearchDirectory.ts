@@ -1,3 +1,4 @@
+import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -7,8 +8,10 @@ import { useSessions } from '@/sync/sync-context';
 import type { Session } from '@/lib/opencode/model';
 
 export const useChatSearchDirectory = (): string | undefined => {
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const sessions = useSessions();
+  // Inside a chat the session is its column's, so a chat pinned in the side
+  // panel searches its own session's project.
+  const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();
+  const sessions = useSessions(currentSessionDirectory ?? undefined);
   const worktreeAttachment = useSessionWorktreeStore((state) =>
     currentSessionId ? state.getAttachment(currentSessionId) : undefined
   );
