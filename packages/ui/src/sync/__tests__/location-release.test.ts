@@ -1,16 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { chatDirectoryUse, createChatLocationRelease, type ChatDirectoryUse } from "../chat-location-release"
+import { createLocationRelease, directoryUse, isWorktreeDirectory, type DirectoryUse } from "../location-release"
 import { replaceGlobalSessionStatusById } from "../global-session-status"
 import { replaceDirectoryShells, resetBackgroundShells } from "../background-shells"
+import type { WorktreeMetadata } from "@/types/worktree"
 
-// Leaving a chat directory releases its OpenCode location (and with it the
-// chat's MCP servers) once nothing there still needs it.
+// Leaving a chat or worktree directory releases its OpenCode location (and with
+// it the directory's MCP servers) once nothing there still needs it.
 
 const CHAT = "/home/u/.config/openchamber/chats/2026-10-03/session-a"
 const OTHER_CHAT = "/home/u/.config/openchamber/chats/2026-10-03/session-b"
+const WORKTREE = "/repo/app-worktrees/feature"
 const PROJECT = "/repo/app"
+const CHAT_DELAY = 30_000
+const WORKTREE_DELAY = 300_000
 
-type ManualTimer = { run: () => void; cleared: boolean }
+type ManualTimer = { run: () => void; ms: number; cleared: boolean }
 
 function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelease?: boolean } = {}) {
   const timers: ManualTimer[] = []
@@ -18,10 +22,13 @@ function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelea
   const busy = options.busy ?? new Set<string>()
   const unknown = options.unknown ?? new Set<string>()
   const current = { value: PROJECT }
-  const release = createChatLocationRelease<ManualTimer>({
-    isChatDirectory: (directory) => directory.includes("/chats/"),
+  const release = createLocationRelease<ManualTimer>({
+    releaseDelayMs: (directory) => {
+      if (directory.includes("/chats/")) return CHAT_DELAY
+      return directory === WORKTREE ? WORKTREE_DELAY : null
+    },
     isCurrentDirectory: (directory) => directory === current.value,
-    directoryUse: (directory): ChatDirectoryUse => {
+    directoryUse: (directory): DirectoryUse => {
       if (unknown.has(directory)) return "unknown"
       return busy.has(directory) ? "busy" : "free"
     },
@@ -29,10 +36,9 @@ function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelea
       released.push(directory)
       if (options.failRelease) throw new Error("404")
     },
-    delayMs: 30_000,
     timers: {
-      set: (run) => {
-        const timer = { run, cleared: false }
+      set: (run, ms) => {
+        const timer = { run, ms, cleared: false }
         timers.push(timer)
         return timer
       },
@@ -52,14 +58,24 @@ function harness(options: { busy?: Set<string>; unknown?: Set<string>; failRelea
   return { release, released, fire, timers, busy, move }
 }
 
-describe("chat location release", () => {
-  test("leaving an idle chat releases its location after the delay", () => {
+describe("location release", () => {
+  test("leaving an idle chat releases its location after the chat delay", () => {
     const h = harness()
     h.move(CHAT)
     h.move(PROJECT)
     expect(h.released).toEqual([])
+    expect(h.timers.map((timer) => timer.ms)).toEqual([CHAT_DELAY])
     h.fire()
     expect(h.released).toEqual([CHAT])
+  })
+
+  test("leaving an idle worktree releases it after the longer worktree delay", () => {
+    const h = harness()
+    h.move(WORKTREE)
+    h.move(PROJECT)
+    expect(h.timers.map((timer) => timer.ms)).toEqual([WORKTREE_DELAY])
+    h.fire()
+    expect(h.released).toEqual([WORKTREE])
   })
 
   test("a project directory is never released", () => {
@@ -69,40 +85,42 @@ describe("chat location release", () => {
     expect(h.released).toEqual([])
   })
 
-  test("coming back before the delay keeps the chat running", () => {
+  test("coming back before the delay keeps the directory running", () => {
     const h = harness()
     h.move(CHAT)
     h.move(OTHER_CHAT)
+    h.move(WORKTREE)
     h.move(CHAT)
     h.fire()
-    // Only the chat just left is released; the one returned to is not.
-    expect(h.released).toEqual([OTHER_CHAT])
+    // Only the directories just left are released; the one returned to is not.
+    expect(h.released).toEqual([OTHER_CHAT, WORKTREE])
   })
 
-  test("a busy chat is released once it settles, not while it works", () => {
+  test("busy work is released once it settles, rechecked at the directory's own delay", () => {
+    const h = harness({ busy: new Set([WORKTREE]) })
+    h.move(WORKTREE)
+    h.move(PROJECT)
+    h.fire()
+    expect(h.timers.map((timer) => timer.ms)).toEqual([WORKTREE_DELAY])
+    h.fire()
+    expect(h.released).toEqual([])
+    h.busy.delete(WORKTREE)
+    h.fire()
+    expect(h.released).toEqual([WORKTREE])
+  })
+
+  test("returning to a busy directory stops looking at it", () => {
     const h = harness({ busy: new Set([CHAT]) })
     h.move(CHAT)
     h.move(PROJECT)
     h.fire()
-    h.fire()
-    expect(h.released).toEqual([])
-    h.busy.delete(CHAT)
-    h.fire()
-    expect(h.released).toEqual([CHAT])
-  })
-
-  test("returning to a busy chat stops looking at it", () => {
-    const h = harness({ busy: new Set([CHAT]) })
-    h.move(CHAT)
-    h.move(PROJECT)
-    h.fire()
     h.move(CHAT)
     h.busy.delete(CHAT)
     h.fire()
     expect(h.released).toEqual([])
   })
 
-  test("a chat this window cannot see is left to OpenCode, not polled", () => {
+  test("a directory this window cannot see is left to OpenCode, not polled", () => {
     const h = harness({ unknown: new Set([CHAT]) })
     h.move(CHAT)
     h.move(PROJECT)
@@ -133,7 +151,7 @@ describe("chat location release", () => {
   })
 })
 
-describe("chatDirectoryUse", () => {
+describe("directoryUse", () => {
   const idle = { session_status: {}, permission: {}, form: {} }
 
   afterEach(() => {
@@ -142,23 +160,35 @@ describe("chatDirectoryUse", () => {
   })
 
   test("a directory whose state this window does not hold is unknown", () => {
-    expect(chatDirectoryUse(CHAT, undefined)).toBe("unknown")
+    expect(directoryUse(CHAT, undefined)).toBe("unknown")
   })
 
   test("an idle directory is free", () => {
-    expect(chatDirectoryUse(CHAT, { ...idle, session_status: { ses_1: { type: "idle" } } })).toBe("free")
+    expect(directoryUse(CHAT, { ...idle, session_status: { ses_1: { type: "idle" } } })).toBe("free")
   })
 
   test("a running session holds it, from the directory store or the global index", () => {
-    expect(chatDirectoryUse(CHAT, { ...idle, session_status: { ses_1: { type: "busy" } } })).toBe("busy")
+    expect(directoryUse(CHAT, { ...idle, session_status: { ses_1: { type: "busy" } } })).toBe("busy")
     replaceGlobalSessionStatusById(new Map([["ses_2", { status: { type: "busy" }, directory: CHAT }]]))
-    expect(chatDirectoryUse(CHAT, idle)).toBe("busy")
-    expect(chatDirectoryUse(OTHER_CHAT, idle)).toBe("free")
+    expect(directoryUse(CHAT, idle)).toBe("busy")
+    expect(directoryUse(OTHER_CHAT, idle)).toBe("free")
   })
 
   test("a background command holds it", () => {
     replaceDirectoryShells(CHAT, [{ id: "sh_1", sessionID: "ses_1", command: "bun dev", file: "/tmp/out", startedAt: 1 }], 0)
-    expect(chatDirectoryUse(CHAT, idle)).toBe("busy")
-    expect(chatDirectoryUse(OTHER_CHAT, idle)).toBe("free")
+    expect(directoryUse(CHAT, idle)).toBe("busy")
+    expect(directoryUse(OTHER_CHAT, idle)).toBe("free")
+  })
+})
+
+describe("isWorktreeDirectory", () => {
+  const worktree = (path: string): WorktreeMetadata => ({ source: "sdk", name: "feature", path, projectDirectory: PROJECT, branch: "feature", label: "feature" })
+
+  test("a listed worktree is one, a project root listed among its own worktrees is not", () => {
+    const byProject = new Map([[PROJECT, [worktree(PROJECT), worktree(WORKTREE)]]])
+    expect(isWorktreeDirectory(WORKTREE, byProject)).toBe(true)
+    expect(isWorktreeDirectory(`${WORKTREE}/`, byProject)).toBe(true)
+    expect(isWorktreeDirectory(PROJECT, byProject)).toBe(false)
+    expect(isWorktreeDirectory("/elsewhere", byProject)).toBe(false)
   })
 })

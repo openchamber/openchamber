@@ -1,16 +1,25 @@
+import { normalizePath } from "@/lib/pathNormalization"
 import { normalizeProjectPath } from "@/lib/projectResolution"
+import type { WorktreeMetadata } from "@/types/worktree"
 import { directoriesWithRunningShells } from "./background-shells"
 import { useGlobalSessionStatusStore } from "./global-session-status"
 import type { State } from "./types"
 
 // OpenCode 2 keeps a location for every directory it serves, and each location
-// runs its own copy of the user's local MCP servers. A managed chat has a
-// directory of its own, so every chat opened keeps one copy alive until
-// OpenCode's hour-long inactivity sweep. Once the user has left a chat
-// directory and nothing runs there, ask OpenCode to drop that location now.
+// runs its own copy of the user's local MCP servers until OpenCode's hour-long
+// inactivity sweep. Once the user has left a managed chat or a worktree and
+// nothing runs there, ask OpenCode to drop that location sooner. Project roots
+// are never released: the user returns to them most, and the server keeps
+// reading the last-used one.
 
 /** Long enough that flicking between chats does not restart their MCP servers. */
-const CHAT_LOCATION_RELEASE_DELAY_MS = 30_000
+export const CHAT_LOCATION_RELEASE_DELAY_MS = 30_000
+
+/**
+ * Worktrees are a place the user works in and comes back to through the day,
+ * and coming back after a release waits for the MCP servers to start again.
+ */
+export const WORKTREE_LOCATION_RELEASE_DELAY_MS = 5 * 60_000
 
 type Timers<T> = {
   set: (run: () => void, ms: number) => T
@@ -27,25 +36,25 @@ const realTimers: Timers<ReturnType<typeof setTimeout>> = {
  * `unknown`: this window cannot see the directory's sessions, so it leaves
  * the location to OpenCode's own sweep.
  */
-export type ChatDirectoryUse = "free" | "busy" | "unknown"
+export type DirectoryUse = "free" | "busy" | "unknown"
 
-type ChatLocationReleaseDeps<T> = {
-  isChatDirectory: (directory: string) => boolean
+type LocationReleaseDeps<T> = {
+  /** How long after leaving `directory` to release it; null never releases it. */
+  releaseDelayMs: (directory: string) => number | null
   isCurrentDirectory: (directory: string) => boolean
-  directoryUse: (directory: string) => ChatDirectoryUse
+  directoryUse: (directory: string) => DirectoryUse
   release: (directory: string) => Promise<void>
-  delayMs: number
   timers: Timers<T>
 }
 
-export type ChatLocationRelease = {
+export type LocationRelease = {
   /** The user moved from `previous` to `next`. */
   directoryChanged: (previous: string | null | undefined, next: string | null | undefined) => void
   dispose: () => void
 }
 
-export function createChatLocationRelease<T>(deps: ChatLocationReleaseDeps<T>): ChatLocationRelease {
-  const { delayMs, timers } = deps
+export function createLocationRelease<T>(deps: LocationReleaseDeps<T>): LocationRelease {
+  const { timers } = deps
   const pending = new Map<string, T>()
   let disposed = false
 
@@ -56,20 +65,20 @@ export function createChatLocationRelease<T>(deps: ChatLocationReleaseDeps<T>): 
     pending.delete(directory)
   }
 
-  const schedule = (directory: string) => {
+  const schedule = (directory: string, delayMs: number) => {
     cancel(directory)
-    pending.set(directory, timers.set(() => attempt(directory), delayMs))
+    pending.set(directory, timers.set(() => attempt(directory, delayMs), delayMs))
   }
 
-  const attempt = (directory: string) => {
+  const attempt = (directory: string, delayMs: number) => {
     pending.delete(directory)
     if (disposed || deps.isCurrentDirectory(directory)) return
     const use = deps.directoryUse(directory)
     if (use === "unknown") return
-    // A chat still running, or waiting on the user, is looked at again later:
+    // Work still running, or waiting on the user, is looked at again later:
     // it usually finishes while the user is elsewhere.
     if (use === "busy") {
-      schedule(directory)
+      schedule(directory, delayMs)
       return
     }
     void deps.release(directory).catch(() => {
@@ -81,7 +90,9 @@ export function createChatLocationRelease<T>(deps: ChatLocationReleaseDeps<T>): 
     directoryChanged: (previous, next) => {
       if (disposed || previous === next) return
       if (next) cancel(next)
-      if (previous && deps.isChatDirectory(previous)) schedule(previous)
+      if (!previous) return
+      const delayMs = deps.releaseDelayMs(previous)
+      if (delayMs !== null) schedule(previous, delayMs)
     },
     dispose: () => {
       disposed = true
@@ -96,10 +107,10 @@ export function createChatLocationRelease<T>(deps: ChatLocationReleaseDeps<T>): 
  * retrying session, a pending permission or form, or a background command.
  * `state` is the directory's store; without one the answer is unknown.
  */
-export function chatDirectoryUse(
+export function directoryUse(
   directory: string,
   state: Pick<State, "session_status" | "permission" | "form"> | undefined,
-): ChatDirectoryUse {
+): DirectoryUse {
   if (!state) return "unknown"
   for (const status of Object.values(state.session_status)) {
     if (status.type === "busy" || status.type === "retry") return "busy"
@@ -118,8 +129,23 @@ export function chatDirectoryUse(
   return shellRuns ? "busy" : "free"
 }
 
-export function createRealChatLocationRelease(
-  deps: Omit<ChatLocationReleaseDeps<ReturnType<typeof setTimeout>>, "delayMs" | "timers">,
-): ChatLocationRelease {
-  return createChatLocationRelease({ ...deps, delayMs: CHAT_LOCATION_RELEASE_DELAY_MS, timers: realTimers })
+/** Whether `directory` is a known worktree of a project, not the project root itself. */
+export function isWorktreeDirectory(
+  directory: string,
+  availableWorktreesByProject: ReadonlyMap<string, readonly WorktreeMetadata[]>,
+): boolean {
+  const target = normalizePath(directory)
+  if (!target) return false
+  const projectRoots = [...availableWorktreesByProject.keys()].map((projectPath) => normalizePath(projectPath))
+  if (projectRoots.includes(target)) return false
+  for (const worktrees of availableWorktreesByProject.values()) {
+    if (worktrees.some((worktree) => normalizePath(worktree.path) === target)) return true
+  }
+  return false
+}
+
+export function createRealLocationRelease(
+  deps: Omit<LocationReleaseDeps<ReturnType<typeof setTimeout>>, "timers">,
+): LocationRelease {
+  return createLocationRelease({ ...deps, timers: realTimers })
 }

@@ -159,19 +159,25 @@ are re-read when selected or on the next `server.connected`. The pending
 permissions and forms OpenCode rejected on the way out and the turns it
 interrupted arrive as their own events.
 
-Every managed chat has its own directory, so each chat opened would keep its
-own set of MCP servers for that hour. `chat-location-release.ts` releases a
-chat directory's location (`DELETE /api/debug/location`, the route the
-worktree removal paths already use) 30 s after the selected directory moves
-away from it. It checks again at that moment and keeps the location while the
-chat is selected again, shown in a side panel, has a busy or retrying session,
-a pending permission or form, or a running background command; a busy chat is
-re-checked every 30 s until it settles or is selected. A directory without a
-store is left to OpenCode's own sweep. Project and worktree directories are never released this
-way. Another client still showing the chat gets `location.shutdown` and
-bootstraps it again, which restarts that chat's MCP servers. A failed release
-is ignored: OpenCode's own sweep still applies. VS Code has no managed chats,
-so nothing there qualifies.
+Every managed chat and every worktree has its own directory, so each one
+opened would keep its own set of MCP servers for that hour.
+`location-release.ts` releases such a directory's location
+(`DELETE /api/debug/location`, the route the worktree removal paths already
+use) after the selected directory moves away from it: 30 s for a chat, 5 min
+for a worktree, which the user comes back to through the day and where a
+return after a release waits for the MCP servers to start again. A worktree is
+a path listed in `availableWorktreesByProject` that is not a project root. It
+checks again at that moment and keeps the location while the directory is
+selected again, shown in a side panel, has a busy or retrying session, a
+pending permission or form, or a running background command; a busy directory
+is re-checked at its own delay until it settles or is selected. A directory
+without a store is left to OpenCode's own sweep. Project roots are never
+released this way: the user returns to them most, and the server's default
+scope reads the last-used one. Another client still showing the directory gets
+`location.shutdown` and bootstraps it again, which restarts its MCP servers. A
+failed release is ignored: OpenCode's own sweep still applies. The rule is the
+same on every surface; VS Code has no managed chats, so only worktrees it
+lists qualify there.
 
 ## Committing a revert
 

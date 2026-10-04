@@ -92,7 +92,14 @@ import {
 } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
-import { chatDirectoryUse, createRealChatLocationRelease, type ChatLocationRelease } from "./chat-location-release"
+import {
+  CHAT_LOCATION_RELEASE_DELAY_MS,
+  WORKTREE_LOCATION_RELEASE_DELAY_MS,
+  createRealLocationRelease,
+  directoryUse,
+  isWorktreeDirectory,
+  type LocationRelease,
+} from "./location-release"
 import { isChatDirectoryPath } from "@/lib/chatDirectories"
 import type { State } from "./types"
 import {
@@ -2465,32 +2472,38 @@ export function SyncProvider(props: {
   React.useLayoutEffect(() => {
     for (const notify of currentDirectoryListenersRef.current) notify()
   }, [props.directory])
-  const chatLocationReleaseRef = useRef<ChatLocationRelease | null>(null)
+  const locationReleaseRef = useRef<LocationRelease | null>(null)
   const previousDirectoryRef = useRef(props.directory)
   useEffect(() => {
     const expectedRuntimeKey = getRuntimeKey()
     const sdkEpoch = opencodeClient.getSdkClient()
-    const release = createRealChatLocationRelease({
-      isChatDirectory: isChatDirectoryPath,
+    const release = createRealLocationRelease({
+      releaseDelayMs: (directory) => {
+        if (isChatDirectoryPath(directory)) return CHAT_LOCATION_RELEASE_DELAY_MS
+        if (isWorktreeDirectory(directory, useSessionUIStore.getState().availableWorktreesByProject)) {
+          return WORKTREE_LOCATION_RELEASE_DELAY_MS
+        }
+        return null
+      },
       isCurrentDirectory: (directory) => directory === currentDirectoryRef.current,
       directoryUse: (directory) => isDirectoryExternallyViewed(directory)
         ? "busy"
-        : chatDirectoryUse(directory, childStores.getChild(directory)?.getState()),
+        : directoryUse(directory, childStores.getChild(directory)?.getState()),
       release: async (directory) => {
         if (getRuntimeKey() !== expectedRuntimeKey || opencodeClient.getSdkClient() !== sdkEpoch) return
         await opencodeClient.releaseLocation(directory)
       },
     })
-    chatLocationReleaseRef.current = release
+    locationReleaseRef.current = release
     return () => {
       release.dispose()
-      if (chatLocationReleaseRef.current === release) chatLocationReleaseRef.current = null
+      if (locationReleaseRef.current === release) locationReleaseRef.current = null
     }
   }, [childStores, props.sdk])
   useEffect(() => {
     const previous = previousDirectoryRef.current
     previousDirectoryRef.current = props.directory
-    chatLocationReleaseRef.current?.directoryChanged(previous, props.directory)
+    locationReleaseRef.current?.directoryChanged(previous, props.directory)
   }, [props.directory])
   const lastStreamActivityAtRef = useRef(0)
   const lastStatusPollAtByDirectoryRef = useRef(new Map<string, number>())
