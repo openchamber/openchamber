@@ -10,6 +10,7 @@ import {
   GUEST_COMPOSE_TEXT_MAX,
   readHostMessage,
 } from './contract.ts';
+import { GUEST_POPOVER_DATA_MAX, isGuestPopoverRequest } from './popover.ts';
 import {
   guestMessageSchema,
   hostMessageSchema,
@@ -74,6 +75,25 @@ const readyPayload = {
 };
 
 describe('parseHostMessage', () => {
+  test('accepts bounded popover messages and refuses unsafe guest payloads', () => {
+    const open = {
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'popover-open', id: 'call-1', payload: {
+        id: 'preview-1', anchor: { x: 10, y: 20, width: 30, height: 40 }, width: 320, height: 160, data: { sha: 'abc' },
+      },
+    };
+    expect(guestMessageSchema.safeParse(open).success).toBe(true);
+    expect(isGuestPopoverRequest(open.payload)).toBe(true);
+    expect(guestMessageSchema.safeParse({ ...open, payload: { ...open.payload, anchor: { ...open.payload.anchor, x: Number.NaN } } }).success).toBe(false);
+    expect(guestMessageSchema.safeParse({ ...open, payload: { ...open.payload, data: 'x'.repeat(GUEST_POPOVER_DATA_MAX + 1) } }).success).toBe(false);
+    expect(isGuestPopoverRequest({ ...open.payload, data: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[null]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]] })).toBe(false);
+  });
+
+  test('reads popover close pushes only when their bounded shape is valid', () => {
+    const closed = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'popover-closed', payload: { id: 'preview-1', reason: 'escape' } };
+    expect(parseHostMessage(closed)).toEqual(closed);
+    expect(parseHostMessage({ ...closed, payload: { ...closed.payload, reason: 'late' } })).toBeNull();
+  });
+
   test('requires computed theme text colors and rejects malformed values', () => {
     const tokens = { ...readyPayload.theme.tokens, primaryText: '#112233', successText: '#224433', warningText: '#664422', errorText: '#882233', infoText: '#334488' };
     const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION, type: 'ready', payload: { ...readyPayload, theme: { ...readyPayload.theme, tokens } } };
@@ -100,6 +120,18 @@ describe('parseHostMessage', () => {
       type: 'ready',
       payload: readyPayload,
     });
+  });
+
+  test('keeps known ready features while dropping a future feature', () => {
+    const message = parseHostMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL,
+      v: OPENCHAMBER_SDK_API_VERSION,
+      type: 'ready',
+      payload: { ...readyPayload, features: { statusControls: true, futureCapability: true } },
+    });
+    expect(message?.type).toBe('ready');
+    if (message?.type !== 'ready') throw new Error('Expected ready snapshot');
+    expect(message.payload.features).toEqual({ statusControls: true });
   });
 
   test('accepts a null directory', () => {

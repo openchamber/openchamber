@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { removeGuestStorage } from './storage.js';
 import https from 'node:https';
 import path from 'node:path';
@@ -54,6 +55,7 @@ const persistGuest = async (guest, root, source, persistPath, { replace = false,
         path: root,
         capabilityGrants: stored.capabilityGrants?.[guest.id] ?? [],
         enabled: !stored.disabledGuests?.[guest.id],
+        storageId: stored.storageIds?.[guest.id],
       }),
     };
   }
@@ -63,21 +65,26 @@ const persistGuest = async (guest, root, source, persistPath, { replace = false,
     if (!replace) {
       return { ok: false, code: 'id-taken', id: guest.id };
     }
-    const removed = await uninstallGuest(guest.id, persistPath);
+    const removed = await uninstallGuest(guest.id, persistPath, { preserveStorageId: true });
     if (!removed.ok) {
       return removed;
     }
   }
-  await updateExtensionStore(persistPath, (after) => ({
-    ...after,
-    paths: after.paths.includes(root) ? after.paths : [...after.paths, root],
-    sources: { ...after.sources, [root]: source },
-    gitOrigins: origin ? { ...after.gitOrigins, [root]: origin } : after.gitOrigins,
-  }));
+  let storageId;
+  await updateExtensionStore(persistPath, (after) => {
+    storageId = after.storageIds?.[guest.id] ?? randomUUID();
+    return {
+      ...after,
+      paths: after.paths.includes(root) ? after.paths : [...after.paths, root],
+      sources: { ...after.sources, [root]: source },
+      gitOrigins: origin ? { ...after.gitOrigins, [root]: origin } : after.gitOrigins,
+      storageIds: { ...after.storageIds, [guest.id]: storageId },
+    };
+  });
   return {
     ok: true,
     replaced: Boolean(clash),
-    guest: toPublicGuest({ ...guest, source, path: root, capabilityGrants: [], enabled: true }),
+    guest: toPublicGuest({ ...guest, source, path: root, capabilityGrants: [], enabled: true, storageId }),
   };
 };
 
@@ -122,7 +129,7 @@ const installCopiedGuest = async ({ source, prepare, persistPath, openchamberVer
         await removeDir(staging);
         return { ok: false, code: 'already-installed', id: inspected.guest.id };
       }
-      const removed = await uninstallGuest(inspected.guest.id, persistPath);
+      const removed = await uninstallGuest(inspected.guest.id, persistPath, { preserveStorageId: true });
       if (!removed.ok) {
         await removeDir(staging);
         return removed;
@@ -368,7 +375,7 @@ export const installGuest = async (request, persistPath, { openchamberVersion, g
   return installGuestFromPath(request.path, persistPath, { openchamberVersion, replace });
 };
 
-export const uninstallGuest = async (id, persistPath) => {
+export const uninstallGuest = async (id, persistPath, { preserveStorageId = false } = {}) => {
   const existing = await listInstalledGuests({ persistPath });
   const guest = existing.find((entry) => entry.id === id);
   if (!guest) {
@@ -405,7 +412,9 @@ export const uninstallGuest = async (id, persistPath) => {
     delete disabledGuests[id];
     const serviceSocketOverrides = { ...(stored.serviceSocketOverrides ?? {}) };
     delete serviceSocketOverrides[id];
-    return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, serviceSocketOverrides };
+    const storageIds = { ...(stored.storageIds ?? {}) };
+    if (!preserveStorageId) delete storageIds[id];
+    return { paths: kept, sources, gitOrigins, capabilityGrants, capabilityScopes, disabledGuests, serviceSocketOverrides, storageIds };
   });
   await stopGuestService(id);
   await removeGuestStorage(persistPath, id);

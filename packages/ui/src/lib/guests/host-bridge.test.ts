@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
+import { HostRequestError, OPENCHAMBER_SDK_CHANNEL, type GuestMessage, type GuestStatusControl, type ResolveResultPayload, type StartSessionRequest, type ToastRequest } from '@openchamber/sdk';
 import type { GuestFileProxyResult, GuestFileRequest } from './files.ts';
 import type { GuestGenerateProxyResult } from './generate.ts';
 
@@ -25,6 +25,7 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   workspaceSubscribe: overrides.workspaceSubscribe ?? (() => {}),
   workspaceUnsubscribe: overrides.workspaceUnsubscribe ?? (() => {}),
   storage: overrides.storage ?? (async () => ({ storage: true, op: 'keys', keys: [] })),
+  setStatusControls: overrides.setStatusControls ?? (() => {}),
   openSession: overrides.openSession ?? (() => {}),
   toast: overrides.toast ?? (() => {}),
   openUrl: overrides.openUrl ?? (async () => true),
@@ -47,9 +48,25 @@ const effects = (overrides: Partial<BridgeEffects> = {}): BridgeEffects => ({
   resize: overrides.resize ?? (() => {}),
   openCommit: overrides.openCommit ?? (async () => ({ ok: true })),
   resolveResult: overrides.resolveResult ?? (() => {}),
+  openPopover: overrides.openPopover ?? (() => {}),
+  closePopover: overrides.closePopover ?? (() => {}),
+  setPopoverAnchorActive: overrides.setPopoverAnchorActive ?? (() => {}),
 });
 
 describe('answerGuestMessage', () => {
+  test('publishes status controls through the frame owner and reports unsupported owners', async () => {
+    const controls: GuestStatusControl[] = [{ kind: 'button', id: 'refresh', label: 'Refresh' }];
+    const seen: GuestStatusControl[][] = [];
+    const message: GuestMessage = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'status-controls', id: 'header-1', payload: { controls } };
+    const result = await answerGuestMessage(message, effects({ setStatusControls: (next) => { seen.push(next); } }));
+    expect(seen).toEqual([controls]);
+    expect(result).toMatchObject({ type: 'result', id: 'header-1', ok: true });
+    const unsupported = await answerGuestMessage(message, effects({ setStatusControls: () => {
+      throw new HostRequestError('UNSUPPORTED', 'Only mounted status frames own header controls.');
+    } }));
+    expect(unsupported).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
+  });
+
   test('forwards toast buttons and persistence to the host without awaiting a click', async () => {
     const request: ToastRequest = { kind: 'info', message: 'Summary', copy: { text: 'Source' }, dismiss: true, persistent: true };
     const seen: ToastRequest[] = [];
@@ -580,6 +597,29 @@ describe('guestSessionLifecyclePhase', () => {
 });
 
 describe('badge and resolve-result', () => {
+  test('routes popover lifecycle requests through the owning pane', async () => {
+    const seen: string[] = [];
+    const base = { channel: OPENCHAMBER_SDK_CHANNEL, v: 1 } as const;
+    const open = await answerGuestMessage({ ...base, type: 'popover-open', id: 'popover-call', payload: {
+      id: 'preview-1', anchor: { x: 10, y: 10, width: 20, height: 20 }, width: 160, height: 48, data: null,
+    } }, effects({ openPopover: (request) => { seen.push(`open:${request.id}`); } }));
+    const active = await answerGuestMessage({ ...base, type: 'popover-anchor', id: 'popover-active', payload: { id: 'preview-1', active: false } }, effects({ setPopoverAnchorActive: (id, value) => { seen.push(`active:${id}:${value}`); } }));
+    const close = await answerGuestMessage({ ...base, type: 'popover-close', id: 'popover-close', payload: { id: 'preview-1', reason: 'escape' } }, effects({ closePopover: (id, reason) => { seen.push(`close:${id}:${reason}`); } }));
+    expect(seen).toEqual(['open:preview-1', 'active:preview-1:false', 'close:preview-1:escape']);
+    expect(open).toMatchObject({ ok: true });
+    expect(active).toMatchObject({ ok: true });
+    expect(close).toMatchObject({ ok: true });
+  });
+
+  test('refuses popovers when the mounted owner has no overlay handler', async () => {
+    const reply = await answerGuestMessage({
+      channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'popover-open', id: 'popover-call', payload: {
+        id: 'preview-1', anchor: { x: 10, y: 10, width: 20, height: 20 }, width: 160, height: 48, data: null,
+      },
+    }, { ...effects(), openPopover: undefined });
+    expect(reply).toMatchObject({ type: 'result', ok: false, code: 'UNSUPPORTED' });
+  });
+
   test('badge sets the count and answers ok', async () => {
     const seen: Array<number | null> = [];
     const reply = await answerGuestMessage({

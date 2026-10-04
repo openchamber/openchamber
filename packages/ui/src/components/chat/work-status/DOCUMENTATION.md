@@ -320,6 +320,25 @@ requested height is remembered per extension id and version for the app
 session (a module-level map, one number per installed extension), so folding
 and reopening a section does not jump back to the manifest default.
 
+An extension section is expanded by default unless its catalog row declares
+`statusDefaultExpanded: false`; an explicit saved expansion choice wins. A row
+with `statusRequiresProject` is absent, including from presence reporting, when
+the panel has no actual Work Status directory. Status-frame controls exist only
+while that expanded frame is mounted. A project change clears the header controls;
+the guest republishes them from `onDirectory`. Workspace subscriptions and other
+in-flight requests survive that project change. One or two controls use the header action
+slot; three or four use a two-column row below the title. Folding removes the
+controls with the frame rather than retaining a hidden controller.
+
+An expanded extension can also open a sandboxed anchored popover outside its
+body iframe. The host positions the card and loads the same approved entry
+with `surface: 'popover'`. Folding or hiding the section removes the card with
+its owner; project/runtime and authorization changes also dismiss it. Pointer
+travel into the card and keyboard dismissal are handled by the SDK anchor
+helper and the host overlay controller. This does not increase the status
+frame's 320px height limit. The public contract is in `packages/sdk/API.md`,
+under Anchored popovers.
+
 `useWorkStatusExtensionSections` lists active guests with a `statusEntry` from
 the catalog store (`useGuestStatusSections`). It is empty on VS Code and
 mobile, which load no guests; the panel is hidden there anyway, but the empty

@@ -50,6 +50,24 @@ describe('parseManifest', () => {
     });
   });
 
+  test('preserves optional Work Status visibility and expansion settings', () => {
+    const result = parseManifest({
+      ...validBlock,
+      contributes: {
+        ...validBlock.contributes,
+        statusSection: {
+          entry: 'status/index.html',
+          defaultExpanded: false,
+          requiresProject: true,
+        },
+      },
+    });
+    expect(result).toMatchObject({ ok: true, manifest: { contributes: { statusSection: {
+      entry: 'status/index.html', defaultExpanded: false, requiresProject: true,
+    } } } });
+    expect(parseManifest({ ...validBlock, contributes: { ...validBlock.contributes, statusSection: { entry: 'status/index.html', defaultExpanded: 'no' } } })).toMatchObject({ ok: false, code: 'invalid-status-section' });
+  });
+
   test('reads package.json openchamber', () => {
     const result = parseManifest({
       openchamber: validBlock,

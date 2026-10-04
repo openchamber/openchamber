@@ -54,6 +54,18 @@ describe('host theme application', () => {
     expect(seen.get('color')).toBe(theme.tokens.foreground);
   });
 
+  test('applies optional syntax tokens and clears stale values from older snapshots', () => {
+    const { root, seen } = captureRoot();
+    applyHostTheme({ ...theme, tokens: { ...theme.tokens, syntaxKeyword: '#aabbcc', syntaxComment: '#778899' } }, root);
+    expect(seen.get('--oc-syntax-keyword')).toBe('#aabbcc');
+    expect(seen.get('--syntax-keyword')).toBe('#aabbcc');
+    expect(seen.get('--oc-syntax-comment')).toBe('#778899');
+    applyHostTheme(theme, root);
+    expect(seen.get('--oc-syntax-keyword')).toBe('');
+    expect(seen.get('--syntax-keyword')).toBe('');
+    expect(seen.get('--oc-syntax-comment')).toBe('');
+  });
+
   test('applyHostReady stamps the host surface on the root', () => {
     const { root } = captureRoot();
     applyHostReady({ theme, surface: 'dialog' }, root);

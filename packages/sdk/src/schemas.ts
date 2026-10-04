@@ -10,6 +10,8 @@ export {
 } from './parse.ts';
 export type { ManifestDocument } from './parse.ts';
 export { guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
+export { guestStatusControlsSchema, guestStatusControlEventSchema } from './status-control-schemas.ts';
+export { guestPopoverClosedEventSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
 export {
   guestMessageSchema,
   hostMessageSchema,

@@ -14,7 +14,9 @@
       "statusSection": {
         "entry": "status/index.html",
         "title": "Recent commits",
-        "height": 160
+        "height": 160,
+        "defaultExpanded": false,
+        "requiresProject": true
       },
       "service": {
         "entry": "service/main.js",

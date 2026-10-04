@@ -281,7 +281,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
             if (!sectionVisible(id)) return null;
             if (isExtensionSectionId(id)) {
               const guest = extensionSections.byId.get(id);
-              return guest ? <WorkStatusExtensionSection key={id} guest={guest} /> : null;
+              return guest ? <WorkStatusExtensionSection key={id} guest={guest} directory={directory} /> : null;
             }
             return <React.Fragment key={id}>{id === 'session' || id === 'repository' ? primary[id] : secondarySections[id]}</React.Fragment>;
           })}

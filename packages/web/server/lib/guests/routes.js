@@ -596,6 +596,7 @@ export const registerGuestRoutes = (app, {
   app.post('/api/guests/:id/storage', json80, async (req, res) => {
     const parsed = guestStorageRequestSchema.safeParse(req.body);
     if (!parsed.success || !isGuestPanelId(req.params.id)) return res.status(400).json({ error: 'HOST_REJECTED', message: 'Invalid storage request.' });
+    if (parsed.data.scope === 'device') return res.status(400).json({ error: 'HOST_REJECTED', message: 'Device storage is not available on this route.' });
     try {
       const result = await runGuestStorage(persistPath, req.params.id, parsed.data, async () => {
         const guest = await loadGuest(req.params.id);

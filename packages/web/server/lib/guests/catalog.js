@@ -8,7 +8,7 @@ import { listRelativeGuestScriptHrefs, resolveGuestHtmlRelativePath } from './ht
 import { effectiveGrants, guestGrantScope } from './grant-scope.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { readEnterprisePolicy } from '../enterprise-mode.js';
-import { onExtensionStoreWrite, readExtensionStore } from './persist.js';
+import { ensureGuestStorageIds, onExtensionStoreWrite, readExtensionStore } from './persist.js';
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
 
@@ -263,6 +263,8 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
     const section = parsed.manifest.contributes.statusSection;
     if (section !== true && section?.title) guest.statusTitle = section.title;
     if (section !== true && section?.height !== undefined) guest.statusHeight = section.height;
+    if (section !== true && section?.defaultExpanded !== undefined) guest.statusDefaultExpanded = section.defaultExpanded;
+    if (section !== true && section?.requiresProject !== undefined) guest.statusRequiresProject = section.requiresProject;
   }
   // File editors are frames of their own too; each entry is checked the same way.
   const fileEditors = parsed.manifest.contributes.fileEditors ?? [];
@@ -368,6 +370,8 @@ export const toPublicGuest = (guest) => {
   if (guest.statusEntry) row.statusEntry = guest.statusEntry;
   if (guest.statusTitle) row.statusTitle = guest.statusTitle;
   if (Number.isInteger(guest.statusHeight)) row.statusHeight = guest.statusHeight;
+  if (guest.statusDefaultExpanded !== undefined) row.statusDefaultExpanded = guest.statusDefaultExpanded;
+  if (guest.statusRequiresProject !== undefined) row.statusRequiresProject = guest.statusRequiresProject;
   if (attach) {
     row.attach = attach;
   }
@@ -403,6 +407,9 @@ export const toPublicGuest = (guest) => {
     requested: requestedGuestCapabilities(guest),
     granted,
   };
+  if (guest.storageId && requestedGuestCapabilities(guest).every((capability) => granted.includes(capability))) {
+    row.storageId = guest.storageId;
+  }
   const service = toPublicService(
     guest.service,
     granted.includes('service'),
@@ -508,6 +515,7 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
         capabilityGrants: requestedGuestCapabilities(guest),
         enabled: !stored.disabledGuests?.[guest.id],
         socketBindings,
+        storageDescriptor: { id: guest.id, storedPath: null, builtIn: true },
       });
     }
   }
@@ -546,9 +554,22 @@ const listInstalledGuestsUncached = async ({ persistPath } = {}) => {
       ),
       enabled: !stored.disabledGuests?.[guest.id],
       socketBindings,
+      storageDescriptor: { id: guest.id, storedPath, builtIn: false },
     });
   }
 
+  const descriptors = guests.map((guest) => guest.storageDescriptor);
+  if (descriptors.some(({ id }) => !stored.storageIds?.[id])) {
+    try {
+      const identities = await ensureGuestStorageIds(persistPath, descriptors);
+      for (const guest of guests) guest.storageId = identities[guest.id];
+    } catch {
+      console.warn('Guest storage identities are temporarily unavailable.');
+    }
+  } else {
+    for (const guest of guests) guest.storageId = stored.storageIds?.[guest.id];
+  }
+  for (const guest of guests) delete guest.storageDescriptor;
   return guests;
 };
 

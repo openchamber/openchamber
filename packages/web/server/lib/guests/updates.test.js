@@ -228,7 +228,8 @@ describe('updateGuest', () => {
     await fs.writeFile(persistPath, `${JSON.stringify({
       paths: store.paths,
       sources: store.sources,
-      gitOrigins: store.gitOrigins,
+       gitOrigins: store.gitOrigins,
+       storageIds: store.storageIds,
       capabilityGrants: { 'upd-swap': ['prompt'] },
       disabledGuests: { 'upd-swap': true },
     })}\n`);
@@ -251,6 +252,7 @@ describe('updateGuest', () => {
     const leftovers = (await fs.readdir(path.dirname(before.packageRoot))).filter((name) => name.startsWith('.'));
     expect(leftovers).toEqual([]);
     expect((await readExtensionStore(persistPath)).paths).toEqual([before.packageRoot]);
+    expect((await readExtensionStore(persistPath)).storageIds['upd-swap']).toBe(store.storageIds['upd-swap']);
 
     await fs.rm(dir, { recursive: true, force: true });
   });

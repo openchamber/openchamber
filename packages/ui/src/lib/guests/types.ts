@@ -15,6 +15,8 @@ export type GuestSource = 'bundled' | 'path' | 'zip' | 'git';
 
 export type InstalledGuest = {
   id: string;
+  /** Opaque server-issued identity for device-local extension preferences. */
+  storageId?: string;
   name: string;
   icon: string;
   /** Visible panel page. Absent for background-only and tools-only extensions. */
@@ -37,6 +39,10 @@ export type InstalledGuest = {
   statusTitle?: string;
   /** Starting frame height in CSS px before the guest reports its own. */
   statusHeight?: number;
+  /** Initial expansion state when the user has not saved a preference. */
+  statusDefaultExpanded?: boolean;
+  /** Whether this status section needs the Work Status directory. */
+  statusRequiresProject?: boolean;
   integration?: PublicIntegration;
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];

@@ -6,6 +6,8 @@ Full guide: [Build an extension](https://openchamber.dev/docs/sdk/). Reference: 
 
 Extensions load in OpenChamber web and desktop. VS Code and mobile do not load them yet.
 
+Device-scoped extension storage is local browser preference data. It stays partitioned by the host's runtime identity and the extension installation. URL aliases are not guaranteed to share preferences; saved host and relay connections follow the host's existing runtime identity rules.
+
 ## Install
 
 ```bash
@@ -157,11 +159,13 @@ Copy keeps the toast open and shows Copied on success. A failed copy shows an er
 
 For a full-screen board, add `"page": true` under `contributes`, or `"page": { "entry": "panel/page.html", "title": "Board" }` for separate HTML. Users open it from the Extension pages menu above the session list. `ctx.surface` is `"page"`. The extension cannot open the page itself.
 
-For a small readout in the chat's Work Status panel, add `"statusSection": { "entry": "status/index.html", "title": "Recent commits" }`. It needs no `panel.entry`, so a section-only extension has no rail icon. `ctx.surface` is `"status"`. Call `host.setHeight(px)` when your content changes size; the host stops growing the frame at 320 px and your page scrolls after that. `examples/git-graph-status` is a complete section with a local service.
+For a small readout in the chat's Work Status panel, add `"statusSection": { "entry": "status/index.html", "title": "Recent commits" }`. It needs no `panel.entry`, so a section-only extension has no rail icon. `ctx.surface` is `"status"`. Call `host.setHeight(px)` when your content changes size; the host stops growing the frame at 320 px and your page scrolls after that. Object-form sections can opt into `defaultExpanded: false` or `requiresProject: true`; omitted fields keep the existing expanded, directory-independent behavior. `examples/git-graph-status` is a complete section with a local service.
 
 With `sessions` approved, use `listProjects()`, `listWorktrees(projectId)`, and `listSessions(projectId)`. Subscribe through `await onProjects(listener)`, `await onWorktrees(projectId, listener)`, or `await onSessions(projectId, listener)` and retain the returned unsubscribe function. Snapshots distinguish loading, ready, and error; session activity and observed turn outcomes are separate from your task status.
 
 `startSession` accepts `projectId` and `worktree: { kind: "new", name: "fix-login", baseBranch: "main" }` or `{ kind: "existing", directory }`. It preserves the current screen by default. `openSession(sessionId)` explicitly opens the chat. `host.storage.get/set/delete/keys` stores your own JSON on the connected server without a file-access grant. See [API.md](./API.md) for limits and partial results. The `tasks-demo` page exercises these methods together.
+
+Pass `{ scope: 'device' }` only after `onReady` reports `features.deviceStorage: true`. Device storage stays in this browser profile and installation namespace instead of the connected server's instance storage. Older hosts reject that request with `UNSUPPORTED`; the SDK does not fall back to instance storage. It is for ordinary preferences, not secrets or single-sign-on state.
 
 ```ts
 import { connectHost, HostRequestError } from '@openchamber/sdk';
@@ -220,9 +224,17 @@ host.onItem((item) => {
 
 Every method, its limits, and the error codes are on the [Host API](https://openchamber.dev/docs/sdk/host/) page.
 
+## Popovers outside the extension frame
+
+When `ready.features.popovers` is true, `host.openPopover` can show a bounded card outside your iframe. The host loads the same package entry in a second sandboxed frame, with `ready.surface === 'popover'` and `ready.popover.data` carrying your JSON. Branch on that surface before mounting your normal page. The popover has the same approved capabilities as your extension.
+
+Use `mountPopoverAnchor` from `@openchamber/sdk/ui` to attach the preview to a DOM element. It handles hover, keyboard access, anchor removal and scrolling; dispose the binding when replacing the element. Keep your existing click action as a fallback for older hosts. The Git Graph example shows this with commit metadata, statistics and copy/link actions. See [Anchored popovers](./API.md#anchored-popovers) for the request, limits and lifecycle.
+
 ## UI kit
 
 `@openchamber/sdk/ui` has buttons, fields, a searchable dropdown, checkboxes, tabs, badges, lists, empty states, spinners, banners, separators, progress bars, menus, and safe text, all drawn with the app's colours and fonts. Apply `applyHostReady` on every `onReady`, but mount controls and register listeners once. Repeated snapshots must not erase inputs or drafts. Every mount returns `{ update, dispose }`. Use `update` to pass changed values back to controls, including `tabs.update({ activeId })` and `select.update({ value })` inside `onChange`. See the [UI kit examples](https://docs.openchamber.dev/sdk/ui/) for input state and tab switching.
+
+Theme snapshots may include optional syntax colors for keywords, strings, numbers, functions, types, comments, variables, and operators. `applyHostReady` publishes them as `--oc-syntax-*` variables and clears an optional variable when a later snapshot omits it. Existing semantic theme variables remain available for older hosts.
 
 ```ts
 import { applyHostReady, mountList } from '@openchamber/sdk/ui';

@@ -32,10 +32,10 @@ export const guestSessionWorktreeSchema = z.union([
 ]);
 const storageKey = z.string().min(1).max(GUEST_STORAGE_KEY_MAX);
 export const guestStorageRequestSchema = z.discriminatedUnion('op', [
-  z.object({ op: z.literal('get'), key: storageKey }).strict(),
-  z.object({ op: z.literal('delete'), key: storageKey }).strict(),
-  z.object({ op: z.literal('set'), key: storageKey, value: z.json().refine((value) => new TextEncoder().encode(JSON.stringify(value)).length <= GUEST_STORAGE_VALUE_BYTES) }).strict(),
-  z.object({ op: z.literal('keys') }).strict(),
+  z.object({ op: z.literal('get'), key: storageKey, scope: z.enum(['instance', 'device']).optional() }).strict(),
+  z.object({ op: z.literal('delete'), key: storageKey, scope: z.enum(['instance', 'device']).optional() }).strict(),
+  z.object({ op: z.literal('set'), key: storageKey, value: z.json().refine((value) => new TextEncoder().encode(JSON.stringify(value)).length <= GUEST_STORAGE_VALUE_BYTES), scope: z.enum(['instance', 'device']).optional() }).strict(),
+  z.object({ op: z.literal('keys'), scope: z.enum(['instance', 'device']).optional() }).strict(),
 ]);
 export const guestStorageResultSchema = z.union([
   z.object({ storage: z.literal(true), op: z.literal('get'), found: z.literal(false) }),

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { listInstalledGuests } from './catalog.js';
+import { listInstalledGuests, toPublicGuest } from './catalog.js';
 import { enterpriseBlockedCapabilities } from './enterprise.js';
 import { guestGrantScope } from './grant-scope.js';
 import { installGuestFromPath } from './install.js';
@@ -91,16 +91,20 @@ describe('extensions in enterprise mode', () => {
     expect((await installGuestFromPath(path.join(dir, 'reach'), persistPath)).ok).toBe(true);
     const [installed] = await listInstalledGuests({ persistPath });
     await setCapabilityGrants(installed.id, persistPath, ['origins'], guestGrantScope(installed));
-    expect((await listInstalledGuests({ persistPath }))[0].capabilityGrants).toEqual(['origins']);
+    const [approved] = await listInstalledGuests({ persistPath });
+    expect(approved.capabilityGrants).toEqual(['origins']);
+    expect(toPublicGuest(approved).storageId).toEqual(expect.any(String));
 
     process.env.OPENCHAMBER_ENTERPRISE_MODE = '1';
     const [guest] = await listInstalledGuests({ persistPath });
     expect(guest.enterpriseBlocked).toEqual(['origins']);
     expect(guest.capabilityGrants).not.toContain('origins');
+    expect(toPublicGuest(guest)).not.toHaveProperty('storageId');
 
     delete process.env.OPENCHAMBER_ENTERPRISE_MODE;
     const [restored] = await listInstalledGuests({ persistPath });
     expect(restored.enterpriseBlocked).toBeUndefined();
     expect(restored.capabilityGrants).toEqual(['origins']);
+    expect(toPublicGuest(restored).storageId).toEqual(expect.any(String));
   });
 });

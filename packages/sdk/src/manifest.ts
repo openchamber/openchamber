@@ -62,7 +62,13 @@ export type PageContribution = true | { entry: string; title?: string };
  * header; `height` is the starting frame height in CSS px before the guest
  * reports its own through `setHeight`.
  */
-export type StatusSectionContribution = true | { entry: string; title?: string; height?: number };
+export type StatusSectionContribution = true | {
+  entry: string;
+  title?: string;
+  height?: number;
+  defaultExpanded?: boolean;
+  requiresProject?: boolean;
+};
 
 /** Characters in a status section title. */
 export const GUEST_STATUS_SECTION_TITLE_MAX = 60;

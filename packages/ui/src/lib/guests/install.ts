@@ -1,10 +1,13 @@
 import type { GuestCapability } from '@openchamber/sdk';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { z } from 'zod';
 
 import { parseInstalledGuestJson } from './parse.ts';
 import type { InstalledGuest } from './types.ts';
 import type { GuestRequestFailure } from './request-failure.ts';
+import { removeDeviceGuestStorage } from './device-storage.ts';
+import { useGuestsStore } from './store.ts';
 
 const errorSchema = z.object({
   error: z.enum([
@@ -170,9 +173,20 @@ export const uploadGuestZip = async (
 };
 
 export const uninstallGuest = async (id: string): Promise<UninstallGuestResult> => {
+  const catalog = useGuestsStore.getState();
+  const runtimeKey = getRuntimeKey();
+  const storageId = catalog.runtimeKey === runtimeKey
+    ? catalog.guests.find((guest) => guest.id === id)?.storageId : undefined;
   try {
     const response = await runtimeFetch(`/api/guests/${id}`, { method: 'DELETE' });
     if (response.status === 204) {
+      if (storageId && globalThis.indexedDB) {
+        // Server removal has already succeeded. A failed local cleanup cannot undo it;
+        // the retired installation identity makes any retained bytes inaccessible.
+        await removeDeviceGuestStorage({ runtimeKey, guestId: id, storageId }).catch(() => {
+          console.warn('Could not clear local extension preferences.');
+        });
+      }
       return { ok: true };
     }
     const error = await readInstallError(response);

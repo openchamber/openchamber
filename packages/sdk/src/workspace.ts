@@ -41,11 +41,15 @@ export type GuestWorkspaceUpdate = { subscriptionId: string; snapshot: GuestWork
 export const GUEST_STORAGE_KEY_MAX = 128;
 export const GUEST_STORAGE_VALUE_BYTES = 65_536;
 export const GUEST_STORAGE_TOTAL_BYTES = 2_097_152;
+/** Maximum bytes retained across all device-scoped guest storage namespaces. */
+export const GUEST_DEVICE_STORAGE_TOTAL_BYTES = 16_777_216;
 export const GUEST_STORAGE_KEYS_MAX = 2_000;
+export type GuestStorageScope = 'instance' | 'device';
+export type GuestStorageOptions = { scope?: GuestStorageScope };
 export type GuestStorageRequest =
-  | { op: 'get' | 'delete'; key: string }
-  | { op: 'set'; key: string; value: JsonValue }
-  | { op: 'keys' };
+  | ({ op: 'get' | 'delete'; key: string } & GuestStorageOptions)
+  | ({ op: 'set'; key: string; value: JsonValue } & GuestStorageOptions)
+  | ({ op: 'keys' } & GuestStorageOptions);
 export type GuestStorageResult = { storage: true } & (
   | { op: 'get'; found: false }
   | { op: 'get'; found: true; value: JsonValue }

@@ -1,6 +1,7 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { GUEST_CAPABILITIES } from '@openchamber/sdk';
@@ -28,6 +29,7 @@ const storeSchema = z.object({
     z.string(),
     z.record(z.string(), z.string().min(1).refine((entry) => !entry.includes('\0'))),
   ).optional(),
+  storageIds: z.record(z.string(), z.unknown()).optional(),
 });
 
 const capabilityScopeSchema = z.object({
@@ -75,6 +77,10 @@ const knownGitOriginsOnly = (origins) => {
   }
   return cleaned;
 };
+
+const knownStorageIdsOnly = (storageIds) => Object.fromEntries(
+  Object.entries(storageIds).filter(([, storageId]) => z.string().uuid().safeParse(storageId).success),
+);
 
 const parseStore = (raw) => {
   try {
@@ -136,7 +142,7 @@ export const readExtensionStore = async (persistPath) => {
     if (!parsed) {
       throw new Error('Invalid extensions store');
     }
-    return {
+    const store = {
       paths: parsed.paths,
       sources: parsed.sources ?? {},
       gitOrigins: knownGitOriginsOnly(parsed.gitOrigins ?? {}),
@@ -145,6 +151,8 @@ export const readExtensionStore = async (persistPath) => {
       disabledGuests: parsed.disabledGuests ?? {},
       serviceSocketOverrides: parsed.serviceSocketOverrides ?? {},
     };
+    if (parsed.storageIds) store.storageIds = knownStorageIdsOnly(parsed.storageIds);
+    return store;
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
       return emptyStore();
@@ -163,6 +171,7 @@ const writeExtensionStoreUnlocked = async (
     capabilityScopes = {},
     disabledGuests = {},
     serviceSocketOverrides = {},
+    storageIds = {},
   },
 ) => {
   const cleaned = {};
@@ -232,6 +241,12 @@ const writeExtensionStoreUnlocked = async (
   if (Object.keys(socketOverrides).length > 0) {
     payload.serviceSocketOverrides = socketOverrides;
   }
+  const identities = {};
+  for (const [guestId, storageId] of Object.entries(storageIds)) {
+    const parsedIdentity = z.string().uuid().safeParse(storageId);
+    if (parsedIdentity.success) identities[guestId] = parsedIdentity.data;
+  }
+  if (Object.keys(identities).length > 0) payload.storageIds = identities;
   // Listeners hear about a write twice: before, so a cached catalog is
   // dropped, and after, so a read that started in between (and saw the old
   // file) cannot be cached as current.
@@ -265,6 +280,25 @@ export const updateExtensionStore = (persistPath, mutate) => (
     }
   })
 );
+
+/** Allocate identities only for installations that still exist under the store lock. */
+export const ensureGuestStorageIds = async (persistPath, descriptors) => {
+  const resolved = {};
+  await updateExtensionStore(persistPath, (current) => {
+  const storageIds = { ...current.storageIds };
+  let changed = false;
+    for (const { id, storedPath, builtIn } of descriptors) {
+      if (!builtIn && (storedPath === null || !current.paths.includes(storedPath))) continue;
+      if (!storageIds[id]) {
+        storageIds[id] = randomUUID();
+      changed = true;
+    }
+      resolved[id] = storageIds[id];
+  }
+  return changed ? { ...current, storageIds } : null;
+  });
+  return resolved;
+};
 
 let writeSequence = 0;
 /** @type {Set<(persistPath: string) => void>} */

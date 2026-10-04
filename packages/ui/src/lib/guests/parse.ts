@@ -21,6 +21,7 @@ import { z } from 'zod';
 import type { InstalledGuest } from './types.ts';
 
 const PANEL_ID = /^[a-z][a-z0-9-]*$/;
+const STORAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const publicIntegrationSchema = z.object({
   name: z.string().trim().min(1),
@@ -98,6 +99,7 @@ export const guestUpdateSchema = z.object({
 
 const installedGuestSchema = z.object({
   id: z.string().regex(PANEL_ID),
+  storageId: z.string().min(1).max(128).regex(STORAGE_ID).optional(),
   name: z.string().trim().min(1),
   icon: z.string().trim().min(1),
   entry: z.string().trim().min(1).optional(),
@@ -113,6 +115,8 @@ const installedGuestSchema = z.object({
   statusEntry: z.string().trim().min(1).optional(),
   statusTitle: z.string().trim().min(1).max(GUEST_STATUS_SECTION_TITLE_MAX).optional(),
   statusHeight: z.number().int().min(GUEST_STATUS_SECTION_HEIGHT_MIN).max(GUEST_STATUS_SECTION_HEIGHT_MAX).optional(),
+  statusDefaultExpanded: z.boolean().optional(),
+  statusRequiresProject: z.boolean().optional(),
   integration: publicIntegrationSchema.optional(),
   filesystem: z.array(z.string().trim().min(1)).optional(),
   origins: z.array(z.string().trim().min(1)).optional(),

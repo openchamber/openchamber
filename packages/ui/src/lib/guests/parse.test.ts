@@ -219,6 +219,15 @@ describe('parseGuestCatalogJson', () => {
     expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
   });
 
+  test('keeps bounded storage and status metadata', () => {
+    const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
+    const storageId = '123e4567-e89b-12d3-a456-426614174000';
+    expect(parseGuestCatalogJson(JSON.stringify({
+      guests: [{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }],
+    }))).toEqual([{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }]);
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, storageId: 'not-an-installation-id' }] }))).toBeNull();
+  });
+
   test('rejects junk instead of returning an empty catalog', () => {
     expect(parseGuestCatalogJson('null')).toBeNull();
     expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toBeNull();

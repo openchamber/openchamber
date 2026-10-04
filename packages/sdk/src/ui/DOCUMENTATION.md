@@ -10,7 +10,7 @@ Do not import this from `packages/ui`. The iframe is not the host React tree.
 
 Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 
-- `theme.ts`: `applyHostReady(ctx, document.documentElement)` writes host tokens as CSS variables (both host names and `--oc-*` aliases) plus `data-oc-surface` / `data-oc-theme`. `applyHostTheme` writes tokens only.
+- `theme.ts`: `applyHostReady(ctx, document.documentElement)` writes host tokens as CSS variables (both host names and `--oc-*` aliases) plus `data-oc-surface` / `data-oc-theme`. `applyHostTheme` writes tokens only. Optional syntax colors map to `--oc-syntax-keyword`, `--oc-syntax-string`, `--oc-syntax-number`, `--oc-syntax-function`, `--oc-syntax-type`, `--oc-syntax-comment`, `--oc-syntax-variable`, and `--oc-syntax-operator`, with matching legacy `--syntax-*` names.
 - `button.ts`: `mountButton`. Variants `default` (tinted primary), `secondary`, `outline`, `ghost`, `destructive`; sizes `default` 36px, `sm` 32px, `xs` 24px. `loading` shows a ring and blocks clicks.
 - `field.ts`: `mountTextField`. Input or textarea (`multiline`), optional label, helper, error, `password`, `mono`.
 - `search.ts`: `mountSearchField`. Leading search icon, clear button when non-empty, Escape clears.
@@ -27,12 +27,14 @@ Every `mountX(root, props)` returns `{ update(partial), dispose() }`.
 - `progress.ts`: `mountProgress`. `role="progressbar"`, value clamped to 0..100.
 - `menu.ts`: `mountMenu`. Button trigger plus `role="menu"` popup. Items may be `destructive`, `disabled`, or `{ separator: true }`.
 - `text.ts`: `mountText`. Plain text through `textContent`; `![alt](https://…)` becomes `img`, `[label](https://…)` becomes `a` that calls `onOpenUrl`. `splitTextMedia` is the pure splitter.
+- `popover-anchor.ts`: `mountPopoverAnchor` binds an element to a host-positioned sandboxed popover. It owns per-opening IDs, hover/focus activity, scroll/removal cleanup and anchor focus restoration. Unlike `popup.ts`, its content lives outside the source frame. Feature-gate it with `ready.features.popovers`, render the child from `ready.popover`, and dispose bindings before replacing rows. See [Anchored popovers](../../API.md#anchored-popovers) for limits and host ownership.
 - `style.ts`: the one CSS string. `dom.ts` `ensureStyle` injects it once. `popup.ts` places fixed popups (flips above when short on room) and wires outside-click, resize, and scroll to close. `option.ts` is the popup row shared by select and menu. `icons.ts` holds the four inline SVG shapes.
 
 ## Invariants
 
 - Call `applyHostReady` from `onReady` before the first mount. Without those tokens the kit has no colours.
 - The required `*Text` tokens come from the host's `lib/theme/readableColors.ts`. The SDK never duplicates the contrast calculation. `applyHostTheme` writes both naming schemes on every snapshot. Tinted button labels, badge text, banner titles and error text use these values; fills keep the base colors.
+- Syntax tokens are optional. Each theme snapshot clears a missing optional token, so a previous theme cannot leave a stale syntax color behind. Guests that need to support older snapshots should fall back to an existing semantic token in their own CSS.
 - Colours come only from `var(--host-name, var(--oc-alias, fallback))`. No literal hex in `style.ts`.
 - Inputs and picker triggers use the elevated pair; hover/pressed colors layer over that fill. Popups scope the text foreground for nested neutral controls. Secondary buttons use the muted surface, selected tabs use the selection pair, and focus stays independent from primary actions.
 - A mount paints from `props`. The only hidden state is UI state: open popup, highlighted row, typed filter. `update()` merges props and keeps that state unless the related prop changed.

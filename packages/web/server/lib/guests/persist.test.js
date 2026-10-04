@@ -12,6 +12,8 @@ import {
   readExtensionStore,
   writeExtensionPaths,
   writeExtensionStore,
+  ensureGuestStorageIds,
+  updateExtensionStore,
 } from './persist.js';
 
 describe('extensionsPersistPath', () => {
@@ -237,6 +239,34 @@ describe('extension persist', () => {
 });
 
 describe('concurrent store changes', () => {
+  test('does not mint a stale installation identity and preserves unrelated concurrent changes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
+    const file = extensionsPersistPath(dir);
+    try {
+      await writeExtensionStore(file, { paths: ['/old', '/other'] });
+      const old = await ensureGuestStorageIds(file, [{ id: 'board', storedPath: '/old', builtIn: false }]);
+      await updateExtensionStore(file, (current) => ({ ...current, paths: current.paths.filter((entry) => entry !== '/old') }));
+      expect(await ensureGuestStorageIds(file, [{ id: 'board', storedPath: '/old', builtIn: false }])).toEqual({});
+      expect((await readExtensionStore(file)).storageIds?.board).toBe(old.board);
+      await updateExtensionStore(file, (current) => {
+        const storageIds = { ...current.storageIds };
+        delete storageIds.board;
+        return { ...current, paths: [...current.paths, '/new'], storageIds };
+      });
+      const fresh = await ensureGuestStorageIds(file, [{ id: 'board', storedPath: '/new', builtIn: false }]);
+      expect(fresh.board).not.toBe(old.board);
+      await Promise.all([
+        ensureGuestStorageIds(file, [{ id: 'other', storedPath: '/other', builtIn: false }]),
+        setCapabilityGrants('board', file, ['prompt'], null),
+      ]);
+      const store = await readExtensionStore(file);
+      expect(store.storageIds?.other).toMatch(/^[0-9a-f-]{36}$/);
+      expect(store.capabilityGrants.board).toEqual(['prompt']);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test('two approvals at once both land', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-persist-'));
     const file = extensionsPersistPath(dir);

@@ -80,6 +80,7 @@ describe('listInstalledGuests', () => {
       path: hello.path,
       attach: 'dialog',
       enabled: true,
+      storageId: expect.any(String),
       capabilities: { requested: [], granted: [] },
     });
     expect(toPublicGuest({
@@ -263,7 +264,7 @@ describe('page-less packages', () => {
       await fs.writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '1.0.0', openchamber: {
         apiVersion: 1, contributes: {
           panel: { id: 'git-graph', name: 'Git graph', icon: 'git-commit' },
-          statusSection: { entry: 'status/index.html', title: 'Recent commits', height: 160 },
+          statusSection: { entry: 'status/index.html', title: 'Recent commits', height: 160, defaultExpanded: false, requiresProject: true },
         },
       } }));
       expect(await inspectGuestPackage(dir)).toMatchObject({ ok: false, code: 'invalid-manifest' });
@@ -274,7 +275,7 @@ describe('page-less packages', () => {
       const inspected = await inspectGuestPackage(dir);
       expect(inspected.ok).toBe(true);
       const row = toPublicGuest(inspected.guest);
-      expect(row).toMatchObject({ statusEntry: 'status/index.html', statusTitle: 'Recent commits', statusHeight: 160 });
+       expect(row).toMatchObject({ statusEntry: 'status/index.html', statusTitle: 'Recent commits', statusHeight: 160, statusDefaultExpanded: false, statusRequiresProject: true });
       expect(row).not.toHaveProperty('entry');
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });

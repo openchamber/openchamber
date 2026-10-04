@@ -17,8 +17,14 @@ import {
 
 type Listener = (event: Event) => void;
 
+const pointerEvent = (type: string, relatedTarget: EventTarget | null = null): Event => {
+  const event = new Event(type);
+  Object.defineProperty(event, 'relatedTarget', { value: relatedTarget });
+  return event;
+};
+
 const createFrame = (): HostFrame & { dispatch: (event: Event) => void; posted: GuestMessage[] } => {
-  const listeners = new Set<Listener>();
+  const listeners = new Map<string, Set<Listener>>();
   const posted: GuestMessage[] = [];
   const postMessage = (message: GuestMessage) => {
     posted.push(message);
@@ -27,13 +33,13 @@ const createFrame = (): HostFrame & { dispatch: (event: Event) => void; posted: 
     parent: { postMessage },
     postMessage,
     addEventListener: (type: string, listener: Listener) => {
-      if (type === 'message') listeners.add(listener);
+      const group = listeners.get(type) ?? new Set<Listener>();
+      group.add(listener);
+      listeners.set(type, group);
     },
-    removeEventListener: (type: string, listener: Listener) => {
-      listeners.delete(listener);
-    },
+    removeEventListener: (type: string, listener: Listener) => { listeners.get(type)?.delete(listener); },
     dispatch: (event: Event) => {
-      for (const listener of listeners) listener(event);
+      for (const listener of listeners.get(event.type) ?? []) listener(event);
     },
     posted,
   };
@@ -95,6 +101,43 @@ const demoItem = {
 };
 
 describe('connectHost', () => {
+  test('a popover child reports only its own pointer and window focus transitions', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    frame.dispatch(new MessageEvent('message', { data: { ...ready, payload: { ...ready.payload, surface: 'popover', popover: { id: 'child-1', data: null } } } }));
+    await expect(host.setPopoverAnchorActive('other', true)).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    frame.dispatch(pointerEvent('pointerover'));
+    frame.dispatch(new Event('focus'));
+    frame.dispatch(pointerEvent('pointerout'));
+    frame.dispatch(new Event('blur'));
+    const activity = frame.posted.filter((message) => message.type === 'popover-anchor');
+    expect(activity.map((message) => message.type === 'popover-anchor' ? message.payload : null)).toEqual([
+      { id: 'child-1', active: true }, { id: 'child-1', active: false },
+    ]);
+    host.dispose();
+    frame.dispatch(pointerEvent('pointerover'));
+    expect(frame.posted.filter((message) => message.type === 'popover-anchor')).toHaveLength(2);
+  });
+
+  test('refuses popovers before the host advertises support without posting', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    await expect(host.openPopover({ id: 'preview-1', anchor: { x: 0, y: 0, width: 1, height: 1 }, width: 160, height: 48, data: null })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    expect(frame.posted).toHaveLength(1);
+    host.dispose();
+  });
+
+  test('forwards popover close pushes and ignores them after disposal', () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    const events: string[] = [];
+    host.onPopoverClosed((event) => events.push(`${event.id}:${event.reason}`));
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'popover-closed', payload: { id: 'preview-1', reason: 'escape' } } }));
+    host.dispose();
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'popover-closed', payload: { id: 'preview-1', reason: 'closed' } } }));
+    expect(events).toEqual(['preview-1:escape']);
+  });
+
   test('toast options are sent as data and resolve on display acknowledgement', async () => {
     const frame = createFrame();
     const host = connectHost({ target: frame, acceptSource: () => true });
@@ -117,6 +160,86 @@ describe('connectHost', () => {
       await expect(host.toast({ kind: 'info', message: 'Summary', copy: { text } })).rejects.toMatchObject({ code: 'HOST_REJECTED' });
     }
     expect(frame.posted.map((message) => message.type)).toEqual(['hello']);
+    host.dispose();
+  });
+
+  test('keeps legacy storage requests unchanged and refuses device storage before advertising it', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    const legacy = host.storage.get('saved');
+    const legacyRequest = frame.posted.at(-1);
+    if (!legacyRequest || legacyRequest.type !== 'storage') throw new Error('Expected storage request');
+    expect(legacyRequest.payload).toEqual({ op: 'get', key: 'saved' });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: legacyRequest.id, ok: true, payload: { storage: true, op: 'get', found: false } } }));
+    await expect(legacy).resolves.toBeUndefined();
+    const explicitInstance = host.storage.keys({ scope: 'instance' });
+    const instanceRequest = frame.posted.at(-1);
+    if (!instanceRequest || instanceRequest.type !== 'storage') throw new Error('Expected storage request');
+    expect(instanceRequest.payload).toEqual({ op: 'keys' });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: instanceRequest.id, ok: true, payload: { storage: true, op: 'keys', keys: [] } } }));
+    await expect(explicitInstance).resolves.toEqual([]);
+    await expect(host.storage.get('saved', { scope: 'device' })).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    expect(frame.posted).toHaveLength(3);
+    host.dispose();
+  });
+
+  test('sends device-scoped storage only after the host advertises it', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    frame.dispatch(new MessageEvent('message', { data: {
+      ...ready,
+      payload: { ...ready.payload, features: { deviceStorage: true } },
+    } }));
+    const pending = host.storage.set('saved', { enabled: true }, { scope: 'device' });
+    const request = frame.posted.at(-1);
+    if (!request || request.type !== 'storage') throw new Error('Expected storage request');
+    expect(request.payload).toEqual({ op: 'set', key: 'saved', value: { enabled: true }, scope: 'device' });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true, payload: { storage: true, op: 'set' } } }));
+    await pending;
+    host.dispose();
+  });
+
+  test('publishes status controls only to supporting hosts and disposes listeners', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    await expect(host.setStatusControls([])).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    frame.dispatch(new MessageEvent('message', { data: {
+      ...ready,
+      payload: { ...ready.payload, features: { statusControls: true } },
+    } }));
+    const events: string[] = [];
+    const remove = host.onStatusControl((event) => events.push(event.id));
+    const pending = host.setStatusControls([{ kind: 'button', id: 'refresh', label: 'Refresh' }]);
+    const request = frame.posted.at(-1);
+    if (!request || request.type !== 'status-controls') throw new Error('Expected status controls request');
+    expect(request.payload).toEqual({ controls: [{ kind: 'button', id: 'refresh', label: 'Refresh' }] });
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'result', id: request.id, ok: true } }));
+    await pending;
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'status-control-event', payload: { id: 'refresh' } } }));
+    remove();
+    frame.dispatch(new MessageEvent('message', { data: { channel: OPENCHAMBER_SDK_CHANNEL, v: 1, type: 'status-control-event', payload: { id: 'refresh' } } }));
+    expect(events).toEqual(['refresh']);
+    host.dispose();
+  });
+
+  test('rejects invalid status controls locally without posting', async () => {
+    const frame = createFrame();
+    const host = connectHost({ target: frame, acceptSource: () => true });
+    frame.dispatch(new MessageEvent('message', { data: {
+      ...ready,
+      payload: { ...ready.payload, features: { statusControls: true } },
+    } }));
+    const invalidControls = [
+      [{ kind: 'button' as const, id: 'refresh', label: 'Refresh' }, { kind: 'button' as const, id: 'refresh', label: 'Again' }],
+      [{ kind: 'select' as const, id: 'branch', label: 'Branch', value: 'main', options: [{ value: 'main', label: 'Main' }, { value: 'main', label: 'Again' }] }],
+      [{ kind: 'select' as const, id: 'branch', label: 'Branch', value: 'missing', options: [{ value: 'main', label: 'Main' }] }],
+      Array.from({ length: 5 }, (_, index) => ({ kind: 'button' as const, id: `item-${index}`, label: 'Control' })),
+      [{ kind: 'button' as const, id: 'refresh', label: '' }],
+    ];
+    for (const controls of invalidControls) {
+      await expect(host.setStatusControls(controls)).rejects.toMatchObject({ code: 'HOST_REJECTED' });
+    }
+    expect(frame.posted).toHaveLength(1);
     host.dispose();
   });
 
