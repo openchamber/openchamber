@@ -331,6 +331,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['code', 'wrap', 'line wrap', 'markdown'],
   },
   {
+    id: 'chat.table-cell-wrap',
+    page: 'chat',
+    titleKey: 'settings.openchamber.visual.field.tableCellWrap',
+    descriptionKey: 'settings.openchamber.visual.field.tableCellWrapInfo',
+    keywords: ['table', 'wrap', 'cell', 'columns', 'markdown'],
+  },
+  {
     id: 'chat.copy-plain-text',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.copyMessagesAsPlainText',

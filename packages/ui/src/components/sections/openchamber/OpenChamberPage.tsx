@@ -211,6 +211,7 @@ const ChatSectionContent: React.FC = () => {
                 'promptNavigatorEnabled',
                 'wideChatLayout',
                 'codeBlockLineWrap',
+                'tableCellWrap',
                 'copyMessagesAsPlainText',
                 'splitAssistantMessageActions',
                 'subagentReadOnlyBanner',

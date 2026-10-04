@@ -34,6 +34,7 @@ import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
   attachMarkdownInteractions,
   applyMarkdownCodeBlockWrapState,
+  applyMarkdownTableWrapState,
   decorateMarkdown,
   getMarkdownCodeText,
   stabilizeMarkdownTableWidths,
@@ -825,6 +826,8 @@ const useDecorateContext = (
     copied: t('markdownRenderer.code.actions.copiedTitle'),
     enableCodeWrap: t('markdownRenderer.code.actions.enableWrapTitle'),
     disableCodeWrap: t('markdownRenderer.code.actions.disableWrapTitle'),
+    enableTableWrap: t('markdownRenderer.table.actions.enableWrapTitle'),
+    disableTableWrap: t('markdownRenderer.table.actions.disableWrapTitle'),
     copyTable: t('markdownRenderer.table.actions.copyTitle'),
     downloadTable: t('markdownRenderer.table.actions.downloadTitle'),
     copyDiagram: t('markdownRenderer.mermaid.actions.copySourceTitle'),
@@ -841,6 +844,11 @@ const useDecorateContext = (
   const toggleCodeBlockLineWrap = React.useCallback(() => {
     setCodeBlockLineWrap(!useUIStore.getState().codeBlockLineWrap);
   }, [setCodeBlockLineWrap]);
+  const tableCellWrap = useUIStore((state) => state.tableCellWrap);
+  const setTableCellWrap = useUIStore((state) => state.setTableCellWrap);
+  const toggleTableCellWrap = React.useCallback(() => {
+    setTableCellWrap(!useUIStore.getState().tableCellWrap);
+  }, [setTableCellWrap]);
 
   return React.useMemo<DecorateContext>(() => {
     const colors = mermaidColorsFromTheme(currentTheme);
@@ -855,8 +863,19 @@ const useDecorateContext = (
           return {};
         }
       });
-    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback, getCopyFormat: readCopyFormat };
-  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
+    return {
+      labels,
+      mermaidControls,
+      codeBlockLineWrap,
+      deferCodeLineNumberSync,
+      onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap,
+      tableCellWrap,
+      onToggleTableCellWrap: toggleTableCellWrap,
+      renderMermaid,
+      onPreviewLoopback,
+      getCopyFormat: readCopyFormat,
+    };
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -919,6 +938,7 @@ const useMorphdomMarkdown = ({
     }
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
+  const { tableCellWrap } = ctx;
   const scheduleTableLayout = React.useCallback(() => {
     if (!tableLayoutSettled) return;
     const previousFrame = tableLayoutFrameRef.current;
@@ -930,10 +950,10 @@ const useMorphdomMarkdown = ({
       if (renderRevisionRef.current !== renderRevision) return;
       const container = containerRef.current;
       const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-      if (target) stabilizeMarkdownTableWidths(target);
+      if (target) stabilizeMarkdownTableWidths(target, tableCellWrap);
     });
     tableLayoutFrameRef.current = frame;
-  }, [containerRef, tableLayoutSettled]);
+  }, [containerRef, tableCellWrap, tableLayoutSettled]);
 
   React.useEffect(() => () => {
     const frame = tableLayoutFrameRef.current;
@@ -963,6 +983,7 @@ const useMorphdomMarkdown = ({
       }
       for (const [key, value] of Object.entries(syntaxVars)) target.style.setProperty(key, value);
       applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
+      applyMarkdownTableWrapState(target, ctx.tableCellWrap, ctx.labels);
       mountedDomRef.current = {
         key: domCacheKey,
         copiedLabel: ctx.labels.copied,

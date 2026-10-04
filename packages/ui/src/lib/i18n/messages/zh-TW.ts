@@ -3328,6 +3328,8 @@ export const dict: Record<I18nKey, string> = {
   'markdownRenderer.table.actions.copyTitle': '複製表格',
   'markdownRenderer.code.actions.enableWrapTitle': '啟用自動換行',
   'markdownRenderer.code.actions.disableWrapTitle': '停用自動換行',
+  'markdownRenderer.table.actions.enableWrapTitle': '啟用儲存格換行',
+  'markdownRenderer.table.actions.disableWrapTitle': '停用儲存格換行',
   'markdownRenderer.table.actions.downloadTitle': '下載表格',
   'markdownRenderer.table.toast.downloadedAsFormat': '表格已下載為 {format}',
   'markdownRenderer.mermaid.actions.copyTitle': '複製',

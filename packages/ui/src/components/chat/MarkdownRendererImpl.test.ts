@@ -184,6 +184,8 @@ const rendererUiState = {
     codeBlockLineWrap: false,
     mermaidRenderingMode: 'svg',
     setCodeBlockLineWrap: () => undefined,
+    tableCellWrap: false,
+    setTableCellWrap: () => undefined,
     openContextPreview: () => undefined,
 };
 
@@ -292,6 +294,7 @@ type TestDecorateContext = {
 mock.module('./markdown/decorate', () => ({
     attachMarkdownInteractions: () => () => undefined,
     applyMarkdownCodeBlockWrapState: () => undefined,
+    applyMarkdownTableWrapState: () => undefined,
     decorateMarkdown: (root: FakeElement, ctx: TestDecorateContext) => {
         decorateCalls += 1;
         if (root.getAttribute('data-test-decoration-marker') === 'true') return;

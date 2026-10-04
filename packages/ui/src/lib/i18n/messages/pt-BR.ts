@@ -3322,6 +3322,8 @@ export const dict: Record<I18nKey, string> = {
   "markdownRenderer.table.actions.copyTitle": "Copiar tabela",
   "markdownRenderer.code.actions.enableWrapTitle": "Ativar quebra de linha",
   "markdownRenderer.code.actions.disableWrapTitle": "Desativar quebra de linha",
+  "markdownRenderer.table.actions.enableWrapTitle": "Ativar quebra nas células",
+  "markdownRenderer.table.actions.disableWrapTitle": "Desativar quebra nas células",
   "markdownRenderer.table.actions.downloadTitle": "Baixar tabela",
   "markdownRenderer.table.toast.downloadedAsFormat": "Tabela baixada como {format}",
   "markdownRenderer.mermaid.actions.copyTitle": "Copiar",

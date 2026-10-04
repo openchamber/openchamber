@@ -3367,6 +3367,8 @@ export const dict = {
   'markdownRenderer.table.actions.copyTitle': 'Tabel kopiëren',
   'markdownRenderer.code.actions.enableWrapTitle': 'Regelafbreking aanzetten',
   'markdownRenderer.code.actions.disableWrapTitle': 'Regelafbreking uitzetten',
+  'markdownRenderer.table.actions.enableWrapTitle': 'Celafbreking aanzetten',
+  'markdownRenderer.table.actions.disableWrapTitle': 'Celafbreking uitzetten',
   'markdownRenderer.table.actions.downloadTitle': 'Tabel downloaden',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabel gedownload als {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopiëren',

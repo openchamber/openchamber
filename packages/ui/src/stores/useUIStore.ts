@@ -1087,6 +1087,7 @@ interface UIStore {
   enterToSendConfigured: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
+  tableCellWrap: boolean;
   copyMessagesAsPlainText: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
@@ -1309,6 +1310,7 @@ interface UIStore {
   setEnterToSendConfigured: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
+  setTableCellWrap: (value: boolean) => void;
   setCopyMessagesAsPlainText: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
@@ -1510,6 +1512,7 @@ export const useUIStore = create<UIStore>()(
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
+        tableCellWrap: false,
         copyMessagesAsPlainText: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -2989,6 +2992,9 @@ export const useUIStore = create<UIStore>()(
         setCodeBlockLineWrap: (value) => {
           set({ codeBlockLineWrap: value });
         },
+        setTableCellWrap: (value) => {
+          set({ tableCellWrap: value });
+        },
         setCopyMessagesAsPlainText: (value) => {
           set({ copyMessagesAsPlainText: value });
         },
@@ -3446,6 +3452,7 @@ export const useUIStore = create<UIStore>()(
           enterToSendConfigured: state.enterToSendConfigured,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,
+          tableCellWrap: state.tableCellWrap,
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,

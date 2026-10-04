@@ -335,6 +335,9 @@
     "codeBlockLineWrap": {
       "scope": "profile"
     },
+    "tableCellWrap": {
+      "scope": "profile"
+    },
     "copyMessagesAsPlainText": {
       "scope": "profile"
     },

@@ -18,6 +18,8 @@ export type DecorateLabels = {
   copied: string;
   enableCodeWrap: string;
   disableCodeWrap: string;
+  enableTableWrap: string;
+  disableTableWrap: string;
   copyTable: string;
   downloadTable: string;
   copyDiagram: string;
@@ -41,6 +43,9 @@ export type DecorateContext = {
   codeBlockLineWrap: boolean;
   deferCodeLineNumberSync?: boolean;
   onToggleCodeBlockLineWrap?: () => void;
+  // Tables fit the available width and wrap cell text instead of scrolling.
+  tableCellWrap: boolean;
+  onToggleTableCellWrap?: () => void;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
   onPreviewLoopback?: (url: string) => void;
@@ -112,6 +117,17 @@ const makeIconButton = (icon: keyof typeof ICONS, title: string, slot: string): 
   return button;
 };
 
+const applyWrapButtonState = (button: HTMLButtonElement, enabled: boolean, enableTitle: string, disableTitle: string): void => {
+  const title = enabled ? disableTitle : enableTitle;
+  button.setAttribute('title', title);
+  button.setAttribute('aria-label', title);
+  button.classList.toggle('text-foreground', enabled);
+  button.classList.toggle('opacity-100', enabled);
+  button.classList.toggle('text-muted-foreground', !enabled);
+  button.classList.toggle('opacity-65', !enabled);
+  button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+};
+
 const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const body = wrapper.querySelector<HTMLElement>('[data-md-code-body]');
   const pre = wrapper.querySelector<HTMLElement>('pre');
@@ -137,16 +153,7 @@ const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels:
     lineContent.style.whiteSpace = enabled ? 'pre-wrap' : 'pre';
     lineContent.style.overflowWrap = enabled ? 'anywhere' : 'normal';
   }
-  if (wrapButton) {
-    const title = enabled ? labels.disableCodeWrap : labels.enableCodeWrap;
-    wrapButton.setAttribute('title', title);
-    wrapButton.setAttribute('aria-label', title);
-    wrapButton.classList.toggle('text-foreground', enabled);
-    wrapButton.classList.toggle('opacity-100', enabled);
-    wrapButton.classList.toggle('text-muted-foreground', !enabled);
-    wrapButton.classList.toggle('opacity-65', !enabled);
-    wrapButton.setAttribute('aria-pressed', enabled ? 'true' : 'false');
-  }
+  if (wrapButton) applyWrapButtonState(wrapButton, enabled, labels.enableCodeWrap, labels.disableCodeWrap);
 };
 
 const layoutCodeLines = (pre: HTMLPreElement): void => {
@@ -389,8 +396,26 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
 const TABLE_COLUMN_MIN_WIDTH = 120;
 const TABLE_COLUMN_FALLBACK_MAX_WIDTH = 320;
 const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
+// The wrap mode the fixed column widths were computed for.
+const TABLE_WRAP_ATTR = 'data-md-table-wrap';
 
-const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
+const applyTableWrapState = (wrapper: Element, enabled: boolean, labels: DecorateLabels): void => {
+  const button = wrapper.querySelector<HTMLButtonElement>('[data-md-action="toggle-table-wrap"]');
+  if (button) applyWrapButtonState(button, enabled, labels.enableTableWrap, labels.disableTableWrap);
+  // Until widths are measured, a wrapping table shrinks to the available
+  // width like any auto-width table; otherwise it keeps its natural width.
+  wrapper.querySelector('table')?.classList.toggle('w-max', !enabled);
+};
+
+/** Sync table wrap buttons with the current mode; column widths follow in stabilizeMarkdownTableWidths. */
+export const applyMarkdownTableWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
+  for (const wrapper of Array.from(root.querySelectorAll('[data-markdown="table-wrapper"]'))) {
+    applyTableWrapState(wrapper, enabled, labels);
+  }
+};
+
+const decorateTables = (root: HTMLElement, ctx: DecorateContext): void => {
+  const { labels } = ctx;
   const tables = root.querySelectorAll<HTMLTableElement>('table');
   for (const table of Array.from(tables)) {
     const existing = table.closest('[data-markdown="table-wrapper"]');
@@ -402,6 +427,8 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
 
     const toolbar = document.createElement('div');
     toolbar.className = 'flex items-center justify-end gap-1';
+
+    toolbar.appendChild(makeIconButton('textWrap', labels.enableTableWrap, 'toggle-table-wrap'));
 
     const copyGroup = document.createElement('div');
     copyGroup.className = 'relative';
@@ -431,7 +458,7 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
     table.setAttribute(TABLE_LAYOUT_ATTR, 'pending');
-    table.classList.add('w-max', 'border-collapse', 'text-sm');
+    table.classList.add('border-collapse', 'text-sm');
 
     for (const tr of Array.from(table.querySelectorAll('tr'))) {
       tr.classList.add('border-b', 'border-border/60');
@@ -449,12 +476,33 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);
     wrapper.appendChild(scroll);
+    applyTableWrapState(wrapper, ctx.tableCellWrap, labels);
   }
 };
 
-export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
+// Columns that fit their share keep their natural width; the rest split what
+// remains, so short columns stay on one line and long ones wrap.
+const fitColumnWidths = (naturalWidths: number[], availableWidth: number): number[] => {
+  const widths = [...naturalWidths];
+  let open = naturalWidths.map((_, index) => index);
+  let remaining = availableWidth;
+  while (open.length > 0) {
+    const share = remaining / open.length;
+    const fitting = open.filter((index) => naturalWidths[index] <= share);
+    if (fitting.length === 0) {
+      for (const index of open) widths[index] = Math.max(TABLE_COLUMN_MIN_WIDTH, Math.floor(share));
+      break;
+    }
+    for (const index of fitting) remaining -= naturalWidths[index];
+    open = open.filter((index) => naturalWidths[index] > share);
+  }
+  return widths;
+};
+
+export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boolean): void => {
+  const wrapMode = String(wrapCells);
   const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
-    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"])`,
+    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"][${TABLE_WRAP_ATTR}="${wrapMode}"])`,
   ));
   if (tables.length === 0 || !root.isConnected) return;
 
@@ -520,10 +568,13 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
     // Without layout (for example, a hidden chat), retain the former limit.
     const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
     const naturalWidths = columnProbes.map((probe) => Math.ceil(probe.getBoundingClientRect().width));
+    const cappedWidths = naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width)));
+    // Without layout there is no width to fit into, so wrapping waits.
+    const widths = wrapCells && availableWidth > 0 ? fitColumnWidths(cappedWidths, availableWidth) : cappedWidths;
     return {
       table,
-      widths: naturalWidths.map((width) => Math.min(maxColumnWidth, Math.max(TABLE_COLUMN_MIN_WIDTH, width))),
-      cappedColumns: naturalWidths.map((width) => width > maxColumnWidth),
+      widths,
+      cappedColumns: naturalWidths.map((width, index) => width > (widths[index] ?? 0)),
     };
   });
   measurementRoot.remove();
@@ -561,6 +612,7 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement): void => {
     table.style.tableLayout = 'fixed';
     table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
     table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
+    table.setAttribute(TABLE_WRAP_ATTR, wrapMode);
   }
 };
 
@@ -695,7 +747,7 @@ export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void 
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);
-  decorateTables(root, ctx.labels);
+  decorateTables(root, ctx);
   decorateLinks(root, ctx);
 };
 
@@ -833,6 +885,13 @@ export const attachMarkdownInteractions = (
     if (action === 'toggle-code-wrap') {
       event.preventDefault();
       ctx.onToggleCodeBlockLineWrap?.();
+      return;
+    }
+
+    if (action === 'toggle-table-wrap') {
+      event.preventDefault();
+      closeAllMenus(container);
+      ctx.onToggleTableCellWrap?.();
       return;
     }
 

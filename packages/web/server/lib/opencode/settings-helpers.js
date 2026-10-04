@@ -416,6 +416,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.codeBlockLineWrap === 'boolean') {
       result.codeBlockLineWrap = candidate.codeBlockLineWrap;
     }
+    if (typeof candidate.tableCellWrap === 'boolean') {
+      result.tableCellWrap = candidate.tableCellWrap;
+    }
     if (typeof candidate.copyMessagesAsPlainText === 'boolean') {
       result.copyMessagesAsPlainText = candidate.copyMessagesAsPlainText;
     }

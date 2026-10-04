@@ -3179,6 +3179,8 @@ export const dict = {
   'markdownRenderer.table.actions.copyTitle': 'Tabloyu kopyala',
   'markdownRenderer.code.actions.enableWrapTitle': 'Satır kaydırmayı etkinleştir',
   'markdownRenderer.code.actions.disableWrapTitle': 'Satır kaydırmayı devre dışı bırak',
+  'markdownRenderer.table.actions.enableWrapTitle': 'Hücre kaydırmayı etkinleştir',
+  'markdownRenderer.table.actions.disableWrapTitle': 'Hücre kaydırmayı devre dışı bırak',
   'markdownRenderer.table.actions.downloadTitle': 'Tabloyu indir',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tablo {format} olarak indirildi',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopyala',

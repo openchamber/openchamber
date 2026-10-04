@@ -312,7 +312,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'sessionTabs' | 'animatedActivityIndicators';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -373,6 +373,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setWideChatLayoutEnabled = useUIStore(state => state.setWideChatLayoutEnabled);
     const codeBlockLineWrap = useUIStore(state => state.codeBlockLineWrap);
     const setCodeBlockLineWrap = useUIStore(state => state.setCodeBlockLineWrap);
+    const tableCellWrap = useUIStore(state => state.tableCellWrap);
+    const setTableCellWrap = useUIStore(state => state.setTableCellWrap);
     const copyMessagesAsPlainText = useUIStore(state => state.copyMessagesAsPlainText);
     const setCopyMessagesAsPlainText = useUIStore(state => state.setCopyMessagesAsPlainText);
     const chatRenderMode = useUIStore(state => state.chatRenderMode);
@@ -728,6 +730,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('promptNavigatorEnabled')
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
+        || shouldShow('tableCellWrap')
         || shouldShow('copyMessagesAsPlainText')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('subagentReadOnlyBanner')
@@ -761,6 +764,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('promptNavigatorEnabled')
         || shouldShow('wideChatLayout')
         || shouldShow('codeBlockLineWrap')
+        || shouldShow('tableCellWrap')
         || shouldShow('copyMessagesAsPlainText')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('dotfiles')
@@ -2041,7 +2045,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     />
                                 </SettingsSection>
 
-                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap') || shouldShow('copyMessagesAsPlainText')) && (
+                                {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('codeBlockLineWrap') || shouldShow('tableCellWrap') || shouldShow('copyMessagesAsPlainText')) && (
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.messageAppearance')}
                                     settingsItem="chat.message-appearance"
@@ -2105,6 +2109,17 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         label={t('settings.openchamber.visual.field.codeBlockLineWrap')}
                                         ariaLabel={t('settings.openchamber.visual.field.codeBlockLineWrapAria')}
                                         settingsItem="chat.code-block-line-wrap"
+                                    />
+                                )}
+
+                                {shouldShow('tableCellWrap') && (
+                                    <SettingsCheckboxRow
+                                        checked={tableCellWrap}
+                                        onChange={setTableCellWrap}
+                                        label={t('settings.openchamber.visual.field.tableCellWrap')}
+                                        ariaLabel={t('settings.openchamber.visual.field.tableCellWrapAria')}
+                                        info={t('settings.openchamber.visual.field.tableCellWrapInfo')}
+                                        settingsItem="chat.table-cell-wrap"
                                     />
                                 )}
 

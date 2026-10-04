@@ -3367,6 +3367,8 @@ export const dict = {
   'markdownRenderer.table.actions.copyTitle': 'Copy table',
   'markdownRenderer.code.actions.enableWrapTitle': 'Enable line wrap',
   'markdownRenderer.code.actions.disableWrapTitle': 'Disable line wrap',
+  'markdownRenderer.table.actions.enableWrapTitle': 'Enable cell wrap',
+  'markdownRenderer.table.actions.disableWrapTitle': 'Disable cell wrap',
   'markdownRenderer.table.actions.downloadTitle': 'Download table',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Table downloaded as {format}',
   'markdownRenderer.mermaid.actions.copyTitle': 'Copy',

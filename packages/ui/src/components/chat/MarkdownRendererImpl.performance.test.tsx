@@ -281,6 +281,7 @@ const initializePerformanceDom = async (): Promise<void> => {
   const fakeState = {
     openContextPreview: () => undefined,
     codeBlockLineWrap: false,
+    tableCellWrap: false,
     mermaidRenderingMode: 'svg',
   };
   type UIStateSelection = typeof fakeState[keyof typeof fakeState];

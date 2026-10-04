@@ -3097,6 +3097,8 @@ export const dict = {
   'markdownRenderer.table.actions.copyTitle': 'Tabelle kopieren',
   'markdownRenderer.code.actions.enableWrapTitle': 'Zeilenumbruch aktivieren',
   'markdownRenderer.code.actions.disableWrapTitle': 'Zeilenumbruch deaktivieren',
+  'markdownRenderer.table.actions.enableWrapTitle': 'Zellenumbruch aktivieren',
+  'markdownRenderer.table.actions.disableWrapTitle': 'Zellenumbruch deaktivieren',
   'markdownRenderer.table.actions.downloadTitle': 'Tabelle herunterladen',
   'markdownRenderer.table.toast.downloadedAsFormat': 'Tabelle als {format} heruntergeladen',
   'markdownRenderer.mermaid.actions.copyTitle': 'Kopieren',

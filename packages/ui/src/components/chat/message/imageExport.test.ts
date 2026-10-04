@@ -17,6 +17,8 @@ describe('message image export', () => {
                 copied: 'Copied',
                 enableCodeWrap: 'Wrap',
                 disableCodeWrap: 'Do not wrap',
+                enableTableWrap: 'Wrap cells',
+                disableTableWrap: 'Do not wrap cells',
                 copyTable: 'Copy table',
                 downloadTable: 'Download table',
                 copyDiagram: 'Copy diagram',
@@ -29,6 +31,7 @@ describe('message image export', () => {
             },
             mermaidControls: { download: false, copy: false, showPanZoomControls: false },
             codeBlockLineWrap: false,
+            tableCellWrap: false,
             renderMermaid: () => ({}),
         });
 
