@@ -4203,18 +4203,25 @@ export async function commit(directory, message, options = {}) {
   });
 }
 
-export async function getBranches(directory) {
+/**
+ * `remote: 'local'` answers from local refs alone, as `git branch -a` does: the
+ * callers that only need the checked-out branch and its upstream (publishing,
+ * worktree creation) must not wait on every remote's network round trip.
+ */
+export async function getBranches(directory, { remote = 'live' } = {}) {
   const { git } = await createRepositoryGitContext(directory);
 
   try {
     const result = await git.branch();
 
     const allBranches = result.all;
+    const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
     // Read-only ref discovery, not a transfer: it never writes refs and never
     // takes the planned-operation path, so a branch pushed from elsewhere is
     // listed and a ref deleted on the remote is pruned without a fetch first.
-    const remoteBranches = allBranches.filter(branch => branch.startsWith('remotes/'));
-    const activeRemoteBranches = await filterActiveRemoteBranches(git, remoteBranches);
+    const activeRemoteBranches = remote === 'local'
+      ? remoteBranches
+      : await filterActiveRemoteBranches(git, directory, remoteBranches);
     const defaultBranches = await getRemoteDefaultBranches(git);
 
     return {
@@ -4287,9 +4294,37 @@ async function getRemoteDefaultBranches(git) {
   return defaults;
 }
 
-async function filterActiveRemoteBranches(git, remoteBranches) {
+// What each remote reported for its heads, per repository and remote. A
+// repository with many remotes paid one network round trip per remote on every
+// branch listing, and the Git panel lists branches several times per action.
+// An answer is reused while it is fresh and the local remote-tracking refs of
+// that remote are unchanged: a push or fetch from here changes them, so it
+// reads again. Concurrent listings share one round trip.
+const REMOTE_HEADS_TTL_MS = 30_000;
+const remoteHeadsCache = new Map();
+
+const readRemoteHeads = (git, directory, remote, localRefs) => {
+  const key = `${directory}\0${remote.name}\0${remote.refs?.fetch ?? ''}`;
+  const localKey = localRefs.join('\n');
+  const cached = remoteHeadsCache.get(key);
+  if (cached && cached.localKey === localKey && Date.now() - cached.at < REMOTE_HEADS_TTL_MS) return cached.heads;
+  const heads = git.raw(['ls-remote', '--heads', '--', remote.name]).then((output) => {
+    const names = new Set();
+    for (const line of output.trim().split('\n')) {
+      if (line.includes('\trefs/heads/')) names.add(line.split('\t')[1].replace('refs/heads/', ''));
+    }
+    return names;
+  });
+  const entry = { at: Date.now(), localKey, heads };
+  remoteHeadsCache.set(key, entry);
+  // A remote that did not answer is asked again next time.
+  heads.catch(() => { if (remoteHeadsCache.get(key) === entry) remoteHeadsCache.delete(key); });
+  return heads;
+};
+
+async function filterActiveRemoteBranches(git, directory, remoteBranches) {
   try {
-    const remotes = await git.getRemotes();
+    const remotes = await git.getRemotes(true);
     const branchesByRemote = new Map();
 
     // A remote that did not answer says nothing about its branches. Dropping
@@ -4301,16 +4336,8 @@ async function filterActiveRemoteBranches(git, remoteBranches) {
 
     await Promise.all(remotes.map(async (remote) => {
       try {
-        const lsRemoteResult = await git.raw(['ls-remote', '--heads', '--', remote.name]);
-        const actualRemoteBranches = new Set();
-        const lines = lsRemoteResult.trim().split('\n');
-        for (const line of lines) {
-          if (line.includes('\trefs/heads/')) {
-            const branchName = line.split('\t')[1].replace('refs/heads/', '');
-            actualRemoteBranches.add(branchName);
-          }
-        }
-        branchesByRemote.set(remote.name, actualRemoteBranches);
+        const localRefs = remoteBranches.filter((branch) => branch.startsWith(`remotes/${remote.name}/`));
+        branchesByRemote.set(remote.name, await readRemoteHeads(git, directory, remote, localRefs));
       } catch {
         unreachableRemotes.add(remote.name);
       }

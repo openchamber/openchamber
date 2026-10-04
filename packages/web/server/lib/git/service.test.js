@@ -4524,6 +4524,35 @@ describe.runIf(canRunGit())('getBranches', () => {
     expect(branches.all).toContain('feature-known');
     expect(branches.all).not.toContain('remotes/origin/feature-stale');
   });
+
+  it('answers from local refs without asking any remote when asked for local', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['checkout', '-b', 'remote-only']);
+    runGit(collaborator, ['push', 'origin', 'remote-only']);
+
+    const branches = await getBranches(repository, { remote: 'local' });
+
+    // Only what `git branch -a` knows: a branch nobody fetched is not listed.
+    expect(branches.all).toContain('remotes/origin/react');
+    expect(branches.all).not.toContain('remotes/origin/remote-only');
+  });
+
+  it('reuses a remote\'s answer until its local tracking refs change', async () => {
+    const { repository, remote } = createRepositoryWithRemote({ remoteName: 'origin', defaultBranch: 'react' });
+    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    const collaborator = createTempDir();
+    runGit(collaborator, ['clone', remote, '.']);
+    runGit(collaborator, ['checkout', '-b', 'later']);
+    runGit(collaborator, ['push', 'origin', 'later']);
+
+    // Within the freshness window the remote is not asked again.
+    expect((await getBranches(repository)).all).not.toContain('remotes/origin/later');
+    // A fetch here changes the tracking refs, so the remote is read again.
+    runGit(repository, ['fetch', 'origin']);
+    expect((await getBranches(repository)).all).toContain('remotes/origin/later');
+  });
 });
 
 describe.runIf(canRunGit())('getUnpushedBranchCounts', () => {

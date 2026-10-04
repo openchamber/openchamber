@@ -193,10 +193,13 @@ export async function isLinkedWorktree(directory: string): Promise<boolean> {
   return gitHttp.isLinkedWorktree(directory);
 }
 
-export async function getGitBranches(directory: string): Promise<import('./api/types').GitBranch> {
+export async function getGitBranches(
+  directory: string,
+  options?: import('./api/types').GitBranchListOptions,
+): Promise<import('./api/types').GitBranch> {
   const runtime = getRuntimeGit();
-  if (runtime) return runtime.getGitBranches(directory);
-  return gitHttp.getGitBranches(directory);
+  if (runtime) return runtime.getGitBranches(directory, options);
+  return gitHttp.getGitBranches(directory, options);
 }
 
 export async function getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<import('./api/types').GitUnpushedBranchCounts> {

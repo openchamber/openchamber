@@ -210,11 +210,13 @@ const isTransport = (value) => {
     && isVerification(value.verification, value.mode);
 };
 const isRef = (value) => isIdentifier(value, 4096) && value.startsWith('refs/');
+// Revision 0 is a repository nobody bound: its remotes use system Git, and the
+// planner and binding service accept it, so its operations are stored too.
 const isRepositoryTargetBase = (value, operation, required = [], optional = []) => isPlainObject(value)
   && exactKeys(value, ['operation', 'repositoryId', 'bindingRevision', 'configRevision', 'remote', ...required], optional)
   && value.operation === operation
   && isIdentifier(value.repositoryId)
-  && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 1
+  && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 0
   && isIdentifier(value.configRevision)
   && isRemote(value.remote);
 const isTarget = (value) => {
@@ -226,7 +228,7 @@ const isTarget = (value) => {
     if (exactKeys(value, ['operation'])) return true;
     return exactKeys(value, ['operation', 'repositoryId', 'bindingRevision', 'configRevision', 'remote', 'requirements'])
       && isIdentifier(value.repositoryId)
-      && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 1
+      && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 0
       && isIdentifier(value.configRevision)
       && isRemote(value.remote)
       && Array.isArray(value.requirements) && value.requirements.length <= 256
@@ -244,7 +246,7 @@ const isTarget = (value) => {
     return isPlainObject(value)
       && exactKeys(value, ['operation', 'repositoryId', 'bindingRevision', 'configRevision', 'fetch', 'pull', 'push'])
       && isIdentifier(value.repositoryId)
-      && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 1
+      && Number.isSafeInteger(value.bindingRevision) && value.bindingRevision >= 0
       && isIdentifier(value.configRevision)
       && isPlainObject(value.fetch) && exactKeys(value.fetch, ['name', 'endpoint', 'sourceRef', 'destinationRef'])
       && isIdentifier(value.fetch.name, 512) && isEndpoint(value.fetch.endpoint)

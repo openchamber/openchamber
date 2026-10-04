@@ -321,6 +321,8 @@ export interface GitBranchDetails {
   behind?: number;
 }
 
+export type GitBranchListOptions = { remote?: 'local' };
+
 export interface GitBranch {
   all: string[];
   current: string;
@@ -1048,7 +1050,12 @@ export interface GitAPI {
   unstageGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   revertGitHunk?(directory: string, filePath: string, patch: string): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
-  getGitBranches(directory: string): Promise<GitBranch>;
+  /**
+   * `remote: 'local'` lists what local refs know, without asking each remote
+   * over the network; for callers that need only the checked-out branch and
+   * its upstream. Runtimes that never ask remotes ignore it.
+   */
+  getGitBranches(directory: string, options?: GitBranchListOptions): Promise<GitBranch>;
   getGitUnpushedBranchCounts(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;

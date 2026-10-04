@@ -517,7 +517,9 @@ export const readGitPublishContext = async ({
 }): Promise<GitPublishContext> => {
   const runtime = runtimeKey();
   const [bindingRead, status, branches] = await Promise.all([
-    sourceControl.repositoryBinding(directory), git.getGitStatus(directory), git.getGitBranches(directory),
+    // Local refs only: publishing needs the checked-out branch and its commit,
+    // and asking every remote over the network made each push wait seconds.
+    sourceControl.repositoryBinding(directory), git.getGitStatus(directory), git.getGitBranches(directory, { remote: 'local' }),
   ]);
   requireCurrentRuntime(runtimeKey, runtime);
   const remotes = effectiveRepositoryBinding(bindingRead).remotes;

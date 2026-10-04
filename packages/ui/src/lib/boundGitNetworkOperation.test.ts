@@ -627,9 +627,10 @@ describe('explicit publication selection', () => {
       const requests: GitNetworkOperationRequest[] = [];
       let executions = 0;
       let reads = 0;
+      const branchOptions: unknown[] = [];
       const git = {
         getGitStatus: async () => { reads += 1; return { ...status, tracking }; },
-        getGitBranches: async () => branches,
+        getGitBranches: async (_directory: string, options?: { remote?: 'local' }) => { branchOptions.push(options); return branches; },
         planNetworkOperation: async (request: GitNetworkOperationRequest) => { requests.push(request); return pushPlan; },
         executeNetworkOperation: async (): Promise<GitNetworkOperation> => { executions += 1; return { ...pushPlan, state: 'succeeded' }; },
         getNetworkOperation,
@@ -647,6 +648,8 @@ describe('explicit publication selection', () => {
       expect(requests).toHaveLength(0);
       await runPreparedGitPublish({ ...dependencies, selection });
       expect(reads).toBe(3);
+      // Publishing reads local refs only; asking every remote made each push wait seconds.
+      expect(branchOptions).toEqual([{ remote: 'local' }, { remote: 'local' }, { remote: 'local' }]);
       expect(executions).toBe(1);
       expect(requests).toEqual([{
         operation: 'push', directory: '/repo', repositoryId: 'repository-one', bindingRevision: 7, configRevision: 'config-one',

@@ -51,6 +51,15 @@ describe('Git network operation storage', () => {
     ]);
   });
 
+  it('stores an operation on a repository nobody bound (binding revision 0)', async () => {
+    const { store } = await setup();
+    const unbound = snapshot('git_unbound');
+    unbound.transport = { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } };
+    unbound.target.bindingRevision = 0;
+
+    await expect(store.claim(unbound)).resolves.toEqual(expect.objectContaining({ operationId: 'git_unbound', state: 'planned' }));
+  });
+
   // Two servers can share one data directory; the second one starting up must
   // not end the first one's push as if a restart had interrupted it.
   it('recovers only operations whose owning process is gone', async () => {

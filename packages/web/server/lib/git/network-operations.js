@@ -2043,7 +2043,10 @@ export function createNetworkOperations({
         }
         const code = ['STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG', 'REMOTE_CHANGED'].includes(error?.code)
           ? error.code : authorityCode(error);
-        return terminal('conflicted', code, 'Checkout hydration authority changed; plan again');
+        // An access problem is the user's to fix, not authority that moved.
+        return code === 'AUTHENTICATION_REQUIRED'
+          ? terminal('failed', code, 'Checkout hydration needs the repository access fixed')
+          : terminal('conflicted', code, 'Checkout hydration authority changed; plan again');
       }
     }
     const hydration = await hydrateCheckout(plan, controls, deadline);
