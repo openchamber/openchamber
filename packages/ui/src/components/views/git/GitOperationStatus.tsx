@@ -9,7 +9,7 @@ import type { GitActionRecovery } from './useGitOperationRecovery';
  * A transfer in flight already shows on the control that started it, and a
  * check of saved operations with nothing saved is bookkeeping, so neither
  * renders here. The card appears for a failure, an outcome nobody knows, a
- * saved operation from earlier, or a commit whose publication did not happen.
+ * saved operation from earlier.
  */
 export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
   entry: GitActionRecovery | undefined;
@@ -26,7 +26,7 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
   // Checking saved operations is only news when there is one to check.
   const problem = entry.problem === 'reconciling' && !restored.length ? null : entry.problem;
   const unreadRestored = restored.filter((reference) => !entry.reads.some((read) => read.operation.operationId === reference.operationId));
-  if (!settledReads.length && !unreadRestored.length && !problem && !entry.localCommit) return null;
+  if (!settledReads.length && !unreadRestored.length && !problem) return null;
   const last = entry.reads.at(-1);
   const canCancel = last?.availability === 'unavailable' && (last.operation.state === 'planned' || last.operation.state === 'running');
   const unknown = Boolean(unreadRestored.length || settledReads.some(({ operation, availability }) => availability === 'unavailable'
@@ -46,7 +46,6 @@ export function GitOperationStatus({ entry, onRefresh, onCancel, className }: {
             <code className="block break-all typography-micro">{reference.operationId}</code>
           </div>
         ))}
-        {entry.localCommit ? <p className="text-foreground">{t('gitView.operation.localCommit')}</p> : null}
         {settledReads.map(({ operation, availability }) => {
           const unavailable = availability === 'unavailable' || operation.state === 'outcome-unknown';
           const hydrationProblems = operation.hydration

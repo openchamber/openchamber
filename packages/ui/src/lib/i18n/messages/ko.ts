@@ -66,7 +66,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.operation.recovery.reconciling': '이전 Git 전송을 확인하는 중…',
   'gitView.operation.recovery.repository': '이 저장소를 읽지 못했습니다. push나 pull 전에 다시 확인하세요.',
   'gitView.operation.recovery.inspect': '계속 알 수 없다면 저장소와 원격을 직접 확인하세요. OpenChamber는 전송을 스스로 반복하지 않습니다.',
-  'gitView.operation.localCommit': '커밋은 로컬에 만들어졌고 그대로 남아 있습니다.',
   'gitView.operation.unknownHint': '완료되었는지 알 수 없습니다. 다시 push나 pull을 하기 전에 확인하세요.',
   'gitView.operation.refresh': '다시 확인',
   'gitView.operation.cancel': '취소',

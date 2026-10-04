@@ -64,7 +64,6 @@ export const dict = {
   'gitView.operation.recovery.reconciling': 'Vorige Git-overdracht controleren…',
   'gitView.operation.recovery.repository': 'Deze repository kon niet worden gelezen. Controleer opnieuw voordat je pusht of pullt.',
   'gitView.operation.recovery.inspect': 'Blijft het onbekend, kijk dan zelf naar de repository en de remote. OpenChamber herhaalt een overdracht nooit uit zichzelf.',
-  'gitView.operation.localCommit': 'De commit is lokaal gemaakt en bewaard.',
   'gitView.operation.unknownHint': 'Het is niet bekend of dit gelukt is. Controleer opnieuw voordat je nog eens pusht of pullt.',
   'gitView.operation.refresh': 'Opnieuw controleren',
   'gitView.operation.cancel': 'Annuleren',

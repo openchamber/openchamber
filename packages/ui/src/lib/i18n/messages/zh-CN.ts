@@ -66,7 +66,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.operation.recovery.reconciling': '正在检查上一次 Git 传输…',
   'gitView.operation.recovery.repository': '无法读取此仓库。push 或 pull 之前请再检查一次。',
   'gitView.operation.recovery.inspect': '如果仍然不确定，请自己查看仓库和远程。OpenChamber 不会自行重复传输。',
-  'gitView.operation.localCommit': '提交已在本地创建并保留。',
   'gitView.operation.unknownHint': '不确定是否已完成。再次 push 或 pull 之前请先检查。',
   'gitView.operation.refresh': '再检查一次',
   'gitView.operation.cancel': '取消',

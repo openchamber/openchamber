@@ -65,7 +65,6 @@ export const dict = {
   'gitView.operation.recovery.reconciling': 'Vérification du transfert Git précédent…',
   'gitView.operation.recovery.repository': 'Impossible de lire ce dépôt. Vérifiez à nouveau avant de faire un push ou un pull.',
   'gitView.operation.recovery.inspect': 'Si l’issue reste inconnue, regardez vous-même le dépôt et le remote. OpenChamber ne relance jamais un transfert de lui-même.',
-  'gitView.operation.localCommit': 'Le commit a été créé en local et conservé.',
   'gitView.operation.unknownHint': 'On ne sait pas si cela est passé. Vérifiez à nouveau avant de refaire un push ou un pull.',
   'gitView.operation.refresh': 'Vérifier à nouveau',
   'gitView.operation.cancel': 'Annuler',

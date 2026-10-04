@@ -66,7 +66,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.operation.recovery.reconciling': '前回の Git 転送を確認しています…',
   'gitView.operation.recovery.repository': 'このリポジトリを読み取れませんでした。push や pull の前にもう一度確認してください。',
   'gitView.operation.recovery.inspect': 'それでも分からない場合は、リポジトリとリモートを自分で確認してください。OpenChamber が転送を勝手にやり直すことはありません。',
-  'gitView.operation.localCommit': 'コミットはローカルに作成され、保持されています。',
   'gitView.operation.unknownHint': '完了したかどうか分かりません。もう一度 push や pull をする前に確認してください。',
   'gitView.operation.refresh': 'もう一度確認',
   'gitView.operation.cancel': 'キャンセル',

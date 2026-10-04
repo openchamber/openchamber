@@ -65,7 +65,6 @@ export const dict = {
   'gitView.operation.recovery.reconciling': 'Checking the previous Git transfer…',
   'gitView.operation.recovery.repository': 'Couldn\'t read this repository. Check again before pushing or pulling.',
   'gitView.operation.recovery.inspect': 'If it stays unknown, look at the repository and the remote yourself. OpenChamber never repeats a transfer on its own.',
-  'gitView.operation.localCommit': 'The commit was made locally and kept.',
   'gitView.operation.unknownHint': 'It\'s not known whether this went through. Check again before pushing or pulling once more.',
   'gitView.operation.refresh': 'Check again',
   'gitView.operation.cancel': 'Cancel',

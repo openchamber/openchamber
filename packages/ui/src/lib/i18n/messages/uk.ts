@@ -76,7 +76,6 @@ export const dict: Record<I18nKey, string> = {
   'gitView.operation.recovery.reconciling': 'Перевіряю попередню Git-передачу…',
   'gitView.operation.recovery.repository': 'Не вдалося прочитати репозиторій. Перевірте ще раз, перш ніж робити push чи pull.',
   'gitView.operation.recovery.inspect': 'Якщо стан так і лишиться невідомим, подивіться на репозиторій і remote самі. OpenChamber ніколи не повторює передачу сам.',
-  'gitView.operation.localCommit': 'Коміт створено локально, він на місці.',
   'gitView.operation.unknownHint': 'Невідомо, чи це пройшло. Перевірте ще раз, перш ніж знову робити push чи pull.',
   'gitView.operation.refresh': 'Перевірити ще раз',
   'gitView.operation.cancel': 'Скасувати',

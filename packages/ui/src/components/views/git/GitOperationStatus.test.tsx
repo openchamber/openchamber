@@ -17,7 +17,7 @@ import { GitOperationStatus } from './GitOperationStatus';
 import type { GitActionRecovery } from './useGitOperationRecovery';
 
 const entry: GitActionRecovery = {
-  localCommit: true, executing: false, checking: false,
+  executing: false, checking: false,
   reads: [{ runtimeKey: 'runtime-a', availability: 'available', operation: {
     operationId: 'git_original', runtimeIdentity: { id: 'server-a', platform: 'web' },
     transport: { fetch: { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } }, push: { mode: 'system', verification: { status: 'unverified', reason: 'system-credentials' } } },
@@ -35,7 +35,7 @@ const render = (entry: GitActionRecovery) => renderToStaticMarkup(<I18nProvider>
 
 describe('Git operation feedback', () => {
   test('a restored reference shows uncertainty, never planned or running history', () => {
-    const html = render({ reads: [], localCommit: false, executing: false, checking: true, problem: 'reconciling', pending: [{
+    const html = render({ reads: [], executing: false, checking: true, problem: 'reconciling', pending: [{
       runtimeKey: 'a'.repeat(64), runtimeIdentity: { id: 'server-a', platform: 'web' }, repositoryId: 'repo-a',
       operationId: 'git_saved', operation: 'push', targetDigest: 'b'.repeat(64),
     }] });
@@ -46,9 +46,9 @@ describe('Git operation feedback', () => {
     expect(html).not.toContain('Planned');
     expect(html).not.toContain('>Cancel<');
   });
-  test('renders the retained commit and partial result without a replay control or internals', () => {
+  test('renders a partial result without a replay control or internals', () => {
     const html = render(entry);
-    for (const text of ['Partly done', 'Push rejected', 'Fetch', 'Pull', 'Push', 'The commit was made locally and kept.']) expect(html).toContain(text);
+    for (const text of ['Partly done', 'Push rejected', 'Fetch', 'Pull', 'Push']) expect(html).toContain(text);
     expect(html).not.toContain('git_original');
     expect(html).not.toContain('TRANSPORT_FAILED');
     expect(html).not.toContain('>Cancel<');
@@ -58,8 +58,8 @@ describe('Git operation feedback', () => {
 
   test('says nothing while a transfer runs or while an empty saved-operation check settles', () => {
     const running = { ...entry.reads[0], operation: { ...entry.reads[0].operation, state: 'planned' as const } };
-    expect(render({ reads: [running], localCommit: false, executing: true, checking: false })).toBe('');
-    expect(render({ reads: [], localCommit: false, executing: false, checking: false, pending: [], problem: 'reconciling' })).toBe('');
+    expect(render({ reads: [running], executing: true, checking: false })).toBe('');
+    expect(render({ reads: [], executing: false, checking: false, pending: [], problem: 'reconciling' })).toBe('');
   });
 
   test('unavailable active operations expose Refresh and Cancel, not a definite failed result', () => {
@@ -93,7 +93,7 @@ describe('Git operation feedback', () => {
         lfs: [],
       },
     };
-    const html = render({ reads: [{ runtimeKey: 'runtime-a', availability: 'available', operation }], localCommit: false, executing: false, checking: false });
+    const html = render({ reads: [{ runtimeKey: 'runtime-a', availability: 'available', operation }], executing: false, checking: false });
     expect(html).toContain('vendor/module');
     expect(html).toContain('Submodule');
     expect(html).toContain('Authorization required');
@@ -106,7 +106,6 @@ describe('Git operation feedback', () => {
       const translated = new Map(Object.entries(dictionary));
       for (const key of keys) expect(translated.get(key)).toBeTruthy();
       expect(dictionary['gitView.operation.unknownHint']).not.toBe(en['gitView.operation.unknownHint']);
-      expect(dictionary['gitView.operation.localCommit']).not.toBe(en['gitView.operation.localCommit']);
     }
   });
 });

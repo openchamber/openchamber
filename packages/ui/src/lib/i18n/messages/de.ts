@@ -65,7 +65,6 @@ export const dict = {
   'gitView.operation.recovery.reconciling': 'Prüfe die vorherige Git-Übertragung…',
   'gitView.operation.recovery.repository': 'Das Repository konnte nicht gelesen werden. Prüfe erneut, bevor du pushst oder pullst.',
   'gitView.operation.recovery.inspect': 'Bleibt es unklar, sieh dir das Repository und das Remote selbst an. OpenChamber wiederholt eine Übertragung nie von sich aus.',
-  'gitView.operation.localCommit': 'Der Commit wurde lokal erstellt und bleibt erhalten.',
   'gitView.operation.unknownHint': 'Unklar, ob das durchging. Prüfe erneut, bevor du noch einmal pushst oder pullst.',
   'gitView.operation.refresh': 'Erneut prüfen',
   'gitView.operation.cancel': 'Abbrechen',

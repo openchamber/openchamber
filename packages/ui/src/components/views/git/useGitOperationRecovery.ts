@@ -6,14 +6,13 @@ import { gitOperationRecoveryOwner, type PendingGitReference } from '@/lib/sourc
 
 export type GitActionRecovery = {
   reads: GitOperationRead[];
-  localCommit: boolean;
   executing: boolean;
   checking: boolean;
   pending?: PendingGitReference[];
   problem?: 'storage' | 'capacity' | 'reconciling' | 'repository' | null;
 };
 
-const EMPTY_RECOVERY: GitActionRecovery = { reads: [], localCommit: false, executing: false, checking: false };
+const EMPTY_RECOVERY: GitActionRecovery = { reads: [], executing: false, checking: false };
 
 export function useGitOperationRecovery(
   directory: string | null | undefined,
@@ -123,17 +122,15 @@ export function useGitOperationRecovery(
         }
         update({ reads });
       },
-      commitCreated: () => update({ localCommit: true }),
       finish: () => {
         const latest = currentEntries.current.get(key);
         if (!latest) return;
         action = latest;
         // A transfer that finished as it should has nothing left to say; the
-        // card stays only for what still needs the person: a failure, an
-        // outcome nobody knows, or a commit whose publication did not happen.
+        // card stays only for what still needs the person: a failure or an
+        // outcome nobody knows.
         const reads = action.reads.filter((read) => read.availability !== 'available' || read.operation.state !== 'succeeded');
-        const settled = reads.length === 0 && !action.pending?.length && !action.problem;
-        update({ executing: false, reads, ...(settled ? { localCommit: false } : {}) });
+        update({ executing: false, reads });
       },
     };
   };

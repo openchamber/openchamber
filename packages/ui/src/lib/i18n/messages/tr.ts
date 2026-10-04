@@ -3478,7 +3478,6 @@ export const dict = {
   'gitView.operation.recovery.reconciling': 'Önceki Git aktarımı kontrol ediliyor…',
   'gitView.operation.recovery.repository': 'Bu repository okunamadı. Push veya pull yapmadan önce tekrar kontrol edin.',
   'gitView.operation.recovery.inspect': 'Hâlâ bilinmiyorsa repository\'ye ve remote\'a kendiniz bakın. OpenChamber bir aktarımı asla kendiliğinden tekrarlamaz.',
-  'gitView.operation.localCommit': 'Commit yerelde oluşturuldu ve korunuyor.',
   'gitView.operation.unknownHint': 'Bunun gidip gitmediği bilinmiyor. Tekrar push veya pull yapmadan önce yeniden kontrol edin.',
   'gitView.operation.refresh': 'Tekrar kontrol et',
   'gitView.operation.cancel': 'İptal',

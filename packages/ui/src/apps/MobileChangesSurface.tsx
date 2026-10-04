@@ -490,6 +490,15 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     }
   }, [currentDirectory, git]);
 
+  // After a commit or a transfer the control waits for the status only; the
+  // branch list (which asks every remote over the network) and the remotes
+  // follow in the background instead of holding the button for seconds.
+  const refreshAfterGitAction = React.useCallback(async () => {
+    if (!currentDirectory) return;
+    void Promise.allSettled([fetchBranches(currentDirectory, git), refreshRemotes()]);
+    await fetchStatus(currentDirectory, git).catch(() => undefined);
+  }, [currentDirectory, fetchBranches, fetchStatus, git, refreshRemotes]);
+
   React.useEffect(() => {
     if (!currentDirectory || !visible) return;
     setActiveDirectory(currentDirectory);
@@ -589,11 +598,10 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
       } else if (action === 'publish') {
         toast.success(t('gitView.publish.succeeded'));
       }
-      await refreshStatusAndBranches(false);
-      await refreshRemotes();
+      await refreshAfterGitAction();
     } catch (error) {
       if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
-        if (recovery.isCurrent()) await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+        if (recovery.isCurrent()) await refreshAfterGitAction();
         if (recovery.isCurrent() && error instanceof GitOperationResultError && error.read.availability === 'available'
           && error.read.operation.state === 'conflicted' && error.read.operation.error.code === 'CONFLICT') {
           // A pull merges the fetched commits, so its conflicts leave a merge in progress.
@@ -608,10 +616,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         toast.info(publishChooser.errorMessage(error));
         return;
       }
-      await Promise.allSettled([
-        refreshStatusAndBranches(false),
-        refreshRemotes(),
-      ]);
+      await refreshAfterGitAction();
       toast.error(error instanceof BoundGitNetworkOperationError
         ? error.code === 'contributor-publish-cancelled-after-update'
           ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
@@ -752,25 +757,20 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         recovery = operationRecovery.start();
         if (!recovery) {
           toast.warning(t('gitView.publish.commitKept'));
-          await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+          await refreshAfterGitAction();
           return;
         }
-        recovery.commitCreated();
         const executePush = await publishChooser.prepare('push', { onOperation: recovery.onOperation });
         setSyncAction('publish');
         await executePush();
         commitOutcome = 'published';
         toast.success(t('gitView.publish.succeeded'));
-
-        await refreshStatusAndBranches(false);
-        await refreshRemotes();
-      } else {
-        await refreshStatusAndBranches(false);
       }
+      await refreshAfterGitAction();
     } catch (error) {
       if (options.pushAfter && commitOutcome === 'local') toast.warning(t('gitView.publish.commitKept'));
       if (error instanceof GitOperationResultError || error instanceof PendingGitOperationError) {
-        await Promise.allSettled([refreshStatusAndBranches(false), refreshRemotes()]);
+        await refreshAfterGitAction();
         return;
       }
       if (error instanceof BoundGitNetworkOperationError && error.code === 'stale-runtime') return;
@@ -778,12 +778,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
         toast.info(publishChooser.errorMessage(error));
         return;
       }
-      if (options.pushAfter) {
-        await Promise.allSettled([
-          refreshStatusAndBranches(false),
-          refreshRemotes(),
-        ]);
-      }
+      if (options.pushAfter) await refreshAfterGitAction();
       toast.error(error instanceof BoundGitNetworkOperationError
         ? error.code === 'contributor-publish-cancelled-after-update'
           ? t('gitView.toast.contributorPublishCancelledAfterUpdate')
