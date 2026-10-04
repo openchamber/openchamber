@@ -1,13 +1,17 @@
 ---
-title: One picker for issues and PRs, and security fixes
+title: GitLab support and security fixes
 ---
 
 ## App
 
 ### New
+- **GitLab:** connect gitlab.com or your own GitLab server in Integrations. Merge requests show their state in the Git panel and sidebar, you can create, compare, review and merge them, and the picker attaches GitLab issues and merge requests or starts a worktree from one (thanks to @deatheros).
 - **References:** the composer has one picker for GitHub issues, pull requests and Linear items. Rows show avatars and a preview of what the item says, and you can attach several at once.
-- **Worktrees:** a worktree whose PR got merged can clean itself up. Turn it on in Settings and OpenChamber archives its sessions and removes the worktree, but only when nothing would be lost. A session restored from a removed worktree moves to the project folder on its own.
+- Repositories: each repository has one identity with the name and email for commits, how it pushes (this machine's Git, an account or a managed SSH key) and an optional account for PRs and issues. Pick it from the chip in the Git panel, and `git` in a terminal or in the agent's shell uses the same identity (thanks to @deatheros).
+- Worktrees: a worktree whose PR got merged can clean itself up. Turn it on in Settings and OpenChamber archives its sessions and removes the worktree, but only when nothing would be lost. A session restored from a removed worktree moves to the project folder on its own.
 - Sessions: agents link the PRs and issues they work on to the session, and the Linked section in the chat shows whether each one is open, merged or closed, Linear issues included.
+- Chat: copying a reply or a selection gives plain text without Markdown marks. Turn it off in Settings > Chat to copy Markdown.
+- Chat: a wrap button on tables fits wide tables into the chat width.
 - Chat: background commands an agent left running show above the message field with a timer and a Stop button.
 - Sessions: when you ask an agent to start another session and report back, that session's final answer comes back into your chat as a "Session finished" row, and the agent carries on from there.
 - Settings/Providers: "Find models" fills a custom provider's model list from the provider in one go. Each model can now have context and output limits, input types and tool calls, and a custom provider can have its own icon (thanks to @dangdinhquan).
@@ -28,7 +32,13 @@ title: One picker for issues and PRs, and security fixes
 - Enterprise: the policy file can pin the OpenCode CLI to use, and in enterprise mode draw.io files open as text and fonts load from the system.
 
 ### Improvements
-- **New Worktree dialog:** it keeps one size while you switch tabs, opens from any draft including Timeline mode, and never sends a prompt on its own.
+- Git: commit, push, pull and sync finish in a few seconds in repositories with many remotes or files, and the buttons free up as soon as the action is done.
+- Git: sync says whether it pulled, pushed or was already up to date, skips the push when there is nothing to send, and Push in the sync menu is off when nothing is waiting.
+- Sidebar: PR, merge request and issue states show right after the app starts and update within about a minute.
+- Chat: chats in the side panel (Open in side panel, subtasks, reviews) open at once and keep their own model, agent, draft and status.
+- Chat: reasoning stays folded while it streams, so the transcript stops jumping. Settings > Chat > Reasoning brings back the old behaviour.
+- Chat: sessions whose last turn ran many tools open faster.
+- New Worktree dialog: it keeps one size while you switch tabs, opens from any draft including Timeline mode, and never sends a prompt on its own. Setup commands now live only in project settings.
 - Files: the file tree updates by itself after an agent creates, deletes or moves files.
 - Composer: it follows agent and model switches made by a plugin or by another device.
 - Archive: lists only top-level sessions, and restoring a session brings back the subagent sessions that belong to it.
@@ -72,6 +82,9 @@ title: One picker for issues and PRs, and security fixes
 - Chat: titles in right-to-left languages keep their start visible (thanks to @SMKeramati).
 - Sidebar: a subagent waiting for your approval shows its shield on the parent session, on multi-run rows and in Timeline (thanks to @IbrahimKhan12).
 - Sidebar: the session menu closes when you switch windows (thanks to @alohaninja).
+- Chat: a subagent's permission request or question can be answered in the subagent's own chat.
+- Chat: subagent rows in the status panel no longer swap places on every step.
+- Header: a new session draft shows its project and branch as the title.
 - Goal: a goal no longer stalls on "Evaluating" after its subagents finish (thanks to @guidan-nick).
 - Settings: the default model from OpenCode is picked up in both config spellings (thanks to @ameshkov), and a model without effort levels no longer breaks the picker (thanks to @Arthur031221).
 - Settings: hidden custom subagents show in Settings (thanks to @IbrahimKhan12), and hidden agents are never picked as the default (thanks to @magicr0d7).
@@ -104,3 +117,4 @@ title: One picker for issues and PRs, and security fixes
 - New session in an editor tab asks which workspace folder to use when you have several (thanks to @mmospanenko).
 - Settings in a global `opencode.jsonc` apply in VS Code too.
 - Git: upstream tracking matches the web app (thanks to @bashrusakh).
+- Chat: reasoning stays folded while it streams, so the transcript stops jumping. Settings > Chat > Reasoning brings back the old behaviour.
