@@ -79,7 +79,8 @@ const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
   { tag: [t.link, t.url], color: 'var(--markdown-link, currentColor)', textDecoration: 'underline' },
-  { tag: t.monospace, backgroundColor: 'var(--surface-muted)' },
+  // Translucent code backgrounds let selection and match highlights show through.
+  { tag: t.monospace, backgroundColor: 'color-mix(in srgb, var(--surface-muted) 30%, transparent)' },
   { tag: t.quote, color: 'var(--markdown-blockquote, currentColor)', fontStyle: 'italic' },
   { tag: t.list, color: 'color-mix(in srgb, var(--muted-foreground) 40%, var(--foreground) 60%)' },
   { tag: t.heading, color: 'var(--syntax-foreground)' },
