@@ -97,6 +97,8 @@ import { WorkStatusPanel } from './work-status/WorkStatusPanel';
 import { useWorkStatusVisibility } from './work-status/useWorkStatusVisibility';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { resolveChatPromptReadOnly } from './chatPromptReadOnly';
+import { PermissionDock } from './PermissionDock';
+import { FormDock } from './FormDock';
 import { ensureSpaceArchives, useSpaceArchiveOf } from '@/lib/spaces/space-archives';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { createFirstVisibleSessionPerformanceTracker } from '@/sync/session-load-performance';
@@ -1844,11 +1846,28 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                     </div>
                 )}
                 {promptReadOnly ? (
-                    <ReadOnlyPromptBanner
-                        text={spaceArchive
-                            ? t('spaces.archive.readOnlyBanner', { name: spaceArchive.name })
-                            : t('chat.container.readOnlySubagentPromptBanner')}
-                    />
+                    <>
+                        {/* The docks live inside ChatInput, which a read-only
+                            chat does not mount. A subagent still asks for
+                            permissions and answers, and they must be answerable
+                            where the user is looking; the parent shows the same
+                            requests, and answering one clears it in both. */}
+                        <PermissionDock
+                            sessionId={currentSessionId}
+                            directory={effectiveSessionDirectory}
+                            hidden={false}
+                        />
+                        <FormDock
+                            sessionId={currentSessionId}
+                            directory={effectiveSessionDirectory}
+                            hidden={sessionPermissions.length > 0}
+                        />
+                        <ReadOnlyPromptBanner
+                            text={spaceArchive
+                                ? t('spaces.archive.readOnlyBanner', { name: spaceArchive.name })
+                                : t('chat.container.readOnlySubagentPromptBanner')}
+                        />
+                    </>
                 ) : (
                     <ChatInput
                         active={active}
