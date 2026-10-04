@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -120,6 +120,15 @@ describe('settings helpers', () => {
       execFileSync('tar', ['-xzf', join(packDir, tarballName), '-C', extractDir], {
         stdio: 'pipe',
       });
+      // An install resolves the package's declared dependencies (zod and the
+      // rest) from node_modules; only relative imports must stay inside it.
+      // Mirror the workspace layout: package-local modules first, then the
+      // hoisted root ones.
+      const linkModules = (from, to) => {
+        if (existsSync(from)) symlinkSync(from, to, 'dir');
+      };
+      linkModules(join(packagesWebDir, 'node_modules'), join(extractDir, 'package', 'node_modules'));
+      linkModules(join(packagesWebDir, '..', '..', 'node_modules'), join(extractDir, 'node_modules'));
 
       const extractedModule = await import(
         pathToFileURL(join(extractDir, 'package', 'server', 'lib', 'opencode', 'settings-helpers.js')).href
