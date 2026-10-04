@@ -168,6 +168,16 @@ describe('sync outcome', () => {
     ],
   });
 
+  test('a sync that had nothing to pull or push is a finished success, not an unknown outcome', async () => {
+    const operation = await runBoundGitNetworkOperation({
+      action: 'sync', directory: '/repo', remoteName: 'upstream', status, targets,
+      sourceControl: { repositoryBinding: async () => boundRead }, runtimeKey: () => 'runtime-one',
+      git: { planNetworkOperation: async () => plan, executeNetworkOperation: async () => finished('skipped', 'skipped'), getNetworkOperation },
+    });
+    expect(operation.state).toBe('succeeded');
+    expect(describeGitSyncOutcome(operation)).toEqual({ kind: 'up-to-date' });
+  });
+
   test('says what the sync did, step by step', () => {
     expect(describeGitSyncOutcome(finished('skipped', 'skipped'))).toEqual({ kind: 'up-to-date' });
     expect(describeGitSyncOutcome(finished('succeeded', 'skipped'))).toEqual({ kind: 'pulled', remoteName: syncTarget.fetch.name });

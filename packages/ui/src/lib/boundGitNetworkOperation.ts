@@ -12,7 +12,7 @@ import type {
 } from '@/lib/api/types';
 import { effectiveRepositoryBinding } from '@/lib/source-control/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { gitOperationRecoveryOwner } from '@/lib/source-control/git-operation-recovery';
+import { gitOperationRecoveryOwner, isCompleteSyncSuccess } from '@/lib/source-control/git-operation-recovery';
 import { notifyGitPush } from '@/lib/gitPushEvents';
 
 type BoundGitNetworkAction = 'fetch' | 'pull' | 'sync';
@@ -97,8 +97,7 @@ const acceptOperation = (read: GitOperationRead, operation: GitNetworkOperation,
     throw new GitOperationResultError({ ...read, availability: 'unavailable' }, 'invalid-terminal-state');
   }
   if (operation.state === 'succeeded' && operation.target.operation === 'sync') {
-    const steps = operation.stepResults;
-    if (!steps || steps.length !== 3 || !['fetch', 'pull', 'push'].every((step) => steps.some((result) => result.step === step && result.status === 'succeeded'))) {
+    if (!isCompleteSyncSuccess(operation.stepResults)) {
       throw new GitOperationResultError({ ...read, availability: 'unavailable' }, 'invalid-terminal-state');
     }
   }
@@ -622,10 +621,7 @@ export const interpretGitNetworkTerminalOperation = (
     return { status: 'failed', state: operation.state, message: operation.error.message };
   }
   if (action === 'sync') {
-    const steps = operation.stepResults;
-    if (!steps || steps.length !== 3 || steps.some((step) => step.status !== 'succeeded')) {
-      fail('invalid-terminal-state');
-    }
+    if (!isCompleteSyncSuccess(operation.stepResults)) fail('invalid-terminal-state');
   }
   return { status: 'succeeded' };
 };

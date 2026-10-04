@@ -2,6 +2,17 @@ import { z } from 'zod';
 import type { GitAPI, GitNetworkOperation, GitNetworkOperationPlan, GitNetworkOperationRequest } from '@/lib/api/types';
 import type { GitOperationRead } from '@/lib/boundGitNetworkOperation';
 
+/**
+ * The step results a successful sync may carry: the fetch ran, and the pull
+ * and the push each either ran or had nothing to do (`skipped`: nothing came
+ * in, or the remote already held the commit).
+ */
+export const isCompleteSyncSuccess = (steps: GitNetworkOperation['stepResults']): boolean => Boolean(steps
+  && steps.length === 3
+  && steps.some((result) => result.step === 'fetch' && result.status === 'succeeded')
+  && (['pull', 'push'] as const).every((step) => steps.some((result) => result.step === step
+    && (result.status === 'succeeded' || result.status === 'skipped'))));
+
 const STORAGE_KEY = 'openchamber.git.pending-operations.v1';
 const MAX_REFERENCES = 64;
 const text = z.string().min(1).max(512);
@@ -142,8 +153,7 @@ export const createGitOperationRecoveryOwner = (storage: () => RecoveryStorage) 
   const matches = async (reference: PendingGitReference, runtimeKey: string, operation: GitNetworkOperation): Promise<boolean> => {
     if (operation.target.operation === 'clone' && operation.state === 'partial' && !operation.completedSteps.includes('checked-out')) return false;
     if (operation.target.operation === 'sync' && operation.state === 'succeeded') {
-      const steps = operation.stepResults;
-      if (!steps || steps.length !== 3 || !['fetch', 'pull', 'push'].every((step) => steps.some((result) => result.step === step && result.status === 'succeeded'))) return false;
+      if (!isCompleteSyncSuccess(operation.stepResults)) return false;
     }
     const targetDigest = await hash(JSON.stringify(operation.target));
     const durableTargetDigest = await hash(durableTargetText(operation.target));
