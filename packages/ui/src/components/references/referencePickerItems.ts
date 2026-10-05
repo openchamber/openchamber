@@ -1,6 +1,7 @@
 import type { IconName } from '@/components/icon/icons';
-import type { GitHubReference, GitHubReferenceFilter, GitHubReferenceKind, LinearIssueSummary } from '@/lib/api/types';
+import type { GitHubPullStatus, GitHubReference, GitHubReferenceFilter, GitHubReferenceKind, LinearIssueSummary } from '@/lib/api/types';
 import type { I18nKey } from '@/lib/i18n';
+import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 
 export type ReferencePickerSource = 'github' | 'linear';
 
@@ -52,9 +53,11 @@ type StateLook = StateGlyph & { labelKey: I18nKey };
 
 /**
  * Issue and PR states in the theme's PR colours, the way the sidebar shows
- * them: open is open, done is merged, dropped is closed. Nothing is orange.
+ * them: open is open, done is merged, dropped is closed. An open PR turns
+ * orange on failed checks or a conflict once its status has arrived
+ * (`prVisualStateOf`); until then it reads as open.
  */
-export const githubStateLook = (reference: GitHubReference): StateLook => {
+export const githubStateLook = (reference: GitHubReference, status: GitHubPullStatus | null): StateLook => {
     if (reference.kind === 'issue') {
         switch (reference.state) {
             case 'open':
@@ -68,7 +71,14 @@ export const githubStateLook = (reference: GitHubReference): StateLook => {
     if (reference.state === 'merged') return { icon: 'git-merge', color: 'var(--pr-merged)', labelKey: 'references.picker.state.merged' };
     if (reference.state === 'closed') return { icon: 'git-close-pull-request', color: 'var(--pr-closed)', labelKey: 'references.picker.state.closed' };
     if (reference.draft) return { icon: 'git-pr-draft', color: 'var(--pr-draft)', labelKey: 'references.picker.state.draft' };
-    return { icon: 'git-pull-request', color: 'var(--pr-open)', labelKey: 'references.picker.state.open' };
+    const visual = prVisualStateOf({
+        state: reference.state,
+        draft: reference.draft,
+        checksState: status?.checks?.state,
+        mergeable: status?.mergeable,
+        mergeableState: status?.mergeableState,
+    });
+    return { icon: 'git-pull-request', color: `var(--pr-${visual})`, labelKey: 'references.picker.state.open' };
 };
 
 /** Linear workflow types in the same colours; the state's own name is the label. */
@@ -124,6 +134,12 @@ export const relativeTimeOf = (iso: string | null | undefined, now: number): Rel
     if (elapsed < YEAR) return { key: 'common.relative.weeksAgoShort', count: Math.floor(elapsed / WEEK) };
     return { key: 'common.relative.yearsAgoShort', count: Math.floor(elapsed / YEAR) };
 };
+
+/**
+ * Ids, people, times and labels around an item. One step quieter than the
+ * usual muted text, so titles and bodies stay the brightest thing on screen.
+ */
+export const REFERENCE_META_TEXT = 'text-muted-foreground/60';
 
 /** GitHub label colours come as bare hex; anything else gets the neutral chip. */
 export const labelColor = (color: string | null | undefined): string | null => {

@@ -28,6 +28,7 @@ const ROUTES = [
 const CACHED_READS = new Map([
   ['/references', 30 * SECOND],
   ['/references/detail', 15 * SECOND],
+  ['/references/status', 30 * SECOND],
   ['/issues/list', 30 * SECOND],
   ['/issues/get', 15 * SECOND],
   ['/issues/comments', 15 * SECOND],

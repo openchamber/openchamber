@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { GitHubChecksSummary, GitHubIssueLabel, LinearIssueLabel } from '@/lib/api/types';
+import type { GitHubChecksSummary, GitHubIssueLabel, GitHubPullStatus, LinearIssueLabel } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -11,6 +11,7 @@ import {
     labelColor,
     LINEAR_PRIORITY_KEYS,
     linearStateLook,
+    REFERENCE_META_TEXT,
     relativeTimeOf,
     type ReferencePickerItem,
     referenceNumberLabel,
@@ -57,7 +58,7 @@ export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = 
             {shown.map((label) => (
                 <span
                     key={label.name}
-                    className="max-w-[9rem] truncate typography-micro text-muted-foreground"
+                    className={cn('max-w-[9rem] truncate typography-micro', REFERENCE_META_TEXT)}
                 >
                     {/* `align-middle` centres on the lowercase letters, not the line box. */}
                     <span
@@ -67,7 +68,7 @@ export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = 
                     {label.name}
                 </span>
             ))}
-            {hidden > 0 ? <span className="typography-micro text-muted-foreground">+{hidden}</span> : null}
+            {hidden > 0 ? <span className={cn('typography-micro', REFERENCE_META_TEXT)}>+{hidden}</span> : null}
         </span>
     );
 };
@@ -82,6 +83,8 @@ export const ChecksGlyph: React.FC<{ checks: GitHubChecksSummary | null }> = ({ 
 
 type RowProps = {
     item: ReferencePickerItem;
+    /** An open PR's checks and mergeability, once they have arrived. */
+    pullStatus: GitHubPullStatus | null;
     highlighted: boolean;
     /** Null in single-choice mode, where rows have no checkbox. */
     checked: boolean | null;
@@ -94,6 +97,7 @@ type RowProps = {
 
 export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     item,
+    pullStatus,
     highlighted,
     checked,
     diffIncluded,
@@ -103,7 +107,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     onActivate,
 }: RowProps) {
     const { t } = useI18n();
-    const look = item.source === 'github' ? githubStateLook(item.reference) : linearStateLook(item.issue);
+    const look = item.source === 'github' ? githubStateLook(item.reference, pullStatus) : linearStateLook(item.issue);
     const title = item.source === 'github' ? item.reference.title : item.issue.title;
     const id = item.source === 'github' ? referenceNumberLabel(item.reference) : item.issue.identifier;
     const updated = relativeTimeOf(item.source === 'github' ? item.reference.updatedAt : item.issue.updatedAt, now);
@@ -134,7 +138,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             <Icon name={look.icon} className="mt-0.5 size-4 shrink-0" style={{ color: look.color }} />
             <div className="min-w-0 flex-1">
                 <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
-                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro text-muted-foreground">
+                <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
                     {item.source === 'github' && item.reference.author ? (
                         <RowPerson name={item.reference.author.login} avatarUrl={item.reference.author.avatarUrl} />

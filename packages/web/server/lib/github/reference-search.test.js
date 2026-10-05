@@ -127,21 +127,15 @@ describe('toReference', () => {
 describe('fetchReferenceDetail', () => {
   const graphqlReturning = (item) => ({ graphql: async () => ({ repository: { issueOrPullRequest: item } }) });
   const author = { login: 'octo', avatarUrl: 'https://avatars/octo' };
-  const contexts = [
-    { __typename: 'CheckRun', databaseId: 1, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: null, checkSuite: { app: { databaseId: 5 } } },
-    { __typename: 'CheckRun', databaseId: 2, name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS', startedAt: null, checkSuite: { app: { databaseId: 5 } } },
-  ];
-  const pull = (state, reviews = []) => ({
+  const pull = (reviews = []) => ({
     __typename: 'PullRequest',
     number: 9,
-    state,
     reviewDecision: 'CHANGES_REQUESTED',
     additions: 12,
     deletions: 3,
     changedFiles: 2,
     comments: { totalCount: 1, nodes: [{ author, body: 'first', createdAt: '2026-10-01T10:00:00Z', url: 'u1' }] },
     reviews: { nodes: reviews },
-    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: contexts } } } }] },
   });
 
   it('reads an issue with its comments', async () => {
@@ -158,8 +152,8 @@ describe('fetchReferenceDetail', () => {
     });
   });
 
-  it('merges a PR review into its comments, oldest first, with size, review and checks', async () => {
-    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull('OPEN', [
+  it('merges a PR review into its comments, oldest first, with size and review', async () => {
+    const detail = await fetchReferenceDetail({ octokit: graphqlReturning(pull([
       { author, body: '', state: 'COMMENTED', createdAt: '2026-10-01T09:00:00Z', url: 'r1', comments: { nodes: [
         { author, body: 'nit', createdAt: '2026-10-01T09:00:00Z', url: 'c1', path: 'src/a.ts', line: null, originalLine: 7 },
       ] } },
@@ -175,12 +169,10 @@ describe('fetchReferenceDetail', () => {
       additions: 12,
       deletions: 3,
       changedFiles: 2,
-      checks: expect.objectContaining({ state: 'failure', total: 2, success: 1, failure: 1 }),
     });
   });
 
-  it('drops checks for a merged PR and answers null for a missing number', async () => {
-    expect((await fetchReferenceDetail({ octokit: graphqlReturning(pull('MERGED')), owner: 'acme', repo: 'app', number: 9 }))?.pull?.checks).toBeNull();
+  it('answers null for a missing number', async () => {
     expect(await fetchReferenceDetail({ octokit: graphqlReturning(null), owner: 'acme', repo: 'app', number: 9 })).toBeNull();
   });
 });

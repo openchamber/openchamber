@@ -6,16 +6,23 @@
 // per-PR enrichment it replaces cost up to 51 calls per search. A pasted link
 // or number skips search and reads that item directly, whatever its kind.
 //
-// Comments, and a PR's size, review decision and checks, are read for one
-// item at a time, when the preview shows it. Measured on
-// openchamber/openchamber (30 open PRs): the cheap fields answer a page in
-// about 2.5 s, size adds about 2 s, the review decision about 4 s and checks
-// about 3 s, which together run into GitHub's 10 s search timeout. One item's
-// detail answers in about a second.
+// Comments, and a PR's size and review decision, are read for one item at a
+// time, when the preview shows it. Measured on openchamber/openchamber (30
+// open PRs): the cheap fields answer a page in about 2.5 s, size adds about
+// 2 s, the review decision about 4 s and checks about 3 s, which together run
+// into GitHub's 10 s search timeout. One item's detail answers in about a
+// second.
+//
+// A PR's checks and mergeability come from a status request for the PRs a
+// page shows, after the page: the sidebar's own summaries, so both colour a PR
+// the same way, and the preview's checks line reads the same answer as its
+// colour. Measured on the same repo: 30 PRs answer in about 4 to 7 s, almost
+// all of it GitHub working out mergeability, which is why it is not part of
+// the page.
 
 import { z } from 'zod';
 
-import { checkContextSchema, isGraphqlRateLimitError, summarizeCheckContexts } from './pr-summaries.js';
+import { isGraphqlRateLimitError, parseSummaryRefs } from './pr-summaries.js';
 
 const REFERENCE_PAGE_SIZE = 30;
 // The preview shows the description; the attach path reads the full one.
@@ -72,7 +79,6 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
       }
       ... on PullRequest {
         number
-        state
         reviewDecision
         additions
         deletions
@@ -87,31 +93,6 @@ query ReferenceDetail($owner: String!, $repo: String!, $number: Int!) {
             url
             comments(first: 30) {
               nodes { author { login avatarUrl } body createdAt url path line originalLine }
-            }
-          }
-        }
-        commits(last: 1) {
-          nodes {
-            commit {
-              statusCheckRollup {
-                contexts(first: 100) {
-                  nodes {
-                    __typename
-                    ... on CheckRun {
-                      databaseId
-                      name
-                      status
-                      conclusion
-                      startedAt
-                      checkSuite { app { databaseId } }
-                    }
-                    ... on StatusContext {
-                      context
-                      state
-                    }
-                  }
-                }
-              }
             }
           }
         }
@@ -194,7 +175,6 @@ const detailSchema = z.object({
       z.object({
         __typename: z.literal('PullRequest'),
         number: z.number().int(),
-        state: z.enum(['OPEN', 'CLOSED', 'MERGED']),
         reviewDecision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REVIEW_REQUIRED']).nullable(),
         additions: z.number().int(),
         deletions: z.number().int(),
@@ -213,15 +193,6 @@ const detailSchema = z.object({
                 line: z.number().int().nullable(),
                 originalLine: z.number().int().nullable(),
               })),
-            }),
-          })),
-        }),
-        commits: z.object({
-          nodes: z.array(z.object({
-            commit: z.object({
-              statusCheckRollup: z.object({
-                contexts: z.object({ nodes: z.array(checkContextSchema) }),
-              }).nullable(),
             }),
           })),
         }),
@@ -354,12 +325,27 @@ export async function fetchReferenceDetail({ octokit, owner, repo, number }) {
       additions: item.additions,
       deletions: item.deletions,
       changedFiles: item.changedFiles,
-      // Closed and merged PRs have nothing to fix; the summaries route agrees.
-      checks: item.state === 'OPEN'
-        ? summarizeCheckContexts(item.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [])
-        : null,
     },
   };
+}
+
+// One request per listed page of PRs.
+const PULL_STATUS_LIMIT = REFERENCE_PAGE_SIZE;
+
+/**
+ * The PRs a status request names, `owner/repo#number` joined by commas, as
+ * summary refs. Null when the list is empty, malformed or longer than a page.
+ */
+export function readPullStatusRefs(value) {
+  const entries = String(value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (entries.length === 0 || entries.length > PULL_STATUS_LIMIT) return null;
+  const refs = [];
+  for (const entry of entries) {
+    const match = entry.match(/^([^/#\s]+)\/([^/#\s]+)#(\d+)$/);
+    if (!match) return null;
+    refs.push({ owner: match[1], repo: match[2], number: Number(match[3]) });
+  }
+  return parseSummaryRefs(refs);
 }
 
 const filterSchema = z.enum(['open', 'assigned', 'created', 'reviewRequested']).catch('open');

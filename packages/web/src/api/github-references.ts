@@ -8,6 +8,7 @@
  */
 import type {
   GitHubPullRequestRef,
+  GitHubPullStatusesResult,
   GitHubReferenceDetailResult,
   GitHubReferencesOptions,
   GitHubReferencesResult,
@@ -99,9 +100,23 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
         additions: z.number(),
         deletions: z.number(),
         changedFiles: z.number(),
-        checks: checksSummarySchema.nullable(),
       }).nullable(),
     }).nullable(),
+  }),
+]);
+
+const pullStatusesResultSchema = z.discriminatedUnion('connected', [
+  z.object({ connected: z.literal(false) }),
+  z.object({
+    connected: z.literal(true),
+    statuses: z.array(z.object({
+      owner: z.string(),
+      repo: z.string(),
+      number: z.number(),
+      checks: checksSummarySchema.nullable(),
+      mergeable: z.boolean().nullable(),
+      mergeableState: z.string().nullable(),
+    })),
   }),
 ]);
 
@@ -155,4 +170,15 @@ export const fetchGitHubReferenceDetail = async (
   query.set('number', String(item.number));
   const response = await fetch('/api/source-control/github/references/detail', { query, headers: { Accept: 'application/json' } });
   return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+};
+
+export const fetchGitHubPullStatuses = async (
+  fetch: GitHubFetch,
+  context: SourceControlReadContext,
+  pulls: GitHubPullRequestRef[],
+): Promise<GitHubPullStatusesResult> => {
+  const query = readContextQuery(context);
+  query.set('pulls', pulls.map((pull) => `${pull.owner}/${pull.repo}#${pull.number}`).join(','));
+  const response = await fetch('/api/source-control/github/references/status', { query, headers: { Accept: 'application/json' } });
+  return readPayload(response, pullStatusesResultSchema, 'Failed to load pull request statuses');
 };

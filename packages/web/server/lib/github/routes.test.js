@@ -248,6 +248,53 @@ describe('GET /api/source-control/github/references', () => {
     expect(graphqlCalls()).toBe(before);
   });
 
+  it('reads the statuses of listed PRs with the sidebar summaries, only from the project repo network', async () => {
+    const fetch = serveGitHub((body) => {
+      expect(body.variables).toMatchObject({ o0: 'example', n0: 'project', p0: 4, o1: 'example', n1: 'project', p1: 9 });
+      return response({ data: {
+        a0: { pullRequest: {
+          number: 4,
+          title: 'PR 4',
+          state: 'OPEN',
+          isDraft: false,
+          mergeable: 'CONFLICTING',
+          mergeStateStatus: 'DIRTY',
+          headRefOid: 'sha-4',
+          commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+            { __typename: 'CheckRun', databaseId: 1, name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', startedAt: null, checkSuite: { app: { databaseId: 1 } } },
+          ] } } } }] },
+        } },
+        // GitHub could not resolve #9: left out, never reported as clean.
+        a1: { pullRequest: null },
+      } });
+    });
+
+    const res = await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'example/project#4,example/project#9' })
+      .expect(200);
+    expect(res.body).toEqual({
+      connected: true,
+      statuses: [{
+        owner: 'example',
+        repo: 'project',
+        number: 4,
+        checks: expect.objectContaining({ state: 'failure', failure: 1, total: 1 }),
+        mergeable: false,
+        mergeableState: 'dirty',
+      }],
+    });
+
+    const graphqlCalls = () => fetch.mock.calls.filter(([url]) => String(url).endsWith('/graphql')).length;
+    const before = graphqlCalls();
+    await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'example/project#4,someone/else#4' })
+      .expect(400);
+    await request(app).get('/api/source-control/github/references/status')
+      .query({ ...readContext(project), pulls: 'example/project#x' })
+      .expect(400);
+    expect(graphqlCalls()).toBe(before);
+  });
+
   it('fails instead of answering an empty page', async () => {
     serveGitHub(() => response({ message: 'Server Error' }, 502));
     vi.spyOn(console, 'error').mockImplementation(() => {});

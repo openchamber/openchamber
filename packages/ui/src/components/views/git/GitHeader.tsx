@@ -31,6 +31,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import type { SourceControlProvider } from '@/lib/source-control/types';
+import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -426,19 +427,13 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     : null;
 
   const prVisualState = pullRequest
-    ? pullRequest.state === 'merged'
-      ? 'merged'
-      : pullRequest.state === 'closed'
-        ? 'closed'
-        : pullRequest.draft
-          ? 'draft'
-          // A `blocked` merge state alone (usually a missing review) keeps
-          // the open colour; orange is for failed checks and conflicts.
-          : prChecks?.state === 'failure'
-            || pullRequest.mergeable === false
-            || pullRequest.mergeableState === 'dirty'
-            ? 'blocked'
-            : 'open'
+    ? prVisualStateOf({
+      state: pullRequest.state,
+      draft: pullRequest.draft,
+      checksState: prChecks?.state,
+      mergeable: pullRequest.mergeable,
+      mergeableState: pullRequest.mergeableState,
+    })
     : null;
 
   const prChip = pullRequest && onOpenPullRequest ? (

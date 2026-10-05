@@ -1694,8 +1694,11 @@ export type GitHubReferenceDetail = {
     additions: number;
     deletions: number;
     changedFiles: number;
-    /** Null for closed and merged PRs. */
-    checks: GitHubChecksSummary | null;
+    /**
+     * GitLab merge requests only, null when closed or merged. A GitHub PR's
+     * checks come with its status, the answer that also colours it.
+     */
+    checks?: GitHubChecksSummary | null;
   } | null;
 };
 
@@ -1705,6 +1708,18 @@ export type GitHubReferenceDetailResult =
 
 /** An issue or PR as the reference picker lists and previews it. */
 export type GitHubReference = GitHubIssueReference | GitHubPullReference;
+
+/** What colours a listed open PR: its checks and whether it conflicts. */
+export type GitHubPullStatus = GitHubPullRequestRef & {
+  checks: GitHubChecksSummary | null;
+  mergeable: boolean | null;
+  mergeableState: string | null;
+};
+
+/** PRs GitHub could not resolve are left out of `statuses`. */
+export type GitHubPullStatusesResult =
+  | { connected: false }
+  | { connected: true; statuses: GitHubPullStatus[] };
 
 export type GitHubReferencesResult =
   | { connected: false }
@@ -1831,6 +1846,8 @@ export interface SourceControlAPI {
   githubReferences(context: SourceControlReadContext, options: GitHubReferencesOptions): Promise<GitHubReferencesResult>;
   /** GitHub only: comments of one item the picker previews, and a PR's size, review and checks. Throws on failure. */
   githubReferenceDetail(context: SourceControlReadContext, item: GitHubPullRequestRef): Promise<GitHubReferenceDetailResult>;
+  /** GitHub only: checks and mergeability of up to 30 listed PRs, for their colour. Throws on failure. */
+  githubPullStatuses(context: SourceControlReadContext, pulls: GitHubPullRequestRef[]): Promise<GitHubPullStatusesResult>;
 }
 
 export interface RemoteClientRecord {

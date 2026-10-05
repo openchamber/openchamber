@@ -17,6 +17,7 @@ import type {
 } from '@/lib/api/types';
 import { mapWithConcurrency } from '@/lib/concurrency';
 import { hasSameSourceControlReadContext } from '@/lib/source-control/identity';
+import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { trackedItemKey, type TrackedItemState, type TrackedThread } from '@/lib/trackedItems/model';
@@ -1510,17 +1511,13 @@ export type PrVisualSummary = {
 const derivePrVisualState = (status: SourceControlStatus | null): string | null => {
   const pr = status?.pr;
   if (!pr) return null;
-  if (pr.state === 'merged') return 'merged';
-  if (pr.state === 'closed') return 'closed';
-  if (pr.draft) return 'draft';
-  const checksFailed = status?.checks?.state === 'failure';
-  const ms = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  // `blocked` merge state alone usually means a required review is missing:
-  // nothing to fix, so it keeps the open colour. Orange is for failed checks
-  // and conflicts.
-  const notMergeable = pr.mergeable === false || ms === 'dirty';
-  if (checksFailed || notMergeable) return 'blocked';
-  return 'open';
+  return prVisualStateOf({
+    state: pr.state,
+    draft: pr.draft,
+    checksState: status?.checks?.state,
+    mergeable: pr.mergeable,
+    mergeableState: pr.mergeableState,
+  });
 };
 
 const deriveSummary = (

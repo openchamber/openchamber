@@ -2,8 +2,9 @@ import * as React from 'react';
 
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
-import { relativeTimeOf } from './referencePickerItems';
+import { REFERENCE_META_TEXT, relativeTimeOf } from './referencePickerItems';
 
 /** One comment in the preview's thread, from GitHub or Linear. */
 export type ReferenceCommentItem = {
@@ -37,8 +38,8 @@ export const ReferenceComments: React.FC<{ comments: ReferenceCommentItem[]; now
                                 <span>{(comment.author ?? '?').slice(0, 1).toUpperCase()}</span>
                             )}
                         </div>
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 typography-meta text-muted-foreground">
-                            <span className="font-medium text-foreground">{comment.author ?? '—'}</span>
+                        <div className={cn('flex min-w-0 flex-wrap items-center gap-x-1.5 typography-meta', REFERENCE_META_TEXT)}>
+                            <span className="font-medium text-muted-foreground">{comment.author ?? '—'}</span>
                             {relative ? (
                                 <span>{relative.key === 'common.relative.justNow' ? t(relative.key) : t(relative.key, { count: relative.count })}</span>
                             ) : null}

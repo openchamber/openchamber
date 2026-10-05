@@ -1825,6 +1825,78 @@ export function registerGitHubRoutes(app, options = {}) {
     }
   });
 
+  // What colours the PRs a picker page shows: checks and mergeability, from
+  // the same summaries the sidebar reads. Every PR must be in the bound
+  // repository's network. A PR GitHub could not resolve is left out, which
+  // the picker reads as "unknown".
+  app.get(canonicalGitHubRoutePath('/references/status'), async (req, res) => {
+    const { readPullStatusRefs } = await import('./reference-search.js');
+    const directory = readQueryString(req, 'directory');
+    const refs = readPullStatusRefs(readQueryString(req, 'pulls'));
+    if (!directory || !refs) {
+      return res.status(400).json({ error: 'directory and pulls (owner/repo#number, comma separated) are required' });
+    }
+    try {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) {
+        return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      }
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+      if (!octokit) {
+        return res.json({ connected: false });
+      }
+      const { isGitHubRateLimited } = await import('./rate-limit.js');
+      if (isGitHubRateLimited()) {
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const resolveRepoNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const remoteName = trustedContext.primaryRemote;
+      const { repo } = await resolveGitHubRepoFromDirectory(directory, remoteName);
+      if (!repo) {
+        return res.status(400).json({ error: 'Repository is not part of this project' });
+      }
+      const repoNetwork = await resolveRepoNetwork(octokit, directory, remoteName, { strictErrors: true });
+      const repos = requireGitHubRepoNetwork(repoNetwork, repo) ?? [{ ...repo, source: 'origin' }];
+      const inNetwork = (ref) => repos.some((entry) => entry.owner.toLowerCase() === ref.owner.toLowerCase()
+        && entry.repo.toLowerCase() === ref.repo.toLowerCase());
+      if (!refs.every(inNetwork)) {
+        return res.status(400).json({ error: 'Repository is not part of this project' });
+      }
+      const { fetchPrSummaries } = await import('./pr-summaries.js');
+      const { summaries } = await fetchPrSummaries({ octokit, refs });
+      const statuses = summaries.map((summary) => ({
+        owner: summary.owner,
+        repo: summary.repo,
+        number: summary.number,
+        checks: summary.checks,
+        mergeable: summary.mergeable,
+        mergeableState: summary.mergeableState,
+      }));
+      return res.json({ connected: true, statuses });
+    } catch (error) {
+      if (isReadContextError(error)) {
+        return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      }
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
+      if (error?.status === 401) {
+        await invalidateRequestAccount(error);
+        return res.json({ connected: false });
+      }
+      const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+      const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
+        noteGitHubRateLimit(error);
+        return res.status(503).json({ error: 'GitHub rate limited' });
+      }
+      console.error('Failed to load GitHub pull request statuses:', error);
+      return res.status(500).json({ error: error.message || 'Failed to load pull request statuses' });
+    }
+  });
+
   app.get(canonicalGitHubRoutePath('/issues/list'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');

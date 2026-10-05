@@ -13,6 +13,8 @@ import * as React from 'react';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
+    GitHubPullReference,
+    GitHubPullStatus,
     GitHubReference,
     GitHubReferenceDetail,
     GitHubReferenceFilter,
@@ -40,7 +42,7 @@ import {
 
 
 import { fetchGitLabReferenceDetail, fetchGitLabReferencePage } from './gitlabReferences';
-import { createListCache, createValueCache, useCachedList, useCachedValue, type ListPage } from './referenceCache';
+import { createListCache, createValueCache, useCachedList, useCachedValue, type CachedValue, type ListPage } from './referenceCache';
 import type { LinearReferenceFilter } from './referencePickerItems';
 
 const githubLists = createListCache<GitHubReference>();
@@ -244,8 +246,12 @@ export function useLinearReferenceList(options: { enabled: boolean; filter: Line
     return useCachedList(linearLists, key, fetchPage);
 }
 
-/** Comments of the previewed issue or PR, and a PR's size, review and checks. */
-export function useGitHubReferenceDetail(directory: string | null, reference: GitHubReference | null) {
+/**
+ * Comments of the previewed issue or PR, and a PR's size and review. A cached
+ * answer shows at once; GitHub is asked only once `settled` says the
+ * highlight stopped on the item.
+ */
+export function useGitHubReferenceDetail(directory: string | null, reference: GitHubReference | null, settled: boolean) {
     const { sourceControl } = useRuntimeAPIs();
     const context = useGitHubReadContext(reference ? directory : null);
     const owner = reference?.sourceRepo.owner ?? '';
@@ -264,7 +270,73 @@ export function useGitHubReferenceDetail(directory: string | null, reference: Gi
         if (!result.detail) throw new Error('Not found');
         return result.detail;
     }, [context, number, owner, reference, repo, sourceControl]);
-    return useCachedValue(githubDetails, key, fetch);
+    return useCachedValue(githubDetails, key, fetch, settled);
+}
+
+// A key per PR and head commit: a push asks again, a page loaded later
+// reuses what the earlier pages already answered.
+const githubPullStatuses = createValueCache<GitHubPullStatus | null>(200);
+// The server's limit: one listed page.
+const PULL_STATUS_BATCH = 30;
+const IDLE: CachedValue<GitHubPullStatus | null> = { status: 'idle' };
+
+/** An open PR, draft or not: its preview shows checks, and a ready one is coloured by them. */
+const needsPullStatus = (reference: GitHubReference): reference is GitHubPullReference => (
+    reference.kind === 'pull' && reference.state === 'open'
+);
+
+const samePull = (status: GitHubPullStatus, pull: GitHubPullReference) => (
+    status.number === pull.number
+    && status.owner.toLowerCase() === pull.sourceRepo.owner.toLowerCase()
+    && status.repo.toLowerCase() === pull.sourceRepo.repo.toLowerCase()
+);
+
+/**
+ * Checks and mergeability of the open PRs a list shows, asked after the list
+ * in batches of a page, so they colour like the sidebar. GitHub only: a GitLab
+ * project's items, issues and closed PRs ask nothing and answer `idle`. A ready
+ * null is a PR GitHub could not resolve.
+ */
+export function useGitHubPullStatuses(directory: string | null, references: readonly GitHubReference[]) {
+    const { sourceControl } = useRuntimeAPIs();
+    const context = useGitHubReadContext(directory);
+    const github = context && context !== 'missing' && context.provider === 'github' ? context : null;
+    const scope = github ? JSON.stringify([getRuntimeKey(), readContextCacheKey(github), directory]) : null;
+    const keyOf = React.useCallback(
+        (pull: GitHubPullReference) => `${scope}|${pull.sourceRepo.owner}/${pull.sourceRepo.repo}#${pull.number}@${pull.headSha}`,
+        [scope],
+    );
+    const pulls = React.useMemo(() => (scope ? references.filter(needsPullStatus) : []), [references, scope]);
+    const keys = React.useMemo(() => pulls.map(keyOf), [keyOf, pulls]);
+
+    const [, bump] = React.useReducer((count: number) => count + 1, 0);
+    React.useEffect(() => {
+        const stops = keys.map((key) => githubPullStatuses.subscribe(key, bump));
+        return () => stops.forEach((stop) => stop());
+    }, [keys]);
+
+    React.useEffect(() => {
+        if (!github || pulls.length === 0) return;
+        const byKey = new Map(pulls.map((pull) => [keyOf(pull), pull]));
+        githubPullStatuses.ensureMany(keys, async (batch) => {
+            const asked = batch.flatMap((key) => byKey.get(key) ?? []);
+            const result = await sourceControl.githubPullStatuses(
+                github,
+                asked.map((pull) => ({ owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo, number: pull.number })),
+            );
+            if (!result.connected) throw new Error('GitHub is not connected');
+            const answers = new Map<string, GitHubPullStatus | null>(batch.map((key) => [key, null]));
+            for (const pull of asked) {
+                answers.set(keyOf(pull), result.statuses.find((status) => samePull(status, pull)) ?? null);
+            }
+            return answers;
+        }, PULL_STATUS_BATCH);
+    }, [github, keyOf, keys, pulls, sourceControl]);
+
+    return (reference: GitHubReference): CachedValue<GitHubPullStatus | null> => {
+        if (!scope || !needsPullStatus(reference)) return IDLE;
+        return githubPullStatuses.read(keyOf(reference)) ?? IDLE;
+    };
 }
 
 const linearDetailKey = (workspace: string, issueId: string) => JSON.stringify([getRuntimeKey(), workspace, issueId]);
@@ -285,8 +357,8 @@ export function readLinearIssueDetail(linear: LinearAPI, issueId: string): Promi
     return linearDetails.ensure(linearDetailKey(workspace, issueId), () => fetchLinearIssue(linear, issueId));
 }
 
-/** The previewed Linear issue's description and comments. */
-export function useLinearIssueDetail(issueId: string | null) {
+/** The previewed Linear issue's description and comments; asked once `settled`, like GitHub's. */
+export function useLinearIssueDetail(issueId: string | null, settled: boolean) {
     const { linear } = useRuntimeAPIs();
     const workspace = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
     const key = issueId && linear ? linearDetailKey(workspace, issueId) : null;
@@ -294,5 +366,5 @@ export function useLinearIssueDetail(issueId: string | null) {
         if (!linear || !issueId) throw new Error('Linear is not available here');
         return fetchLinearIssue(linear, issueId);
     }, [issueId, linear]);
-    return { detail: useCachedValue(linearDetails, key, fetch) };
+    return { detail: useCachedValue(linearDetails, key, fetch, settled) };
 }

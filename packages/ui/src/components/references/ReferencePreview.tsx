@@ -4,8 +4,9 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import type { GitHubChecksSummary, GitHubReference, GitHubReferenceComment, GitHubReferenceDetail, LinearIssue, LinearIssueSummary } from '@/lib/api/types';
+import type { GitHubChecksSummary, GitHubPullStatus, GitHubReference, GitHubReferenceComment, GitHubReferenceDetail, LinearIssue, LinearIssueSummary } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 import type { CachedValue } from './referenceCache';
 import { getSourceControlProviderLabel } from '@/lib/source-control/identity';
@@ -16,6 +17,7 @@ import {
     labelColor,
     LINEAR_PRIORITY_KEYS,
     linearStateLook,
+    REFERENCE_META_TEXT,
     relativeTimeOf,
     type ReferencePickerItem,
     referenceNumberLabel,
@@ -51,8 +53,8 @@ const PreviewFrame: React.FC<{ pinned: boolean; footer: React.ReactNode; childre
 
 const MetaRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
     <>
-        <dt className="typography-meta text-muted-foreground">{label}</dt>
-        <dd className="min-w-0 typography-meta text-foreground">{children}</dd>
+        <dt className={cn('typography-meta', REFERENCE_META_TEXT)}>{label}</dt>
+        <dd className="min-w-0 typography-meta text-muted-foreground">{children}</dd>
     </>
 );
 
@@ -109,7 +111,7 @@ const CommentsSection: React.FC<{
             <h4 className="flex items-center gap-2 typography-ui-label font-semibold text-foreground">
                 {t('references.picker.preview.comments')}
                 {state.status === 'ready' && total !== null && total > shown ? (
-                    <span className="typography-meta font-normal text-muted-foreground">
+                    <span className={cn('typography-meta font-normal', REFERENCE_META_TEXT)}>
                         {t('references.picker.preview.commentsLatest', { shown, total })}
                     </span>
                 ) : null}
@@ -137,61 +139,82 @@ const mapDetail = <T, R>(state: CachedValue<T>, map: (value: T) => R): CachedVal
     state.status === 'ready' ? { status: 'ready', value: map(state.value) } : state
 );
 
-/** Size, checks and review of a PR, read for the previewed PR only. */
-const PullDetailRows: React.FC<{ detail: CachedValue<GitHubReferenceDetail> }> = ({ detail }) => {
+const LoadError: React.FC<{ error: string }> = ({ error }) => {
     const { t } = useI18n();
-    if (detail.status === 'error') {
-        return (
-            <MetaRow label={t('references.picker.preview.checks')}>
-                <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error: detail.error })}</span>
-            </MetaRow>
-        );
-    }
-    if (detail.status !== 'ready' || !detail.value.pull) {
-        return (
-            <>
-                <MetaRow label={t('references.picker.preview.changes')}><Pending /></MetaRow>
-                <MetaRow label={t('references.picker.preview.checks')}><Pending /></MetaRow>
-            </>
-        );
-    }
-    const { additions, deletions, changedFiles, checks, reviewDecision } = detail.value.pull;
+    return <span className="text-[var(--status-error-text)]">{t('references.picker.error.load', { error })}</span>;
+};
+
+/**
+ * Size and review of the previewed PR from its detail, and its checks from
+ * `checks`: the status that colours a GitHub PR, or a GitLab detail's pipeline.
+ */
+const PullDetailRows: React.FC<{
+    detail: CachedValue<GitHubReferenceDetail>;
+    checks: CachedValue<GitHubChecksSummary | null>;
+}> = ({ detail, checks }) => {
+    const { t } = useI18n();
+    const pull = detail.status === 'ready' ? detail.value.pull : null;
     return (
         <>
             <MetaRow label={t('references.picker.preview.changes')}>
-                <span className="inline-flex items-center gap-2">
-                    <span className="text-[var(--status-success)]">+{additions}</span>
-                    <span className="text-[var(--status-error)]">−{deletions}</span>
-                    <span className="inline-flex items-center gap-0.5 text-muted-foreground">
-                        <Icon name="file-list-2" className="size-3.5" />
-                        {changedFiles}
+                {detail.status === 'error' ? <LoadError error={detail.error} /> : pull ? (
+                    <span className="inline-flex items-center gap-2">
+                        <span className="text-[var(--status-success)]">+{pull.additions}</span>
+                        <span className="text-[var(--status-error)]">−{pull.deletions}</span>
+                        <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+                            <Icon name="file-list-2" className="size-3.5" />
+                            {pull.changedFiles}
+                        </span>
                     </span>
-                </span>
+                ) : <Pending />}
             </MetaRow>
-            {checks && checks.total > 0 ? (
+            {checks.status === 'ready' ? (
+                checks.value && checks.value.total > 0 ? (
+                    <MetaRow label={t('references.picker.preview.checks')}>
+                        <span className="inline-flex items-center gap-1.5">
+                            <ChecksGlyph checks={checks.value} />
+                            <ChecksSummaryText checks={checks.value} />
+                        </span>
+                    </MetaRow>
+                ) : null
+            ) : (
                 <MetaRow label={t('references.picker.preview.checks')}>
-                    <span className="inline-flex items-center gap-1.5">
-                        <ChecksGlyph checks={checks} />
-                        <ChecksSummaryText checks={checks} />
-                    </span>
+                    {checks.status === 'error' ? <LoadError error={checks.error} /> : <Pending />}
                 </MetaRow>
-            ) : null}
-            {reviewDecision ? (
-                <MetaRow label={t('references.picker.preview.review')}>{t(REVIEW_KEYS[reviewDecision])}</MetaRow>
+            )}
+            {pull?.reviewDecision ? (
+                <MetaRow label={t('references.picker.preview.review')}>{t(REVIEW_KEYS[pull.reviewDecision])}</MetaRow>
             ) : null}
         </>
     );
 };
 
+const NO_CHECKS: CachedValue<GitHubChecksSummary | null> = { status: 'ready', value: null };
+const CHECKS_PENDING: CachedValue<GitHubChecksSummary | null> = { status: 'loading' };
+
+/** Where the previewed PR's checks come from; closed and merged PRs have none to show. */
+const previewChecks = (
+    reference: GitHubReference,
+    pullStatus: CachedValue<GitHubPullStatus | null>,
+    detail: CachedValue<GitHubReferenceDetail>,
+): CachedValue<GitHubChecksSummary | null> => {
+    if (reference.provider === 'gitlab') return mapDetail(detail, (value) => value.pull?.checks ?? null);
+    if (reference.kind !== 'pull' || reference.state !== 'open') return NO_CHECKS;
+    // Idle: listed, but its status has not been asked for yet.
+    if (pullStatus.status === 'idle') return CHECKS_PENDING;
+    return mapDetail(pullStatus, (status) => status?.checks ?? null);
+};
+
 const GitHubPreview: React.FC<{
     reference: GitHubReference;
+    pullStatus: CachedValue<GitHubPullStatus | null>;
     detail: CachedValue<GitHubReferenceDetail>;
     purpose: ReferencePreviewPurpose;
     pinned: boolean;
     includeDiff: boolean;
     onIncludeDiffChange: (include: boolean) => void;
     now: number;
-}> = ({ reference, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now }) => {
+}> = ({ reference, pullStatus, detail, purpose, pinned, includeDiff, onIncludeDiffChange, now }) => {
     const { t } = useI18n();
     const comments = React.useMemo(
         () => mapDetail(detail, (value) => value.comments.map((comment: GitHubReferenceComment, index): ReferenceCommentItem => ({
@@ -207,7 +230,7 @@ const GitHubPreview: React.FC<{
         [detail, t],
     );
     const relative = useRelative(now);
-    const look = githubStateLook(reference);
+    const look = githubStateLook(reference, pullStatus.status === 'ready' ? pullStatus.value : null);
     const labels = reference.labels.map((label) => ({ name: label.name, color: labelColor(label.color) }));
     const updated = relative(reference.updatedAt);
     const body = reference.body.trim() ? reference.body : '';
@@ -233,14 +256,14 @@ const GitHubPreview: React.FC<{
             <header className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                     <StatePill icon={look.icon} color={look.color} label={t(look.labelKey)} />
-                    <span className="truncate typography-meta text-muted-foreground">
+                    <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>
                         {reference.sourceRepo.owner}/{reference.sourceRepo.repo} {referenceNumberLabel(reference)}
                     </span>
                     <a
                         href={reference.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                        className={cn('ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
                     >
                         {getSourceControlProviderLabel(reference.provider ?? 'github')}
                         <Icon name="external-link" className="size-3.5" />
@@ -270,7 +293,7 @@ const GitHubPreview: React.FC<{
                                 <span className="truncate">{reference.base}</span>
                             </span>
                         </MetaRow>
-                        <PullDetailRows detail={detail} />
+                        <PullDetailRows detail={detail} checks={previewChecks(reference, pullStatus, detail)} />
                     </>
                 ) : null}
                 {labels.length > 0 ? (
@@ -331,12 +354,12 @@ const LinearPreview: React.FC<{
             <header className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                     {issue.state?.name ? <StatePill icon={look.icon} color={look.color} label={issue.state.name} /> : null}
-                    <span className="truncate typography-meta text-muted-foreground">{issue.identifier}</span>
+                    <span className={cn('truncate typography-meta', REFERENCE_META_TEXT)}>{issue.identifier}</span>
                     <a
                         href={issue.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+                        className={cn('ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 typography-meta hover:bg-interactive-hover hover:text-foreground', REFERENCE_META_TEXT)}
                     >
                         Linear
                         <Icon name="external-link" className="size-3.5" />
@@ -379,6 +402,8 @@ const LinearPreview: React.FC<{
 
 export const ReferencePreview: React.FC<{
     item: ReferencePickerItem | null;
+    /** The previewed PR's checks and mergeability, as its row has them. */
+    pullStatus: CachedValue<GitHubPullStatus | null>;
     linearDetail: CachedValue<LinearIssue>;
     githubDetail: CachedValue<GitHubReferenceDetail>;
     purpose: ReferencePreviewPurpose;
@@ -387,7 +412,7 @@ export const ReferencePreview: React.FC<{
     includeDiff: boolean;
     onIncludeDiffChange: (include: boolean) => void;
     now: number;
-}> = ({ item, linearDetail, githubDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now }) => {
+}> = ({ item, pullStatus, linearDetail, githubDetail, purpose, pinned, includeDiff, onIncludeDiffChange, now }) => {
     const { t } = useI18n();
     if (!item) {
         return (
@@ -402,6 +427,7 @@ export const ReferencePreview: React.FC<{
     return (
         <GitHubPreview
             reference={item.reference}
+            pullStatus={pullStatus}
             detail={githubDetail}
             purpose={purpose}
             pinned={pinned}

@@ -22,7 +22,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import type { GitHubReferenceFilter, GitHubReferenceKind } from '@/lib/api/types';
+import type { GitHubPullStatus, GitHubReference, GitHubReferenceFilter, GitHubReferenceKind } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -30,6 +30,7 @@ import { useUIStore } from '@/stores/useUIStore';
 
 import { ReferencePickerRow } from './ReferencePickerRow';
 import { ReferencePreview, type ReferencePreviewPurpose } from './ReferencePreview';
+import type { CachedValue } from './referenceCache';
 import {
     FILTER_LABEL_KEYS,
     GITHUB_FILTERS,
@@ -42,6 +43,7 @@ import {
 } from './referencePickerItems';
 import {
     useGitHubReferenceDetail,
+    useGitHubPullStatuses,
     useGitHubReferenceList,
     useGitHubSourceStatus,
     useRepositoryReferenceProvider,
@@ -72,6 +74,10 @@ let lastGitHubKind: GitHubReferenceKind = 'issue';
 const lastGitHubFilter = new Map<GitHubReferenceKind, GitHubReferenceFilter>();
 let lastLinearFilter: LinearReferenceFilter = 'open';
 
+const NO_REFERENCES: GitHubReference[] = [];
+const IDLE_STATUS: CachedValue<GitHubPullStatus | null> = { status: 'idle' };
+
+const readyValue = <T,>(state: CachedValue<T | null>): T | null => (state.status === 'ready' ? state.value : null);
 const SEARCH_DEBOUNCE_MS = 300;
 const DETAIL_DEBOUNCE_MS = 250;
 
@@ -136,6 +142,8 @@ function ReferencePickerSurface({
         query: '',
     });
     const list = source === 'github' ? githubList : linearList;
+    // Failed checks and conflicts colour open PRs once their statuses arrive.
+    const pullStatusOf = useGitHubPullStatuses(directory, source === 'github' ? githubList.items : NO_REFERENCES);
 
     const items = React.useMemo<ReferencePickerItem[]>(() => (
         source === 'github'
@@ -156,14 +164,12 @@ function ReferencePickerSurface({
         : null;
 
     // Details are asked for the row the highlight rests on, not every row an
-    // arrow key passes over.
+    // arrow key passes over; one already fetched shows at once.
     const settledPreviewItem = useDebouncedValue(previewItem, DETAIL_DEBOUNCE_MS);
-    const detailItem = settledPreviewItem && previewItem
-        && referencePickerItemKey(settledPreviewItem) === referencePickerItemKey(previewItem)
-        ? previewItem
-        : null;
-    const { detail: linearDetail } = useLinearIssueDetail(detailItem?.source === 'linear' ? detailItem.issue.id : null);
-    const githubDetail = useGitHubReferenceDetail(directory, detailItem?.source === 'github' ? detailItem.reference : null);
+    const previewSettled = Boolean(settledPreviewItem && previewItem
+        && referencePickerItemKey(settledPreviewItem) === referencePickerItemKey(previewItem));
+    const { detail: linearDetail } = useLinearIssueDetail(previewItem?.source === 'linear' ? previewItem.issue.id : null, previewSettled);
+    const githubDetail = useGitHubReferenceDetail(directory, previewItem?.source === 'github' ? previewItem.reference : null, previewSettled);
 
     const selectGitHubKind = (kind: GitHubReferenceKind) => {
         lastGitHubKind = kind;
@@ -310,8 +316,9 @@ function ReferencePickerSurface({
         }));
 
     const searchAndFilters = (
-        <div className={cn('flex gap-2', isMobile ? 'flex-col' : 'items-center')}>
-            <div className={cn('relative min-w-0', isMobile ? 'w-full' : 'w-[22rem] shrink-0')}>
+        <div className={cn('flex gap-2', isMobile ? 'flex-col' : 'min-w-0 flex-1 items-center')}>
+            {/* Desktop: shares the title row, so the field gives way first when it runs short. */}
+            <div className={cn('relative', isMobile ? 'w-full' : 'min-w-[10rem] max-w-[18rem] flex-1')}>
                 <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                     ref={searchRef}
@@ -424,6 +431,7 @@ function ReferencePickerSurface({
                         <ReferencePickerRow
                             key={key}
                             item={item}
+                            pullStatus={item.source === 'github' ? readyValue(pullStatusOf(item.reference)) : null}
                             highlighted={!isMobile && key === effectiveHighlightKey}
                             checked={selection === 'multiple' ? checked.has(key) : null}
                             diffIncluded={diffIncluded.has(key)}
@@ -453,6 +461,7 @@ function ReferencePickerSurface({
     const preview = (
         <ReferencePreview
             item={previewItem}
+            pullStatus={previewItem?.source === 'github' ? pullStatusOf(previewItem.reference) : IDLE_STATUS}
             linearDetail={linearDetail}
             githubDetail={githubDetail}
             purpose={purpose}
@@ -549,7 +558,7 @@ function ReferencePickerSurface({
         <Dialog open onOpenChange={onOpenChange}>
             <DialogContent className="h-[min(90vh,58rem)] w-[min(72rem,calc(100vw-1.5rem))] max-w-6xl gap-0 overflow-hidden p-0">
                 <div className="flex shrink-0 flex-col gap-3 border-b border-border/60 px-5 pb-3 pt-4">
-                    <div className="flex items-center gap-3 pr-8">
+                    <div className="flex flex-wrap items-center gap-3 pr-8">
                         <DialogTitle className="flex shrink-0 items-center gap-2 typography-ui-header">
                             <Icon name={source === 'linear' ? 'linear' : isGitLab ? 'gitlab' : 'github'} className="size-5" />
                             {title}
@@ -558,8 +567,8 @@ function ReferencePickerSurface({
                             {t(selection === 'multiple' ? 'references.picker.footer.hint.multiple' : 'references.picker.footer.hint.single')}
                         </DialogDescription>
                         {tabs}
+                        {searchAndFilters}
                     </div>
-                    {searchAndFilters}
                 </div>
                 <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
                     <ScrollableOverlay outerClassName="min-h-0 border-r border-border/60" disableHorizontal>

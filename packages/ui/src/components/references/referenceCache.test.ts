@@ -165,3 +165,40 @@ test('a value is asked once while in flight and kept after an error', async () =
     }).catch(() => undefined);
     expect(cache.read('w')).toEqual({ status: 'error', error: 'gone' });
 });
+
+test('many values are asked in batches, skipping fresh and in-flight keys', async () => {
+    let clock = 0;
+    const cache = createValueCache<string | null>(40, () => clock);
+    const batches: string[][] = [];
+    const answer = (keys: string[]) => {
+        batches.push(keys);
+        // `c` is left out of the answer.
+        return Promise.resolve(new Map(keys.filter((key) => key !== 'c').map((key) => [key, key === 'b' ? null : key.toUpperCase()])));
+    };
+
+    cache.ensureMany(['a', 'b', 'c'], answer, 2);
+    cache.ensureMany(['a', 'b', 'c'], answer, 2);
+    expect(batches).toEqual([['a', 'b'], ['c']]);
+    await flush();
+    expect(cache.read('a')).toEqual({ status: 'ready', value: 'A' });
+    expect(cache.read('b')).toEqual({ status: 'ready', value: null });
+    expect(cache.read('c')).toEqual({ status: 'error', error: 'Not in the answer' });
+
+    // Only the failed key is asked again while the rest are fresh; all once stale.
+    cache.ensureMany(['a', 'b', 'c'], answer, 2);
+    clock = 60_000;
+    await flush();
+    cache.ensureMany(['a', 'b', 'c', 'd'], answer, 2);
+    expect(batches.slice(2)).toEqual([['c'], ['a', 'b'], ['c', 'd']]);
+    expect(cache.read('a')).toEqual({ status: 'ready', value: 'A' });
+});
+
+test('a failed batch fails each of its keys', async () => {
+    const cache = createValueCache<string>();
+    cache.ensureMany(['a', 'b'], async () => {
+        throw new Error('rate limited');
+    }, 30);
+    await flush();
+    expect(cache.read('a')).toEqual({ status: 'error', error: 'rate limited' });
+    expect(cache.read('b')).toEqual({ status: 'error', error: 'rate limited' });
+});
