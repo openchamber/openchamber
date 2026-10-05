@@ -56,7 +56,10 @@ export const resolveOpenCodeEnvConfig = (options = {}) => {
       warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
       return null;
     }
-    const port = parseInt(url.port, 10);
+    // URL drops a port equal to the scheme default (https://host:443 -> ''),
+    // so read an explicitly written port from the raw value.
+    const writtenPort = raw.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/?#]*@)?(?:\[[^\]]*\]|[^/?#:]*):(\d+)(?:[/?#]|$)/i)?.[1];
+    const port = parseInt(url.port || writtenPort || '', 10);
     if (!Number.isFinite(port) || port <= 0) {
       warnInvalidHost('must include an explicit port (example: http://hostname:4096)');
       return null;

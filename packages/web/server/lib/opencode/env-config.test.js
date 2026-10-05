@@ -95,3 +95,25 @@ describe('resolveOpenCodeEnvConfig hostname', () => {
     expect(result.effectivePort).toBe(4096);
   });
 });
+
+describe('resolveOpenCodeEnvConfig OPENCODE_HOST', () => {
+  it('keeps an explicitly written default port', () => {
+    const https = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example:443' } });
+    expect(https.configuredOpenCodeHost).toEqual({ origin: 'https://opencode.example', port: 443 });
+    const http = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://[::1]:80' } });
+    expect(http.configuredOpenCodeHost).toEqual({ origin: 'http://[::1]', port: 80 });
+  });
+
+  it('reads a non-default port', () => {
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'http://host:4096' } });
+    expect(result.configuredOpenCodeHost).toEqual({ origin: 'http://host:4096', port: 4096 });
+    expect(result.effectivePort).toBe(4096);
+  });
+
+  it('still rejects a host without a port', () => {
+    const logger = { warn: vi.fn() };
+    const result = resolveOpenCodeEnvConfig({ env: { OPENCODE_HOST: 'https://opencode.example' }, logger });
+    expect(result.configuredOpenCodeHost).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('must include an explicit port'));
+  });
+});
