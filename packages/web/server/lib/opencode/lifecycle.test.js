@@ -427,8 +427,9 @@ describe('OpenCode lifecycle', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  it('treats a directory without read/execute permission as unusable', async () => {
-    if (process.getuid?.() === 0) return; // root ignores the permission bits
+  // Windows chmod only toggles the read-only attribute, and root ignores the
+  // permission bits, so neither can take read/execute away from a directory.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('treats a directory without read/execute permission as unusable', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-perm-'));
     const locked = path.join(root, 'locked');
     await fs.mkdir(locked);
