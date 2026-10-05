@@ -631,14 +631,16 @@ const decorateMermaid = (root: HTMLElement, ctx: DecorateContext): void => {
     const block = document.createElement('div');
     block.setAttribute('data-markdown', 'mermaid-block');
     block.setAttribute('data-md-source', source);
-    block.className = 'group relative';
+    block.className = 'relative';
 
     const scroll = document.createElement('div');
     scroll.setAttribute('data-markdown', 'mermaid-scroll');
 
     const toolbar = document.createElement('div');
     toolbar.setAttribute('data-markdown', 'mermaid-toolbar');
-    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity';
+    // Visible on touch screens, so a shared image must drop it explicitly.
+    toolbar.setAttribute(MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE, 'true');
+    toolbar.className = 'absolute top-1 right-2 flex items-center gap-1';
 
     if (rendered.svg) {
       block.setAttribute('data-mermaid-render', 'svg');

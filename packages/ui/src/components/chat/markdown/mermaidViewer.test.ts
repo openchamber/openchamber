@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 
 import {
+  createMermaidViewerRegistry,
   fitMermaidViewBox,
   formatMermaidViewBox,
+  getMermaidPinch,
   getMermaidSvgContentBox,
+  getMermaidViewerController,
   getMermaidViewerSignature,
   hasMermaidPointerDragMoved,
   MERMAID_BLOCK_SELECTOR,
@@ -194,5 +198,99 @@ describe('mermaidViewer', () => {
 
   test('exports the shared Mermaid block selector', () => {
     expect(MERMAID_BLOCK_SELECTOR).toBe('[data-markdown="mermaid-block"]');
+  });
+
+  test('measures a pinch from its first two pointers', () => {
+    expect(getMermaidPinch([{ x: 0, y: 0 }])).toBeNull();
+    expect(getMermaidPinch([{ x: 0, y: 0 }, { x: 30, y: 40 }, { x: 999, y: 999 }])).toEqual({
+      distance: 50,
+      center: { x: 15, y: 20 },
+    });
+  });
+});
+
+describe('mermaidViewer pointer gestures', () => {
+  const win = new Window({ url: 'https://openchamber.test/' });
+  Object.assign(globalThis, {
+    window: win,
+    document: win.document,
+    Element: win.Element,
+    HTMLElement: win.HTMLElement,
+    PointerEvent: win.PointerEvent,
+  });
+
+  const mountDiagram = () => {
+    const container = document.createElement('div');
+    container.innerHTML = '<div data-markdown="mermaid-block"><div data-markdown="mermaid-viewport">'
+      + '<div data-markdown="mermaid"><svg viewBox="0 0 300 300"></svg></div></div></div>';
+    document.body.appendChild(container);
+    const block = container.querySelector('[data-markdown="mermaid-block"]');
+    const viewport = container.querySelector('[data-markdown="mermaid-viewport"]');
+    Object.defineProperty(viewport, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 300, height: 300 }),
+    });
+    const registry = createMermaidViewerRegistry(container);
+    getMermaidViewerController(block);
+    const pointer = (type: string, pointerId: number, x: number, y: number) => {
+      viewport?.dispatchEvent(new PointerEvent(type, {
+        pointerId, clientX: x, clientY: y, button: 0, isPrimary: pointerId === 1, bubbles: true, cancelable: true,
+      }));
+    };
+    const viewBox = () => container.querySelector('svg')?.getAttribute('viewBox');
+    const teardown = () => {
+      registry.cleanup();
+      container.remove();
+    };
+    return { block, pointer, viewBox, teardown };
+  };
+
+  test('two fingers spreading apart zoom in around their center', () => {
+    const { block, pointer, viewBox, teardown } = mountDiagram();
+    try {
+      expect(viewBox()).toBe('0 0 300 300');
+      pointer('pointerdown', 1, 100, 150);
+      pointer('pointerdown', 2, 200, 150);
+      pointer('pointermove', 2, 300, 150);
+      // Distance doubled around the center (200, 150), which stays put.
+      expect(viewBox()).toBe('100 75 150 150');
+      expect(block?.hasAttribute('data-mermaid-suppress-click')).toBe(true);
+
+      // The finger left behind does not drag the zoomed view.
+      pointer('pointerup', 2, 300, 150);
+      pointer('pointermove', 1, 50, 150);
+      expect(viewBox()).toBe('100 75 150 150');
+      pointer('pointerup', 1, 50, 150);
+    } finally {
+      teardown();
+    }
+  });
+
+  test('a new gesture pans even when the last pinch never reported its fingers lifting', () => {
+    const { pointer, viewBox, teardown } = mountDiagram();
+    try {
+      pointer('pointerdown', 1, 100, 150);
+      pointer('pointerdown', 2, 200, 150);
+      pointer('pointermove', 2, 300, 150);
+      expect(viewBox()).toBe('100 75 150 150');
+
+      pointer('pointerdown', 1, 100, 150);
+      pointer('pointermove', 1, 130, 150);
+      expect(viewBox()).toBe('85 75 150 150');
+      pointer('pointerup', 1, 130, 150);
+    } finally {
+      teardown();
+    }
+  });
+
+  test('one pointer still pans', () => {
+    const { pointer, viewBox, teardown } = mountDiagram();
+    try {
+      pointer('pointerdown', 1, 100, 100);
+      pointer('pointermove', 1, 130, 100);
+      pointer('pointerup', 1, 130, 100);
+      expect(viewBox()).toBe('-30 0 300 300');
+    } finally {
+      teardown();
+    }
   });
 });

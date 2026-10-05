@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { marked } from 'marked';
+import { cloneMessageImageExportSource } from '../message/imageExport';
 import { attachMarkdownInteractions, decorateMarkdown, stabilizeMarkdownTableWidths, type DecorateContext } from './decorate';
 
 const win = new Window({ url: 'https://openchamber.test/' });
@@ -162,6 +163,24 @@ describe('Markdown table actions', () => {
       URL.createObjectURL = createObjectURL;
       URL.revokeObjectURL = revokeObjectURL;
     }
+  });
+});
+
+describe('Mermaid toolbar', () => {
+  test('is not hidden by hover-only classes, so touch screens can reach zoom, and stays out of shared images', () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<pre><code class="language-mermaid">graph TD; A-->B</code></pre>';
+    decorateMarkdown(root, {
+      ...context,
+      mermaidControls: { download: false, copy: false, showPanZoomControls: true },
+      renderMermaid: () => ({ svg: '<svg viewBox="0 0 100 50"></svg>' }),
+    });
+
+    const toolbar = root.querySelector('[data-markdown="mermaid-toolbar"]');
+    expect(toolbar?.querySelector('[data-md-action="mermaid-zoom-in"]')).not.toBeNull();
+    const hoverOnly = Array.from(toolbar?.classList ?? []).filter((name) => name === 'opacity-0' || name.startsWith('group-'));
+    expect(hoverOnly).toEqual([]);
+    expect(cloneMessageImageExportSource(root).querySelector('[data-markdown="mermaid-toolbar"]')).toBeNull();
   });
 });
 

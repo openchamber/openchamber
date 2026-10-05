@@ -188,6 +188,15 @@ export const hasMermaidPointerDragMoved = (start: MermaidPoint, current: Mermaid
   return (deltaX * deltaX) + (deltaY * deltaY) > (DRAG_CLICK_SUPPRESSION_THRESHOLD_PX * DRAG_CLICK_SUPPRESSION_THRESHOLD_PX);
 };
 
+export const getMermaidPinch = (points: readonly MermaidPoint[]): { distance: number; center: MermaidPoint } | null => {
+  const [first, second] = points;
+  if (!first || !second) return null;
+  return {
+    distance: Math.hypot(second.x - first.x, second.y - first.y),
+    center: { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 },
+  };
+};
+
 export const zoomMermaidViewBoxAtPoint = ({
   currentBox,
   contentBox,
@@ -359,6 +368,9 @@ const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewe
   let dragStartPointer: MermaidPoint | null = null;
   let lastPointer: MermaidPoint | null = null;
   let clearClickSuppressionTimer: number | null = null;
+  // Every pointer pressed on the diagram; a second one turns the pan into a pinch.
+  const pressedPointers = new Map<number, MermaidPoint>();
+  let lastPinchDistance: number | null = null;
 
   const applyViewBox = (box: MermaidViewBox): void => {
     currentBox = box;
@@ -410,6 +422,21 @@ const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewe
     if (event.button !== 0 || isPanExcludedTarget(event.target)) {
       return;
     }
+    // A primary pointer starts a new gesture, so a lost pointerup cannot leave
+    // a stale finger behind that would turn the next pan into a pinch.
+    if (event.isPrimary) {
+      pressedPointers.clear();
+      lastPinchDistance = null;
+    }
+    pressedPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pressedPointers.size > 1) {
+      activePointerId = null;
+      lastPinchDistance = getMermaidPinch(Array.from(pressedPointers.values()))?.distance ?? null;
+      viewport.setPointerCapture?.(event.pointerId);
+      block.setAttribute('data-mermaid-suppress-click', 'true');
+      event.preventDefault();
+      return;
+    }
     activePointerId = event.pointerId;
     dragStartPointer = { x: event.clientX, y: event.clientY };
     lastPointer = dragStartPointer;
@@ -424,10 +451,21 @@ const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewe
   };
 
   const onPointerMove = (event: PointerEvent): void => {
+    const nextPointer = { x: event.clientX, y: event.clientY };
+    if (lastPinchDistance !== null && pressedPointers.has(event.pointerId)) {
+      pressedPointers.set(event.pointerId, nextPointer);
+      const pinch = getMermaidPinch(Array.from(pressedPointers.values()));
+      if (pinch) {
+        const center = getPointerInViewport({ clientX: pinch.center.x, clientY: pinch.center.y }, viewport);
+        zoomAt(center, pinch.distance / lastPinchDistance);
+        lastPinchDistance = pinch.distance;
+      }
+      event.preventDefault();
+      return;
+    }
     if (activePointerId !== event.pointerId || !lastPointer) {
       return;
     }
-    const nextPointer = { x: event.clientX, y: event.clientY };
     applyViewBox(panMermaidViewBox({
       currentBox,
       viewport: getViewportSize(viewport),
@@ -444,10 +482,20 @@ const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewe
   };
 
   const stopPan = (event: PointerEvent): void => {
-    if (activePointerId !== event.pointerId) {
+    if (!pressedPointers.delete(event.pointerId)) {
       return;
     }
     viewport.releasePointerCapture?.(event.pointerId);
+    if (pressedPointers.size > 0) {
+      // A finger left after a pinch does not pan, so the view does not jump
+      // when the other one lifts.
+      activePointerId = null;
+      lastPinchDistance = pressedPointers.size > 1
+        ? getMermaidPinch(Array.from(pressedPointers.values()))?.distance ?? null
+        : null;
+      return;
+    }
+    lastPinchDistance = null;
     activePointerId = null;
     dragStartPointer = null;
     lastPointer = null;
@@ -481,6 +529,7 @@ const createMermaidViewerController = (block: HTMLElement): InternalMermaidViewe
       if (clearClickSuppressionTimer !== null) {
         window.clearTimeout(clearClickSuppressionTimer);
       }
+      pressedPointers.clear();
       block.removeAttribute('data-mermaid-panning');
       block.removeAttribute('data-mermaid-suppress-click');
       controllerByBlock.delete(block);

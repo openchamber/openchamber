@@ -1750,6 +1750,25 @@ html:not(.dark) .chat-scroll {
   min-width: 0;
 }
 
+/* Like code-block actions: hidden until hover only where a pointer can
+   hover; on touch screens the zoom controls stay visible. */
+[data-markdown="mermaid-block"] [data-markdown="mermaid-toolbar"] {
+  transition: opacity 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-markdown="mermaid-block"] [data-markdown="mermaid-toolbar"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-markdown="mermaid-block"]:hover [data-markdown="mermaid-toolbar"],
+  [data-markdown="mermaid-block"]:focus-within [data-markdown="mermaid-toolbar"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 [data-markdown="mermaid-block"][data-mermaid-render="svg"] [data-markdown="mermaid-scroll"] {
   overflow: hidden;
 }
