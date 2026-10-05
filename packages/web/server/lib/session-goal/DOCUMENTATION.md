@@ -164,7 +164,7 @@ before touching the filesystem). Rationale: metadata rides every
      up for another feature is not consent to audit goals with Jev) and a
      classification provider can run it (`classifierEndpoint`, owned by
      `../routing`); the small model otherwise, and also when Jev fails this
-     time (`restrictToPreferredProvider`, session's own provider/model
+     time (the session's own provider/model
      preferred). The check is the SOLE termination authority besides the hard
      stops above — the working agent has no channel to settle its own goal.
      `complete` and `blocked` settle on the first such answer: a blocked turn

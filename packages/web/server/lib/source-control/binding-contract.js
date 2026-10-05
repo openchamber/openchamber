@@ -139,6 +139,8 @@ export const resolveBindingReadiness = (binding, repository) => {
       || entry.push.fingerprint !== current.push.fingerprint) ? { ...entry, readiness: 'config-changed' } : entry;
   });
   const result = { ...binding, providers, remotes: grants };
-  result.state = binding.configRevision !== repository.configRevision ? 'needs-attention' : bindingSummary(result);
+  // The summary follows what the grants still authorize: a remote added beside
+  // the bound ones changes the config revision but nothing the binding relies on.
+  result.state = bindingSummary(result);
   return result;
 };

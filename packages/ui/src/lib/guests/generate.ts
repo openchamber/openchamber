@@ -48,21 +48,23 @@ const parseGuestGenerateResponse = async (response: Response): Promise<GuestGene
  * One-off text generation for a guest through the server's Small Model,
  * which resolves and authenticates the model itself. The open project only
  * informs which OpenCode config decides the model; it never enters the prompt.
- * `providerID` is the composer's provider, which the model stays on; the host
- * sets it, never the guest.
+ * `composer` is the composer's provider, which the model stays on, and its
+ * model, used when that provider has no small one; the host sets both, never
+ * the guest.
  */
 export const guestGenerate = async (
   guestId: string,
   request: GenerateRequest,
   directory: string | null,
-  providerID: string | null,
+  composer: { providerID: string | null; modelID: string | null },
 ): Promise<GuestGenerateProxyResult> => {
   const headers = new Headers({ 'Content-Type': 'application/json' });
   if (directory) {
     headers.set('x-opencode-directory', directory);
   }
-  if (providerID) {
-    headers.set('x-openchamber-provider', providerID);
+  if (composer.providerID) {
+    headers.set('x-openchamber-provider', composer.providerID);
+    if (composer.modelID) headers.set('x-openchamber-model', composer.modelID);
   }
   try {
     const response = await runtimeFetch(`/api/guests/${guestId}/generate`, {

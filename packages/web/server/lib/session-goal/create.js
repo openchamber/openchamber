@@ -21,7 +21,6 @@ const fitObjective = async ({ objective, directory, sessionID, providerID, model
   try {
     const { generateSmallModelText } = await import('../small-model/index.js');
     const generated = await generateSmallModelText({
-      restrictToPreferredProvider: true,
       prompt: objective,
       system: [
         'You distill a large task description into the COMPLETION CRITERIA a progress auditor will judge against.',

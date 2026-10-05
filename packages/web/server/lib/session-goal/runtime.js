@@ -481,10 +481,9 @@ export const createSessionGoalRuntime = ({
     }
     try {
       const generated = await service.generateSmallModelText({
-        // Background feature: conversation content must never leave the
-        // session's own provider unless the user explicitly picked a small
-        // model (settings override / opencode config).
-        restrictToPreferredProvider: true,
+        // Background feature: conversation content stays on the session's own
+        // provider unless the user explicitly picked a small model (settings
+        // override / opencode config); naming the provider is what keeps it.
         prompt: buildSmallModelAuditPrompt({ objective, answer }),
         directory,
         sessionID: typeof lastAssistantInfo?.sessionID === 'string' ? lastAssistantInfo.sessionID : undefined,

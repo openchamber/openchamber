@@ -128,6 +128,7 @@ export async function generateSessionTitle(input: {
       sessionID: input.sessionID,
       preferredProviderID: last.assistant.info.providerID,
       preferredModelID: last.assistant.info.modelID,
+      // Read by servers before 2026-10; newer ones stay on the named provider anyway.
       restrictToPreferredProvider: true,
     }),
   });

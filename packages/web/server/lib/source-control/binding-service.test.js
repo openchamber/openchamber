@@ -1455,3 +1455,29 @@ describe('source-control binding service', () => {
     expect(reconcileAccount).toHaveBeenCalledWith({ provider, instance: normalizedInstance, accountId: 'account-one' });
   });
 });
+
+describe('binding readiness summary', () => {
+  const remote = (name, url) => {
+    const endpoint = { displayUrl: redactRemoteUrl(url), fingerprint: fingerprintRemoteUrl(url) };
+    return { name, fetch: endpoint, push: endpoint };
+  };
+  const origin = remote('origin', 'git@github.com:team/repo.git');
+  const binding = {
+    repositoryId: 'repo_one', revision: 3, state: 'bound', configRevision: 'config_one', providers: [], auxiliary: [],
+    remotes: [{ ...origin, mode: 'system', readiness: 'ready' }],
+  };
+  const repository = (remotes) => ({ repositoryId: 'repo_one', configRevision: 'config_two', bare: false, remotes });
+
+  it('stays bound when a remote is only added beside the bound ones', () => {
+    const read = resolveBindingReadiness(binding, repository([origin, remote('fork', 'git@github.com:someone/repo.git')]));
+    expect(read.state).toBe('bound');
+    expect(read.remotes[0].readiness).toBe('ready');
+  });
+
+  it('needs attention when a bound remote is repointed or removed', () => {
+    const repointed = resolveBindingReadiness(binding, repository([remote('origin', 'https://github.com/team/repo.git')]));
+    expect(repointed.state).toBe('needs-attention');
+    expect(repointed.remotes[0].readiness).toBe('config-changed');
+    expect(resolveBindingReadiness(binding, repository([])).state).toBe('needs-attention');
+  });
+});

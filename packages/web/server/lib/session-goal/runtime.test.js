@@ -154,7 +154,7 @@ describe('session goal tick on v2 messages', () => {
 
     // The check saw the assistant's text and ran within the session's provider.
     expect(generate).toHaveBeenCalledTimes(1);
-    expect(generate.mock.calls[0][0]).toMatchObject({ preferredProviderID: 'anthropic', preferredModelID: 'claude-sonnet-5', restrictToPreferredProvider: true });
+    expect(generate.mock.calls[0][0]).toMatchObject({ preferredProviderID: 'anthropic', preferredModelID: 'claude-sonnet-5' });
     expect(generate.mock.calls[0][0].prompt).toContain('Done with step one.');
     // Tokens were accounted from the v2 record: input + cache.read + output.
     const written = seam.persistSessionGoal.mock.calls.at(-1)[2];

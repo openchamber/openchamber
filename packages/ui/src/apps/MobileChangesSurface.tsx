@@ -36,6 +36,7 @@ import { hasUncommittedTrackedChanges, isConflictedStatusFile } from '@/componen
 import { PierreDiffViewer, type ContextExpansionRequest } from '@/components/views/PierreDiffViewer';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useBranchComparisonBase } from '@/hooks/useBranchComparisonBase';
@@ -296,11 +297,12 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
     [boundAccountId, currentIdentity, gitIdentityProfiles, globalGitIdentity],
   );
   // The same answer the desktop chip gives: a binding that stopped matching
-  // its repository, most often a remote added after the identity was applied.
+  // its repository, most often a bound remote repointed after the identity
+  // was applied.
   const identityAttention = React.useMemo(() => {
     const read = binding.read;
     if (!read?.binding || binding.status !== 'ready' || read.binding.state === 'bound') return null;
-    return read.binding.configRevision !== read.repository.configRevision
+    return hasConfigChangedGrant(read.binding)
       ? t('gitView.identity.configChanged')
       : t('gitView.context.needsAttention');
   }, [binding.read, binding.status, t]);

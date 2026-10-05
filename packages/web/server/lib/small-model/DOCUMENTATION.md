@@ -73,8 +73,7 @@ Five things are decided here, in order:
    behind it is gone) is skipped the same way, as OpenCode's own titles move
    on to another model then; one it does not list yet (a plugin model still
    loading) is kept. Like the settings override, it is a choice the
-   user made on purpose, so a caller restricted to its session's provider
-   accepts it.
+   user made on purpose, so it may leave the caller's provider.
 4. The small model of the caller's provider (`preferredProviderID`: the
    session's, or the composer's for commit messages, PR descriptions, spoken
    summaries, the diff walkthrough and extensions) —
@@ -87,13 +86,19 @@ Five things are decided here, in order:
    models.dev `family` values, not model ids (`gpt-luna` is the family of
    `gpt-5.6-luna`); a model without one — a custom provider, a subscription
    outside the catalog — gets its family read from its id (`familyOf`:
-   luna / flash-lite / flash / haiku). A caller that passes `restrictToPreferredProvider`
-   (session titles, the session goal, session assist, notes from a selection)
-   and finds none then takes the session's own model — `source:
+   luna / flash-lite / flash / haiku). A provider with none of these families
+   takes the caller's own model (`preferredModelID`) — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
-   provider's subscription.
+   provider's subscription. OpenCode's titles end the same way.
 5. Otherwise `GET /api/model/default` — `source: 'default'`. This is
-   OpenCode's default chat model, not a small one; it is the last resort.
+   OpenCode's default chat model, not a small one; it is the last resort, and
+   only for a caller that named no provider or whose provider it is on. With
+   no default configured OpenCode answers its first available model from any
+   provider, so a caller that named a provider and no model gets 404 rather
+   than that. Until 2026-10 only callers passing `restrictToPreferredProvider`
+   stayed on their provider; commit messages, PR descriptions, spoken
+   summaries, the walkthrough and extensions fell to the default. Current
+   servers ignore the flag; the UI still sends it for older ones.
 
 There is deliberately no step that takes a small model from whichever other
 provider is connected. Until 2026-09 one existed (`source: 'small'`, after

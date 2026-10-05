@@ -103,8 +103,8 @@ model context is small. Page/count bounds are not a network-byte quota.
    old canceled request is still settling, retain that pending run and start it
    after the old one finishes. Later activity cancels the pending run as well.
 4. Resolve the small model using the last answer's provider/model and the
-   existing explicit settings/config overrides. `restrictToPreferredProvider`
-   prevents an implicit cross-provider fallback. Production does not pin the
+   existing explicit settings/config overrides. Naming that provider prevents
+   an implicit cross-provider fallback. Production does not pin the
    experimental model. Generation accepts an abort signal and a 120-second limit.
 5. Recap describes the substantive work and its current result, including the
    work behind a closing commit or acknowledgment. Suggestion is independent:

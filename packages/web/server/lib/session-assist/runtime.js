@@ -190,7 +190,7 @@ export const createSessionAssistRuntime = ({
     try {
       generated = await generateSmallModelText({
         prompt: prompt.text, system, directory, sessionID: sessionId,
-        preferredProviderID, preferredModelID, restrictToPreferredProvider: true,
+        preferredProviderID, preferredModelID,
         onOverflow: 'error', timeoutMs: GENERATION_TIMEOUT_MS, signal,
       });
     } catch (error) {

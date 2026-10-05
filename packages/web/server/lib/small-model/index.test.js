@@ -237,13 +237,12 @@ describe('generateSmallModelText', () => {
     expect(lastGenerate().body.model).toEqual({ id: 'haiku', providerID: 'claude-code' });
   });
 
-  it('stays on the session provider when the caller forbids switching', async () => {
+  it('falls back to the session model when its provider has no small one', async () => {
     const result = await generateSmallModelText({
       prompt: 'hi',
       directory: '/proj',
       preferredProviderID: 'openai',
       preferredModelID: 'gpt-5.6-luna',
-      restrictToPreferredProvider: true,
     });
 
     expect(result).toMatchObject({ providerID: 'openai', modelID: 'gpt-5.6-luna', source: 'session-model' });
@@ -263,7 +262,6 @@ describe('generateSmallModelText', () => {
       directory: '/proj',
       preferredProviderID: 'anthropic',
       preferredModelID: 'claude-sonnet-5',
-      restrictToPreferredProvider: true,
     });
 
     // Newest active haiku of the session provider; the other provider's
@@ -279,15 +277,15 @@ describe('generateSmallModelText', () => {
     ];
     state.defaultModel = state.models[0];
 
-    // Anthropic has no small family here; the caller allows leaving it, yet
-    // the connected Google flash is not someone's pick for this content.
+    // Anthropic has no small family here, yet the connected Google flash is
+    // not someone's pick for this content.
     const withProvider = await generateSmallModelText({
       prompt: 'hi',
       directory: '/proj',
       preferredProviderID: 'anthropic',
       preferredModelID: 'claude-sonnet-5',
     });
-    expect(withProvider).toMatchObject({ providerID: 'anthropic', modelID: 'claude-sonnet-5', source: 'default' });
+    expect(withProvider).toMatchObject({ providerID: 'anthropic', modelID: 'claude-sonnet-5', source: 'session-model' });
 
     const withoutProvider = await generateSmallModelText({ prompt: 'hi', directory: '/proj' });
     expect(withoutProvider).toMatchObject({ providerID: 'anthropic', modelID: 'claude-sonnet-5', source: 'default' });
@@ -306,7 +304,6 @@ describe('generateSmallModelText', () => {
       directory: '/proj',
       preferredProviderID: 'my-proxy',
       preferredModelID: 'my-big-model',
-      restrictToPreferredProvider: true,
     });
 
     expect(result).toMatchObject({ providerID: 'my-proxy', modelID: 'gemini-3.6-flash', source: 'session-provider-small' });
@@ -331,7 +328,6 @@ describe('generateSmallModelText', () => {
       directory: '/proj',
       preferredProviderID: 'anthropic',
       preferredModelID: 'claude-sonnet-5',
-      restrictToPreferredProvider: true,
     });
 
     expect(result).toMatchObject({ providerID: 'anthropic', modelID: 'claude-sonnet-5', source: 'session-model' });
@@ -345,7 +341,6 @@ describe('generateSmallModelText', () => {
       directory: '/proj',
       preferredProviderID: 'anthropic',
       preferredModelID: 'claude-haiku-4-5',
-      restrictToPreferredProvider: true,
     });
 
     // Configured on purpose, so it may leave the session provider the way
@@ -354,12 +349,41 @@ describe('generateSmallModelText', () => {
     expect(lastGenerate().body.model).toEqual({ id: 'gpt-5-mini', providerID: 'openai' });
   });
 
+  // A commit message or a spoken summary names the composer's provider and
+  // model; OpenCode's default (its first available model when none is set)
+  // can be another provider's.
+  it('takes the composer model, not OpenCode\'s default from another provider', async () => {
+    state.models = [
+      MODEL({ id: 'claude-opus-5', modelID: 'claude-opus-5', family: 'claude-opus' }),
+      MODEL({ id: 'gpt-5.6', modelID: 'gpt-5.6', providerID: 'openai', family: 'gpt' }),
+    ];
+    state.defaultModel = state.models[1];
+
+    const result = await generateSmallModelText({
+      prompt: 'hi',
+      directory: '/proj',
+      preferredProviderID: 'anthropic',
+      preferredModelID: 'claude-opus-5',
+    });
+
+    expect(result).toMatchObject({ providerID: 'anthropic', modelID: 'claude-opus-5', source: 'session-model' });
+    expect(state.requests.some((entry) => entry.body?.model?.providerID === 'openai')).toBe(false);
+  });
+
+  it('keeps OpenCode\'s default when it is on the named provider', async () => {
+    state.models = [MODEL({ id: 'claude-opus-5', modelID: 'claude-opus-5', family: 'claude-opus' })];
+    state.defaultModel = state.models[0];
+
+    const result = await generateSmallModelText({ prompt: 'hi', directory: '/proj', preferredProviderID: 'anthropic' });
+
+    expect(result).toMatchObject({ providerID: 'anthropic', modelID: 'claude-opus-5', source: 'default' });
+  });
+
   it('refuses rather than switch provider when the session has no model of its own', async () => {
     await expect(generateSmallModelText({
       prompt: 'hi',
       directory: '/proj',
       preferredProviderID: 'openai',
-      restrictToPreferredProvider: true,
     })).rejects.toMatchObject({ statusCode: 404 });
   });
 

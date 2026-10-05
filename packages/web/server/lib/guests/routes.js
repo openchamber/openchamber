@@ -672,8 +672,10 @@ export const registerGuestRoutes = (app, {
         return res.status(400).json({ error: 'invalid-request' });
       }
       const { directory } = await resolveOptionalProjectDirectory(req);
-      // The host names the composer's provider; the model stays on it.
+      // The host names the composer's provider, which the model stays on, and
+      // its model, used when that provider has no small one.
       const provider = providerHeaderSchema.safeParse(req.get('x-openchamber-provider'));
+      const composerModel = providerHeaderSchema.safeParse(req.get('x-openchamber-model'));
       const { generateSmallModelText } = await getSmallModelService();
       let generated;
       try {
@@ -683,6 +685,7 @@ export const registerGuestRoutes = (app, {
           maxOutputTokens: parsed.data.maxOutputTokens,
           directory: directory || undefined,
           preferredProviderID: provider.success ? provider.data : undefined,
+          preferredModelID: provider.success && composerModel.success ? composerModel.data : undefined,
         });
       } catch (error) {
         const statusCode = Number(error?.statusCode) || 500;

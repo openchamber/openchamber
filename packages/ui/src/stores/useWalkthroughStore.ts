@@ -94,14 +94,15 @@ interface WalkthroughState {
 interface WalkthroughActions {
   getEntry: (directory: string, target: WalkthroughTarget) => WalkthroughEntry;
   /**
-   * `providerID` is the composer's provider: without a model of its own the
-   * walkthrough stays on it.
+   * `providerID` / `modelID` are the composer's: without a model of its own
+   * the walkthrough stays on that provider, and on that model when the
+   * provider has no small one.
    */
-  load: (directory: string, target: WalkthroughTarget, options?: { language?: string; providerID?: string }) => Promise<void>;
+  load: (directory: string, target: WalkthroughTarget, options?: { language?: string; providerID?: string; modelID?: string }) => Promise<void>;
   generate: (
     directory: string,
     target: WalkthroughTarget,
-    options?: { force?: boolean; language?: string; providerID?: string }
+    options?: { force?: boolean; language?: string; providerID?: string; modelID?: string }
   ) => Promise<void>;
   cancel: (directory: string, target: WalkthroughTarget) => void;
   requestTarget: (directory: string, target: WalkthroughTarget) => void;
@@ -193,6 +194,7 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
           const result = await fetchWalkthrough(directory, target, {
             model: get().selectedModel[key],
             providerID: options.providerID,
+            modelID: options.modelID,
             language: options.language,
             signal: controller.signal,
           });
@@ -205,7 +207,7 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
           }));
 
           if (result.generating) {
-            void get().generate(directory, target, { language: options.language, providerID: options.providerID });
+            void get().generate(directory, target, { language: options.language, providerID: options.providerID, modelID: options.modelID });
           }
         } catch (error) {
           if (controller.signal.aborted) return;
@@ -268,6 +270,7 @@ export const useWalkthroughStore = create<WalkthroughState & WalkthroughActions>
             force: options.force,
             model: get().selectedModel[key],
             providerID: options.providerID,
+            modelID: options.modelID,
             language: options.language,
             signal: controller.signal,
           });

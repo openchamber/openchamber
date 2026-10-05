@@ -118,6 +118,7 @@ interface GenerateWalkthroughBody extends WalkthroughReadContextBody {
   force: boolean;
   model?: string;
   providerID?: string;
+  modelID?: string;
   language?: string;
 }
 
@@ -152,11 +153,12 @@ export const buildTargetQuery = (directory: string, target: WalkthroughTarget): 
 export async function fetchWalkthrough(
   directory: string,
   target: WalkthroughTarget,
-  options: { model?: string; providerID?: string; language?: string; signal?: AbortSignal } = {}
+  options: { model?: string; providerID?: string; modelID?: string; language?: string; signal?: AbortSignal } = {}
 ): Promise<WalkthroughResult> {
   const query = buildTargetQuery(directory, target);
   if (options.model) query.model = options.model;
   if (options.providerID) query.providerID = options.providerID;
+  if (options.modelID) query.modelID = options.modelID;
   if (options.language) query.language = options.language;
   const response = await runtimeFetch(BASE, {
     query,
@@ -171,7 +173,7 @@ export async function fetchWalkthrough(
 export async function generateWalkthrough(
   directory: string,
   target: WalkthroughTarget,
-  options: { force?: boolean; model?: string; providerID?: string; language?: string; signal?: AbortSignal } = {}
+  options: { force?: boolean; model?: string; providerID?: string; modelID?: string; language?: string; signal?: AbortSignal } = {}
 ): Promise<WalkthroughResult> {
   const body: GenerateWalkthroughBody = {
     directory,
@@ -181,6 +183,7 @@ export async function generateWalkthrough(
   if (isPullRequestTarget(target)) Object.assign(body, readContextFields(target.context));
   if (options.model) body.model = options.model;
   if (options.providerID) body.providerID = options.providerID;
+  if (options.modelID) body.modelID = options.modelID;
   if (options.language) body.language = options.language;
   const response = await runtimeFetch(`${BASE}/generate`, {
     method: 'POST',

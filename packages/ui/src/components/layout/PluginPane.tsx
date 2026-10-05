@@ -796,7 +796,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             guestIdRef.current,
             request,
             directoryRef.current || null,
-            useConfigStore.getState().currentProviderId || null,
+            {
+              providerID: useConfigStore.getState().currentProviderId || null,
+              modelID: useConfigStore.getState().currentModelId || null,
+            },
           );
         },
         setBadge: (count) => {

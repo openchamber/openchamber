@@ -76,6 +76,7 @@ import { isConflictedStatusFile } from './git/changeStatus';
 import { getFreshestSourceControlStatusForBranch, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore, useConnectedAccountIds } from '@/stores/useSourceControlAuthStore';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { hasConfigChangedGrant } from '@/lib/source-control/types';
 import { createGitIndexMutationQueue, type GitIndexMutationDirection, type GitIndexMutationQueue } from './git/gitIndexMutationQueue';
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -392,10 +393,11 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   const identityAttention = React.useMemo(() => {
     const read = binding.read;
     if (!read?.binding || binding.status !== 'ready' || read.binding.state === 'bound') return null;
-    // The commonest way a binding stops matching is a remote added, renamed or
-    // repointed after the identity was applied. That has a remedy the generic
-    // words do not name — choose the identity again — so it is said here.
-    return read.binding.configRevision !== read.repository.configRevision
+    // The commonest way a binding stops matching is a bound remote renamed,
+    // repointed or removed after the identity was applied. That has a remedy
+    // the generic words do not name — choose the identity again — so it is
+    // said here.
+    return hasConfigChangedGrant(read.binding)
       ? t('gitView.identity.configChanged')
       : t('gitView.context.needsAttention');
   }, [binding.read, binding.status, t]);

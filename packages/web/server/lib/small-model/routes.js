@@ -21,7 +21,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.post('/api/small-model/generate', async (req, res) => {
     try {
       const { generateSmallModelText } = await getSmallModelService();
-      const { prompt, system, maxOutputTokens, model, directory, sessionID, preferredProviderID, preferredModelID, restrictToPreferredProvider } = req.body || {};
+      const { prompt, system, maxOutputTokens, model, directory, sessionID, preferredProviderID, preferredModelID } = req.body || {};
       const result = await generateSmallModelText({
         prompt,
         system,
@@ -31,7 +31,6 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         sessionID,
         preferredProviderID,
         preferredModelID,
-        restrictToPreferredProvider: restrictToPreferredProvider === true,
       });
       res.json(result);
     } catch (error) {

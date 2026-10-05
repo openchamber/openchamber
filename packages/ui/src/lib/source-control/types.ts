@@ -129,6 +129,10 @@ export const effectiveRepositoryBinding = (read: SourceControlBindingRead): Sour
   };
 };
 
+/** Whether a bound remote moved or disappeared after the binding was saved. */
+export const hasConfigChangedGrant = (binding: SourceControlRepositoryBinding): boolean =>
+  [...binding.providers, ...binding.remotes].some((entry) => entry.readiness === 'config-changed');
+
 export type GitTransportBindingIntent = {
   directory: string;
   expectedRepositoryId: string;

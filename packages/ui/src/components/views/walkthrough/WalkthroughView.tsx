@@ -351,6 +351,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const selectedLanguage = useWalkthroughStore((state) => state.getSelectedLanguage(directory, target));
   // Without a model of its own the walkthrough stays on the composer's provider.
   const composerProviderId = useConfigStore((state) => state.currentProviderId) || undefined;
+  const composerModelId = useConfigStore((state) => state.currentModelId) || undefined;
 
   // Explicit pick first, then the language the walkthrough on screen is
   // actually written in, then the interface locale. The middle step matters for
@@ -374,12 +375,12 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   useEffect(() => {
     if (!visible || needsSourceSelection) return;
     if (target.source.kind === 'pr') {
-      const key = JSON.stringify([runtimeKey, directory, target, activeLanguage, selectedModel, composerProviderId, prPushRevision]);
+      const key = JSON.stringify([runtimeKey, directory, target, activeLanguage, selectedModel, composerProviderId, composerModelId, prPushRevision]);
       if (lastPrRead.current === key) return;
       lastPrRead.current = key;
     }
-    void load(directory, target, { language: activeLanguage, providerID: composerProviderId });
-  }, [activeLanguage, composerProviderId, needsSourceSelection, directory, load, target, selectedModel, sourceRevision, visible, runtimeKey, prPushRevision]);
+    void load(directory, target, { language: activeLanguage, providerID: composerProviderId, modelID: composerModelId });
+  }, [activeLanguage, composerProviderId, composerModelId, needsSourceSelection, directory, load, target, selectedModel, sourceRevision, visible, runtimeKey, prPushRevision]);
 
   const view = useMemo(() => needsSourceSelection ? null : buildWalkthroughView(entry.result), [needsSourceSelection, entry.result]);
 
@@ -569,9 +570,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const handleGenerate = useCallback(
     (force: boolean) => {
       if (generateDisabled) return;
-      void generate(directory, target, { force, language: activeLanguage, providerID: composerProviderId });
+      void generate(directory, target, { force, language: activeLanguage, providerID: composerProviderId, modelID: composerModelId });
     },
-    [activeLanguage, composerProviderId, directory, generate, generateDisabled, target]
+    [activeLanguage, composerProviderId, composerModelId, directory, generate, generateDisabled, target]
   );
 
   const isGitRepo = useIsGitRepo(gitDirectory || null);
@@ -962,7 +963,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             model={blockedModel}
             requiredChars={blockedRequiredChars}
             availableChars={blockedAvailableChars}
-            onRetry={() => void load(directory, target, { providerID: composerProviderId })}
+            onRetry={() => void load(directory, target, { providerID: composerProviderId, modelID: composerModelId })}
           />
         ) : showStages ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
