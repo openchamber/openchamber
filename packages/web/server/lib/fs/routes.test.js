@@ -1284,6 +1284,88 @@ describe('fs raw byte ranges', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it.each(['complete', 'disconnect', 'disconnect while opening'])('closes the real file handle on %s', async (scenario) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'oc-raw-stream-'));
+    const file = path.join(root, 'clip.mp4');
+    await nativeFs.writeFile(file, Buffer.alloc(256 * 1024));
+    let handle;
+    let stream;
+    let closed;
+    let bytesWritten = 0;
+    const res = new Writable({
+      write(chunk, _encoding, callback) {
+        bytesWritten += chunk.length;
+        if (scenario === 'disconnect') {
+          // Leave a pending write, as with a slow client that then goes away.
+          res.destroy();
+        } else {
+          callback();
+        }
+      },
+    });
+    Object.assign(res, {
+      status() { return res; },
+      type() { return res; },
+      setHeader() {},
+    });
+    const handler = registerRaw({
+      realpath: async () => file,
+      stat: async () => nativeFs.stat(file),
+      open: async () => {
+        handle = await nativeFs.open(file, 'r');
+        const createReadStream = handle.createReadStream.bind(handle);
+        vi.spyOn(handle, 'createReadStream').mockImplementation((options) => {
+          stream = createReadStream(options);
+          closed = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('file stream did not close')), 1000);
+            stream.once('close', () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+          return stream;
+        });
+        if (scenario === 'disconnect while opening') res.destroy();
+        return handle;
+      },
+    });
+
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=0-' } }, res);
+      await closed;
+      expect(handle.fd).toBe(-1);
+      expect(res.listenerCount('close')).toBe(0);
+      if (scenario === 'complete') expect(bytesWritten).toBe(256 * 1024);
+      if (scenario === 'disconnect') expect(bytesWritten).toBeGreaterThan(0);
+      if (scenario === 'disconnect while opening') expect(bytesWritten).toBe(0);
+    } finally {
+      // Also clean up the descriptor when running against the broken version.
+      stream?.destroy();
+      if (handle) await handle.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 2000);
+
+  it('closes the file handle when stream creation throws', async () => {
+    const close = vi.fn(async () => {});
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open: async () => ({
+        createReadStream: () => { throw new Error('stream setup failed'); },
+        close,
+      }),
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=0-' } }, res);
+      expect(close).toHaveBeenCalledOnce();
+      expect(res.statusCode).toBe(500);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('rejects a span past the end with 416 and the file size', async () => {
     const { handler, open } = registerRawWithFile(Buffer.from('0123456789'));
     const res = createMockResponse();

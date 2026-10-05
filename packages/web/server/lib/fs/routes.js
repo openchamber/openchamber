@@ -1149,13 +1149,26 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${stats.size}`);
         res.setHeader('Content-Length', String(range.end - range.start + 1));
         res.type(mimeType);
-        // The handle closes with the stream, on success and on failure alike.
-        const stream = handle.createReadStream({ start: range.start, end: range.end });
-        stream.on('error', (error) => {
-          console.error('Failed to stream raw file range:', error);
-          res.destroy(error);
-        });
-        stream.pipe(res);
+        // pipe() leaves the source paused when a media player disconnects.
+        // Destroy it too so autoClose releases the FileHandle before GC.
+        try {
+          const stream = handle.createReadStream({ start: range.start, end: range.end });
+          const onResponseClose = () => stream.destroy();
+          res.once('close', onResponseClose);
+          stream.once('close', () => res.removeListener('close', onResponseClose));
+          stream.on('error', (error) => {
+            console.error('Failed to stream raw file range:', error);
+            res.destroy(error);
+          });
+          if (res.destroyed) {
+            stream.destroy();
+          } else {
+            stream.pipe(res);
+          }
+        } catch (error) {
+          await handle.close();
+          throw error;
+        }
         return undefined;
       }
 
