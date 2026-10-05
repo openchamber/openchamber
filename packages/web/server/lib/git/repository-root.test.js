@@ -36,7 +36,8 @@ describe('vcsInitRefusal', () => {
   });
 
   afterAll(() => {
-    fs.rmSync(homeLink, { force: true });
+    // unlink, not rm: Node 24.13 refuses to rm a link that points at a folder.
+    fs.unlinkSync(homeLink);
     fs.rmSync(home, { recursive: true, force: true });
   });
 

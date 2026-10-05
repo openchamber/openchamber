@@ -1037,7 +1037,7 @@ describe('applyAsChanges after round five', () => {
         bg(['commit', '--quiet', '-m', 'a link', '--', 'lib']);
       },
       edit: (scratch) => {
-        fs.rmSync(path.join(scratch, 'lib'));
+        fs.unlinkSync(path.join(scratch, 'lib'));
         fs.mkdirSync(path.join(scratch, 'lib'));
         fs.writeFileSync(path.join(scratch, 'lib', 'own.txt'), 'own\n');
       },
