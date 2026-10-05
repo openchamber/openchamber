@@ -395,20 +395,46 @@ export const useDirectoryStore = create<DirectoryStore>()(
   )
 );
 
+let pendingHomeResolution: Promise<void> | null = null;
+
+// Only the newest resolution may commit: an older one can finish later with a
+// worse answer (the previous host's home after a runtime switch).
+const resolveHomeDirectory = (): Promise<void> => {
+  const generation = ++homeResolveGeneration;
+  const resolution: Promise<void> = initializeHomeDirectory()
+    .then((home) => {
+      if (generation !== homeResolveGeneration) return;
+      useDirectoryStore.getState().synchronizeHomeDirectory(home);
+    })
+    .finally(() => {
+      if (pendingHomeResolution === resolution) pendingHomeResolution = null;
+    });
+  pendingHomeResolution = resolution;
+  return resolution;
+};
+
+/**
+ * Resolves the home directory again when the startup attempt could not. A
+ * server with a UI password answers /api/fs/home only after login, so on a
+ * browser's first visit the attempt at page load falls back to "/". The
+ * session gate calls this right after authentication, before the app mounts.
+ * A resolution still in flight is awaited first rather than superseded: on a
+ * server without a password it is the one that succeeds.
+ */
+export const ensureHomeDirectoryResolved = async (): Promise<void> => {
+  if (pendingHomeResolution) await pendingHomeResolution;
+  if (useDirectoryStore.getState().isHomeReady) return;
+  await resolveHomeDirectory();
+};
+
 if (typeof window !== 'undefined') {
-  initializeHomeDirectory().then((home) => {
-    useDirectoryStore.getState().synchronizeHomeDirectory(home);
-  });
+  void resolveHomeDirectory();
 
   // Host switches happen in place (no page reload), so the home directory
   // must be re-resolved from the new runtime's authoritative source instead
   // of keeping the previous host's value cached.
   subscribeRuntimeEndpointChanged(() => {
     cachedHomeDirectory = null;
-    const generation = ++homeResolveGeneration;
-    initializeHomeDirectory().then((home) => {
-      if (generation !== homeResolveGeneration) return;
-      useDirectoryStore.getState().synchronizeHomeDirectory(home);
-    });
+    void resolveHomeDirectory();
   });
 }
