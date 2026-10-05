@@ -58,6 +58,11 @@ cd openchamber
 bun install
 ```
 
+To start over from a fresh state, `bun run clean` removes every `node_modules`
+and build output (`dist`, `dist-*`, built-in extensions), packaged desktop
+builds in `packages/electron/dist` included. Then run `bun install` again. Add
+`-- --dry-run` to see the list without deleting anything.
+
 ## Dev Scripts
 
 Run commands from the project root unless a section says otherwise.
