@@ -77,7 +77,7 @@ const searchPanelSpacePlugin = ViewPlugin.fromClass(class {
         this.observer?.disconnect();
         this.observer = null;
         this.panel = panel;
-        if (!panel || typeof ResizeObserver === 'undefined') return;
+        if (!panel) return;
         this.observer = new ResizeObserver(() => this.syncSpace());
         this.observer.observe(panel);
       },

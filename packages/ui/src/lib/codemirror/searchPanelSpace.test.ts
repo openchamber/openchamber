@@ -1,62 +1,77 @@
-import { describe, expect, test } from 'bun:test';
-import { EditorState, type TransactionSpec } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-import { closeSearchPanel, openSearchPanel, search } from '@codemirror/search';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
+import { Window } from 'happy-dom';
 
-import { searchPanelSpace, searchPanelSpaceField, setSearchPanelSpace } from './searchPanelSpace';
+const dom = new Window();
+Object.assign(globalThis, {
+  window: dom,
+  document: dom.document,
+  MutationObserver: dom.MutationObserver,
+  ResizeObserver: dom.ResizeObserver,
+  Node: dom.Node,
+  HTMLElement: dom.HTMLElement,
+  getComputedStyle: dom.getComputedStyle.bind(dom),
+});
 
-// Just enough of a view for the search commands to toggle the panel in state.
-const run = (state: EditorState, command: typeof openSearchPanel): EditorState => {
-  let next = state;
-  const view = {
-    get state() { return next; },
-    dispatch: (spec: TransactionSpec) => { next = next.update(spec).state; },
-    plugin: () => null,
-    root: { activeElement: null },
-    focus: () => {},
-  };
-  command(view as unknown as EditorView);
-  return next;
-};
+const { EditorView } = await import('@codemirror/view');
+const { closeSearchPanel, openSearchPanel, search } = await import('@codemirror/search');
+const { searchPanelSpace, searchPanelSpaceField, setSearchPanelSpace } = await import('./searchPanelSpace');
+const views: InstanceType<typeof EditorView>[] = [];
 
-const paddingTop = (state: EditorState): string | undefined => {
-  const styles = state.facet(EditorView.contentAttributes)
-    .map((attrs) => (typeof attrs === 'function' ? null : attrs?.style))
-    .filter(Boolean)
-    .join(';');
-  return /padding-top:\s*([^;]+)/.exec(styles)?.[1];
-};
+afterEach(() => {
+  for (const view of views.splice(0)) view.destroy();
+  document.body.replaceChildren();
+});
+afterAll(() => dom.happyDOM.close());
 
-const create = () => EditorState.create({ doc: 'a\nb\nc', extensions: [search({ top: true }), searchPanelSpace()] });
+// happy-dom does no layout, so the tests hand in the panel height the plugin would measure.
+function editor() {
+  const view = new EditorView({
+    doc: 'a\nb\nc',
+    extensions: [search({ top: true }), searchPanelSpace()],
+    parent: document.body,
+  });
+  views.push(view);
+  return view;
+}
+
+function measurePanel(view: InstanceType<typeof EditorView>, space: number) {
+  view.dispatch({ effects: setSearchPanelSpace.of(space) });
+}
 
 describe('searchPanelSpace', () => {
   test('pads the content by the measured panel height while search is open', () => {
-    const open = run(create(), openSearchPanel);
-    const measured = open.update({ effects: setSearchPanelSpace.of(42) }).state;
+    const view = editor();
+    openSearchPanel(view);
+    measurePanel(view, 42);
 
-    expect(measured.field(searchPanelSpaceField)).toBe(42);
-    expect(paddingTop(measured)).toBe('42px');
+    expect(view.state.field(searchPanelSpaceField)).toBe(42);
+    expect(view.contentDOM.style.paddingTop).toBe('42px');
   });
 
-  test('follows the panel when it grows, e.g. when Replace opens', () => {
-    const open = run(create(), openSearchPanel).update({ effects: setSearchPanelSpace.of(42) }).state;
-    const grown = open.update({ effects: setSearchPanelSpace.of(78) }).state;
+  test('follows the panel when it grows', () => {
+    const view = editor();
+    openSearchPanel(view);
+    measurePanel(view, 42);
+    measurePanel(view, 78);
 
-    expect(paddingTop(grown)).toBe('78px');
+    expect(view.contentDOM.style.paddingTop).toBe('78px');
   });
 
   test('removes the space when search closes', () => {
-    const open = run(create(), openSearchPanel).update({ effects: setSearchPanelSpace.of(42) }).state;
-    const closed = run(open, closeSearchPanel);
+    const view = editor();
+    openSearchPanel(view);
+    measurePanel(view, 42);
+    closeSearchPanel(view);
 
-    expect(closed.field(searchPanelSpaceField)).toBe(0);
-    expect(paddingTop(closed)).toBeUndefined();
+    expect(view.state.field(searchPanelSpaceField)).toBe(0);
+    expect(view.contentDOM.style.paddingTop).toBe('');
   });
 
   test('ignores measurements while search is closed', () => {
-    const state = create().update({ effects: setSearchPanelSpace.of(42) }).state;
+    const view = editor();
+    measurePanel(view, 42);
 
-    expect(state.field(searchPanelSpaceField)).toBe(0);
-    expect(paddingTop(state)).toBeUndefined();
+    expect(view.state.field(searchPanelSpaceField)).toBe(0);
+    expect(view.contentDOM.style.paddingTop).toBe('');
   });
 });
