@@ -26,6 +26,7 @@ import { useMobileAutocompleteMaxHeight } from '../useMobileAutocompleteMaxHeigh
 import ChatMessage from '../ChatMessage';
 import { PermissionCard } from '../PermissionCard';
 import { FormCard } from '../FormCard';
+import { SessionErrorNotice } from '../SessionErrorNotice';
 
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
@@ -394,6 +395,7 @@ const BtwExpandedSheet: React.FC<{
         <BtwFrame actions={actions} onTitleClick={onTitleClick} titleClickLabel={titleClickLabel} collapsed={false}>
             <ChatSurfaceProvider mode="peek">
                 <BtwMessages
+                    sessionRef={sessionRef}
                     data={data}
                     bodyRef={bodyRef}
                     contentRef={contentRef}
@@ -406,12 +408,13 @@ const BtwExpandedSheet: React.FC<{
 };
 
 const BtwMessages: React.FC<{
+    sessionRef: BtwSessionRef;
     data: BtwSessionData;
     bodyRef: React.RefObject<HTMLDivElement | null>;
     contentRef: React.RefObject<HTMLDivElement | null>;
     onBodyScroll: (event: React.UIEvent<HTMLDivElement>) => void;
     maxHeight?: number;
-}> = ({ data, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
+}> = ({ sessionRef, data, bodyRef, contentRef, onBodyScroll, maxHeight }) => {
     const { t } = useI18n();
 
     if (data.isEmpty) {
@@ -456,6 +459,10 @@ const BtwMessages: React.FC<{
                         ))}
                     </div>
                 ) : null}
+                {/* A turn OpenCode stops before any reply exists (an unusable
+                    model, a provider that fails to load) leaves only the
+                    question here; the same notice as the main chat says why. */}
+                <SessionErrorNotice sessionId={sessionRef.btwSessionId} directory={sessionRef.directory} />
                 {/* Always reserve this row so the content does not shift down
                     by a line when the indicator disappears. */}
                 <div
