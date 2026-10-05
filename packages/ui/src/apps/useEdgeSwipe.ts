@@ -10,6 +10,8 @@ import React from 'react';
  *
  * Touch listeners are passive to preserve native scrolling and text selection.
  * A selection cancels the pending swipe, even if it clears before touchend.
+ * A swipe that starts on content still able to scroll the way the finger
+ * moves (a wide table, a code block) belongs to that content, not the drawer.
  */
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
@@ -29,6 +31,25 @@ export interface EdgeSwipeOptions {
       drawer needs: its element only exists (or only matters) while open. */
   enabled?: boolean;
 }
+
+// Whether anything between `target` and `container` can still scroll
+// horizontally toward the content the finger would pull into view: a swipe
+// from the left edge reveals content on the left, one from the right edge
+// content on the right. RTL scrollers run scrollLeft from -range up to 0.
+const canScrollAlongSwipe = (target: EventTarget | null, container: HTMLElement, fromLeftEdge: boolean): boolean => {
+  const view = container.ownerDocument.defaultView;
+  if (!view) return false;
+  for (let node = target instanceof view.Element ? target : null; node && node !== container; node = node.parentElement) {
+    const range = node.scrollWidth - node.clientWidth;
+    if (range <= 1) continue;
+    const style = view.getComputedStyle(node);
+    if (style.overflowX !== 'auto' && style.overflowX !== 'scroll') continue;
+    const min = style.direction === 'rtl' ? -range : 0;
+    const max = min + range;
+    if (fromLeftEdge ? node.scrollLeft > min + 1 : node.scrollLeft < max - 1) return true;
+  }
+  return false;
+};
 
 export const useEdgeSwipe = (
   ref: React.RefObject<HTMLElement | null>,
@@ -71,8 +92,8 @@ export const useEdgeSwipe = (
       const width = element.clientWidth;
       const nearLeft = touch.clientX <= edgeZone;
       const nearRight = touch.clientX >= width - edgeZone;
-      tracking = nearLeft || nearRight;
       fromLeftEdge = nearLeft;
+      tracking = (nearLeft || nearRight) && !canScrollAlongSwipe(event.target, element, fromLeftEdge);
       startX = touch.clientX;
       startY = touch.clientY;
     };

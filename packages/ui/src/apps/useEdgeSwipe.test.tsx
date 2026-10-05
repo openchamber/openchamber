@@ -7,6 +7,8 @@ import { useEdgeSwipe } from './useEdgeSwipe';
 describe('edge swipe selection isolation', () => {
   let root: Root;
   let text: HTMLParagraphElement;
+  let scroller: HTMLElement;
+  let cell: HTMLElement;
   let opened: string[];
   let restoreGlobals: () => void;
   let render: (enabled?: boolean) => Promise<void>;
@@ -40,7 +42,12 @@ describe('edge swipe selection isolation', () => {
         onLeftEdgeSwipe: () => opened.push('left'),
         onRightEdgeSwipe: () => opened.push('right'),
       });
-      return <main ref={ref}><p>Selectable rendered message text</p></main>;
+      return (
+        <main ref={ref}>
+          <p>Selectable rendered message text</p>
+          <div data-scroller style={{ overflowX: 'auto' }}><table><tbody><tr><td>Wide cell</td></tr></tbody></table></div>
+        </main>
+      );
     };
     render = async (enabled) => {
       await act(async () => root.render(<Harness enabled={enabled} />));
@@ -48,9 +55,15 @@ describe('edge swipe selection isolation', () => {
     await render();
     const main = host.querySelector('main');
     const paragraph = host.querySelector('p');
-    if (!main || !paragraph) throw new Error('Missing chat harness');
+    const wide = host.querySelector<HTMLElement>('[data-scroller]');
+    const wideCell = host.querySelector<HTMLElement>('td');
+    if (!main || !paragraph || !wide || !wideCell) throw new Error('Missing chat harness');
     Object.defineProperty(main, 'clientWidth', { value: 390 });
+    Object.defineProperty(wide, 'clientWidth', { value: 390 });
+    Object.defineProperty(wide, 'scrollWidth', { value: 900 });
     text = paragraph;
+    scroller = wide;
+    cell = wideCell;
   });
 
   afterEach(async () => {
@@ -58,13 +71,13 @@ describe('edge swipe selection isolation', () => {
     restoreGlobals();
   });
 
-  const touch = (type: string, x: number, y = 100) => {
+  const touch = (type: string, x: number, y = 100, target: HTMLElement = text) => {
     const point = { clientX: x, clientY: y };
     const event = Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
       touches: type === 'touchstart' ? [point] : [],
       changedTouches: [point],
     });
-    text.dispatchEvent(event);
+    target.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
   };
 
@@ -164,6 +177,43 @@ describe('edge swipe selection isolation', () => {
       touch('touchcancel', startX);
       touch('touchend', endX);
       expect(opened).toEqual([]);
+    });
+
+    test(`${side}: a swipe on wide content scrolls it until it reaches its end`, () => {
+      // Right-edge swipes pull content in from the right, left-edge ones from the left.
+      const scrollable = side === 'left' ? 510 : 0;
+      const atEnd = side === 'left' ? 0 : 510;
+      scroller.scrollLeft = scrollable;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([]);
+
+      scroller.scrollLeft = atEnd;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([side]);
+    });
+
+    test(`${side}: right-to-left content scrolls from its own start`, () => {
+      scroller.style.direction = 'rtl';
+      // RTL scrollLeft runs from -510 (left end) to 0 (right end, the start).
+      scroller.scrollLeft = side === 'left' ? 0 : -510;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([]);
+
+      scroller.scrollLeft = side === 'left' ? -510 : 0;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([side]);
+    });
+
+    test(`${side}: wide content that cannot scroll does not block the drawer`, () => {
+      scroller.style.overflowX = 'hidden';
+      scroller.scrollLeft = side === 'left' ? 510 : 0;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([side]);
     });
 
     test(`${side}: vertical, short and non-edge gestures remain ignored`, () => {
