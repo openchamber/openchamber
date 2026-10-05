@@ -1432,6 +1432,20 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-italic, var(--foreground));
 }
 
+/* Bold/italic inside a blockquote keeps the quote's muted color instead of
+   jumping to the full foreground (mirrors the reasoning-scope rules below). */
+.markdown-content blockquote strong,
+.markdown-content blockquote b,
+.markdown-content blockquote [data-markdown="strong"],
+.markdown-content blockquote [data-markdown="bold"] {
+  color: inherit;
+}
+
+.markdown-content blockquote em,
+.markdown-content blockquote i {
+  color: inherit;
+}
+
 .markdown-content del {
   color: var(--markdown-strikethrough, var(--muted-foreground));
 }
