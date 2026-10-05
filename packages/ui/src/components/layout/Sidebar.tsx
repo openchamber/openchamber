@@ -44,6 +44,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         sidebar.style.minWidth = `${nextWidth}px`;
         sidebar.style.maxWidth = `${nextWidth}px`;
         sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
+        // A drag writes the DOM directly and does not re-render, so the root
+        // copy has to be written here too or the titlebar overlay keeps
+        // capping itself to the width the drag started from.
+        document.documentElement.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
     }, []);
 
     React.useEffect(() => {
@@ -59,15 +63,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         }
     }, [isResizing]);
 
-    if (isMobile) {
-        return null;
-    }
-
     const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
         Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth || SIDEBAR_CONTENT_WIDTH)
     );
     const appliedWidth = isOpen ? openWidth : 0;
+    const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
+
+    // The titlebar overlay that floats above the sidebar is a sibling of it, not
+    // a child, so it cannot read the width published on <aside>. Publish it on
+    // the root as well, the way --oc-header-height and --oc-titlebar-left-inset
+    // already are, so the overlay can cap itself to the sidebar.
+    React.useEffect(() => {
+        document.documentElement.style.setProperty(
+            '--oc-left-sidebar-width',
+            `${isResizing ? currentWidth : openWidth}px`,
+        );
+    }, [currentWidth, isResizing, openWidth]);
+
+    if (isMobile) {
+        return null;
+    }
 
     const handlePointerDown = (event: React.PointerEvent) => {
         if (!isOpen) {
@@ -121,8 +137,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         setIsResizing(false);
         setSidebarWidth(finalWidth);
     };
-
-    const currentWidth = isResizing ? (resizingWidthRef.current ?? appliedWidth) : appliedWidth;
 
     return (
         <aside
