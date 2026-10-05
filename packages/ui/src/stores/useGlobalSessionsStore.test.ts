@@ -4,7 +4,6 @@ import type { Session } from '@/lib/opencode/model';
 import {
   isGlobalSessionRecencyOnlyUpdate,
   resolveGlobalSessionDirectory,
-  mergeLiveSessionWithGlobalSession,
   useGlobalSessionsStore,
 } from './useGlobalSessionsStore';
 
@@ -216,33 +215,6 @@ describe('useGlobalSessionsStore', () => {
     expect(publications).toBe(1);
     expect(state.activeSessions.map((session) => session.id)).toEqual(['ses_final']);
     expect(state.structure.activeRootIds).toEqual(['ses_final']);
-  });
-});
-
-describe('mergeLiveSessionWithGlobalSession', () => {
-  test('keeps the live record when it is the newer one', () => {
-    const live = buildSession('Live', { time: { created: 1, updated: 5 } });
-    const global = buildSession('Global', { time: { created: 1, updated: 3 } });
-
-    const merged = mergeLiveSessionWithGlobalSession(live, global);
-    expect(merged.title).toBe('Live');
-    expect(merged.time?.updated).toBe(5);
-  });
-
-  test('preserves directory from global when live omits it', () => {
-    const live = buildSession('Live', { time: { created: 1, updated: 5 } });
-    const global = buildSession('Global', { directory: '/repo/app' });
-
-    const merged = mergeLiveSessionWithGlobalSession(live, global);
-    expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/app');
-  });
-
-  test('live directory takes precedence over global when present', () => {
-    const live = buildSession('Live', { directory: '/repo/worktree' });
-    const global = buildSession('Global', { directory: '/repo/app' });
-
-    const merged = mergeLiveSessionWithGlobalSession(live, global);
-    expect(resolveGlobalSessionDirectory(merged)).toBe('/repo/worktree');
   });
 });
 

@@ -62,7 +62,6 @@ mock.module("@/stores/useGlobalSessionsStore", () => ({
     }),
   },
   mergeSessionDirectoryMetadata: (incoming: Session) => incoming,
-  mergeLiveSessionWithGlobalSession: (incoming: Session) => incoming,
   resolveGlobalSessionDirectory: () => null,
 }))
 
