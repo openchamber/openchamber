@@ -141,6 +141,30 @@ replaced. If the server still cannot name the home, the app starts in `/` as it
 did before. A home that is already known, from storage or the desktop shell,
 shows the app at once.
 
+Nothing about directories is carried from one host to another (the desktop
+host switcher, a mobile instance switch). Three rules hold that:
+
+- The home lookup for a switch starts after every subscriber of the
+  endpoint-changed event has run. One of them rebinds the client; a lookup
+  started earlier still reaches the previous host and takes its home for the
+  new one's.
+- After a switch, only the host's own answer names the home. System info (which
+  derives a home from the stored last directory), the desktop shell's home, and
+  the stored home all describe the host the window booted on, so they are used
+  at boot only. A host that does not answer (401 before login) leaves the home
+  unknown, and the post-login resolution above names it.
+- `session-ui-store` restores the directory it remembers for the host being
+  entered. When it remembers none and the switch comes from another real host,
+  `resetForRuntimeSwitch` forgets the directory: it is unknown (`/`,
+  `isHomeReady` false, no client directory; `isDirectoryUnknown`) until the home
+  resolves, and `synchronizeHomeDirectory` then adopts the home whatever is
+  stored. The reset writes nothing, so the previous host's stored last
+  directory survives for its next start. Coming from no host (a cold launch
+  that connects through a switch) the directory the window started with stays.
+  Leaving a host records its directory unless it is unknown; a key that names
+  no host (disconnected) records none. A host whose home lookup failed still
+  has a directory, and it is recorded.
+
 ### Session / project coordination stores
 
 `useMultiRunStore` creates ID-bound multi-run members. Runs are projected from

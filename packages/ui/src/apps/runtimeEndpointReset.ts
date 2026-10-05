@@ -128,7 +128,7 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // The Linear team filter names a team in one workspace. Carried across, it
   // filters the new instance's issue list down to nothing.
   useUIStore.getState().applyLinearIssueListFiltersForRuntime();
-  useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey);
+  useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
   useUIStore.getState().setOpenGuestPage(null);
   resetStreamingState();

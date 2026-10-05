@@ -26,10 +26,28 @@ interface DirectoryStore {
   goToParent: () => void;
   goHome: () => Promise<void>;
   synchronizeHomeDirectory: (path: string) => void;
+  /**
+   * Forgets a working directory that belonged to another host. The directory
+   * is unknown until the host now connected names its home, which then becomes
+   * the directory through `synchronizeHomeDirectory`.
+   */
+  resetForRuntimeSwitch: () => void;
 }
+
+/**
+ * No working directory yet: the host has not named its home and nothing else
+ * set one. The state at a browser's first visit before login, and after
+ * `resetForRuntimeSwitch`.
+ */
+export const isDirectoryUnknown = (state: Pick<DirectoryStore, 'currentDirectory' | 'isHomeReady'>): boolean =>
+  !state.isHomeReady && state.currentDirectory === '/';
 
 let cachedHomeDirectory: string | null = null;
 let homeResolveGeneration = 0;
+// Whether a home may be guessed when the host does not name one. The guesses
+// (system info, the desktop shell's home, the one stored in this window) all
+// describe the host this window booted on, so a switch to another host ends it.
+let bootHomeFallbacksApply = true;
 const safeStorage = getDeferredSafeStorage();
 const persistedLastDirectory = safeStorage.getItem('lastDirectory');
 const initialHasPersistedDirectory =
@@ -163,6 +181,15 @@ const initializeHomeDirectory = async () => {
     }
   } catch (filesystemError) {
     console.warn('Failed to obtain filesystem home directory:', filesystemError);
+  }
+
+  // Everything below is a guess: system info derives a home from the stored
+  // last directory, and the fallbacks after it describe the host this window
+  // booted on. After a switch to another host only that host's own answer
+  // counts. Until it gives one (before login it answers 401) the home stays
+  // unknown, and it is resolved again once the user is authenticated there.
+  if (!bootHomeFallbacksApply) {
+    return '/';
   }
 
   try {
@@ -333,13 +360,16 @@ export const useDirectoryStore = create<DirectoryStore>()(
         const needsUpdate = state.homeDirectory !== resolvedHome;
         const savedLastDirectory = safeStorage.getItem('lastDirectory');
         const hasSavedLastDirectory = typeof savedLastDirectory === 'string' && savedLastDirectory.length > 0;
+        // An unknown directory adopts the resolved home whatever is stored:
+        // after a host switch the stored last directory is the previous host's.
         const shouldReplaceCurrent =
-          !hasSavedLastDirectory &&
+          isDirectoryUnknown(state) ||
+          (!hasSavedLastDirectory &&
           (
             state.currentDirectory === '/' ||
             state.currentDirectory === state.homeDirectory ||
             !state.currentDirectory
-          );
+          ));
 
         if (!needsUpdate && !shouldReplaceCurrent) {
           if (!state.isHomeReady) {
@@ -387,6 +417,22 @@ export const useDirectoryStore = create<DirectoryStore>()(
         }
 
         void updateDesktopSettings({ homeDirectory: resolvedHome });
+      },
+
+      resetForRuntimeSwitch: () => {
+        // Nothing is stored or sent: the stored last directory is the previous
+        // host's to keep, and the new host's settings are not this path's.
+        opencodeClient.setDirectory(undefined);
+        invalidateFileSearchCache();
+        set({
+          currentDirectory: '/',
+          directoryHistory: ['/'],
+          historyIndex: 0,
+          homeDirectory: '/',
+          hasPersistedDirectory: false,
+          isHomeReady: false,
+          isSwitchingDirectory: false,
+        });
       }
     }),
     {
@@ -433,8 +479,14 @@ if (typeof window !== 'undefined') {
   // Host switches happen in place (no page reload), so the home directory
   // must be re-resolved from the new runtime's authoritative source instead
   // of keeping the previous host's value cached.
-  subscribeRuntimeEndpointChanged(() => {
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey !== detail.previousRuntimeKey) bootHomeFallbacksApply = false;
     cachedHomeDirectory = null;
-    void resolveHomeDirectory();
+    // A lookup still in flight belongs to the previous endpoint from here on.
+    homeResolveGeneration += 1;
+    // Other subscribers of this same event rebind the client to the new
+    // endpoint. A lookup started here would still reach the previous host and
+    // take its home for the new one's, so it starts once they have all run.
+    queueMicrotask(() => void resolveHomeDirectory());
   });
 }

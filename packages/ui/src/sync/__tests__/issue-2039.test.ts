@@ -159,6 +159,7 @@ mock.module("@/stores/useProjectsStore", () => ({
 }))
 
 mock.module("@/stores/useDirectoryStore", () => ({
+  isDirectoryUnknown: () => false,
   useDirectoryStore: {
     getState: () => ({
       currentDirectory: null,
