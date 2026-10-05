@@ -27,6 +27,12 @@ describe('worktreeStatus.canDeleteWorktreeWithoutConfirm', () => {
     expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 0, behind: 3, upstream: 'origin/feature' })).toBe(true);
   });
 
+  test('allows a clean never-pushed branch whose commits are all on the base branch', () => {
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 0, upstream: null, aheadBase: 'origin/main' })).toBe(true);
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 1, upstream: null, aheadBase: 'origin/main' })).toBe(false);
+    expect(canDeleteWorktreeWithoutConfirm({ isDirty: true, ahead: 0, upstream: null, aheadBase: 'origin/main' })).toBe(false);
+  });
+
   test('keeps the dialog when something could be lost or is unknown', () => {
     expect(canDeleteWorktreeWithoutConfirm({ isDirty: true, ahead: 0, upstream: 'origin/feature' })).toBe(false);
     expect(canDeleteWorktreeWithoutConfirm({ isDirty: false, ahead: 2, upstream: 'origin/feature' })).toBe(false);

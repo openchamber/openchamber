@@ -210,6 +210,12 @@ export interface GitStatus {
   tracking: string | null;
   ahead: number;
   behind: number;
+  /**
+   * Set only when the branch has no upstream and `ahead` counts its commits
+   * missing from this base ref (e.g. `origin/main`). Absent or null means no
+   * such count was made, so `ahead: 0` alone does not prove nothing is lost.
+   */
+  aheadBase?: string | null;
   upstreamComparison?: GitRemoteComparison | null;
   files: GitStatusFile[];
   isClean: boolean;

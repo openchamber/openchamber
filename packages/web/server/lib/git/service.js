@@ -3030,6 +3030,9 @@ async function readStatus(normalizedDirectory, lightMode) {
       candidates.push('origin/main', 'origin/master', 'main', 'master');
 
       for (const ref of candidates) {
+        // A branch compared with itself always reads 0 commits ahead, which
+        // would let a never-pushed `main` pass as having nothing unpublished.
+        if (ref === status.current) continue;
         const exists = await git
           .raw(['rev-parse', '--verify', ref])
           .then((value) => String(value || '').trim())
@@ -3043,6 +3046,9 @@ async function readStatus(normalizedDirectory, lightMode) {
     let tracking = status.tracking || null;
     let ahead = status.ahead;
     let behind = status.behind;
+    // The ref `ahead` was counted against when there is no upstream; null when
+    // that count was not made, so a bare 0 never reads as "nothing unpublished".
+    let aheadBase = null;
     let upstreamComparison;
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
@@ -3059,6 +3065,7 @@ async function readStatus(normalizedDirectory, lightMode) {
         if (Number.isFinite(count)) {
           ahead = count;
           behind = 0;
+          aheadBase = baseRef;
         }
       }
     }
@@ -3132,6 +3139,7 @@ async function readStatus(normalizedDirectory, lightMode) {
       tracking,
       ahead,
       behind,
+      aheadBase,
       upstreamComparison,
       files: status.files.map((f) => ({
         path: f.path,

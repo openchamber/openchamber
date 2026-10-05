@@ -12,15 +12,17 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeM
     ahead: status.ahead,
     behind: status.behind,
     upstream: status.tracking,
+    aheadBase: status.aheadBase ?? null,
   };
 }
 
 // Deleting a worktree force-removes its files and force-deletes its branch, so
 // skipping the confirmation is allowed only when nothing would be lost: no
-// uncommitted changes and a branch with an upstream that has every commit.
-// A branch never pushed has no upstream and always goes through the dialog.
+// uncommitted changes, and every commit already on the branch's upstream or,
+// for a branch never pushed, on the base branch (`aheadBase`, e.g. origin/main).
+// A never-pushed branch whose base could not be compared opens the dialog.
 export function canDeleteWorktreeWithoutConfirm(status: WorktreeMetadata['status']): boolean {
-  return Boolean(status && !status.isDirty && status.upstream && status.ahead === 0);
+  return Boolean(status && !status.isDirty && (status.upstream || status.aheadBase) && status.ahead === 0);
 }
 
 // Resolving a project's root (primary worktree) requires shelling out to
