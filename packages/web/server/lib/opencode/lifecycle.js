@@ -1,5 +1,6 @@
 import { readOpenCodeInfo, readExternalOpenCodeVersion, isSupportedOpenCodeVersion, requireOpenCodeV2, UnsupportedOpenCodeVersionError } from './compatibility.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
@@ -1048,7 +1049,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     while (Date.now() < deadline) {
       try {
         const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
-        if (defaultOpenCodeDirectory) headers['x-opencode-directory'] = encodeURIComponent(defaultOpenCodeDirectory);
+        const scopedDirectory = getValidatedDefaultDirectory();
+        if (scopedDirectory) headers['x-opencode-directory'] = encodeURIComponent(scopedDirectory);
         const response = await fetch(buildOpenCodeUrl('/api/agent'), { method: 'GET', headers });
 
         if (response.ok) {
@@ -1219,7 +1221,95 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   // one warmed at startup, which OpenCode is running anyway. v2 answers a
   // location read without a directory for its own working directory (the
   // user's home for a managed OpenCode) and starts it, MCP servers included.
+  //
+  // It is a cache of the directory warmed at startup, but that directory can
+  // stop being usable while the server keeps running: the user deletes or
+  // moves the project, the path is replaced by a regular file, or its
+  // permissions change. Handing that stale path to OpenCode makes every
+  // directory-scoped read answer `500 FileSystem.realPath ... ENOENT`, which
+  // is an avoidable failure of reads that are not about the directory at all
+  // (the integration list behind quota credentials, the small model's model
+  // list). The getter therefore revalidates on each read and, when the cached
+  // path is no longer usable, advances to another directory the warm pass
+  // validated and re-reads the settings-backed warmup source so the
+  // currently-valid `lastDirectory` replaces the stale one. Only a usable
+  // directory is ever sent; a valid directory still scopes the read, which
+  // keeps OpenCode from booting its working directory + MCP fleet.
   let defaultOpenCodeDirectory = null;
+  // The directories the last warm pass (or a later refresh) found usable,
+  // kept so a stale default can fall back synchronously without another
+  // settings read.
+  let warmedOpenCodeDirectories = [];
+  let defaultDirectoryRefresh = null;
+  let defaultDirectoryRefreshAt = 0;
+  // A stale default is normal once and persistent when the user has no usable
+  // directory at all; the cooldown keeps that state from turning every read
+  // (small-model generations can be frequent) into a settings read.
+  const DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS = 5000;
+
+  const isUsableDirectory = (directory) => {
+    if (!directory) return false;
+    try {
+      // `stat`/`access` reject a non-path value on their own, so the caller
+      // only needs to rule out an empty hint; a throw lands in the catch.
+      if (!statSync(directory).isDirectory()) return false;
+      // A directory whose read/execute bit is gone is not a directory scoped
+      // reads can use; OpenCode answers `500 FileSystem.realPath` for it just
+      // like the missing-path case, so treat it the same.
+      accessSync(directory, fsConstants.R_OK | fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const usableDirectories = (directories) => (
+    Array.isArray(directories) ? directories.filter((directory) => isUsableDirectory(directory)) : []
+  );
+
+  // The first directory that is usable *right now*, revalidating each
+  // candidate because the warmed list was validated only at warm time.
+  const selectUsableDirectory = (directories) => usableDirectories(directories)[0] || null;
+
+  // Re-reads the settings-backed warmup source when the cached default is no
+  // longer usable, so a directory valid now (`lastDirectory` after a move, a
+  // surviving project) replaces the stale one. Coalesced: concurrent reads
+  // trigger at most one refresh.
+  const refreshDefaultDirectories = () => {
+    if (defaultDirectoryRefresh) return defaultDirectoryRefresh;
+    defaultDirectoryRefresh = (async () => {
+      try {
+        const directories = await getWarmupDirectories();
+        warmedOpenCodeDirectories = usableDirectories(directories);
+        const usable = selectUsableDirectory(warmedOpenCodeDirectories);
+        if (usable) defaultOpenCodeDirectory = usable;
+      } catch {
+        // Best-effort: the caller falls back to OpenCode's working directory
+        // for this read and the refresh can succeed next time.
+      } finally {
+        defaultDirectoryRefresh = null;
+      }
+    })();
+    return defaultDirectoryRefresh;
+  };
+
+  // The warmed directory only while it is still usable; otherwise another
+  // usable directory (from this or a refreshed pass), or null so the caller
+  // sends no directory and OpenCode uses its own working directory.
+  const getValidatedDefaultDirectory = () => {
+    if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
+    const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
+    if (alternate) {
+      defaultOpenCodeDirectory = alternate;
+      return alternate;
+    }
+    const checkedAt = now();
+    if (!defaultDirectoryRefresh && checkedAt - defaultDirectoryRefreshAt >= DEFAULT_DIRECTORY_REFRESH_COOLDOWN_MS) {
+      defaultDirectoryRefreshAt = checkedAt;
+      void refreshDefaultDirectories();
+    }
+    return null;
+  };
 
   // OpenCode initializes each project directory lazily on its first
   // directory-scoped request, and that initialization takes seconds on large
@@ -1237,7 +1327,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
     if (!Array.isArray(directories) || directories.length === 0) return;
-    defaultOpenCodeDirectory = directories[0] || null;
+    warmedOpenCodeDirectories = usableDirectories(directories);
+    defaultOpenCodeDirectory = warmedOpenCodeDirectories[0] || null;
 
     const warmedPort = state.openCodePort;
     for (const directory of directories.slice(0, WARMUP_DIRECTORY_LIMIT)) {
@@ -1424,8 +1515,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   return {
     /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
     getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
-    /** The directory to scope a server-side OpenCode read that has none, or null before startup picked one. */
-    getDefaultOpenCodeDirectory: () => defaultOpenCodeDirectory,
+    /** The directory to scope a server-side OpenCode read that has none, or null once none is usable. */
+    getDefaultOpenCodeDirectory: () => getValidatedDefaultDirectory(),
     getManagedOpenCodePreflight: async () => {
       const preflight = managedPreflight;
       if (!preflight || state.isExternalOpenCode || state.isShuttingDown) return false;
