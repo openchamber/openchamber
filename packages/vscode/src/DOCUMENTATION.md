@@ -375,4 +375,8 @@ bundle loads. It picks them from OpenChamber's own saved locale
 chosen one, from VS Code's display language, which the HTML exposes as
 `window.__OPENCHAMBER_HOST_LANGUAGE__`. The UI bundle reads the same value as
 its default locale (`detectInitialLocale`), so a fresh install in a supported
-language starts in that language on both the splash and the app.
+language starts in that language on both the splash and the app. Both are only
+the first paint: the interface language is a `profile` setting (`locale`), so
+once the settings load, a language the person picked in any OpenChamber client
+replaces it. VS Code's display language stays in effect only while no client
+has saved one.

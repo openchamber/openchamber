@@ -48,6 +48,11 @@ describe('settings registry', () => {
       useUIStore.setState(original, true);
     }
   });
+  test('accepts only interface languages the UI ships', () => {
+    expect(parseSettingsDocument({ locale: 'zh-CN' })).toEqual({ locale: 'zh-CN' });
+    expect(parseSettingsDocument({ locale: 'xx' })).toEqual({});
+    expect(parseSettingsDocument({ locale: 3 })).toEqual({});
+  });
   test('project paths retain absolute Windows roots across parsing and serialization', () => {
     const parsed = parseSettingsDocument({ projects: [
       { path: 'c:\\', label: 'Drive' },

@@ -208,6 +208,25 @@ describe('settings helpers', () => {
     })).toEqual({});
   });
 
+  it('keeps every interface language and nothing else', () => {
+    const helpers = createTestHelpers();
+    // The server cannot import `packages/ui`, so its list is compared with the
+    // interface's own here: a language added there and not on the server would
+    // never be saved, and would quietly reset again after a restart.
+    const source = readFileSync(fileURLToPath(new URL('../../../../ui/src/lib/i18n/runtime.ts', import.meta.url)), 'utf8');
+    const match = source.match(/export const LOCALES = \[([^\]]*)\]/);
+    if (!match) throw new Error('Could not find LOCALES in the UI i18n runtime');
+    const interfaceLocales = match[1].split(',').map((entry) => entry.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+
+    expect(interfaceLocales.length).toBeGreaterThan(1);
+    for (const locale of interfaceLocales) {
+      expect(helpers.sanitizeSettingsUpdate({ locale })).toEqual({ locale });
+    }
+    expect(helpers.sanitizeSettingsUpdate({ locale: 'xx' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ locale: ['uk'] })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ locale: 1 })).toEqual({});
+  });
+
   it('persists valid tool JSON view modes', () => {
     const helpers = createTestHelpers();
 
@@ -786,7 +805,7 @@ describe('settings registry gate', () => {
   // stops accepting a key the registry still lists — that is the drift the
   // registry exists to end.
   const validValues = {
-    themeId: 'openchamber-dark', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
+    themeId: 'openchamber-dark', locale: 'zh-CN', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
     splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',

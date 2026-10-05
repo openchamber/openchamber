@@ -32,7 +32,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { CODE_FONT_OPTIONS, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTIONS, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
-import { useI18n, type Locale } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
@@ -492,6 +492,15 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setReportUsage(enabled);
         void updateDesktopSettings({ reportUsage: enabled });
     }, [setReportUsage]);
+
+    // The server copy lets the language survive lost browser storage and reach
+    // the other clients of this instance.
+    const handleLocaleChange = React.useCallback((value: string) => {
+        const next = locales.find((candidate) => candidate === value);
+        if (!next) return;
+        setLocale(next);
+        void updateDesktopSettings({ locale: next });
+    }, [locales, setLocale]);
 
     const handleWindowControlsPositionChange = React.useCallback((value: DesktopWindowControlsPosition) => {
         setDesktopWindowControlsPosition(value);
@@ -1088,7 +1097,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         info={t('settings.appearance.language.description')}
                                         settingsItem="appearance.language"
                                     >
-                                        <Select value={locale} onValueChange={(value) => setLocale(value as Locale)}>
+                                        <Select value={locale} onValueChange={handleLocaleChange}>
                                             <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>

@@ -21,6 +21,9 @@
       "scope": "profile",
       "perSurface": true
     },
+    "locale": {
+      "scope": "profile"
+    },
     "lastDirectory": {
       "scope": "instance",
       "adopt": "bootstrap-only"

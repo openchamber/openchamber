@@ -8,6 +8,8 @@ import {
   DEFAULT_INPUT_HISTORY_LIMIT,
   DEFAULT_INPUT_HISTORY_SCOPE,
 } from '@/lib/inputHistoryScope';
+import { LOCALE_STORAGE_KEY } from '@/lib/i18n/runtime';
+import { useI18nStore } from '@/lib/i18n/store';
 import { useInputHistoryStore } from '@/stores/useInputHistoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -27,6 +29,7 @@ import { switchRuntimeEndpoint } from './runtime-switch';
 
 type TestWindow = {
   __OPENCHAMBER_HOME__?: string;
+  localStorage?: Storage;
   addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
   removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
   dispatchEvent: (event: Event) => boolean;
@@ -410,6 +413,36 @@ describe('updateDesktopSettings', () => {
     });
     await firstSync;
     expect(useUIStore.getState().terminalShell).toBe('bash');
+  });
+
+  test('restores the interface language from the server after browser storage lost it (#2745)', async () => {
+    // The i18n runtime reads storage through `window`, as it does in a browser.
+    const testWindow = getWindow();
+    const hadWindowStorage = testWindow.localStorage !== undefined;
+    testWindow.localStorage ??= localStorage;
+    useI18nStore.getState().setLocale('en');
+    localStorage.clear();
+    const saves: Partial<SettingsPayload>[] = [];
+    registerSettingsApi(async (changes) => {
+      saves.push(changes);
+      return {};
+    }, async () => ({
+      settings: { locale: 'uk', draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true },
+      source: 'web',
+    }));
+
+    try {
+      await syncDesktopSettings();
+
+      expect(useI18nStore.getState().locale).toBe('uk');
+      // The next launch paints in the restored language before the server answers.
+      expect(JSON.parse(localStorage.getItem(LOCALE_STORAGE_KEY) ?? '{}')).toEqual({ locale: 'uk' });
+      await delay(400);
+      expect(saves).toEqual([]);
+    } finally {
+      useI18nStore.getState().setLocale('en');
+      if (!hadWindowStorage) delete testWindow.localStorage;
+    }
   });
 
   test('isolates local settings mirrors and removes values omitted by the next runtime', async () => {
