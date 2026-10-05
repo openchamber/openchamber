@@ -303,6 +303,45 @@ describe("SessionMessageLoader", () => {
     childStores.disposeAll()
   })
 
+  test("a tail refresh replaces the optimistic prompt's client clock with the server's", async () => {
+    // The browser's clock runs ahead of the server's: the prompt was stamped
+    // 10s, the server recorded it at 1s and its reply at 1.5s.
+    const prompt = createRecord("session-skew", "msg_prompt", 10_000)
+    const serverPrompt = createRecord("session-skew", "msg_prompt", 1_000)
+    const reply = {
+      info: { id: "msg_reply", sessionID: "session-skew", role: "assistant", time: { created: 1_500, completed: 2_000 } } as Message,
+      parts: [{ id: "part_reply", messageID: "msg_reply", sessionID: "session-skew", type: "text", text: "answer" }] as Part[],
+    }
+    const { childStores, loader } = createLoader(async () => response([serverPrompt, reply]))
+    const target = { directory: "/remote", sessionID: "session-skew" }
+    loader.initializeCreatedSession(target)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+
+    await loader.refreshTail(target, 30)
+
+    const messages = childStores.getChild(target.directory)?.getState().message[target.sessionID]
+    expect(messages?.map((message) => [message.id, message.time.created])).toEqual([["msg_prompt", 1_000], ["msg_reply", 1_500]])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("a tail refresh keeps a prompt a live event already replaced", async () => {
+    const prompt = createRecord("session-live", "msg_prompt", 10_000)
+    const { childStores, loader } = createLoader(async () => response([createRecord("session-live", "msg_prompt", 1_000)]))
+    const target = { directory: "/remote", sessionID: "session-live" }
+    loader.initializeCreatedSession(target)
+    loader.optimisticAdd({ ...target, message: prompt.info, parts: prompt.parts })
+    const store = childStores.getChild(target.directory)!
+    const live = { ...prompt.info, time: { created: 1_200 } }
+    store.setState({ message: { ...store.getState().message, [target.sessionID]: [live] } })
+
+    await loader.refreshTail(target, 30)
+
+    expect(store.getState().message[target.sessionID]).toEqual([live])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("preserves complete history coverage across a tail refresh", async () => {
     let calls = 0
     const { childStores, loader } = createLoader(async ({ sessionID }) => {

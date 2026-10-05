@@ -78,7 +78,7 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
-    expect(response.headers.get('cache-control')).toBe('no-cache');
+    expect(response.headers.get('cache-control')).toBe('no-cache, no-transform');
     expect(response.headers.get('x-accel-buffering')).toBe('no');
     expect(response.headers.get('x-upstream-test')).toBe('ok');
     expect(await response.text()).toBe('data: {"ok":true}\n\n');

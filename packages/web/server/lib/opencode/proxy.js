@@ -599,7 +599,9 @@ export const registerOpenCodeProxy = (app, deps) => {
       }
 
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Cache-Control', 'no-cache');
+      // `no-transform` keeps proxies and tunnels (Cloudflare among them) from
+      // compressing or buffering the stream, as the other SSE routes do.
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       if (typeof res.flushHeaders === 'function') {

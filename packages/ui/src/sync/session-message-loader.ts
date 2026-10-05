@@ -117,6 +117,29 @@ const hasInitialTurns = (messages: Message[]): boolean => {
   return false
 }
 
+/**
+ * Drops the client's own copies of records the page now carries, so the
+ * server's version replaces them instead of losing to them as an existing
+ * record. An optimistic prompt is stamped with the browser's clock, the reply
+ * with the server's; a remote client whose clock runs ahead would otherwise
+ * keep its prompt sorted after the reply until a reload. A copy a live event
+ * already replaced is no longer the optimistic object and is left alone.
+ */
+const withoutEchoedOptimisticRecords = (
+  state: DirectoryStore,
+  sessionID: string,
+  page: FetchedPage,
+  optimistic: ReadonlyMap<string, OptimisticItem>,
+): DirectoryStore => {
+  const messages = state.message[sessionID]
+  if (!messages || optimistic.size === 0) return state
+  const pageIDs = new Set(page.session.map((message) => message.id))
+  const kept = messages.filter((message) => (
+    !pageIDs.has(message.id) || optimistic.get(message.id)?.message !== message
+  ))
+  return kept.length === messages.length ? state : { ...state, message: { ...state.message, [sessionID]: kept } }
+}
+
 const toLoadError = (error: unknown): Error =>
   error instanceof Error ? error : new Error("Session messages could not be loaded")
 
@@ -783,6 +806,7 @@ export class SessionMessageLoader {
     isCurrent: () => boolean,
   ): { messages: Message[] } | null {
     if (!isCurrent()) return null
+    const state = withoutEchoedOptimisticRecords(store.getState(), target.sessionID, page, entry.optimistic)
     const merged = mergeOptimisticPage({
       session: page.session,
       part: [...page.partsByMessageID].map(([id, part]) => ({ id, part })),
@@ -792,7 +816,7 @@ export class SessionMessageLoader {
     for (const messageID of merged.confirmed) entry.optimistic.delete(messageID)
     const mergedPartsByMessageID = new Map(merged.part.map((candidate) => [candidate.id, candidate.part] as const))
     const materialized = materializeSessionSnapshots(
-      store.getState(),
+      state,
       target.sessionID,
       merged.session.map((info) => ({
         info,
