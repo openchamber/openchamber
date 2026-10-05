@@ -166,6 +166,18 @@ Snapshots have `state: "loading" | "ready" | "error"`. Loading/error may retain 
 
 Session `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question`. `outcome` is an observed `completed`/`failed` turn or `null`. It is not reconstructed from history and is retained in memory for at most 2,000 observed sessions. Idle after an error keeps the failed outcome until another run starts. Neither idle nor completed marks your task Done. Use `host.openSession(sessionId)` for an explicit transition from a card to its chat.
 
+## Background shells
+
+With the `shells` capability, watch the shell commands running in the background, scoped to a session and its subagents, a registered project, or every session. OpenChamber answers from its local store; no network read happens.
+
+| Call | What it does |
+| --- | --- |
+| `onRunningShells(scope, listener)` | subscribe to the running shell commands in scope: `{ kind: 'session', sessionId }` covers the session and its subagents, `{ kind: 'project', projectId }` covers a registered project, and `{ kind: 'global' }` covers every session. Oldest first, with each command's `background` flag. Returns an unsubscribe function. |
+| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a command's output. Without `cursor` it starts `tailBytes` (up to 65536) before the end. Returns `{ output, cursor, skipped }`. |
+| `stopShell(shellId)` | send the agent the stop note first, then remove the command. |
+
+The snapshot is `{ kind: "shells", scope, shells }`, with `scope` echoing the subscription's scope; each shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for. A shell that is not running is `NOT_FOUND`; an unapproved `shells` capability is `NOT_GRANTED`.
+
 ## Persistent extension data
 
 ```ts

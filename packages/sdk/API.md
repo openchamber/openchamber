@@ -218,6 +218,18 @@ Projects contain `id`, `name`, `directory`. Worktrees contain `directory`, `name
 
 `activity` is `unknown`, `idle`, `running`, `retrying`, `waiting-permission`, or `waiting-question` (the agent put a form to the user and is waiting on the answer). `outcome` is the last observed `completed` or `failed` turn, or `null` when unknown or working. Outcomes are in memory for the latest 2,000 observed sessions, reset on runtime switch, and are not reconstructed from persisted history. A later idle event preserves an observed failure until another run starts. `completed` never means the extension's task is Done. Blocking-request contents and approve/reply actions are not exposed.
 
+### Running shells
+
+These methods need the `shells` capability. They expose the running shell commands in a scope — one session and its subagents, a registered project, or every session — and let the extension read their output and stop them. OpenChamber answers from its local store; no network read happens per request.
+
+| Method | Result |
+| --- | --- |
+| `onRunningShells(scope, listener)` | subscription: the running shell commands in scope — one session and its subagents (`{ kind: 'session', sessionId }`), a registered project (`{ kind: 'project', projectId }`), or every session (`{ kind: 'global' }`) — oldest first, with each command's `background` flag |
+| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a command's output; `tailBytes` is capped at 65536 |
+| `stopShell(shellId)` | sends the agent the stop note first, then removes the command |
+
+Await subscription registration to handle refusal, then retain its returned unsubscribe function. Each subscription sends an initial snapshot, then changes, and counts against the same 32-subscription limit as the workspace subscriptions. The snapshot is `{ kind: 'shells', scope, shells }`, where `scope` echoes the subscription's scope; each shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for, and `false` while the turn that ran it is blocked on it. `readShellOutput` returns `{ output, cursor, skipped }`; omit `cursor` to start `tailBytes` before the end, and `skipped` says earlier output was dropped. A shell that is not running is `NOT_FOUND`. An unapproved `shells` capability is `NOT_GRANTED`.
+
 ### Extension storage
 
 `host.storage.get(key, options?)` returns JSON or `undefined` for a missing key. JSON `null` is a stored value. `set(key, value, options?)` and `delete(key, options?)` return `Promise<void>`; `keys(options?)` returns `Promise<string[]>` in sorted order.
@@ -449,7 +461,7 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
         "entry": "panel/index.html"
       },
       "attach": "dialog",
-      "capabilities": ["prompt", "sessions", "files"],
+      "capabilities": ["prompt", "sessions", "files", "shells"],
       "filesystem": ["~/.config/opencode/opencode.json", "/tmp/acme/**"],
       "actions": [
         { "id": "create-task", "label": "Create task from message", "icon": "add-circle", "where": "message", "roles": ["assistant"] },
@@ -475,7 +487,7 @@ Used by the OpenChamber host and by tools that validate packages. Guests rarely 
 | `panel.entry` | Optional visible-panel HTML path inside the package. No `..`, absolute path, or URL. Its scripts must be built. Omitting it removes the rail icon and visible views; `background.entry` can still run code. With neither entry, only `tools` plus package identity/version/engines are allowed. `hasGuestPage` means a visible panel, not background execution |
 | `background.entry` | Optional package-local `.html` path. Loaded on demand for background actions and slash commands, preferred over `panel.entry` for these calls. Adds no rail icon. The file and its built scripts must exist. Malformed declarations are `invalid-background` |
 | `attach`              | `true` / `"panel"` → + menu opens rail; `"dialog"` → host window; omit/`false` → off menus. Object form `{ "mode": "panel" \| "dialog", "entry"?: "panel/attach.html" }`: `entry` (dialog only, same path rules as `panel.entry`, must exist with built scripts) is the page the dialog loads instead of `panel.entry` |
-| `capabilities`        | Optional list of `prompt`, `sessions`, `files`, `model`. `files` is read **and** write inside the open project; `model` is `generate`. Approved once at install                     |
+| `capabilities`        | Optional list of `prompt`, `sessions`, `files`, `model`, `shells`. `files` is read **and** write inside the open project; `model` is `generate`; `shells` is the running-shell methods. Approved once at install                     |
 | `actions` | Optional, 1–8 entries, unique kebab-case `id`, `label` 1–40 chars, optional `icon` with the `panel.icon` rules, `where: "message" \| "session"`, optional `mode: "open" \| "background"`. Message actions may narrow `roles` to `["user"]` / `["assistant"]`, default both. Session actions may request `payload: ["messages"]`, adding the `conversation` capability. Invalid shape is `invalid-actions`. Default `open` mode opens the guest with `ready.item`, using the attach dialog for `attach: "dialog"` and the rail otherwise. `background` calls `onAction` in a temporary hidden frame; see Background actions above |
 | `commands`            | Optional, 1–8 entries, unique `name` matching `/^[a-z][a-z0-9-]{0,23}$/`, optional `description` 1–80 chars (`invalid-commands`). `/name args` in the chat box calls `onResolve` instead of the model and attaches what it returns. A name the composer already has (built-in, OpenCode command, skill) is ignored with a console warning |
 | `tools`               | Optional, 1–16 entries that say how the extension's tool calls look in the chat. `match` is the full tool name OpenCode reports (`mcp.jira.search`, `jira_search`), 1–128 chars of `[A-Za-z0-9_.:-]`, with `*` allowed once at the end as a suffix wildcard (`mcp.jira.*`). Optional `name` (1–40, the header title when `title` is absent or renders empty), `icon` (Remixicon name or package `.svg` path, same rules as `panel.icon`; the SVG is drawn in the text colour at the glyph size), `title` / `subtitle` templates (1–200, `{input.path}` / `{output.path}` / `{metadata.path}` placeholders, a missing path renders empty, values are cut at 200), `output` `"auto"` (default) \| `"text"` \| `"json"` \| `"markdown"` \| `"code"` \| `"table"`, `language` (code only), `columns` (table only, 1–16 dotted paths; rows are the output array or `output.items`). Bad shape is `invalid-tools`. An exact `match` beats a wildcard from any extension; among equals the first extension wins. Only an enabled, fully approved extension's rules apply |

@@ -3,6 +3,20 @@ export { GUEST_SCROLLBAR_CSS, GUEST_SCROLLBAR_SCRIPT } from './scrollbar-style.t
 export { guestFramePolicy } from './frame-policy.ts';
 export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity, GuestSessionRecord, GuestDirectoryCoverage, GuestProjectsSnapshot, GuestWorktreesSnapshot, GuestSessionsSnapshot, GuestWorkspaceSnapshot, GuestWorkspaceQuery, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestStorageRequest, GuestStorageResult, GuestStorageOptions, GuestStorageScope, GuestSessionWorktree } from './workspace.ts';
 export { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_TOTAL_BYTES, GUEST_DEVICE_STORAGE_TOTAL_BYTES } from './workspace.ts';
+export type {
+  GuestRunningShell,
+  GuestRunningShellsSnapshot,
+  GuestShellsScope,
+  GuestShellsSubscription,
+  GuestShellOutputRequest,
+  GuestShellOutputResult,
+  GuestShellStopResult,
+} from './shells.ts';
+export {
+  GUEST_SHELL_ID_MAX,
+  GUEST_SHELLS_MAX,
+  GUEST_SHELL_OUTPUT_TAIL_MAX,
+} from './shells.ts';
 export { GUEST_STATUS_CONTROLS_MAX, GUEST_STATUS_CONTROL_ID, GUEST_STATUS_CONTROL_LABEL_MAX, GUEST_STATUS_CONTROL_OPTIONS_MAX, GUEST_STATUS_CONTROL_VALUE_MAX } from './status-controls.ts';
 export type { GuestStatusControl, GuestStatusControlEvent, GuestStatusControlOption } from './status-controls.ts';
 export type { OpenChamberManifestApiVersion } from './api-version.ts';
@@ -246,6 +260,10 @@ export type {
   ComposeRequest,
   GuestServiceRequestMessage,
   GuestServiceStatusMessage,
+  GuestShellOutputMessage,
+  GuestShellsSubscribeMessage,
+  GuestShellsUnsubscribeMessage,
+  GuestShellStopMessage,
   GuestAttachMessage,
   GuestClipboardWriteMessage,
   GuestCloseMessage,
@@ -279,6 +297,7 @@ export type {
   HostSessionLifecycleMessage,
   HostSessionMessage,
   HostSettingsMessage,
+  HostShellsMessage,
   HostTheme,
   HostThemeMode,
   HostThemeTokens,

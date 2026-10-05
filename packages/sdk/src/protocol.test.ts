@@ -910,4 +910,26 @@ describe('actions, commands, and badge wire shapes', () => {
     expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: -1 } })).toBeNull();
     expect(parseGuestMessage({ ...envelope, type: 'badge', id: 'b-1', payload: { count: 1.5 } })).toBeNull();
   });
+
+  test('shells messages parse, including every scope, and refuse out-of-range bounds', () => {
+    const envelope = { channel: OPENCHAMBER_SDK_CHANNEL, v: OPENCHAMBER_SDK_API_VERSION };
+    expect(parseGuestMessage({ ...envelope, type: 'shells-subscribe', id: 'c1', payload: { subscriptionId: 's1', scope: { kind: 'session', sessionId: 'ses_1' } } })?.type).toBe('shells-subscribe');
+    expect(parseGuestMessage({ ...envelope, type: 'shells-subscribe', id: 'c1p', payload: { subscriptionId: 's1', scope: { kind: 'project', projectId: 'p1' } } })?.type).toBe('shells-subscribe');
+    expect(parseGuestMessage({ ...envelope, type: 'shells-subscribe', id: 'c1g', payload: { subscriptionId: 's1', scope: { kind: 'global' } } })?.type).toBe('shells-subscribe');
+    expect(parseGuestMessage({ ...envelope, type: 'shells-subscribe', id: 'c1x', payload: { subscriptionId: 's1', scope: { kind: 'nope' } } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'shells-unsubscribe', id: 'c2', payload: { subscriptionId: 's1' } })?.type).toBe('shells-unsubscribe');
+    expect(parseGuestMessage({ ...envelope, type: 'shell-output', id: 'c3', payload: { shellId: 'sh_1', cursor: 0, tailBytes: 65536 } })?.type).toBe('shell-output');
+    expect(parseGuestMessage({ ...envelope, type: 'shell-output', id: 'c4', payload: { shellId: 'sh_1', tailBytes: 65537 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'shell-output', id: 'c5', payload: { shellId: 'sh_1', cursor: -1 } })).toBeNull();
+    expect(parseGuestMessage({ ...envelope, type: 'shell-stop', id: 'c6', payload: { shellId: 'sh_1' } })?.type).toBe('shell-stop');
+    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'global' }, shells: [{ id: 'sh_1', sessionID: 'ses_1', command: 'sleep 1', startedAt: 1, background: true }] } } })?.type).toBe('shells');
+    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'session', sessionId: 'ses_1' }, shells: [] } } })?.type).toBe('shells');
+  });
+
+  test('accepts shell output and shell stop result payloads', () => {
+    expect(parseHostMessage({ ...envelope, type: 'result', id: 'c1', ok: true, payload: { output: 'tick', cursor: 14, skipped: false } }))
+      .toMatchObject({ type: 'result', ok: true, payload: { output: 'tick', cursor: 14, skipped: false } });
+    expect(parseHostMessage({ ...envelope, type: 'result', id: 'c2', ok: true, payload: { stopped: true } }))
+      .toMatchObject({ type: 'result', ok: true, payload: { stopped: true } });
+  });
 });

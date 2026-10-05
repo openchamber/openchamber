@@ -109,6 +109,7 @@ Drawing a panel and reading the current session need no permission. Anything tha
 | `sessions` | list projects, worktrees, and session states; create and open sessions across registered projects |
 | `files` | read and write files inside the open project (`readFile`, `writeFile`, `listDir`, `stat` with a relative path) |
 | `model` | one-off text generation with the user's Small Model (`generate`), outside any session |
+| `shells` | watch the shell commands your agents run in the background, read their output, and stop them (`onRunningShells`, `readShellOutput`, `stopShell`) |
 
 Five more are added for you: `network` when you declare an `integration`, `service` when you declare a `service`, `filesystem` when you declare `filesystem` patterns, `origins` when you declare `origins`, and `conversation` when a session action asks for the messages (see [Actions, commands, and the badge](#actions-commands-and-the-badge)).
 

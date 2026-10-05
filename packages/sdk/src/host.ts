@@ -75,6 +75,7 @@ import {
   isPromptResult,
   isStartSessionResult,
 } from './contract.ts';
+import { GUEST_SHELL_ID_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX, type GuestRunningShellsSnapshot, type GuestShellOutputResult, type GuestShellStopResult, type GuestShellsScope } from './shells.ts';
 
 export type HostFrame = {
   addEventListener: Window['addEventListener'];
@@ -100,6 +101,9 @@ export type HostClient = {
   onProjects: (listener: (snapshot: GuestProjectsSnapshot) => void) => Promise<() => void>;
   onWorktrees: (projectId: string, listener: (snapshot: GuestWorktreesSnapshot) => void) => Promise<() => void>;
   onSessions: (projectId: string, listener: (snapshot: GuestSessionsSnapshot) => void) => Promise<() => void>;
+  onRunningShells: (scope: GuestShellsScope, listener: (snapshot: GuestRunningShellsSnapshot) => void) => Promise<() => void>;
+  readShellOutput: (shellId: string, options?: { cursor?: number; tailBytes?: number }) => Promise<GuestShellOutputResult>;
+  stopShell: (shellId: string) => Promise<GuestShellStopResult>;
   openSession: (sessionId: string) => Promise<void>;
   storage: {
     get: (key: string, options?: GuestStorageOptions) => Promise<JsonValue | undefined>;
@@ -297,6 +301,7 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
   let saveShortcutInstalled = false;
   const pending = new Map<string, Pending>();
   const workspaceListeners = new Map<string, (snapshot: GuestWorkspaceSnapshot) => void>();
+  const shellsListeners = new Map<string, (snapshot: GuestRunningShellsSnapshot) => void>();
   let disposed = false;
   const ids = { value: 0 };
   let lastReady: HostReadyContext | null = null;
@@ -336,6 +341,12 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     if (!message) return;
     if (message.type === 'workspace') {
       const listener = workspaceListeners.get(message.payload.subscriptionId);
+      if (listener) emit([listener], message.payload.snapshot);
+      return;
+    }
+
+    if (message.type === 'shells') {
+      const listener = shellsListeners.get(message.payload.subscriptionId);
       if (listener) emit([listener], message.payload.snapshot);
       return;
     }
@@ -623,6 +634,23 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
       post({ ...envelope, type: 'workspace-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
     };
   };
+  const subscribeShells = async (scope: GuestShellsScope, listener: (snapshot: GuestRunningShellsSnapshot) => void): Promise<() => void> => {
+    if (scope.kind === 'session') requireIdentity(scope.sessionId);
+    if (scope.kind === 'project') requireIdentity(scope.projectId);
+    const subscriptionId = nextId(ids);
+    shellsListeners.set(subscriptionId, listener);
+    try {
+      await request({ ...envelope, type: 'shells-subscribe', id: nextId(ids), payload: { subscriptionId, scope } });
+    } catch (error) {
+      shellsListeners.delete(subscriptionId);
+      if (!disposed) post({ ...envelope, type: 'shells-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
+      throw error;
+    }
+    return () => {
+      if (!shellsListeners.delete(subscriptionId) || disposed) return;
+      post({ ...envelope, type: 'shells-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
+    };
+  };
   const storage = async (payload: GuestStorageRequest): Promise<GuestStorageResult> => {
     if ('key' in payload && (payload.key.length === 0 || payload.key.length > GUEST_STORAGE_KEY_MAX)) {
       throw new HostRequestError('HOST_REJECTED', 'Storage key must contain 1 to 128 characters.');
@@ -680,6 +708,30 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
     onProjects: (listener) => subscribeWorkspace({ kind: 'projects' }, (snapshot) => { if (snapshot.kind === 'projects') listener(snapshot); }),
     onWorktrees: (projectId, listener) => subscribeWorkspace({ kind: 'worktrees', projectId }, (snapshot) => { if (snapshot.kind === 'worktrees') listener(snapshot); }),
     onSessions: (projectId, listener) => subscribeWorkspace({ kind: 'sessions', projectId }, (snapshot) => { if (snapshot.kind === 'sessions') listener(snapshot); }),
+    onRunningShells: (scope, listener) => subscribeShells(scope, listener),
+    readShellOutput: async (shellId, options) => {
+      requireIdentity(shellId, GUEST_SHELL_ID_MAX);
+      const cursor = options?.cursor;
+      if (cursor !== undefined && (!Number.isInteger(cursor) || cursor < 0)) {
+        throw new HostRequestError('HOST_REJECTED', 'Shell output cursor must be a non-negative integer.');
+      }
+      const tailBytes = options?.tailBytes;
+      if (tailBytes !== undefined && (!Number.isInteger(tailBytes) || tailBytes < 1 || tailBytes > GUEST_SHELL_OUTPUT_TAIL_MAX)) {
+        throw new HostRequestError('HOST_REJECTED', `Shell output tailBytes must be an integer between 1 and ${GUEST_SHELL_OUTPUT_TAIL_MAX}.`);
+      }
+      const result = await send({ ...envelope, type: 'shell-output', id: nextId(ids), payload: { shellId, cursor, tailBytes } });
+      const output = result as GuestShellOutputResult | undefined;
+      if (!output || typeof output.output !== 'string' || !Number.isFinite(output.cursor)) {
+        throw new HostRequestError('HOST_REJECTED', 'Host did not return shell output.');
+      }
+      return output;
+    },
+    stopShell: async (shellId) => {
+      requireIdentity(shellId, GUEST_SHELL_ID_MAX);
+      const result = (await send({ ...envelope, type: 'shell-stop', id: nextId(ids), payload: { shellId } })) as GuestShellStopResult | undefined;
+      if (result?.stopped !== true) throw new HostRequestError('HOST_REJECTED', 'Host did not stop the shell.');
+      return { stopped: true as const };
+    },
     openSession: async (sessionId) => {
       requireIdentity(sessionId);
       await request({ ...envelope, type: 'open-session', id: nextId(ids), payload: { sessionId } });
@@ -1083,6 +1135,10 @@ export const connectHost = (options: HostClientOptions = {}): HostClient => {
         post({ ...envelope, type: 'workspace-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
       }
       workspaceListeners.clear();
+      for (const subscriptionId of shellsListeners.keys()) {
+        post({ ...envelope, type: 'shells-unsubscribe', id: nextId(ids), payload: { subscriptionId } });
+      }
+      shellsListeners.clear();
       disposed = true;
       resolveHandler = null;
       actionHandler = null;

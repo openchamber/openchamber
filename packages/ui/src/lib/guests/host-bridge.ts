@@ -6,6 +6,10 @@ import {
   type GuestWorkspaceQuery,
   type GuestWorkspaceSnapshot,
   type GuestWorkspaceSubscription,
+  type GuestShellsSubscription,
+  type GuestShellOutputRequest,
+  type GuestShellOutputResult,
+  type GuestShellStopResult,
   GUEST_SESSION_AGENT_MAX,
   GUEST_SESSION_MODEL_MAX,
   OPENCHAMBER_SDK_API_VERSION,
@@ -44,6 +48,10 @@ type HostBridgeEffects = {
   workspaceRead: (query: GuestWorkspaceQuery) => GuestWorkspaceSnapshot;
   workspaceSubscribe: (subscription: GuestWorkspaceSubscription) => void;
   workspaceUnsubscribe: (subscriptionId: string) => void;
+  shellsSubscribe: (subscription: GuestShellsSubscription) => void;
+  shellsUnsubscribe: (subscriptionId: string) => void;
+  shellOutput: (request: GuestShellOutputRequest) => Promise<GuestShellOutputResult>;
+  shellStop: (request: { shellId: string }) => Promise<GuestShellStopResult>;
   storage: (request: GuestStorageRequest) => Promise<GuestStorageResult>;
   setStatusControls: (controls: GuestStatusControl[]) => void;
   openSession: (sessionId: string) => void;
@@ -250,6 +258,10 @@ export const answerGuestMessage = async (
     case 'workspace-read': return okResult(message.id, effects.workspaceRead(message.payload));
     case 'workspace-subscribe': effects.workspaceSubscribe(message.payload); return okResult(message.id);
     case 'workspace-unsubscribe': effects.workspaceUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
+    case 'shells-subscribe': effects.shellsSubscribe(message.payload); return okResult(message.id);
+    case 'shells-unsubscribe': effects.shellsUnsubscribe(message.payload.subscriptionId); return okResult(message.id);
+    case 'shell-output': return okResult(message.id, await effects.shellOutput(message.payload));
+    case 'shell-stop': return okResult(message.id, await effects.shellStop(message.payload));
     case 'storage': return okResult(message.id, await effects.storage(message.payload));
     case 'status-controls': effects.setStatusControls(message.payload.controls); return okResult(message.id);
     case 'open-session': effects.openSession(message.payload.sessionId); return okResult(message.id);

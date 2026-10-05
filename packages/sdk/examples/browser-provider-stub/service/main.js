@@ -90,6 +90,7 @@ var serviceStatusSet = new Set(SERVICE_STATUS_VALUES);
 var fileStatKindSet = new Set(GUEST_FILE_STAT_KINDS);
 var HOST_PUSH_TYPES = new Set([
   "workspace",
+  "shells",
   "ready",
   "directory",
   "session",
