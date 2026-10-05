@@ -99,7 +99,10 @@ export const isLoopbackHttpUrl = (url: string): boolean => {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return false;
   }
-  return LOOPBACK_HOSTNAMES.has(parsed.hostname.toLowerCase());
+  // WHATWG URL keeps brackets on IPv6 hostnames (`[::1]`), but LOOPBACK_HOSTNAMES
+  // stores the bare form (`::1`). Strip brackets before the membership check.
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1');
+  return LOOPBACK_HOSTNAMES.has(hostname);
 };
 
 const LOOPBACK_URL_PATTERN

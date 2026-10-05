@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getUrlScheme, isAppLinkUrl } from '@/lib/url';
+import { getUrlScheme, isAppLinkUrl, isLoopbackHttpUrl, extractLoopbackUrls } from '@/lib/url';
 
 describe('getUrlScheme', () => {
   test('extracts the lowercased scheme', () => {
@@ -58,5 +58,30 @@ describe('isAppLinkUrl', () => {
   test('rejects malformed input', () => {
     expect(isAppLinkUrl('')).toBe(false);
     expect(isAppLinkUrl('random text')).toBe(false);
+  });
+});
+
+
+describe('isLoopbackHttpUrl', () => {
+  test('recognizes IPv4 and localhost loopback hosts', () => {
+    expect(isLoopbackHttpUrl('http://localhost:5173/')).toBe(true);
+    expect(isLoopbackHttpUrl('http://127.0.0.1:5173/')).toBe(true);
+    expect(isLoopbackHttpUrl('https://0.0.0.0:3000')).toBe(true);
+    expect(isLoopbackHttpUrl('https://example.test')).toBe(false);
+  });
+
+  test('recognizes bracketed IPv6 loopback from WHATWG URL.hostname', () => {
+    // new URL('http://[::1]:5173/').hostname === '[::1]'
+    expect(isLoopbackHttpUrl('http://[::1]:5173/')).toBe(true);
+    expect(isLoopbackHttpUrl('https://[::1]:4123/preview')).toBe(true);
+  });
+});
+
+describe('extractLoopbackUrls', () => {
+  test('keeps bracketed IPv6 loopback URLs after membership filtering', () => {
+    expect(extractLoopbackUrls('open http://[::1]:5173/ and http://localhost:5173/')).toEqual([
+      'http://[::1]:5173/',
+      'http://localhost:5173/',
+    ]);
   });
 });
