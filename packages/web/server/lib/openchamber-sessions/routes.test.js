@@ -549,6 +549,35 @@ describe('openchamber session routes', () => {
     expect(sessionSwitchAgentMock).toHaveBeenCalledWith({ sessionID: 'ses_123', agent: 'build' });
   });
 
+  it('skips a model hidden in the picker when nothing names a model (#1801)', async () => {
+    useCatalog({
+      models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
+    });
+    const hiddenModels = [{ providerID: 'opencode', modelID: 'big-pickle' }];
+    const { app } = createApp({
+      readSettingsFromDiskMigrated: async () => ({ hiddenModels, projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+    });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+    expect(response.body.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+
+    // A default the user chose stays, hidden or not.
+    const { app: configured } = createApp({
+      readSettingsFromDiskMigrated: async () => ({
+        defaultModel: 'opencode/big-pickle',
+        hiddenModels,
+        projects: [{ id: 'proj_1', path: '/repo/app' }],
+      }),
+    });
+    const configuredResponse = await request(configured)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', prompt: 'Run this' })
+      .expect(200);
+    expect(configuredResponse.body.model).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+  });
+
   it('resolves an Auto default through the routing hook before switching the session', async () => {
     useCatalog();
     const resolveAutoSelection = vi.fn(async () => ({

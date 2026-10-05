@@ -290,6 +290,7 @@ describe('useConfigStore provider persistence', () => {
       lastUsedProvider: null,
     });
     useSessionUIStore.setState({ currentSessionId: null, availableWorktreesByProject: new Map() });
+    useUIStore.setState({ hiddenModels: [] });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -1974,6 +1975,40 @@ describe('useConfigStore provider persistence', () => {
     liveAgents = [testAgent('build')];
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
     expect(useConfigStore.getState().currentModelId).toBe('chosen');
+  });
+
+  test('a new conversation skips a model hidden in the picker when nothing is configured (#1801)', async () => {
+    useUIStore.setState({ hiddenModels: [{ providerID: 'opencode', modelID: 'big-pickle' }] });
+    useConfigStore.setState({ providers: [provider('opencode', 'big-pickle'), provider('deepseek', 'v4-pro')], agents: [testAgent('build')] });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro' });
+
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerResponse('opencode', 'big-pickle').providers[0], providerResponse('deepseek', 'v4-pro').providers[0]],
+      models: [providerResponse('opencode', 'big-pickle').models[0], providerResponse('deepseek', 'v4-pro').models[0]],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+    useConfigStore.setState({ currentProviderId: '', currentModelId: '' });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro' });
+  });
+
+  test('a default model the user set stays selected even when hidden in the picker', () => {
+    useUIStore.setState({ hiddenModels: [{ providerID: 'opencode', modelID: 'big-pickle' }] });
+    useConfigStore.setState({
+      providers: [provider('opencode', 'big-pickle'), provider('deepseek', 'v4-pro')],
+      agents: [testAgent('build')],
+      settingsDefaultModel: 'opencode/big-pickle',
+    });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+  });
+
+  test('with every model hidden a new conversation still gets one', () => {
+    useUIStore.setState({ hiddenModels: [{ providerID: 'opencode', modelID: 'big-pickle' }, { providerID: 'deepseek', modelID: 'v4-pro' }] });
+    useConfigStore.setState({ providers: [provider('deepseek', 'v4-pro'), provider('opencode', 'big-pickle')], agents: [testAgent('build')] });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
   });
 
   test('a project default remains selected when only the global default is discoverable', () => {

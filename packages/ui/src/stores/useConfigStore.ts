@@ -23,6 +23,7 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier";
+import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
@@ -261,6 +262,7 @@ const resolveProviderModelSelection = ({
     settingsDefaultModel,
     settingsDefaultVariant,
     allowFallback,
+    hiddenModels,
 }: {
     providers: ProviderWithModelList[];
     currentProviderId?: string;
@@ -270,6 +272,7 @@ const resolveProviderModelSelection = ({
     settingsDefaultModel?: string;
     settingsDefaultVariant?: string;
     allowFallback: boolean;
+    hiddenModels: readonly ModelRef[];
 }): ProviderModelSelection => {
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
@@ -302,16 +305,40 @@ const resolveProviderModelSelection = ({
     }
 
     if (!allowFallback) return null;
-    if (hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
+    return resolveFallbackModel(providers, hiddenModels);
+};
+
+// The pick when nothing is configured: Big Pickle, else the first model. A model
+// the user hid in the picker is skipped; configured defaults never come through
+// here, so they stay honoured even when hidden. With every model hidden the
+// conversation still needs one to send with, so the unfiltered pick stands.
+const resolveFallbackModel = (
+    providers: ProviderWithModelList[],
+    hiddenModels: readonly ModelRef[],
+): { providerId: string; modelId: string } | null => {
+    const isVisible = (providerId: string, modelId: string) => !hiddenModels.some(
+        (hidden) => hidden.providerID === providerId && hidden.modelID === modelId,
+    );
+
+    const hasBigPickle = hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
+    if (hasBigPickle && isVisible(FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
         return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
     }
+    for (const provider of providers) {
+        const visibleModel = provider.models.find((model) => isVisible(provider.id, model.modelID));
+        if (visibleModel) {
+            return { providerId: provider.id, modelId: visibleModel.modelID };
+        }
+    }
 
+    if (hasBigPickle) {
+        return { providerId: FALLBACK_PROVIDER_ID, modelId: FALLBACK_MODEL_ID };
+    }
     const firstProvider = providers[0];
     const firstModel = firstProvider?.models[0];
     if (firstProvider && firstModel) {
         return { providerId: firstProvider.id, modelId: firstModel.modelID };
     }
-
     return null;
 };
 
@@ -327,7 +354,7 @@ type DefaultAgentModelSelection = {
 //
 //   Agent: project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
 //   Model: project.defaultModel → settings.defaultModel → resolved agent's pinned model+variant → opencode config.model
-//          → opencode/big-pickle → first
+//          → opencode/big-pickle → first (these two skip models hidden in the picker)
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
 // only when our own settings have no default. A configured identifier remains
@@ -348,6 +375,7 @@ const resolveDefaultAgentModelSelection = ({
     opencodeDefaultAgent,
     opencodeDefaultModel,
     allowFallback = true,
+    hiddenModels,
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
@@ -360,6 +388,7 @@ const resolveDefaultAgentModelSelection = ({
     opencodeDefaultAgent?: string;
     opencodeDefaultModel?: string;
     allowFallback?: boolean;
+    hiddenModels: readonly ModelRef[];
 }): DefaultAgentModelSelection => {
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
@@ -436,17 +465,9 @@ const resolveDefaultAgentModelSelection = ({
     }
 
     if (!providerId) {
-        if (hasProviderModel(providers, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
-            providerId = FALLBACK_PROVIDER_ID;
-            modelId = FALLBACK_MODEL_ID;
-        } else {
-            const firstProvider = providers[0];
-            const firstModel = firstProvider?.models[0];
-            if (firstProvider && firstModel) {
-                providerId = firstProvider.id;
-                modelId = firstModel.modelID;
-            }
-        }
+        const fallback = resolveFallbackModel(providers, hiddenModels);
+        providerId = fallback?.providerId;
+        modelId = fallback?.modelId;
     }
 
     return { agentName: resolvedAgent?.name, providerId, modelId, variant };
@@ -2078,6 +2099,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultModel: projectDefaults.projectDefaultModel || state.settingsDefaultModel,
                                     settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : state.settingsDefaultVariant,
                                     allowFallback: state.settingsDefaultsLoaded,
+                                    hiddenModels: useUIStore.getState().hiddenModels,
                                 });
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
@@ -2759,7 +2781,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                             // Resolve agent + model via the shared cascade:
                             //   project.defaultAgent → settings.defaultAgent → opencode default_agent → build → first primary → first
-                            //   project.defaultModel → settings.defaultModel → resolved agent's model+variant → opencode/big-pickle → first
+                            //   project.defaultModel → settings.defaultModel → resolved agent's model+variant → opencode/big-pickle → first (skipping hidden models)
                             const resolvedDefault = resolveDefaultAgentModelSelection({
                                 agents: safeAgents,
                                 providers,
@@ -2770,6 +2792,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 opencodeDefaultAgent,
                                 opencodeDefaultModel,
                                 allowFallback: get().settingsDefaultsLoaded,
+                                hiddenModels: useUIStore.getState().hiddenModels,
                             });
                             const resolvedAgentName = resolvedDefault.agentName ?? safeAgents[0].name;
                             const resolvedProviderId = resolvedDefault.providerId;
@@ -3216,7 +3239,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                 // Re-applies the same priority cascade used at app startup (see loadAgents):
                 //   agent: settings.defaultAgent → build → first primary → first agent
-                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first
+                //   model: project.defaultModel → settings.defaultModel → agent's preferred model → opencode/big-pickle → first (skipping hidden models)
                 // Used when entering a fresh draft session so model/agent reset to defaults
                 // instead of sticking to the previously open session's selection.
                 dropStaleAutoSelection: () => {
@@ -3228,6 +3251,7 @@ export const useConfigStore = create<ConfigStore>()(
                         settingsDefaultModel: projectDefaults.projectDefaultModel || current.settingsDefaultModel,
                         settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : current.settingsDefaultVariant,
                         allowFallback: true,
+                        hiddenModels: useUIStore.getState().hiddenModels,
                     });
                     if (!resolved) return;
                     set((state) => {
@@ -3297,6 +3321,7 @@ export const useConfigStore = create<ConfigStore>()(
                         opencodeDefaultAgent,
                         opencodeDefaultModel,
                         allowFallback: get().settingsDefaultsLoaded,
+                        hiddenModels: useUIStore.getState().hiddenModels,
                     });
 
                     set((state) => {
@@ -3410,6 +3435,7 @@ export const useConfigStore = create<ConfigStore>()(
                             opencodeDefaultAgent,
                             opencodeDefaultModel,
                             allowFallback: state.settingsDefaultsLoaded,
+                            hiddenModels: useUIStore.getState().hiddenModels,
                         });
 
                         if (!resolved.agentName) {

@@ -91,6 +91,25 @@ const resolveVariant = (models, providerID, modelID, variant) => {
   return asList(model.variants).some((entry) => entry?.id === normalized) ? normalized : undefined;
 };
 
+// The pick when nothing is configured: Big Pickle, else the first model. A model
+// the user hid in the picker is skipped; configured defaults never come through
+// here, so they stay honoured even when hidden. With every model hidden the
+// session still needs one, so the unfiltered pick stands.
+const resolveFallbackModel = (models, hiddenModels) => {
+  const isVisible = (providerID, modelID) => !hiddenModels.some(
+    (hidden) => hidden?.providerID === providerID && hidden?.modelID === modelID,
+  );
+  const candidates = models.filter(
+    (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.modelID),
+  );
+  const bigPickle = findCatalogModel(candidates, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID);
+  const pick = (bigPickle && isVisible(bigPickle.providerID, bigPickle.modelID) ? bigPickle : null)
+    || candidates.find((entry) => isVisible(entry.providerID, entry.modelID))
+    || bigPickle
+    || candidates[0];
+  return pick ? { providerID: pick.providerID, modelID: pick.modelID } : null;
+};
+
 const resolveProjectDefaults = (settings, directory, projectId) => {
   const projects = Array.isArray(settings?.projects) ? settings.projects : [];
   const matchedProject = projectId
@@ -193,16 +212,7 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
     variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
-  if (!model && hasCatalogModel(models, FALLBACK_PROVIDER_ID, FALLBACK_MODEL_ID)) {
-    model = { providerID: FALLBACK_PROVIDER_ID, modelID: FALLBACK_MODEL_ID };
-  }
-
-  if (!model) {
-    const first = models[0];
-    if (asNonEmptyString(first?.providerID) && asNonEmptyString(first?.modelID)) {
-      model = { providerID: first.providerID, modelID: first.modelID };
-    }
-  }
+  if (!model) model = resolveFallbackModel(models, asList(settings?.hiddenModels));
 
   return {
     agent: resolvedAgent?.id,
