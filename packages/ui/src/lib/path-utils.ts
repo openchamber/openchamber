@@ -12,8 +12,13 @@ export const normalizeFilePath = (value: string | null | undefined): string => {
   }
 
   const withSlashes = trimmed.replace(/\\/g, '/');
-  const hadUncPrefix = withSlashes.startsWith('//');
-  let normalized = withSlashes.replace(/\/+/g, '/');
+  // A markdown href can carry a bare Windows drive reference in RFC 8089
+  // E.2.1 form (`/C:/...`); Windows would read the leading slash as part of
+  // the path (`C:\C:\...`). Drop it the same way a `file:///C:/` URL is
+  // handled. UNC (`//server/share`) and `\\?\` device paths keep their prefix.
+  const withoutDriveSlash = /^\/[A-Za-z]:\//.test(withSlashes) ? withSlashes.slice(1) : withSlashes;
+  const hadUncPrefix = withoutDriveSlash.startsWith('//');
+  let normalized = withoutDriveSlash.replace(/\/+/g, '/');
 
   if (hadUncPrefix && !normalized.startsWith('//')) {
     normalized = `/${normalized}`;

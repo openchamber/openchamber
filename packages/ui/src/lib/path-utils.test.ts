@@ -23,6 +23,18 @@ describe('path-utils', () => {
     expect(isAbsoluteFilePath('src/file.ts')).toBe(false);
   });
 
+  test('strips the leading slash from a bare Windows drive reference', () => {
+    // RFC 8089 E.2.1 form: a markdown href like /C:/... reaches the resolver
+    // with a leading slash. Windows would read the unslashed path as C:\C:\...
+    expect(normalizeFilePath('/C:/Users/test/report.html')).toBe('C:/Users/test/report.html');
+    expect(normalizeFilePath('/c:/Users/test/report.html')).toBe('c:/Users/test/report.html');
+    expect(isAbsoluteFilePath('/C:/Users/file.ts')).toBe(true);
+  });
+
+  test('treats a slashed drive reference as inside its Windows directory', () => {
+    expect(isFilePathWithinDirectory('/C:/example/project/package.json', 'C:/example/project')).toBe(true);
+  });
+
   test('does not prefix Windows absolute targets with the workspace directory', () => {
     expect(toAbsoluteFilePath('C:/Users/Bohdan Triapitsyn/projects/openchamber', 'C:/Users/Bohdan Triapitsyn/projects/openchamber/packages/ui/Button.tsx')).toBe(
       'C:/Users/Bohdan Triapitsyn/projects/openchamber/packages/ui/Button.tsx',
