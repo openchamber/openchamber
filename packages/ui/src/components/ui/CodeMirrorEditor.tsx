@@ -8,6 +8,7 @@ import { forceParsing, indentUnit } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen, getSearchQuery } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
+import { searchPanelSpace } from '@/lib/codemirror/searchPanelSpace';
 import { createVimModeExtensions } from '@/lib/codemirror/vimModeExtension';
 import { cn } from '@/lib/utils';
 
@@ -401,7 +402,7 @@ export function CodeMirrorEditor({
         externalExtensionsCompartment.of(extensions ?? []),
         highlightLinesCompartment.of(createHighlightLinesExtension(highlightLines)),
         blockWidgetsCompartment.of(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
-        searchCompartment.of(enableSearch ? [search({ top: true }), keymap.of(toViewKeyBindings(searchKeymap))] : []),
+        searchCompartment.of(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []),
       ],
     });
 
@@ -443,7 +444,7 @@ export function CodeMirrorEditor({
         externalExtensionsCompartment.reconfigure(extensions ?? []),
         highlightLinesCompartment.reconfigure(createHighlightLinesExtension(highlightLines)),
         blockWidgetsCompartment.reconfigure(createBlockWidgetsExtension(blockWidgets, widgetContainersRef.current)),
-        searchCompartment.reconfigure(enableSearch ? [search({ top: true }), keymap.of(toViewKeyBindings(searchKeymap))] : []),
+        searchCompartment.reconfigure(enableSearch ? [search({ top: true }), searchPanelSpace(), keymap.of(toViewKeyBindings(searchKeymap))] : []),
       ],
     });
 
