@@ -1102,10 +1102,11 @@ const variantAfterResolve = (selection: CurrentVariantSelection | undefined, res
 );
 
 /**
- * Lift the active directory's cached provider/agent snapshot into the top-level
- * fields the pickers read (`providers`, `agents`, selections), so a cold start
- * paints instantly from persisted data. Falls back to whatever top-level data
- * was persisted; handles legacy persisted blobs that only stored directoryScoped.
+ * Lift the active directory's snapshot into the top-level fields the pickers
+ * read (`providers`, `agents`, selections). Persisted snapshots carry no
+ * catalogs, so this restores selections; a blob from before that change still
+ * has catalogs, and those paint instantly. Falls back to whatever top-level
+ * data was persisted; handles legacy blobs that only stored directoryScoped.
  */
 const hydrateActiveDirectorySnapshot = <T extends Partial<ConfigStore>>(merged: T): T => {
     const directoryScoped = merged.directoryScoped;
@@ -1139,6 +1140,39 @@ const hydrateActiveDirectorySnapshot = <T extends Partial<ConfigStore>>(merged: 
         next.agentSelectionSource = snapshot.agentSelectionSource;
     }
     return next as T;
+};
+
+/** A directory snapshot as persisted: its selections, without the catalogs. */
+const toPersistedDirectorySnapshot = (snapshot: DirectoryScopedConfig) => {
+    const { providers: _providers, agents: _agents, providersLoaded: _providersLoaded, agentsLoaded: _agentsLoaded, ...selection } = snapshot;
+    void _providers;
+    void _agents;
+    void _providersLoaded;
+    void _agentsLoaded;
+    return {
+        ...selection,
+        selectedProviderId: sanitizePersistedSelectedProviderId(snapshot.selectedProviderId),
+    };
+};
+
+const SELECTION_FIELDS = ["currentProviderId", "currentModelId", "currentAgentName", "selectionSource", "agentSelectionSource"] as const;
+type SelectionField = typeof SELECTION_FIELDS[number];
+
+/**
+ * Whether writing `next` would leave both the top-level selection and the
+ * active directory's snapshot as they are. The persist middleware writes the
+ * whole store after every `set()`, even one whose updater returns the same
+ * state, and VS Code delivers each `config-store` write to every OpenChamber
+ * webview in every window. So a setter makes this check before it calls
+ * `set()`. A missing snapshot is a change: the write would create it.
+ */
+const isUnchangedSelection = (
+    state: Pick<ConfigStore, "activeDirectoryKey" | "directoryScoped" | SelectionField>,
+    next: Partial<Pick<DirectoryScopedConfig, SelectionField>>,
+): boolean => {
+    const snapshot = state.directoryScoped[state.activeDirectoryKey];
+    if (!snapshot) return false;
+    return SELECTION_FIELDS.every((field) => !(field in next) || (next[field] === state[field] && next[field] === snapshot[field]));
 };
 
 const createEmptyDirectoryScopedConfig = (
@@ -2252,7 +2286,11 @@ export const useConfigStore = create<ConfigStore>()(
  
                     const firstModel = provider?.models[0];
                     const newModelId = isAuto ? AUTO_MODEL_ID : (firstModel?.modelID || "");
- 
+
+                    if (isUnchangedSelection(get(), { currentProviderId: providerId, currentModelId: newModelId, selectionSource: "manual" })) {
+                        return;
+                    }
+
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
                         const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
@@ -2287,6 +2325,10 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 setModel: (modelId: string) => {
+                    if (isUnchangedSelection(get(), { currentModelId: modelId, selectionSource: "manual" })) {
+                        return;
+                    }
+
                     set((state) => {
                         const directoryKey = state.activeDirectoryKey;
                         const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
@@ -2919,39 +2961,43 @@ export const useConfigStore = create<ConfigStore>()(
                         currentAgentName,
                     } = get();
                     const hadManualSelection = get().selectionSource === "manual";
+                    // The agent is a choice even when its model is inherited, so
+                    // it is recorded apart from `selectionSource`. Without it a
+                    // config reload resolves the default agent over this one.
+                    const agentSelectionSource = agentName ? "manual" as const : "auto" as const;
 
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
+                    // Only the write is skipped: the session memory and model
+                    // resolution below still run for an unchanged agent.
+                    if (!isUnchangedSelection(get(), { currentAgentName: agentName, agentSelectionSource })) {
+                        set((state) => {
+                            const directoryKey = state.activeDirectoryKey;
+                            const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
+                                providers: state.providers,
+                                agents: state.agents,
+                                currentProviderId: state.currentProviderId,
+                                currentModelId: state.currentModelId,
+                                currentAgentName: state.currentAgentName,
+                                selectedProviderId: state.selectedProviderId,
+                                agentModelSelections: state.agentModelSelections,
+                                defaultProviders: state.defaultProviders,
+                            };
 
-                        // The agent is a choice even when its model is inherited, so
-                        // it is recorded apart from `selectionSource`. Without it a
-                        // config reload resolves the default agent over this one.
-                        const agentSelectionSource = agentName ? "manual" as const : "auto" as const;
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            currentAgentName: agentName,
-                            agentSelectionSource,
-                        };
+                            const nextSnapshot: DirectoryScopedConfig = {
+                                ...baseSnapshot,
+                                currentAgentName: agentName,
+                                agentSelectionSource,
+                            };
 
-                        return {
-                            currentAgentName: agentName,
-                            agentSelectionSource,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-                    });
+                            return {
+                                currentAgentName: agentName,
+                                agentSelectionSource,
+                                directoryScoped: {
+                                    ...state.directoryScoped,
+                                    [directoryKey]: nextSnapshot,
+                                },
+                            };
+                        });
+                    }
 
                     if (agentName) {
                         const { currentSessionId } = useSessionUIStore.getState();
@@ -2981,19 +3027,22 @@ export const useConfigStore = create<ConfigStore>()(
                             variantSelection: CurrentVariantSelection,
                             source: "auto" | "manual" = "manual",
                         ) => {
-                            set((state) => {
-                                const variant = resolveVariantFromSelection(variantSelection);
-                                if (
-                                    state.currentProviderId === providerId
-                                    && state.currentModelId === modelId
-                                    && state.currentVariant === variant
-                                    && state.currentVariantSelection.override === variantSelection.override
-                                    && state.currentVariantSelection.inherited === variantSelection.inherited
-                                    && state.selectionSource === source
-                                ) {
-                                    return state;
-                                }
+                            const variant = resolveVariantFromSelection(variantSelection);
+                            // Checked before `set()`: persist writes after every
+                            // `set()`, even one that returns the same state.
+                            const current = get();
+                            if (
+                                current.currentProviderId === providerId
+                                && current.currentModelId === modelId
+                                && current.currentVariant === variant
+                                && current.currentVariantSelection.override === variantSelection.override
+                                && current.currentVariantSelection.inherited === variantSelection.inherited
+                                && current.selectionSource === source
+                            ) {
+                                return;
+                            }
 
+                            set((state) => {
                                 const directoryKey = state.activeDirectoryKey;
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers: state.providers,
@@ -3985,6 +4034,13 @@ export const useConfigStore = create<ConfigStore>()(
             {
                 name: "config-store",
                 storage: createDeferredSafeJSONStorage(),
+                // Version 1 is the slim format below. Builds without it read
+                // `snapshot.agents` unguarded; the version bump makes them skip
+                // this blob (they have no migrate) instead of crashing on it.
+                version: 1,
+                // SAFETY: a version-0 blob is the same shape plus catalogs, and
+                // merge() is the one place that validates any persisted state.
+                migrate: (persistedState) => persistedState as ConfigStore,
                 merge: (persistedState, currentState) => {
                     // SAFETY: Zustand's storage boundary supplies an unknown
                     // partial store. Only an explicitly matching runtime may hydrate it.
@@ -3998,40 +4054,43 @@ export const useConfigStore = create<ConfigStore>()(
                     for (const [directory, snapshot] of Object.entries(directoryScoped)) {
                         if (!isRecord(snapshot)) {
                             delete directoryScoped[directory];
+                        } else if (snapshot.providers === undefined) {
+                            // Version 1 persists selections without catalogs; give the
+                            // snapshot the empty lists the store expects. With no
+                            // `*Loaded` flag persisted, an empty list reads as not loaded.
+                            directoryScoped[directory] = { ...snapshot, providers: [], agents: snapshot.agents ?? [] };
                         } else if (!hasCompatibleCachedVariants(snapshot.providers)) {
                             directoryScoped[directory] = {
                                 ...snapshot, providers: [], providersLoaded: false, defaultProviders: {},
+                                agents: snapshot.agents ?? [],
                             };
                         }
                     }
 
                     const merged = { ...currentState, ...persisted, directoryScoped };
-                    if (!hasCompatibleCachedVariants(persisted.providers)) {
+                    if (persisted.providers !== undefined && !hasCompatibleCachedVariants(persisted.providers)) {
                         merged.providers = currentState.providers;
                         merged.providersLoaded = currentState.providersLoaded;
                         merged.defaultProviders = currentState.defaultProviders;
                     }
                     return hydrateActiveDirectorySnapshot(merged);
                 },
-                // Stale-while-revalidate: persist the last-known provider/agent
-                // snapshots so the model/agent pickers paint instantly on cold
-                // start. Freshness is guaranteed by the background refresh in
-                // initializeApp() / activateDirectory() (which overwrite these on
-                // success) and by the provider/agent config-change subscriptions.
+                // Selections only. The provider and agent catalogs are not
+                // persisted: VS Code gives every OpenChamber webview one origin,
+                // so each write reaches every webview in every window as a
+                // StorageEvent carrying the old and the new value, and with the
+                // catalogs a write was tens of megabytes. On a cold start the
+                // pickers wait for initializeApp() / activateDirectory() to load
+                // the catalogs. Older blobs that still carry them hydrate as before.
                 partialize: (state) => ({
                     configRuntimeKey: state.configRuntimeKey,
                     activeDirectoryKey: state.activeDirectoryKey,
                     directoryScoped: Object.fromEntries(
                         Object.entries(state.directoryScoped).map(([directoryKey, snapshot]) => [
                             directoryKey,
-                            {
-                                ...snapshot,
-                                selectedProviderId: sanitizePersistedSelectedProviderId(snapshot.selectedProviderId),
-                            },
+                            toPersistedDirectorySnapshot(snapshot),
                         ]),
                     ),
-                    providers: state.providers,
-                    agents: state.agents,
                     currentProviderId: state.currentProviderId,
                     currentModelId: state.currentModelId,
                     currentVariant: state.currentVariant,

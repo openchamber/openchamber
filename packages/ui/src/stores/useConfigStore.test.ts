@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { DesktopSettings } from '@/lib/desktop';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -548,7 +548,7 @@ describe('useConfigStore provider persistence', () => {
     expect(useConfigStore.getState().currentVariant).toBeUndefined();
   });
 
-  test('hydrates persisted provider snapshots for instant paint, then refreshes to live data', async () => {
+  test('hydrates a legacy blob with catalogs for instant paint, refreshes to live data, then writes it slim', async () => {
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
         configRuntimeKey: getRuntimeKey(),
@@ -585,8 +585,8 @@ describe('useConfigStore provider persistence', () => {
 
     await useConfigStore.persist.rehydrate();
 
-    // Stale-while-revalidate: the persisted snapshot is hydrated as-is so the
-    // pickers can paint instantly on cold start, instead of being stripped to empty.
+    // A blob from before the slim format still carries catalogs; they are
+    // hydrated as-is so the pickers paint instantly on that first cold start.
     const hydrated = useConfigStore.getState();
     expect(hydrated.providers.map((entry) => entry.id)).toEqual(['stale']);
     expect(hydrated.defaultProviders).toEqual({ default: 'stale' });
@@ -605,6 +605,13 @@ describe('useConfigStore provider persistence', () => {
     expect(reloaded.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['fresh']);
     expect(reloaded.currentProviderId).toBe('fresh');
     expect(reloaded.currentModelId).toBe('fresh-model');
+
+    const rewritten = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(rewritten.version).toBe(1);
+    expect(rewritten.state.providers).toBeUndefined();
+    expect(rewritten.state.directoryScoped[DIRECTORY].providers).toBeUndefined();
+    expect(rewritten.state.directoryScoped[OTHER_DIRECTORY].agents).toBeUndefined();
+    expect(rewritten.state.directoryScoped[DIRECTORY].currentModelId).toBe('fresh-model');
   });
 
   test('an upgraded cache with keyed variants cannot break model selection', async () => {
@@ -2707,6 +2714,280 @@ describe('useConfigStore provider persistence', () => {
     });
     useConfigStore.getState().applyDefaultModelAgentSelection();
     expect(useConfigStore.getState().currentAgentName).toBe('custom-agent');
+  });
+
+  // VS Code gives every OpenChamber webview one origin, so each config-store
+  // write reaches every webview in every window as a StorageEvent carrying the
+  // old and the new value. Persisting the catalogs made each write ~27 MB.
+  test('persisted config keeps selections but no provider or agent catalogs', () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('live')],
+      agents: [testAgent('build')],
+      providersLoaded: true,
+      agentsLoaded: true,
+      currentProviderId: 'live',
+      currentModelId: 'live-model',
+      currentAgentName: 'build',
+      directoryScoped: {
+        [DIRECTORY]: {
+          providersLoaded: true,
+          agentsLoaded: true,
+          providers: [provider('live')],
+          agents: [testAgent('build')],
+          currentProviderId: 'live',
+          currentModelId: 'live-model',
+          currentAgentName: 'build',
+          selectedProviderId: 'live',
+          agentModelSelections: { build: { providerId: 'live', modelId: 'live-model' } },
+          defaultProviders: { live: 'live-model' },
+        },
+        [OTHER_DIRECTORY]: {
+          providersLoaded: true,
+          agentsLoaded: true,
+          providers: [provider('other')],
+          agents: [testAgent('review')],
+          currentProviderId: 'other',
+          currentModelId: 'other-model',
+          currentAgentName: 'review',
+          selectedProviderId: 'other',
+          agentModelSelections: {},
+          defaultProviders: { other: 'other-model' },
+        },
+      },
+    });
+
+    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(persisted.state.providers).toBeUndefined();
+    expect(persisted.state.agents).toBeUndefined();
+    for (const directory of [DIRECTORY, OTHER_DIRECTORY]) {
+      const snapshot = persisted.state.directoryScoped[directory];
+      expect(snapshot.providers).toBeUndefined();
+      expect(snapshot.agents).toBeUndefined();
+      expect(snapshot.providersLoaded).toBeUndefined();
+      expect(snapshot.agentsLoaded).toBeUndefined();
+    }
+    expect(persisted.state.currentProviderId).toBe('live');
+    expect(persisted.state.directoryScoped[DIRECTORY].currentAgentName).toBe('build');
+    expect(persisted.state.directoryScoped[DIRECTORY].agentModelSelections).toEqual({ build: { providerId: 'live', modelId: 'live-model' } });
+    expect(persisted.state.directoryScoped[OTHER_DIRECTORY].currentModelId).toBe('other-model');
+    expect(persisted.state.directoryScoped[OTHER_DIRECTORY].defaultProviders).toEqual({ other: 'other-model' });
+  });
+
+  // Builds without the slim format read `snapshot.agents.find` straight away;
+  // a newer version makes them skip this blob (no migrate) instead of crashing.
+  test('persisted config is written as version 1', () => {
+    useConfigStore.setState({ activeDirectoryKey: DIRECTORY, currentModelId: 'live-model' });
+
+    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(persisted.version).toBe(1);
+  });
+
+  test('a persisted snapshot without catalogs hydrates its selections and empty catalogs', async () => {
+    storage.set(STORAGE_KEY, JSON.stringify({
+      state: {
+        configRuntimeKey: getRuntimeKey(),
+        activeDirectoryKey: DIRECTORY,
+        directoryScoped: {
+          [DIRECTORY]: {
+            currentProviderId: 'stale',
+            currentModelId: 'stale-model',
+            currentAgentName: 'build',
+            selectedProviderId: 'stale',
+            agentModelSelections: {},
+            defaultProviders: { stale: 'stale-model' },
+          },
+          [OTHER_DIRECTORY]: {
+            currentProviderId: 'other-stale',
+            currentModelId: 'other-stale-model',
+            currentAgentName: 'review',
+            selectedProviderId: 'other-stale',
+            agentModelSelections: {},
+            defaultProviders: {},
+          },
+        },
+        currentProviderId: 'stale',
+        currentModelId: 'stale-model',
+      },
+      version: 0,
+    }));
+
+    await useConfigStore.persist.rehydrate();
+
+    const hydrated = useConfigStore.getState();
+    expect(hydrated.directoryScoped[DIRECTORY]?.providers).toEqual([]);
+    expect(hydrated.directoryScoped[DIRECTORY]?.agents).toEqual([]);
+    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers).toEqual([]);
+    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.currentAgentName).toBe('review');
+    expect(hydrated.directoryScoped[DIRECTORY]?.currentModelId).toBe('stale-model');
+    // A snapshot without catalogs is not a legacy cache with incompatible
+    // variants, so its defaults survive.
+    expect(hydrated.directoryScoped[DIRECTORY]?.defaultProviders).toEqual({ stale: 'stale-model' });
+    expect(hydrated.defaultProviders).toEqual({ stale: 'stale-model' });
+    expect(selectCatalogLoadedForDirectory(hydrated, 'models', DIRECTORY)).toBe(false);
+
+    liveProviderId = 'fresh';
+    await hydrated.initializeApp();
+
+    const reloaded = useConfigStore.getState();
+    expect(reloaded.providers.map((entry) => entry.id)).toEqual(['fresh']);
+    expect(reloaded.directoryScoped[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['fresh']);
+  });
+
+  describe('setters write config-store only when the selection changes', () => {
+    afterEach(() => {
+      storage = new Map<string, string>();
+    });
+
+    class CountingMap extends Map<string, string> {
+      configWrites = 0;
+
+      override set(key: string, value: string) {
+        if (key === STORAGE_KEY) this.configWrites += 1;
+        return super.set(key, value);
+      }
+    }
+
+    const settledSelection = () => {
+      useConfigStore.setState({
+        activeDirectoryKey: DIRECTORY,
+        providers: [provider('live')],
+        agents: [testAgent('build')],
+        currentProviderId: 'live',
+        currentModelId: 'live-model',
+        currentAgentName: 'build',
+        agentSelectionSource: 'manual',
+        selectionSource: 'manual',
+        directoryScoped: {
+          [DIRECTORY]: {
+            providers: [provider('live')],
+            agents: [testAgent('build')],
+            currentProviderId: 'live',
+            currentModelId: 'live-model',
+            currentAgentName: 'build',
+            agentSelectionSource: 'manual',
+            selectionSource: 'manual',
+            selectedProviderId: 'live',
+            agentModelSelections: {},
+            defaultProviders: {},
+          },
+        },
+      });
+      const counting = new CountingMap(storage);
+      storage = counting;
+      return counting;
+    };
+
+    test('setModel with the current model', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setModel('live-model');
+      expect(counting.configWrites).toBe(0);
+    });
+
+    test('setProvider with the current provider and model', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setProvider('live');
+      expect(counting.configWrites).toBe(0);
+    });
+
+    test('setAgent with the current agent', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setAgent('build');
+      expect(counting.configWrites).toBe(0);
+      expect(useConfigStore.getState().currentModelId).toBe('live-model');
+    });
+
+    test('setAgent with the current agent pinned to the current model', () => {
+      const pinned = testAgent('build', { model: { providerID: 'live', modelID: 'live-model' } });
+      const counting = settledSelection();
+      useConfigStore.setState((state) => ({
+        agents: [pinned],
+        selectionSource: 'auto',
+        currentVariantSelection: { override: undefined, inherited: undefined },
+        directoryScoped: {
+          [DIRECTORY]: { ...state.directoryScoped[DIRECTORY], agents: [pinned], selectionSource: 'auto' },
+        },
+      }));
+      counting.configWrites = 0;
+      useConfigStore.getState().setAgent('build');
+      expect(counting.configWrites).toBe(0);
+      expect(useConfigStore.getState().currentModelId).toBe('live-model');
+      expect(useConfigStore.getState().selectionSource).toBe('auto');
+    });
+
+    test('setModel with another model writes it', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setModel('other-model');
+      expect(counting.configWrites).toBe(1);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentModelId).toBe('other-model');
+    });
+
+    test('setAgent with another agent writes it', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setAgent('review');
+      expect(counting.configWrites).toBeGreaterThan(0);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentAgentName).toBe('review');
+    });
+
+    test('a setter writes when the active directory has no snapshot yet, and creates it', () => {
+      const counting = settledSelection();
+      useConfigStore.setState({ directoryScoped: {} });
+      counting.configWrites = 0;
+      useConfigStore.getState().setModel('live-model');
+      expect(counting.configWrites).toBe(1);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentModelId).toBe('live-model');
+    });
+
+    test('a setter writes when the snapshot disagrees with the top-level selection', () => {
+      const counting = settledSelection();
+      useConfigStore.setState((state) => ({
+        directoryScoped: { [DIRECTORY]: { ...state.directoryScoped[DIRECTORY], currentModelId: 'old-model' } },
+      }));
+      counting.configWrites = 0;
+      useConfigStore.getState().setModel('live-model');
+      expect(counting.configWrites).toBe(1);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentModelId).toBe('live-model');
+    });
+
+    test('setAgent(undefined) writes once to clear an agent, then not again', () => {
+      const counting = settledSelection();
+      useConfigStore.getState().setAgent(undefined);
+      expect(counting.configWrites).toBe(1);
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.currentAgentName).toBeUndefined();
+      expect(useConfigStore.getState().directoryScoped[DIRECTORY]?.agentSelectionSource).toBe('auto');
+
+      counting.configWrites = 0;
+      useConfigStore.getState().setAgent(undefined);
+      expect(counting.configWrites).toBe(0);
+    });
+  });
+
+  test('selections round-trip through storage without catalogs, which read as not loaded', async () => {
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      providers: [provider('live')],
+      agents: [testAgent('build')],
+      directoryScoped: {
+        [DIRECTORY]: { providers: [provider('live')], agents: [testAgent('build')], currentProviderId: 'live', currentModelId: 'live-model', currentAgentName: undefined, selectedProviderId: 'live', agentModelSelections: {}, defaultProviders: {} },
+        [OTHER_DIRECTORY]: { providersLoaded: true, agentsLoaded: true, providers: [provider('other')], agents: [testAgent('review')], currentProviderId: 'other', currentModelId: 'other-model', currentAgentName: 'review', selectedProviderId: 'other', agentModelSelections: {}, defaultProviders: {} },
+      },
+    });
+    useConfigStore.getState().setModel('live-model');
+    useConfigStore.getState().setAgent('build');
+    const written = storage.get(STORAGE_KEY) ?? '';
+    // Clearing the store writes too, so the saved blob is put back before rehydrating.
+    useConfigStore.setState({ directoryScoped: {}, providers: [], agents: [], currentModelId: '', currentAgentName: undefined });
+    storage.set(STORAGE_KEY, written);
+
+    await useConfigStore.persist.rehydrate();
+
+    const hydrated = useConfigStore.getState();
+    expect(hydrated.directoryScoped[DIRECTORY]?.currentModelId).toBe('live-model');
+    expect(hydrated.directoryScoped[DIRECTORY]?.currentAgentName).toBe('build');
+    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.currentModelId).toBe('other-model');
+    expect(hydrated.directoryScoped[OTHER_DIRECTORY]?.providers).toEqual([]);
+    expect(selectCatalogLoadedForDirectory(hydrated, 'models', OTHER_DIRECTORY)).toBe(false);
+    expect(selectCatalogLoadedForDirectory(hydrated, 'agents', OTHER_DIRECTORY)).toBe(false);
   });
 });
 
