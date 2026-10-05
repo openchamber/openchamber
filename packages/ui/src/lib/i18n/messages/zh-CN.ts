@@ -3223,6 +3223,7 @@ export const dict: Record<I18nKey, string> = {
   'startup.initRecovery.lastError': '最近的错误',
   'startup.initRecovery.retry': '重试',
   'startup.initRecovery.retrying': '重试中…',
+  'startup.overlay.slow': '启动时间比预期更长…',
   'onboarding.desktopRecovery.placeholders.remoteServer': '远程服务器',
   'onboarding.desktopRecovery.placeholders.unknownServer': '未知服务器',
   'vscodeLayout.title.chat': '聊天',

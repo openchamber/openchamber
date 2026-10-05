@@ -3078,6 +3078,7 @@ export const dict = {
   'startup.initRecovery.lastError': 'Son hata',
   'startup.initRecovery.retry': 'Yeniden dene',
   'startup.initRecovery.retrying': 'Yeniden deneniyor…',
+  'startup.overlay.slow': 'Başlatma beklenenden uzun sürüyor…',
   'onboarding.desktopRecovery.placeholders.remoteServer': 'uzak sunucu',
   'onboarding.desktopRecovery.placeholders.unknownServer': 'bilinmeyen',
   'vscodeLayout.title.chat': 'Sohbet',

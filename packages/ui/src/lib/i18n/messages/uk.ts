@@ -3211,6 +3211,7 @@ export const dict: Record<I18nKey, string> = {
   "startup.initRecovery.lastError": "Остання помилка",
   "startup.initRecovery.retry": "Повторити спробу",
   "startup.initRecovery.retrying": "Повторна спроба…",
+  "startup.overlay.slow": "Запуск триває довше, ніж очікувалося…",
   "onboarding.desktopRecovery.placeholders.remoteServer": "віддалений сервер",
   "onboarding.desktopRecovery.placeholders.unknownServer": "невідомий",
   "vscodeLayout.title.chat": "Чат",

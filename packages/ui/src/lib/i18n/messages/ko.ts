@@ -3257,6 +3257,7 @@ export const dict: Record<I18nKey, string> = {
   'startup.initRecovery.lastError': '마지막 오류',
   'startup.initRecovery.retry': '다시 시도',
   'startup.initRecovery.retrying': '다시 시도 중…',
+  'startup.overlay.slow': '시작이 예상보다 오래 걸리고 있습니다…',
   'onboarding.desktopRecovery.placeholders.remoteServer': '원격 서버',
   'onboarding.desktopRecovery.placeholders.unknownServer': '알 수 없음',
   'vscodeLayout.title.chat': '채팅',

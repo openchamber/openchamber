@@ -2983,6 +2983,7 @@ export const dict = {
   'startup.initRecovery.lastError': 'Letzter Fehler',
   'startup.initRecovery.retry': 'Erneut versuchen',
   'startup.initRecovery.retrying': 'Erneuter Versuch…',
+  'startup.overlay.slow': 'Der Start dauert länger als erwartet…',
   'onboarding.desktopRecovery.placeholders.remoteServer': 'der Remote-Server',
   'onboarding.desktopRecovery.placeholders.unknownServer': 'unbekannt',
   'vscodeLayout.title.chat': 'Chat',

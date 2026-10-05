@@ -1273,6 +1273,7 @@ export const dict: Record<I18nKey, string> = {
   'startup.initRecovery.lastError': 'Ostatni błąd',
   'startup.initRecovery.retry': 'Ponów',
   'startup.initRecovery.retrying': 'Ponawianie...',
+  'startup.overlay.slow': 'Uruchamianie trwa dłużej, niż oczekiwano...',
   'onboarding.desktopRecovery.placeholders.remoteServer': 'serwer zdalny',
   'onboarding.desktopRecovery.placeholders.unknownServer': 'nieznany',
   'aboutDialog.actions.copyDiagnostics': 'Kopiuj diagnostykę',
