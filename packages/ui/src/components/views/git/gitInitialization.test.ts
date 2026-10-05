@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { canOfferGitInitialization } from './InitializeGitButton';
+import { canOfferGitInitialization } from './gitInitialization';
 
 describe('canOfferGitInitialization', () => {
   test('offers an ordinary project directory', () => {
