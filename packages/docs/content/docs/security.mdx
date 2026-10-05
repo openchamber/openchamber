@@ -60,7 +60,7 @@ The path doesn't depend on how OpenChamber is installed. The desktop app, the we
   "allowNetworkAccess": false,
   "allowedExtensions": ["https://github.com/acme/"],
   "jev": {
-    "url": "https://llm.acme.com/v1",
+    "url": "https://llm.acme.com/v1/systemone",
     "model": "acme-classifier",
     "apiKey": "..."
   }
@@ -142,7 +142,7 @@ environment:
   OPENCHAMBER_ALLOW_NETWORK_ACCESS: "1"
   # Optional:
   OPENCHAMBER_RELAY_URL: wss://relay.acme.com/ws
-  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1
+  OPENCHAMBER_JEV_URL: https://llm.acme.com/v1/systemone
   OPENCHAMBER_JEV_MODEL: acme-classifier
   OPENCHAMBER_JEV_API_KEY: ${ACME_JEV_KEY}
   OPENCHAMBER_ALLOWED_EXTENSIONS: https://github.com/acme/

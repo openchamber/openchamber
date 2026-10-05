@@ -38,16 +38,14 @@ export const CLASSIFIER_SOURCES = ['off', 'zen-promo', 'zen-key', 'openrouter', 
 // What the user set up in OpenChamber for Jev comes before keys borrowed from OpenCode.
 const FALLBACK_ORDER = ['typesafe', 'custom', 'openrouter', 'vercel', 'zen-key'];
 
-const SYSTEM_ONE_PATH = '/systemone';
-
 /**
- * The request URL for a custom endpoint, from what the user pasted: the full
- * `.../v1/systemone` URL as is, an OpenAI-style base URL ending in `/v1`, or
- * an API root the way TypeSafe's SDKs take `baseURL` (`https://api.typesafe.ai`).
- * Only http(s), and no credentials in the URL: the key has its own field and
- * the URL is shown back in Settings. Throws with status 400 otherwise.
+ * The request URL for a custom endpoint: exactly what the user pasted, with
+ * nothing appended, because a company proxy can serve System One on any path
+ * (`.../v1/decision`). Only http(s), and no credentials in the URL: the key has
+ * its own field and the URL is shown back in Settings. Throws with status 400
+ * otherwise.
  */
-export const normalizeCustomEndpointUrl = (input) => {
+export const parseCustomEndpointUrl = (input) => {
   const invalid = (message) => Object.assign(new Error(message), { status: 400 });
   let url;
   try {
@@ -58,10 +56,6 @@ export const normalizeCustomEndpointUrl = (input) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw invalid('Only http:// and https:// URLs are supported');
   if (url.username || url.password) throw invalid('Put the key in the API key field, not in the URL');
   url.hash = '';
-  const base = url.pathname.replace(/\/+$/, '');
-  if (base.endsWith(SYSTEM_ONE_PATH)) url.pathname = base;
-  else if (base.endsWith('/v1')) url.pathname = `${base}${SYSTEM_ONE_PATH}`;
-  else url.pathname = `${base}/v1${SYSTEM_ONE_PATH}`;
   return url.toString();
 };
 
@@ -69,7 +63,7 @@ let warnedInvalidPin = false;
 
 /**
  * A custom endpoint an administrator pinned: `jev` in the machine policy file,
- * else `OPENCHAMBER_JEV_URL` (any form `normalizeCustomEndpointUrl` accepts),
+ * else `OPENCHAMBER_JEV_URL` (the full request URL, as `parseCustomEndpointUrl` takes it),
  * `OPENCHAMBER_JEV_MODEL` (default `jev-latest`) and an optional
  * `OPENCHAMBER_JEV_API_KEY` (see ../enterprise-mode.js). It replaces the one
  * saved in Settings, which then cannot be edited, and it is the one Jev source
@@ -80,7 +74,7 @@ export const readPinnedCustomEndpoint = (options) => {
   if (!pinned) return null;
   let url;
   try {
-    url = normalizeCustomEndpointUrl(pinned.url);
+    url = parseCustomEndpointUrl(pinned.url);
   } catch (error) {
     if (!warnedInvalidPin) console.warn('[routing] the pinned Jev endpoint is ignored:', error.message);
     warnedInvalidPin = true;

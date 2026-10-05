@@ -70,14 +70,14 @@ Elke dienst die de System One API van TypeSafe ondersteunt, zoals een zelfgehost
 2. Voeg een **API-sleutel** toe als de dienst die vereist. Deze wordt als `Bearer`-token verstuurd.
 3. Klik op **Opslaan**.
 
-U kunt de volledige URL met `/v1/systemone` aan het einde plakken, een OpenAI-achtige basis-URL met `/v1`, of de hoofd-URL van de API, zoals `https://api.typesafe.ai`. OpenChamber vult het ontbrekende deel aan en toont het exacte adres dat wordt aangeroepen. Alleen `http` en `https` worden ondersteund. De sleutel hoort in het eigen veld, nooit in de URL.
+Plak het volledige adres waarop de dienst antwoordt, zoals `https://api.typesafe.ai/v1/systemone` of `https://proxy.company.internal/v1/decision` bij een bedrijfsproxy. OpenChamber roept het precies zo aan als u het plakt en voegt niets toe aan het pad. Alleen `http` en `https` worden ondersteund. De sleutel hoort in het eigen veld, nooit in de URL.
 
 Opslaan selecteert ook het adres. Net als de TypeSafe-sleutel blijven het adres en de bijbehorende sleutel in een eigen bestand op de OpenChamber-server. De sleutel wordt nooit naar de browser gestuurd.
 
 Een server kan het adres ook uit omgevingsvariabelen halen. Dat is handig als u OpenChamber voor een team inricht:
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # optional, this is the default
 OPENCHAMBER_JEV_API_KEY=...             # optional
 ```

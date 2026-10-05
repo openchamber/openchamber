@@ -70,14 +70,14 @@ TypeSafe의 System One API를 지원하는 서비스라면 무엇이든 쓸 수 
 2. 서비스에 키가 필요하면 **API 키**를 추가합니다. 키는 `Bearer` 토큰으로 전송됩니다.
 3. **저장**을 누릅니다.
 
-URL에는 `/v1/systemone`으로 끝나는 전체 주소, `/v1`로 끝나는 OpenAI 스타일 기본 URL, API 루트(예: `https://api.typesafe.ai`) 중 무엇이든 붙여 넣을 수 있습니다. OpenChamber가 빠진 부분을 채우고 실제로 호출할 주소를 보여 줍니다. `http`와 `https`만 쓸 수 있으며, 키는 URL이 아니라 전용 칸에 넣습니다.
+서비스가 응답하는 전체 주소를 붙여 넣으세요. 예를 들어 `https://api.typesafe.ai/v1/systemone`, 회사 프록시라면 `https://proxy.company.internal/v1/decision` 같은 주소입니다. OpenChamber는 붙여 넣은 그대로 호출하며 경로에 아무것도 덧붙이지 않습니다. `http`와 `https`만 쓸 수 있으며, 키는 URL이 아니라 전용 칸에 넣습니다.
 
 저장하면 그 엔드포인트가 바로 선택됩니다. TypeSafe 키와 마찬가지로 엔드포인트와 키는 OpenChamber 서버의 전용 파일에 보관되며, 키는 브라우저로 전송되지 않습니다.
 
 서버는 환경 변수에서 엔드포인트를 가져올 수도 있습니다. 팀용으로 OpenChamber를 설정할 때 편리합니다.
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # 선택 사항, 이것이 기본값입니다
 OPENCHAMBER_JEV_API_KEY=...             # 선택 사항
 ```

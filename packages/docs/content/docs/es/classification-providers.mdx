@@ -70,14 +70,14 @@ Cualquier servicio que hable la API System One de TypeSafe: un gateway autoaloja
 2. Añade una **Clave de API** si el servicio la necesita. Se envía como token `Bearer`.
 3. Pulsa **Guardar**.
 
-Como URL puedes pegar la dirección completa que termina en `/v1/systemone`, una URL base al estilo de OpenAI que termina en `/v1` o la raíz de la API (como `https://api.typesafe.ai`). OpenChamber añade la parte que falta y muestra la dirección exacta a la que llamará. Solo funcionan `http` y `https`, y la clave va en su propio campo, nunca en la URL.
+Pega la dirección completa en la que responde el servicio, como `https://api.typesafe.ai/v1/systemone` o `https://proxy.company.internal/v1/decision` en un proxy de empresa. OpenChamber la llama tal como la pegas y no añade nada a la ruta. Solo funcionan `http` y `https`, y la clave va en su propio campo, nunca en la URL.
 
 Al guardar, el endpoint también queda seleccionado. Igual que la clave de TypeSafe, el endpoint y su clave se quedan en el servidor de OpenChamber, en su propio archivo, y la clave nunca se envía al navegador.
 
 Un servidor también puede tomar su endpoint del entorno, algo útil cuando configuras OpenChamber para un equipo:
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # opcional, este es el valor predeterminado
 OPENCHAMBER_JEV_API_KEY=...             # opcional
 ```

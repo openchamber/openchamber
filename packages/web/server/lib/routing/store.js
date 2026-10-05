@@ -24,7 +24,7 @@ import {
   THINKING_LEVELS,
   isAutoModel,
 } from './defaults.js';
-import { CLASSIFIER_SOURCES, normalizeCustomEndpointUrl } from './classifier.js';
+import { CLASSIFIER_SOURCES, parseCustomEndpointUrl } from './classifier.js';
 
 const FILE_VERSION = 1;
 const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -94,9 +94,9 @@ const authSchema = z.object({ token: z.string().min(1).max(4000) }).strict();
 
 const classifierSchema = z.object({ version: z.literal(FILE_VERSION), source: z.enum(CLASSIFIER_SOURCES) }).strict();
 
-const isNormalizedEndpointUrl = (url) => {
+const isParsedEndpointUrl = (url) => {
   try {
-    return normalizeCustomEndpointUrl(url) === url;
+    return parseCustomEndpointUrl(url) === url;
   } catch {
     return false;
   }
@@ -104,7 +104,7 @@ const isNormalizedEndpointUrl = (url) => {
 
 // A hand-edited URL that the setter would not have produced is not an endpoint.
 const customEndpointSchema = z.object({
-  url: z.string().max(2000).refine(isNormalizedEndpointUrl, { message: 'Invalid endpoint URL' }),
+  url: z.string().max(2000).refine(isParsedEndpointUrl, { message: 'Invalid endpoint URL' }),
   model: z.string().trim().min(1).max(200),
   key: z.string().min(1).max(4000).optional(),
 }).strict();

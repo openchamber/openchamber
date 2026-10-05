@@ -70,14 +70,14 @@ Any service that speaks TypeSafe's System One API: a self-hosted gateway, a comp
 2. Add an **API key** if the service needs one. It's sent as a `Bearer` token.
 3. Press **Save**.
 
-For the URL you can paste the full address ending in `/v1/systemone`, an OpenAI-style base URL ending in `/v1`, or the API root (like `https://api.typesafe.ai`). OpenChamber adds the missing part and shows the exact address it will call. Only `http` and `https` work, and the key goes in its own field, never in the URL.
+Paste the full address the service answers on, like `https://api.typesafe.ai/v1/systemone` or a company proxy's `https://proxy.company.internal/v1/decision`. OpenChamber calls it exactly as you paste it and adds nothing to the path. Only `http` and `https` work, and the key goes in its own field, never in the URL.
 
 Saving also selects the endpoint. Like the TypeSafe key, the endpoint and its key stay on the OpenChamber server in their own file, and the key is never sent to the browser.
 
 A server can also get its endpoint from the environment, which is handy when you set up OpenChamber for a team:
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # optional, this is the default
 OPENCHAMBER_JEV_API_KEY=...             # optional
 ```

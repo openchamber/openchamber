@@ -70,14 +70,14 @@ Jev 从不写代码，也不会在你的聊天里回复。它只返回一个判�
 2. 如果服务需要，添加 **API 密钥**。它会作为 `Bearer` 令牌发送。
 3. 点 **保存**。
 
-URL 可以填以 `/v1/systemone` 结尾的完整地址、以 `/v1` 结尾的 OpenAI 风格基础 URL，或 API 根地址（比如 `https://api.typesafe.ai`）。OpenChamber 会补上缺少的部分，并显示它实际要调用的地址。只支持 `http` 和 `https`，密钥要填在单独的输入框里，不要写进 URL。
+粘贴服务实际响应的完整地址，比如 `https://api.typesafe.ai/v1/systemone`，或者公司代理的 `https://proxy.company.internal/v1/decision`。OpenChamber 会按你粘贴的原样调用，不会在路径后追加任何内容。只支持 `http` 和 `https`，密钥要填在单独的输入框里，不要写进 URL。
 
 保存的同时也会选中这个端点。和 TypeSafe 密钥一样，端点和它的密钥单独存放在 OpenChamber 服务器上的一个文件里，密钥从不发送到浏览器。
 
 服务器也可以从环境变量获取端点，为团队部署 OpenChamber 时很方便：
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # 可选，这是默认值
 OPENCHAMBER_JEV_API_KEY=...             # 可选
 ```

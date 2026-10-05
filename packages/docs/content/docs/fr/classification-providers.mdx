@@ -70,14 +70,14 @@ N’importe quel service qui parle l’API System One de TypeSafe : une passerel
 2. Ajoutez une **Clé API** si le service en demande une. Elle est envoyée comme jeton `Bearer`.
 3. Cliquez sur **Enregistrer**.
 
-Pour l’URL, vous pouvez coller l’adresse complète qui se termine par `/v1/systemone`, une URL de base de style OpenAI qui se termine par `/v1`, ou la racine de l’API (comme `https://api.typesafe.ai`). OpenChamber ajoute la partie manquante et affiche l’adresse exacte qu’il appellera. Seuls `http` et `https` fonctionnent, et la clé va dans son propre champ, jamais dans l’URL.
+Collez l’adresse complète sur laquelle le service répond, comme `https://api.typesafe.ai/v1/systemone` ou `https://proxy.company.internal/v1/decision` pour un proxy d’entreprise. OpenChamber l’appelle telle que vous la collez et n’ajoute rien au chemin. Seuls `http` et `https` fonctionnent, et la clé va dans son propre champ, jamais dans l’URL.
 
 Enregistrer sélectionne aussi le point de terminaison. Comme la clé TypeSafe, le point de terminaison et sa clé restent sur le serveur OpenChamber, dans leur propre fichier, et la clé n’est jamais envoyée au navigateur.
 
 Un serveur peut aussi recevoir son point de terminaison depuis l’environnement, ce qui est pratique quand vous configurez OpenChamber pour une équipe :
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # facultatif, c’est la valeur par défaut
 OPENCHAMBER_JEV_API_KEY=...             # facultatif
 ```

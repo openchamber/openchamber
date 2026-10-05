@@ -25,7 +25,7 @@ Auto. There is no env gate — the feature shipped dark behind
   user's pick, what is usable, and the source that actually answers) and
   `classifierEndpoint` (where a request for a source goes),
   `legacyClassifier` (the view older clients parse) and
-  `normalizeCustomEndpointUrl` (the custom endpoint's request URL).
+  `parseCustomEndpointUrl` (the custom endpoint's request URL).
 - `store.js` — `routing.json` (only deviations from the built-ins),
   `routing-auth.json` (the TypeSafe key alone, mode 0600),
   `classification.json` (the classification provider pick) and
@@ -125,11 +125,13 @@ Classification providers:
   and optional key the user saved (`classifier-endpoint.json`, mode 0600, its
   own file so a token write never rewrites it). The key goes as a bearer when
   present; `describe` returns `customEndpoint` as URL, model and `keyPresent`,
-  never the key. `setCustomEndpoint` accepts the full `.../systemone` URL, an
-  OpenAI-style base ending in `/v1` (what "base URL" means to most users), or
-  an API root the way TypeSafe's SDKs take `baseURL`, and stores the resolved
-  request URL, which the page shows back. Only http(s), no credentials in the
-  URL. It does not go through the TTS remote-URL gate: a remote classifier is
+  never the key. `setCustomEndpoint` stores the request URL exactly as pasted
+  (trimmed, without a `#fragment`) and appends nothing: a company proxy can
+  serve System One on any path, so only the user knows the full address. Before
+  2026-10-05 a `/v1` base or an API root got `/v1/systemone` appended; URLs
+  saved then are already full and read back unchanged, but a pin written in
+  that short form now needs the full address. Only http(s), no credentials in
+  the URL. It does not go through the TTS remote-URL gate: a remote classifier is
   the user's explicit choice, the same as the hosted sources. Saving picks it;
   a missing `key` keeps the saved one, null removes it without changing the
   pick.

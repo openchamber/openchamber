@@ -70,14 +70,14 @@ TypeSafe'in System One API'sini konuşan herhangi bir hizmet: kendi barındırd�
 2. Hizmet gerektiriyorsa bir **API anahtarı** ekleyin. Anahtar `Bearer` token olarak gönderilir.
 3. **Kaydet**'e basın.
 
-URL olarak `/v1/systemone` ile biten tam adresi, `/v1` ile biten OpenAI tarzı bir temel URL'yi veya API kökünü (`https://api.typesafe.ai` gibi) yapıştırabilirsiniz. OpenChamber eksik kısmı tamamlar ve çağıracağı tam adresi gösterir. Yalnızca `http` ve `https` çalışır; anahtar URL'ye değil, kendi alanına girilir.
+Hizmetin yanıt verdiği tam adresi yapıştırın; örneğin `https://api.typesafe.ai/v1/systemone` ya da bir şirket proxy'si için `https://proxy.company.internal/v1/decision`. OpenChamber adresi yapıştırdığınız gibi çağırır ve yola hiçbir şey eklemez. Yalnızca `http` ve `https` çalışır; anahtar URL'ye değil, kendi alanına girilir.
 
 Kaydetmek uç noktayı da seçer. TypeSafe anahtarı gibi uç nokta ve anahtarı da OpenChamber sunucusunda kendi dosyasında durur ve anahtar asla tarayıcıya gönderilmez.
 
 Bir sunucu uç noktasını ortam değişkenlerinden de alabilir; OpenChamber'ı bir ekip için kurarken bu işe yarar:
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # isteğe bağlı, varsayılan budur
 OPENCHAMBER_JEV_API_KEY=...             # isteğe bağlı
 ```

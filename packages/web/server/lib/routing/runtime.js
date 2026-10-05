@@ -21,7 +21,7 @@ import {
   CLASSIFIER_SOURCES,
   classifierEndpoint,
   legacyClassifier,
-  normalizeCustomEndpointUrl,
+  parseCustomEndpointUrl,
   readPinnedCustomEndpoint,
   resolveClassifier,
 } from './classifier.js';
@@ -469,7 +469,7 @@ export function createRoutingRuntime({
     const parsed = customEndpointInputSchema.safeParse(input);
     if (!parsed.success) throw Object.assign(new Error('A URL and a model are required'), { status: 400 });
     const { model, key } = parsed.data;
-    const url = normalizeCustomEndpointUrl(parsed.data.url);
+    const url = parseCustomEndpointUrl(parsed.data.url);
     // An empty key field is the same as leaving it out.
     const keepKey = key === undefined || key === '';
     const savedKey = keepKey ? (await store.readCustomEndpoint())?.key : key;

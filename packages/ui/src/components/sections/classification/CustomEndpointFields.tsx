@@ -33,7 +33,7 @@ export const CustomEndpointFields: React.FC = () => {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // The server normalizes the URL, and another client may change it: show what is saved.
+  // The server trims the URL and drops a #fragment, and another client may change it: show what is saved.
   React.useEffect(() => {
     setUrl(saved?.url ?? '');
     setModel(saved?.model ?? '');
@@ -94,7 +94,7 @@ export const CustomEndpointFields: React.FC = () => {
               value={url}
               onChange={(event) => setUrl(event.target.value)}
               onKeyDown={saveOnEnter}
-              placeholder="https://example.com/v1"
+              placeholder="https://example.com/v1/systemone"
               aria-label={t('settings.classification.custom.url.label')}
               className={INPUT_CLASS}
               disabled={busy}

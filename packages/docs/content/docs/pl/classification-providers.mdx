@@ -70,14 +70,14 @@ Dowolna usługa obsługująca API System One od TypeSafe: samodzielnie hostowana
 2. Dodaj **Klucz API**, jeśli usługa go wymaga. Jest wysyłany jako token `Bearer`.
 3. Kliknij **Zapisz**.
 
-Jako URL możesz wkleić pełny adres kończący się na `/v1/systemone`, bazowy URL w stylu OpenAI kończący się na `/v1` albo główny adres API (np. `https://api.typesafe.ai`). OpenChamber dopisze brakującą część i pokaże dokładny adres, pod który będzie wysyłał zapytania. Działają tylko `http` i `https`, a klucz wpisuje się w osobne pole, nigdy w URL.
+Wklej pełny adres, pod którym odpowiada usługa, np. `https://api.typesafe.ai/v1/systemone` albo `https://proxy.company.internal/v1/decision` w przypadku firmowego proxy. OpenChamber wysyła zapytania dokładnie pod wklejony adres i niczego nie dopisuje do ścieżki. Działają tylko `http` i `https`, a klucz wpisuje się w osobne pole, nigdy w URL.
 
 Zapisanie od razu wybiera ten endpoint. Tak jak klucz TypeSafe, endpoint i jego klucz leżą na serwerze OpenChamber w osobnym pliku, a klucz nigdy nie trafia do przeglądarki.
 
 Serwer może też pobrać endpoint ze zmiennych środowiskowych, co przydaje się, gdy konfigurujesz OpenChamber dla zespołu:
 
 ```bash
-OPENCHAMBER_JEV_URL=https://jev.example.com/v1
+OPENCHAMBER_JEV_URL=https://jev.example.com/v1/systemone
 OPENCHAMBER_JEV_MODEL=jev-latest        # opcjonalne, to wartość domyślna
 OPENCHAMBER_JEV_API_KEY=...             # opcjonalne
 ```
