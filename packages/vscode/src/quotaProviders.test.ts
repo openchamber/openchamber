@@ -38,7 +38,7 @@ configureOpenCodeCredentials({
   ],
 });
 
-import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchZenmuxQuota } from './quotaProviders';
+import { activateQuotaGiftReset, fetchClinePassQuota, fetchHyperQuota, fetchKiloQuota, fetchKimiQuota, fetchOllamaCloudQuota, fetchQuotaForProvider, fetchXaiQuota, fetchZenmuxQuota } from './quotaProviders';
 import { validateCredential } from './quotaCredentials';
 
 type MockResponseInit = { ok?: boolean; status?: number };
@@ -2177,5 +2177,59 @@ describe('Kilo Code quota provider (VS Code parity)', () => {
     });
     assert.equal(result.ok, false);
     assert.equal(result.error, 'Session expired — please re-authenticate with Kilo Code');
+  });
+});
+
+describe('xAI quota provider (VS Code parity)', () => {
+  const xaiResponse = (usedPercent: number): Response => {
+    const bytes = Buffer.alloc(5);
+    bytes[0] = 0x0d;
+    bytes.writeFloatLE(usedPercent, 1);
+    return new Response(new Uint8Array(bytes));
+  };
+
+  test('reads usage with the stored access token while it is still valid', async () => {
+    const requests: string[] = [];
+    const result = await fetchXaiQuota({
+      readAuth: () => ({ xai: { type: 'oauth', access: 'valid-access', refresh: 'rotating-1', expires: Date.now() + 3_600_000 } }),
+      fetchImpl: async (url) => {
+        requests.push(url);
+        return xaiResponse(42);
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.usage?.windows.billing_cycle?.usedPercent, 42);
+    assert.deepEqual(requests, ['https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig']);
+  });
+
+  test('never exchanges the rotating refresh token when the access token is expired', async () => {
+    const requests: string[] = [];
+    const result = await fetchXaiQuota({
+      readAuth: () => ({ xai: { type: 'oauth', access: 'stale-access', refresh: 'rotating-1', expires: Date.now() - 1_000 } }),
+      fetchImpl: async (url) => {
+        requests.push(url);
+        return xaiResponse(42);
+      },
+    });
+
+    assert.deepEqual(requests.filter((url) => url.includes('auth.x.ai')), []);
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.match(result.error ?? '', /expired/i);
+  });
+
+  test('reports a missing credential as unconfigured without contacting xAI', async () => {
+    let requests = 0;
+    const result = await fetchXaiQuota({
+      readAuth: () => ({}),
+      fetchImpl: async () => {
+        requests += 1;
+        return xaiResponse(42);
+      },
+    });
+
+    assert.equal(result.configured, false);
+    assert.equal(requests, 0);
   });
 });
