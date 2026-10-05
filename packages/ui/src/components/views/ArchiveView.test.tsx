@@ -15,7 +15,7 @@ const { createRoot } = await import('react-dom/client');
 const { I18nProvider } = await import('@/lib/i18n');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
-const { ArchiveView } = await import('./ArchiveView');
+const { ArchiveSessionsView, ArchiveView } = await import('./ArchiveView');
 const initialUI = useUIStore.getState();
 const initialSessions = useGlobalSessionsStore.getState();
 const session = (id: string, title: string, archived = 2): Session => ({
@@ -100,4 +100,34 @@ test('the chats of a deleted space are grouped under its name and cannot be rest
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('the mobile layout names each row\'s project, offers Restore without Delete, and leaves when a session opens', async () => {
+  useGlobalSessionsStore.setState({
+    archivedSessions: [session('ses_mobile1', 'Phone chat')],
+    activeSessions: [],
+  });
+  let left = 0;
+  await act(async () => root.render(
+    <I18nProvider><ArchiveSessionsView open layout="mobile" onLeave={() => { left += 1; }} /></I18nProvider>,
+  ));
+  expect(document.querySelector('.group\\/dir')).toBeNull();
+  expect(document.querySelector('[aria-label="Restore Phone chat"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Delete Phone chat"]')).toBeNull();
+  const row = [...document.querySelectorAll('button')].find((button) => button.textContent?.startsWith('Phone chat'));
+  if (!row) throw new Error('Archived session row missing');
+  expect(row.textContent).toContain('workspace');
+  await act(async () => { row.click(); });
+  expect(left).toBe(1);
+});
+
+test('an empty archive is not reported before the session list has loaded, or after it failed to load', async () => {
+  const emptyText = () => document.querySelector('p.font-semibold')?.textContent;
+  useGlobalSessionsStore.setState({ archivedSessions: [], activeSessions: [], status: 'loading' });
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  expect(emptyText()).toBe('Loading sessions…');
+  await act(async () => { useGlobalSessionsStore.setState({ status: 'error' }); });
+  expect(emptyText()).toBe('Could not refresh sessions.');
+  await act(async () => { useGlobalSessionsStore.setState({ status: 'ready' }); });
+  expect(emptyText()).toBe('No archived sessions');
 });

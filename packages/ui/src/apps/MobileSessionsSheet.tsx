@@ -132,6 +132,7 @@ type MobileSessionsSheetProps = {
     onOpenInstances?: () => void;
     onOpenSettings: () => void;
     onOpenScheduled: () => void;
+    onOpenArchive: () => void;
     onOpenUsage: () => void;
     /** Present only while a server update is available (hosted web). */
     onOpenUpdate?: () => void;
@@ -965,7 +966,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     for (const session of liveSessions) {
       if (!seenIds.has(session.id)) merged.push(session);
     }
-    // Archived sessions never show on mobile (no archived view here): the live
+    // Archived sessions never show in this list (they have the Archive page,
+    // opened from the footer): the live
     // overlay can carry them for the active directory, and they'd otherwise
     // surface in search and then "disappear" once the overlay refreshes.
     return merged.filter((session) => !session.time?.archived);
@@ -2391,6 +2393,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 style={{ touchAction: 'manipulation' }}
               >
                 <Icon name="calendar-schedule" className="size-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
+                onClick={footer.onOpenArchive}
+                aria-label={t('sessions.sidebar.nav.archive')}
+                title={t('sessions.sidebar.nav.archive')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="archive" className="size-5" />
               </Button>
               <Button
                 type="button"

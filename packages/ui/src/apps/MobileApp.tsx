@@ -72,6 +72,7 @@ import { MobileInstancesSurface } from './MobileInstancesSurface';
 import { MobileSessionsSheet } from './MobileSessionsSheet';
 import { MobileFullscreenSurface } from './MobileFullscreenSurface';
 import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
+import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
@@ -127,7 +128,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
-type MobileSurface = 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
+type MobileSurface = 'archive' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t } = useI18n();
@@ -400,6 +401,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenSettings: () => openSettingsSurface('nav'),
       onOpenUsage: () => openSurface('usage'),
       onOpenScheduled: () => openSurface('scheduled'),
+      onOpenArchive: () => openSurface('archive'),
       onOpenUpdate: showUpdateItem ? () => openSurface('update') : undefined,
     }),
     [openSettingsSurface, openSurface, showCapacitorOnlyFeatures, showUpdateItem],
@@ -412,6 +414,14 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setSessionsSheetOpen(false);
     if (reason === 'file') openFilesSurface();
   }, [closeSurface, openFilesSurface]);
+
+  // An opened archived session replaces the page: back to the chat, the same
+  // way picking a session from the list gives the space back.
+  const leaveArchive = React.useCallback(() => {
+    closeSurface();
+    setSessionsSheetOpen(false);
+    if (isTabletLayout && !roomyForPanels) setSidebarOpen(false);
+  }, [closeSurface, isTabletLayout, roomyForPanels]);
 
   const openMcpCreateSettings = React.useCallback(() => {
     const baseName = 'new-mcp-server';
@@ -689,6 +699,21 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           >
             <ErrorBoundary>
               <ScheduledTasksView layout="mobile" onLeave={leaveScheduledTasks} />
+            </ErrorBoundary>
+          </MobileFullscreenSurface>
+        ) : null}
+
+        {activeSurface === 'archive' ? (
+          <MobileFullscreenSurface
+            open
+            variant={surfaceVariant}
+            dialogAlign="app"
+            onClose={closeSurface}
+            ariaLabel={t('sessions.archivePage.title')}
+            title={t('sessions.archivePage.title')}
+          >
+            <ErrorBoundary>
+              <ArchiveSessionsView open layout="mobile" onLeave={leaveArchive} />
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}
