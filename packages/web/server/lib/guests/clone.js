@@ -305,6 +305,14 @@ export const runGitNetwork = async (args, options) => {
   return retried;
 };
 
+// What git and the common hosts print when a clone is refused for lack of
+// access: no stored HTTPS login (prompts are off), a rejected login, or an
+// SSH key the host does not accept.
+const AUTH_FAILURE_PATTERN = /Authentication failed|could not read (?:Username|Password)|Invalid username or (?:password|token)|HTTP Basic: Access denied|Permission denied \(publickey/i;
+
+/** @param {string | undefined} stderr */
+export const isGitAuthFailure = (stderr) => AUTH_FAILURE_PATTERN.test(stderr ?? '');
+
 export const cloneGitRepository = async (source, dest, { gitBinary = 'git', timeoutMs = CLONE_TIMEOUT_MS, ref, lookup, gitIdentityId } = {}) => {
   if (ref !== undefined && !isGitRef(ref)) {
     return { ok: false, code: 'clone-failed' };
@@ -319,5 +327,8 @@ export const cloneGitRepository = async (source, dest, { gitBinary = 'git', time
   }
   args.push('--', source, dest);
   const result = await runGitNetwork(args, { gitBinary, timeoutMs, env: network.env });
-  return result.ok ? { ok: true } : { ok: false, code: 'clone-failed' };
+  if (result.ok) {
+    return { ok: true };
+  }
+  return { ok: false, code: isGitAuthFailure(result.stderr) ? 'clone-auth-failed' : 'clone-failed' };
 };

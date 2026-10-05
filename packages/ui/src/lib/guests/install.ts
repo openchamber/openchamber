@@ -22,6 +22,7 @@ const errorSchema = z.object({
     'bundled',
     'reserved-id',
     'clone-failed',
+    'clone-auth-failed',
     'extract-failed',
     'too-large',
     'enterprise-mode',
@@ -42,6 +43,7 @@ export type InstallGuestErrorCode =
   | 'bundled'
   | 'reserved-id'
   | 'clone-failed'
+  | 'clone-auth-failed'
   | 'extract-failed'
   | 'too-large'
   | 'enterprise-mode'

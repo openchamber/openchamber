@@ -14,6 +14,7 @@ export const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
   if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
   if (code === 'host-too-old') return 'settings.extensions.toast.hostTooOld';
   if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
+  if (code === 'clone-auth-failed') return 'settings.extensions.toast.cloneNeedsSignIn';
   if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
   if (code === 'too-large') return 'settings.extensions.toast.zipTooLarge';
   if (code === 'enterprise-mode') return 'settings.extensions.toast.enterpriseMode';
@@ -25,6 +26,7 @@ export const updateErrorToastKey = (code: UpdateGuestErrorCode): I18nKey => {
   if (code === 'not-git') return 'settings.extensions.toast.notGit';
   if (code === 'enterprise-mode') return 'settings.extensions.toast.enterpriseUpdate';
   if (code === 'clone-failed') return 'settings.extensions.toast.cloneFailed';
+  if (code === 'clone-auth-failed') return 'settings.extensions.toast.cloneNeedsSignIn';
   if (code === 'invalid-manifest') return 'settings.extensions.toast.invalidManifest';
   if (code === 'missing-build') return 'settings.extensions.toast.missingBuild';
   if (code === 'swap-failed') return 'settings.extensions.toast.swapFailed';

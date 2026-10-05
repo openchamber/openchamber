@@ -46,6 +46,7 @@ const requiredKeys = [
   'settings.extensions.toast.missingBuild',
   'settings.extensions.toast.hostTooOld',
   'settings.extensions.toast.cloneFailed',
+  'settings.extensions.toast.cloneNeedsSignIn',
   'settings.extensions.toast.extractFailed',
   'settings.extensions.toast.folderNeedsZip',
   'settings.extensions.toast.zipTooLarge',
