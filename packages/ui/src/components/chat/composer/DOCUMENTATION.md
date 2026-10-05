@@ -555,6 +555,12 @@ refusing programmatic focus outside a gesture, WebKit leaving the layout
 viewport panned after the keyboard hides, overlay chains handing off through a
 frame where nothing is open.
 
+The keyboard pin also runs in the iPad Home Screen app (iPad, standalone, not
+Capacitor) at every width, the tablet surface included: standalone Safari does
+not reveal the focused field there. It lifts the composer by the part the
+keyboard covers, so a hardware keyboard or an already revealed field means no
+lift, and a composer too tall to fit above the keyboard stays put.
+
 Typed text and salvage text shown after a failed dictation use the same measured
 line and screen-height limits. Once the viewport reports usable space, content
 scrolls inside the composer so the failed-dictation action row stays inside the

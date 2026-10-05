@@ -5,16 +5,18 @@
  * composer stays where it belongs on its own. A mobile browser has nothing of
  * the sort: Safari pans the visual viewport over an unchanged layout instead
  * of shrinking it, so a composer positioned in normal flow ends up partly
- * off-screen or behind the keyboard. Both effects here exist to put it back,
- * and both are deliberately restricted to non-Capacitor mobile.
+ * off-screen or behind the keyboard. Every effect here exists to put it back,
+ * and all are deliberately restricted to non-Capacitor mobile browsers — the
+ * last one to the iPad Home Screen app, at any width.
  *
- * Neither is verifiable from a test: they are corrections for specific WebKit
- * behaviors, and every guard in them marks a case that was observed breaking.
+ * The WebKit behaviors they correct are only verifiable on a device, and every
+ * guard in them marks a case that was observed breaking; tests cover only the
+ * iPad lift's arithmetic.
  */
 
 import React from 'react';
 
-import { isCapacitorApp } from '@/lib/platform';
+import { isCapacitorApp, isIPadDevice } from '@/lib/platform';
 import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 
 // Android mobile browsers are the pan-mode holdouts this pin exists for on
@@ -25,6 +27,14 @@ import type { ComposerEditorHandle } from '../editor/ComposerEditor';
 // screen, so this stays Android-only there.
 // Callers are browser-only React effects, so navigator always exists here.
 const isAndroidBrowser = (): boolean => /Android/i.test(navigator.userAgent);
+
+// The iPad Home Screen app is the iOS exception: standalone Safari neither
+// resizes the page nor reveals the focused field, and a keyboard shown again
+// after a dismissal fires no visualViewport resize, so the composer stayed
+// behind it until the first keystroke (#4326).
+const isIPadHomeScreenApp = (): boolean => (
+    isIPadDevice() && window.matchMedia?.('(display-mode: standalone)').matches === true
+);
 
 export interface MobileViewportPinOptions {
     isMobile: boolean;
@@ -154,4 +164,58 @@ export function useMobileViewportPin(options: MobileViewportPinOptions): void {
             releaseForm(form);
         };
     }, [formRef, isDraftScreen, isFocused, isFullscreen, isMobile]);
+
+    // iPad Home Screen app: lift the composer by exactly the part the keyboard
+    // covers. Past 768px an iPad is a tablet or desktop surface, so isMobile is
+    // false and the pins above never run. Only the relatively positioned
+    // form's offset moves, leaving the layout around it alone, and the lift is
+    // zero whenever nothing is covered (a hardware keyboard, or a field Safari
+    // already revealed). Focus is read from the DOM because the composer shell
+    // tracks it on the phone surface only.
+    React.useLayoutEffect(() => {
+        if (isCapacitorApp() || !isIPadHomeScreenApp()) return;
+        // The pins above own these screens on the phone surface.
+        if (isMobile && (isFullscreen || isDraftScreen)) return;
+        const vv = window.visualViewport;
+        const form = formRef.current;
+        if (!vv || !form) return;
+
+        let lift = 0;
+        let frame = 0;
+        const setLift = (next: number) => {
+            if (next === lift) return;
+            lift = next;
+            form.style.top = next > 0 ? `${-next}px` : '';
+        };
+        // A rAF loop for the same reason as above: the keyboard's re-show
+        // fires no viewport event at all.
+        const track = () => {
+            if (!form.contains(document.activeElement)) {
+                frame = 0;
+                setLift(0);
+                return;
+            }
+            const visibleBottom = Math.min(vv.offsetTop + vv.height, document.documentElement.clientHeight);
+            const rect = form.getBoundingClientRect();
+            const covered = Math.max(0, Math.ceil(rect.bottom + lift - visibleBottom));
+            // A form taller than the room above the keyboard (the expanded
+            // composer) stays put: lifting would push its first lines off the
+            // top, which is worse than the footer the keyboard hides.
+            const fits = rect.top + lift - covered >= vv.offsetTop;
+            setLift(fits ? covered : 0);
+            frame = requestAnimationFrame(track);
+        };
+        const start = () => {
+            if (frame === 0) track();
+        };
+        form.addEventListener('focusin', start);
+        // Focus can already be inside when a screen change re-runs this.
+        start();
+
+        return () => {
+            form.removeEventListener('focusin', start);
+            cancelAnimationFrame(frame);
+            form.style.top = '';
+        };
+    }, [formRef, isDraftScreen, isFullscreen, isMobile]);
 }
