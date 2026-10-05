@@ -44,7 +44,7 @@ jobs:
             This pull request has been automatically closed because it has been
             stale for 7 days with no activity. If this is still relevant, please
             comment or reopen the pull request.
-          exempt-issue-labels: pinned,security,help wanted
+          exempt-issue-labels: pinned,security,help wanted,accepted
           exempt-pr-labels: pinned,security,help wanted
           remove-stale-when-updated: true
           labels-to-add-when-unstale: ""
