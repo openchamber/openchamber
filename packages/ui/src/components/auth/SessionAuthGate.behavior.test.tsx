@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+import type { AuthSessionState } from '@/lib/runtime-auth-expiry';
 
 type ComponentFn<P extends Record<string, unknown> = Record<string, unknown>> = (props: P) => unknown;
 
@@ -38,6 +39,9 @@ const resetHarness = () => {
   desktopHostsGetCalls = 0;
   desktopHostsSetCalls = 0;
   runtimeSwitchCalls = 0;
+  sessionStatusOk = false;
+  authSessionState = 'ok';
+  markAuthenticatedCalls = 0;
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
     value: {
@@ -180,6 +184,7 @@ const reactJsxRuntime = {
 
 let desktopShell = false;
 let runtimeFetchRejects = true;
+let sessionStatusOk = false;
 let runtimeApiBaseUrl = '';
 let runtimeKey = 'local';
 let runtimeEndpointChangedListener: (() => void) | null = null;
@@ -258,8 +263,8 @@ mock.module('@/lib/runtime-fetch', () => ({
       throw new Error('offline');
     }
 
-    return new Response(JSON.stringify({ authenticated: false }), {
-      status: 401,
+    return new Response(JSON.stringify({ authenticated: sessionStatusOk }), {
+      status: sessionStatusOk ? 200 : 401,
       headers: { 'content-type': 'application/json' },
     });
   }),
@@ -303,9 +308,16 @@ mock.module('@/lib/passkeys', () => ({
   registerCurrentDevicePasskey: mock(() => Promise.resolve(null)),
 }));
 
+let authSessionState: AuthSessionState = 'ok';
+let markAuthenticatedCalls = 0;
 const authSessionStore = {
-  state: 'ok' as const,
-  markAuthenticated: mock(() => undefined),
+  get state() {
+    return authSessionState;
+  },
+  markAuthenticated: () => {
+    markAuthenticatedCalls += 1;
+    authSessionState = 'ok';
+  },
 };
 
 mock.module('@/lib/runtime-auth-expiry', () => ({
@@ -392,6 +404,23 @@ describe('SessionAuthGate status-check failure behavior', () => {
     // A network failure says nothing about the server, so the desktop error
     // screen keeps its real escape hatches: retry and the host switcher.
     expect(text).toContain('host-switcher');
+  });
+
+  test('a login that finds the session alive releases the expired state', async () => {
+    // The user logged in from another tab, then pressed "Log in" on this tab's banner.
+    resetHarness();
+    desktopShell = false;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+
+    expect(collectText(await renderGate())).toContain('child');
+    expect(markAuthenticatedCalls).toBe(0);
+
+    authSessionState = 'reauthenticating';
+    expect(collectText(await renderGate())).toContain('child');
+
+    expect(markAuthenticatedCalls).toBe(1);
+    expect(authSessionState).toBe('ok');
   });
 
   test('discards a password completion after switching to another host', async () => {

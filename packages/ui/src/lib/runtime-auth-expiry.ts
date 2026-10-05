@@ -28,6 +28,29 @@ export const useAuthSessionStore = create<AuthSessionStore>((set) => ({
   markAuthenticated: () => set({ state: 'ok' }),
 }));
 
+/**
+ * Resolves once the session is usable again (immediately when it already is),
+ * or when `signal` aborts. Live streams wait here instead of reconnecting:
+ * while the session is expired every attempt is a guaranteed 401. The session
+ * gate's login, or a probe proving the session alive, flips the state back to
+ * 'ok' and releases every waiter at once.
+ */
+export const waitForAuthSession = (signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+  if (signal.aborted || useAuthSessionStore.getState().state === 'ok') {
+    resolve();
+    return;
+  }
+  const finish = () => {
+    unsubscribe();
+    signal.removeEventListener('abort', finish);
+    resolve();
+  };
+  const unsubscribe = useAuthSessionStore.subscribe((store) => {
+    if (store.state === 'ok') finish();
+  });
+  signal.addEventListener('abort', finish, { once: true });
+});
+
 // One confirm probe per window: parallel 401s from a burst of requests must
 // not turn into a probe storm, and a provider-side 401 that keeps repeating
 // must not re-probe on every retry.

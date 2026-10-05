@@ -4,6 +4,7 @@ import type { SyncEvent } from "@/lib/opencode/events"
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
+import { useAuthSessionStore } from "@/lib/runtime-auth-expiry"
 import { createEventPipeline } from "./event-pipeline"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
@@ -302,6 +303,71 @@ describe("createEventPipeline", () => {
       pipeline.cleanup()
     }
     expect(activity).toBe(0)
+  })
+
+  describe("while the OpenChamber session is expired", () => {
+    afterEach(() => {
+      useAuthSessionStore.getState().markAuthenticated()
+    })
+
+    /**
+     * Every attempt is refused, and the first refusal confirms the expiry. The failure carries no
+     * HTTP status, as a refused SSE request or WebSocket upgrade does in a browser, so the
+     * pipeline's normal retry backoff applies.
+     */
+    const createUnauthorizedSdk = (onAttempt: () => void): OpenCodeClient => {
+      const client: Pick<OpenCodeClient, "event"> = {
+        event: {
+          subscribe: () => ({
+            [Symbol.asyncIterator]: () => ({
+              next: async () => {
+                onAttempt()
+                useAuthSessionStore.getState().markExpired()
+                throw new Error("UI authentication required")
+              },
+            }),
+          }),
+        },
+      }
+      // SAFETY: the pipeline only touches `event.subscribe` on the client.
+      return client as OpenCodeClient
+    }
+
+    test("stops reconnecting until the user logs in, then reconnects at once", async () => {
+      let attempts = 0
+      const pipeline = createEventPipeline({
+        sdk: createUnauthorizedSdk(() => { attempts += 1 }),
+        onEvents: () => undefined,
+        transport: "sse",
+        heartbeatTimeoutMs: 60_000,
+      })
+      try {
+        // The retry backoff starts at 250 ms and doubles; three more attempts would fit here.
+        await new Promise((resolve) => setTimeout(resolve, 2_000))
+        expect(attempts).toBe(1)
+
+        useAuthSessionStore.getState().markAuthenticated()
+        for (let i = 0; i < 20 && attempts < 2; i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+        expect(attempts).toBe(2)
+      } finally {
+        pipeline.cleanup()
+      }
+    })
+
+    test("a pipeline cleaned up while waiting for the login never reconnects", async () => {
+      let attempts = 0
+      const pipeline = createEventPipeline({
+        sdk: createUnauthorizedSdk(() => { attempts += 1 }),
+        onEvents: () => undefined,
+        transport: "sse",
+        heartbeatTimeoutMs: 60_000,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      pipeline.cleanup()
+      useAuthSessionStore.getState().markAuthenticated()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(attempts).toBe(1)
+    })
   })
 })
 

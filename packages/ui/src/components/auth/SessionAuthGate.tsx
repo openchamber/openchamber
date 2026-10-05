@@ -466,6 +466,12 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
         if (response.ok) {
           resetTransientRetry();
+          // The gate may already be 'authenticated' (the user logged in from
+          // another tab before pressing "Log in" here), so the state effect
+          // below would not fire; this answer itself proves the session alive.
+          if (useAuthSessionStore.getState().state !== 'ok') {
+            useAuthSessionStore.getState().markAuthenticated();
+          }
           setState('authenticated');
           setIsTunnelLocked(false);
           setErrorMessage('');

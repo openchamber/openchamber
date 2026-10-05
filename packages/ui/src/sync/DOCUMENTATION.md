@@ -503,6 +503,18 @@ covers the client cursor. The pipeline clears that cursor and the sync provider
 runs normal authoritative gap repair even during early boot. Ordinary reconnects
 retain their existing startup grace period.
 
+While `useAuthSessionStore` says the OpenChamber session is not usable
+(confirmed expiry, or a login in progress), the event pipeline and the
+OpenChamber control stream do not reconnect: every attempt would be refused
+with 401 (#3778). A stream that is still connected keeps running. The store
+returns to `ok` when a login succeeds, a confirm probe finds the session alive,
+or the session gate's status check answers 200, including the check behind the
+banner's "Log in" after the user already logged in from another tab. Then both
+streams reconnect at once, cutting short any backoff wait, and the normal
+reconnect callback repairs the gap. VS Code never reports an
+expired session, and native mobile clears it on the spot, so the pause applies
+where the session gate's banner and login exist.
+
 `SessionMessageLoader` is the shared authority for session message requests. Navigation, reactive chat loading, sidebar prefetch, pagination, reconnect/recovery, and optimistic reconciliation must delegate to it rather than issuing parallel initial requests.
 
 Rules:

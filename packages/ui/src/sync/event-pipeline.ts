@@ -21,6 +21,7 @@ import { GLOBAL_EVENT_DIRECTORY, routeWireEvent, syncEventSessionID, type SyncEv
 import type { Metadata } from "@/lib/opencode/model"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
+import { useAuthSessionStore, waitForAuthSession } from "@/lib/runtime-auth-expiry"
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -465,6 +466,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
    * Wait between reconnect attempts. Resolves early when:
    *   - the browser fires `online` (network came back — probe immediately),
    *   - the tab becomes visible (user came back — probe immediately),
+   *   - an expired OpenChamber session becomes usable (the user logged in),
    *   - the pipeline is being torn down (cleanup aborts).
    * Otherwise resolves after `ms` like a plain timer.
    */
@@ -486,6 +488,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         document.removeEventListener("visibilitychange", onVisibilityInterrupt)
       }
       abort.signal.removeEventListener("abort", onInterrupt)
+      unsubscribeAuthSession()
     }
     const onInterrupt = () => {
       cleanup()
@@ -505,6 +508,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       document.addEventListener("visibilitychange", onVisibilityInterrupt)
     }
     abort.signal.addEventListener("abort", onInterrupt, { once: true })
+    const unsubscribeAuthSession = useAuthSessionStore.subscribe((store, previous) => {
+      if (store.state === "ok" && previous.state !== "ok") onInterrupt()
+    })
   })
 
   const computeRetryDelay = (failures: number): number => {
@@ -853,6 +859,10 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
 
   void (async () => {
     while (!abort.signal.aborted) {
+      // An expired OpenChamber session refuses every attempt; wait for the
+      // user to log in rather than retrying into 401s.
+      await waitForAuthSession(abort.signal)
+      if (abort.signal.aborted) return
       attempt = new AbortController()
       lastEventAt = Date.now()
       attemptAbortReason = null

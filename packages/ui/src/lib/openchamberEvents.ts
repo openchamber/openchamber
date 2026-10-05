@@ -1,5 +1,6 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
+import { useAuthSessionStore, waitForAuthSession } from './runtime-auth-expiry';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
@@ -173,6 +174,7 @@ const worktreeChangedPropertiesSchema = z.object({
 let eventSource: EventSource | null = null;
 let relayAbortController: AbortController | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let authSessionWait: AbortController | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
@@ -189,8 +191,26 @@ const clearHeartbeatTimer = () => {
   heartbeatTimer = null;
 };
 
+const cancelAuthSessionWait = () => {
+  authSessionWait?.abort();
+  authSessionWait = null;
+};
+
 const scheduleReconnect = () => {
-  if (reconnectTimer || listeners.size === 0) {
+  if (reconnectTimer || authSessionWait || listeners.size === 0) {
+    return;
+  }
+  // An expired session answers every attempt with 401; wait for the login
+  // instead and reconnect right after it.
+  if (useAuthSessionStore.getState().state !== 'ok') {
+    const wait = new AbortController();
+    authSessionWait = wait;
+    void waitForAuthSession(wait.signal).then(() => {
+      if (wait.signal.aborted) return;
+      authSessionWait = null;
+      reconnectAttempt = 0;
+      connect();
+    });
     return;
   }
   const delay = Math.min(1_000 * Math.pow(2, Math.min(reconnectAttempt, 5)), MAX_RECONNECT_DELAY_MS);
@@ -538,6 +558,7 @@ const ensureRuntimeChangeSubscription = () => {
   if (runtimeChangeUnsubscribe || typeof window === 'undefined') return;
   runtimeChangeUnsubscribe = subscribeRuntimeEndpointChanged(() => {
     cleanupSource();
+    cancelAuthSessionWait();
     reconnectAttempt = 0;
     connect();
   });
@@ -564,6 +585,7 @@ export const subscribeOpenchamberEvents = (listener: Listener): (() => void) => 
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      cancelAuthSessionWait();
       reconnectAttempt = 0;
       cleanupSource();
       cleanupRuntimeChangeSubscription();
