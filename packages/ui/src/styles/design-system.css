@@ -234,6 +234,15 @@
     margin-inline-start: 1.25rem;
   }
 
+  /* Two-digit markers ("10.") need digit advance + period + a 0.3em marker
+     gap (~1.9em at common UI fonts) — wider than the fixed 1.25rem gutter, so
+     they clip at the nearest overflow-x edge once the font scales up (mobile
+     bumps --text-markdown to 1rem). Scale the ordered-list gutter with the
+     marker's own em instead. */
+  .markdown-content ol > li {
+    margin-inline-start: 2em;
+  }
+
   .markdown-content li::marker {
     color: currentColor;
   }
