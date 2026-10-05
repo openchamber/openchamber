@@ -91,6 +91,30 @@ describe('useGitStore', () => {
     useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
   });
 
+  test('recheckRepository re-probes a directory whose non-repository answer is still fresh', async () => {
+    let isRepository = false;
+    const git: GitAPI = {
+      ...createGitApi(async () => createStatus()),
+      checkIsGitRepository: async () => isRepository,
+    };
+    await useGitStore.getState().fetchStatus('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+
+    isRepository = true;
+    // An ordinary refresh trusts the cached answer for the stale window.
+    await useGitStore.getState().fetchStatus('/repo', git);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+
+    expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(true);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.status?.current).toBe('main');
+  });
+
+  test('recheckRepository reports a directory that is still not a repository', async () => {
+    const git: GitAPI = { ...createGitApi(async () => createStatus()), checkIsGitRepository: async () => false };
+    expect(await useGitStore.getState().recheckRepository('/repo', git)).toBe(false);
+    expect(useGitStore.getState().getDirectoryState('/repo')?.isGitRepo).toBe(false);
+  });
+
   test('keeps timed-out diff requests inside the concurrency limit until they settle', async () => {
     const paths = ['one.ts', 'two.ts', 'three.ts', 'four.ts'];
     setDirectoryStatus(createStatus({ staged: {}, working: {} }, paths.map((path) => ({ path, index: ' ', working_dir: 'M' }))));

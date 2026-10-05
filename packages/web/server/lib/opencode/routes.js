@@ -19,6 +19,7 @@ import {
   isProviderConnectRequest,
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
+import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -324,6 +325,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       ? res.status(403).json({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' })
       : next()
   ));
+
+  // `git init` in home or at a disk root makes a repository Git surfaces then
+  // ignore; refuse it here so no client can create one through the proxy.
+  app.use((req, res, next) => {
+    const refusal = vcsInitRefusal(req.method, req.originalUrl, req.headers);
+    return refusal ? res.status(400).json(vcsInitRefusalBody(refusal)) : next();
+  });
 
   app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {
     try {

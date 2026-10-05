@@ -11,7 +11,6 @@ import { normalizeGitOutputPath } from './output-path.js';
 
 import {
   getCurrentIdentity,
-  unsupportedRepositoryRootReason,
   checkoutBranch,
   checkoutCommit,
   cherryPick,
@@ -188,20 +187,19 @@ async function createTempRepo() {
 // resolveBaseRefForLog
 // ---------------------------------------------------------------------------
 
-describe('unsupportedRepositoryRootReason', () => {
-  it('rejects a repository rooted at a filesystem root or the home directory', () => {
-    const home = path.join(os.tmpdir(), 'unsupported-root-home');
-    expect(unsupportedRepositoryRootReason('/', home)).toBe('filesystem-root');
-    expect(unsupportedRepositoryRootReason(path.parse(process.cwd()).root, home)).toBe('filesystem-root');
-    expect(unsupportedRepositoryRootReason(home, home)).toBe('home');
-    expect(unsupportedRepositoryRootReason(`${home}${path.sep}`, home)).toBe('home');
-  });
+describe('getLog on a repository with no commits yet', () => {
+  it('answers an empty history instead of failing, then the first commit appears', async () => {
+    const { tmpDir, git } = await createTempRepo();
+    fs.writeFileSync(path.join(tmpDir, 'a.txt'), 'hello\n');
 
-  it('accepts an ordinary project root, including one directly under home', () => {
-    const home = path.join(os.tmpdir(), 'unsupported-root-home');
-    expect(unsupportedRepositoryRootReason(path.join(home, 'project'), home)).toBeNull();
-    expect(unsupportedRepositoryRootReason(path.join(os.tmpdir(), 'repo'), home)).toBeNull();
-    expect(unsupportedRepositoryRootReason('', home)).toBeNull();
+    const empty = { all: [], latest: null, total: 0 };
+    expect(await getLog(tmpDir, { maxCount: 25 })).toEqual(empty);
+    expect(await getLog(tmpDir, { maxCount: 25, all: true })).toEqual(empty);
+
+    await git.add('a.txt');
+    await git.commit('first');
+    const history = await getLog(tmpDir, { maxCount: 25 });
+    expect(history.all.map((entry) => entry.message)).toEqual(['first']);
   });
 });
 

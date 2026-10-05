@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
 import { normalizeGitOutputPath } from './output-path.js';
+import { unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
 
 const fsp = fs.promises;
@@ -2448,22 +2449,6 @@ const applyUpstreamConfiguration = async (args) => {
     ['branch', `--set-upstream-to=${upstream.full}`, localBranch],
     `Failed to set upstream to ${upstream.full}`
   );
-};
-
-/**
- * A repository whose root is the user's home directory or a filesystem root
- * (`C:\`, `/`) covers the whole disk. Every status read walks Program Files
- * or the entire home tree, which is minutes of Git work per refresh and, on
- * Windows, the process pile-ups users report. Such a repository is nearly
- * always an accidental `git init` in the wrong place, so OpenChamber treats
- * it as no repository at all. Returns the reason or null for a normal root.
- */
-export const unsupportedRepositoryRootReason = (repoRoot, home = os.homedir()) => {
-  if (typeof repoRoot !== 'string' || !repoRoot.trim()) return null;
-  const resolved = path.resolve(repoRoot.trim());
-  if (path.resolve(path.parse(resolved).root) === resolved) return 'filesystem-root';
-  if (typeof home === 'string' && home.trim() && path.resolve(home.trim()) === resolved) return 'home';
-  return null;
 };
 
 const warnedUnsupportedRoots = new Set();
@@ -6049,6 +6034,13 @@ export async function getLog(directory, options = {}) {
         return false;
       }
     };
+    // A fresh `git init` sits on a branch with no commits yet: HEAD names a
+    // branch that does not resolve. Its history is empty, not an error.
+    if (!options.to && !(await checkRef('HEAD'))) {
+      const unborn = await git.raw(['symbolic-ref', '-q', 'HEAD']).then(() => true, () => false);
+      if (unborn) return { all: [], latest: null, total: 0 };
+    }
+
     const resolvedFrom = await resolveBaseRefForLog(options.from, checkRef);
 
     // simple-git's `to` alone means HEAD..to, which is empty for the current

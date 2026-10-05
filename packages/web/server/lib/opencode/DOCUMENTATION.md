@@ -113,6 +113,14 @@ generic proxy, in and out of enterprise mode: anyone signed in to the UI,
 over a tunnel or a paired phone too, would otherwise read every key. Renaming,
 switching and removing an account still reach OpenCode.
 
+`POST /api/vcs/init` (OpenCode 2.0.23, runs `git init`) answers 400 with an
+`InvalidRequestError` body when it would create a repository in the home
+directory, at a disk root, or in OpenCode's own working directory because no
+directory was named (`vcsInitRefusal` in `../git/repository-root.js`). Git
+surfaces ignore a repository there, so the user would get a repository that
+covers every file and a Git tab that still says "not a repository". The UI
+hides its Initialize Git button in the same places.
+
 Keys OpenCode takes from environment variables (`ZAI_API_KEY`, ...) are never
 stored and `/api/credential` does not list them; `GET /api/integration` names
 the variable behind each such connection, but not its value. For a managed

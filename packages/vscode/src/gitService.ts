@@ -3387,6 +3387,14 @@ export async function getGitLog(
     return { all: entries, latest: entries[0] || null, total: entries.length };
   }
 
+  // A fresh `git init` sits on a branch with no commits yet: HEAD names a
+  // branch that does not resolve. Its history is empty, not an error.
+  if (!options?.to && (await execGit(['rev-parse', '--verify', '-q', 'HEAD'], directory)).exitCode !== 0) {
+    if ((await execGit(['symbolic-ref', '-q', 'HEAD'], directory)).exitCode === 0) {
+      return { all: [], latest: null, total: 0 };
+    }
+  }
+
   // Prefer the local ref; fall back to origin/<from> only when the local ref
   // cannot be resolved (e.g. user has never checked out the base branch).
   const resolvedFrom = await resolveBaseRefForLog(options?.from, directory);

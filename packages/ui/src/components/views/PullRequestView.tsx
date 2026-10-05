@@ -192,6 +192,7 @@ export const PullRequestView: React.FC = () => {
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return (
       <NestedRepoResolutionStates
+        root={currentDirectory}
         rootIsGitRepo={rootIsGitRepo}
         resolvedIsGitRepo={isGitRepo}
         nestedRepos={nestedRepos}

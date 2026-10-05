@@ -760,6 +760,8 @@ const transportMatches = (
 
 subscribeGitStatusInvalidations((directory) => {
   clearGitStatusCache(getRuntimeKey(), directory);
+  // A mutation can also turn a directory into a repository (Git initialized).
+  gitRepoCache.delete(getDirectoryCacheKey(getRuntimeKey(), directory));
 });
 
 const invalidateGitStatusCache = (directory: string): void => {

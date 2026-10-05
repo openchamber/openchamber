@@ -2420,6 +2420,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
     // none found, or settling on the auto-selected repository).
     return (
       <NestedRepoResolutionStates
+        root={currentDirectory}
         rootIsGitRepo={rootIsGitRepo}
         resolvedIsGitRepo={isGitRepo}
         nestedRepos={nestedRepos}

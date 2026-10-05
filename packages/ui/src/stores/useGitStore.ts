@@ -12,7 +12,7 @@ import type {
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
-import { subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
+import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
 import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
 
 const LOG_STALE_THRESHOLD = 10000;
@@ -119,6 +119,13 @@ interface GitStore {
   ensureNestedRepos: (root: string, options?: { force?: boolean }) => Promise<void>;
   selectNestedRepo: (root: string, repository: string) => void;
   clearNestedRepoSelection: (root: string) => void;
+
+  /**
+   * Re-probes a directory whose repository state just changed under the app
+   * (Git was initialized in it), skipping the cached non-repository answer.
+   * Resolves to whether the directory is now a repository.
+   */
+  recheckRepository: (directory: string, git: GitAPI) => Promise<boolean>;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
   resetForRuntimeSwitch: (runtimeKey: string) => void;
@@ -1418,6 +1425,17 @@ export const useGitStore = create<GitStore>()(
         nextStale.set(root, forRoot);
         set({ staleClearedSelections: nextStale });
         writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+      },
+
+      recheckRepository: async (directory, git) => {
+        // Drops adapter caches and fences off a probe started before the change.
+        notifyGitStatusInvalidated(directory);
+        const newDirectories = new Map(get().directories);
+        const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
+        newDirectories.set(directory, { ...dirState, lastRepoCheckAt: 0 });
+        set({ directories: newDirectories });
+        await get().fetchStatus(directory, git, { force: true });
+        return get().directories.get(directory)?.isGitRepo === true;
       },
 
       ensureStatus: async (directory, git) => {

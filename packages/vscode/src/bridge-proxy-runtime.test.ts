@@ -199,3 +199,48 @@ describe('VS Code API proxy read coalescing', () => {
     }
   });
 });
+
+describe('VS Code API proxy Git initialization', () => {
+  test('refuses to initialize Git in the home directory without reaching OpenCode', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+      const home = (await import('node:os')).homedir();
+      const response = await handleProxyBridgeMessage(
+        { id: 'init_home', type: 'api:proxy', payload: { method: 'POST', path: '/api/vcs/init', headers: { 'X-OpenCode-Directory': encodeURIComponent(home) } } },
+        ctx,
+        deps,
+      );
+      const data = response?.data as { status?: number; bodyText?: string };
+      assert.equal(data.status, 400);
+      assert.equal(JSON.parse(data.bodyText ?? '{}')._tag, 'InvalidRequestError');
+      assert.equal(fetchCount, 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('forwards Git initialization for a project directory', async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+      globalThis.fetch = (async () => {
+        fetchCount += 1;
+        return new Response(null, { status: 204 });
+      }) as typeof fetch;
+      const response = await handleProxyBridgeMessage(
+        { id: 'init_project', type: 'api:proxy', payload: { method: 'POST', path: '/api/vcs/init', headers: { 'x-opencode-directory': encodeURIComponent('/tmp/some-project') } } },
+        ctx,
+        deps,
+      );
+      assert.equal((response?.data as { status?: number }).status, 204);
+      assert.equal(fetchCount, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

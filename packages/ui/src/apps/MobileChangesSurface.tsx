@@ -948,6 +948,7 @@ export const MobileChangesPane: React.FC<MobileChangesPaneProps> = ({ rootDirect
   if (rootIsGitRepo === false && isGitRepo !== true) {
     return renderListState(
       <NestedRepoResolutionStates
+        root={rootDirectory}
         rootIsGitRepo={rootIsGitRepo}
         resolvedIsGitRepo={isGitRepo}
         nestedRepos={nestedRepos}

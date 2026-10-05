@@ -743,6 +743,15 @@ class OpencodeService {
     return call("vcs.get", () => this.clientFor(directory).vcs.get().then((r) => projectVcs(r.data)))
   }
 
+  /**
+   * Runs `git init` in a directory that has no repository yet (OpenCode
+   * 2.0.23). OpenCode refreshes its own view of the directory; the caller
+   * refreshes the app's Git state.
+   */
+  async initializeGit(directory: string): Promise<void> {
+    return call("vcs.init", () => this.clientFor(directory).vcs.init())
+  }
+
   // Get system information including home directory
   async getSystemInfo(): Promise<{ homeDirectory: string; username?: string }> {
     const candidates = new Set<string>()

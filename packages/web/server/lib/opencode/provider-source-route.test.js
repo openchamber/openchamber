@@ -180,3 +180,29 @@ describe('POST /api/provider/discover-models', () => {
     expect(JSON.stringify(response.body)).not.toContain('replacement-secret');
   });
 });
+
+describe('Git initialization through the proxy', () => {
+  it('refuses home, a disk root, and a request without a directory', async () => {
+    const agent = request(createApp(vi.fn()));
+    const os = await import('node:os');
+    const refused = [
+      agent.post('/api/vcs/init').set('x-opencode-directory', encodeURIComponent(os.homedir())),
+      agent.post('/api/vcs/init').set('x-opencode-directory', encodeURIComponent('/')),
+      agent.post('/API//vcs/init;x').set('x-opencode-directory', encodeURIComponent(os.homedir())),
+      agent.post(`/api/vcs/init?location%5Bdirectory%5D=${encodeURIComponent(os.homedir())}`),
+      agent.post('/api/vcs/init'),
+    ];
+    for (const response of await Promise.all(refused)) {
+      expect(response.status).toBe(400);
+      expect(response.body._tag).toBe('InvalidRequestError');
+    }
+  });
+
+  it('passes a project directory on to the proxy', async () => {
+    const response = await request(createApp(vi.fn()))
+      .post('/api/vcs/init')
+      .set('x-opencode-directory', encodeURIComponent('/tmp/some-project'));
+    // No proxy in this app: falling through reads as Express's 404.
+    expect(response.status).toBe(404);
+  });
+});

@@ -7,6 +7,7 @@ import {
   isEnterpriseMode,
   isProviderConnectRequest,
 } from '../../web/server/lib/enterprise-mode.js';
+import { vcsInitRefusal, vcsInitRefusalBody } from '../../web/server/lib/git/repository-root.js';
 import { isSessionRecordPath, overlaySessionResponseBody, parseJson, type SessionStateStore } from './openchamberSessionState';
 
 type BridgeMessageInput = {
@@ -110,6 +111,9 @@ const buildReadCoalesceKey = (targetUrl: string, headers: Record<string, string>
     .join('\n');
   return `GET ${targetUrl}\n${canonicalHeaders}`;
 };
+
+const normalizeHeaderKeys = (headers: Record<string, string> | undefined): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers ?? {}).map(([name, value]) => [name.toLowerCase(), value]));
 
 const performApiProxyFetch = async (
   targetUrl: string,
@@ -252,6 +256,17 @@ export async function handleProxyBridgeMessage(
           status: 403,
           headers: { 'content-type': 'application/json' },
           bodyText: JSON.stringify({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' }),
+        };
+        return { id, type, success: true, data };
+      }
+
+      // Same refusal as the web server: no repository in home or at a disk root.
+      const vcsInitRefused = vcsInitRefusal(normalizedMethod, resolvedPath, normalizeHeaderKeys(headers));
+      if (vcsInitRefused) {
+        const data: ApiProxyResponsePayload = {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify(vcsInitRefusalBody(vcsInitRefused)),
         };
         return { id, type, success: true, data };
       }
