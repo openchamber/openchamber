@@ -266,6 +266,11 @@
     vertical-align: middle;
   }
 
+  /* Pull back across the wider ordered-list gutter above. */
+  .markdown-content ol > li > input[type="checkbox"]:first-child {
+    margin-inline-start: -2em;
+  }
+
   .focus-ring-accent:focus-visible,
   [data-focus-ring="accent"]:focus-visible {
     outline: 2px solid var(--interactive-focus-ring) !important;
