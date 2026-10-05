@@ -38,3 +38,21 @@ export const migrateLegacyUserDirs = async ({ fsPromises, path, dataDir, legacyR
   }
   return moved;
 };
+
+/**
+ * Create the managed chats folder if it is missing. The UI reads it as soon as
+ * a new chat opens, and OpenCode answers every read of a missing folder with
+ * an error, which the sidebar showed as "Could not initialize workspace" on a
+ * fresh install until the first chat happened to create it. A folder that
+ * cannot be created (a relocated root this user cannot write) is reported
+ * through `warn` and the server keeps starting. Returns whether it exists now.
+ */
+export const ensureChatsDir = async ({ fsPromises, chatsDir, warn = () => {} }) => {
+  try {
+    await fsPromises.mkdir(chatsDir, { recursive: true });
+    return true;
+  } catch (error) {
+    warn(`Could not create the chats folder ${chatsDir}: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+};

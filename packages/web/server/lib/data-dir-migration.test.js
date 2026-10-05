@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import fsPromises from 'fs/promises';
 
-import { migrateLegacyUserDirs } from './data-dir-migration.js';
+import { ensureChatsDir, migrateLegacyUserDirs } from './data-dir-migration.js';
 
 const setup = async () => {
   const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-data-dir-'));
@@ -54,6 +54,38 @@ describe('migrateLegacyUserDirs', () => {
       expect(await fsPromises.readdir(path.join(legacyRoot, 'projects'))).toEqual(['p.json']);
     } finally {
       await cleanup();
+    }
+  });
+});
+
+describe('ensureChatsDir', () => {
+  it('creates a missing chats folder, parents included, and leaves an existing one as it is', async () => {
+    const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-chats-dir-'));
+    try {
+      const chatsDir = path.join(root, 'openchamber', 'chats');
+      expect(await ensureChatsDir({ fsPromises, chatsDir })).toBe(true);
+      expect((await fsPromises.stat(chatsDir)).isDirectory()).toBe(true);
+
+      await fsPromises.writeFile(path.join(chatsDir, 'keep.txt'), 'kept');
+      expect(await ensureChatsDir({ fsPromises, chatsDir })).toBe(true);
+      expect(await fsPromises.readFile(path.join(chatsDir, 'keep.txt'), 'utf8')).toBe('kept');
+    } finally {
+      await fsPromises.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a folder it cannot create and does not throw', async () => {
+    const root = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-chats-dir-'));
+    try {
+      // A file where a parent folder should be makes the folder impossible to create.
+      await fsPromises.writeFile(path.join(root, 'openchamber'), '');
+      const warnings = [];
+      const chatsDir = path.join(root, 'openchamber', 'chats');
+      expect(await ensureChatsDir({ fsPromises, chatsDir, warn: (message) => warnings.push(message) })).toBe(false);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(chatsDir);
+    } finally {
+      await fsPromises.rm(root, { recursive: true, force: true });
     }
   });
 });
