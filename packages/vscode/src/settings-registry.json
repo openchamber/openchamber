@@ -507,6 +507,9 @@
     "recentModels": {
       "scope": "profile"
     },
+    "lastSelectedModel": {
+      "scope": "profile"
+    },
     "recentAgents": {
       "scope": "profile"
     },

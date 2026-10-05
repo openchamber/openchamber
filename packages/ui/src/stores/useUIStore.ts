@@ -984,6 +984,8 @@ interface UIStore {
   collapsedModelProviders: string[];
   customProviderIcons: Record<string, CustomProviderIcon>;
   recentModels: Array<{ providerID: string; modelID: string }>;
+  /** `provider/model` last picked in a chat composer; a new session starts on it when nothing is configured. */
+  lastSelectedModel: string | undefined;
   recentAgents: string[];
   recentEfforts: Record<string, string[]>;
 
@@ -1247,6 +1249,7 @@ interface UIStore {
   setModelProvidersCollapsed: (providerIDs: string[], collapsed: boolean) => void;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
+  setLastSelectedModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
@@ -1445,6 +1448,7 @@ export const useUIStore = create<UIStore>()(
         collapsedModelProviders: [],
         customProviderIcons: {},
         recentModels: [],
+        lastSelectedModel: undefined,
         recentAgents: [],
         recentEfforts: {},
         diffLayoutPreference: 'inline',
@@ -2787,6 +2791,12 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setLastSelectedModel: (providerID, modelID) => {
+          const next = `${providerID}/${modelID}`;
+          if (get().lastSelectedModel === next) return;
+          set({ lastSelectedModel: next });
+        },
+
         addRecentAgent: (agentName) => {
           const normalized = typeof agentName === 'string' ? agentName.trim() : '';
           if (!normalized) {
@@ -3404,6 +3414,7 @@ export const useUIStore = create<UIStore>()(
           collapsedModelProviders: state.collapsedModelProviders,
           customProviderIcons: state.customProviderIcons,
           recentModels: state.recentModels,
+          lastSelectedModel: state.lastSelectedModel,
           recentAgents: state.recentAgents,
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,

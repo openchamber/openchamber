@@ -58,6 +58,8 @@ let forcePreserveManualOverride: boolean | null = null;
 const variantWrites: VariantChoice[] = [];
 /** Every `(override, inherited)` pair pushed into the config store. */
 const overrideWrites: Array<{ override: VariantChoice; inherited: string | undefined }> = [];
+/** Every model remembered as the last chat pick. */
+const lastSelectedWrites: string[] = [];
 
 type ConfigState = {
   providers: typeof provider[];
@@ -219,6 +221,7 @@ const useUIStore = create(() => ({
   setSettingsPage: () => undefined,
   addRecentAgent: () => undefined,
   addRecentModel: () => undefined,
+  setLastSelectedModel: (providerID: string, modelID: string) => { lastSelectedWrites.push(`${providerID}/${modelID}`); },
   addRecentEffort: () => undefined,
 }));
 
@@ -405,6 +408,7 @@ describe('ModelControls effort restore', () => {
   beforeEach(() => {
     variantWrites.length = 0;
     overrideWrites.length = 0;
+    lastSelectedWrites.length = 0;
     latestUserChoice = null;
     knownElsewhere = nothingKnownElsewhere();
     setSessionRecord(undefined);
@@ -490,6 +494,8 @@ describe('ModelControls effort restore', () => {
       expect(dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open')).toBe('true');
       expect(variantWrites).toContain('low');
       expect(variantWrites).not.toContain(null);
+      // Opening a session is not a pick: the next new session must not inherit its model.
+      expect(lastSelectedWrites).toEqual([]);
       expect(useSelectionStore.getState().savedVariant).toBe('low');
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('low');
     } finally {
@@ -509,6 +515,7 @@ describe('ModelControls effort restore', () => {
       expect(variantWrites).toContain('high');
       expect(useSelectionStore.getState().savedVariant).toBe('high');
       expect(useConfigStore.getState().currentVariantSelection.override).toBe('high');
+      expect(lastSelectedWrites).toEqual([]);
     } finally {
       await cleanup();
     }
@@ -944,6 +951,8 @@ describe('ModelControls effort restore', () => {
 
         await act(async () => setSessionRecord(recordWith(THIRD_MODEL_ID)));
         expect(useConfigStore.getState().currentModelId).toBe(THIRD_MODEL_ID);
+        // A switch made elsewhere is not this person's pick.
+        expect(lastSelectedWrites).toEqual([]);
       } finally {
         await cleanup();
       }

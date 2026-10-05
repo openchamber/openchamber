@@ -578,6 +578,45 @@ describe('openchamber session routes', () => {
     expect(configuredResponse.body.model).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
   });
 
+  it('starts on the model last picked in a chat when nothing names one (#1801)', async () => {
+    useCatalog({
+      models: [{ id: 'big-pickle', modelID: 'big-pickle', providerID: 'opencode', variants: [] }, ...CATALOG_MODELS],
+    });
+    const project = { projects: [{ id: 'proj_1', path: '/repo/app' }] };
+    const create = async (settings, routing = {}) => {
+      const { app } = createApp({ readSettingsFromDiskMigrated: async () => ({ ...project, ...settings }), ...routing });
+      const response = await request(app)
+        .post('/api/openchamber/sessions')
+        .send({ directory: '/repo/app', prompt: 'Run this' })
+        .expect(200);
+      return response.body.model;
+    };
+
+    expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5' }))
+      .toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-5' });
+    // Kept through a catalog gap, like a saved default.
+    expect(await create({ lastSelectedModel: 'claude-code/opus' }))
+      .toEqual({ providerID: 'claude-code', modelID: 'opus' });
+    // A configured default outranks it.
+    expect(await create({ lastSelectedModel: 'anthropic/claude-sonnet-5', defaultModel: 'openai/gpt-5.5' }))
+      .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    // Hidden since it was picked: skipped.
+    expect(await create({
+      lastSelectedModel: 'anthropic/claude-sonnet-5',
+      hiddenModels: [{ providerID: 'anthropic', modelID: 'claude-sonnet-5' }],
+    })).toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+    // Auto on a server without routing, or with routing that cannot run it
+    // now: skipped instead of refusing the request.
+    expect(await create({ lastSelectedModel: 'openchamber/auto' }))
+      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+    const resolveAutoSelection = vi.fn(async () => ({ model: { providerID: 'openai', id: 'gpt-5.5' }, agent: 'build', decision: {} }));
+    expect(await create({ lastSelectedModel: 'openchamber/auto' }, { resolveAutoSelection, isAutoReady: async () => false }))
+      .toEqual({ providerID: 'opencode', modelID: 'big-pickle' });
+    expect(resolveAutoSelection).not.toHaveBeenCalled();
+    expect(await create({ lastSelectedModel: 'openchamber/auto' }, { resolveAutoSelection, isAutoReady: async () => true }))
+      .toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+  });
+
   it('resolves an Auto default through the routing hook before switching the session', async () => {
     useCatalog();
     const resolveAutoSelection = vi.fn(async () => ({

@@ -349,6 +349,7 @@ export const useKeyboardShortcuts = () => {
     config.setProvider(next.providerID);
     config.setModel(next.modelID);
     state.addRecentModel(next.providerID, next.modelID);
+    state.setLastSelectedModel(next.providerID, next.modelID);
   }
 
   React.useEffect(() => {

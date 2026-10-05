@@ -439,6 +439,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setProviderOrder = useUIStore((state) => state.setProviderOrder);
     const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
     const addRecentModel = useUIStore((state) => state.addRecentModel);
+    const setLastSelectedModel = useUIStore((state) => state.setLastSelectedModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
     const globalModelSelectorOpen = useUIStore((state) => !selection && state.isModelSelectorOpen);
@@ -1501,6 +1502,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 // Add to recent models on successful selection. Auto is pinned, not recent.
                 addRecentModel(providerId, modelId);
             }
+            if (!selection) {
+                // A new session starts on this pick when nothing configured names a
+                // model. Only a person's pick writes it, never a session restore.
+                setLastSelectedModel(providerId, modelId);
+            }
             setAgentMenuOpen(false);
             if (isCompact) {
                 closeMobilePanel();
@@ -1854,6 +1860,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 }
                 return;
             }
+            if (!selection) setLastSelectedModel(providerId, modelId);
 
             setExpandedMobileModelKey(null);
             closeMobilePanel();

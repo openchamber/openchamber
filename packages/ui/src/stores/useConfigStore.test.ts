@@ -290,7 +290,7 @@ describe('useConfigStore provider persistence', () => {
       lastUsedProvider: null,
     });
     useSessionUIStore.setState({ currentSessionId: null, availableWorktreesByProject: new Map() });
-    useUIStore.setState({ hiddenModels: [] });
+    useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined });
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -2000,6 +2000,53 @@ describe('useConfigStore provider persistence', () => {
       agents: [testAgent('build')],
       settingsDefaultModel: 'opencode/big-pickle',
     });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
+  });
+
+  test('a new session starts on the model last picked in a chat when nothing is configured (#1801)', async () => {
+    const providers = [provider('opencode', 'big-pickle'), provider('deepseek', 'v4-pro')];
+    useConfigStore.setState({ providers, agents: [testAgent('build')] });
+    useUIStore.getState().setLastSelectedModel('deepseek', 'v4-pro');
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro', selectionSource: 'auto' });
+
+    // After a restart the catalog load lands on it too.
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerResponse('opencode', 'big-pickle').providers[0], providerResponse('deepseek', 'v4-pro').providers[0]],
+      models: [providerResponse('opencode', 'big-pickle').models[0], providerResponse('deepseek', 'v4-pro').models[0]],
+      default: { providerID: 'opencode', id: 'big-pickle' },
+    });
+    useConfigStore.setState({ currentProviderId: '', currentModelId: '' });
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'deepseek', currentModelId: 'v4-pro' });
+  });
+
+  test('the last chat pick survives a provider that has not registered yet', () => {
+    useConfigStore.setState({ providers: [provider('opencode', 'big-pickle')], agents: [testAgent('build')] });
+    useUIStore.getState().setLastSelectedModel('claude-code', 'opus');
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'claude-code', currentModelId: 'opus' });
+  });
+
+  test('anything configured outranks the last chat pick, and a hidden pick is skipped', () => {
+    const providers = [provider('opencode', 'big-pickle'), provider('deepseek', 'v4-pro'), provider('anthropic', 'claude')];
+    useUIStore.getState().setLastSelectedModel('deepseek', 'v4-pro');
+
+    useConfigStore.setState({ providers, agents: [testAgent('build')], settingsDefaultModel: 'anthropic/claude' });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState().currentModelId).toBe('claude');
+
+    useConfigStore.setState({ settingsDefaultModel: undefined, agents: [testAgent('build', { model: { providerID: 'anthropic', modelID: 'claude' } })] });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState().currentModelId).toBe('claude');
+
+    useConfigStore.setState({ agents: [testAgent('build')], opencodeDefaultModel: 'anthropic/claude' });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState().currentModelId).toBe('claude');
+
+    useConfigStore.setState({ opencodeDefaultModel: undefined });
+    useUIStore.setState({ hiddenModels: [{ providerID: 'deepseek', modelID: 'v4-pro' }] });
     useConfigStore.getState().applyDefaultModelAgentSelection();
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'opencode', currentModelId: 'big-pickle' });
   });

@@ -91,14 +91,16 @@ const resolveVariant = (models, providerID, modelID, variant) => {
   return asList(model.variants).some((entry) => entry?.id === normalized) ? normalized : undefined;
 };
 
-// The pick when nothing is configured: Big Pickle, else the first model. A model
-// the user hid in the picker is skipped; configured defaults never come through
-// here, so they stay honoured even when hidden. With every model hidden the
-// session still needs one, so the unfiltered pick stands.
+const isModelHidden = (hiddenModels, providerID, modelID) => hiddenModels.some(
+  (hidden) => hidden?.providerID === providerID && hidden?.modelID === modelID,
+);
+
+// The pick when nothing is configured or remembered: Big Pickle, else the first
+// model. A model the user hid in the picker is skipped; configured defaults never
+// come through here, so they stay honoured even when hidden. With every model
+// hidden the session still needs one, so the unfiltered pick stands.
 const resolveFallbackModel = (models, hiddenModels) => {
-  const isVisible = (providerID, modelID) => !hiddenModels.some(
-    (hidden) => hidden?.providerID === providerID && hidden?.modelID === modelID,
-  );
+  const isVisible = (providerID, modelID) => !isModelHidden(hiddenModels, providerID, modelID);
   const candidates = models.filter(
     (entry) => asNonEmptyString(entry?.providerID) && asNonEmptyString(entry?.modelID),
   );
@@ -155,7 +157,7 @@ const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) =>
   return { settings, models, agents, opencodeDefaultAgent, opencodeDefaultModel };
 };
 
-const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel }) => {
+const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel, autoAvailable }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
   const projectDefaultAgent = asNonEmptyString(projectDefaults?.defaultAgent);
@@ -212,7 +214,19 @@ const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, op
     variant = resolveVariant(models, model.providerID, model.modelID, opencodeDefaultModel.variant);
   }
 
-  if (!model) model = resolveFallbackModel(models, asList(settings?.hiddenModels));
+  // The model last picked in a chat composer. Like a saved default it is kept
+  // through catalog gaps; a model hidden since, or Auto on a server without
+  // routing, is skipped.
+  const hiddenModels = asList(settings?.hiddenModels);
+  const lastSelectedModel = splitModel(settings?.lastSelectedModel);
+  if (!model
+    && lastSelectedModel
+    && !isModelHidden(hiddenModels, lastSelectedModel.providerID, lastSelectedModel.modelID)
+    && (autoAvailable || !isAutoModel(lastSelectedModel))) {
+    model = lastSelectedModel;
+  }
+
+  if (!model) model = resolveFallbackModel(models, hiddenModels);
 
   return {
     agent: resolvedAgent?.id,
@@ -418,6 +432,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     // `openchamber/auto` (Session Defaults) is resolved here before the
     // session is switched onto it. Null when routing is not wired in.
     resolveAutoSelection = null,
+    // Whether routing can run Auto right now (the composer's own test). Null
+    // when routing is not wired in.
+    isAutoReady = null,
   } = dependencies;
 
   if ((!injectedArchiveStore || !injectedSessionMetadataStore) && !dataDir) {
@@ -543,9 +560,15 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
     if (!model || !agent) {
       const inputs = await fetchSelectionInputs({ client, readSettingsFromDiskMigrated });
+      // Asked only when the last chat pick is Auto; an unanswerable question
+      // skips that pick rather than refusing the request.
+      const autoAvailable = isAutoModel(splitModel(inputs.settings?.lastSelectedModel))
+        && isAutoReady !== null
+        && await isAutoReady().catch(() => false);
       const defaults = resolveDefaultSelection({
         ...inputs,
         projectDefaults: resolveProjectDefaults(inputs.settings, directory, projectId),
+        autoAvailable,
       });
       if (!model) {
         model = defaults.model;

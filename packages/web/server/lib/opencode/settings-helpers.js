@@ -44,6 +44,8 @@ const customProviderIconsSchema = z.record(
   z.enum(['server', 'cloud', 'database', 'terminal', 'code', 'ai']),
 );
 const CUSTOM_PROVIDER_ICONS_MAX = 256;
+// `provider/model` last picked in a chat composer.
+const lastSelectedModelSchema = z.string().trim().min(1).max(512);
 
 /** Provider id -> icon id; unknown icons and malformed entries are dropped one by one. */
 const sanitizeCustomProviderIcons = (value) => {
@@ -597,6 +599,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.defaultModel === 'string') {
       const trimmed = candidate.defaultModel.trim();
       result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    const lastSelectedModel = lastSelectedModelSchema.safeParse(candidate.lastSelectedModel);
+    if (lastSelectedModel.success) {
+      result.lastSelectedModel = lastSelectedModel.data;
     }
     if (typeof candidate.defaultVariant === 'string') {
       const trimmed = candidate.defaultVariant.trim();

@@ -26,7 +26,7 @@ export const useMiniChatKeyboardShortcuts = () => {
 
   const cycleFavoriteModel = (delta: number): boolean | void => {
     if (hasActiveBtwComposer()) return false;
-    const { favoriteModels, addRecentModel } = useUIStore.getState();
+    const { favoriteModels, addRecentModel, setLastSelectedModel } = useUIStore.getState();
     if (favoriteModels.length === 0) return false;
 
     const {
@@ -42,6 +42,7 @@ export const useMiniChatKeyboardShortcuts = () => {
     setProvider(next.providerID);
     setModel(next.modelID);
     addRecentModel(next.providerID, next.modelID);
+    setLastSelectedModel(next.providerID, next.modelID);
   };
 
   useKeybinds({
