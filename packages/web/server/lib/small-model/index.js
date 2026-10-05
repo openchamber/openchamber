@@ -5,6 +5,7 @@ import path from 'path';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
 import {
   findModelInfo,
+  getConfiguredSmallModelRef,
   getDefaultModelInfo,
   getSmallModelClient,
   listModelInfos,
@@ -115,10 +116,7 @@ const noClientError = () => Object.assign(
  * `packages/core/src/catalog.ts`); OpenCode does not expose that lookup over
  * HTTP, so the scan is repeated here on `GET /api/model`.
  */
-export const SMALL_MODEL_FAMILY_PRIORITY = ['gpt-luna', 'gemini-flash-lite', 'gemini-flash', 'claude-haiku', 'gpt-nano', 'gpt-mini'];
-// The last two are not on OpenCode's list; v1 counted them as small and a
-// provider with nothing else cheap (Copilot's utility models, for one)
-// would otherwise fall through to the session's big model.
+export const SMALL_MODEL_FAMILY_PRIORITY = ['gpt-luna', 'gemini-flash-lite', 'gemini-flash', 'claude-haiku'];
 
 /**
  * A model's family: the catalog's `family` (models.dev) when it has one,
@@ -132,8 +130,6 @@ export const familyOf = (model) => {
   if (id.includes('flash-lite') || id.includes('flash_lite')) return 'gemini-flash-lite';
   if (id.includes('flash')) return 'gemini-flash';
   if (id.includes('haiku')) return 'claude-haiku';
-  if (id.includes('nano')) return 'gpt-nano';
-  if (id.includes('mini') && !id.includes('minimax')) return 'gpt-mini';
   return null;
 };
 
@@ -164,13 +160,15 @@ const pickSmallModel = (models, accept) => {
  *
  * 1. An explicit request model.
  * 2. OpenChamber's settings override (Settings → Sessions → Small Model).
- * 3. The small model of the caller's provider — the session's, or the one
+ * 3. The small model configured for OpenCode itself: the `title` agent's
+ *    model (`agents.title.model`, or v1 `small_model`) — `config`.
+ * 4. The small model of the caller's provider — the session's, or the one
  *    in the composer (family scan above) — `session-provider-small`. A caller
  *    that must not leave that provider then takes its own model
  *    (`session-model`): costlier, but never someone else's subscription.
- * 4. `GET /api/model/default`: OpenCode's default model — `default`. This is
- *    the chat default, not a small model; OpenCode's own small-model chain is
- *    not reachable over HTTP, which is why step 3 lives here.
+ * 5. `GET /api/model/default`: OpenCode's default model — `default`. This is
+ *    the chat default, not a small model; OpenCode's own family scan is not
+ *    reachable over HTTP, which is why step 4 lives here.
  *
  * There is no step that picks a small model from whichever other provider
  * happens to be connected: the content (diffs, replies, session text) goes
@@ -182,6 +180,15 @@ const resolveSmallModel = async ({ client, directory, model, preferredProviderID
 
   const fromSettings = parseModelRef(readSmallModelSettingsOverride());
   if (fromSettings) return { ...fromSettings, source: 'settings' };
+
+  // A config can outlive the login behind it. OpenCode's own titles then move
+  // on to another model, so a model it lists as disabled is skipped here too;
+  // one it does not list (a plugin model still loading) is kept.
+  const fromConfig = await getConfiguredSmallModelRef(client);
+  if (fromConfig) {
+    const info = findModelInfo(await listModelInfos(client, directory), fromConfig.providerID, fromConfig.modelID);
+    if (info?.enabled !== false) return { ...fromConfig, source: 'config' };
+  }
 
   if (preferredProviderID) {
     const small = pickSmallModelInProvider(await listModelInfos(client, directory), preferredProviderID);
@@ -254,9 +261,10 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   }
 
   // A caller that must stay on its session's provider is only overruled by an
-  // explicit user choice (the settings override or a request model).
+  // explicit user choice (a request model, the settings override, or the
+  // small model configured for OpenCode).
   if (restrictToPreferredProvider
-    && !['settings', 'request'].includes(resolved.source)
+    && !['settings', 'request', 'config'].includes(resolved.source)
     && preferredProviderID
     && resolved.providerID !== preferredProviderID) {
     throw Object.assign(

@@ -108,6 +108,23 @@ export async function getDefaultModelInfo(client) {
 }
 
 /**
+ * The model the user configured for OpenCode's hidden `title` agent, or `null`
+ * when there is none. OpenCode 2 merges `agents.title.model` and the v1
+ * `small_model` (migrated onto that agent) across every config layer, and its
+ * own session titles run on this model before any family scan.
+ */
+export async function getConfiguredSmallModelRef(client) {
+  try {
+    const { model } = (await client.agent.get({ agentID: 'title' })).data;
+    return model ? { providerID: model.providerID, modelID: model.id } : null;
+  } catch {
+    // No `title` agent (removed in config, or a cold location still loading
+    // its agents) or OpenCode unreachable: nothing configured to honor.
+    return null;
+  }
+}
+
+/**
  * The model entry for a `provider/model` reference. `id` is the catalog key a
  * reference holds; `modelID` is the provider API name, shared by derived
  * entries (`gpt-6-luna` and `gpt-6-luna-fast`), so an exact `id` match wins.

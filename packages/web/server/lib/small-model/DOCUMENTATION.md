@@ -53,40 +53,55 @@ login `generateSmallModelText` throws `404`. What happens next is per feature:
 
 ## Model resolution
 
-Four things are decided here, in order:
+Five things are decided here, in order:
 
 1. An explicit `model` on the request (`provider/model`) — `source: 'request'`.
 2. OpenChamber's settings override (Settings → Sessions → Small Model): when
    `smallModelUseDefault` is `false`, `smallModelOverride` wins —
    `source: 'settings'`.
-3. The small model of the caller's provider (`preferredProviderID`: the
+3. The small model configured for OpenCode itself — `source: 'config'`. OpenCode
+   2 has no `small_model` key of its own: it migrates the v1 `small_model` onto
+   its hidden `title` agent, whose native form is `agents.title.model`, and
+   its session titles run on that model before any family scan.
+   `getConfiguredSmallModelRef` reads it from `GET /api/agent/title` in the
+   caller's directory, so OpenCode's own merge of global, project and
+   `OPENCODE_CONFIG` layers decides it; nothing here parses config files.
+   Read on every call, never cached: OpenCode watches its config, so an edit
+   applies without a restart. A cold location can answer 404 for a few
+   seconds while its agents load; that call falls through to step 4 and the
+   next one sees the model. A model OpenCode lists as disabled (the login
+   behind it is gone) is skipped the same way, as OpenCode's own titles move
+   on to another model then; one it does not list yet (a plugin model still
+   loading) is kept. Like the settings override, it is a choice the
+   user made on purpose, so a caller restricted to its session's provider
+   accepts it.
+4. The small model of the caller's provider (`preferredProviderID`: the
    session's, or the composer's for commit messages, PR descriptions, spoken
    summaries, the diff walkthrough and extensions) —
    `source: 'session-provider-small'` — found by `pickSmallModelInProvider`:
    the newest enabled, active, text-in text-out model of the first family in
    `SMALL_MODEL_FAMILY_PRIORITY` (`gpt-luna`, `gemini-flash-lite`,
-   `gemini-flash`, `claude-haiku`, then `gpt-nano`, `gpt-mini`) that the
-   provider has. The first four are OpenCode's own list for its session
-   titles (`Catalog.model.small`), repeated here because OpenCode does not
-   expose it over HTTP; the last two are v1's additions so a provider with
-   only utility models (Copilot) still gets a cheap one. Families are
+   `gemini-flash`, `claude-haiku`) that the provider has. This is
+   OpenCode's own list for its session titles (`Catalog.model.small`),
+   repeated here because OpenCode does not expose it over HTTP. Families are
    models.dev `family` values, not model ids (`gpt-luna` is the family of
    `gpt-5.6-luna`); a model without one — a custom provider, a subscription
    outside the catalog — gets its family read from its id (`familyOf`:
-   luna / flash-lite / flash / haiku / nano / mini). A caller that passes `restrictToPreferredProvider`
+   luna / flash-lite / flash / haiku). A caller that passes `restrictToPreferredProvider`
    (session titles, the session goal, session assist, notes from a selection)
    and finds none then takes the session's own model — `source:
    'session-model'`: costlier than a small model elsewhere, but never another
    provider's subscription.
-4. Otherwise `GET /api/model/default` — `source: 'default'`. This is
+5. Otherwise `GET /api/model/default` — `source: 'default'`. This is
    OpenCode's default chat model, not a small one; it is the last resort.
 
 There is deliberately no step that takes a small model from whichever other
 provider is connected. Until 2026-09 one existed (`source: 'small'`, after
-step 3); it sent diffs and replies to a provider the user never chose for
+the family scan); it sent diffs and replies to a provider the user never chose for
 them, and the walkthrough and extensions reached it without even passing
 their provider. Content goes only to the provider the user works with, the
-model they picked, or the default they configured.
+model they picked, the small model they set for OpenCode, or the default they
+configured.
 
 Claude Code (`claude-code`, from the opencode-claude plugin) is a provider
 like any other: its generate path runs a clean one-shot turn with no tools and
