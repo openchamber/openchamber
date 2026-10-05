@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.fn();
@@ -273,6 +276,11 @@ describe('OpenCode lifecycle', () => {
   });
 
   it('warms only the last-used directory after a successful bootstrap', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-warm-'));
+    const lastUsed = path.join(root, 'worktree-a');
+    const otherProject = path.join(root, 'project-b');
+    await fs.mkdir(lastUsed);
+    await fs.mkdir(otherProject);
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
@@ -287,7 +295,7 @@ describe('OpenCode lifecycle', () => {
         ENV_SKIP_OPENCODE_START: true,
       },
       reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
-      getWarmupDirectories: vi.fn(async () => ['/tmp/worktree-a', '/tmp/project-b']),
+      getWarmupDirectories: vi.fn(async () => [lastUsed, otherProject]),
     });
 
     await runtime.bootstrapOpenCodeAtStartup();
@@ -300,10 +308,196 @@ describe('OpenCode lifecycle', () => {
     // v2 reads the directory from the header, and only location routes start
     // one: `/api/session` is a global list.
     expect(warmups).toEqual([
-      ['http://127.0.0.1:45678/api/location', '%2Ftmp%2Fworktree-a'],
+      ['http://127.0.0.1:45678/api/location', encodeURIComponent(lastUsed)],
     ]);
     // Server-side reads without a directory of their own go to the warmed one.
-    expect(runtime.getDefaultOpenCodeDirectory()).toBe('/tmp/worktree-a');
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(lastUsed);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('answers null once the warmed default directory is no longer usable', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-stale-'));
+    const stale = path.join(root, 'worktree-a');
+    await fs.mkdir(stale);
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => [stale]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // While the directory is usable, it scopes default reads.
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+
+    // The project directory is removed while the server keeps running. The
+    // cached default must not keep being handed to OpenCode: a stale path
+    // makes every directory-scoped read answer 500 (the bug behind the quota
+    // endpoints' "UnexpectedStatus: 500").
+    await fs.rm(stale, { recursive: true, force: true });
+    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+
+    // A path that now points at a regular file is not a directory either.
+    await fs.writeFile(stale, 'x');
+    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('advances to a currently-valid warmup directory when the cached default goes stale', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-replace-'));
+    const stale = path.join(root, 'gone');
+    const surviving = path.join(root, 'still-here');
+    await fs.mkdir(stale);
+    await fs.mkdir(surviving);
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    // The warm pass offered both; only the first was cached as the default.
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => [stale, surviving]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+
+    // Removing the first still leaves a valid directory: default reads keep
+    // their location scope rather than dropping it entirely.
+    await fs.rm(stale, { recursive: true, force: true });
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(surviving);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('re-resolves the settings-backed default when the cached one is stale', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-refresh-'));
+    const stale = path.join(root, 'old-project');
+    const navigated = path.join(root, 'new-project');
+    await fs.mkdir(stale);
+    await fs.mkdir(navigated);
+    let current = stale;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      // Mirrors the real dep: the warmup source answers the settings'
+      // lastDirectory, which moves as the user navigates.
+      getWarmupDirectories: vi.fn(async () => [current]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(stale);
+
+    // The user navigated to another project while the old one vanished.
+    await fs.rm(stale, { recursive: true, force: true });
+    current = navigated;
+    // First read drops the stale default and kicks the refresh; the next read
+    // sees the re-resolved, currently-valid directory and scopes to it.
+    expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(navigated);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  // Windows chmod only toggles the read-only attribute, and root ignores the
+  // permission bits, so neither can take read/execute away from a directory.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('treats a directory without read/execute permission as unusable', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-perm-'));
+    const locked = path.join(root, 'locked');
+    await fs.mkdir(locked);
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }),
+    }));
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => [locked]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runtime.getDefaultOpenCodeDirectory()).toBe(locked);
+
+    // OpenCode answers 500 FileSystem.realPath for a directory it cannot read
+    // or traverse, same as for a missing one, so it must not be sent.
+    await fs.chmod(locked, 0o000);
+    try {
+      expect(runtime.getDefaultOpenCodeDirectory()).toBeNull();
+    } finally {
+      await fs.chmod(locked, 0o755);
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not scope the restart agent check to a directory that went stale', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-agent-'));
+    const stale = path.join(root, 'worktree-a');
+    await fs.mkdir(stale);
+    const requested = [];
+    globalThis.fetch = vi.fn(async (url, init) => {
+      requested.push([String(url), init?.headers?.['x-opencode-directory'] ?? null]);
+      if (String(url).endsWith('/api/info')) {
+        return { ok: true, json: async () => ({ version: '2.0.20', pid: 1, urls: [], paths: { tmp: '/tmp' } }) };
+      }
+      return { ok: true, json: async () => ({ data: [{ id: 'build' }] }) };
+    });
+    const runtime = createRuntime({
+      env: {
+        ENV_CONFIGURED_OPENCODE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOST: null,
+        ENV_EFFECTIVE_PORT: 45678,
+        ENV_CONFIGURED_OPENCODE_HOSTNAME: '127.0.0.1',
+        ENV_SKIP_OPENCODE_START: true,
+      },
+      reapManagedOrphanedProcesses: vi.fn(async () => ({ reaped: 0 })),
+      getWarmupDirectories: vi.fn(async () => [stale]),
+    });
+
+    await runtime.bootstrapOpenCodeAtStartup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await fs.rm(stale, { recursive: true, force: true });
+    await expect(runtime.waitForAgentPresence('build', 500, 50)).resolves.toBeUndefined();
+
+    const agentChecks = requested.filter(([url]) => url.endsWith('/api/agent'));
+    expect(agentChecks.length).toBeGreaterThan(0);
+    expect(agentChecks.every(([, directory]) => directory === null)).toBe(true);
+    await fs.rm(root, { recursive: true, force: true });
   });
 
   it('records an authoritative error terminal event when bootstrap fails', async () => {
