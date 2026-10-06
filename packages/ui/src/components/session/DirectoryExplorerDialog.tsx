@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { initialBrowseQuery } from './directoryExplorerStart';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -250,7 +251,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     const resolveHome = async () => {
       const resolved = await resolveFreshFilesystemHome();
       if (cancelled) return;
-      setDialogHomeDirectory(resolved || homeDirectory || '');
+      const home = resolved || homeDirectory || '';
+      setDialogHomeDirectory(home);
+      // Only while the field still holds the untouched default.
+      const start = initialBrowseQuery(useProjectsStore.getState().projects, home);
+      setQuery((current) => (current === '~/' ? start : current));
       requestAnimationFrame(() => focusPathInput(inputRef.current));
     };
     void resolveHome();
