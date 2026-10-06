@@ -513,6 +513,9 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
         <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
             <ScrollShadow
                 ref={scrollRef}
+                // Tool output boxes are short (often 240px), so the 48px default
+                // fade would hide a couple of lines at each edge.
+                size={24}
                 data-scrollable="true"
                 onWheelCapture={(event) => {
                     if (followKey !== undefined && event.deltaY < 0) {

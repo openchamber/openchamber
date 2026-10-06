@@ -247,7 +247,7 @@ export const NotesSection: React.FC<{
         resizedHeight={notesPanelHeight}
         onResizeHeightChange={setNotesPanelHeight}
         useScrollShadow
-        scrollShadowSize={56}
+        scrollShadowSize={24}
         disabled={disabled}
         endSlot={(
           <>
