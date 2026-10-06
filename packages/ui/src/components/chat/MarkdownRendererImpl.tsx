@@ -17,7 +17,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isVSCodeRuntime, openDesktopPath } from '@/lib/desktop';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
@@ -435,10 +435,16 @@ const useFileReferenceInteractions = ({
       unwrapBlockCodePathTokens(container);
     };
 
-    const openFileReference = async (sourceElement: HTMLElement) => {
+    const openFileReference = async (sourceElement: HTMLElement, options?: { external: boolean }) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
+        return;
+      }
+
+      // Cmd/Ctrl-click hands the file to the OS, which opens it with the app
+      // that owns its type; where that is not possible it opens here as usual.
+      if (options?.external && isDesktopLocalOriginActive() && await openDesktopPath(resolved.resolvedPath)) {
         return;
       }
 

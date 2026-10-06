@@ -18,8 +18,11 @@ type FileReferenceClickGuardOptions = {
   hrefCandidate: (anchor: HTMLAnchorElement) => string | null;
   /** True when the candidate is a resolvable file reference. */
   isResolvable: (raw: string) => boolean;
-  /** Open the file reference carried by the element. */
-  openFileReference: (element: HTMLElement) => void;
+  /**
+   * Open the file reference carried by the element. `external` is set for a
+   * Cmd-click (macOS) or Ctrl-click: open it in the system's default app.
+   */
+  openFileReference: (element: HTMLElement, options: { external: boolean }) => void;
 };
 
 type FileReferenceClickContainer = {
@@ -55,7 +58,8 @@ export const attachFileRefClickGuard = (
     if (!element) return;
     event.preventDefault();
     event.stopPropagation();
-    options.openFileReference(element);
+    const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+    options.openFileReference(element, { external: isMac ? event.metaKey : event.ctrlKey });
   };
   container.addEventListener('click', handleClick);
   return () => container.removeEventListener('click', handleClick);

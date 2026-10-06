@@ -49,9 +49,11 @@ class TestContainer {
     this.listeners.delete(type);
   }
 
-  dispatchClick(target: TestElement): Event {
+  dispatchClick(target: TestElement, modifiers: { ctrlKey?: boolean; metaKey?: boolean } = {}): Event {
     const event = new Event('click', { cancelable: true });
     Object.defineProperty(event, 'target', { value: target });
+    Object.defineProperty(event, 'ctrlKey', { value: modifiers.ctrlKey ?? false });
+    Object.defineProperty(event, 'metaKey', { value: modifiers.metaKey ?? false });
     this.listeners.get('click')?.(event);
     return event;
   }
@@ -66,6 +68,7 @@ const makeAnchor = (href: string, annotated = false): TestHTMLAnchorElement => {
 const setup = () => {
   const container = new TestContainer();
   const openedHrefs: string[] = [];
+  const externalFlags: boolean[] = [];
   const cleanup = attachFileRefClickGuard(container, {
     hrefCandidate: (anchor) => {
       const href = anchor.getAttribute('href')?.trim() ?? '';
@@ -73,12 +76,27 @@ const setup = () => {
       return href.startsWith('file:') || href.startsWith('src/') ? href : null;
     },
     isResolvable: (raw) => raw.length > 0,
-    openFileReference: (element) => openedHrefs.push(element.getAttribute('href') ?? ''),
+    openFileReference: (element, options) => {
+      openedHrefs.push(element.getAttribute('href') ?? '');
+      externalFlags.push(options.external);
+    },
   });
-  return { container, openedHrefs, cleanup };
+  return { container, openedHrefs, externalFlags, cleanup };
 };
 
 describe('file reference click guard', () => {
+  test('asks for the default app on the platform modifier click only', () => {
+    const { container, externalFlags } = setup();
+    const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+    const link = makeAnchor('src/index.ts', true);
+
+    container.dispatchClick(link);
+    container.dispatchClick(link, isMac ? { metaKey: true } : { ctrlKey: true });
+    container.dispatchClick(link, isMac ? { ctrlKey: true } : { metaKey: true });
+
+    expect(externalFlags).toEqual([false, true, false]);
+  });
+
   test('routes a pre-annotation click on an href file reference to the file viewer', () => {
     const { container, openedHrefs } = setup();
     const link = makeAnchor('src/index.ts');
