@@ -43,7 +43,7 @@ worktree setup commands and `/api/fs/exec`. There are two layers:
 | Process | Variables | Wired in |
 |---|---|---|
 | Managed OpenCode | service env, then user (none in enterprise mode) | `opencode/lifecycle.js` `getUserEnvironment` |
-| Git (every command, hooks included) | user, command output, project; minus the names simple-git refuses and the repository-location names | `git/service.js` `configureGitEnvironment` / `buildGitEnv(directory)` |
+| Git commands in `git/service.js`, hooks included (push, pull and fetch run through `git/network-operations.js` with its own scrubbed environment and get none) | user, command output, project; minus the names simple-git refuses and the repository-location names | `git/service.js` `configureGitEnvironment` / `buildGitEnv(directory)` |
 | Terminal, project actions | user, command output, project | `terminal/runtime.js` `environmentRuntime` |
 | Worktree setup commands | same as Git | `git/service.js` `runWorktreeStartCommand` |
 | `/api/fs/exec` | user, command output, project | `fs/routes.js` `environmentRuntime` |
@@ -64,10 +64,19 @@ token, PATH entries it needs) are applied after the user's variables and win.
 - **Failure is reported, not hidden.** A run that exits non-zero, times out
   (15 s), prints too much (4 MB) or prints nothing readable applies nothing
   from the command and is recorded for `projectStatus`, which Settings shows.
-- **Only the first run is waited for.** A command result is kept per project
-  checkout for five minutes; after that the kept result is used while a fresh
-  run happens in the background. Editing the project's settings drops what was
-  kept, and a run that started before the edit is not kept.
+- **Only user actions run the command.** Work the user started (`refresh`):
+  Git routes wrapped in `runAsUserAction` (commit, checkout, branch create,
+  merge, rebase, cherry-pick, revert, worktree create, integrate), the
+  terminal and project actions, exec other than cacheable Git reads, and
+  Reload in Settings. Reads the UI repeats on its own (Git status polling) use
+  the kept result and never start a run, so an idle project costs nothing.
+  The first user action in a checkout waits for the run; a result older than
+  five minutes is used by the next user action while a fresh run happens in
+  the background. Editing the project's settings drops what was kept, and a
+  run that started before the edit is not kept.
+- `refresh-scope.js`: the AsyncLocalStorage flag behind `runAsUserAction` /
+  `isUserAction`, so the Git service needs no extra argument between route
+  and spawn.
 - **The command is personal.** It is read only from `environment.json`, never
   from the repository's shared `.openchamber/project.json`, so a cloned
   repository cannot make the server run anything. Who can set it: anyone

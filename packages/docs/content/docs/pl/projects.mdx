@@ -34,7 +34,7 @@ Gdy narzędzia projektu pochodzą z direnv, devenv albo powłoki Nix, hooki Gita
 - dodaj zmienne potrzebne tylko temu projektowi
 - albo ustaw **polecenie środowiska**, które je wypisuje, na przykład `direnv export json` lub `devenv print-dev-env --json`
 
-Polecenie uruchamia się w folderze projektu, a dla worktree w jego własnym folderze. Uruchamia się ponownie co kilka minut, a **Uruchom ponownie** uruchamia je od razu. Pod polem widać, ile zmiennych dodało ostatnie uruchomienie albo dlaczego się nie udało. Nieudane uruchomienie niczego nie dodaje, a Git i terminal działają dalej bez niego.
+Polecenie uruchamia się w folderze projektu, a dla worktree w jego własnym folderze. Uruchamia się ponownie, gdy robisz commit, otwierasz terminal albo uruchamiasz akcję, o ile ostatnie uruchomienie ma już kilka minut, a **Uruchom ponownie** uruchamia je od razu. Samo otwarcie projektu go nie uruchamia. Pod polem widać, ile zmiennych dodało ostatnie uruchomienie albo dlaczego się nie udało. Nieudane uruchomienie niczego nie dodaje, a Git i terminal działają dalej bez niego.
 
 Te zmienne trafiają do Gita, terminala i akcji projektu, obok tych z **Ustawienia → Ogólne → Zmienne środowiskowe** (zobacz [Zmienne środowiskowe](/pl/environment/#zmienne-dla-opencode-git-i-terminala)). OpenCode obsługuje wszystkie projekty jednym procesem, więc nie dostaje zmiennych projektu: to, czego potrzebuje agent, wpisz na ogólną listę.
 

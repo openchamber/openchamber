@@ -711,9 +711,10 @@ export const registerFsRoutes = (app, dependencies) => {
       resolvedCwd,
       spawn,
       // The user's and the project's variables (lib/environment) on top of
-      // the terminal's PATH.
+      // the terminal's PATH. Git reads the UI repeats on its own never run
+      // the project's environment command; anything else may.
       execEnv: environmentRuntime
-        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() })
+        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() }, { refresh: !isCacheableGitReadCommand(command) })
         : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
     }))().then((result) => {

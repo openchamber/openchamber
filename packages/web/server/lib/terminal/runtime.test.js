@@ -388,7 +388,7 @@ describe('terminal runtime', () => {
     const harness = createHarness({ environmentRuntime: { applyToDirectory } });
     try {
       await harness.routes.post.get('/api/terminal/create')({ body: { sessionId: 'term-env', cwd: '/repo' } }, createResponse());
-      expect(applyToDirectory).toHaveBeenCalledWith('/repo', expect.objectContaining({ PATH: expect.any(String) }));
+      expect(applyToDirectory).toHaveBeenCalledWith('/repo', expect.objectContaining({ PATH: expect.any(String) }), { refresh: true });
       const { env } = harness.processes[0].options;
       expect(env.PROJECT_TOOL).toBe('from-project');
       expect(env.TERM).toBe('xterm-256color');

@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createEnvironmentRuntime } from './runtime.js';
 import { createEnvironmentStore } from './store.js';
+import { runAsUserAction } from './refresh-scope.js';
+
+const USER_ACTION = { refresh: true };
 
 const fakeChild = ({ stdout = '', code = 0, hang = false } = {}) => {
   const child = new EventEmitter();
@@ -60,7 +63,7 @@ describe('environment runtime', () => {
     const spawn = vi.fn(() => fakeChild({ stdout: '{"SHARED":"command","FROM_COMMAND":"1"}' }));
     const runtime = createRuntime({ spawn });
 
-    expect(await runtime.forDirectory(path.join(projectPath, 'src'))).toEqual({
+    expect(await runtime.forDirectory(path.join(projectPath, 'src'), USER_ACTION)).toEqual({
       SHARED: 'project',
       ONLY_USER: 'u',
       FROM_COMMAND: '1',
@@ -81,7 +84,7 @@ describe('environment runtime', () => {
 
   it('answers null when nothing is configured', async () => {
     const runtime = createRuntime();
-    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
   });
 
   it('applies a project to its linked worktree and runs the command in the worktree', async () => {
@@ -93,7 +96,7 @@ describe('environment runtime', () => {
     const spawn = vi.fn(() => fakeChild({ stdout: 'export FROM_COMMAND=1' }));
     const runtime = createRuntime({ spawn });
 
-    expect(await runtime.forDirectory(worktree)).toEqual({ B: '2', FROM_COMMAND: '1' });
+    expect(await runtime.forDirectory(worktree, USER_ACTION)).toEqual({ B: '2', FROM_COMMAND: '1' });
     expect(spawn.mock.calls[0][1].cwd).toBe(worktree);
   });
 
@@ -102,7 +105,7 @@ describe('environment runtime', () => {
     const spawn = vi.fn(() => fakeChild({ stdout: 'SECRET=leaked', code: 1 }));
     const runtime = createRuntime({ spawn });
 
-    expect(await runtime.forDirectory(projectPath)).toEqual({ B: '2' });
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toEqual({ B: '2' });
     expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'failed', reason: 'exit', exitCode: 1 });
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('leaked');
   });
@@ -110,7 +113,7 @@ describe('environment runtime', () => {
   it('reports output it cannot read', async () => {
     await store.updateProject('path_project', { command: 'echo hello' });
     const runtime = createRuntime({ spawn: vi.fn(() => fakeChild({ stdout: 'hello' })) });
-    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
     expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'failed', reason: 'unrecognized-output' });
   });
 
@@ -118,7 +121,7 @@ describe('environment runtime', () => {
     await store.updateProject('path_project', { command: 'sleep 100' });
     const child = fakeChild({ hang: true });
     const runtime = createRuntime({ spawn: vi.fn(() => child), commandTimeoutMs: 5 });
-    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
     expect(runtime.projectStatus('path_project')).toMatchObject({ state: 'failed', reason: 'timeout' });
   });
@@ -129,26 +132,50 @@ describe('environment runtime', () => {
     const spawn = vi.fn(() => fakeChild({ stdout: output }));
     const runtime = createRuntime({ spawn, commandTtlMs: 100 });
 
-    const [first, second] = await Promise.all([runtime.forDirectory(projectPath), runtime.forDirectory(projectPath)]);
+    const [first, second] = await Promise.all([runtime.forDirectory(projectPath, USER_ACTION), runtime.forDirectory(projectPath, USER_ACTION)]);
     expect(first).toEqual({ VERSION: '1' });
     expect(second).toEqual({ VERSION: '1' });
     expect(spawn).toHaveBeenCalledTimes(1);
 
     output = '{"VERSION":"2"}';
     clock += 200;
-    expect(await runtime.forDirectory(projectPath)).toEqual({ VERSION: '1' });
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toEqual({ VERSION: '1' });
     expect(spawn).toHaveBeenCalledTimes(2);
-    await vi.waitFor(async () => expect(await runtime.forDirectory(projectPath)).toEqual({ VERSION: '2' }));
+    await vi.waitFor(async () => expect(await runtime.forDirectory(projectPath, USER_ACTION)).toEqual({ VERSION: '2' }));
+  });
+
+  it('never runs the command for a read, and lets a read use what a user action left', async () => {
+    await store.updateProject('path_project', { variables: { B: '2' }, command: 'direnv export json' });
+    const spawn = vi.fn(() => fakeChild({ stdout: '{"FROM_COMMAND":"1"}' }));
+    const runtime = createRuntime({ spawn, commandTtlMs: 100 });
+
+    expect(await runtime.forDirectory(projectPath)).toEqual({ B: '2' });
+    expect(spawn).not.toHaveBeenCalled();
+
+    await runtime.forDirectory(projectPath, USER_ACTION);
+    expect(spawn).toHaveBeenCalledTimes(1);
+
+    clock += 200;
+    expect(await runtime.forDirectory(projectPath)).toEqual({ B: '2', FROM_COMMAND: '1' });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats work inside runAsUserAction as a user action', async () => {
+    await store.updateProject('path_project', { command: 'direnv export json' });
+    const spawn = vi.fn(() => fakeChild({ stdout: '{"A":"1"}' }));
+    const runtime = createRuntime({ spawn });
+    expect(await runAsUserAction(() => runtime.forDirectory(projectPath))).toEqual({ A: '1' });
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it('runs the command again after the project settings change', async () => {
     await store.updateProject('path_project', { command: 'direnv export json' });
     const spawn = vi.fn(() => fakeChild({ stdout: '{"A":"1"}' }));
     const runtime = createRuntime({ spawn });
-    await runtime.forDirectory(projectPath);
+    await runtime.forDirectory(projectPath, USER_ACTION);
     runtime.invalidateProject('path_project');
     expect(runtime.projectStatus('path_project')).toBeNull();
-    await runtime.forDirectory(projectPath);
+    await runtime.forDirectory(projectPath, USER_ACTION);
     expect(spawn).toHaveBeenCalledTimes(2);
   });
 
@@ -173,8 +200,8 @@ describe('environment runtime', () => {
   it('keeps spawns going when the store is broken, and says so once', async () => {
     fs.writeFileSync(path.join(root, 'environment.json'), 'broken');
     const runtime = createRuntime();
-    expect(await runtime.forDirectory(projectPath)).toBeNull();
-    expect(await runtime.forDirectory(projectPath)).toBeNull();
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
+    expect(await runtime.forDirectory(projectPath, USER_ACTION)).toBeNull();
     expect(runtime.forOpenCode()).toEqual({});
     expect(logger.warn).toHaveBeenCalledTimes(2);
   });

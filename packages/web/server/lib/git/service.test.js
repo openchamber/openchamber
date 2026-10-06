@@ -7,6 +7,7 @@ import simpleGit from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
+import { isUserAction } from '../environment/refresh-scope.js';
 import { normalizeGitOutputPath } from './output-path.js';
 
 import {
@@ -5239,6 +5240,31 @@ describe('git environment through simple-git', () => {
         expect(hookPath.split(':')).toContain('/opt/project-tools/bin');
         expect(forDirectory).toHaveBeenCalledWith(repo);
       });
+    } finally {
+      configureGitEnvironment(null);
+    }
+  });
+
+  it('asks for the project environment as a user action on commit, and as a read on status', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const seen = [];
+    configureGitEnvironment({ forDirectory: async () => { seen.push(isUserAction()); return null; } });
+    try {
+      const { repo } = createRepositoryLoggingHookEnv([]);
+      const routes = { get: new Map(), post: new Map() };
+      registerGitRoutes({
+        get: (url, handler) => routes.get.set(url, handler),
+        post: (url, handler) => routes.post.set(url, handler),
+        put() {}, delete() {},
+      });
+      const response = { status() { return this; }, json() {} };
+      await routes.get.get('/api/git/status')({ query: { directory: repo } }, response);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((flag) => flag === false)).toBe(true);
+      seen.length = 0;
+      await routes.post.get('/api/git/commit')({ query: { directory: repo }, body: { message: 'init', addAll: true } }, response);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((flag) => flag === true)).toBe(true);
     } finally {
       configureGitEnvironment(null);
     }

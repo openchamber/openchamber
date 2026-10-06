@@ -34,7 +34,7 @@ Bir projenin araçları direnv, devenv ya da bir Nix shell'den geliyorsa Git hoo
 - yalnızca bu projenin ihtiyaç duyduğu değişkenleri ekleyin
 - ya da bunları yazdıran bir **ortam komutu** ayarlayın, örneğin `direnv export json` veya `devenv print-dev-env --json`
 
-Komut proje klasöründe, bir worktree için de o worktree'nin kendi klasöründe çalışır. Birkaç dakikada bir yeniden çalışır; **Yeniden çalıştır** onu hemen çalıştırır. Alanın altında son çalıştırmanın kaç değişken eklediğini ya da neden başarısız olduğunu görürsünüz. Başarısız bir çalıştırma hiçbir şey eklemez; Git ve terminal onsuz çalışmaya devam eder.
+Komut proje klasöründe, bir worktree için de o worktree'nin kendi klasöründe çalışır. Son çalıştırmanın üzerinden birkaç dakika geçtiyse, commit yaptığınızda, terminal açtığınızda ya da bir eylem çalıştırdığınızda yeniden çalışır; **Yeniden çalıştır** onu hemen çalıştırır. Projenin yalnızca açık olması onu çalıştırmaz. Alanın altında son çalıştırmanın kaç değişken eklediğini ya da neden başarısız olduğunu görürsünüz. Başarısız bir çalıştırma hiçbir şey eklemez; Git ve terminal onsuz çalışmaya devam eder.
 
 Bu değişkenler, **Ayarlar → Genel → Ortam değişkenleri** içindekilere ek olarak Git'e, terminale ve proje eylemlerine gider ([Ortam değişkenleri](/tr/environment/#opencode-git-ve-terminal-için-değişkenler) sayfasına bakın). OpenCode tüm projelere tek bir süreçten hizmet verdiği için proje değişkenlerini almaz: aracının ihtiyaç duyduklarını genel listeye koyun.
 

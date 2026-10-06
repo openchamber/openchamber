@@ -34,7 +34,7 @@ Als de tools van een project uit direnv, devenv of een Nix-shell komen, vinden G
 - variabelen toevoegen die alleen dit project nodig heeft
 - of een **omgevingscommando** instellen dat ze afdrukt, bijvoorbeeld `direnv export json` of `devenv print-dev-env --json`
 
-Het commando draait in de projectmap, en voor een worktree in de eigen map van die worktree. Het draait om de paar minuten opnieuw, en **Opnieuw uitvoeren** draait het meteen. Onder het veld ziet u hoeveel variabelen de laatste run heeft toegevoegd, of waarom die mislukte. Een mislukte run voegt niets toe, en Git en de terminal blijven gewoon werken.
+Het commando draait in de projectmap, en voor een worktree in de eigen map van die worktree. Het draait opnieuw wanneer u commit, een terminal opent of een actie uitvoert, zodra de laatste run een paar minuten oud is, en **Opnieuw uitvoeren** draait het meteen. Alleen het project open hebben laat het niet draaien. Onder het veld ziet u hoeveel variabelen de laatste run heeft toegevoegd, of waarom die mislukte. Een mislukte run voegt niets toe, en Git en de terminal blijven gewoon werken.
 
 Deze variabelen gaan naar Git, de terminal en projectacties, bovenop die in **Instellingen → Algemeen → Omgevingsvariabelen** (zie [Omgevingsvariabelen](/nl/environment/#variabelen-voor-opencode-git-en-de-terminal)). OpenCode bedient alle projecten vanuit één proces en krijgt dus geen projectvariabelen: zet wat de agent nodig heeft in de algemene lijst.
 

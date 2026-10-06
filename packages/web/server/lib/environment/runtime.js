@@ -2,6 +2,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
 import { primaryWorktreeRootFromGitDir } from '../git/repository-root.js';
+import { isUserAction } from './refresh-scope.js';
 import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
 
 /**
@@ -24,11 +25,14 @@ import { overlayEnvironment, parseEnvironmentOutput } from './variables.js';
  * but runs the command in its own checkout, so direnv or devenv sees the
  * worktree's files.
  *
- * The command runs once per project checkout and its result is kept for
- * `commandTtlMs`. After that the kept result is still used while a fresh run
- * happens in the background; only the very first run is waited for. A failed
- * run applies nothing from the command and is reported through
- * `projectStatus`, never as a silent success. Command output and its error
+ * Only work the user started runs the command (`refresh`: a commit, a
+ * checkout, a terminal, a project action; see `refresh-scope.js`). Reads the
+ * UI repeats on its own, like Git status polling, use what an earlier run
+ * left and never start one, so an idle Git tab costs nothing. A user action
+ * waits for the first run in a checkout; once the result is older than
+ * `commandTtlMs`, the next user action uses it and refreshes it in the
+ * background. A failed run applies nothing from the command and is reported
+ * through `projectStatus`, never as a silent success. Command output and its error
  * text are never logged or returned: they may hold secrets.
  */
 
@@ -224,8 +228,9 @@ export const createEnvironmentRuntime = ({
     return run;
   };
 
-  const commandVariables = async (projectId, root, command) => {
+  const commandVariables = async (projectId, root, command, refresh) => {
     const cached = commandCache.get(`${projectId}\0${root}`);
+    if (!refresh) return cached?.variables ?? {};
     if (!cached) return runProjectCommand(projectId, root, command);
     if (now() - cached.at >= commandTtlMs) void runProjectCommand(projectId, root, command);
     return cached.variables;
@@ -234,9 +239,11 @@ export const createEnvironmentRuntime = ({
   /**
    * The variables to lay over the environment of a process started in
    * `directory`, or null when there are none. Never throws: a spawn always
-   * goes ahead, with what could be resolved.
+   * goes ahead, with what could be resolved. `refresh` lets the project's
+   * environment command run; it defaults to whether the caller is inside a
+   * user action.
    */
-  const forDirectory = async (directory) => {
+  const forDirectory = async (directory, { refresh = isUserAction() } = {}) => {
     const userVariables = readUserVariables();
     let projectVariables = {};
     try {
@@ -244,7 +251,7 @@ export const createEnvironmentRuntime = ({
       const target = store.hasProjectEntries() ? await targetFor(path.resolve(directory)) : null;
       if (target) {
         const entry = readProjectEntry(target.projectId);
-        const fromCommand = entry.command ? await commandVariables(target.projectId, target.root, entry.command) : {};
+        const fromCommand = entry.command ? await commandVariables(target.projectId, target.root, entry.command, refresh) : {};
         projectVariables = { ...fromCommand, ...entry.variables };
       }
     } catch (error) {
@@ -292,8 +299,8 @@ export const createEnvironmentRuntime = ({
   };
 
   /** `env` with the variables for `directory` laid over it. */
-  const applyToDirectory = async (directory, env) => {
-    const variables = await forDirectory(directory);
+  const applyToDirectory = async (directory, env, options) => {
+    const variables = await forDirectory(directory, options);
     return variables ? overlayEnvironment(env, variables) : env;
   };
 

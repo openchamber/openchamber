@@ -34,7 +34,7 @@ When a project's tools come from direnv, devenv or a Nix shell, Git hooks, the t
 - add variables only this project needs
 - or set an **environment command** that prints them, for example `direnv export json` or `devenv print-dev-env --json`
 
-The command runs in the project folder, and in a worktree's own folder for that worktree. It runs again every few minutes, and **Run again** runs it right away. Under the field you see how many variables the last run added, or why it failed. A failed run adds nothing, and Git and the terminal keep working without it.
+The command runs in the project folder, and in a worktree's own folder for that worktree. It runs again when you commit, open a terminal or run an action, once the last run is a few minutes old, and **Run again** runs it right away. Just having the project open doesn't run it. Under the field you see how many variables the last run added, or why it failed. A failed run adds nothing, and Git and the terminal keep working without it.
 
 These variables go to Git, the terminal and project actions, on top of the ones in **Settings → General → Environment variables** (see [Environment variables](/environment/#variables-for-opencode-git-and-the-terminal)). OpenCode serves every project from one process, so it doesn't get project variables: put what the agent needs in the general list.
 

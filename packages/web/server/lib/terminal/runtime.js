@@ -126,7 +126,9 @@ export function createTerminalRuntime({
     // The user's and the project's variables go under the terminal's own TERM
     // settings and the host-private removals below.
     const hostEnv = { ...process.env, PATH: buildAugmentedPath() };
-    const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv) : hostEnv;
+    // Opening a terminal or running a project action is the user's own act,
+    // so it may run the project's environment command.
+    const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv, { refresh: true }) : hostEnv;
     let lastError = null;
     for (const executable of resolvedShell.executables) {
       try {

@@ -34,7 +34,7 @@ Cuando las herramientas de un proyecto vienen de direnv, devenv o un shell de Ni
 - añade variables que solo necesita este proyecto
 - o define un **comando de entorno** que las imprima, por ejemplo `direnv export json` o `devenv print-dev-env --json`
 
-El comando se ejecuta en la carpeta del proyecto y, para un worktree, en la carpeta propia de ese worktree. Se vuelve a ejecutar cada pocos minutos, y **Ejecutar de nuevo** lo ejecuta en el acto. Debajo del campo ves cuántas variables añadió la última ejecución o por qué falló. Una ejecución fallida no añade nada, y Git y la terminal siguen funcionando sin ella.
+El comando se ejecuta en la carpeta del proyecto y, para un worktree, en la carpeta propia de ese worktree. Se vuelve a ejecutar cuando haces un commit, abres una terminal o ejecutas una acción, si la última ejecución tiene ya unos minutos, y **Ejecutar de nuevo** lo ejecuta en el acto. Tener el proyecto abierto no basta para ejecutarlo. Debajo del campo ves cuántas variables añadió la última ejecución o por qué falló. Una ejecución fallida no añade nada, y Git y la terminal siguen funcionando sin ella.
 
 Estas variables van a Git, a la terminal y a las acciones de proyecto, además de las de **Configuración → General → Variables de entorno** (consulta [Variables de entorno](/es/environment/#variables-para-opencode-git-y-la-terminal)). OpenCode atiende todos los proyectos desde un solo proceso, así que no recibe las variables de proyecto: pon lo que necesite el agente en la lista general.
 
