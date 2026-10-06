@@ -16,7 +16,7 @@ import { OpenCode } from '@opencode/client';
 import { z } from 'zod';
 import { AUTO_MODEL_REF, BUILTIN_CATEGORIES, ZEN_JEV_PROMOTION_ACTIVE, isAutoModel } from './defaults.js';
 import { createRoutingStore, parseEffectiveConfig } from './store.js';
-import { buildPermissionRequest, buildRoutingRequest, createJevClient, decidePermission, decideRouting } from './jev.js';
+import { buildPermissionRequest, buildProbeRequest, buildRoutingRequest, createJevClient, decidePermission, decideRouting, isProbeAnswer } from './jev.js';
 import {
   CLASSIFIER_SOURCES,
   classifierEndpoint,
@@ -487,6 +487,46 @@ export function createRoutingRuntime({
     return publishUpdated();
   };
 
+  /**
+   * Sends one small Jev request and reports what came back, so Settings can
+   * show a broken setup before a feature quietly falls back. Without `draft`
+   * it tests the provider answering now; with one it tests the custom endpoint
+   * fields as typed, before they are saved (an empty key reuses the saved
+   * one). Nothing is stored either way.
+   */
+  const testClassifier = async (draft) => {
+    let source;
+    let endpoint;
+    if (draft !== undefined) {
+      if (readPinnedEndpoint()) throw pinnedEndpointError();
+      if (enterpriseMode()) throw Object.assign(new Error(ENTERPRISE_MODE_ERROR), { status: 403 });
+      const parsed = customEndpointInputSchema.safeParse(draft);
+      if (!parsed.success) throw Object.assign(new Error('A URL and a model are required'), { status: 400 });
+      const key = parsed.data.key || (await store.readCustomEndpoint())?.key;
+      source = 'custom';
+      endpoint = classifierEndpoint('custom', {
+        customEndpoint: { url: parseCustomEndpointUrl(parsed.data.url), model: parsed.data.model, ...(key ? { key } : {}) },
+      });
+    } else {
+      const access = await resolveAccess();
+      source = access.classifier.effective;
+      endpoint = access.endpoint;
+    }
+    if (!source || !endpoint) return { ok: false, reason: 'unavailable' };
+    try {
+      const { answers, ms } = await jev.ask(buildProbeRequest(), endpoint);
+      if (!isProbeAnswer(answers.probe)) return { ok: false, reason: 'unparsable', source, model: endpoint.model };
+      return { ok: true, source, model: endpoint.model, ms };
+    } catch (error) {
+      if (error?.code === 'timeout') return { ok: false, reason: 'timeout', source, model: endpoint.model };
+      if (typeof error?.status === 'number') return { ok: false, reason: 'http', status: error.status, source, model: endpoint.model };
+      if (error instanceof SyntaxError || /no answers/.test(errorMessage(error))) {
+        return { ok: false, reason: 'unparsable', source, model: endpoint.model };
+      }
+      return { ok: false, reason: 'network', message: errorMessage(error), source, model: endpoint.model };
+    }
+  };
+
   /** Where a Jev request goes right now, or null when no classification provider is usable. */
   const currentClassifierEndpoint = async () => (await resolveAccess()).endpoint;
 
@@ -517,5 +557,6 @@ export function createRoutingRuntime({
     setClassifierSource,
     setCustomEndpoint,
     clearCustomEndpoint,
+    testClassifier,
   };
 }

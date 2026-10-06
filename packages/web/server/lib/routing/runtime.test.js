@@ -534,3 +534,41 @@ describe('describe', () => {
     expect(none.classification.sources.find((s) => s.id === 'custom')).toEqual({ id: 'custom', usable: false });
   });
 });
+
+describe('testClassifier', () => {
+  const probe = { choice: 'blue', confidence: 0.98 };
+
+  it('reports the source, model and round trip of the provider answering now', async () => {
+    const { runtime, jev, store } = makeRuntime({ classifierSource: 'typesafe', answers: { probe } });
+    expect(await runtime.testClassifier()).toEqual({ ok: true, source: 'typesafe', model: expect.any(String), ms: 12 });
+    expect(jev.ask.mock.calls[0][1].headers.authorization).toBe('Bearer key');
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+  });
+
+  it('names the failure: HTTP status, timeout, unparsable answer, nothing usable', async () => {
+    const http = makeRuntime({ classifierSource: 'typesafe', askError: Object.assign(new Error('Jev responded 401'), { status: 401 }) });
+    expect(await http.runtime.testClassifier()).toMatchObject({ ok: false, reason: 'http', status: 401, source: 'typesafe' });
+    const timeout = makeRuntime({ classifierSource: 'typesafe', askError: Object.assign(new Error('timed out'), { code: 'timeout' }) });
+    expect(await timeout.runtime.testClassifier()).toMatchObject({ ok: false, reason: 'timeout' });
+    const garbled = makeRuntime({ classifierSource: 'typesafe', answers: { probe: { nope: true } } });
+    expect(await garbled.runtime.testClassifier()).toMatchObject({ ok: false, reason: 'unparsable' });
+    const off = makeRuntime({ classifierSource: 'off' });
+    expect(await off.runtime.testClassifier()).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('tests typed custom endpoint fields without saving them, reusing the saved key when the field is empty', async () => {
+    const { runtime, jev, store } = makeRuntime({
+      customEndpoint: { url: 'https://old.example/v1/decision', model: 'm', key: 'saved' },
+      answers: { probe },
+    });
+    const result = await runtime.testClassifier({ url: 'https://new.example/v1/decision', model: 'jev-x', key: '' });
+    expect(result).toMatchObject({ ok: true, source: 'custom', model: 'jev-x' });
+    expect(jev.ask.mock.calls[0][1]).toMatchObject({ url: 'https://new.example/v1/decision', headers: { authorization: 'Bearer saved' } });
+    expect(store.writeCustomEndpoint).not.toHaveBeenCalled();
+  });
+
+  it('refuses typed endpoints in enterprise mode', async () => {
+    const { runtime } = makeRuntime({ enterprise: true });
+    await expect(runtime.testClassifier({ url: 'https://x.example', model: 'm' })).rejects.toMatchObject({ status: 403 });
+  });
+});

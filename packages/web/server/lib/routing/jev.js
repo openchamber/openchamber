@@ -37,7 +37,25 @@ export const buildPermissionRequest = (permission) => ({
   },
 });
 
+/**
+ * The Settings "Test" request: one tiny choice with an obvious answer, so any
+ * working provider answers it and the reply proves the whole round trip.
+ */
+export const buildProbeRequest = () => ({
+  state: { request: 'Which of these is a colour: blue or table?' },
+  questions: {
+    probe: {
+      type: 'choice',
+      instructions: 'Pick the word that names a colour.',
+      criteria: { blue: 'A colour.', table: 'A piece of furniture.' },
+    },
+  },
+});
+
 const choiceAnswerSchema = z.object({ choice: z.string(), confidence: z.number() });
+
+/** True when the probe came back as a choice answer, whichever choice it made. */
+export const isProbeAnswer = (answer) => choiceAnswerSchema.safeParse(answer).success;
 const noulAnswerSchema = z.object({ noul: z.number() });
 const permissionAnswersSchema = z.object({
   ask: noulAnswerSchema,

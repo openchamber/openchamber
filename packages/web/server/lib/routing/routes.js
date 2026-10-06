@@ -84,6 +84,18 @@ export function registerRoutingRoutes(app, runtime) {
     }
   });
 
+  // `custom` present: test those endpoint fields as typed, before saving.
+  app.post('/api/routing/classifier/test', express.json({ limit: '16kb' }), async (req, res) => {
+    try {
+      const custom = req.body?.custom;
+      res.json(await runtime.testClassifier(custom === undefined || custom === null
+        ? undefined
+        : { url: custom.url, model: custom.model, key: custom.key }));
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
   app.delete('/api/routing/classifier/custom', async (_req, res) => {
     try {
       res.json(await runtime.clearCustomEndpoint());

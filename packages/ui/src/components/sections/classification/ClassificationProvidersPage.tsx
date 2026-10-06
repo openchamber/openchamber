@@ -19,6 +19,7 @@ import { useRoutingStore } from '@/stores/useRoutingStore';
 import { openExternalUrl } from '@/lib/url';
 import { useClassifierSourceName } from './classifierSources';
 import { CustomEndpointFields } from './CustomEndpointFields';
+import { ClassifierTestButton } from './ClassifierTestButton';
 import { SettingsInlineLink } from './JevAccessNote';
 
 // The docs keep the list of features Jev answers for, so this page never goes stale.
@@ -283,6 +284,9 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
               </SettingsFieldRow>
             )}
             {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
+            <SettingsFieldRow label={null}>
+              <ClassifierTestButton disabled={classifier.effective === null} />
+            </SettingsFieldRow>
           </div>
         </SettingsSection>
         {!locked || customEndpoint?.pinned ? <CustomEndpointFields /> : null}

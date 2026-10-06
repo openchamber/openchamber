@@ -160,3 +160,36 @@ export const saveCustomEndpoint = async (endpoint: CustomEndpointInput): Promise
 
 export const clearCustomEndpoint = async (): Promise<RoutingState> =>
   readState(await runtimeFetch('/api/routing/classifier/custom', { method: 'DELETE' }));
+
+const sourceSchema = classifierSourceSchema.exclude(['off']);
+const classifierTestSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), source: sourceSchema, model: z.string(), ms: z.number() }),
+  z.object({ ok: z.literal(false), reason: z.literal('unavailable') }),
+  z.object({
+    ok: z.literal(false),
+    reason: z.enum(['http', 'timeout', 'unparsable', 'network']),
+    source: sourceSchema,
+    model: z.string(),
+    status: z.number().optional(),
+    message: z.string().optional(),
+  }),
+]);
+export type ClassifierTestResult = z.infer<typeof classifierTestSchema>;
+
+/**
+ * One Jev request through the provider answering now, or through `custom`
+ * endpoint fields as typed (an empty key reuses the saved one). Saves nothing.
+ */
+export const testClassifier = async (custom?: CustomEndpointInput): Promise<ClassifierTestResult> => {
+  const response = await runtimeFetch('/api/routing/classifier/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(custom ? { custom } : {}),
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const failure = errorPayloadSchema.safeParse(payload);
+    throw new Error(failure.success ? failure.data.error : `Routing request failed (${response.status})`);
+  }
+  return classifierTestSchema.parse(payload);
+};

@@ -45,10 +45,14 @@ Auto. There is no env gate — the feature shipped dark behind
   `../session-work` and `../session-goal`), `noteModelSelection`,
   `isAutoSession`, `resolveAutoSelection`, `applySessionSelection`, `routeSend`,
   `evaluatePermission`, `legacySafetyNetEnabled`, config, token, classifier and
-  custom endpoint writes, event broadcasts.
+  custom endpoint writes, event broadcasts, and `testClassifier` (one probe
+  request from Settings' Test button, through the provider answering now or
+  through custom endpoint fields as typed; stores nothing, and typed fields are
+  refused in enterprise mode like a save).
 - `routes.js` — `/api/routing` (GET, PUT), `/api/routing/token` (PUT, DELETE),
   `/api/routing/classifier` (PUT), `/api/routing/classifier/custom` (PUT,
-  DELETE) and `registerRoutingPromptRewrite`.
+  DELETE), `/api/routing/classifier/test` (POST) and
+  `registerRoutingPromptRewrite`.
 
 ## Invariants
 
