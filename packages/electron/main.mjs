@@ -75,6 +75,7 @@ import {
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import {
   browserPanelPermissionAuditDetails,
+  plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
@@ -1042,6 +1043,7 @@ const resolveBrowserPanelContents = (rawId) => {
 
 const hardenBrowserPanelSession = () => {
   const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
+  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
 
   app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
     if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {

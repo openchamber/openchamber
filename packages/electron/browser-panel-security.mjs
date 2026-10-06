@@ -32,3 +32,13 @@ export const shouldAllowBrowserPanelCertificateError = ({ url, error }) => {
     return false;
   }
 };
+
+/**
+ * The user agent the browser panel sends: Electron's default minus the app and
+ * Electron tokens, so sites see plain Chrome. Some sites refuse or degrade an
+ * Electron user agent (sign-in pages in particular).
+ */
+export const plainChromeUserAgent = (userAgent) => String(userAgent || '')
+  .replace(/\s(?:Electron|OpenChamber)\/\S+/gi, '')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
