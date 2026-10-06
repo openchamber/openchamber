@@ -30,6 +30,7 @@ import {
 } from '@/lib/scheduledTasksApi';
 import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
+import { getModelDisplayName } from '@/lib/modelDisplay';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -40,6 +41,16 @@ const scheduleTimes = (task: ScheduledTask): string[] => {
     : (task.schedule.time ? [task.schedule.time] : []);
   const valid = raw.filter((value) => typeof value === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
   return Array.from(new Set(valid)).sort((a, b) => a.localeCompare(b));
+};
+
+// Model, then variant and agent when the task sets them; names stay literal.
+const formatTaskModel = (task: ScheduledTask): string => {
+  const { providerID, modelID, variant, agent } = task.execution;
+  return [
+    `${providerID} · ${getModelDisplayName(null, modelID)}`,
+    variant?.trim(),
+    agent?.trim() ? `@${agent.trim()}` : undefined,
+  ].filter(Boolean).join(' · ');
 };
 
 const formatSchedule = (task: ScheduledTask, t: ReturnType<typeof useI18n>['t']): string => {
@@ -522,6 +533,9 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   </div>
                   <div className="typography-micro truncate text-muted-foreground">
                     {formatSchedule(task, t)}
+                  </div>
+                  <div className="typography-micro truncate text-muted-foreground/70" title={`${task.execution.providerID}/${task.execution.modelID}`}>
+                    {formatTaskModel(task)}
                   </div>
                   {task.loopFile ? (
                     <div
