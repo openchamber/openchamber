@@ -19,6 +19,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getTypeToCommentText } from '@/lib/typeToComment';
+import { useCommentImagePaste } from '@/components/comments/useCommentImagePaste';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import {
     useMobileCommentComposerController,
@@ -122,6 +123,18 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     element.style.height = 'auto';
     element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
   }, []);
+
+  // A pasted image becomes a citation in the comment; the caret lands after
+  // it once the new text renders.
+  const { takePastedImages, attachCitedImages, discardPastedImages } = useCommentImagePaste();
+  const pendingCommentCaretRef = React.useRef<number | null>(null);
+  React.useLayoutEffect(() => {
+    const caret = pendingCommentCaretRef.current;
+    if (caret === null) return;
+    pendingCommentCaretRef.current = null;
+    commentInputRef.current?.setSelectionRange(caret, caret);
+    resizeCommentInput();
+  }, [commentText, resizeCommentInput]);
   const isDraggingRef = React.useRef(false);
   const [isOpening, setIsOpening] = React.useState(false);
   const [isAddingToNotes, setIsAddingToNotes] = React.useState(false);
@@ -545,6 +558,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
   const openComment = React.useCallback((initialText: string) => {
     if (!selectedTextMarkdown) return;
+    // Images pasted into an abandoned comment never reach the composer.
+    discardPastedImages();
     setSelectedAnchor(captureCommentAnchor());
     setCommentText(initialText);
     setCommentMode(true);
@@ -557,7 +572,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
     });
-  }, [captureCommentAnchor, selectedTextMarkdown, updateCommentRects]);
+  }, [captureCommentAnchor, discardPastedImages, selectedTextMarkdown, updateCommentRects]);
 
   const handleOpenComment = React.useCallback(() => openComment(''), [openComment]);
 
@@ -629,9 +644,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     }
     hideMenu();
     queueMicrotask(() => {
+      // Focus first: it hands the attachment slot to this column's composer,
+      // where the comment's images belong.
       focusColumnInput();
+      void attachCitedImages(commentText);
     });
-  }, [addContextDraft, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
+  }, [addContextDraft, attachCitedImages, commentText, currentSessionId, effectiveDirectory, focusColumnInput, hideMenu, newSessionDraftOpen, selectedAnchor, selectedMessageId, selectedTextMarkdown, t]);
 
   const currentSession = React.useMemo(() => {
     if (!currentSessionId) {
@@ -721,6 +739,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         onChange={(event) => {
           setCommentText(event.target.value);
           resizeCommentInput();
+        }}
+        onPaste={(event) => {
+          const pasted = takePastedImages(event);
+          if (!pasted) return;
+          pendingCommentCaretRef.current = pasted.caret;
+          setCommentText(pasted.text);
         }}
         onKeyDown={(event) => {
           // An IME candidate is confirmed with Enter and abandoned with

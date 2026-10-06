@@ -5,6 +5,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { useCommentImagePaste } from './useCommentImagePaste';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -115,9 +116,28 @@ export function InlineCommentInput({
     });
   }, [isMobile]);
 
+  // A pasted image becomes a citation in the text; the caret lands after it
+  // once the new text renders.
+  const { takePastedImages, attachCitedImages } = useCommentImagePaste();
+  const pendingCaretRef = useRef<number | null>(null);
+  React.useLayoutEffect(() => {
+    const caret = pendingCaretRef.current;
+    if (caret === null) return;
+    pendingCaretRef.current = null;
+    textareaRef.current?.setSelectionRange(caret, caret);
+  }, [text]);
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = takePastedImages(e);
+    if (!pasted) return;
+    pendingCaretRef.current = pasted.caret;
+    handleTextChange(pasted.text);
+  };
+
   const save = () => {
     if (text.trim()) {
       onSave(text, normalizeRange(stableRangeRef.current));
+      void attachCitedImages(text);
     }
   };
 
@@ -173,6 +193,7 @@ export function InlineCommentInput({
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={isMobile
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}

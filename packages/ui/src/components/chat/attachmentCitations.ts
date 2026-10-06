@@ -158,6 +158,18 @@ export const nextPastedContextFilename = (existingFilenames: string[]): string =
     return `pasted-context-${Date.now()}.txt`;
 };
 
+/** The attachment carries the name its citation uses. */
+export const renameFileForAttachmentCitation = (file: File, filename: string): File => {
+    if (file.name === filename) {
+        return file;
+    }
+
+    return new File([file], filename, {
+        type: file.type,
+        lastModified: file.lastModified,
+    });
+};
+
 export const buildAttachmentCitationText = (filenames: string[]): string => (
     filenames.map((filename) => `[${filename}]`).join(' ')
 );
