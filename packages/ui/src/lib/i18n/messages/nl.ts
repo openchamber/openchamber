@@ -3758,4 +3758,9 @@ export const dict = {
   'multirun.overview.bar.waiting': 'Runs die op u wachten: {count}. De runs kunnen niet klaar zijn voordat u antwoord geeft.',
   'multirun.overview.prompt.expand': 'Alles tonen',
   'multirun.overview.prompt.collapse': 'Minder tonen',
+  'gitView.changes.revertFileDialogTitle': 'Wijzigingen in bestand terugdraaien?',
+  'gitView.changes.revertFileDescription': 'Hiermee worden je lokale wijzigingen in {path} verwijderd.',
+  'gitView.changes.revertFileConfirm': 'Bestand terugdraaien',
+  'diffView.hunk.discardDialogTitle': 'Dit blok verwijderen?',
+  'diffView.hunk.discardDescription': 'Hiermee worden deze lokale wijzigingen in {path} verwijderd.',
 } as const;

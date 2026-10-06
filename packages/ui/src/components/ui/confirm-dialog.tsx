@@ -7,6 +7,8 @@ type ConfirmRequest = {
   title: string;
   message: string;
   action: string;
+  /** The action discards something; its button reads as destructive. */
+  destructive?: boolean;
 };
 
 /**
@@ -54,7 +56,7 @@ export function useConfirmDialog() {
         </DialogHeader>
         <DialogFooter>
           <Button size="sm" variant="outline" autoFocus onClick={() => settle(false)}>{t('dialog.common.actions.cancel')}</Button>
-          <Button size="sm" onClick={() => settle(true)}>{request?.action}</Button>
+          <Button size="sm" variant={request?.destructive ? 'destructive' : 'default'} onClick={() => settle(true)}>{request?.action}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

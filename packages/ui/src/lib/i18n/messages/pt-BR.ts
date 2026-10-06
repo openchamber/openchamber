@@ -3759,4 +3759,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': 'Execuções aguardando você: {count}. A execução só termina quando você responder.',
   'multirun.overview.prompt.expand': 'Mostrar tudo',
   'multirun.overview.prompt.collapse': 'Mostrar menos',
+  'gitView.changes.revertFileDialogTitle': 'Reverter as alterações do arquivo?',
+  'gitView.changes.revertFileDescription': 'Isso vai descartar suas alterações locais em {path}.',
+  'gitView.changes.revertFileConfirm': 'Reverter arquivo',
+  'diffView.hunk.discardDialogTitle': 'Descartar este trecho?',
+  'diffView.hunk.discardDescription': 'Isso vai descartar estas alterações locais em {path}.',
 };

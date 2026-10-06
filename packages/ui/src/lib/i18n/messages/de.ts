@@ -3756,4 +3756,9 @@ export const dict = {
   'multirun.overview.bar.waiting': 'Läufe, die auf dich warten: {count}. Der Lauf endet erst, wenn du antwortest.',
   'multirun.overview.prompt.expand': 'Alles zeigen',
   'multirun.overview.prompt.collapse': 'Weniger zeigen',
+  'gitView.changes.revertFileDialogTitle': 'Änderungen an der Datei verwerfen?',
+  'gitView.changes.revertFileDescription': 'Damit werden deine lokalen Änderungen in {path} verworfen.',
+  'gitView.changes.revertFileConfirm': 'Datei zurücksetzen',
+  'diffView.hunk.discardDialogTitle': 'Diesen Abschnitt verwerfen?',
+  'diffView.hunk.discardDescription': 'Damit werden diese lokalen Änderungen in {path} verworfen.',
 };

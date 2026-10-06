@@ -48,6 +48,7 @@ import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { findDiffScrollAnchor, getRestoredDiffScrollTop, type DiffScrollAnchor } from './diffScrollAnchor';
 import { useI18n } from '@/lib/i18n';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import type { SourceControlProvider } from '@/lib/api/types';
 import { buildDiffTreeRows } from './diffFileTree';
@@ -908,6 +909,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setDiffRetryNonce((nonce) => nonce + 1);
     }, []);
 
+    const discardConfirm = useConfirmDialog();
+    const { confirm: confirmDiscard } = discardConfirm;
     const handleHunkAction = React.useCallback(async (hunkIndex: number, action: HunkDiffAction) => {
         if (!directory || !hunkEligible || isLoading || diffLoadFailure || mutationInFlight.current || hunkAction !== null) {
             return;
@@ -920,6 +923,14 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         }
 
         if ((staged && action !== 'unstage') || (!staged && action === 'unstage')) return;
+        // Discard sits next to stage, so one stray click must not lose work.
+        if (action === 'discard' && !await confirmDiscard({
+            title: t('diffView.hunk.discardDialogTitle'),
+            message: t('diffView.hunk.discardDescription', { path: file.path }),
+            action: t('diffView.hunk.discard'),
+            destructive: true,
+        })) return;
+        if (mutationInFlight.current) return;
         mutationInFlight.current = true;
         const runtimeKey = getRuntimeKey();
         setHunkAction({ index: hunkIndex, action });
@@ -946,7 +957,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             mutationInFlight.current = false;
             setHunkAction((current) => (current?.index === hunkIndex && current.action === action ? null : current));
         }
-    }, [actionPatch, hunkEligible, isLoading, diffLoadFailure, directory, fetchStatus, file.path, git, hunkAction, invalidatePatch, staged, t]);
+    }, [actionPatch, confirmDiscard, hunkEligible, isLoading, diffLoadFailure, directory, fetchStatus, file.path, git, hunkAction, invalidatePatch, staged, t]);
 
     const hunkAnchors = React.useMemo(() => hunkEligible && actionPatch !== null ? getPatchHunkAnchors(actionPatch) : [], [actionPatch, hunkEligible]);
     const renderHunkActions = React.useCallback((index: number) => (
@@ -1157,6 +1168,7 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     ) : null}
                 </div>
             )}
+            {discardConfirm.dialog}
         </div>
     );
 });

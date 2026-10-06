@@ -3759,4 +3759,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': '等待你处理的运行：{count}。你回复之前，这次运行不会结束。',
   'multirun.overview.prompt.expand': '展开全部',
   'multirun.overview.prompt.collapse': '收起',
+  'gitView.changes.revertFileDialogTitle': '还原文件更改？',
+  'gitView.changes.revertFileDescription': '这将丢弃 {path} 中的本地更改。',
+  'gitView.changes.revertFileConfirm': '还原文件',
+  'diffView.hunk.discardDialogTitle': '丢弃此代码块？',
+  'diffView.hunk.discardDescription': '这将丢弃 {path} 中的这些本地更改。',
 };

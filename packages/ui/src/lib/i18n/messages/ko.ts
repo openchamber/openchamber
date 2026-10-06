@@ -3758,4 +3758,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': '사용자를 기다리는 실행: {count}. 응답하기 전에는 실행이 끝나지 않습니다.',
   'multirun.overview.prompt.expand': '모두 보기',
   'multirun.overview.prompt.collapse': '접기',
+  'gitView.changes.revertFileDialogTitle': '파일 변경 사항을 되돌릴까요?',
+  'gitView.changes.revertFileDescription': '{path}의 로컬 변경 사항이 삭제됩니다.',
+  'gitView.changes.revertFileConfirm': '파일 되돌리기',
+  'diffView.hunk.discardDialogTitle': '이 변경 블록을 버릴까요?',
+  'diffView.hunk.discardDescription': '{path}의 이 로컬 변경 사항이 삭제됩니다.',
 };

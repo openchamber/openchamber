@@ -3763,4 +3763,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': 'Uruchomienia czekające na Ciebie: {count}. Uruchomienie nie skończy się, dopóki nie odpowiesz.',
   'multirun.overview.prompt.expand': 'Pokaż wszystko',
   'multirun.overview.prompt.collapse': 'Zwiń',
+  'gitView.changes.revertFileDialogTitle': 'Cofnąć zmiany w pliku?',
+  'gitView.changes.revertFileDescription': 'Lokalne zmiany w {path} zostaną odrzucone.',
+  'gitView.changes.revertFileConfirm': 'Cofnij zmiany',
+  'diffView.hunk.discardDialogTitle': 'Odrzucić ten fragment?',
+  'diffView.hunk.discardDescription': 'Te lokalne zmiany w {path} zostaną odrzucone.',
 } as const;

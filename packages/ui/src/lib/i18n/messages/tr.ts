@@ -3756,4 +3756,9 @@ export const dict = {
   'multirun.overview.bar.waiting': 'Sizi bekleyen çalıştırmalar: {count}. Siz yanıtlayana kadar çalıştırma bitmez.',
   'multirun.overview.prompt.expand': 'Tümünü göster',
   'multirun.overview.prompt.collapse': 'Daha az göster',
+  'gitView.changes.revertFileDialogTitle': 'Dosyadaki değişiklikler geri alınsın mı?',
+  'gitView.changes.revertFileDescription': '{path} içindeki yerel değişiklikleriniz silinecek.',
+  'gitView.changes.revertFileConfirm': 'Dosyayı geri al',
+  'diffView.hunk.discardDialogTitle': 'Bu parça silinsin mi?',
+  'diffView.hunk.discardDescription': '{path} içindeki bu yerel değişiklikler silinecek.',
 };

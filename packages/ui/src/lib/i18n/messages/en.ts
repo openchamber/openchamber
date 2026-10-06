@@ -3758,6 +3758,11 @@ export const dict = {
   'multirun.overview.bar.waiting': 'Runs waiting for you: {count}. The run can\'t finish until you answer them.',
   'multirun.overview.prompt.expand': 'Show all',
   'multirun.overview.prompt.collapse': 'Show less',
+  'gitView.changes.revertFileDialogTitle': 'Revert file changes?',
+  'gitView.changes.revertFileDescription': 'This will discard your local changes in {path}.',
+  'gitView.changes.revertFileConfirm': 'Revert file',
+  'diffView.hunk.discardDialogTitle': 'Discard this hunk?',
+  'diffView.hunk.discardDescription': 'This will discard these local changes in {path}.',
 } as const;
 
 export type I18nKey = keyof typeof dict;

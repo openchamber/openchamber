@@ -3757,4 +3757,9 @@ export const dict = {
   'multirun.overview.bar.waiting': 'Exécutions en attente de vous : {count}. L\'exécution ne se termine pas tant que vous n\'avez pas répondu.',
   'multirun.overview.prompt.expand': 'Tout afficher',
   'multirun.overview.prompt.collapse': 'Réduire',
+  'gitView.changes.revertFileDialogTitle': 'Annuler les modifications du fichier ?',
+  'gitView.changes.revertFileDescription': 'Vos modifications locales dans {path} seront perdues.',
+  'gitView.changes.revertFileConfirm': 'Annuler les modifications',
+  'diffView.hunk.discardDialogTitle': 'Abandonner ce bloc ?',
+  'diffView.hunk.discardDescription': 'Ces modifications locales dans {path} seront perdues.',
 } as const;

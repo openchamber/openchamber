@@ -3758,4 +3758,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': 'あなたを待っている実行: {count}。応答するまで実行は終わりません。',
   'multirun.overview.prompt.expand': 'すべて表示',
   'multirun.overview.prompt.collapse': '折りたたむ',
+  'gitView.changes.revertFileDialogTitle': 'ファイルの変更を元に戻しますか？',
+  'gitView.changes.revertFileDescription': '{path} のローカルの変更が破棄されます。',
+  'gitView.changes.revertFileConfirm': '元に戻す',
+  'diffView.hunk.discardDialogTitle': 'このハンクを破棄しますか？',
+  'diffView.hunk.discardDescription': '{path} のこのローカルの変更が破棄されます。',
 };

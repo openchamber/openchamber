@@ -25,6 +25,7 @@ import type { GitStatus } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export interface ChangesGroupConfig {
   /** Stable id (e.g. 'staged' | 'unstaged'). */
@@ -100,6 +101,19 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
   const [expandedDirectories, setExpandedDirectories] = React.useState<Set<string>>(new Set());
   const [revertAllOpen, setRevertAllOpen] = React.useState(false);
   const [pendingDirectoryRevert, setPendingDirectoryRevert] = React.useState<PendingDirectoryRevert | null>(null);
+  const revertFileConfirm = useConfirmDialog();
+  const { confirm: confirmRevertFile } = revertFileConfirm;
+  // The revert button sits next to stage, so one stray click must not
+  // discard a file's changes.
+  const requestRevertFile = React.useCallback(async (group: ChangesGroupConfig, path: string) => {
+    const confirmed = await confirmRevertFile({
+      title: t('gitView.changes.revertFileDialogTitle'),
+      message: t('gitView.changes.revertFileDescription', { path }),
+      action: t('gitView.changes.revertFileConfirm'),
+      destructive: true,
+    });
+    if (confirmed) group.onRevertFile(path);
+  }, [confirmRevertFile, t]);
 
   const trees = React.useMemo(
     () => visibleGroups.map((group) => buildChangesTree(group.entries)),
@@ -472,7 +486,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
           onAction={() => group.onActionFile(file.path)}
           stats={diffStats?.[group.statsScope]?.[file.path]}
           onViewDiff={() => group.onViewDiff(file.path)}
-          onRevert={() => group.onRevertFile(file.path)}
+          onRevert={() => void requestRevertFile(group, file.path)}
           isReverting={revertingPaths.has(file.path) || isRevertingAll}
           rowPaddingClassName={ROW_PADDING_CLASSNAME}
           indentPx={row.depth * TREE_INDENT_PX}
@@ -482,7 +496,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         />
       );
     },
-    [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, revertingPaths, t, visibleGroups]
+    [diffStats, isRevertingAll, isTreeView, renderDirectory, renderHeader, requestRevertFile, revertingPaths, t, visibleGroups]
   );
 
   // One faint vertical guide per ancestor level, centred under its chevron.
@@ -571,6 +585,8 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
         </ScrollShadow>
         <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
       </div>
+
+      {revertFileConfirm.dialog}
 
       <Dialog
         open={revertAllOpen}

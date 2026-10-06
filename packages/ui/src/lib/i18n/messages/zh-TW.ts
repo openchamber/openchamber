@@ -3758,4 +3758,9 @@ export const dict: Record<I18nKey, string> = {
   'multirun.overview.bar.waiting': '等待你處理的執行：{count}。你回覆之前，這次執行不會結束。',
   'multirun.overview.prompt.expand': '展開全部',
   'multirun.overview.prompt.collapse': '收合',
+  'gitView.changes.revertFileDialogTitle': '還原檔案變更？',
+  'gitView.changes.revertFileDescription': '這將捨棄 {path} 中的本機變更。',
+  'gitView.changes.revertFileConfirm': '還原檔案',
+  'diffView.hunk.discardDialogTitle': '捨棄此區塊？',
+  'diffView.hunk.discardDescription': '這將捨棄 {path} 中的這些本機變更。',
 };
