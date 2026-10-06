@@ -212,7 +212,11 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
   const { t } = useI18n();
   const [query, setQuery] = React.useState('');
   const projectIds = useProjectProviderIds(providers, directory);
-  const filtered = rankByQuery([...providers], query, (provider) => [provider.name || provider.id, provider.id]);
+  // Alphabetical by name, so a card is found by scanning rather than in the
+  // order the providers happened to be configured.
+  const alphabetical = React.useMemo(() => [...providers].sort((a, b) =>
+    (a.name || a.id).localeCompare(b.name || b.id, undefined, { sensitivity: 'base' })), [providers]);
+  const filtered = rankByQuery(alphabetical, query, (provider) => [provider.name || provider.id, provider.id]);
   const hasQuery = query.trim().length > 0;
   // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
