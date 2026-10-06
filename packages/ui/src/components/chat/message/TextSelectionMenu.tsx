@@ -772,7 +772,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
               className={cn(
                 'flex flex-auto items-center gap-2 rounded-xl px-3 py-2.5 text-left',
                 'text-sm font-medium leading-tight',
-                'bg-[var(--surface-muted)] text-[var(--surface-foreground)]',
+                'bg-foreground/[0.04] text-foreground',
                 'active:opacity-80',
                 'transition-opacity duration-150'
               )}
@@ -805,7 +805,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
                 className={cn(
                   'flex flex-[1_0_auto] items-center gap-2 rounded-xl px-3 py-2.5 text-left',
                   'text-sm font-medium leading-tight',
-                  'bg-[var(--surface-muted)] text-[var(--surface-foreground)]',
+                  'bg-foreground/[0.04] text-foreground',
                   'active:opacity-80',
                   'transition-opacity duration-150'
                 )}
@@ -827,7 +827,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
                 className={cn(
                   'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left',
                   'text-sm font-medium leading-tight',
-                  'bg-[var(--surface-muted)] text-[var(--surface-foreground)]',
+                  'bg-foreground/[0.04] text-foreground',
                   'active:opacity-80',
                   'transition-opacity duration-150'
                 )}
@@ -846,7 +846,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
                 className={cn(
                   'flex min-w-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left',
                   'text-sm font-medium leading-tight',
-                  'bg-[var(--surface-muted)] text-[var(--surface-foreground)]',
+                  'bg-foreground/[0.04] text-foreground',
                   'active:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed',
                   'transition-opacity duration-150'
                 )}

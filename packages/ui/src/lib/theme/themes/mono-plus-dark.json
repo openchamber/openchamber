@@ -20,7 +20,7 @@
     },
     "surface": {
       "background": "#000000",
-      "foreground": "#BDBDBD",
+      "foreground": "#bdbdbd",
       "muted": "#0A0A0A",
       "mutedForeground": "#808080",
       "elevated": "#141414",
@@ -28,15 +28,15 @@
       "subtle": "#1A1A1A"
     },
     "interactive": {
-      "border": "#232323",
+      "border": "#232323d2",
       "selection": "#ffffff1f",
       "borderHover": "#333333",
       "borderFocus": "#FFFFFF",
       "focus": "#FFFFFF",
       "focusRing": "#FFFFFF50",
       "cursor": "#E5E5E5",
-      "hover": "#ffffff1f",
-      "active": "#ffffff1f"
+      "hover": "#ffffff0f",
+      "active": "#ffffff1a"
     },
     "status": {
       "error": "#9e6a6a",
@@ -50,53 +50,56 @@
     },
     "syntax": {
       "base": {
-        "background": "#0a0a0a",
-        "foreground": "#d4d4d4",
+        "background": "#050505",
         "comment": "#8c8c8c",
         "keyword": "#dccdbeff",
         "string": "#b6d8e6ff",
         "number": "#e3bdadff",
         "function": "#a2bee8",
-        "variable": "#d4d4d4",
+        "variable": "#bdbdbd",
         "type": "#edcbb8ff",
         "operator": "#dccdbeff"
       },
       "tokens": {
         "stringEscape": "#b6d8e6ff",
         "variableProperty": "#c0dcc0ff",
-        "tag": "#a2bee8",
-        "boolean": "#e3bdadff"
+        "boolean": "#e3bdadff",
+        "tag": "#a2bee8"
       },
       "highlights": {
-        "lineNumber": "#7c7c7c"
+        "diffAdded": "#6a8e6a",
+        "diffRemoved": "#9e6a6a",
+        "diffModified": "#6a7e9e"
       }
     },
     "pr": {
-      "draft": "#8c8c8c",
       "merged": "#bda2e8"
     },
     "chat": {
-      "userMessageBackground": "#1A1A1A",
-      "divider": "#242424"
+      "userMessageBackground": "#111214",
+      "divider": "#242424",
+      "background": "#000000"
     },
     "markdown": {
       "link": "#CCCCCC",
       "linkHover": "#a2bee8",
       "inlineCode": "#a2bee8",
-      "inlineCodeBackground": "#0D0D0D",
+      "inlineCodeBackground": "#050505",
       "blockquote": "#808080",
       "blockquoteBorder": "#242424",
-      "listMarker": "#99999999"
+      "listMarker": "#99999999",
+      "bold": "#c4c4c4",
+      "italic": "#bdbdbd"
     },
     "tools": {
       "border": "#30303080",
-      "icon": "#A6A6A6",
-      "title": "#BDBDBD",
+      "icon": "#808080",
+      "title": "#bdbdbd",
       "description": "#808080",
       "edit": {
         "addedBackground": "#6a8e6a20",
         "removedBackground": "#9e6a6a20",
-        "lineNumber": "#2a2a2a"
+        "lineNumber": "#808080"
       }
     }
   },

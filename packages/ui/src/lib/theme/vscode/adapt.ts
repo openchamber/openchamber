@@ -1,107 +1,151 @@
 import type { Theme } from '@/types/theme';
-import { chromaticDistance, contrastRatio, mixColor, onColor, readableText, rotateColorHue, withOpacity } from '../color';
+import type { VSCodeThemePalette } from './adapter';
+import { colorHue, contrastRatio, mixColor, onColor, readableText, withOpacity } from '../color';
 
-const MIN_ACCENT_SEPARATION = 0.075;
-
-/** Imported button fills are not necessarily usable as app-wide accents.
- * Adapt only the UI roles; syntax/diff colors still describe the source theme. */
-export function adaptImportedRoles(theme: Theme, authored: Readonly<Record<string, string>>, syntax: Theme['colors']['syntax']['base']): void {
-  const { surface, primary, status, interactive } = theme.colors;
-  const canvas = surface.background;
+// Both file imports and live VS Code palettes pass through this policy once.
+export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePalette['colors']>, highContrast = false): void {
+  if (highContrast) return;
+  const { surface, primary, status, interactive, markdown, chat, tools, syntax } = theme.colors;
   const dark = theme.metadata.variant === 'dark';
-  const neutral = onColor(surface.muted, canvas);
-  const surfaces = [canvas, surface.muted, surface.elevated, mixColor(interactive.selection, surface.muted, 1, canvas)]
-    .filter((background) => onColor(background, canvas) === neutral);
-  const readable = (seed: string) => surfaces.reduce((color, background) => readableText(color, background, canvas), seed);
-  const paintedAccent = (color: string) => [canvas, surface.muted].every((background) => (contrastRatio(color, background, canvas) ?? 0) >= 3);
+  const canvas = surface.background;
+  const neutral = onColor(canvas, canvas);
+  const contrast = (color: string, background: string) => contrastRatio(color, background, canvas) ?? 1;
 
-  const accents = [
-    authored['button.background'], authored['textLink.foreground'],
-    authored['activityBarBadge.background'], authored['list.highlightForeground'],
-    authored.focusBorder, authored['inputOption.activeBorder'], syntax.function, syntax.keyword,
-  ].filter((color) => color !== undefined);
-  const nextPrimary = readable(accents.find(paintedAccent) ?? primary.base);
-  if (nextPrimary !== primary.base) {
-    primary.base = nextPrimary;
-    primary.foreground = onColor(nextPrimary, canvas);
-    primary.hover = mixColor(surface.foreground, nextPrimary, 0.08, canvas);
-    primary.active = mixColor(surface.foreground, nextPrimary, 0.16, canvas);
-    primary.muted = withOpacity(nextPrimary, 0.5);
-    if (!authored.focusBorder && !authored['inputOption.activeBorder']) {
-      interactive.focus = nextPrimary;
-      interactive.focusRing = nextPrimary;
-      interactive.borderFocus = nextPrimary;
+  // Search along a color pair, retaining the source hue instead of replacing
+  // every palette with one shared gray. If a text floor is unattainable, the
+  // readable neutral endpoint is the best available result.
+  const toward = (seed: string, target: string, accepts: (color: string) => boolean) => {
+    if (accepts(seed)) return seed;
+    let low = 0, high = 1;
+    let result = target;
+    for (let step = 0; step < 16; step++) {
+      const amount = (low + high) / 2;
+      const candidate = mixColor(target, seed, amount, canvas);
+      if (accepts(candidate)) { high = amount; result = candidate; }
+      else low = amount;
     }
-    if (theme.colors.markdown) {
-      if (!authored['textLink.foreground']) theme.colors.markdown.link = nextPrimary;
-      if (!authored['textLink.activeForeground']) theme.colors.markdown.linkHover = primary.hover;
-      theme.colors.markdown.listMarker = withOpacity(nextPrimary, 0.6);
-    }
-  }
-  if (surfaces.some((background) => (contrastRatio(interactive.focusRing, background, canvas) ?? 0) < 1.1)) {
+    return result;
+  };
+  const luminance = (color: string) => contrast(color, '#000000');
+  const surfaceTextFloor = Math.min(4.6, contrast(neutral, canvas));
+  const layer = (seed: string, lighter: boolean) => {
+    const target = lighter ? '#ffffff' : '#000000';
+    const correctDirection = lighter ? luminance(seed) > luminance(canvas) : luminance(seed) < luminance(canvas);
+    const start = correctDirection ? mixColor(seed, canvas, 1, canvas) : canvas;
+    const quiet = toward(start, canvas, (color) => contrast(color, canvas) <= 1.10);
+    const separated = contrast(target, canvas) < 1.04
+      ? target : toward(quiet, target, (color) => contrast(color, canvas) >= 1.04);
+    // Mid-tone canvases have very little contrast headroom. Keep text readable
+    // even when that leaves less room for separating the layers.
+    return toward(separated, canvas, (color) => contrast(neutral, color) >= surfaceTextFloor);
+  };
+  surface.muted = layer(surface.muted, false);
+  surface.elevated = layer(surface.elevated, dark);
+  surface.subtle = mixColor(neutral, canvas, 0.025, canvas);
+  const surfaces = [canvas, surface.muted, surface.elevated];
+  const minimum = (color: string) => Math.min(...surfaces.map((background) => contrast(color, background)));
+  const readable = (color: string) => toward(color, neutral, (candidate) => minimum(candidate) >= 4.6);
+  const text = (seed: string, ceiling: number, floor = 4.6) => toward(
+    toward(seed, canvas, (color) => contrast(color, canvas) <= ceiling),
+    neutral, (color) => minimum(color) >= floor,
+  );
+  surface.foreground = text(surface.foreground, dark ? 10 : 9, 7);
+  surface.mutedForeground = text(surface.mutedForeground, Math.min(6, contrast(surface.foreground, canvas) * 0.7));
+  surface.elevatedForeground = text(surface.elevatedForeground, dark ? 10 : 9, 7);
+
+  const accents = [authored['button.background'], authored['textLink.foreground'], authored['activityBarBadge.background'], authored['list.highlightForeground'], authored.focusBorder];
+  primary.base = readable(accents.find((color) => color !== undefined && minimum(color) >= 3) ?? primary.base);
+  primary.foreground = onColor(primary.base, canvas);
+  primary.hover = mixColor(neutral, primary.base, 0.08, canvas);
+  primary.active = mixColor(neutral, primary.base, 0.16, canvas);
+  primary.muted = withOpacity(primary.base, 0.5);
+  if (minimum(interactive.focusRing) < 1.1) {
     interactive.focus = primary.base;
     interactive.focusRing = primary.base;
     interactive.borderFocus = primary.base;
   }
-
-  const separate = (color: string, other: string, minimum: number) => surfaces.every((background) =>
-    (chromaticDistance(color, other, background, canvas) ?? 0) >= minimum);
-  let nextInfo = readable(status.info);
-  if (!separate(nextInfo, primary.base, MIN_ACCENT_SEPARATION)) {
-    const acceptable = (color: string) => separate(color, primary.base, MIN_ACCENT_SEPARATION)
-      && [status.error, status.warning, status.success].every((other) => separate(color, other, 0.1));
-    const candidates = [
-      authored['notificationsInfoIcon.foreground'], authored['editorInfo.foreground'],
-      authored['terminal.ansiCyan'], authored['terminal.ansiBlue'], authored['terminal.ansiMagenta'],
-      authored['textLink.foreground'], syntax.function, syntax.type,
-    ].filter((color) => color !== undefined).map(readable);
-    let info = candidates.find(acceptable);
-    if (!info) {
-      const seed = mixColor(nextInfo, canvas, 1, canvas);
-      const seeds = [seed, readable(mixColor(seed, canvas, 0.5, canvas))];
-      const rotated = seeds.flatMap((value) => [0.12, 0.18].flatMap((chroma) => [0, 60, -60, 90, -90, 120, -120, 180]
-        .map((angle) => readable(rotateColorHue(value, angle, chroma)))));
-      info = rotated.find(acceptable);
-      // A dense palette can occupy every hue. Keep primary/info distinct first,
-      // then maximize distance from the remaining status roles.
-      if (!info) {
-        const score = (color: string) => Math.min(...[status.error, status.warning, status.success]
-          .map((other) => chromaticDistance(color, other, surface.muted, canvas) ?? 0));
-        info = rotated.filter((color) => separate(color, primary.base, MIN_ACCENT_SEPARATION))
-          .sort((a, b) => score(b) - score(a))[0];
-      }
+  // Selection is a state, not a substitute for the sidebar surface.
+  interactive.selection = toward(interactive.selection, mixColor(primary.base, canvas, 0.18, canvas), (color) => minimum(color) >= 1.1);
+  interactive.selectionForeground = readableText(interactive.selectionForeground, interactive.selection, canvas);
+  // Alpha must be measured over each surface, not flattened onto the canvas.
+  const border = (seed: string, cap: number) => {
+    if (surfaces.every((background) => contrast(seed, background) <= cap)) return seed;
+    let low = 0, high = 1;
+    let result = withOpacity(seed, 0);
+    for (let step = 0; step < 16; step++) {
+      const alpha = (low + high) / 2;
+      const candidate = withOpacity(seed, alpha);
+      if (surfaces.every((background) => contrast(candidate, background) <= cap)) { low = alpha; result = candidate; }
+      else high = alpha;
     }
-    if (info) nextInfo = info;
-  }
-  if (nextInfo !== status.info) {
-    status.info = nextInfo;
-    status.infoForeground = onColor(nextInfo, canvas);
-    status.infoBackground = withOpacity(nextInfo, dark ? 0.16 : 0.12);
-    status.infoBorder = withOpacity(nextInfo, dark ? 0.45 : 0.35);
-  }
+    return result;
+  };
+  interactive.border = border(interactive.border, dark ? 1.245 : 1.268);
+  interactive.borderHover = border(interactive.borderHover, dark ? 2.356 : 1.64);
+  interactive.hover = border(interactive.hover, 1.18);
+  interactive.active = border(interactive.active, 1.25);
 
-  if (theme.colors.chat) {
-    const current = theme.colors.chat.userMessageBackground ?? surface.elevated;
-    if ((contrastRatio(current, canvas, canvas) ?? 1) < 1.1) {
-      const painted = mixColor(current, canvas, 1, canvas);
-      const darker = (contrastRatio(painted, '#000000') ?? 1) < (contrastRatio(canvas, '#000000') ?? 1);
-      let target = darker ? '#000000' : '#ffffff';
-      let start = painted;
-      if ((contrastRatio(target, canvas, canvas) ?? 1) < 1.1 || (contrastRatio(painted, canvas, canvas) ?? 1) < 1.01) {
-        start = canvas;
-        target = surface.foreground;
-      }
-      let low = 0, high = 1;
-      for (let step = 0; step < 16; step++) {
-        const amount = (low + high) / 2;
-        const candidate = mixColor(target, start, amount, canvas);
-        if ((contrastRatio(candidate, canvas, canvas) ?? 1) >= 1.1) high = amount;
-        else low = amount;
-      }
-      const background = mixColor(target, start, high, canvas);
-      if ((contrastRatio(surface.foreground, background, canvas) ?? 0) >= 4.5) {
-        theme.colors.chat.userMessageBackground = background;
-      }
-    }
+  // Semantic hue families stay stable even when the source diagnostics reuse
+  // a brand accent. Shades within the family remain authored where possible.
+  const semantic = (seed: string, fallback: string, low: number, high: number) => {
+    const hue = colorHue(seed, canvas);
+    return readable(hue !== null && hue >= low && hue <= high ? seed : fallback);
+  };
+  status.error = semantic(status.error, dark ? '#e07777' : '#b43b45', 10, 40);
+  status.warning = semantic(status.warning, dark ? '#d6b467' : '#916b17', 65, 100);
+  status.success = semantic(status.success, dark ? '#80b888' : '#357b47', 125, 165);
+  status.info = semantic(status.info, dark ? '#83afe0' : '#366eaa', 230, 275);
+  for (const role of ['error', 'warning', 'success', 'info'] as const) {
+    status[`${role}Foreground`] = onColor(status[role], canvas);
+    status[`${role}Background`] = withOpacity(status[role], dark ? 0.16 : 0.12);
+    status[`${role}Border`] = withOpacity(status[role], dark ? 0.45 : 0.35);
   }
+  theme.colors.pr = {
+    open: status.success, closed: status.error, draft: surface.mutedForeground,
+    blocked: semantic(authored['terminal.ansiYellow'] ?? '', dark ? '#d99464' : '#a65b25', 40, 65),
+    merged: semantic(authored['terminal.ansiMagenta'] ?? '', dark ? '#b79bd9' : '#8255b0', 285, 325),
+  };
+  if (chat) {
+    let base = toward(canvas, neutral, (color) => contrast(color, canvas) >= 1.12);
+    if (contrast(neutral, base) < surfaceTextFloor) {
+      base = toward(canvas, neutral === '#ffffff' ? '#000000' : '#ffffff', (color) => contrast(color, canvas) >= 1.12);
+    }
+    chat.userMessageBackground = toward(mixColor(primary.base, base, 0.03, canvas), base,
+      (color) => contrast(color, canvas) >= 1.1 && contrast(neutral, color) >= surfaceTextFloor);
+    surfaces.push(chat.userMessageBackground);
+    surface.foreground = toward(surface.foreground, neutral, (color) => minimum(color) >= 7);
+    surface.mutedForeground = readable(surface.mutedForeground);
+    chat.userMessage = readableText(surface.foreground, chat.userMessageBackground, canvas);
+    chat.assistantMessage = surface.foreground;
+    chat.timestamp = surface.mutedForeground;
+    chat.typing = surface.mutedForeground;
+    chat.avatarForeground = authored['chat.avatarForeground'] ?? surface.foreground;
+    chat.slashCommandBackground = authored['chat.slashCommandBackground'] ?? primary.base;
+    chat.slashCommandForeground = authored['chat.slashCommandForeground'] ?? onColor(chat.slashCommandBackground, canvas);
+    chat.inputWorkingBorderColor1 = authored['chat.inputWorkingBorderColor1'] ?? primary.base;
+    chat.inputWorkingBorderColor2 = authored['chat.inputWorkingBorderColor2'] ?? primary.hover;
+    chat.inputWorkingBorderColor3 = authored['chat.inputWorkingBorderColor3'] ?? primary.muted;
+    chat.divider = border(chat.divider ?? interactive.border, dark ? 1.442 : 1.427);
+  }
+  if (theme.colors.pr) theme.colors.pr.draft = surface.mutedForeground;
+  if (tools) {
+    tools.border = border(tools.border ?? interactive.border, dark ? 1.207 : 1.231);
+    tools.title = surface.foreground;
+    tools.description = surface.mutedForeground;
+    tools.icon = surface.mutedForeground;
+  }
+  if (markdown) {
+    markdown.bold = mixColor(neutral, surface.foreground, 0.12, canvas);
+    markdown.italic = surface.foreground;
+    markdown.blockquote = surface.mutedForeground;
+    markdown.blockquoteBorder = border(markdown.blockquoteBorder ?? interactive.border, dark ? 1.442 : 1.427);
+    markdown.hr = border(markdown.hr ?? interactive.border, dark ? 1.442 : 1.427);
+    markdown.link = readable(authored['textLink.foreground'] ?? primary.base);
+    markdown.linkHover = readable(authored['textLink.activeForeground'] ?? primary.hover);
+    markdown.listMarker = withOpacity(primary.base, 0.6);
+    markdown.inlineCode = surface.foreground;
+    markdown.inlineCodeBackground = surface.subtle;
+  }
+  syntax.base.background = toward(syntax.base.background, canvas, (color) => contrast(color, canvas) <= 1.1);
+  syntax.base.foreground = readableText(surface.foreground, syntax.base.background, canvas);
 }

@@ -94,6 +94,14 @@ export function chromaticDistance(first: string, second: string, background: str
   return Math.hypot(x.a - y.a, x.b - y.b);
 }
 
+/** Hue of a painted color; near-neutral colors have no semantic hue. */
+export function colorHue(value: string, canvas: string): number | null {
+  const color = parseColor(value), background = parseColor(canvas);
+  if (!color || !background) return null;
+  const lab = oklab(over(color, background));
+  return Math.hypot(lab.a, lab.b) < 0.025 ? null : (Math.atan2(lab.b, lab.a) * 180 / Math.PI + 360) % 360;
+}
+
 /** Rotate a validated color in OKLCH while retaining lightness. A neutral seed
  * starts from blue when a caller requests chroma. Clamp to the sRGB gamut. */
 export function rotateColorHue(value: string, degrees: number, minimumChroma = 0): string {

@@ -18,10 +18,43 @@ retain their exact authored background. Bodies and gutters use the same fill.
 
 For authoring and supported fields, see `docs/CUSTOM_THEMES.md`. Surface semantics belong to `.agents/skills/theme-system/references/tokens-and-examples.md`.
 
+`scripts/port-opencode-theme.ts` is the maintainer's OpenCode App converter,
+promoted from the personal converter that produced the `OpenCode App / …`
+library. It reads an installed sibling `../opencode` checkout, using its actual
+v2 UI and v1 syntax resolvers, then the shared VS Code importer. The sibling
+checkout is a development prerequisite, not a shipped dependency. Run its explicit
+integration suite with `bun run themes:port:opencode:test`; it needs that checkout
+and is kept outside the ordinary self-contained test suite.
+
+The command uses `--theme ID`, `--mode`, `--output`, `--list` and `--dry-run`.
+The previous positional/TUI converter and its `--force` option are replaced.
+Output retains the personal library's IDs and compact format. Publication skips
+identical files and refuses edited files or symlinks; use a fresh output directory
+to review regenerated palettes. Markdown bold derives from body text rather than
+the upstream syntax accent. Status hue adaptation is inherited from the personal
+converter, so review status and PR semantics before promoting output to built-ins.
+
 Elevated surfaces scope `--foreground` to `surface.elevatedForeground`, so neutral
 children do not accidentally paint canvas text inside a popup. Opaque canvas
 and secondary surfaces reset that context; code establishes its own syntax text.
 Palette files are not retuned to conceal incorrect role usage.
+
+Built-in palettes place the sidebar below the chat canvas in luminance. Fields
+and elevated panels are lighter than the canvas in dark mode and darker in light
+mode. Mono and Mono Plus keep their pure-black dark canvas, so their sidebars are
+the exception. User-message backgrounds carry a faint primary tint, with enough
+separation from the canvas to remain visible. Mono keeps every role grayscale.
+Body, secondary and bold text retain the palette's neutral cast with distinct
+contrast levels; bold text is a stronger body color rather than a syntax accent.
+These authored choices apply to built-ins, not to existing custom theme files.
+
+Built-in border strength uses OpenChamber's matching light/dark palette as the
+reference. Compare alpha-composited contrast on canvas, sidebar and elevated
+surfaces separately for ordinary borders, hover borders, tool outlines and
+dividers. Only soften roles exceeding the reference's strongest contrast across
+those surfaces; retain quieter authored borders and their hue. Markdown rules
+and quote borders use the divider reference. Focus and status borders keep their
+own emphasis.
 
 The VS Code adapter maps the main canvas from chat/editor, secondary layout from
 sidebar/panel, and the shared elevated role from an editor-widget, dropdown or
@@ -31,8 +64,8 @@ the same time. Always keep the foreground paired with the chosen source.
 Selection prefers the authored list pair, then menu and editor pairs, but skips
 a candidate that becomes indistinguishable from a shared canvas, sidebar or
 elevated surface when another authored pair remains visible. Keep the matching
-foreground. This collision check does not impose a minimum contrast style on
-intentionally subtle palettes. Pressed controls use toolbar-active, never list-selection. Input backgrounds are not hover
+foreground. The shared adaptation pass then makes an indistinct selection visible
+on the final surfaces. Pressed controls use toolbar-active, never list-selection. Input backgrounds are not hover
 states, chat bubbles are not sidebars, and diagnostic colors are not search highlights.
 
 A transparent input/widget border does not disable the app's generic borders;
@@ -41,33 +74,33 @@ diagnostic fills likewise fall back to status tints, because an editor underline
 and an app alert have different background needs. Focus rings retain the authored
 focus color and alpha rather than replacing its opacity with a fixed percentage.
 
-File/catalog import normalizes generic borders to the built-in palettes' quiet
-edge contrast: at least 1.15 on dark surfaces and 1.20 on light surfaces. It lifts
-the authored hue into a readable tint and adjusts overlay alpha against canvas,
-sidebar and elevated surfaces, so an opaque edge cannot disappear on one of them.
-Inherited tool/divider/blockquote borders follow it; explicit component borders,
-focus, status, diff and high-contrast palettes are outside border normalization. Palettes
-mixing light and dark surfaces retain the original border because one overlay
-cannot provide that quiet contrast consistently. The live VS Code adapter does
-not normalize borders, and existing saved theme files are not rewritten.
+`vscode/adapt.ts` applies the shared UI policy once, at the end of
+`buildVSCodeThemeFromPalette`. File imports and live VS Code theme changes both
+use it. The adapter also owns missing-role fallbacks, so the same source colors
+produce the same UI palette through either route. High-contrast light and dark
+palettes retain their authored contrasts; the live reader recognizes VS Code's
+high-contrast body classes. Existing saved custom files are not rewritten.
 
-`vscode/adapt.ts` adapts imported UI roles after source mapping. A button fill that
-disappears on the canvas/sidebar is not a usable app accent: prefer authored link,
-badge or list-highlight colors before syntax accents. Primary and info must remain
-readable on the sidebar and same-polarity selected/elevated backgrounds because
-session timers use these colors directly. An effectively invisible focus ring uses
-the resulting primary. Primary-dependent fallbacks are updated with the accent.
+Ordinary palettes retain their canvas and hue, but sidebar and elevated layers
+follow the built-in hierarchy. Surface contrast stays within 1.04–1.10 where
+the canvas permits it; a black canvas keeps a black sidebar. Body text is softened
+to a canvas contrast ceiling of 10 in dark and 9 in light, with a readability
+floor of 7 across shared surfaces when possible. Secondary text targets 4.6–6.
+Readability takes precedence over ceilings. Bubble text is checked after adding
+the faint primary tint. Bold uses stronger neutral text. Code backgrounds stay
+within 1.10 of the canvas; syntax token and diff colors retain their source values.
 
-Info must also differ chromatically from primary. Compare alpha-composited colors
-in OKLab's a/b plane, with a minimum distance of 0.075. Prefer an authored palette
-candidate separated from error/warning/success too; otherwise rotate the info hue
-in OKLCH with bounded candidates. Update the entire info family together. This is
-an import policy, not a change to session indicators or the live VS Code palette.
+Borders use the matching OpenChamber role's maximum contrast as a cap, including
+explicit tool and quote borders. Quieter authored borders remain intact. Hover
+and pressed fills have their own quiet caps; selection keeps a readable paired
+foreground. Focus retains its source color unless effectively invisible.
 
-User-message backgrounds need at least 1.1 contrast against the chat canvas while
-retaining readable message text. Strengthen a faint existing bubble in its original
-light/dark direction, or derive a neutral surface when the bubble equals the canvas.
-Visible authored bubbles and syntax/diff colors remain unchanged by this pass.
+An unusable button fill falls back to a visible authored link, badge or highlight
+accent. Status shades may retain the source color only within the semantic hue
+family: info blue, success green, error red, warning amber. PR blocked is orange,
+merged purple and draft secondary text. Status fills and borders follow the final
+status shade. A blue primary may share the info hue; hue rotation no longer moves
+info into another semantic family.
 
 `vscode/import.ts` owns file conversion for Settings and the maintainer CLI.
 It accepts bounded JSON/JSONC with literal VS Code colors. Missing neutral roles

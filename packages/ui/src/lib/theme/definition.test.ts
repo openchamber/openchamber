@@ -54,7 +54,7 @@ describe('compact theme definitions', () => {
 });
 
 describe('Catppuccin built-in palettes', () => {
-  test('maps the dark variant to official Mocha roles', () => {
+  test('keeps Mocha accents with the shared dark surface hierarchy', () => {
     const theme = themes.find((item) => item.metadata.id === 'catppuccin-dark');
     expect({
       primary: theme?.colors.primary.base,
@@ -87,10 +87,10 @@ describe('Catppuccin built-in palettes', () => {
       primary: '#cba6f7',
       surface: {
         background: '#1e1e2e',
-        foreground: '#cdd6f4',
+        foreground: '#bdc5df',
         muted: '#181825',
-        mutedForeground: '#a6adc8',
-        elevated: '#181825',
+        mutedForeground: '#9098ad',
+        elevated: '#272736',
       },
       status: {
         error: '#f38ba8',
@@ -99,21 +99,21 @@ describe('Catppuccin built-in palettes', () => {
         info: '#89b4fa',
       },
       mergedPr: '#cba6f7',
-      inlineCodeBackground: '#313244',
+      inlineCodeBackground: '#1b1b2a',
       syntax: {
         comment: '#9399b2',
         keyword: '#cba6f7',
         string: '#a6e3a1',
         number: '#fab387',
         function: '#89b4fa',
-        variable: '#cdd6f4',
+        variable: '#bdc5df',
         type: '#f9e2af',
         operator: '#94e2d5',
       },
     });
   });
 
-  test('maps the light variant to official Latte roles', () => {
+  test('keeps Latte accents with the shared light surface hierarchy', () => {
     const theme = themes.find((item) => item.metadata.id === 'catppuccin-light');
     expect({
       primary: theme?.colors.primary.base,
@@ -149,9 +149,9 @@ describe('Catppuccin built-in palettes', () => {
       surface: {
         background: '#eff1f5',
         foreground: '#4c4f69',
-        muted: '#e6e9ef',
-        mutedForeground: '#5c5f77',
-        elevated: '#e6e9ef',
+        muted: '#e9ebef',
+        mutedForeground: '#616274',
+        elevated: '#e5e7eb',
       },
       status: {
         error: '#d20f39',
@@ -160,7 +160,7 @@ describe('Catppuccin built-in palettes', () => {
         info: '#1850c1',
       },
       mergedPr: '#8839ef',
-      inlineCodeBackground: '#ccd0da',
+      inlineCodeBackground: '#eceef2',
       syntax: {
         comment: '#7c7f93',
         keyword: '#8839ef',

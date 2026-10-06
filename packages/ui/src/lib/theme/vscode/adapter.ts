@@ -1,7 +1,8 @@
 import type { Theme } from '@/types/theme';
 import type { ThemeMode } from '@/types/theme';
 import { getDefaultTheme } from '../themes';
-import { contrastRatio, onColor, readableText, withOpacity } from '../color';
+import { contrastRatio, mixColor, onColor, readableText, withOpacity } from '../color';
+import { adaptVSCodeRoles } from './adapt';
 
 export type VSCodeThemeKind = 'light' | 'dark' | 'high-contrast';
 
@@ -101,6 +102,8 @@ type VSCodeThemeColorToken =
   // Badge
   | 'badge.background'
   | 'badge.foreground'
+  | 'activityBarBadge.background'
+  | 'list.highlightForeground'
   // Status bar
   | 'statusBar.background'
   | 'statusBar.foreground'
@@ -134,6 +137,7 @@ export type VSCodeThemePalette = {
   kind: VSCodeThemeKind;
   colors: Partial<Record<VSCodeThemeColorToken, string>>;
   mode?: ThemeMode;
+  highContrast?: boolean;
 };
 
 export type VSCodeThemePayload = {
@@ -237,6 +241,8 @@ const VARIABLE_MAP: Record<VSCodeThemeColorToken, string> = {
   // Badge
   'badge.background': '--vscode-badge-background',
   'badge.foreground': '--vscode-badge-foreground',
+  'activityBarBadge.background': '--vscode-activityBarBadge-background',
+  'list.highlightForeground': '--vscode-list-highlightForeground',
   // Status bar
   'statusBar.background': '--vscode-statusBar-background',
   'statusBar.foreground': '--vscode-statusBar-foreground',
@@ -312,15 +318,40 @@ export const readVSCodeThemePalette = (
   });
 
   return {
-    kind: readKind(preferredKind),
+    kind: document.body?.classList.contains('vscode-high-contrast-light') ? 'light' : readKind(preferredKind),
+    highContrast: document.body?.classList.contains('vscode-high-contrast-light') || document.body?.classList.contains('vscode-high-contrast'),
     colors,
     mode: preferredMode,
   };
 };
 
-export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme => {
+export const buildVSCodeThemeFromPalette = (source: VSCodeThemePalette): Theme => {
+  const palette = { ...source, colors: { ...source.colors } };
   const isDark = palette.kind === 'dark' || palette.kind === 'high-contrast';
   const base = getDefaultTheme(isDark);
+  const colors = palette.colors;
+  const canvas = colors['chat.list.background'] ?? colors['editor.background'] ?? base.colors.surface.background;
+  const text = colors['interactive-session.foreground'] ?? colors.foreground ?? colors['editor.foreground'] ?? onColor(canvas, canvas);
+  colors.foreground ??= text;
+  colors['sideBar.background'] ??= colors['panel.background'] ?? mixColor(text, canvas, 0.03, canvas);
+  if (!colors['editorWidget.background'] && !colors['dropdown.background'] && !colors['input.background']) {
+    colors['editorWidget.background'] = mixColor(text, canvas, 0.04, canvas);
+    colors['editorWidget.foreground'] = readableText(text, colors['editorWidget.background'], canvas);
+  }
+  colors.descriptionForeground ??= readableText(mixColor(text, canvas, 0.6, canvas), canvas);
+  colors['widget.border'] ??= colors['input.border'] ?? colors['panel.border'] ?? mixColor(text, canvas, 0.15, canvas);
+  colors['toolbar.hoverBackground'] ??= colors['list.hoverBackground'] ?? mixColor(text, canvas, 0.08, canvas);
+  colors['toolbar.activeBackground'] ??= mixColor(text, canvas, 0.12, canvas);
+  if (!colors['list.activeSelectionBackground'] && !colors['menu.selectionBackground'] && !colors['editor.selectionBackground']) {
+    colors['list.activeSelectionBackground'] = mixColor(text, canvas, 0.16, canvas);
+    colors['list.activeSelectionForeground'] = readableText(text, colors['list.activeSelectionBackground'], canvas);
+  }
+  if (!colors['button.background']) {
+    colors['button.background'] = colors['textLink.foreground'] ?? colors.focusBorder ?? text;
+    colors['button.foreground'] = onColor(colors['button.background'], canvas);
+  }
+  colors.focusBorder ??= colors['button.background'];
+  colors['editorCursor.foreground'] ??= colors['editor.foreground'] ?? text;
   
   const read = (token: VSCodeThemeColorToken, fallback: string): string =>
     palette.colors[token] ?? fallback;
@@ -382,9 +413,9 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // ===========================================
   
   // Border: Use widget.border (most generic), then input.border, panel.border
-  // DO NOT reduce opacity - these are already properly set by VS Code themes
+  // The shared adaptation pass caps ordinary border strength after mapping.
   const border = [
-    palette.kind === 'high-contrast' ? read('contrastBorder', '') : '',
+    palette.kind === 'high-contrast' || palette.highContrast ? read('contrastBorder', '') : '',
     read('widget.border', ''), read('input.border', ''),
     read('panel.border', ''), read('sideBar.border', ''),
     read('editorWidget.border', ''), read('contrastBorder', ''),
@@ -452,7 +483,7 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // TOOLS SECTION - For tool cards, diffs, etc.
   // ===========================================
   
-  // Tools border should be visible! Use border directly without extra opacity reduction
+  // Keep the source tool outline until the shared role adaptation pass.
   const toolsBorder = read('chat.requestBorder', effectiveBorder);
   
   // Diff colors from VS Code diff editor
@@ -469,7 +500,7 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // Prefer the authored chat bubble, with an elevated surface as the fallback.
   const userMessageBg = read('chat.requestBubbleBackground', read('chat.requestBackground', elevated));
   
-  return {
+  const theme: Theme = {
     ...base,
     metadata: {
       ...base.metadata,
@@ -530,6 +561,9 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         infoBackground: infoBg,
         infoBorder: applyAlpha(infoColor, isDark ? 0.45 : 0.35),
       },
+      pr: base.colors.pr ? {
+        ...base.colors.pr, open: successColor, closed: errorColor, draft: mutedForeground,
+      } : undefined,
       syntax: {
         tokens: {},
         highlights: {
@@ -602,4 +636,6 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
       },
     },
   };
+  adaptVSCodeRoles(theme, source.colors, palette.kind === 'high-contrast' || palette.highContrast === true);
+  return theme;
 };

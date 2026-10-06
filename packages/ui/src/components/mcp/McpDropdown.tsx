@@ -145,10 +145,9 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         </div>
       </div> : null}
 
-      {/* Desktop dropdown: servers grouped in one mobile-style card; the mobile
-          sheet variant keeps its own density and chrome. */}
+      {/* Desktop and mobile share the list, with different row density. */}
       <div className={cn('max-h-64 overflow-y-auto', mobileListDensity ? 'space-y-1 py-3' : 'px-3 py-2.5', listClassName)}>
-        <div className={cn(!mobileListDensity && sortedNames.length > 0 && 'rounded-xl bg-[var(--surface-muted)] p-1.5')}>
+        <div className={cn(!mobileListDensity && sortedNames.length > 0 && 'p-1.5')}>
         {sortedNames.map((serverName) => {
           const serverStatus = status[serverName];
           const tone = statusTone(serverStatus);
@@ -160,7 +159,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             <div
               key={serverName}
               className={cn(
-                'flex items-center justify-between rounded-lg hover:bg-interactive-hover/50',
+                'flex items-center justify-between rounded-lg hover:bg-interactive-hover',
                 mobileListDensity ? 'gap-3 px-4 py-3' : 'gap-2 px-2.5 py-2',
               )}
             >

@@ -2,9 +2,8 @@ import { z } from 'zod';
 import stripJsonComments from 'strip-json-comments';
 import { buildVSCodeThemeFromPalette, type VSCodeThemePalette } from './adapter';
 import { compactTheme, type ThemeDefinition } from '../definition';
-import { contrastRatio, mixColor, onColor, readableText, withOpacity } from '../color';
+import { mixColor, onColor, readableText } from '../color';
 import { MAX_THEME_IMPORT_BYTES, ThemeImportError } from '../importErrors';
-import { adaptImportedRoles } from './adapt';
 
 const hex = z.string().regex(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i);
 const tokenSettings = z.object({ foreground: hex.optional() });
@@ -66,23 +65,6 @@ function formatImportedThemeName(name: string): string {
   return name.split(/[-_]/).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
-function normalizeImportedBorder(border: string, surfaces: string[], canvas: string, target: number): string {
-  // An overlay keeps the edge visible on both canvas and elevated controls.
-  // A single opaque color can disappear when it equals one of those surfaces.
-  const neutral = onColor(canvas, canvas);
-  if (surfaces.some((surface) => onColor(surface, canvas) !== neutral)) return border;
-  let tint = border;
-  for (const surface of surfaces) tint = readableText(tint, surface, canvas);
-  let low = 0, high = 1;
-  for (let step = 0; step < 16; step++) {
-    const alpha = (low + high) / 2;
-    const candidate = withOpacity(tint, alpha);
-    if (surfaces.every((surface) => (contrastRatio(candidate, surface, canvas) ?? 0) >= target)) high = alpha;
-    else low = alpha;
-  }
-  return withOpacity(tint, high);
-}
-
 export function importVSCodeTheme(text: string, filename: string): ThemeDefinition {
   if (new TextEncoder().encode(text).byteLength > MAX_THEME_IMPORT_BYTES) throw new ThemeImportError('size');
   let source: z.output<typeof sourceSchema>;
@@ -98,7 +80,6 @@ export function importVSCodeTheme(text: string, filename: string): ThemeDefiniti
   for (const [key, color] of Object.entries(source.colors)) {
     if (color !== null) colors[key] = color;
   }
-  const authoredColors = { ...colors };
   const authoredBackground = colors['editor.background'];
   if (!authoredBackground) throw new ThemeImportError('background');
   const dark = source.type ? ['dark', 'hc', 'hc-black'].includes(source.type) : onColor(authoredBackground, '#ffffff') === '#ffffff';
@@ -107,64 +88,27 @@ export function importVSCodeTheme(text: string, filename: string): ThemeDefiniti
   const entries = scopeEntries(rules.data);
   const defaultTokenColor = rules.data.filter((rule) => !rule.scope && rule.settings.foreground).at(-1)?.settings.foreground;
   const editorForeground = colors['editor.foreground'] ?? defaultTokenColor ?? colors.foreground ?? onColor(editorBackground, editorBackground);
-  const canvas = colors['chat.list.background'] ?? editorBackground;
-  const foreground = colors['interactive-session.foreground'] ?? colors.foreground ?? editorForeground;
-
-  // Fill missing neutral UI roles from this palette, not OpenChamber's brand
-  // colors. The runtime adapter owns role precedence and matched surface pairs.
   colors['editor.background'] = editorBackground;
   colors['editor.foreground'] = editorForeground;
-  colors.foreground ??= foreground;
-  colors['sideBar.background'] ??= colors['panel.background'] ?? mixColor(foreground, canvas, 0.03, canvas);
-  if (!colors['editorWidget.background'] && !colors['dropdown.background'] && !colors['input.background']) {
-    colors['editorWidget.background'] = mixColor(foreground, canvas, 0.04, canvas);
-    colors['editorWidget.foreground'] = readableText(foreground, colors['editorWidget.background'], canvas);
-  }
-  colors.descriptionForeground ??= readableText(mixColor(foreground, canvas, 0.6, canvas), canvas);
-  colors['widget.border'] ??= colors['input.border'] ?? colors['panel.border'] ?? mixColor(foreground, canvas, 0.15, canvas);
-  colors['toolbar.hoverBackground'] ??= colors['list.hoverBackground'] ?? mixColor(foreground, canvas, 0.08, canvas);
-  colors['toolbar.activeBackground'] ??= mixColor(foreground, canvas, 0.12, canvas);
-  if (!colors['list.activeSelectionBackground'] && !colors['editor.selectionBackground']) {
-    colors['list.activeSelectionBackground'] = mixColor(foreground, canvas, 0.16, canvas);
-    colors['list.activeSelectionForeground'] = readableText(foreground, colors['list.activeSelectionBackground'], canvas);
-  }
-  if (!colors['button.background']) {
-    colors['button.background'] = colors['textLink.foreground'] ?? colors.focusBorder ?? foreground;
-    colors['button.foreground'] = onColor(colors['button.background'], canvas);
-  }
-  colors.focusBorder ??= colors['button.background'];
-  colors['editorCursor.foreground'] ??= editorForeground;
 
   const highContrast = source.type?.startsWith('hc') ?? false;
   if (highContrast && colors.contrastBorder) colors['widget.border'] = colors.contrastBorder;
-  const palette: VSCodeThemePalette = { kind: dark && highContrast ? 'high-contrast' : variant, colors };
+  const palette: VSCodeThemePalette = { kind: dark && highContrast ? 'high-contrast' : variant, colors, highContrast };
   const mapped = buildVSCodeThemeFromPalette(palette);
-  if (highContrast) mapped.colors.interactive.focusRing = colors.focusBorder;
-  else {
-    const { surface, interactive } = mapped.colors;
-    // Match the quietest border/surface pairing in the built-in OpenChamber
-    // palettes: about 1.15 dark and 1.20 light. Other roles are handled separately.
-    const border = normalizeImportedBorder(interactive.border,
-      [surface.background, surface.muted, surface.elevated], surface.background, dark ? 1.15 : 1.2);
-    interactive.border = border;
-    if (!colors['toolbar.hoverOutline']) interactive.borderHover = border;
-    if (mapped.colors.tools && !colors['chat.requestBorder']) mapped.colors.tools.border = border;
-    if (mapped.colors.chat) mapped.colors.chat.divider = border;
-    if (mapped.colors.markdown && !colors['textBlockQuote.border']) mapped.colors.markdown.blockquoteBorder = border;
-  }
   const semantic = source.semanticHighlighting === false ? {} : source.semanticTokenColors ?? {};
   const pick = (semantics: string[], scopes: string[], fallback: string) => semanticColor(semantic, semantics) ?? textMateColor(entries, scopes) ?? fallback;
+  const codeForeground = mapped.colors.syntax.base.foreground;
   const base = {
-    background: editorBackground,
-    foreground: editorForeground,
+    background: mapped.colors.syntax.base.background,
+    foreground: mapped.colors.syntax.base.foreground,
     comment: pick(['comment'], ['comment', 'comment.line', 'comment.block'], readableText(mixColor(editorForeground, editorBackground, 0.6, editorBackground), editorBackground)),
-    keyword: pick(['keyword'], ['keyword', 'storage', 'keyword.control', 'storage.type'], editorForeground),
-    string: pick(['string'], ['string', 'string.quoted', 'string.template'], editorForeground),
-    number: pick(['number'], ['constant.numeric'], editorForeground),
-    function: pick(['function'], ['entity.name.function', 'support.function'], editorForeground),
-    variable: pick(['variable'], ['variable.other.readwrite', 'variable'], editorForeground),
-    type: pick(['type'], ['entity.name.type', 'support.type', 'support.class'], editorForeground),
-    operator: pick(['operator'], ['keyword.operator'], editorForeground),
+    keyword: pick(['keyword'], ['keyword', 'storage', 'keyword.control', 'storage.type'], codeForeground),
+    string: pick(['string'], ['string', 'string.quoted', 'string.template'], codeForeground),
+    number: pick(['number'], ['constant.numeric'], codeForeground),
+    function: pick(['function'], ['entity.name.function', 'support.function'], codeForeground),
+    variable: pick(['variable'], ['variable.other.readwrite', 'variable'], codeForeground),
+    type: pick(['type'], ['entity.name.type', 'support.type', 'support.class'], codeForeground),
+    operator: pick(['operator'], ['keyword.operator'], codeForeground),
   };
   const className = pick(['class'], ['entity.name.type.class', 'entity.name.class'], base.type);
   const property = pick(['property'], ['variable.other.property', 'support.type.property-name'], base.variable);
@@ -189,13 +133,11 @@ export function importVSCodeTheme(text: string, filename: string): ThemeDefiniti
     highlights: mapped.colors.syntax.highlights,
   };
   const name = formatImportedThemeName(source.name ?? (filename.replace(/\.(jsonc?|code-theme)$/i, '').replace(/[-_]color[-_]theme$/i, '').trim().slice(0, 160) || 'VS Code'));
-  adaptImportedRoles(mapped, authoredColors, base);
   return compactTheme({
     metadata: { id: `vscode-import-${variant}`, name, variant, author: source.author, description: source.description ?? '', version: '1.0.0', tags: ['imported', 'vscode'] },
     colors: {
       ...mapped.colors,
       syntax,
-      pr: { open: mapped.colors.status.success, draft: mapped.colors.surface.mutedForeground, blocked: mapped.colors.status.warning, merged: className, closed: mapped.colors.status.error },
     },
   });
 }

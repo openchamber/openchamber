@@ -23,10 +23,10 @@
     },
     "surface": {
       "background": "#fdfcfa",
-      "foreground": "#393a34",
+      "foreground": "#44443d",
       "muted": "#f7f6f4",
-      "mutedForeground": "#5c5c54",
-      "elevated": "#f8f7f5",
+      "mutedForeground": "#696960",
+      "elevated": "#f3f2f0",
       "overlay": "#39393420"
     },
     "interactive": {
@@ -34,7 +34,8 @@
       "selection": "#a9998f2b",
       "borderHover": "#cbc7c2",
       "focusRing": "#b3501755",
-      "hover": "#0000000d",
+      "cursor": "#393a34",
+      "hover": "#0000000a",
       "active": "#00000014"
     },
     "status": {
@@ -46,7 +47,7 @@
     },
     "syntax": {
       "base": {
-        "background": "#f4f3f1",
+        "background": "#faf9f7",
         "comment": "#9dae9d",
         "keyword": "#15764e",
         "string": "#c25f4b",
@@ -68,37 +69,38 @@
         "diffAdded": "#2c751e",
         "diffRemoved": "#ab5959",
         "diffModified": "#2c751e",
-        "diffModifiedBackground": "#5f8d3d20",
-        "lineNumber": "#b9b6b0"
+        "diffModifiedBackground": "#5f8d3d20"
       }
     },
     "pr": {
-      "draft": "#6F6E69",
       "blocked": "#b35017",
       "merged": "#795cbc"
     },
     "chat": {
-      "userMessageBackground": "#f7f2ee",
-      "divider": "#d8d5d0"
+      "userMessageBackground": "#eeeae7",
+      "divider": "#d8d5d0",
+      "background": "#fdfcfa"
     },
     "markdown": {
       "link": "#2e808f",
       "linkHover": "#296aa3",
       "inlineCode": "#006A2C",
-      "inlineCodeBackground": "#F0EFED",
+      "inlineCodeBackground": "#faf9f7",
       "blockquote": "#6b6b63",
       "blockquoteBorder": "#d8d5d0",
-      "listMarker": "#1e754f99"
+      "listMarker": "#1e754f99",
+      "bold": "#3d3d37",
+      "italic": "#44443d"
     },
     "tools": {
       "border": "#d8d5d099",
-      "icon": "#6b6b63",
-      "title": "#393a34",
-      "description": "#6b6b63",
+      "icon": "#696960",
+      "title": "#44443d",
+      "description": "#696960",
       "edit": {
         "addedBackground": "#2c751e25",
         "removedBackground": "#ab595925",
-        "lineNumber": "#b9b6b0"
+        "lineNumber": "#696960"
       }
     }
   },

@@ -855,11 +855,10 @@ export function DesktopHostSwitcherDialog({
                     key={host.id}
                     className={cn(
                       'group flex items-center gap-2 px-2.5 py-2 rounded-md overflow-hidden',
-                      // Dropdown (embedded): mobile-style card per host; the
-                      // active host reads as selected, not just labelled.
-                      embedded && 'rounded-xl bg-[var(--surface-muted)] px-3 py-2.5',
-                      embedded && isActive && 'bg-[var(--interactive-selection)]/25',
-                      isEditing ? 'bg-interactive-hover/20' : 'hover:bg-interactive-hover/30'
+                      embedded && 'rounded-xl px-3 py-2.5',
+                      embedded && isActive
+                        ? 'bg-interactive-selection text-interactive-selection-foreground'
+                        : isEditing ? 'bg-interactive-hover' : 'hover:bg-interactive-hover'
                     )}
                   >
                     <button
@@ -878,7 +877,7 @@ export function DesktopHostSwitcherDialog({
                           then the address. */}
                       <div className="flex-1 min-w-0 space-y-0.5">
                         <div className="flex min-w-0 items-center gap-1.5">
-                          <span className="typography-ui-label font-medium truncate text-foreground">
+                          <span className="typography-ui-label font-medium truncate text-inherit">
                             {displayLabel}
                           </span>
                           {isActive && (

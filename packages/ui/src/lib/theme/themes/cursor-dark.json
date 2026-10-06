@@ -1,15 +1,15 @@
 {
   "metadata": {
+    "id": "cursor-dark",
     "name": "Cursor Dark",
-    "author": "cedricverlinden",
     "variant": "dark",
     "description": "",
     "version": "1.0.0",
+    "author": "cedricverlinden",
     "tags": [
       "cursor",
       "vscode"
-    ],
-    "id": "cursor-dark"
+    ]
   },
   "colors": {
     "primary": {
@@ -21,22 +21,22 @@
     },
     "surface": {
       "background": "#1a1a1a",
-      "foreground": "#CCCCCCdd",
-      "muted": "#141414",
-      "mutedForeground": "#848484",
-      "elevated": "#141414"
+      "foreground": "#bbbbbb",
+      "muted": "#151515",
+      "mutedForeground": "#919191",
+      "elevated": "#232323",
+      "subtle": "#141414"
     },
     "interactive": {
       "border": "#8484841f",
       "selection": "#ffffff1d",
-      "selectionForeground": "#FFFFFF",
       "borderHover": "#8484841f",
       "borderFocus": "#4c9df399",
       "focus": "#4c9df399",
       "focusRing": "#4c9df399",
       "cursor": "#FFFFFF",
-      "hover": "#2A2A2A99",
-      "active": "#2d2d2d"
+      "hover": "#ffffff0f",
+      "active": "#ffffff1a"
     },
     "status": {
       "error": "#BF616A",
@@ -54,7 +54,7 @@
     },
     "syntax": {
       "base": {
-        "foreground": "#D8DEE9",
+        "background": "#181818",
         "comment": "#6d6d6d",
         "keyword": "#83d6c5",
         "string": "#e394dc",
@@ -65,15 +65,15 @@
         "operator": "#d6d6dd"
       },
       "tokens": {
-        "className": "#87c3ff",
-        "enum": "#efb080",
-        "method": "#efb080",
-        "variableProperty": "#AA9BF5",
-        "constant": "#d6d6dd",
-        "boolean": "#ebc88d",
-        "punctuation": "#d6d6dd",
         "stringEscape": "#d6d6dd",
         "keywordImport": "#83d6c5",
+        "method": "#efb080",
+        "variableProperty": "#AA9BF5",
+        "className": "#87c3ff",
+        "enum": "#efb080",
+        "boolean": "#ebc88d",
+        "constant": "#d6d6dd",
+        "punctuation": "#d6d6dd",
         "tagAttribute": "#aaa0fa"
       },
       "highlights": {
@@ -82,38 +82,39 @@
         "diffRemoved": "#BF616A",
         "diffRemovedBackground": "#BF616A24",
         "diffModified": "#EBCB8B",
-        "diffModifiedBackground": "#ebcb8b29",
-        "lineNumber": "#505050",
-        "lineNumberActive": "#FFFFFF"
+        "diffModifiedBackground": "#ebcb8b29"
       }
     },
     "pr": {
-      "merged": "#87c3ff"
+      "blocked": "#D09770",
+      "merged": "#B48ECA"
     },
     "chat": {
       "background": "#1a1a1a",
-      "userMessageBackground": "#0f0f0f",
+      "userMessageBackground": "#26292b",
       "divider": "#8484841f"
     },
     "markdown": {
       "link": "#4c9df3",
       "linkHover": "#4c9df3",
       "inlineCode": "#88C0D0",
-      "inlineCodeBackground": "#1a1a1a",
+      "inlineCodeBackground": "#181818",
       "blockquote": "#CCCCCCdd",
       "blockquoteBorder": "#8484841f",
-      "listMarker": "#4c9df399"
+      "listMarker": "#4c9df399",
+      "bold": "#c2c2c2",
+      "italic": "#bbbbbb"
     },
     "tools": {
       "border": "#8484841f",
-      "icon": "#848484",
-      "title": "#CCCCCCdd",
-      "description": "#848484cc",
+      "icon": "#919191",
+      "title": "#bbbbbb",
+      "description": "#919191",
       "edit": {
         "addedBackground": "#A3BE8C24",
         "removedBackground": "#BF616A24",
         "modifiedBackground": "#ebcb8b29",
-        "lineNumber": "#505050"
+        "lineNumber": "#919191"
       }
     }
   }
