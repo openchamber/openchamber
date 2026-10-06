@@ -32,7 +32,8 @@ const INITIAL_USER_TURNS = 10
 const CONSTRAINED_SESSION_CACHE_LIMIT = 6
 // Cold navigation extends the first page backward through the cursor, one
 // page at a time, until INITIAL_USER_TURNS prompts are present or this many
-// records are held. Nothing already downloaded is requested again.
+// records are held. The ceiling never stops it before the newest prompt.
+// Nothing already downloaded is requested again.
 const INITIAL_WINDOW_MAX_RECORDS = 300
 const CONSTRAINED_INITIAL_WINDOW_MAX_RECORDS = 200
 
@@ -379,9 +380,12 @@ export class SessionMessageLoader {
       const visited = new Set([cursor])
       // An interactive batch tries to start on a user prompt so the oldest
       // visible turn is whole. Every fetched record is kept, and the server
-      // cursor stays authoritative; the extra reads are bounded.
-      for (let extra = 0; mode === "interactive" && extra < HISTORY_TURN_ALIGNMENT_EXTRA_PAGES; extra += 1) {
+      // cursor stays authoritative. Alignment reads are bounded, except that a
+      // batch holding no prompt at all would add nothing visible: it keeps
+      // reading until the turn's prompt arrives.
+      for (let extra = 0; mode === "interactive"; extra += 1) {
         if (page.complete || !page.session[0] || isUserMessage(page.session[0])) break
+        if (extra >= HISTORY_TURN_ALIGNMENT_EXTRA_PAGES && hasUserMessage(page.session)) break
         if (!page.cursor || visited.has(page.cursor)) throw new Error("Session history pagination made no progress")
         visited.add(page.cursor)
         const older = await this.fetchPage(normalized, HISTORY_MESSAGE_PAGE_SIZE, page.cursor, "older", performance)
@@ -719,13 +723,18 @@ export class SessionMessageLoader {
     let acceptedPage = firstPage
 
     const visited = new Set<string>()
-    while (!acceptedPage.complete && !hasBoundary(acceptedPage.session)
-      && acceptedPage.session.length < getInitialWindowMaxRecords()) {
+    while (!acceptedPage.complete && !hasBoundary(acceptedPage.session)) {
+      // The record ceiling bounds the extra turns, never the newest one: a
+      // window without any prompt has no turn to render, so a last turn longer
+      // than the ceiling is still read back to its prompt.
+      const hasNewestTurn = hasUserMessage(acceptedPage.session)
+      const remaining = getInitialWindowMaxRecords() - acceptedPage.session.length
+      if (hasNewestTurn && remaining <= 0) break
       const cursor = acceptedPage.cursor
       if (!cursor || visited.has(cursor)) break
       visited.add(cursor)
-      const remaining = getInitialWindowMaxRecords() - acceptedPage.session.length
-      const older = await this.fetchPage(target, Math.min(HISTORY_MESSAGE_PAGE_SIZE, remaining), cursor, "initial-page", performance)
+      const limit = hasNewestTurn ? Math.min(HISTORY_MESSAGE_PAGE_SIZE, remaining) : HISTORY_MESSAGE_PAGE_SIZE
+      const older = await this.fetchPage(target, limit, cursor, "initial-page", performance)
       if (!isCurrent()) return
       if (older.session.length === 0 && !older.complete) break
       acceptedPage = {
