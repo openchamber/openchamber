@@ -322,6 +322,11 @@ div[data-chat-input-footer="true"] {
   /* The band at the scroller's end that floating chrome covers. The end fade
      sits above it, so content dissolves before it reaches that chrome. */
   --scroll-shadow-end-inset: 0px;
+  /* Reset per scroller: the chat transcript sets a composer-sized end fade,
+     and custom properties inherit, so without this every scroller nested in
+     the transcript (tool output, reasoning) would fade its bottom over the
+     composer's height too. */
+  --scroll-shadow-end-size: var(--scroll-shadow-size);
 }
 
 /* The chat composer floats over the transcript's tail (plus any panel docked
