@@ -726,9 +726,10 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
     return directoryRequests.run(normalizedDir, async (ownsRequest) => {
       const stale = () => !ownsRequest() || getRuntimeKey() !== requestRuntime;
       try {
+        const respectGitignore = !showGitignored;
         const entries = files.listDirectory
-          ? (await files.listDirectory(normalizedDir)).entries
-          : await opencodeClient.listLocalDirectory(normalizedDir);
+          ? (await files.listDirectory(normalizedDir, { respectGitignore })).entries
+          : await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore });
         if (stale()) return;
         entryCountByDirRef.current.set(normalizedDir, entries.length);
         const mapped = mapDirectoryEntries(normalizedDir, entries);
@@ -749,7 +750,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
         setLoadErrorsByDir((prev) => ({ ...prev, [normalizedDir]: message }));
       }
     }, force);
-  }, [directoryRequests, files, mapDirectoryEntries]);
+  }, [directoryRequests, files, mapDirectoryEntries, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) return;
