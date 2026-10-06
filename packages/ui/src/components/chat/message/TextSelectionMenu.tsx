@@ -18,6 +18,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { getTypeToCommentText } from '@/lib/typeToComment';
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import {
     useMobileCommentComposerController,
@@ -542,17 +543,37 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     return container && range ? captureChatQuoteAnchor(container, range) : null;
   }, [containerRef]);
 
-  const handleOpenComment = React.useCallback(() => {
+  const openComment = React.useCallback((initialText: string) => {
     if (!selectedTextMarkdown) return;
     setSelectedAnchor(captureCommentAnchor());
+    setCommentText(initialText);
     setCommentMode(true);
     commentModeRef.current = true;
     updateCommentRects();
     window.getSelection()?.removeAllRanges();
     queueMicrotask(() => {
-      commentInputRef.current?.focus();
+      const input = commentInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
     });
   }, [captureCommentAnchor, selectedTextMarkdown, updateCommentRects]);
+
+  const handleOpenComment = React.useCallback(() => openComment(''), [openComment]);
+
+  // Desktop: typing while the bubble is up starts the comment with that
+  // keystroke, so a quick note needs no click on Comment first.
+  React.useEffect(() => {
+    if (!position.show || !anchorVisible || commentMode || isMobile) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const text = getTypeToCommentText(event);
+      if (!text) return;
+      event.preventDefault();
+      openComment(text);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [anchorVisible, commentMode, isMobile, openComment, position.show]);
 
   // Mobile: no floating input here. The quote is handed to this column's
   // composer, which swaps its input for the comment shell. The scope is

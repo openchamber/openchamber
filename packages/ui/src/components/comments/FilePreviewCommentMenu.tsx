@@ -9,6 +9,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
+import { getTypeToCommentText } from '@/lib/typeToComment';
 import { Icon } from '@/components/icon/Icon';
 import { InlineCommentInput } from './InlineCommentInput';
 
@@ -37,6 +38,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
   const [anchor, setAnchor] = React.useState<{ x: number; y: number } | null>(null);
   const [selectedText, setSelectedText] = React.useState('');
   const [commentMode, setCommentMode] = React.useState(false);
+  const [initialCommentText, setInitialCommentText] = React.useState('');
   const commentModeRef = React.useRef(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const selectionRangeRef = React.useRef<Range | null>(null);
@@ -163,13 +165,28 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
     };
   }, [commentMode, updateHighlightRects]);
 
-  const openComment = React.useCallback(() => {
+  const openComment = React.useCallback((initialText: string) => {
     if (!selectedText) return;
+    setInitialCommentText(initialText);
     setCommentMode(true);
     commentModeRef.current = true;
     updateHighlightRects();
     window.getSelection()?.removeAllRanges();
   }, [selectedText, updateHighlightRects]);
+
+  // Desktop: typing while the Comment pill is up starts the comment with
+  // that keystroke, same as the chat selection bubble.
+  React.useEffect(() => {
+    if (!anchor || commentMode || isMobile) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const text = getTypeToCommentText(event);
+      if (!text) return;
+      event.preventDefault();
+      openComment(text);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [anchor, commentMode, isMobile, openComment]);
 
   const saveComment = React.useCallback((text: string) => {
     const sessionKey = currentSessionId ?? (newSessionDraftOpen ? 'draft' : null);
@@ -213,6 +230,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
 
   const commentInput = (
     <InlineCommentInput
+      initialText={initialCommentText}
       fileLabel={filePath}
       lineRange={lineRange ? { start: lineRange.start, end: lineRange.end } : undefined}
       onSave={saveComment}
@@ -250,7 +268,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
                 // Keep the text selection alive through the tap: the
                 // selection is what the comment quotes.
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={openComment}
+                onClick={() => openComment('')}
                 className={cn(
                   'flex min-w-0 items-center gap-2 rounded-full px-4 py-2',
                   'text-sm font-medium leading-tight text-foreground',
@@ -296,7 +314,7 @@ export function FilePreviewCommentMenu({ containerRef, filePath, fileContent }: 
         >
           <button
             type="button"
-            onClick={openComment}
+            onClick={() => openComment('')}
             className={cn(
               'px-3.5 py-1.5 rounded-full',
               'text-sm font-medium',
