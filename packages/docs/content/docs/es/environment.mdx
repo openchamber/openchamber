@@ -17,6 +17,14 @@ Dirección donde escucha el servidor web de OpenChamber. Usa `0.0.0.0` para perm
 
 Contraseña para la interfaz del navegador. Úsala cuando no te limites a localhost, o cuando uses túneles o un proxy inverso.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Cuánto dura un inicio de sesión en el navegador, en horas, cuando «confiar en este dispositivo» está desactivado. El valor por defecto es `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Cuánto dura un inicio de sesión, en días, en un dispositivo marcado como de confianza. El valor por defecto es `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Inicia OpenChamber en modo headless cuando vale `true` o `1`. Las rutas API siguen disponibles para clientes de escritorio y móviles, pero no se sirve la UI del navegador.

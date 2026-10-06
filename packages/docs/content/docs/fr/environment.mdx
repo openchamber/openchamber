@@ -17,6 +17,14 @@ Adresse d’écoute du serveur web OpenChamber. Utilisez `0.0.0.0` pour autorise
 
 Mot de passe pour l’UI navigateur. Utilisez-le lorsque vous écoutez hors de localhost, utilisez des tunnels ou passez derrière un reverse proxy.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Durée d’une connexion dans le navigateur, en heures, quand « faire confiance à cet appareil » est désactivé. La valeur par défaut est `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Durée d’une connexion, en jours, sur un appareil auquel vous faites confiance. La valeur par défaut est `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Démarre OpenChamber en mode headless lorsqu’il vaut `true` ou `1`. Les routes API restent disponibles pour les clients desktop et mobile, mais l’UI navigateur n’est pas servie.

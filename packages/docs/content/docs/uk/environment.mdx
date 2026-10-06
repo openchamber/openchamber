@@ -17,6 +17,14 @@ OpenChamber читає ці змінні під час запуску. Для st
 
 Пароль для browser UI. Використовуйте його для доступу не лише з localhost, тунелів або reverse proxy.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Скільки годин діє вхід у браузері, якщо «довіряти цьому пристрою» вимкнено. За замовчуванням `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Скільки днів діє вхід на пристрої, якому ви довіряєте. За замовчуванням `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Запускає OpenChamber у headless mode, якщо встановлено `true` або `1`. API routes залишаються доступними для desktop і mobile clients, але browser UI не віддається.

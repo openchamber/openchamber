@@ -17,6 +17,14 @@ Bind address for the OpenChamber web server. Use `0.0.0.0` to allow access from 
 
 Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+How long a browser sign-in lasts, in hours, when "trust this device" is off. The default is `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+How long a sign-in lasts, in days, on a device you chose to trust. The default is `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Starts OpenChamber in headless mode when set to `true` or `1`. API routes stay available for desktop and mobile clients, but the browser UI is not served.

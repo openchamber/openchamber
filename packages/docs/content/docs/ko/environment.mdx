@@ -17,6 +17,14 @@ OpenChamber 웹 서버가 바인딩할 주소입니다. 다른 컴퓨터에서 �
 
 브라우저 UI 비밀번호입니다. localhost 밖으로 바인딩하거나 터널, 리버스 프록시를 사용할 때 설정하세요.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+"이 기기 신뢰"가 꺼져 있을 때 브라우저 로그인이 유지되는 시간(시간 단위)입니다. 기본값은 `12`입니다.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+신뢰하기로 한 기기에서 로그인이 유지되는 기간(일 단위)입니다. 기본값은 `7`입니다.
+
 ### `OPENCHAMBER_API_ONLY`
 
 `true` 또는 `1`이면 OpenChamber를 headless 모드로 시작합니다. 데스크톱과 모바일 클라이언트용 API route는 계속 사용할 수 있지만 브라우저 UI는 제공하지 않습니다.

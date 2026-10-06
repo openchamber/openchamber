@@ -13,8 +13,20 @@ import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+// A positive number of hours or days from the environment, else the default.
+export const readSessionTtlMs = (raw, unitMs, fallbackMs) => {
+  const value = Number(String(raw ?? '').trim());
+  return Number.isFinite(value) && value > 0 ? Math.round(value * unitMs) : fallbackMs;
+};
+
+const SESSION_TTL_MS = readSessionTtlMs(process.env.OPENCHAMBER_UI_SESSION_TTL_HOURS, HOUR_MS, 12 * HOUR_MS);
+const TRUSTED_DEVICE_SESSION_TTL_MS = readSessionTtlMs(
+  process.env.OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS,
+  24 * HOUR_MS,
+  7 * 24 * HOUR_MS,
+);
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
 
@@ -440,6 +452,7 @@ export const createUiAuth = ({
   password,
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
+  trustedSessionTtlMs = TRUSTED_DEVICE_SESSION_TTL_MS,
   readSettingsFromDiskMigrated,
   clientAuthController = null,
   requireClientAuth = false,
@@ -657,7 +670,7 @@ export const createUiAuth = ({
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
   let jwtSecret = getOrCreateJwtSecret();
   let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
-  const resolveSessionTtlMs = (trustDevice) => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
+  const resolveSessionTtlMs = (trustDevice) => (trustDevice ? trustedSessionTtlMs : sessionTtlMs);
   let passkeyController = createUiPasskeys({
     passwordBinding,
     readSettingsFromDiskMigrated,

@@ -17,6 +17,14 @@ OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机�
 
 浏览器 UI 的密码。当你绑定到 localhost 之外、使用隧道或反向代理时，请设置它。
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+未勾选“信任此设备”时，浏览器登录的有效时长（小时）。默认值为 `12`。
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+在你选择信任的设备上，登录的有效时长（天）。默认值为 `7`。
+
 ### `OPENCHAMBER_API_ONLY`
 
 设置为 `true` 或 `1` 时，以 headless 模式启动 OpenChamber。桌面和移动客户端仍可使用 API 路由，但不会提供浏览器 UI。

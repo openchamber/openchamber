@@ -636,6 +636,8 @@ OPTIONS:
 ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCHAMBER_UI_SESSION_TTL_HOURS        Browser sign-in lifetime in hours (default: 12)
+  OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS Sign-in lifetime on a trusted device in days (default: 7)
   OPENCHAMBER_API_ONLY         Set to true/1 to start API routes only
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096

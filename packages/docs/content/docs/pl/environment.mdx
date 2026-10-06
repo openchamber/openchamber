@@ -17,6 +17,14 @@ Adres, na którym nasłuchuje serwer web OpenChamber. Użyj `0.0.0.0`, aby pozwo
 
 Hasło do interfejsu w przeglądarce. Ustaw je przy dostępie spoza localhost, tunelach albo reverse proxy.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Jak długo trwa logowanie w przeglądarce, w godzinach, gdy opcja „ufaj temu urządzeniu” jest wyłączona. Domyślnie `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Jak długo trwa logowanie, w dniach, na urządzeniu oznaczonym jako zaufane. Domyślnie `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Uruchamia OpenChamber w trybie headless, gdy ustawione na `true` lub `1`. Trasy API pozostają dostępne dla klientów desktopowych i mobilnych, ale UI przeglądarki nie jest serwowane.

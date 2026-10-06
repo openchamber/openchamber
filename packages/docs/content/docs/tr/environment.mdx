@@ -17,6 +17,14 @@ OpenChamber web sunucusu için bind adresi. Diğer makinelerden erişime izin ve
 
 Tarayıcı arayüzü için parola. Bunu localhost dışına bind ederken, tünel kullanırken ya da reverse proxy arkasında çalıştırırken kullanın.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+"Bu cihaza güven" kapalıyken tarayıcıdaki oturumun kaç saat geçerli kalacağı. Varsayılan `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Güvendiğiniz bir cihazda oturumun kaç gün geçerli kalacağı. Varsayılan `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 `true` ya da `1` olarak ayarlandığında OpenChamber'ı headless modda başlatır. API rotaları masaüstü ve mobil istemciler için açık kalır, ama tarayıcı arayüzü sunulmaz.

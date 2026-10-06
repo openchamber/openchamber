@@ -17,6 +17,14 @@ Bind-Adresse für den OpenChamber-Webserver. Verwende `0.0.0.0`, um Zugriff von 
 
 Passwort für die Browser-Oberfläche. Verwende es, wenn du außerhalb von localhost bindest, Tunnels nutzt oder hinter einem Reverse Proxy läufst.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Wie lange eine Anmeldung im Browser gilt, in Stunden, wenn „Diesem Gerät vertrauen“ aus ist. Standard ist `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Wie lange eine Anmeldung gilt, in Tagen, auf einem Gerät, dem du vertraust. Standard ist `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Startet OpenChamber im Headless-Modus, wenn auf `true` oder `1` gesetzt. API-Routen bleiben für Desktop- und Mobile-Clients verfügbar, aber die Browser-Oberfläche wird nicht ausgeliefert.

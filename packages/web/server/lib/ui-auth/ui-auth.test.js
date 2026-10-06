@@ -400,6 +400,27 @@ describe('ui auth client credential seam', () => {
     expect(expiresAt).toBeGreaterThanOrEqual(before + 122_000);
     expect(expiresAt).toBeLessThanOrEqual(Date.now() + 124_000);
   });
+
+  it('gives a trusted device the trusted session lifetime', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({ password: 'secret', sessionTtlMs: 60_000, trustedSessionTtlMs: 3_600_000 });
+    const maxAgeFor = async (trustDevice) => {
+      const res = createResponse();
+      await auth.handleSessionCreate({ method: 'POST', headers: {}, body: { password: 'secret', trustDevice } }, res);
+      return String(res.getHeader('set-cookie')).match(/Max-Age=(\d+)/i)?.[1];
+    };
+    expect(await maxAgeFor(false)).toBe('60');
+    expect(await maxAgeFor(true)).toBe('3600');
+  });
+
+  it('reads session lifetimes from the environment', async () => {
+    const { readSessionTtlMs } = await import('./ui-auth.js');
+    expect(readSessionTtlMs('24', 1000, 5)).toBe(24_000);
+    expect(readSessionTtlMs(' 0.5 ', 1000, 5)).toBe(500);
+    for (const invalid of [undefined, '', 'abc', '0', '-3']) {
+      expect(readSessionTtlMs(invalid, 1000, 5)).toBe(5);
+    }
+  });
 });
 
 // issue #2377: browsers key cookie jars on host only, so two instances on one

@@ -17,6 +17,14 @@ Het adres waarop de OpenChamber-webserver luistert. Gebruik `0.0.0.0` om toegang
 
 Wachtwoord voor de browserinterface. Gebruik dit bij luisteren buiten localhost, tunnels of een reverse proxy.
 
+### `OPENCHAMBER_UI_SESSION_TTL_HOURS`
+
+Hoe lang een aanmelding in de browser geldig blijft, in uren, als "dit apparaat vertrouwen" uit staat. Standaard is `12`.
+
+### `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS`
+
+Hoe lang een aanmelding geldig blijft, in dagen, op een apparaat dat u vertrouwt. Standaard is `7`.
+
 ### `OPENCHAMBER_API_ONLY`
 
 Start zonder webinterface bij `true` of `1`. De API-routes blijven beschikbaar voor desktop- en mobiele clients, maar de browserinterface wordt niet aangeboden.
