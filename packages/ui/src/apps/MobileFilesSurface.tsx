@@ -20,6 +20,7 @@ import { AUTO_RELIST_MAX_ENTRIES, useFileTreeChanges, type FileTreeChangeBatch }
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
+import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import type { FileListEntry, FileSearchResult } from '@/lib/api/types';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -87,6 +88,7 @@ export const MobileFilesSurface: React.FC<MobileFilesSurfaceProps> = ({ onClose,
 const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: string; visible: boolean }> = ({ root, onClose, visible }) => {
   const { t } = useI18n();
   const { files } = useRuntimeAPIs();
+  const showGitignored = useFilesViewShowGitignored();
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const [route, setRoute] = React.useState<MobileFilesRoute>(() => ({ type: 'browser', directory: root }));
   const [entries, setEntries] = React.useState<FileListEntry[]>([]);
@@ -105,12 +107,13 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
   // on screen when it fails.
   const loadDirectory = React.useCallback(async (directory: string, options?: { background?: boolean }) => {
     if (!directory) return;
+    const respectGitignore = !showGitignored;
     const requestId = directoryLoadRequestIdRef.current + 1;
     directoryLoadRequestIdRef.current = requestId;
     setIsLoadingDirectory(true);
     if (!options?.background) setDirectoryError(null);
     try {
-      const result = await files.listDirectory(directory);
+      const result = await files.listDirectory(directory, { respectGitignore });
       if (directoryLoadRequestIdRef.current !== requestId) return;
       setDirectoryError(null);
       setEntries(result.entries.slice().sort((a, b) => {
@@ -130,7 +133,7 @@ const MobileFilesSurfaceForRoot: React.FC<MobileFilesSurfaceProps & { root: stri
         setIsLoadingDirectory(false);
       }
     }
-  }, [files, t]);
+  }, [files, showGitignored, t]);
 
   React.useEffect(() => {
     if (route.type !== 'browser') return;

@@ -12,12 +12,12 @@ matches. `fileTreeStatus.ts` builds path and ancestor indexes once per Git
 snapshot. Open-file membership has its own set, so changing tabs does not
 rebuild the Git index.
 
-Directory listings follow the "Show gitignored files" setting: `loadDirectory`
-asks the runtime for `respectGitignore` unless the user has chosen to show
-gitignored entries, so the server's `git check-ignore` filter decides what
-appears inside a Git repository. Outside a repository no entries are ignored,
-so the hardcoded `node_modules` name filter remains as a fallback. Search
-already follows the same setting.
+Directory listings follow the "Show gitignored files" setting: `SidebarFilesTree`,
+`FilesView`, and the mobile `MobileFilesSurface` ask the runtime for
+`respectGitignore` unless the user has chosen to show gitignored entries, so the
+server's `git check-ignore` filter decides what appears inside a Git repository.
+Outside a repository no entries are ignored, so the hardcoded `node_modules`
+name filter remains as a fallback. Search already follows the same setting.
 
 Desktop `FilesView` in editor-only mode neither loads nor constructs its unused
 tree. Mobile retains its tree. The context panel passes actual visibility,
