@@ -392,7 +392,7 @@ export const buildRendererAdditionalArguments = ({
 
 // Linux can opt into the desktop environment's own title bar (Settings ->
 // Desktop); it takes effect at the next start, like the window it shapes.
-export const usesLinuxNativeFrame = () => (
+const usesLinuxNativeFrame = () => (
   process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
 );
 
