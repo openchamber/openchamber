@@ -3773,3 +3773,4 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.showHiddenSingle': 'Mostrar {count} puerto oculto',
   'contextPanel.browser.devServers.showHiddenPlural': 'Mostrar {count} puertos ocultos',
 };
+  'sidebarFilesTree.menu.openInDefaultApp': 'Abrir con la app predeterminada',

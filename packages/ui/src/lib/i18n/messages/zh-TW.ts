@@ -3772,3 +3772,4 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.showHiddenSingle': '顯示 {count} 個已隱藏連接埠',
   'contextPanel.browser.devServers.showHiddenPlural': '顯示 {count} 個已隱藏連接埠',
 };
+  'sidebarFilesTree.menu.openInDefaultApp': '以預設應用程式開啟',

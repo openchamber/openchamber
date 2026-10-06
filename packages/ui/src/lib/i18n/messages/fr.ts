@@ -3771,3 +3771,4 @@ export const dict = {
   'contextPanel.browser.devServers.showHiddenSingle': 'Afficher {count} port masqué',
   'contextPanel.browser.devServers.showHiddenPlural': 'Afficher {count} ports masqués',
 } as const;
+  'sidebarFilesTree.menu.openInDefaultApp': 'Ouvrir avec l’app par défaut',

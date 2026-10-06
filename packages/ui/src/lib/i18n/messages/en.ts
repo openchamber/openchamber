@@ -3773,4 +3773,5 @@ export const dict = {
   'contextPanel.browser.devServers.showHiddenPlural': 'Show {count} hidden ports',
 } as const;
 
+  'sidebarFilesTree.menu.openInDefaultApp': 'Open in default app',
 export type I18nKey = keyof typeof dict;

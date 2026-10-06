@@ -3770,3 +3770,4 @@ export const dict = {
   'contextPanel.browser.devServers.showHiddenSingle': '{count} gizli bağlantı noktasını göster',
   'contextPanel.browser.devServers.showHiddenPlural': '{count} gizli bağlantı noktasını göster',
 };
+  'sidebarFilesTree.menu.openInDefaultApp': 'Varsayılan uygulamada aç',

@@ -100,7 +100,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { isBrowserClientRuntime, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
 import { isFileMissingError } from '@/lib/api/files-errors';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
@@ -501,6 +501,17 @@ const FileRow: React.FC<FileRowProps> = ({
       {canRevealPath && (
         <Item onClick={(e: React.MouseEvent) => { e.stopPropagation(); onRevealPath(node.path); }}>
           <Icon name="folder-received" className="mr-2 size-4" /> {t(getRevealLabelKey())}
+        </Item>
+      )}
+      {/* The OS opens it with whatever app owns the type: Word for a .docx, Typora for a .md. */}
+      {!isDir && canRevealPath && isDesktopLocalOriginActive() && (
+        <Item onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          void openDesktopPath(node.path).then((opened) => {
+            if (!opened) toast.error(t('sidebarFilesTree.toast.operationFailed'));
+          });
+        }}>
+          <Icon name="external-link" className="mr-2 size-4" /> {t('sidebarFilesTree.menu.openInDefaultApp')}
         </Item>
       )}
       {isDir && (canCreateFile || canCreateFolder || canUploadHere) && (

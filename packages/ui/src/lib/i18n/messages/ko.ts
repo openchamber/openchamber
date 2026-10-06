@@ -3772,3 +3772,4 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.showHiddenSingle': '숨긴 포트 {count}개 표시',
   'contextPanel.browser.devServers.showHiddenPlural': '숨긴 포트 {count}개 표시',
 };
+  'sidebarFilesTree.menu.openInDefaultApp': '기본 앱에서 열기',

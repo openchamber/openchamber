@@ -3770,3 +3770,4 @@ export const dict = {
   'contextPanel.browser.devServers.showHiddenSingle': '{count} ausgeblendeten Port anzeigen',
   'contextPanel.browser.devServers.showHiddenPlural': '{count} ausgeblendete Ports anzeigen',
 };
+  'sidebarFilesTree.menu.openInDefaultApp': 'In Standard-App öffnen',

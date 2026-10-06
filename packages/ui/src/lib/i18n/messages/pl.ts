@@ -3777,3 +3777,4 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.showHiddenSingle': 'Pokaż ukryte porty: {count}',
   'contextPanel.browser.devServers.showHiddenPlural': 'Pokaż ukryte porty: {count}',
 } as const;
+  'sidebarFilesTree.menu.openInDefaultApp': 'Otwórz w domyślnej aplikacji',
