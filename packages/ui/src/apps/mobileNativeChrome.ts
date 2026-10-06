@@ -185,6 +185,21 @@ export const useNativeMobileChrome = (): void => {
       const dispatchKb = (type: 'oc:keyboard-intent' | 'oc:keyboard-anim' | 'oc:keyboard-settled', detail: Record<string, unknown>) => {
         window.dispatchEvent(new CustomEvent(type, { detail }));
       };
+      // WKWebView pans its own scroll view to reveal a focused field near the
+      // bottom edge, on top of the manual lift this file already does. That
+      // native pan is tracked outside React/CSS and WebKit does not always
+      // undo it — a field near the bottom can leave the page panned after the
+      // keyboard settles, so what's painted on screen drifts from where taps
+      // actually land (the same WebKit behavior the browser PWA works around
+      // in useMobileComposerShell's post-dismiss `scrollTo(0, 0)`, which only
+      // runs outside Capacitor). The shell choreography already owns the
+      // visible lift via `--oc-kb-layout`/inline transforms, so any leftover
+      // native pan is pure drift — zero it at both settle points.
+      const resetNativePagePan = () => {
+        window.scrollTo(0, 0);
+        document.body.scrollTop = 0;
+        root.scrollTop = 0;
+      };
       // Elements that ride the keyboard slide, with their travel factor. Driven
       // by INLINE styles from here: WebKit does not reliably start a transition
       // when the transform's value changes via a CSS custom property, which
@@ -255,6 +270,7 @@ export const useNativeMobileChrome = (): void => {
           setVar('--oc-kb-layout', keyboardHeight);
           layoutApplied = true;
           clearKbMovers();
+          resetNativePagePan();
           dispatchKb('oc:keyboard-settled', { open: true });
           // Reveal the caret only after UIKit's own caret reposition window.
           caretTimer = window.setTimeout(() => {
@@ -320,6 +336,7 @@ export const useNativeMobileChrome = (): void => {
           root.classList.remove('oc-kb-animating', 'oc-kb-hide');
           clearKbMovers();
           setVar('--oc-kb-scroll-inset', 0);
+          resetNativePagePan();
           dispatchKb('oc:keyboard-settled', { open: false });
         }, KB_HIDE_MS + 20);
       };
