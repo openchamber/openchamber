@@ -52,6 +52,8 @@ interface ShortcutRecordingDialogProps {
     replaceActionId?: ShortcutActionId,
   ) => void;
   onOpenChange: (open: boolean) => void;
+  /** Maximum number of chords in the sequence. OS-level global shortcuts only support one. @default 2 */
+  maxChords?: number;
 }
 
 function getPhysicalKeyCount(
@@ -119,6 +121,7 @@ export function updateShortcutRecordingState(
   state: ShortcutRecordingState,
   event: RecordingKeyboardEvent,
   phase: 'keydown' | 'keyup',
+  maxChords = 2,
 ): ShortcutRecordingState {
   if (event.repeat || event.isComposing) return state;
   if (phase === 'keyup') {
@@ -132,13 +135,14 @@ export function updateShortcutRecordingState(
   const chord = keyboardEventToCombo(event);
   if (chord) {
     if (state.settled) {
-      return { chords: [chord], livePreview: null, settled: false };
+      const chords = [chord];
+      return { chords, livePreview: null, settled: chords.length >= maxChords };
     }
-    const chords = state.chords.length < 2 ? [...state.chords, chord] : state.chords;
+    const chords = state.chords.length < maxChords ? [...state.chords, chord] : state.chords;
     return {
       chords,
       livePreview: null,
-      settled: chords.length === 2,
+      settled: chords.length >= maxChords,
     };
   }
 
@@ -150,6 +154,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   overrides,
   onSave,
   onOpenChange,
+  maxChords = 2,
 }) => {
   const { t } = useI18n();
   const actionLabel = (shortcut: CustomizableShortcutAction) => t(shortcut.settingsLabelKey);
@@ -219,7 +224,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
       metaKey: event.metaKey,
       repeat: event.repeat,
       shiftKey: event.shiftKey,
-    }, phase);
+    }, phase, maxChords);
     setRecording(isPrefixStyleAction && nextRecording.chords.length > 1
       ? recording
       : nextRecording);
@@ -239,7 +244,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
           <DialogTitle>
             {action ? t('settings.openchamber.keyboardShortcuts.dialog.title', { action: actionLabel(action) }) : ''}
           </DialogTitle>
-          <DialogDescription>{t('settings.openchamber.keyboardShortcuts.dialog.instructions')}</DialogDescription>
+          <DialogDescription>{t(maxChords === 1 ? 'settings.openchamber.keyboardShortcuts.dialog.instructionsSingle' : 'settings.openchamber.keyboardShortcuts.dialog.instructions')}</DialogDescription>
         </DialogHeader>
 
         <div

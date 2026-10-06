@@ -1,6 +1,6 @@
-import type { ShortcutCombo } from './bindings';
+import { UNASSIGNED_SHORTCUT, type ShortcutCombo } from './bindings';
 
-type ShortcutCategory = 'session' | 'models' | 'panels' | 'navigation' | 'application';
+type ShortcutCategory = 'session' | 'models' | 'panels' | 'navigation' | 'application' | 'desktop';
 
 type ShortcutConfig = {
   id: string;
@@ -291,6 +291,17 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.cycle_theme.label',
     },
   ],
+  // Desktop-shell capabilities: registered as OS-level global shortcuts rather
+  // than in-app keybindings, so they carry no in-app default binding. The
+  // Settings shortcut list renders only the categories above, never this one.
+  desktop: [
+    {
+      id: 'mini_chat_global',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.mini_chat_global.label',
+    },
+  ],
 } as const satisfies Record<ShortcutCategory, readonly ShortcutConfig[]>;
 
 /** All application shortcuts, flattened in the same order used by Settings. */
@@ -314,5 +325,9 @@ export const SHORTCUT_SCHEMA = [
   ...SHORTCUT_GROUPS.application.map((shortcut) => ({
     ...shortcut,
     category: 'application' as const,
+  })),
+  ...SHORTCUT_GROUPS.desktop.map((shortcut) => ({
+    ...shortcut,
+    category: 'desktop' as const,
   })),
 ] as const;

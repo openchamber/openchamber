@@ -62,4 +62,16 @@ describe('ShortcutRecordingDialog recording state', () => {
     expect(updateShortcutRecordingState(state, keyEvent('Backspace'), 'keydown').settled).toBe(false);
     expect(updateShortcutRecordingState({ chords: ['mod+k'], livePreview: null, settled: false }, keyEvent('Backspace'), 'keydown')).toEqual(emptyState);
   });
+
+  test('maxChords=1 settles on the first chord', () => {
+    const first = updateShortcutRecordingState(emptyState, keyEvent('m', { altKey: true }), 'keydown', 1);
+    expect(first.chords).toEqual(['alt+m']);
+    expect(first.settled).toBe(true);
+  });
+
+  test('maxChords=1 replaces an already-settled chord in one press', () => {
+    const settled = { chords: ['alt+m'], livePreview: null, settled: true };
+    const next = updateShortcutRecordingState(settled, keyEvent('k', { ctrlKey: true }), 'keydown', 1);
+    expect(next).toEqual({ chords: ['mod+k'], livePreview: null, settled: true });
+  });
 });

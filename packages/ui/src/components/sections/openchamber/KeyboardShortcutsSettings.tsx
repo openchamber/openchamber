@@ -10,14 +10,14 @@ import {
   getEffectiveShortcutPrefix,
   UNASSIGNED_SHORTCUT,
   type ShortcutActionId,
-  type ShortcutCategory,
   type ShortcutCombo,
   type CustomizableShortcutAction,
 } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { getDesktopMiniChatGlobalShortcut, setDesktopMiniChatGlobalShortcut } from '@/lib/desktop';
 import { ShortcutRecordingDialog } from './ShortcutRecordingDialog';
 
-const CATEGORIES: ShortcutCategory[] = ['session', 'models', 'panels', 'navigation', 'application'];
+const CATEGORIES = ['session', 'models', 'panels', 'navigation', 'application'] as const;
 
 export const KeyboardShortcutsSettings: React.FC = () => {
   const { t } = useI18n();
@@ -26,6 +26,17 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
   const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
   const [editingAction, setEditingAction] = React.useState<CustomizableShortcutAction | null>(null);
+  // The OS-level Mini Chat combo lives in the desktop setting, not in
+  // shortcutOverrides; feed it to the recorder as a conflict source.
+  const [globalMiniChatCombo, setGlobalMiniChatCombo] = React.useState<ShortcutCombo | null>(null);
+  const refreshGlobalMiniChatCombo = React.useCallback(() => {
+    void getDesktopMiniChatGlobalShortcut()
+      .then((status) => setGlobalMiniChatCombo(status?.combo ?? null))
+      .catch(() => {});
+  }, []);
+  React.useEffect(() => {
+    refreshGlobalMiniChatCombo();
+  }, [refreshGlobalMiniChatCombo]);
 
   const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
   const persist = (nextOverrides: Record<string, ShortcutCombo>) => {
@@ -37,9 +48,17 @@ export const KeyboardShortcutsSettings: React.FC = () => {
     replaceActionId?: ShortcutActionId,
   ) => {
     const nextOverrides = { ...shortcutOverrides, [actionId]: combo };
-    if (replaceActionId) nextOverrides[replaceActionId] = UNASSIGNED_SHORTCUT;
     setShortcutOverride(actionId, combo);
-    if (replaceActionId) setShortcutOverride(replaceActionId, UNASSIGNED_SHORTCUT);
+    if (replaceActionId === 'mini_chat_global') {
+      // Releasing the OS-level Mini Chat combo goes through the desktop
+      // setting; the overrides only carried it as a conflict source.
+      void setDesktopMiniChatGlobalShortcut(null).then((status) => {
+        if (status) setGlobalMiniChatCombo(status.combo);
+      });
+    } else if (replaceActionId) {
+      nextOverrides[replaceActionId] = UNASSIGNED_SHORTCUT;
+      setShortcutOverride(replaceActionId, UNASSIGNED_SHORTCUT);
+    }
     persist(nextOverrides);
   };
   const resetOne = (actionId: ShortcutActionId) => {
@@ -98,7 +117,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                     variant="secondary"
                     size="xs"
                     className="!font-normal"
-                    onClick={() => setEditingAction(action)}
+                    onClick={() => {
+                      refreshGlobalMiniChatCombo();
+                      setEditingAction(action);
+                    }}
                   >
                     {t('settings.openchamber.keyboardShortcuts.actions.edit')}
                   </Button>
@@ -121,7 +143,9 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       })}
       <ShortcutRecordingDialog
         action={editingAction}
-        overrides={shortcutOverrides}
+        overrides={globalMiniChatCombo
+          ? { ...shortcutOverrides, mini_chat_global: globalMiniChatCombo }
+          : shortcutOverrides}
         onSave={save}
         onOpenChange={(open) => {
           if (!open) setEditingAction(null);
