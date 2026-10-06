@@ -12,6 +12,8 @@ import { useUIStore } from '@/stores/useUIStore';
 interface FontPreferences {
     uiFont: UiFontOption;
     monoFont: MonoFontOption;
+    customUiFont: string;
+    customMonoFont: string;
 }
 
 /**
@@ -23,10 +25,14 @@ interface FontPreferences {
 export const useFontPreferences = (): FontPreferences => {
     const uiFont = useUIStore(state => state.uiFont);
     const monoFont = useUIStore(state => state.monoFont);
+    const customUiFont = useUIStore(state => state.customUiFont);
+    const customMonoFont = useUIStore(state => state.customMonoFont);
     const enterpriseMode = useEnterpriseMode();
 
     return {
         uiFont: enterpriseMode && UI_FONT_OPTION_MAP[uiFont]?.source ? DEFAULT_UI_FONT : uiFont,
         monoFont: enterpriseMode && CODE_FONT_OPTION_MAP[monoFont]?.source ? DEFAULT_MONO_FONT : monoFont,
+        customUiFont,
+        customMonoFont,
     };
 };

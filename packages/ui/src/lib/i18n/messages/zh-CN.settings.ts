@@ -2503,4 +2503,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': '代码融合说明',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': '使用系统标题栏',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': '需要重启应用。窗口将使用桌面环境自带的标题栏和按钮，显示在 OpenChamber 顶栏上方。',
+  'settings.openchamber.visual.field.customFont': '自定义…',
+  'settings.openchamber.visual.field.customFontPlaceholder': '已安装字体的名称，例如 Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': '自定义字体名称',
 } as const;

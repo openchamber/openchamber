@@ -2503,4 +2503,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Інструкції кодового fusion',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Використовувати системний заголовок вікна',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Потрібен перезапуск застосунку. Вікно отримає заголовок і кнопки вашого робочого середовища, над шапкою OpenChamber.',
+  'settings.openchamber.visual.field.customFont': 'Власний…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Назва встановленого шрифту, напр. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Назва власного шрифту',
 } as const;

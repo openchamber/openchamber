@@ -2493,4 +2493,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Code Fusion Instructions',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Use the system title bar',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Requires an app restart. The window gets your desktop environment\'s own title bar and buttons, above OpenChamber\'s header.',
+  'settings.openchamber.visual.field.customFont': 'Custom…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Installed font name, e.g. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Custom font name',
 } as const;

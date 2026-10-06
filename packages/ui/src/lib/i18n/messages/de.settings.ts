@@ -2494,4 +2494,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Anweisungen für Code-Fusion',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Systemtitelleiste verwenden',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Erfordert einen Neustart der App. Das Fenster erhält die Titelleiste und Schaltflächen deiner Desktopumgebung, über der Kopfzeile von OpenChamber.',
+  'settings.openchamber.visual.field.customFont': 'Eigene…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Name einer installierten Schrift, z. B. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Name der eigenen Schrift',
 };

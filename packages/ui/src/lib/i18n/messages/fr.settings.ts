@@ -2503,4 +2503,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Instructions de fusion de code',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Utiliser la barre de titre du système',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Nécessite un redémarrage de l’app. La fenêtre reçoit la barre de titre et les boutons de votre environnement de bureau, au-dessus de l’en-tête d’OpenChamber.',
+  'settings.openchamber.visual.field.customFont': 'Personnalisée…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Nom d’une police installée, p. ex. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Nom de la police personnalisée',
 } as const;

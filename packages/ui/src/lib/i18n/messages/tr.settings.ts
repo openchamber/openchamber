@@ -2494,4 +2494,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Kod fusion talimatları',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Sistem başlık çubuğunu kullan',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Uygulamanın yeniden başlatılmasını gerektirir. Pencere, OpenChamber başlığının üstünde masaüstü ortamınızın kendi başlık çubuğunu ve düğmelerini alır.',
+  'settings.openchamber.visual.field.customFont': 'Özel…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Yüklü yazı tipi adı, ör. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Özel yazı tipi adı',
 };

@@ -2504,4 +2504,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Instrukcje fusion kodu',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Używaj systemowego paska tytułu',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Wymaga ponownego uruchomienia aplikacji. Okno dostaje pasek tytułu i przyciski Twojego środowiska pulpitu, nad nagłówkiem OpenChamber.',
+  'settings.openchamber.visual.field.customFont': 'Własna…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Nazwa zainstalowanej czcionki, np. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Nazwa własnej czcionki',
 };

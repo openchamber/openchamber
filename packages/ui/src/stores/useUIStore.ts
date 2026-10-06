@@ -973,6 +973,9 @@ interface UIStore {
   editorFontSize: number;
   uiFont: UiFontOption;
   monoFont: MonoFontOption;
+  /** Family names used when `uiFont` / `monoFont` is `custom`. */
+  customUiFont: string;
+  customMonoFont: string;
   padding: number;
   cornerRadius: number;
   inputBarOffset: number;
@@ -1226,6 +1229,8 @@ interface UIStore {
   setEditorFontSize: (size: number) => void;
   setUiFont: (font: UiFontOption) => void;
   setMonoFont: (font: MonoFontOption) => void;
+  setCustomUiFont: (family: string) => void;
+  setCustomMonoFont: (family: string) => void;
   setPadding: (size: number) => void;
   setCornerRadius: (radius: number) => void;
   setInputBarOffset: (offset: number) => void;
@@ -1438,6 +1443,8 @@ export const useUIStore = create<UIStore>()(
         editorFontSize: 13,
         uiFont: DEFAULT_UI_FONT,
         monoFont: DEFAULT_MONO_FONT,
+        customUiFont: '',
+        customMonoFont: '',
         padding: 100,
         cornerRadius: 18,
         inputBarOffset: 0,
@@ -2458,6 +2465,14 @@ export const useUIStore = create<UIStore>()(
           set({ monoFont: font });
         },
 
+        setCustomUiFont: (family) => {
+          set({ customUiFont: family.slice(0, 100) });
+        },
+
+        setCustomMonoFont: (family) => {
+          set({ customMonoFont: family.slice(0, 100) });
+        },
+
         setPadding: (size) => {
           // Clamp between 50% and 200%
           const clampedSize = Math.max(50, Math.min(200, size));
@@ -3406,6 +3421,8 @@ export const useUIStore = create<UIStore>()(
           editorFontSize: state.editorFontSize,
           uiFont: state.uiFont,
           monoFont: state.monoFont,
+          customUiFont: state.customUiFont,
+          customMonoFont: state.customMonoFont,
           padding: state.padding,
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,

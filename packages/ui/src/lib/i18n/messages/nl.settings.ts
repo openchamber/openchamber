@@ -2493,4 +2493,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Codefusie-instructies',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Systeemtitelbalk gebruiken',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Vereist een herstart van de app. Het venster krijgt de titelbalk en knoppen van je desktopomgeving, boven de koptekst van OpenChamber.',
+  'settings.openchamber.visual.field.customFont': 'Aangepast…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'Naam van een geïnstalleerd lettertype, bijv. Maple Mono NF CN',
+  'settings.openchamber.visual.field.customFontAria': 'Naam van aangepast lettertype',
 } as const;

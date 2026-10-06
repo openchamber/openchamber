@@ -2503,4 +2503,7 @@ export const settingsDict = {
   'settings.magicPrompts.page.block.codeFusionInstructions': 'コードフュージョンの指示',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'システムのタイトルバーを使う',
   'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'アプリの再起動が必要です。ウィンドウにデスクトップ環境のタイトルバーとボタンが付き、OpenChamber のヘッダーの上に表示されます。',
+  'settings.openchamber.visual.field.customFont': 'カスタム…',
+  'settings.openchamber.visual.field.customFontPlaceholder': 'インストール済みフォント名 (例: Maple Mono NF CN)',
+  'settings.openchamber.visual.field.customFontAria': 'カスタムフォント名',
 } as const;

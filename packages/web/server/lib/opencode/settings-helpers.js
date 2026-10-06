@@ -397,6 +397,13 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.monoFont === 'string' && candidate.monoFont.length > 0) {
       result.monoFont = candidate.monoFont;
     }
+    // Family names for the "custom" font choice; empty clears them.
+    if (typeof candidate.customUiFont === 'string') {
+      result.customUiFont = candidate.customUiFont.slice(0, 100);
+    }
+    if (typeof candidate.customMonoFont === 'string') {
+      result.customMonoFont = candidate.customMonoFont.slice(0, 100);
+    }
     if (typeof candidate.githubClientId === 'string') {
       const trimmed = candidate.githubClientId.trim();
       if (trimmed.length > 0) {
