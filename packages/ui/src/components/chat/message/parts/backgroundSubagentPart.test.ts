@@ -10,6 +10,7 @@ const call: ToolPart = {
     type: 'tool',
     callID: 'call_1',
     tool: 'subagent',
+    time: { created: 900, completed: 1100 },
     state: {
         status: 'completed',
         input: { agent: 'explore', description: 'Review' },
@@ -38,6 +39,8 @@ describe('toBackgroundSubagentPart', () => {
     });
 
     test('a report finishes the row with its result and end time', () => {
+        expect(toBackgroundSubagentPart(call, { kind: 'finished', run: run() }).time)
+            .toEqual({ created: 900, completed: 60_000 });
         expect(toBackgroundSubagentPart(call, { kind: 'finished', run: run() }).state)
             .toMatchObject({ status: 'completed', output: 'Nothing serious found.', time: { start: 1000, end: 60_000 } });
         expect(toBackgroundSubagentPart(call, { kind: 'finished', run: run({ state: 'error', output: 'boom' }) }).state)

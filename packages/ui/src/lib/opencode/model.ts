@@ -349,6 +349,8 @@ export type ToolPart = PartBase & {
   callID: string
   /** Tool name (`shell`, `edit`, `openchamber_web`, ...); see `./tools`. */
   tool: string
+  /** Authoritative call creation/completion, distinct from execution timer fallbacks. */
+  time?: { created: number; completed?: number }
   state: ToolState
   /** The provider actually executed the call (false for replayed/synthetic calls). */
   executed?: boolean

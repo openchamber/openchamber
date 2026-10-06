@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message, Part, Session } from '@/lib/opencode/model';
+import type { Part, Session, ToolPart } from '@/lib/opencode/model';
+import type { MessageRecord } from '@/lib/messageCompletion';
 
 import {
     buildTaskSummaryEntriesFromSession,
@@ -10,6 +11,32 @@ import {
     resolveRunningTaskChildSessionId,
 } from './taskToolModel';
 import { TOOL_OUTPUT_MAX_CHARS } from '../toolRenderers';
+
+const invocation = (start: number, end?: number): ToolPart => ({
+    id: `task-${start}`, sessionID: 'parent', messageID: 'parent-message',
+    type: 'tool', callID: `task-${start}`, tool: 'subagent',
+    time: { created: start, completed: end },
+    state: end === undefined
+        ? { status: 'running', input: { sessionID: 'child' }, time: { start } }
+        : { status: 'completed', input: { sessionID: 'child' }, output: '', time: { start, end } },
+});
+
+const activity = (id: string, created: number, completed?: number): ToolPart => ({
+    id, sessionID: 'child', messageID: 'child-message', type: 'tool', callID: id, tool: 'read',
+    time: { created, completed },
+    state: completed === undefined
+        ? { status: 'running', input: { path: id }, time: { start: created } }
+        : { status: 'completed', input: { path: id }, output: '', time: { start: created, end: completed } },
+});
+
+const records = (parts: Part[]): MessageRecord[] => [{
+    info: {
+        id: 'child-message', sessionID: 'child', role: 'assistant', agent: 'general',
+        time: { created: 1 }, modelID: 'model', providerID: 'provider', cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts,
+}];
 
 describe('taskToolModel', () => {
     test('reads the current OpenCode running-state identity contract', () => {
@@ -29,16 +56,11 @@ describe('taskToolModel', () => {
     });
 
     test('projects tool calls while excluding nested subagent calls', () => {
-        const message = {
-            info: { id: 'message-1', role: 'assistant' } as Message,
-            parts: [
-                { id: 'read-1', type: 'tool', tool: 'read', state: { status: 'completed', input: { path: 'a.ts' } } },
-                { id: 'subagent-1', type: 'tool', tool: 'subagent', state: { status: 'running' } },
-                { id: 'subagent-1', type: 'tool', tool: 'subagent', state: { status: 'completed' } },
-            ] as unknown as Part[],
-        };
+        const read = activity('read-1', 110, 150);
+        read.state.input = { path: 'a.ts' };
+        const messages = records([read, invocation(110), invocation(120, 150)]);
 
-        expect(buildTaskSummaryEntriesFromSession([message])).toEqual([{
+        expect(buildTaskSummaryEntriesFromSession(messages, invocation(100, 200))).toEqual([{
             id: 'read-1',
             tool: 'read',
             state: { status: 'completed', input: { path: 'a.ts' } },
@@ -130,6 +152,60 @@ describe('taskToolModel', () => {
         expect(prepareTaskToolOutput(output)).toBe('## Verdict');
         expect(readTaskSessionIdFromOutput(output)).toBe('child-1');
         expect(parseTaskMetadataBlock(output).sessionId).toBe('child-1');
+    });
+});
+
+describe('invocation-scoped task activity', () => {
+    const ids = (messages: MessageRecord[], part: ToolPart) => buildTaskSummaryEntriesFromSession(messages, part).map((entry) => entry.id);
+
+    test('isolates sequential invocations of the same child, including input.sessionID resumes', () => {
+        const messages = records([activity('old', 50, 60), activity('first', 110, 150), activity('second', 210)]);
+        expect(ids(messages, invocation(100, 200))).toEqual(['first']);
+        expect(ids(messages, invocation(200))).toEqual(['second']);
+        expect(ids(messages, invocation(200, 300))).toEqual(['second']);
+    });
+
+    test('derives identical membership after reload without a React snapshot', () => {
+        const messages = records([activity('first', 110, 150), activity('second', 210, 250)]);
+        const part = invocation(100, 200);
+        expect(ids(structuredClone(messages), structuredClone(part))).toEqual(ids(messages, part));
+        expect(ids(structuredClone(messages), part)).toEqual(['first']);
+    });
+
+    test('accepts a late final event for old activity without accepting new activity', () => {
+        const first = invocation(100, 200);
+        const live = records([activity('first', 110), activity('second', 210)]);
+        expect(buildTaskSummaryEntriesFromSession(live, first)[0]?.state?.status).toBe('running');
+        const settled = records([activity('first', 110, 260), activity('second', 210, 250)]);
+        expect(ids(settled, first)).toEqual(['first']);
+        expect(buildTaskSummaryEntriesFromSession(settled, first)[0]?.state?.status).toBe('completed');
+        expect(ids(settled, invocation(200, 300))).toEqual(['second']);
+    });
+
+    test('rejects missing, nonfinite, or inverted bounds and missing activity creation', () => {
+        const messages = records([activity('first', 110, 150)]);
+        const noCompletion = invocation(100, 200);
+        noCompletion.time = { created: 100 };
+        expect(ids(messages, noCompletion)).toEqual([]);
+        expect(ids(messages, invocation(NaN, 200))).toEqual([]);
+        expect(ids(messages, invocation(200, 100))).toEqual([]);
+        expect(ids(messages, invocation(100, Infinity))).toEqual([]);
+        const missingCreated = activity('unknown', 110, 150);
+        delete missingCreated.time;
+        expect(ids(records([missingCreated]), invocation(100, 200))).toEqual([]);
+        expect(ids(messages, { ...invocation(100), state: { status: 'pending', input: {}, raw: '' } })).toEqual([]);
+    });
+
+    test('uses each tool creation rather than message creation or execution/completion time', () => {
+        const tool = activity('first', 110, 260);
+        tool.state = { status: 'completed', input: {}, output: '', time: { start: 230, end: 260 } };
+        expect(ids(records([tool, activity('at-end', 200)]), invocation(100, 200))).toEqual(['first']);
+    });
+
+    test('scopes failed invocations and includes the authoritative start boundary', () => {
+        const failed = invocation(100, 200);
+        failed.state = { status: 'error', input: { sessionID: 'child' }, error: 'failed', time: { start: 100, end: 200 } };
+        expect(ids(records([activity('before', 99), activity('at-start', 100), activity('after', 201)]), failed)).toEqual(['at-start']);
     });
 });
 

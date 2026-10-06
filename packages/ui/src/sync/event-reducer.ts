@@ -259,6 +259,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       return {
         ...part,
         executed: transition.executed,
+        time: part.time ? { ...part.time, completed: transition.end } : undefined,
         state: compact({
           status: "completed",
           input: state.input,
@@ -275,6 +276,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       return {
         ...part,
         executed: transition.executed,
+        time: part.time ? { ...part.time, completed: transition.end } : undefined,
         state: compact({
           status: "error",
           input: state.input,

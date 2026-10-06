@@ -175,6 +175,7 @@ export function projectToolPart(
     type: "tool",
     callID: tool.id,
     tool: tool.name,
+    time: compact({ created: tool.time.created, completed: tool.time.completed }),
     state,
     executed: tool.executed,
   })

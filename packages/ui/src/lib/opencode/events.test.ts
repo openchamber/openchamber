@@ -212,7 +212,7 @@ describe("translateWireEvent", () => {
     })
     expect(pending[0]).toMatchObject({
       type: "message.part.updated",
-      properties: { part: { id: "call_1", type: "tool", tool: "bash", callID: "call_1", state: { status: "pending", raw: "" } } },
+      properties: { part: { id: "call_1", type: "tool", tool: "bash", callID: "call_1", time: { created: 1000 }, state: { status: "pending", raw: "" } } },
     })
     const rawDelta = translateWireEvent({
       ...base,

@@ -616,6 +616,7 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
           type: "tool",
           callID: event.data.id,
           tool: event.data.name,
+          time: { created: event.created },
           state: { status: "pending", input: {}, raw: "" },
         }),
       ]

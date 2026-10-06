@@ -1,5 +1,5 @@
 import type { MessageRecord } from '@/lib/messageCompletion';
-import type { Part, Session, ToolInput } from '@/lib/opencode/model';
+import type { Part, Session, ToolInput, ToolPart } from '@/lib/opencode/model';
 
 import { isSubagentTool, normalizeToolName } from '@/lib/opencode/tools';
 
@@ -148,25 +148,30 @@ export const readTaskSessionIdFromOutput = (output: string | undefined): string 
     return normalizeSessionIdCandidate(readTaskTagSessionIdFromOutput(output));
 };
 
-const messageSummaryCache = new WeakMap<MessageRecord, TaskToolSummaryEntry[]>();
+const messageSummaryCache = new WeakMap<MessageRecord, { created: number; entry: TaskToolSummaryEntry }[]>();
 
-const projectMessageSummaryEntries = (message: MessageRecord): TaskToolSummaryEntry[] => {
+const projectMessageSummaryEntries = (message: MessageRecord): { created: number; entry: TaskToolSummaryEntry }[] => {
     const cached = messageSummaryCache.get(message);
     if (cached) return cached;
 
-    const entries: TaskToolSummaryEntry[] = [];
+    const entries: { created: number; entry: TaskToolSummaryEntry }[] = [];
     if (message.info.role === 'assistant') {
         for (const part of message.parts) {
             if (part.type !== 'tool') continue;
             const toolName = normalizeToolName(part.tool);
             if (!toolName || isSubagentTool(toolName)) continue;
-            const state = part.state as { status?: string; input?: ToolInput } | undefined;
+            const created = part.time?.created;
+            if (created === undefined || !Number.isFinite(created)) continue;
+            const state = part.state;
             entries.push({
-                id: part.id,
-                tool: part.tool,
-                state: {
-                    status: state?.status,
-                    input: state?.input,
+                created,
+                entry: {
+                    id: part.id,
+                    tool: part.tool,
+                    state: {
+                        status: state.status,
+                        input: state.input,
+                    },
                 },
             });
         }
@@ -175,9 +180,28 @@ const projectMessageSummaryEntries = (message: MessageRecord): TaskToolSummaryEn
     return entries;
 };
 
-export const buildTaskSummaryEntriesFromSession = (messages: MessageRecord[]): TaskToolSummaryEntry[] => {
+/** Unknown final bounds never authorize a whole-session projection. */
+export const taskInvocationBounds = (part: ToolPart): { start: number; end?: number } | undefined => {
+    if (part.state.status === 'pending') return undefined;
+    const start = part.state.time.start;
+    if (!Number.isFinite(start)) return undefined;
+    if (part.state.status === 'running') return { start };
+    const end = part.time?.completed;
+    if (end === undefined || !Number.isFinite(end) || end < start) return undefined;
+    return { start, end };
+};
+
+export const buildTaskSummaryEntriesFromSession = (messages: MessageRecord[], invocation: ToolPart): TaskToolSummaryEntry[] => {
+    const bounds = taskInvocationBounds(invocation);
+    if (!bounds) return [];
     const entries: TaskToolSummaryEntry[] = [];
-    for (const message of messages) entries.push(...projectMessageSummaryEntries(message));
+    for (const message of messages) {
+        for (const { created, entry } of projectMessageSummaryEntries(message)) {
+            // Membership follows creation, not completion or last update: late
+            // final events still update calls that belong to this invocation.
+            if (created >= bounds.start && (bounds.end === undefined || created < bounds.end)) entries.push(entry);
+        }
+    }
     return entries;
 };
 

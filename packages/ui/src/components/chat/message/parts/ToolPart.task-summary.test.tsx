@@ -50,15 +50,17 @@ const themeContext: ThemeContextValue = {
 const parent: ToolPartData = {
   id: 'parent-call', sessionID: 'parent', messageID: 'parent-message',
   type: 'tool', tool: 'subagent', callID: 'parent-call',
+  time: { created: 1, completed: 2 },
   state: {
     status: 'completed', input: { description: 'Update files' },
     output: '', metadata: { sessionID: 'child' }, time: { start: 1, end: 2 },
   },
 };
 
-const patchPart = (paths: string[]): ToolPartData => ({
+const patchPart = (paths: string[], created = 1): ToolPartData => ({
   id: 'patch-call', sessionID: 'child', messageID: 'child-message',
   type: 'tool', tool: 'patch', callID: 'patch-call',
+  time: { created },
   state: {
     status: 'completed',
     input: { patchText: ['*** Begin Patch', ...paths.flatMap((path) => [
@@ -188,7 +190,7 @@ test('a running subagent without the progress join resolves its child session fr
         agent: 'explore', providerID: 'test', modelID: 'test',
         time: { created: 121, completed: 122 },
       }] },
-      part: { 'child-message': [patchPart(['src/found.ts'])] },
+      part: { 'child-message': [patchPart(['src/found.ts'], 121)] },
     }));
     expect(container.textContent).not.toContain('Waiting for subagent activity');
     expect(container.textContent).toContain('found.ts');
@@ -216,7 +218,7 @@ test('a resumed subagent uses its explicit child id when that child predates the
         agent: 'explore', providerID: 'test', modelID: 'test',
         time: { created: 121, completed: 122 },
       }] },
-      part: { 'child-message': [patchPart(['src/resumed.ts'])] },
+      part: { 'child-message': [patchPart(['src/resumed.ts'], 121)] },
     }));
 
     expect(container.textContent).not.toContain('Waiting for subagent activity');
@@ -242,7 +244,7 @@ test('progress metadata takes precedence over a different explicit child id', as
       time: { created: 121, completed: 122 },
     });
     const childPatch = (sessionID: string, path: string) => ({
-      ...patchPart([path]),
+      ...patchPart([path], 121),
       id: `${sessionID}-patch`,
       sessionID,
       messageID: `${sessionID}-message`,
@@ -267,5 +269,54 @@ test('progress metadata takes precedence over a different explicit child id', as
 
     expect(container.textContent).toContain('metadata.ts');
     expect(container.textContent).not.toContain('input.ts');
+  });
+});
+
+test('a completed card keeps only its invocation activity through reuse and a late final update', async () => {
+  const first = patchPart(['src/first.ts'], 1);
+  const second = { ...patchPart(['src/second.ts'], 3), id: 'second-patch', callID: 'second-patch' };
+  const childMessage = {
+    id: 'child-message', sessionID: 'child', role: 'assistant' as const,
+    agent: 'build', providerID: 'test', modelID: 'test', time: { created: 1 },
+  };
+  // A fresh mount derives historical membership from records, not a captured
+  // list. Repeating the mount also exercises revisit/reload behavior.
+  for (let mount = 0; mount < 2; mount += 1) {
+    await withHarness(parent, async (store, container) => {
+      await act(async () => store.setState({
+        message: { child: [childMessage] },
+        part: { 'child-message': [first, second] },
+      }));
+      expect(container.textContent).toContain('first.ts');
+      expect(container.textContent).not.toContain('second.ts');
+      const late = patchPart(['src/first-final.ts'], 1);
+      if (late.state.status !== 'completed') throw new Error('Expected completed patch');
+      late.state.time.end = 5;
+      await act(async () => store.setState({ part: { 'child-message': [late, second] } }));
+      expect(container.textContent).toContain('first-final.ts');
+      expect(container.textContent).not.toContain('second.ts');
+    });
+  }
+  const resumed: ToolPartData = {
+    ...parent, id: 'resume', callID: 'resume', time: { created: 3 },
+    state: { status: 'running', input: { sessionID: 'child' }, time: { start: 3 } },
+  };
+  await withHarness(resumed, async (store, container) => {
+    await act(async () => store.setState({ message: { child: [childMessage] }, part: { 'child-message': [first, second] } }));
+    expect(container.textContent).toContain('second.ts');
+    expect(container.textContent).not.toContain('first.ts');
+  });
+});
+
+test('a final per-call metadata summary wins over reused child history', async () => {
+  if (parent.state.status !== 'completed') throw new Error('Expected completed invocation');
+  const finalized: ToolPartData = {
+    ...parent,
+    state: { ...parent.state, metadata: { sessionID: 'child', summary: [{ tool: 'read', title: 'authoritative.ts' }] } },
+  };
+  await withHarness(finalized, async (store, container) => {
+    await act(async () => store.setState({ part: { 'child-message': [patchPart(['src/later.ts'], 3)] } }));
+    expect(container.textContent).toContain('authoritative.ts');
+    expect(container.textContent).not.toContain('later.ts');
   });
 });

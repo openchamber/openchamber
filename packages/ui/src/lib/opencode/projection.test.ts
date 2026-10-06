@@ -148,6 +148,7 @@ describe("projectToolPart", () => {
       owner,
     )
     expect(part.state).toEqual({ status: "pending", input: {}, raw: '{"pa' })
+    expect(part.time).toEqual({ created: 5 })
   })
 
   test("running state uses the run timestamp as start", () => {
@@ -162,6 +163,16 @@ describe("projectToolPart", () => {
       owner,
     )
     expect(part.state).toEqual({ status: "running", input: { path: "a" }, metadata: { title: "Editing" }, time: { start: 7 } })
+    expect(part.time).toEqual({ created: 5 })
+  })
+
+  test("keeps missing authoritative completion separate from the display timer fallback", () => {
+    const part = projectToolPart({
+      type: "tool", id: "c", name: "subagent", time: { created: 5, ran: 7 },
+      state: { status: "completed", input: {}, content: [{ type: "text", text: "done" }] },
+    }, owner)
+    expect(part.time).toEqual({ created: 5 })
+    expect(part.state).toMatchObject({ time: { start: 7, end: 7 } })
   })
 
   test("error state renders the structured error as text and keeps partial output", () => {
@@ -187,6 +198,7 @@ describe("projectToolPart", () => {
       output: "partial",
       time: { start: 6, end: 9 },
     })
+    expect(part.time).toEqual({ created: 5, completed: 9 })
   })
 })
 

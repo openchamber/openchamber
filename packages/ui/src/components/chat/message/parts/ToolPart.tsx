@@ -56,6 +56,7 @@ import {
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import {
     buildTaskSummaryEntriesFromSession,
+    taskInvocationBounds,
     normalizeTaskSummaryEntries,
     parseTaskMetadataBlock,
     prepareTaskToolOutput,
@@ -1966,7 +1967,7 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
     );
     const taskSessionId = authoritativeTaskSessionId ?? inferredTaskSessionId;
 
-    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
+    const childSessionLookupId = hasFinalMetadataTaskSummary || !taskInvocationBounds(part) ? '' : (taskSessionId ?? '');
 
     const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
     useEnsureSessionMessages(childSessionLookupId, currentDirectory);
@@ -1978,8 +1979,8 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
         if (!Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
             return [];
         }
-        return buildTaskSummaryEntriesFromSession(childSessionMessages);
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
+        return buildTaskSummaryEntriesFromSession(childSessionMessages, part);
+    }, [childSessionMessages, isTaskTool, taskSessionId, part]);
 
     React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {

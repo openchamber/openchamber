@@ -330,7 +330,7 @@ describe("streaming parts", () => {
       type: "message.part.updated",
       properties: {
         sessionID: "ses_1",
-        part: { id: "call_1", sessionID: "ses_1", messageID: "msg_a", type: "tool", callID: "call_1", tool: "bash", state: { status: "pending", input: {}, raw: "" } },
+        part: { id: "call_1", sessionID: "ses_1", messageID: "msg_a", type: "tool", callID: "call_1", tool: "bash", time: { created: 10 }, state: { status: "pending", input: {}, raw: "" } },
       },
     })
     apply(draft, { type: "message.part.delta", properties: { sessionID: "ses_1", messageID: "msg_a", partID: "call_1", field: "raw", delta: '{"command":' } })
@@ -351,6 +351,7 @@ describe("streaming parts", () => {
     const done = draft.part.msg_a[0]
     if (done.type !== "tool" || done.state.status !== "completed") throw new Error("expected completed tool")
     expect(done.state).toEqual({ status: "completed", input: { command: "ls" }, output: "a\nb", metadata: { title: "Listing" }, time: { start: 11, end: 15 } })
+    expect(done.time).toEqual({ created: 10, completed: 15 })
 
     // A late progress or a replay of the running snapshot cannot reopen a finished call.
     expect(apply(draft, { type: "message.tool.transition", properties: { sessionID: "ses_1", messageID: "msg_a", partID: "call_1", transition: { kind: "progress", metadata: {} } } })).toBe(false)

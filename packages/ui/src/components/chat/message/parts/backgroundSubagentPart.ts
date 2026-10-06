@@ -31,10 +31,11 @@ export const toBackgroundSubagentPart = (part: ToolPart, phase: BackgroundSubage
         case 'finished': {
             const { run } = phase;
             const time = { start, end: Math.max(start, run.reportedAt) };
+            const invocationTime = part.time ? { ...part.time, completed: run.reportedAt } : undefined;
             if (run.state === 'error') {
-                return { ...part, state: { status: 'error', input, metadata, error: run.output, time } };
+                return { ...part, time: invocationTime, state: { status: 'error', input, metadata, error: run.output, time } };
             }
-            return { ...part, state: { ...state, output: run.output, time } };
+            return { ...part, time: invocationTime, state: { ...state, output: run.output, time } };
         }
         case 'unknown':
             return part;

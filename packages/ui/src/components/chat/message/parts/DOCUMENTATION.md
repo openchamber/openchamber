@@ -28,6 +28,7 @@ Use this doc when you ask an agent to change tool/header/description behavior.
 - `taskToolModel.ts`
   - Owns subagent metadata parsing and child-session summary projection. `ToolPart.tsx` resolves the call's child identity.
   - A subagent's `state.metadata.sessionID` is the preferred child identity from progress/result updates. Legacy part metadata and output IDs remain readable, then a non-empty `state.input.sessionID` identifies a resumed child when those IDs are absent.
+  - Activity belongs to the invocation whose execution start and authoritative completion bound the tool's creation time. The end is exclusive. `ToolPart.time` preserves OpenCode's creation/completion separately from display timer fallbacks. Completed calls without a real completion time show no derived activity; running calls require a real start. Missing activity creation times are excluded. Late final updates retain membership through creation time, and final per-call metadata summaries take precedence. Projection uses the loaded child history, never a per-card full-history fetch.
   - If none of those sources names a child, a running call may infer one from child sessions created at or after the call start. Candidates must belong to the parent, match the requested agent when the session has one, and remain unclaimed by sibling calls. A unique candidate is accepted; when several remain, the call description must uniquely match the child title. Ambiguous calls stay unlinked. Inference never pairs children by sibling order or status.
 
 - `toolPresentation.tsx`
