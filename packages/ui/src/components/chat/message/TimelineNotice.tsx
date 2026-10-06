@@ -32,8 +32,8 @@ import type { Message, ToolPart as ToolPartType } from '@/lib/opencode/model';
 import { cn } from '@/lib/utils';
 
 /** The shared frame every notice row sits in, so they line up with messages. */
-const NoticeRow: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-    <div className="w-full pb-2">
+const NoticeRow: React.FC<{ children: React.ReactNode; spacingClassName?: string }> = ({ children, spacingClassName = 'pb-2' }) => (
+    <div className={cn('w-full', spacingClassName)}>
         <div className="chat-message-column">{children}</div>
     </div>
 );
@@ -49,8 +49,10 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
     // whose body is the summary as Markdown. The summary streams in while the
     // compaction runs; the reasoning setting decides whether the body opens and
     // follows its end until it settles, or stays folded.
+    // The compaction opens a turn, and the activity row under it brings its own
+    // top margin, so the row spaces itself above to keep both gaps even.
     return (
-        <NoticeRow>
+        <NoticeRow spacingClassName="pt-1">
             <ReasoningTimelineBlock
                 text={summary}
                 variant="thinking"

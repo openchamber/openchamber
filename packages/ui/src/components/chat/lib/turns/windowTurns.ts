@@ -1,4 +1,4 @@
-import { isBackgroundReportEntry } from '../timelineRoles';
+import { isTurnOpeningNotice } from '../timelineRoles';
 import type { ChatMessageEntry } from './types';
 
 const resolveMessageRole = (message: ChatMessageEntry): string => {
@@ -6,9 +6,9 @@ const resolveMessageRole = (message: ChatMessageEntry): string => {
     return typeof role === 'string' ? role : '';
 };
 
-/** A user prompt opens a turn, and so does a background report (see `isBackgroundReportEntry`). */
+/** A user prompt opens a turn, and so does a background report or a compaction (see `isTurnOpeningNotice`). */
 const opensTurn = (message: ChatMessageEntry): boolean =>
-    resolveMessageRole(message) === 'user' || isBackgroundReportEntry(message.info);
+    resolveMessageRole(message) === 'user' || isTurnOpeningNotice(message.info);
 
 const resolveParentMessageId = (message: ChatMessageEntry): string | undefined => {
     const parentId = (message.info as { parentID?: unknown }).parentID;

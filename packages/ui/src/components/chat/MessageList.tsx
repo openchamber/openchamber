@@ -4,7 +4,7 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react';
 import ChatMessage from './ChatMessage';
 import { TimelineNotice } from './message/TimelineNotice';
 import { useRunningSubagentRuns, withRunningSubagentRuns } from './lib/runningSubagentRuns';
-import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole } from './lib/timelineRoles';
+import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole, isTurnOpeningNotice } from './lib/timelineRoles';
 import { filterVisibleParts, isEmptyTextPart } from './message/partUtils';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
@@ -292,10 +292,10 @@ const TurnBlock = React.memo(({
 }: TurnBlockProps) => {
 
     const showReasoningTraces = useUIStore((state) => state.showReasoningTraces);
-    // A hidden prompt has nothing to pin, and a background report opens its turn as
-    // a notice row, which never sticks.
+    // A hidden prompt has nothing to pin, and a background report or a
+    // compaction opens its turn as a notice row, which never sticks.
     const turnHeaderCanStick = React.useMemo(
-        () => !isHiddenUserMessage(turn.userMessage) && !isBackgroundReportEntry(turn.userMessage.info),
+        () => !isHiddenUserMessage(turn.userMessage) && !isTurnOpeningNotice(turn.userMessage.info),
         [turn.userMessage]
     );
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };

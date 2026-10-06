@@ -43,6 +43,15 @@ export const isSkippedTimelineRole = (role: Message['role']): boolean => SKIPPED
 export const isBackgroundReportEntry = (message: Message): boolean =>
     readSubagentRun(message) !== undefined || readDispatchedSessionResult(message) !== undefined;
 
+/**
+ * A notice row that opens a turn the way a prompt does: a background report,
+ * or a compaction. OpenCode compacts in the middle of a run once the context
+ * fills and the agent carries on after it, so the steps that follow belong
+ * below the compaction row, not to the turn that was running before it.
+ */
+export const isTurnOpeningNotice = (message: Message): boolean =>
+    message.role === 'compaction' || isBackgroundReportEntry(message);
+
 /** Whether the timeline renders nothing for this message. */
 export const isSkippedTimelineMessage = (message: Message): boolean =>
     isSkippedTimelineRole(message.role) && !isBackgroundReportEntry(message);

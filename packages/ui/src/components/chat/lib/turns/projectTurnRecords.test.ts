@@ -100,6 +100,25 @@ describe('projectTurnRecords', () => {
         expect(projection.ungroupedMessageIds.has('s1')).toBe(false);
     });
 
+    test('opens a turn at a compaction so the steps after it render under it', () => {
+        // OpenCode compacts mid-run and the agent carries on; those steps must
+        // not rejoin the prompt's turn and push the compaction above the prompt.
+        const user = createMessageEntry({ id: 'u1', role: 'user', createdAt: 1 });
+        const before = createMessageEntry({ id: 'a1', role: 'assistant', createdAt: 2 });
+        const compaction: ChatMessageEntry = {
+            info: { id: 'c1', sessionID: 'ses_1', role: 'compaction', time: { created: 3 }, status: 'completed', reason: 'auto', summary: 'Objective' },
+            parts: [],
+        };
+        const after = createMessageEntry({ id: 'a2', role: 'assistant', createdAt: 4 });
+
+        const projection = projectTurnRecords([user, before, compaction, after]);
+
+        expect(projection.turns.map((turn) => turn.turnId)).toEqual(['u1', 'c1']);
+        expect(projection.turns[0]?.assistantMessageIds).toEqual(['a1']);
+        expect(projection.turns[1]?.assistantMessageIds).toEqual(['a2']);
+        expect(projection.ungroupedMessageIds.has('c1')).toBe(false);
+    });
+
     test('keeps non-assistant orphan messages available as ungrouped entries', () => {
         const system = createMessageEntry({ id: 's1', role: 'system', createdAt: 1 });
 
