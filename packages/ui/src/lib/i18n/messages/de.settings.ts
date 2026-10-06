@@ -2492,4 +2492,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Gib eine vollständige http://- oder https://-Adresse ein.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Anweisungen für Code-Fusion',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Systemtitelleiste verwenden',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Erfordert einen Neustart der App. Das Fenster erhält die Titelleiste und Schaltflächen deiner Desktopumgebung, über der Kopfzeile von OpenChamber.',
 };

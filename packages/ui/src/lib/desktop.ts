@@ -55,6 +55,8 @@ type ElectronRuntimeGlobal = {
   runtime?: string;
   arch?: string;
   trayEnabled?: boolean;
+  /** Linux window with the desktop environment's own title bar (opt-in). */
+  nativeFrame?: boolean;
 };
 
 const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
@@ -82,7 +84,8 @@ export const DEFAULT_DESKTOP_WINDOW_CONTROLS_POSITION: DesktopWindowControlsPosi
 export const usesFramelessElectronChrome = (): boolean => {
   if (!isElectronShell()) return false;
   const platform = getElectronPlatform();
-  return platform === 'win32' || platform === 'linux';
+  if (platform === 'linux') return getElectronRuntime()?.nativeFrame !== true;
+  return platform === 'win32';
 };
 
 /** Normalize a stored preference; legacy `auto` maps to the right-side default. */

@@ -2491,4 +2491,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Voer een volledig http://- of https://-adres in.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Codefusie-instructies',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Systeemtitelbalk gebruiken',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Vereist een herstart van de app. Het venster krijgt de titelbalk en knoppen van je desktopomgeving, boven de koptekst van OpenChamber.',
 } as const;

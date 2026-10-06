@@ -2501,4 +2501,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'http:// 또는 https://로 시작하는 전체 주소를 입력하세요.',
   'settings.magicPrompts.page.block.codeFusionInstructions': '코드 fusion 지침',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': '시스템 제목 표시줄 사용',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': '앱을 다시 시작해야 합니다. 창에 데스크톱 환경의 제목 표시줄과 버튼이 OpenChamber 헤더 위에 표시됩니다.',
 } as const;

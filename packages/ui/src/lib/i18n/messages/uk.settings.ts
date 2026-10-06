@@ -2501,4 +2501,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Введіть повну адресу http:// або https://.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Інструкції кодового fusion',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Використовувати системний заголовок вікна',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Потрібен перезапуск застосунку. Вікно отримає заголовок і кнопки вашого робочого середовища, над шапкою OpenChamber.',
 } as const;

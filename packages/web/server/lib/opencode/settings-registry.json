@@ -74,6 +74,12 @@
         "desktop"
       ]
     },
+    "desktopLinuxNativeFrame": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
     "desktopUiPassword": {
       "scope": "instance",
       "surfaces": [

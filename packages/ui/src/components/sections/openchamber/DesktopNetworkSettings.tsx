@@ -38,6 +38,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const isMacDesktop = isLocalDesktop
     && typeof window !== 'undefined'
     && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
+  const isLinuxDesktop = isLocalDesktop
+    && typeof window !== 'undefined'
+    && window.__OPENCHAMBER_PLATFORM__ === 'linux';
   const [savedValue, setSavedValue] = React.useState(false);
   const [draftValue, setDraftValue] = React.useState(false);
   // The password is write-only: the server says whether one is set, and the
@@ -57,6 +60,8 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
   const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
   const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
+  const [savedLinuxNativeFrame, setSavedLinuxNativeFrame] = React.useState(false);
+  const [draftLinuxNativeFrame, setDraftLinuxNativeFrame] = React.useState(false);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
   const [keepAwakeEnabled, setKeepAwakeEnabled] = React.useState(false);
   const [isSavingKeepAwake, setIsSavingKeepAwake] = React.useState(false);
@@ -102,6 +107,9 @@ export const DesktopNetworkSettings: React.FC = () => {
         const macMenuBarEnabled = data.desktopMacMenuBarEnabled !== false;
         setSavedMacMenuBarEnabled(macMenuBarEnabled);
         setDraftMacMenuBarEnabled(macMenuBarEnabled);
+        const linuxNativeFrame = data.desktopLinuxNativeFrame === true;
+        setSavedLinuxNativeFrame(linuxNativeFrame);
+        setDraftLinuxNativeFrame(linuxNativeFrame);
         setError(null);
       } catch (cause) {
         if (!cancelled) {
@@ -228,7 +236,8 @@ export const DesktopNetworkSettings: React.FC = () => {
   const passwordDirty = nextPassword.length > 0 || removePassword;
   const isDirty = draftValue !== savedValue
     || passwordDirty
-    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled;
+    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled
+    || draftLinuxNativeFrame !== savedLinuxNativeFrame;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
       return null;
@@ -402,6 +411,7 @@ export const DesktopNetworkSettings: React.FC = () => {
         // Omitted when unchanged: the server keeps the password it has.
         ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
         desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
+        desktopLinuxNativeFrame: draftLinuxNativeFrame,
       });
 
       if (!result.ok) {
@@ -417,6 +427,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setDraftPassword('');
       setRemovePassword(false);
       setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
+      setSavedLinuxNativeFrame(draftLinuxNativeFrame);
 
       const restarted = await restartDesktopApp();
       if (!restarted) {
@@ -426,7 +437,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftMacMenuBarEnabled, draftValue, isDirty, nextPassword, removePassword, t]);
+  }, [draftLinuxNativeFrame, draftMacMenuBarEnabled, draftValue, isDirty, nextPassword, removePassword, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -435,7 +446,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
       <div className="space-y-3">
-        {(launchAtLoginSupported || isMacDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported) ? (
+        {(launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported) ? (
           <div className={SETTINGS_OPTION_STACK_CLASS}>
             {launchAtLoginSupported ? (
               <SettingsCheckboxRow
@@ -461,6 +472,18 @@ export const DesktopNetworkSettings: React.FC = () => {
                 label={t('settings.openchamber.desktopNetwork.field.macMenuBar')}
                 info={t('settings.openchamber.desktopNetwork.field.macMenuBarDescription')}
                 ariaLabel={t('settings.openchamber.desktopNetwork.field.macMenuBarAria')}
+              />
+            ) : null}
+
+            {isLinuxDesktop ? (
+              <SettingsCheckboxRow
+                settingsItem="sessions.desktop-linux-native-frame"
+                checked={draftLinuxNativeFrame}
+                onChange={setDraftLinuxNativeFrame}
+                disabled={isLoading || isSaving}
+                label={t('settings.openchamber.desktopNetwork.field.linuxNativeFrame')}
+                info={t('settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription')}
+                ariaLabel={t('settings.openchamber.desktopNetwork.field.linuxNativeFrame')}
               />
             ) : null}
 

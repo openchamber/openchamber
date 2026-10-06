@@ -2502,4 +2502,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Podaj pełny adres http:// lub https://.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Instrukcje fusion kodu',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Używaj systemowego paska tytułu',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Wymaga ponownego uruchomienia aplikacji. Okno dostaje pasek tytułu i przyciski Twojego środowiska pulpitu, nad nagłówkiem OpenChamber.',
 };

@@ -376,6 +376,7 @@ export const buildRendererAdditionalArguments = ({
   bootOutcome = null,
   relayHostId = '',
   trayEnabled = isMacMenuBarEnabled(),
+  nativeFrame = usesLinuxNativeFrame(),
 } = {}) => [
   `--openchamber-local-origin=${localOrigin}`,
   `--openchamber-api-base-url=${apiBaseUrl}`,
@@ -386,12 +387,22 @@ export const buildRendererAdditionalArguments = ({
   `--openchamber-tray-enabled=${trayEnabled ? '1' : '0'}`,
   `--openchamber-boot-outcome=${JSON.stringify(bootOutcome)}`,
   `--openchamber-relay-host-id=${relayHostId}`,
+  `--openchamber-native-frame=${nativeFrame ? '1' : '0'}`,
 ];
 
-export const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
+// Linux can opt into the desktop environment's own title bar (Settings ->
+// Desktop); it takes effect at the next start, like the window it shapes.
+export const usesLinuxNativeFrame = () => (
+  process.platform === 'linux' && readSettingsRoot().desktopLinuxNativeFrame === true
+);
+
+export const usesFramelessChrome = () => (
+  process.platform === 'win32' || (process.platform === 'linux' && !usesLinuxNativeFrame())
+);
 
 export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArguments }) => {
-  const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
+  const frameless = usesFramelessChrome();
+  const usesCustomTitleBar = process.platform === 'darwin' || frameless;
   const options = {
     title: 'OpenChamber',
     width: bounds?.width ?? DEFAULT_WINDOW_WIDTH,
@@ -401,7 +412,7 @@ export const buildMainWindowOptions = ({ bounds, backgroundColor, additionalArgu
     icon: getWindowIconPath(),
     show: false,
     backgroundColor,
-    frame: usesFramelessChrome ? false : undefined,
+    frame: frameless ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.

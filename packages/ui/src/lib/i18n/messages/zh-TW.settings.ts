@@ -2501,4 +2501,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': '請輸入完整的 http:// 或 https:// 位址。',
   'settings.magicPrompts.page.block.codeFusionInstructions': '程式碼融合說明',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': '使用系統標題列',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': '需要重新啟動應用程式。視窗會使用桌面環境自己的標題列與按鈕，顯示在 OpenChamber 頂欄上方。',
 } as const;

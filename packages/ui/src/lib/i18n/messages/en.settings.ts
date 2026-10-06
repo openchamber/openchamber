@@ -2491,4 +2491,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Enter a full http:// or https:// address.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Code Fusion Instructions',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Use the system title bar',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Requires an app restart. The window gets your desktop environment\'s own title bar and buttons, above OpenChamber\'s header.',
 } as const;

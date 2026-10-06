@@ -2501,4 +2501,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'http:// または https:// で始まる完全なアドレスを入力してください。',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'コードフュージョンの指示',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'システムのタイトルバーを使う',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'アプリの再起動が必要です。ウィンドウにデスクトップ環境のタイトルバーとボタンが付き、OpenChamber のヘッダーの上に表示されます。',
 } as const;

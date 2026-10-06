@@ -2501,4 +2501,6 @@ export const settingsDict = {
   'settings.mcp.page.advanced.oauthMetadataUrlPlaceholder': 'https://example.com/.well-known/oauth-authorization-server',
   'settings.mcp.page.advanced.oauthMetadataUrlInvalid': 'Introduce una dirección http:// o https:// completa.',
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Instrucciones de fusion de código',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Usar la barra de título del sistema',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Requiere reiniciar la app. La ventana usa la barra de título y los botones de tu entorno de escritorio, encima de la cabecera de OpenChamber.',
 } as const;

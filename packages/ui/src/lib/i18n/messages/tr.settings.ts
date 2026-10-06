@@ -2492,4 +2492,6 @@ export const settingsDict = {
   ...guestIntegrationsI18n.tr,
   ...extensionsSettingsI18n.tr,
   'settings.magicPrompts.page.block.codeFusionInstructions': 'Kod fusion talimatları',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrame': 'Sistem başlık çubuğunu kullan',
+  'settings.openchamber.desktopNetwork.field.linuxNativeFrameDescription': 'Uygulamanın yeniden başlatılmasını gerektirir. Pencere, OpenChamber başlığının üstünde masaüstü ortamınızın kendi başlık çubuğunu ve düğmelerini alır.',
 };
