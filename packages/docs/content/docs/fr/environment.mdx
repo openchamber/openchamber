@@ -13,6 +13,10 @@ OpenChamber lit ces variables d’environnement au démarrage. Pour les services
 
 Adresse d’écoute du serveur web OpenChamber. Utilisez `0.0.0.0` pour autoriser l’accès depuis d’autres machines.
 
+### `OPENCHAMBER_LAN_URL`
+
+L’adresse à laquelle les autres appareils de votre réseau joignent OpenChamber, par exemple `http://192.168.1.20:3000`. Les liens et QR codes d’appairage la proposent à la place de l’adresse détectée par OpenChamber. Définissez-la quand cette détection se trompe, par exemple dans Docker, où OpenChamber ne voit que l’adresse interne du conteneur.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Mot de passe pour l’UI navigateur. Utilisez-le lorsque vous écoutez hors de localhost, utilisez des tunnels ou passez derrière un reverse proxy.

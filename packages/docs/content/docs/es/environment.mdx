@@ -13,6 +13,10 @@ OpenChamber lee estas variables al arrancar. Para servicios de inicio, `opencham
 
 Dirección donde escucha el servidor web de OpenChamber. Usa `0.0.0.0` para permitir acceso desde otras máquinas.
 
+### `OPENCHAMBER_LAN_URL`
+
+La dirección con la que otros dispositivos de tu red llegan a OpenChamber, por ejemplo `http://192.168.1.20:3000`. Los enlaces y códigos QR de emparejamiento la ofrecen en lugar de la que OpenChamber detecta por sí mismo. Defínela cuando esa detección falle, por ejemplo en Docker, donde OpenChamber solo ve la dirección interna del contenedor.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Contraseña para la interfaz del navegador. Úsala cuando no te limites a localhost, o cuando uses túneles o un proxy inverso.

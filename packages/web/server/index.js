@@ -24,6 +24,7 @@ import {
   isLoopbackBindHost,
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
+  readAdvertisedLanUrl,
 } from './lib/security/bind-host.js';
 import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
 import {
@@ -1883,9 +1884,13 @@ async function main(options = {}) {
     if (address.startsWith('127.')) return null;
     return address;
   };
+  const advertisedLanUrl = readAdvertisedLanUrl();
   const resolvePairingTransports = (req) => {
     const activePort = tunnelRuntimeContext.getActivePort() || port;
     const local = `http://127.0.0.1:${activePort}`;
+    if (advertisedLanUrl) {
+      return { local, lan: advertisedLanUrl, relayAvailable: !relayBlockedByEnterprise() };
+    }
     let lanHost = null;
     if (isNetworkExposedBindHost(effectiveBindHost)) {
       // Prefer the address the client is ALREADY talking to us on — it is the
@@ -1921,6 +1926,7 @@ async function main(options = {}) {
   // interface. A client that paired while the machine had a different DHCP
   // lease uses this to replace its stale LAN candidate.
   const resolveDirectLanUrls = (req) => {
+    if (advertisedLanUrl) return [advertisedLanUrl];
     const activePort = tunnelRuntimeContext.getActivePort() || port;
     const urls = [];
     const push = (host) => {

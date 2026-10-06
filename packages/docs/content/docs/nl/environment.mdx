@@ -13,6 +13,10 @@ OpenChamber leest deze omgevingsvariabelen bij het starten. Voor opstartservices
 
 Het adres waarop de OpenChamber-webserver luistert. Gebruik `0.0.0.0` om toegang vanaf andere computers toe te staan.
 
+### `OPENCHAMBER_LAN_URL`
+
+Het adres waarop andere apparaten in uw netwerk OpenChamber bereiken, bijvoorbeeld `http://192.168.1.20:3000`. Koppelingslinks en QR-codes bieden dit aan in plaats van het adres dat OpenChamber zelf detecteert. Stel het in als die detectie fout zit, bijvoorbeeld in Docker, waar OpenChamber alleen het interne adres van de container ziet.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Wachtwoord voor de browserinterface. Gebruik dit bij luisteren buiten localhost, tunnels of een reverse proxy.

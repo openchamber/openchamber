@@ -13,6 +13,10 @@ OpenChamber liest diese Umgebungsvariablen beim Start. Für Startdienste speiche
 
 Bind-Adresse für den OpenChamber-Webserver. Verwende `0.0.0.0`, um Zugriff von anderen Maschinen zu erlauben.
 
+### `OPENCHAMBER_LAN_URL`
+
+Die Adresse, unter der andere Geräte in deinem Netzwerk OpenChamber erreichen, zum Beispiel `http://192.168.1.20:3000`. Kopplungslinks und QR-Codes bieten sie statt der selbst erkannten Adresse an. Setze sie, wenn diese Erkennung falsch liegt, etwa in Docker, wo OpenChamber nur die interne Adresse des Containers sieht.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Passwort für die Browser-Oberfläche. Verwende es, wenn du außerhalb von localhost bindest, Tunnels nutzt oder hinter einem Reverse Proxy läufst.

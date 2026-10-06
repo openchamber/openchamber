@@ -13,6 +13,10 @@ OpenChamber bu environment değişkenlerini başlangıçta okur. Başlangıç se
 
 OpenChamber web sunucusu için bind adresi. Diğer makinelerden erişime izin vermek için `0.0.0.0` kullanın.
 
+### `OPENCHAMBER_LAN_URL`
+
+Ağınızdaki diğer cihazların OpenChamber'a ulaştığı adres, örneğin `http://192.168.1.20:3000`. Eşleştirme bağlantıları ve QR kodları, OpenChamber'ın kendi algıladığı adres yerine bunu sunar. Bu algılama yanlış olduğunda ayarlayın; örneğin Docker'da OpenChamber yalnızca konteynerin iç adresini görür.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Tarayıcı arayüzü için parola. Bunu localhost dışına bind ederken, tünel kullanırken ya da reverse proxy arkasında çalıştırırken kullanın.

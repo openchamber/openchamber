@@ -635,6 +635,7 @@ OPTIONS:
 
 ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
+  OPENCHAMBER_LAN_URL          LAN address pairing links offer (e.g. http://192.168.1.20:3000 in Docker)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
   OPENCHAMBER_UI_SESSION_TTL_HOURS        Browser sign-in lifetime in hours (default: 12)
   OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS Sign-in lifetime on a trusted device in days (default: 7)

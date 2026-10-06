@@ -13,6 +13,10 @@ OpenChamber reads these environment variables at startup. For startup services, 
 
 Bind address for the OpenChamber web server. Use `0.0.0.0` to allow access from other machines.
 
+### `OPENCHAMBER_LAN_URL`
+
+The address other devices on your network use to reach OpenChamber, such as `http://192.168.1.20:3000`. Pairing links and QR codes offer it instead of the address OpenChamber detects itself. Set it when that guess is wrong, for example in Docker, where OpenChamber only sees the container's internal address.
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 Password for the browser UI. Use this when binding outside localhost, using tunnels, or running behind a reverse proxy.

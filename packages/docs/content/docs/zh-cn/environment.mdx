@@ -13,6 +13,10 @@ OpenChamber 会在启动时读取这些变量。对于开机启动服务，`open
 
 OpenChamber web 服务器监听的地址。使用 `0.0.0.0` 可允许其他机器访问。
 
+### `OPENCHAMBER_LAN_URL`
+
+网络中其他设备访问 OpenChamber 所用的地址，例如 `http://192.168.1.20:3000`。配对链接和二维码会使用它，而不是 OpenChamber 自己检测到的地址。当检测结果不对时设置它，例如在 Docker 中，OpenChamber 只能看到容器的内部地址。
+
 ### `OPENCHAMBER_UI_PASSWORD`
 
 浏览器 UI 的密码。当你绑定到 localhost 之外、使用隧道或反向代理时，请设置它。
