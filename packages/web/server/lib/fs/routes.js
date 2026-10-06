@@ -1566,8 +1566,11 @@ export const registerFsRoutes = (app, dependencies) => {
       } else if (platform === 'win32') {
         const stat = await fsPromises.stat(resolved);
         const escapedPath = resolved.replace(/'/g, "''");
-        const explorerArg = stat.isDirectory() ? escapedPath : `/select,${escapedPath}`;
-        const command = `Start-Process -FilePath explorer.exe -ArgumentList '${explorerArg}'`;
+        // A folder opens through its default handler, so a replacement file
+        // manager gets it; only Explorer can select a file inside its folder.
+        const command = stat.isDirectory()
+          ? `Start-Process -FilePath '${escapedPath}'`
+          : `Start-Process -FilePath explorer.exe -ArgumentList '/select,${escapedPath}'`;
         await new Promise((resolve, reject) => {
           const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
             windowsHide: true,
