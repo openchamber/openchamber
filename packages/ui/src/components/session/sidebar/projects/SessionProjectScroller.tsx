@@ -40,6 +40,13 @@ import type { ProjectSection } from './sessionProjectRender';
 import { formatProjectLabel } from '../utils';
 import { CrossfadeZoneHeader, CrossfadeZoneHeaders } from './CrossfadeZoneHeaders';
 import { prepareSessionProjectAction } from './sessionProjectActionContext';
+import { selectArchiveAllSessionIds } from './archiveAllSessions';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog';
+import { toast } from '@/components/ui';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
+import { isSessionBusyNow } from '@/sync/session-actions';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -152,6 +159,39 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     projectIconImage: section.project.iconImage,
     projectIconBackground: section.project.iconBackground,
   })), [model.projectSections, view.homeDirectory]);
+
+  const archiveAllConfirm = useConfirmDialog();
+  const { confirm: confirmArchiveAll } = archiveAllConfirm;
+  const requestArchiveAll = React.useCallback(async (projectLabel: string, groups: SessionGroup[]) => {
+    const pinnedIds = useSessionPinnedStore.getState().ids;
+    const ids = selectArchiveAllSessionIds(groups, (session) =>
+      isSessionPinned(pinnedIds, session.directory, session.id)
+      || isSessionBusyNow(session.id)
+      || isSessionInWork(session));
+    if (ids.length === 0) {
+      toast.info(t('sessions.sidebar.project.archiveAll.nothing'));
+      return;
+    }
+    const confirmed = await confirmArchiveAll({
+      title: t('sessions.sidebar.project.archiveAll.title', { project: projectLabel }),
+      message: ids.length === 1
+        ? t('sessions.sidebar.project.archiveAll.descriptionSingle', { count: ids.length })
+        : t('sessions.sidebar.project.archiveAll.descriptionPlural', { count: ids.length }),
+      action: t('sessions.sidebar.bulkActions.archive'),
+    });
+    if (!confirmed) return;
+    const { archivedIds, failedIds } = await useSessionUIStore.getState().archiveSessions(ids);
+    if (archivedIds.length > 0) {
+      toast.success(archivedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.archivedSingle', { count: archivedIds.length })
+        : t('sessions.sidebar.bulkActions.archivedPlural', { count: archivedIds.length }));
+    }
+    if (failedIds.length > 0) {
+      toast.error(failedIds.length === 1
+        ? t('sessions.sidebar.bulkActions.failedArchiveSingle', { count: failedIds.length })
+        : t('sessions.sidebar.bulkActions.failedArchivePlural', { count: failedIds.length }));
+    }
+  }, [confirmArchiveAll, t]);
 
   const stickyDescriptorIndex = React.useMemo(() => {
     if (!view.stickyZoneHeaders) return -1;
@@ -309,6 +349,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         onManageWorktrees={() => actions.openWorktreesPage(project.id)}
         onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
+        onArchiveAll={() => void requestArchiveAll(label, row.section.groups)}
         onClose={() => actions.removeProject(project.id)}
         showCreateButtons
       />;
@@ -427,7 +468,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     return <div className="py-1 pl-[26px] text-left typography-micro text-muted-foreground">
       {row.emptyKind === 'archived' ? t('sessions.sidebar.group.empty.noArchivedSessions') : row.group?.emptyMessage ?? t('sessions.sidebar.group.empty.noSessionsInWorkspace')}
     </div>;
-  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, model, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => row.kind === 'project-header' ? [row.section.project.id] : row.kind === 'group-header' ? [row.groupKey] : []), [model.rowModel.rows]);
   const projectDragIds = React.useMemo(() => new Set(model.sectionsForRender.map((section) => section.project.id)), [model.sectionsForRender]);
@@ -500,6 +541,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       deleteFolder(folderDeleteConfirm.scopeKey, folderDeleteConfirm.folderId);
       setFolderDeleteConfirm(null);
     }} />
+    {archiveAllConfirm.dialog}
   </div>;
 }
 

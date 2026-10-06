@@ -3764,4 +3764,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': 'Revertir archivo',
   'diffView.hunk.discardDialogTitle': '¿Descartar este fragmento?',
   'diffView.hunk.discardDescription': 'Se descartarán estos cambios locales en {path}.',
+  'sessions.sidebar.project.actions.archiveAll': 'Archivar todas las sesiones',
+  'sessions.sidebar.project.archiveAll.title': '¿Archivar las sesiones de {project}?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': 'Se archivará {count} sesión. Las sesiones fijadas, en ejecución y «En curso» se quedan.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': 'Se archivarán {count} sesiones. Las sesiones fijadas, en ejecución y «En curso» se quedan.',
+  'sessions.sidebar.project.archiveAll.nothing': 'Nada que archivar: todas las sesiones están fijadas, en ejecución o «En curso».',
 };

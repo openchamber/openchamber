@@ -3762,4 +3762,9 @@ export const dict = {
   'gitView.changes.revertFileConfirm': 'Annuler les modifications',
   'diffView.hunk.discardDialogTitle': 'Abandonner ce bloc ?',
   'diffView.hunk.discardDescription': 'Ces modifications locales dans {path} seront perdues.',
+  'sessions.sidebar.project.actions.archiveAll': 'Archiver toutes les sessions',
+  'sessions.sidebar.project.archiveAll.title': 'Archiver les sessions de {project} ?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} session passe dans les archives. Les sessions épinglées, en cours d’exécution et « En cours » restent.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessions passent dans les archives. Les sessions épinglées, en cours d’exécution et « En cours » restent.',
+  'sessions.sidebar.project.archiveAll.nothing': 'Rien à archiver : chaque session ici est épinglée, en cours d’exécution ou « En cours ».',
 } as const;

@@ -3764,4 +3764,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': 'Скасувати зміни',
   'diffView.hunk.discardDialogTitle': 'Відкинути цей фрагмент?',
   'diffView.hunk.discardDescription': 'Ці локальні зміни в {path} буде втрачено.',
+  'sessions.sidebar.project.actions.archiveAll': 'Архівувати всі сесії',
+  'sessions.sidebar.project.archiveAll.title': 'Архівувати сесії в {project}?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} сесію буде архівовано. Закріплені, запущені й ті, що «В роботі», лишаються.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': 'Буде архівовано сесій: {count}. Закріплені, запущені й ті, що «В роботі», лишаються.',
+  'sessions.sidebar.project.archiveAll.nothing': 'Нічого архівувати: усі сесії тут закріплені, запущені або «В роботі».',
 };

@@ -3761,4 +3761,9 @@ export const dict = {
   'gitView.changes.revertFileConfirm': 'Datei zurücksetzen',
   'diffView.hunk.discardDialogTitle': 'Diesen Abschnitt verwerfen?',
   'diffView.hunk.discardDescription': 'Damit werden diese lokalen Änderungen in {path} verworfen.',
+  'sessions.sidebar.project.actions.archiveAll': 'Alle Sitzungen archivieren',
+  'sessions.sidebar.project.archiveAll.title': 'Sitzungen in {project} archivieren?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} Sitzung wird archiviert. Angeheftete, laufende und „In Arbeit“-Sitzungen bleiben.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} Sitzungen werden archiviert. Angeheftete, laufende und „In Arbeit“-Sitzungen bleiben.',
+  'sessions.sidebar.project.archiveAll.nothing': 'Nichts zu archivieren: Jede Sitzung hier ist angeheftet, läuft oder ist „In Arbeit“.',
 };

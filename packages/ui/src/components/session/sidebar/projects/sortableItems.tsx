@@ -121,6 +121,8 @@ export interface SortableProjectItemProps extends ProjectIdentityProps {
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
   onRenameStart: () => void;
+  /** Archives the project's sessions except pinned, running and In work ones. */
+  onArchiveAll?: () => void;
   onClose: () => void;
   children?: React.ReactNode;
   showCreateButtons?: boolean;
@@ -153,6 +155,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onManageWorktrees,
   onManageSpaces,
   onRenameStart,
+  onArchiveAll,
   onClose,
   children,
   showCreateButtons = true,
@@ -211,6 +214,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Icon name="pencil-ai" className="mr-1.5 h-4 w-4" />
         {t('sessions.sidebar.project.actions.edit')}
       </Item>
+      {onArchiveAll && (
+        <Item onClick={onArchiveAll}>
+          <Icon name="archive" className="mr-1.5 h-4 w-4" />
+          {t('sessions.sidebar.project.actions.archiveAll')}
+        </Item>
+      )}
       <Item onClick={onClose} className="text-destructive focus:text-destructive">
         <Icon name="close" className="mr-1.5 h-4 w-4" />
         {t('sessions.sidebar.project.actions.closeProject')}

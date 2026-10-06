@@ -3763,4 +3763,9 @@ export const dict = {
   'gitView.changes.revertFileConfirm': 'Bestand terugdraaien',
   'diffView.hunk.discardDialogTitle': 'Dit blok verwijderen?',
   'diffView.hunk.discardDescription': 'Hiermee worden deze lokale wijzigingen in {path} verwijderd.',
+  'sessions.sidebar.project.actions.archiveAll': 'Alle sessies archiveren',
+  'sessions.sidebar.project.archiveAll.title': 'Sessies in {project} archiveren?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} sessie gaat naar het archief. Vastgezette, lopende en \'In bewerking\'-sessies blijven.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessies gaan naar het archief. Vastgezette, lopende en \'In bewerking\'-sessies blijven.',
+  'sessions.sidebar.project.archiveAll.nothing': 'Niets te archiveren: elke sessie hier is vastgezet, loopt of staat \'In bewerking\'.',
 } as const;

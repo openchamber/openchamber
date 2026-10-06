@@ -3763,4 +3763,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': '元に戻す',
   'diffView.hunk.discardDialogTitle': 'このハンクを破棄しますか？',
   'diffView.hunk.discardDescription': '{path} のこのローカルの変更が破棄されます。',
+  'sessions.sidebar.project.actions.archiveAll': 'すべてのセッションをアーカイブ',
+  'sessions.sidebar.project.archiveAll.title': '{project} のセッションをアーカイブしますか？',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 件のセッションがアーカイブされます。ピン留め、実行中、作業中のセッションは残ります。',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 件のセッションがアーカイブされます。ピン留め、実行中、作業中のセッションは残ります。',
+  'sessions.sidebar.project.archiveAll.nothing': 'アーカイブするものはありません。すべてのセッションがピン留め、実行中、または作業中です。',
 };

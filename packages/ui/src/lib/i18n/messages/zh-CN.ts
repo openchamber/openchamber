@@ -3764,4 +3764,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': '还原文件',
   'diffView.hunk.discardDialogTitle': '丢弃此代码块？',
   'diffView.hunk.discardDescription': '这将丢弃 {path} 中的这些本地更改。',
+  'sessions.sidebar.project.actions.archiveAll': '归档所有会话',
+  'sessions.sidebar.project.archiveAll.title': '归档 {project} 中的会话？',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 个会话将被归档。已置顶、正在运行和进行中的会话会保留。',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 个会话将被归档。已置顶、正在运行和进行中的会话会保留。',
+  'sessions.sidebar.project.archiveAll.nothing': '没有可归档的会话：这里的每个会话都已置顶、正在运行或进行中。',
 };

@@ -3763,4 +3763,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': '還原檔案',
   'diffView.hunk.discardDialogTitle': '捨棄此區塊？',
   'diffView.hunk.discardDescription': '這將捨棄 {path} 中的這些本機變更。',
+  'sessions.sidebar.project.actions.archiveAll': '封存所有工作階段',
+  'sessions.sidebar.project.archiveAll.title': '封存 {project} 中的工作階段？',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 個工作階段將被封存。已釘選、執行中與進行中的工作階段會保留。',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 個工作階段將被封存。已釘選、執行中與進行中的工作階段會保留。',
+  'sessions.sidebar.project.archiveAll.nothing': '沒有可封存的工作階段：這裡的每個工作階段都已釘選、執行中或進行中。',
 };

@@ -3763,4 +3763,9 @@ export const dict: Record<I18nKey, string> = {
   'gitView.changes.revertFileConfirm': '파일 되돌리기',
   'diffView.hunk.discardDialogTitle': '이 변경 블록을 버릴까요?',
   'diffView.hunk.discardDescription': '{path}의 이 로컬 변경 사항이 삭제됩니다.',
+  'sessions.sidebar.project.actions.archiveAll': '모든 세션 보관',
+  'sessions.sidebar.project.archiveAll.title': '{project}의 세션을 보관할까요?',
+  'sessions.sidebar.project.archiveAll.descriptionSingle': '세션 {count}개가 보관됩니다. 고정된 세션, 실행 중인 세션, 작업 중인 세션은 남습니다.',
+  'sessions.sidebar.project.archiveAll.descriptionPlural': '세션 {count}개가 보관됩니다. 고정된 세션, 실행 중인 세션, 작업 중인 세션은 남습니다.',
+  'sessions.sidebar.project.archiveAll.nothing': '보관할 세션이 없습니다. 모든 세션이 고정되었거나 실행 중이거나 작업 중입니다.',
 };
