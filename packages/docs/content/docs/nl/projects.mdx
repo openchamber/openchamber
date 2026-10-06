@@ -27,6 +27,19 @@ Open **Instellingen → Projecten** om een eigen naam, kleur of pictogram in te 
 
 > In VS Code gebruikt OpenChamber altijd de geopende map als enige project. U hoeft daar dus geen projecten toe te voegen of ertussen te wisselen. De instellingenpagina Projecten is er verborgen.
 
+## Projectomgeving
+
+Als de tools van een project uit direnv, devenv of een Nix-shell komen, vinden Git-hooks, de terminal en [projectacties](/nl/project-actions/) ze niet vanzelf. Open **Instellingen → Projecten**, kies het project en ga naar **Omgeving**. Daar kunt u:
+
+- variabelen toevoegen die alleen dit project nodig heeft
+- of een **omgevingscommando** instellen dat ze afdrukt, bijvoorbeeld `direnv export json` of `devenv print-dev-env --json`
+
+Het commando draait in de projectmap, en voor een worktree in de eigen map van die worktree. Het draait om de paar minuten opnieuw, en **Opnieuw uitvoeren** draait het meteen. Onder het veld ziet u hoeveel variabelen de laatste run heeft toegevoegd, of waarom die mislukte. Een mislukte run voegt niets toe, en Git en de terminal blijven gewoon werken.
+
+Deze variabelen gaan naar Git, de terminal en projectacties, bovenop die in **Instellingen → Algemeen → Omgevingsvariabelen** (zie [Omgevingsvariabelen](/nl/environment/#variabelen-voor-opencode-git-en-de-terminal)). OpenCode bedient alle projecten vanuit één proces en krijgt dus geen projectvariabelen: zet wat de agent nodig heeft in de algemene lijst.
+
+Alleen u stelt het commando in. Het wordt niet uit de repository gelezen, dus een gekloonde repository kan OpenChamber niets laten uitvoeren.
+
 ## Zie ook
 
 - [Chats](/nl/chats/) voor snelle vragen buiten een project

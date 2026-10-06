@@ -27,6 +27,19 @@ Abra **Settings → Projects** para dar a um projeto um nome, cor ou ícone pers
 
 > No VS Code, o OpenChamber sempre usa a pasta que você tem aberta como o único projeto, então não há nada para adicionar ou trocar. A página de configurações de Projects fica oculta lá.
 
+## Ambiente do projeto
+
+Quando as ferramentas de um projeto vêm do direnv, do devenv ou de um shell Nix, os hooks do Git, o terminal e as [ações de projeto](/pt-br/project-actions/) não as encontram sozinhos. Abra **Configurações → Projetos**, escolha o projeto e, em **Ambiente**:
+
+- adicione variáveis de que só esse projeto precisa
+- ou defina um **comando de ambiente** que as imprima, por exemplo `direnv export json` ou `devenv print-dev-env --json`
+
+O comando roda na pasta do projeto e, para um worktree, na pasta do próprio worktree. Ele roda de novo a cada poucos minutos, e **Rodar de novo** o executa na hora. Embaixo do campo você vê quantas variáveis a última execução adicionou, ou por que ela falhou. Uma execução que falha não adiciona nada, e o Git e o terminal continuam funcionando sem ela.
+
+Essas variáveis vão para o Git, o terminal e as ações de projeto, somadas às de **Configurações → Geral → Variáveis de ambiente** (veja [Variáveis de ambiente](/pt-br/environment/#variáveis-para-o-opencode-o-git-e-o-terminal)). O OpenCode atende todos os projetos a partir de um único processo, então ele não recebe variáveis de projeto: coloque o que o agente precisa na lista geral.
+
+O comando é só seu. Ele não é lido do repositório, então um repositório clonado não consegue fazer o OpenChamber rodar nada.
+
 ## Relacionado
 
 - [Conversas](/pt-br/chats/) — sessões sem projeto, para perguntas rápidas

@@ -7,6 +7,19 @@ description: Environment değişkenleriyle OpenChamber ve OpenCode entegrasyonun
 
 OpenChamber bu environment değişkenlerini başlangıçta okur. Başlangıç servisleri için `openchamber startup enable` varsayılan olarak mevcut environment'ı anlık görüntü olarak kaydeder. Servisin kullanmasını istediğiniz değişkenleri değiştirdikten sonra bunu yeniden çalıştırın.
 
+## OpenCode, Git ve terminal için değişkenler
+
+OpenCode'a, Git'e, terminale ve [proje eylemlerine](/tr/project-actions/) API token'ı ya da veritabanı adresi gibi kendi değişkenlerinizi vermek için, bunları OpenChamber başlamadan önce export etmek yerine **Ayarlar → Genel → Ortam değişkenleri** bölümüne ekleyin. Değerler OpenChamber'ı çalıştıran makinede, veri dizinindeki `environment.json` dosyasında kalır ve onları yalnızca sizin kullanıcınız okuyabilir. Ayarlar bir değeri bir daha asla göstermez: değeri değiştirebilir ya da silebilirsiniz ama geri okuyamazsınız.
+
+- OpenCode bunları başlarken alır, bu yüzden bir değişiklikten sonra onu yeniden başlatın. Ayarlar bunun için bir düğme sunar.
+- `opencode service set env` ile ayarladığınız değişkenler de OpenCode'a ulaşır. Ayarlar'dakiler önceliklidir.
+- Git, terminal ve proje eylemleri bunları bir sonraki çalıştırmada alır.
+- OpenChamber'ın OpenCode'un kendisi için ayarladığı değişkenler, örneğin parolası ve yapılandırması, sizinkilerden önceliklidir.
+
+Bir proje kendi değişkenlerini ya da bunları yazdıran `direnv export json` gibi bir komutu **Ayarlar → Projeler** bölümünde ekleyebilir. [Projeler](/tr/projects/#proje-ortamı) sayfasına bakın.
+
+Bu değişkenler kendi başlattığınız bir OpenCode sunucusuna ulaşmaz ve VS Code eklentisinde böyle bir ayar yoktur. Aşağıdaki her şeyi OpenChamber başlangıçta kendisi okur.
+
 ## OpenChamber sunucusu
 
 ### `OPENCHAMBER_HOST`

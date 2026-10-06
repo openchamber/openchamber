@@ -667,6 +667,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'general.environment-variables',
+    page: 'general',
+    titleKey: 'settings.environment.user.title',
+    descriptionKey: 'settings.environment.user.info',
+    keywords: ['environment', 'env', 'variables', 'api key', 'token', 'secret', 'opencode', 'terminal', 'git'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'sessions.opencode-update-notifications',
     page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',
@@ -880,6 +888,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.shared.replaceMode',
     keywords: ['worktree', 'setup commands', 'shared', 'team', 'only mine'],
+  },
+  {
+    id: 'projects.environment',
+    page: 'projects',
+    titleKey: 'settings.projects.environment.title',
+    descriptionKey: 'settings.projects.environment.info',
+    keywords: ['environment', 'env', 'variables', 'direnv', 'devenv', 'nix', 'envrc', 'path', 'terminal', 'git hooks'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'projects.shared',

@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -131,6 +132,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ja,
   ...webSearchI18n.ja,
   ...isolatedSpacesI18n.ja,
+  ...environmentI18n.ja,
   ...providersI18n.ja,
   ...mcpGridI18n.ja,
   ...pluginsGridI18n.ja,
@@ -3771,5 +3773,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': 'ポート {port} をこの一覧から隠す',
   'contextPanel.browser.devServers.showHiddenSingle': '隠したポート {count} 件を表示',
   'contextPanel.browser.devServers.showHiddenPlural': '隠したポート {count} 件を表示',
-};
   'sidebarFilesTree.menu.openInDefaultApp': '既定のアプリで開く',
+};

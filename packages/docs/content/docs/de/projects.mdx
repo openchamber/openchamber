@@ -27,6 +27,19 @@ Wähle ein Projekt in der Seitenleiste aus, um es aktiv zu machen. Alles — Ses
 
 > In VS Code verwendet OpenChamber immer den Ordner, den du geöffnet hast, als einziges Projekt. Es gibt dort also nichts hinzuzufügen oder umzuschalten. Die Seite mit den Projekteinstellungen ist dort ausgeblendet.
 
+## Projektumgebung
+
+Wenn die Werkzeuge eines Projekts aus direnv, devenv oder einer Nix-Shell kommen, finden Git-Hooks, das Terminal und [Projektaktionen](/de/project-actions/) sie nicht von selbst. Öffne **Einstellungen → Projekte** und wähle das Projekt aus. Unter **Umgebung** kannst du:
+
+- Variablen hinzufügen, die nur dieses Projekt braucht
+- oder einen **Umgebungsbefehl** festlegen, der sie ausgibt, zum Beispiel `direnv export json` oder `devenv print-dev-env --json`
+
+Der Befehl läuft im Projektordner und für einen Worktree in dessen eigenem Ordner. Er läuft alle paar Minuten erneut, und **Erneut ausführen** startet ihn sofort. Unter dem Feld siehst du, wie viele Variablen der letzte Lauf hinzugefügt hat oder warum er fehlgeschlagen ist. Ein fehlgeschlagener Lauf fügt nichts hinzu, und Git und das Terminal arbeiten ohne ihn weiter.
+
+Diese Variablen gehen an Git, das Terminal und Projektaktionen, zusätzlich zu denen unter **Einstellungen → Allgemein → Umgebungsvariablen** (siehe [Umgebungsvariablen](/de/environment/#variablen-für-opencode-git-und-das-terminal)). OpenCode bedient alle Projekte aus einem einzigen Prozess und bekommt deshalb keine Projektvariablen: Was der Agent braucht, gehört in die allgemeine Liste.
+
+Den Befehl legst nur du fest. Er wird nicht aus dem Repository gelesen, ein geklontes Repository kann OpenChamber also nichts ausführen lassen.
+
 ## Verwandtes
 
 - [Chats](/de/chats/) — Sitzungen ohne Projekt, für schnelle Fragen

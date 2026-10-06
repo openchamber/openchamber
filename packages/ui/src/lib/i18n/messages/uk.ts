@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -141,6 +142,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.uk,
   ...webSearchI18n.uk,
   ...isolatedSpacesI18n.uk,
+  ...environmentI18n.uk,
   ...providersI18n.uk,
   ...mcpGridI18n.uk,
   ...pluginsGridI18n.uk,
@@ -3772,5 +3774,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': 'Сховати порт {port} з цього списку',
   'contextPanel.browser.devServers.showHiddenSingle': 'Показати приховані порти: {count}',
   'contextPanel.browser.devServers.showHiddenPlural': 'Показати приховані порти: {count}',
-};
   'sidebarFilesTree.menu.openInDefaultApp': 'Відкрити в програмі за замовчуванням',
+};

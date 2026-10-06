@@ -21,6 +21,7 @@ that writes it:
 | `setup-worktree`, `setup-worktree-wait`, `projectActions`, `projectActionsPrimaryId`, `draftStarters`, `projectPath` | `project-setup.js` via `readProjectSetup` / `updateProjectSetup` on the same runtime | `GET/PUT /api/projects/:projectId/config` (`routes.js`) |
 
 Notes, todos, and plans moved out of this file to `packages/web/server/lib/project-context`.
+A project's environment variables and environment command are not in this file either: values can be secrets, so they live in `environment.json` (mode 0600, `packages/web/server/lib/environment`).
 
 A second, optional source is the team's shared file, `<repo>/.openchamber/project.json`
 (`version: 1`; `setupWorktree`, `setupWorktreeWait`, `projectActions`, `draftStarters`,

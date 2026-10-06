@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -131,6 +132,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['zh-TW'],
   ...webSearchI18n['zh-TW'],
   ...isolatedSpacesI18n['zh-TW'],
+  ...environmentI18n['zh-TW'],
   ...providersI18n['zh-TW'],
   ...mcpGridI18n['zh-TW'],
   ...pluginsGridI18n['zh-TW'],
@@ -3771,5 +3773,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': '從此清單隱藏連接埠 {port}',
   'contextPanel.browser.devServers.showHiddenSingle': '顯示 {count} 個已隱藏連接埠',
   'contextPanel.browser.devServers.showHiddenPlural': '顯示 {count} 個已隱藏連接埠',
-};
   'sidebarFilesTree.menu.openInDefaultApp': '以預設應用程式開啟',
+};

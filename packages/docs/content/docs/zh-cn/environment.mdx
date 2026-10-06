@@ -7,6 +7,19 @@ description: 使用环境变量配置 OpenChamber 和 OpenCode 集成。
 
 OpenChamber 会在启动时读取这些变量。对于开机启动服务，`openchamber startup enable` 默认会保存当前环境的 snapshot，所以如果要让服务使用新的变量，请重新运行它。
 
+## 供 OpenCode、Git 和终端使用的变量
+
+要给 OpenCode、Git、终端和[项目操作](/zh-cn/project-actions/)提供你自己的变量，比如 API 令牌或数据库地址，请在 **设置 → 通用 → 环境变量** 中添加，而不是在启动 OpenChamber 之前导出。这些值只保存在运行 OpenChamber 的机器上，位于数据目录中的 `environment.json`，只有你的用户能读取。设置不会再显示已保存的值：你可以替换或删除它，但无法读回。
+
+- OpenCode 在启动时读取这些变量，所以修改后需要重启它。设置中提供了对应的按钮。
+- 用 `opencode service set env` 设置的变量也会传给 OpenCode。两者冲突时，以设置中的为准。
+- Git、终端和项目操作会在下一次运行时拿到这些变量。
+- OpenChamber 为 OpenCode 自身设置的变量（例如它的密码和配置）优先于你的变量。
+
+项目可以在 **设置 → 项目** 中添加自己的变量，或者添加一条输出这些变量的命令，例如 `direnv export json`。参阅[项目](/zh-cn/projects/#项目环境)。
+
+这些变量不会传给你自己启动的 OpenCode 服务器，VS Code 扩展也没有这项设置。下面的所有变量都由 OpenChamber 本身在启动时读取。
+
 ## OpenChamber 服务器
 
 ### `OPENCHAMBER_HOST`

@@ -44,6 +44,9 @@ import { z } from 'zod';
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
  * - Update checks still run but never report usage (`package-manager.js`).
+ * - Environment variables from Settings and `opencode service set env` do
+ *   not reach the managed OpenCode: one could carry a provider key
+ *   (`environment/runtime.js`). Git, the terminal and exec still get them.
  * - The draw.io diagram editor, diagrams.net's own page in a frame, is not
  *   loaded; a .drawio file opens as its XML (`packages/ui` FilesView). The
  *   crossing happens in the browser, so the UI is where it is held back.

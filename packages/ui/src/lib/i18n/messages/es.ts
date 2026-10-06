@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -141,6 +142,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.es,
   ...webSearchI18n.es,
   ...isolatedSpacesI18n.es,
+  ...environmentI18n.es,
   ...providersI18n.es,
   ...mcpGridI18n.es,
   ...pluginsGridI18n.es,
@@ -3772,5 +3774,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': 'Ocultar el puerto {port} de esta lista',
   'contextPanel.browser.devServers.showHiddenSingle': 'Mostrar {count} puerto oculto',
   'contextPanel.browser.devServers.showHiddenPlural': 'Mostrar {count} puertos ocultos',
-};
   'sidebarFilesTree.menu.openInDefaultApp': 'Abrir con la app predeterminada',
+};

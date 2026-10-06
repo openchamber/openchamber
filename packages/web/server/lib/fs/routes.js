@@ -507,14 +507,11 @@ const resolveReadPathFromContext = async ({ req, targetPath, scope, resolveProje
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
+const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, execEnv, commandTimeoutMs }) => {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-
-    const envPath = buildAugmentedPath();
-    const execEnv = { ...process.env, PATH: envPath };
 
     const child = spawn(shell, [shellFlag, command], {
       cwd: resolvedCwd,
@@ -591,6 +588,7 @@ export const registerFsRoutes = (app, dependencies) => {
     openchamberUserConfigRoot,
     managedChatsRoot,
     cloneRepository,
+    environmentRuntime = null,
   } = dependencies;
   // Chat worktrees may live outside every project workspace; both managed
   // roots stay valid filesystem targets.
@@ -706,15 +704,19 @@ export const registerFsRoutes = (app, dependencies) => {
       }
     }
 
-    const runPromise = runCommandInDirectory({
+    const runPromise = (async () => runCommandInDirectory({
       shell,
       shellFlag,
       command,
       resolvedCwd,
       spawn,
-      buildAugmentedPath,
+      // The user's and the project's variables (lib/environment) on top of
+      // the terminal's PATH.
+      execEnv: environmentRuntime
+        ? await environmentRuntime.applyToDirectory(resolvedCwd, { ...process.env, PATH: buildAugmentedPath() })
+        : { ...process.env, PATH: buildAugmentedPath() },
       commandTimeoutMs,
-    }).then((result) => {
+    }))().then((result) => {
       // Only cache successful results — failures may be transient.
       if (cacheKey && result && result.success) {
         setGitReadCacheEntry(cacheKey, result);

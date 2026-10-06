@@ -11,7 +11,8 @@ import crypto from 'node:crypto';
 import { fingerprintRemoteUrl } from '../source-control/url-redaction.js';
 import { readWorktreeDirectorySetting } from '../opencode/shared.js';
 import { normalizeGitOutputPath } from './output-path.js';
-import { unsupportedRepositoryRootReason } from './repository-root.js';
+import { overlayEnvironment } from '../environment/variables.js';
+import { primaryWorktreeRootFromGitDir, unsupportedRepositoryRootReason } from './repository-root.js';
 import { randomUUID } from 'crypto';
 
 const fsp = fs.promises;
@@ -373,10 +374,49 @@ const resolveSshAuthSock = async () => {
   return null;
 };
 
-const buildGitEnv = async () => {
+// Variables the user gave OpenChamber for the directory's project
+// (lib/environment). Unset in tests and tools that use this module alone.
+let gitEnvironment = null;
+
+export const configureGitEnvironment = (runtime) => {
+  gitEnvironment = runtime;
+};
+
+// Names simple-git refuses in a command's environment unless the matching
+// unsafe option is on (EDITOR, PAGER, GIT_SSH_COMMAND, GIT_ASKPASS, ...; see
+// toSimpleGitEnv). One of them from a project environment would make every
+// Git command fail, so the overlay leaves them out for Git only.
+const SIMPLE_GIT_REFUSED_ENV_NAMES = new Set([
+  'editor', 'git_askpass', 'git_config', 'git_config_global', 'git_config_system', 'git_config_count',
+  'git_editor', 'git_exec_path', 'git_external_diff', 'git_pager', 'git_proxy_command', 'git_template_dir',
+  'git_sequence_editor', 'git_ssh', 'git_ssh_command', 'pager', 'prefix', 'ssh_askpass',
+]);
+const isRefusedBySimpleGit = (name) => {
+  const lower = name.toLowerCase();
+  return SIMPLE_GIT_REFUSED_ENV_NAMES.has(lower) || lower.startsWith('git_config_key_') || lower.startsWith('git_config_value_');
+};
+// OpenChamber names the repository each command works on; a project variable
+// must not quietly point Git at another one.
+const REPOSITORY_LOCATION_ENV_NAMES = new Set([
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR', 'GIT_NAMESPACE',
+]);
+const isKeptOutOfGitOverlay = (name) => isRefusedBySimpleGit(name) || REPOSITORY_LOCATION_ENV_NAMES.has(name.toUpperCase());
+
+const directoryEnvironmentForGit = async (directory) => {
+  if (!gitEnvironment || !directory) return null;
+  const variables = await gitEnvironment.forDirectory(normalizeDirectoryPath(directory));
+  if (!variables) return null;
+  return Object.fromEntries(Object.entries(variables).filter(([name]) => !isKeptOutOfGitOverlay(name)));
+};
+
+const buildGitEnv = async (directory) => {
   // Git runs the user's hooks, so they must not see what the AppImage launcher
   // added to LD_LIBRARY_PATH and friends (#4177).
-  const env = stripAppImageLauncherEnv({ ...process.env });
+  const inherited = stripAppImageLauncherEnv({ ...process.env });
+  // Hooks and credential helpers run with the project's tools on PATH.
+  const variables = await directoryEnvironmentForGit(directory);
+  const env = variables ? overlayEnvironment(inherited, variables) : inherited;
   if (process.platform === 'win32') {
     // Node already passes an argument array. MSYS globbing corrupts Git refs
     // such as HEAD^{commit} and branch@{upstream} before Git sees them.
@@ -391,7 +431,7 @@ const buildGitEnv = async () => {
   // The server has no terminal a user could answer. Without this, Git asks
   // for a username or password on its (hidden, on Windows) console and waits
   // forever; credential helpers and GUI prompts still run before this point.
-  if (env.GIT_TERMINAL_PROMPT === undefined) {
+  if (env.GIT_TERMINAL_PROMPT === undefined || variables?.GIT_TERMINAL_PROMPT !== undefined) {
     env.GIT_TERMINAL_PROMPT = '0';
   }
   return env;
@@ -422,7 +462,7 @@ const toSimpleGitEnv = (env) => {
 // broker, so no caller needs simple-git's unsafe SSH-command or
 // credential-helper escapes any more.
 const createGit = async (directory, { stallTimeoutMs = 0 } = {}) => {
-  const env = await buildGitEnv();
+  const env = await buildGitEnv(directory);
   const spawnOptions = { windowsHide: true };
   // simple-git's block timeout kills the process once it has produced no
   // output for this long. Opt-in per caller: a background read must never hold
@@ -1107,7 +1147,7 @@ const runGitCommand = async (cwd, args, { env: envOverride, timeoutMs = 0 } = {}
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
-      env: envOverride || await buildGitEnv(),
+      env: envOverride || await buildGitEnv(cwd),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
       // Only short probes pass a timeout; commands that legitimately run long
@@ -1212,7 +1252,7 @@ const WORKTREE_POPULATE_CONFIG_ARGS = [
 
 const buildWorktreePopulateCommand = async (directory) => {
   const env = {
-    ...(await buildGitEnv()),
+    ...(await buildGitEnv(directory)),
     GIT_ALLOW_PROTOCOL: '',
     GIT_LFS_SKIP_SMUDGE: '1',
     GIT_NO_LAZY_FETCH: '1',
@@ -1368,19 +1408,7 @@ export const inspectContributorCheckoutActions = async (directory, provenance) =
   return Object.freeze({ state: 'awaiting-trust', actions: Object.freeze(actions), digest });
 };
 
-const derivePrimaryWorktreeRootFromGitDir = (gitDir) => {
-  const normalized = normalizePath(gitDir);
-  if (!normalized) return null;
-  if (normalized.endsWith('/.git')) {
-    return normalized.slice(0, -'/.git'.length) || null;
-  }
-  const marker = '/.git/worktrees/';
-  const markerIndex = normalized.indexOf(marker);
-  if (markerIndex > 0) {
-    return normalized.slice(0, markerIndex) || null;
-  }
-  return null;
-};
+const derivePrimaryWorktreeRootFromGitDir = (gitDir) => primaryWorktreeRootFromGitDir(normalizePath(gitDir));
 
 export async function resolvePrimaryWorktreeRoot(directory) {
   const result = await runGitCommand(directory, ['rev-parse', '--absolute-git-dir', '--git-common-dir']);
@@ -2036,7 +2064,7 @@ const runWorktreeStartCommand = async (directory, command) => {
   if (process.platform === 'win32') {
     const result = await execFileAsync('cmd', ['/c', text], {
       cwd: directory,
-      env: await buildGitEnv(),
+      env: await buildGitEnv(directory),
       windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
     }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
@@ -2050,7 +2078,7 @@ const runWorktreeStartCommand = async (directory, command) => {
 
   const result = await execFileAsync('bash', ['-lc', text], {
     cwd: directory,
-    env: await buildGitEnv(),
+    env: await buildGitEnv(directory),
     maxBuffer: 20 * 1024 * 1024,
   }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
     success: false,
@@ -2709,7 +2737,7 @@ const killProcessTree = (child) => {
 // huge directory is never listed in full. `paths` is complete when
 // `truncated` is false.
 const listUntrackedFilesBounded = async (repoRoot, dirPath, limit) => {
-  const env = await buildGitEnv();
+  const env = await buildGitEnv(repoRoot);
   return new Promise((resolve, reject) => {
     const child = spawn(getGitBinary(), ['ls-files', '--others', '--exclude-standard', '-z', '--', dirPath], {
       cwd: repoRoot,
@@ -5902,7 +5930,7 @@ export async function snapshotWorktree(directory, input = {}) {
   try {
     const run = async (args, message, env = indexEnv) => {
       // `env` replaces the whole environment, so start from the Git one.
-      const result = await runGitCommand(worktreeDirectory, args, { env: { ...(await buildGitEnv()), ...env } });
+      const result = await runGitCommand(worktreeDirectory, args, { env: { ...(await buildGitEnv(worktreeDirectory)), ...env } });
       if (!result.success) {
         throw new Error(result.message || message);
       }

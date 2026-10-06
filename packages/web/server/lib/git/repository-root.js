@@ -20,6 +20,24 @@ export const unsupportedRepositoryRootReason = (repoRoot, home = os.homedir()) =
   return null;
 };
 
+/**
+ * The primary checkout of a repository from a git dir written with forward
+ * slashes: `<root>/.git` for the checkout itself, `<root>/.git/worktrees/<name>`
+ * for a linked worktree. Null for any other layout (a bare repository, a
+ * separate git dir).
+ */
+export const primaryWorktreeRootFromGitDir = (gitDir) => {
+  if (!gitDir) return null;
+  if (gitDir.endsWith('/.git')) {
+    return gitDir.slice(0, -'/.git'.length) || null;
+  }
+  const markerIndex = gitDir.indexOf('/.git/worktrees/');
+  if (markerIndex > 0) {
+    return gitDir.slice(0, markerIndex) || null;
+  }
+  return null;
+};
+
 // OpenCode decodes the header once and falls back to the raw value; a value
 // the browser had to re-encode carries the `uri` hint and one more layer.
 const decodeOnce = (value) => {

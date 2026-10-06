@@ -10,6 +10,7 @@ import { registerGitRoutes } from './routes.js';
 import { normalizeGitOutputPath } from './output-path.js';
 
 import {
+  configureGitEnvironment,
   getCurrentIdentity,
   checkoutBranch,
   checkoutCommit,
@@ -5215,6 +5216,32 @@ describe('git environment through simple-git', () => {
       await commit(repo, 'init', { addAll: true });
       expect(readHookLog()).toBe('0|/opt/x');
     });
+  });
+
+  it('gives hooks the directory variables from Settings, except the ones simple-git refuses', async () => {
+    if (!canRunGit() || process.platform === 'win32') return;
+    const forDirectory = vi.fn(async () => ({
+      PROJECT_TOOL: 'from-project',
+      PATH: '/opt/project-tools/bin',
+      EDITOR: 'project-editor',
+      GIT_TERMINAL_PROMPT: '1',
+      GIT_DIR: '/elsewhere/.git',
+    }));
+    configureGitEnvironment({ forDirectory });
+    try {
+      await withProcessEnv({ EDITOR: undefined, GIT_TERMINAL_PROMPT: undefined }, async () => {
+        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'PATH']);
+        await commit(repo, 'init', { addAll: true });
+        const [projectTool, editor, prompt, hookPath] = readHookLog().split('|');
+        // The commit landed in this repository, not in GIT_DIR's.
+        expect((await getLog(repo, { maxCount: 1 })).all).toHaveLength(1);
+        expect([projectTool, editor, prompt]).toEqual(['from-project', '<unset>', '0']);
+        expect(hookPath.split(':')).toContain('/opt/project-tools/bin');
+        expect(forDirectory).toHaveBeenCalledWith(repo);
+      });
+    } finally {
+      configureGitEnvironment(null);
+    }
   });
 
   it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs', async () => {

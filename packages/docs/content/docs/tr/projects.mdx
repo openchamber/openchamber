@@ -27,6 +27,19 @@ Etkin yapmak için kenar çubuğundan bir proje seçin. Oturumlar, git, notlar g
 
 > VS Code içinde OpenChamber her zaman açık olan klasörü tek proje olarak kullanır. Bu yüzden ekleyecek ya da geçiş yapacak bir şey yoktur. Projects ayar sayfası orada gizlidir.
 
+## Proje ortamı
+
+Bir projenin araçları direnv, devenv ya da bir Nix shell'den geliyorsa Git hook'ları, terminal ve [proje eylemleri](/tr/project-actions/) onları kendi başına bulamaz. **Ayarlar → Projeler** bölümünü açın, projeyi seçin ve **Ortam** altında:
+
+- yalnızca bu projenin ihtiyaç duyduğu değişkenleri ekleyin
+- ya da bunları yazdıran bir **ortam komutu** ayarlayın, örneğin `direnv export json` veya `devenv print-dev-env --json`
+
+Komut proje klasöründe, bir worktree için de o worktree'nin kendi klasöründe çalışır. Birkaç dakikada bir yeniden çalışır; **Yeniden çalıştır** onu hemen çalıştırır. Alanın altında son çalıştırmanın kaç değişken eklediğini ya da neden başarısız olduğunu görürsünüz. Başarısız bir çalıştırma hiçbir şey eklemez; Git ve terminal onsuz çalışmaya devam eder.
+
+Bu değişkenler, **Ayarlar → Genel → Ortam değişkenleri** içindekilere ek olarak Git'e, terminale ve proje eylemlerine gider ([Ortam değişkenleri](/tr/environment/#opencode-git-ve-terminal-için-değişkenler) sayfasına bakın). OpenCode tüm projelere tek bir süreçten hizmet verdiği için proje değişkenlerini almaz: aracının ihtiyaç duyduklarını genel listeye koyun.
+
+Komutu yalnızca siz belirlersiniz. Depodan okunmaz, bu yüzden klonlanmış bir depo OpenChamber'a hiçbir şey çalıştıramaz.
+
 ## İlgili
 
 - [Sohbetler](/tr/chats/) — hızlı sorular için projesiz oturumlar

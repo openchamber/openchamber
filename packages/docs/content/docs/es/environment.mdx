@@ -7,6 +7,19 @@ description: Configura la integración de OpenChamber y OpenCode con variables d
 
 OpenChamber lee estas variables al arrancar. Para servicios de inicio, `openchamber startup enable` guarda por defecto una copia del entorno actual, así que vuelve a ejecutarlo después de cambiar variables que quieras usar en el servicio.
 
+## Variables para OpenCode, Git y la terminal
+
+Para darles a OpenCode, a Git, a la terminal y a las [acciones de proyecto](/es/project-actions/) variables propias, como un token de API o la dirección de una base de datos, añádelas en **Configuración → General → Variables de entorno** en lugar de exportarlas antes de arrancar OpenChamber. Los valores se quedan en la máquina donde se ejecuta OpenChamber, en `environment.json` dentro del directorio de datos, y solo tu usuario puede leerlos. Configuración nunca vuelve a mostrar un valor: puedes sustituirlo o quitarlo, pero no leerlo.
+
+- OpenCode las recibe al arrancar, así que reinícialo después de un cambio. Configuración ofrece el botón para hacerlo.
+- Las variables que defines con `opencode service set env` también llegan a OpenCode. Las de Configuración tienen prioridad.
+- Git, la terminal y las acciones de proyecto las reciben la próxima vez que se ejecutan.
+- Las variables que OpenChamber define para el propio OpenCode, como su contraseña y su configuración, tienen prioridad sobre las tuyas.
+
+Un proyecto puede añadir sus propias variables, o un comando que las imprima como `direnv export json`, en **Configuración → Proyectos**. Consulta [Proyectos](/es/projects/#entorno-del-proyecto).
+
+Las variables no llegan a un servidor de OpenCode que hayas arrancado tú, y la extensión de VS Code no tiene este ajuste. Todo lo que sigue lo lee el propio OpenChamber al arrancar.
+
 ## Servidor OpenChamber
 
 ### `OPENCHAMBER_HOST`

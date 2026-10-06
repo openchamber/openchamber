@@ -27,6 +27,19 @@ Open **Settings → Projects** to give a project a custom name, color, or icon. 
 
 > In VS Code, OpenChamber always uses the folder you have open as the only project, so there's nothing to add or switch. The Projects settings page is hidden there.
 
+## Project environment
+
+When a project's tools come from direnv, devenv or a Nix shell, Git hooks, the terminal and [project actions](/project-actions/) don't find them on their own. Open **Settings → Projects**, pick the project, and under **Environment**:
+
+- add variables only this project needs
+- or set an **environment command** that prints them, for example `direnv export json` or `devenv print-dev-env --json`
+
+The command runs in the project folder, and in a worktree's own folder for that worktree. It runs again every few minutes, and **Run again** runs it right away. Under the field you see how many variables the last run added, or why it failed. A failed run adds nothing, and Git and the terminal keep working without it.
+
+These variables go to Git, the terminal and project actions, on top of the ones in **Settings → General → Environment variables** (see [Environment variables](/environment/#variables-for-opencode-git-and-the-terminal)). OpenCode serves every project from one process, so it doesn't get project variables: put what the agent needs in the general list.
+
+The command is yours only. It isn't read from the repository, so a cloned repository can't make OpenChamber run anything.
+
 ## Related
 
 - [Chats](/chats/) — sessions without a project, for quick questions

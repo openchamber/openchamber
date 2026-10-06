@@ -94,6 +94,7 @@ export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
+  environmentRuntime = null,
 }) {
   const sessions = new Map();
   const pendingSessionCreates = new Map();
@@ -122,10 +123,14 @@ export function createTerminalRuntime({
   const spawnPty = async ({ cwd, cols, rows, themeMode, shell, loginShell, mode, command }) => {
     const provider = await getPtyProvider();
     const resolvedShell = await shellResolver.resolve(shell);
+    // The user's and the project's variables go under the terminal's own TERM
+    // settings and the host-private removals below.
+    const hostEnv = { ...process.env, PATH: buildAugmentedPath() };
+    const inheritedEnv = environmentRuntime ? await environmentRuntime.applyToDirectory(cwd, hostEnv) : hostEnv;
     let lastError = null;
     for (const executable of resolvedShell.executables) {
       try {
-        const env = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
+        const env = { ...inheritedEnv, TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // The daemon's IPC fd is closed inside the PTY; an inherited NODE_CHANNEL_FD
         // (even an empty one) makes Node CLIs warn about an unparsable IPC channel.
         delete env.NODE_CHANNEL_FD;

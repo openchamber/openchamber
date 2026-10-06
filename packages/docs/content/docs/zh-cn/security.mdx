@@ -163,6 +163,7 @@ environment:
 - [Private Relay](/zh-cn/private-relay/) 只能通过你自己的中继使用。运行一个[自托管中继](https://github.com/openchamber/openchamber-relay)，并用策略文件中的 `relayUrl` 或 `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws` 让 OpenChamber 指向它。共享中继同样无法读取你的流量，因为它是端到端加密的，但你自己的中继能把连接元数据和进入这台机器的通道留在你的网络内。没有你自己的中继，就完全无法配对设备。
 - OpenChamber 只在它所运行的机器上监听。允许本地网络中其他设备打开应用的桌面设置会关闭，服务器也会拒绝在网络地址上启动，无论是通过 CLI（`--host`、`--lan`）还是通过环境。如果应用运行期间出现了策略文件，来自其他机器的连接会被断开，直到下次启动。要允许网络访问，请在策略文件中设置 `"allowNetworkAccess": true`，或在由环境开启企业模式的情况下设置 `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1`。请注意连接是未加密的 HTTP，在共享网络中任何人都能读取；其他人要访问的服务器，请放在[你自己的 HTTPS](/zh-cn/reverse-proxy/) 后面。
 - 能把数据发送到机器之外的[扩展](/zh-cn/extensions/)（与外部 API 通信、从外部地址加载内容或运行后台服务的扩展）只能从 `allowedExtensions` 中列出的 Git 仓库安装。不做这些事的扩展照常安装。从其他地方安装的扩展会保持关闭，设置中会说明原因。列表里填写仓库 URL，因为扩展的名字由它自己决定。以 `/` 结尾的条目（如 `https://github.com/acme/`）会允许其下的所有仓库。在开发扩展的人的机器上，`"allowLocalExtensions": true` 还允许从本地文件夹安装。ZIP 无论如何都不能安装。
+- 来自 **设置 → 通用** 和 `opencode service set env` 的环境变量不会传给 OpenCode，因为其中可能带有提供商密钥。Git、终端和项目操作仍然会拿到它们。
 - 在 VS Code 扩展中，连接提供商的功能会关闭，更新检查也不上报使用情况。它本来就没有 Jev、中继、隧道、推送通知或云端语音功能。
 
 小模型任务（会话标题、摘要、提交信息、变更讲解）不需要任何特殊模式。它们始终使用你在设置中选择的小模型、你当前所用提供商的小模型，或你的 OpenCode 配置中的默认模型。它们绝不会退而使用你恰好连接着的其他提供商。

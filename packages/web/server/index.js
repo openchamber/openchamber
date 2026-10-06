@@ -26,7 +26,7 @@ import {
   isUnsafeUnauthenticatedLanAllowed,
   readAdvertisedLanUrl,
 } from './lib/security/bind-host.js';
-import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
+import { isEnterpriseMode, isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR, readEnterprisePolicy } from './lib/enterprise-mode.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -128,7 +128,11 @@ import { createSpaceArchive } from './lib/spaces/space-archive.js';
 import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
 import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
 import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
-import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import { configureGitEnvironment, resolvePrimaryWorktreeRoot } from './lib/git/service.js';
+import { createEnvironmentStore } from './lib/environment/store.js';
+import { createEnvironmentRuntime } from './lib/environment/runtime.js';
+import { readOpenCodeServiceEnv } from './lib/environment/opencode-service-env.js';
+import { OPENCODE_CONFIG_DIR } from './lib/opencode/shared.js';
 import { createWorktreeBootstrapStore } from './lib/git/worktree-bootstrap-storage.js';
 import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
@@ -1263,6 +1267,27 @@ const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args)
 const waitForOpenCodePort = (...args) => serverUtilsRuntime.waitForOpenCodePort(...args);
 const buildAugmentedPath = (...args) => serverUtilsRuntime.buildAugmentedPath(...args);
 const buildManagedOpenCodePath = (...args) => serverUtilsRuntime.buildManagedOpenCodePath(...args);
+
+// Variables from Settings for the processes OpenChamber starts: the managed
+// OpenCode, Git, the terminal and command execution (lib/environment).
+const environmentStore = createEnvironmentStore({
+  filePath: path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'environment.json'),
+});
+const listConfiguredProjects = async () => {
+  const settings = await readSettingsFromDiskMigrated();
+  return sanitizeProjects(settings?.projects || []);
+};
+const environmentRuntime = createEnvironmentRuntime({
+  store: environmentStore,
+  listProjects: listConfiguredProjects,
+  spawn,
+  // The terminal's PATH: a packaged server starts with a minimal one, where
+  // direnv, devenv or nix would not be found.
+  commandBaseEnv: () => ({ ...process.env, PATH: buildAugmentedPath() }),
+  readOpenCodeServiceEnv: () => readOpenCodeServiceEnv(OPENCODE_CONFIG_DIR),
+  isEnterpriseMode: () => isEnterpriseMode(),
+});
+configureGitEnvironment(environmentRuntime);
 const parseSseDataPayload = (...args) => serverUtilsRuntime.parseSseDataPayload(...args);
 const staticRoutesRuntime = createStaticRoutesRuntime({
   fs,
@@ -1462,6 +1487,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     }
   },
   getManagedOpenCodeEnv: async () => (managedConfigRuntime ? managedConfigRuntime.buildManagedChildEnv() : {}),
+  getUserEnvironment: () => environmentRuntime.forOpenCode(),
 });
 
 // Quota lookups, voice keys and routing read provider credentials from the
@@ -2369,6 +2395,9 @@ async function main(options = {}) {
   });
 
   await featureRoutesRuntime.registerRoutes(app, {
+    environmentStore,
+    environmentRuntime,
+    listConfiguredProjects,
     messageSearchRuntime,
     crypto,
     fs,
@@ -2484,6 +2513,7 @@ async function main(options = {}) {
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
+    environmentRuntime,
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,

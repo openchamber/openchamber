@@ -7,6 +7,19 @@ description: 환경 변수로 OpenChamber와 OpenCode 연동을 설정합니다.
 
 OpenChamber는 시작할 때 이 변수들을 읽습니다. 시작 서비스는 `openchamber startup enable` 실행 시 기본적으로 현재 환경의 snapshot을 저장하므로, 서비스에 적용할 변수를 바꾼 뒤에는 다시 실행하세요.
 
+## OpenCode, Git, 터미널용 변수
+
+OpenCode, Git, 터미널, [프로젝트 작업](/ko/project-actions/)에 API 토큰이나 데이터베이스 주소 같은 직접 정한 변수를 넘기려면, OpenChamber를 시작하기 전에 export하는 대신 **설정 → 일반 → 환경 변수**에 추가하세요. 값은 OpenChamber가 실행되는 컴퓨터의 데이터 디렉터리에 있는 `environment.json`에 저장되며, 내 사용자 계정만 읽을 수 있습니다. 설정은 저장된 값을 다시 보여 주지 않습니다. 값을 바꾸거나 지울 수는 있지만 다시 읽을 수는 없습니다.
+
+- OpenCode는 시작할 때 변수를 받으므로, 바꾼 뒤에는 다시 시작하세요. 설정에 그 버튼이 있습니다.
+- `opencode service set env`로 설정한 변수도 OpenCode에 전달됩니다. 겹치면 설정의 값이 우선합니다.
+- Git, 터미널, 프로젝트 작업은 다음에 실행될 때 변수를 받습니다.
+- OpenChamber가 OpenCode 자체를 위해 설정하는 변수(비밀번호, 설정 등)는 내 변수보다 우선합니다.
+
+프로젝트는 **설정 → 프로젝트**에서 자체 변수나, `direnv export json`처럼 변수를 출력하는 명령을 추가할 수 있습니다. [프로젝트](/ko/projects/#프로젝트-환경)를 참고하세요.
+
+이 변수는 직접 시작한 OpenCode 서버에는 전달되지 않으며, VS Code 확장에는 이 설정이 없습니다. 아래 변수는 모두 OpenChamber가 시작할 때 직접 읽습니다.
+
 ## OpenChamber 서버
 
 ### `OPENCHAMBER_HOST`

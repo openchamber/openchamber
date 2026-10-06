@@ -1,6 +1,7 @@
 import React from 'react';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
+import { ProjectEnvironmentSection } from '@/components/sections/projects/ProjectEnvironmentSection';
 import { ProjectIdentityFields } from '@/components/sections/projects/ProjectIdentityFields';
 import { SharedProjectConfigSection } from '@/components/sections/projects/SharedProjectConfigSection';
 import {
@@ -9,6 +10,7 @@ import {
 } from '@/components/sections/projects/useProjectIdentityForm';
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
 import type { ProjectEntry } from '@/lib/api/types';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;
@@ -49,6 +51,8 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
     <div className="space-y-0">
       <ProjectIdentityFields form={form} />
       <ProjectActionsSection projectRef={projectRef} />
+      {/* VS Code runs no OpenChamber server that could apply these. */}
+      {!isVSCodeRuntime() ? <ProjectEnvironmentSection projectRef={projectRef} /> : null}
       {showWorktrees ? <WorktreeSectionContent projectRef={projectRef} /> : null}
       <SharedProjectConfigSection projectRef={projectRef} />
     </div>

@@ -33,6 +33,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
+      environmentRuntime = null,
       setupProxy,
       scheduleOpenCodeApiDetection,
       bootstrapOpenCodeAtStartup,
@@ -76,6 +77,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: terminalHeartbeatIntervalMs,
       TERMINAL_INPUT_WS_REBIND_WINDOW_MS: terminalRebindWindowMs,
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
+      environmentRuntime,
     });
 
     const dictationRuntime = createDictationRuntime({

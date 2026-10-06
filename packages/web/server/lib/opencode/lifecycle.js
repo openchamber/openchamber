@@ -5,6 +5,7 @@ import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
+import { overlayEnvironment } from '../environment/variables.js';
 import { recordStartupPerformance } from './startup-performance.js';
 import { topUpV1Migration } from './v1-migration-topup.js';
 
@@ -137,6 +138,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
     getManagedOpenCodeEnv = async () => ({}),
+    // Variables from Settings and `opencode service set env` (lib/environment).
+    getUserEnvironment = () => ({}),
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
@@ -766,11 +769,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
     }
 
+    // The user's variables go over the inherited environment (a PATH entry
+    // in front of the managed PATH) and under everything OpenChamber itself
+    // sets for OpenCode.
+    const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
     const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
-      ...shellEnv,
-      ...process.env,
+      ...inheritedEnv,
       ...managedOpenCodeEnv,
-      PATH: envPath,
+      PATH: inheritedEnv.PATH,
       // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
       // user's own OPENCODE_PASSWORD would otherwise win and every request
       // we send with openCodePassword would get 401.

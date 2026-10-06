@@ -959,6 +959,35 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('passes the user variables to OpenCode under the variables OpenChamber owns', async () => {
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => {
+        child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n');
+      });
+      return child;
+    });
+    const getUserEnvironment = vi.fn(() => ({
+      DATABASE_URL: 'postgres://db',
+      PATH: '/opt/tools/bin',
+      OPENCODE_PASSWORD: 'user-password',
+      OPENCHAMBER_AGENT_TOOL_TOKEN: 'user-token',
+    }));
+    const getManagedOpenCodeEnv = vi.fn(async () => ({ OPENCHAMBER_AGENT_TOOL_TOKEN: 'ephemeral' }));
+
+    const runtime = createRuntime({ getUserEnvironment, getManagedOpenCodeEnv });
+    const server = await runtime.startOpenCode();
+    const [, , options] = spawnMock.mock.calls[0];
+
+    expect(options.env.DATABASE_URL).toBe('postgres://db');
+    expect(options.env.PATH).toBe('/opt/tools/bin:/home/user/.bun/bin:/usr/local/bin:/usr/bin');
+    expect(options.env.OPENCODE_PASSWORD).toBe('password');
+    expect(options.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
+    expect(runtime.getManagedOpenCodeProcessEnv().DATABASE_URL).toBe('postgres://db');
+
+    await server.close();
+  });
+
   it('adds managed OpenChamber tool environment without allowing it to replace launch invariants', async () => {
     const child = createMockChild();
     spawnMock.mockImplementationOnce(() => {

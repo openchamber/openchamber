@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -131,6 +132,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n.ko,
   ...webSearchI18n.ko,
   ...isolatedSpacesI18n.ko,
+  ...environmentI18n.ko,
   ...providersI18n.ko,
   ...mcpGridI18n.ko,
   ...pluginsGridI18n.ko,
@@ -3771,5 +3773,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': '이 목록에서 포트 {port} 숨기기',
   'contextPanel.browser.devServers.showHiddenSingle': '숨긴 포트 {count}개 표시',
   'contextPanel.browser.devServers.showHiddenPlural': '숨긴 포트 {count}개 표시',
-};
   'sidebarFilesTree.menu.openInDefaultApp': '기본 앱에서 열기',
+};

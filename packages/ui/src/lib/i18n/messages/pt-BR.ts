@@ -11,6 +11,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -141,6 +142,7 @@ export const dict: Record<I18nKey, string> = {
   ...usageStatsI18n['pt-BR'],
   ...webSearchI18n['pt-BR'],
   ...isolatedSpacesI18n['pt-BR'],
+  ...environmentI18n['pt-BR'],
   ...providersI18n['pt-BR'],
   ...mcpGridI18n['pt-BR'],
   ...pluginsGridI18n['pt-BR'],
@@ -3772,5 +3774,5 @@ export const dict: Record<I18nKey, string> = {
   'contextPanel.browser.devServers.hide': 'Ocultar a porta {port} desta lista',
   'contextPanel.browser.devServers.showHiddenSingle': 'Mostrar {count} porta oculta',
   'contextPanel.browser.devServers.showHiddenPlural': 'Mostrar {count} portas ocultas',
-};
   'sidebarFilesTree.menu.openInDefaultApp': 'Abrir no app padrão',
+};

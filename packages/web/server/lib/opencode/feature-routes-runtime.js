@@ -1,4 +1,5 @@
 import { registerFsRoutes } from '../fs/routes.js';
+import { registerEnvironmentRoutes } from '../environment/routes.js';
 import { registerQuotaRoutes } from '../quota/routes.js';
 import { registerSmallModelRoutes } from '../small-model/routes.js';
 import { registerWalkthroughRoutes } from '../walkthrough/routes.js';
@@ -212,6 +213,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getOwnPorts,
       devServerScanner,
       buildAugmentedPath,
+      environmentStore,
+      environmentRuntime,
+      listConfiguredProjects,
       projectConfigRuntime,
       projectContextRuntime,
       agentMemoryRuntime,
@@ -677,7 +681,9 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       openchamberUserConfigRoot,
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,
+      environmentRuntime,
     });
+    registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
   };
 
   return {

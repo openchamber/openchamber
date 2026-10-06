@@ -10,6 +10,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
+import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
@@ -130,6 +131,7 @@ export const dict = {
   ...usageStatsI18n.nl,
   ...webSearchI18n.nl,
   ...isolatedSpacesI18n.nl,
+  ...environmentI18n.nl,
   ...providersI18n.nl,
   ...mcpGridI18n.nl,
   ...pluginsGridI18n.nl,
@@ -3771,5 +3773,5 @@ export const dict = {
   'contextPanel.browser.devServers.hide': 'Poort {port} in deze lijst verbergen',
   'contextPanel.browser.devServers.showHiddenSingle': '{count} verborgen poort tonen',
   'contextPanel.browser.devServers.showHiddenPlural': '{count} verborgen poorten tonen',
-} as const;
   'sidebarFilesTree.menu.openInDefaultApp': 'Openen in standaardapp',
+} as const;
