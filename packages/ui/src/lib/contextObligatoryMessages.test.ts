@@ -17,4 +17,15 @@ describe('context obligatory message metadata', () => {
       openchamber: { goal: { id: 'goal_1' }, context_obligatory_messages: [] },
     });
   });
+
+  test('reads pins in conversation order, not pin order', () => {
+    const late = { id: 'msg_3', createdAt: 30, role: 'assistant' as const };
+    const early = { id: 'msg_1', createdAt: 10, role: 'user' as const };
+    const sameTime = { id: 'msg_2', createdAt: 10, role: 'assistant' as const };
+    let metadata = withContextObligatoryMessage({}, late, true);
+    metadata = withContextObligatoryMessage(metadata, sameTime, true);
+    metadata = withContextObligatoryMessage(metadata, early, true);
+
+    expect(getContextObligatoryMessages({ metadata } as never)).toEqual([early, sameTime, late]);
+  });
 });
