@@ -65,6 +65,8 @@ import { ChatQuoteHighlightLayer } from './message/ChatQuoteHighlightLayer';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
+import { StopIcon } from '@/components/icons/StopIcon';
+import { abortCurrentOperation } from '@/sync/session-actions';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -616,11 +618,25 @@ const HYDRATING_SKELETON_ITEMS: Array<{
     },
 ];
 
-const ReadOnlyPromptBanner: React.FC<{ text: string }> = ({ text }) => (
+// `onStop` is set while a subagent's turn runs: its session takes no
+// prompts, but the user can still stop it from here.
+const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string }> = ({ text, onStop, stopLabel }) => (
     <div className="w-full py-3">
         <div className="chat-input-column">
-            <div className="rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 text-center typography-ui-label text-muted-foreground">
-                {text}
+            <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
+                <span className="min-w-0 flex-1 text-center">{text}</span>
+                {onStop ? (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="-my-1.5 -mr-2 shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+                        onClick={onStop}
+                        aria-label={stopLabel}
+                        title={stopLabel}
+                    >
+                        <StopIcon className="size-4" />
+                    </Button>
+                ) : null}
             </div>
         </div>
     </div>
@@ -1866,6 +1882,10 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                             text={spaceArchive
                                 ? t('spaces.archive.readOnlyBanner', { name: spaceArchive.name })
                                 : t('chat.container.readOnlySubagentPromptBanner')}
+                            onStop={!spaceArchive && currentSessionId && sessionStatusForCurrent.type !== 'idle'
+                                ? () => void abortCurrentOperation(currentSessionId)
+                                : undefined}
+                            stopLabel={t('chat.chatInput.actions.stopGeneratingAria')}
                         />
                     </>
                 ) : (
