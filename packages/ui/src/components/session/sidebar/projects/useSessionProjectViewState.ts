@@ -4,6 +4,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
 import { useGroupOrdering } from './useGroupOrdering';
+import { SIDEBAR_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -52,6 +53,7 @@ export const useSessionProjectViewState = ({
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => (
     parseStringSet(safeStorage.getItem(GROUP_COLLAPSE_STORAGE_KEY))
   ));
+  const [collapsedActivities, setCollapsedActivities] = React.useState<Set<string>>(() => new Set());
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
     parseGroupOrder(safeStorage.getItem(GROUP_ORDER_STORAGE_KEY))
   ));
@@ -115,10 +117,11 @@ export const useSessionProjectViewState = ({
     }
   }, [collapsedGroups, safeStorage]);
 
-  const collapseAllProjects = React.useCallback(() => {
+  const collapseAllSections = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     groupCollapseDirty.current = true;
     setCollapsedGroups(new Set());
+    setCollapsedActivities(new Set(SIDEBAR_ACTIVITY_KEYS));
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((project) => project.id));
       try {
@@ -131,10 +134,11 @@ export const useSessionProjectViewState = ({
     });
   }, [projects, safeStorage, scheduleCollapsedProjectsPersist]);
 
-  const expandAllProjects = React.useCallback(() => {
+  const expandAllSections = React.useCallback(() => {
     ignoreIntersectionUntil.current = Date.now() + 150;
     groupCollapseDirty.current = true;
     setCollapsedGroups(new Set());
+    setCollapsedActivities(new Set());
     setCollapsedProjects(() => {
       const empty = new Set<string>();
       try {
@@ -181,19 +185,21 @@ export const useSessionProjectViewState = ({
   const state = React.useMemo(() => ({
     collapsedProjects,
     collapsedGroups,
+    collapsedActivities,
     groupOrderByProject,
-  }), [collapsedGroups, collapsedProjects, groupOrderByProject]);
+  }), [collapsedActivities, collapsedGroups, collapsedProjects, groupOrderByProject]);
   const actions = React.useMemo(() => ({
     setCollapsedProjects,
     toggleProject,
-    collapseAllProjects,
-    expandAllProjects,
+    collapseAllSections,
+    expandAllSections,
     scheduleCollapsedProjectsPersist,
     setCollapsedGroups,
+    setCollapsedActivities,
     toggleGroup,
     setGroupOrderByProject: updateGroupOrderByProject,
     getOrderedGroups,
-  }), [collapseAllProjects, expandAllProjects, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, updateGroupOrderByProject]);
+  }), [collapseAllSections, expandAllSections, getOrderedGroups, scheduleCollapsedProjectsPersist, setCollapsedActivities, toggleGroup, toggleProject, updateGroupOrderByProject]);
 
   return { state, actions };
 };

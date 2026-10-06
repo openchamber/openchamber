@@ -41,6 +41,7 @@ import { streamPerfCount, streamPerfMark } from '@/stores/utils/streamDebug';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { buildKnownSessionDirectories } from './sidebar/list/sessionListDirectories';
 import { sortProjectsByOrder } from './sidebar/list/projectSort';
+import { SIDEBAR_ACTIVITY_KEYS } from './sidebar/sessionSidebarRowModel';
 import { z } from 'zod';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import {
@@ -527,6 +528,14 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   );
   const projectView = useSessionProjectViewState({ isVSCode, projects: sortedProjects });
 
+  // Collapse/expand is a single toggle: it offers "expand all" only once every
+  // project and activity section is collapsed, and stays disabled while no
+  // project exists to act on.
+  const allProjectsCollapsed = sortedProjects.length > 0
+    && sortedProjects.every((project) => projectView.state.collapsedProjects.has(project.id));
+  const allActivitiesCollapsed = SIDEBAR_ACTIVITY_KEYS.every((key) => projectView.state.collapsedActivities.has(key));
+  const allSectionsCollapsed = allProjectsCollapsed && allActivitiesCollapsed;
+
   const searchEmptyState = React.useMemo(() => (
     <div className="py-6 text-center text-muted-foreground">
       <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
@@ -658,8 +667,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
         searchMatchCount={searchMatchCount}
-        collapseAllProjects={projectView.actions.collapseAllProjects}
-        expandAllProjects={projectView.actions.expandAllProjects}
+        hasProjects={sortedProjects.length > 0}
+        allSectionsCollapsed={allSectionsCollapsed}
+        collapseAllSections={projectView.actions.collapseAllSections}
+        expandAllSections={projectView.actions.expandAllSections}
       />
 
       <SessionProjectCollection

@@ -105,9 +105,9 @@ describe('useSessionProjectViewState', () => {
 
       await act(async () => initialActions.toggleProject('project-a'));
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a']));
-      await act(async () => initialActions.collapseAllProjects());
+      await act(async () => initialActions.collapseAllSections());
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a', 'project-b']));
-      await act(async () => initialActions.expandAllProjects());
+      await act(async () => initialActions.expandAllSections());
       expect(capture.state?.collapsedProjects).toEqual(new Set());
 
       await act(async () => initialActions.toggleGroup('project-a:group-a'));

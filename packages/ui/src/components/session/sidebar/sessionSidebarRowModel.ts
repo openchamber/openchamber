@@ -21,6 +21,9 @@ export type SessionSidebarActivityItem = {
 
 export type SessionSidebarActivityKey = 'work' | 'chats' | 'active-now' | 'timeline';
 
+/** The activity sections the whole-sidebar collapse toggle drives. */
+export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'work', 'active-now', 'timeline'];
+
 // 'timeline-chat' is a Chats row inside the timeline view: one line, no left
 // gutter, status and pin on the right like the three-line timeline rows.
 export type SessionSidebarRenderContext = 'project' | 'recent' | 'timeline' | 'timeline-chat';

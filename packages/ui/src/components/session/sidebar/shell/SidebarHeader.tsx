@@ -10,6 +10,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
+import type { IconName } from '@/components/icon/icons';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n } from '@/lib/i18n';
@@ -38,8 +39,10 @@ type Props = {
   setSessionSearchQuery: (value: string) => void;
   hasSessionSearchQuery: boolean;
   searchMatchCount: number;
-  collapseAllProjects: () => void;
-  expandAllProjects: () => void;
+  hasProjects: boolean;
+  allSectionsCollapsed: boolean;
+  collapseAllSections: () => void;
+  expandAllSections: () => void;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -61,8 +64,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     setSessionSearchQuery,
     hasSessionSearchQuery,
     searchMatchCount,
-    collapseAllProjects,
-    expandAllProjects,
+    hasProjects,
+    allSectionsCollapsed,
+    collapseAllSections,
+    expandAllSections,
   } = props;
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -81,6 +86,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
   // VS Code has no mode switch and always renders the projects view.
   const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
+
+  // One toggle for the whole list: it offers "collapse all" while any project or
+  // activity section is expanded, "expand all" once everything is collapsed, and
+  // stays disabled when there is no project to act on.
+  const offerCollapseAll = hasProjects && !allSectionsCollapsed;
+  const sectionCollapseLabel = t(offerCollapseAll
+    ? 'sessions.sidebar.header.displayMode.collapseAll'
+    : 'sessions.sidebar.header.displayMode.expandAll');
+  const sectionCollapseIcon: IconName = offerCollapseAll ? 'contract-up-down' : 'expand-up-down';
+
+  const onToggleSectionCollapse = offerCollapseAll ? collapseAllSections : expandAllSections;
 
   if (hideDirectoryControls) {
     return null;
@@ -167,6 +183,23 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
             </Tooltip>
+
+            {!timelineView && !isSingleProjectMode ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleSectionCollapse}
+                    disabled={!hasProjects}
+                    className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent disabled:opacity-40')}
+                    aria-label={sectionCollapseLabel}
+                  >
+                    <Icon name={sectionCollapseIcon} className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>{sectionCollapseLabel}</p></TooltipContent>
+              </Tooltip>
+            ) : null}
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -305,19 +338,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
                     {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
-                ) : null}
-                {!timelineView && !isSingleProjectMode ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
-                      <Icon name="contract-up-down" className="h-4 w-4" />
-                      <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
-                      <Icon name="expand-up-down" className="h-4 w-4" />
-                      <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
-                    </DropdownMenuItem>
-                  </>
                 ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
