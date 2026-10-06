@@ -3766,4 +3766,7 @@ export const dict = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} oturum arşive taşınacak. Sabitlenmiş, çalışan ve "Devam eden" oturumları kalır.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} oturum arşive taşınacak. Sabitlenmiş, çalışan ve "Devam eden" oturumları kalır.',
   'sessions.sidebar.project.archiveAll.nothing': 'Arşivlenecek bir şey yok: buradaki her oturum sabitlenmiş, çalışıyor ya da "Devam eden" bölümünde.',
+  'contextPanel.browser.devServers.hide': '{port} bağlantı noktasını bu listede gizle',
+  'contextPanel.browser.devServers.showHiddenSingle': '{count} gizli bağlantı noktasını göster',
+  'contextPanel.browser.devServers.showHiddenPlural': '{count} gizli bağlantı noktasını göster',
 };

@@ -3768,4 +3768,7 @@ export const dict = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} sessie gaat naar het archief. Vastgezette, lopende en \'In bewerking\'-sessies blijven.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessies gaan naar het archief. Vastgezette, lopende en \'In bewerking\'-sessies blijven.',
   'sessions.sidebar.project.archiveAll.nothing': 'Niets te archiveren: elke sessie hier is vastgezet, loopt of staat \'In bewerking\'.',
+  'contextPanel.browser.devServers.hide': 'Poort {port} in deze lijst verbergen',
+  'contextPanel.browser.devServers.showHiddenSingle': '{count} verborgen poort tonen',
+  'contextPanel.browser.devServers.showHiddenPlural': '{count} verborgen poorten tonen',
 } as const;

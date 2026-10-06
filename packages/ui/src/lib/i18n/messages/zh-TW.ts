@@ -3768,4 +3768,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 個工作階段將被封存。已釘選、執行中與進行中的工作階段會保留。',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 個工作階段將被封存。已釘選、執行中與進行中的工作階段會保留。',
   'sessions.sidebar.project.archiveAll.nothing': '沒有可封存的工作階段：這裡的每個工作階段都已釘選、執行中或進行中。',
+  'contextPanel.browser.devServers.hide': '從此清單隱藏連接埠 {port}',
+  'contextPanel.browser.devServers.showHiddenSingle': '顯示 {count} 個已隱藏連接埠',
+  'contextPanel.browser.devServers.showHiddenPlural': '顯示 {count} 個已隱藏連接埠',
 };

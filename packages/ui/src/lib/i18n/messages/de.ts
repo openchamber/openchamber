@@ -3766,4 +3766,7 @@ export const dict = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} Sitzung wird archiviert. Angeheftete, laufende und „In Arbeit“-Sitzungen bleiben.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} Sitzungen werden archiviert. Angeheftete, laufende und „In Arbeit“-Sitzungen bleiben.',
   'sessions.sidebar.project.archiveAll.nothing': 'Nichts zu archivieren: Jede Sitzung hier ist angeheftet, läuft oder ist „In Arbeit“.',
+  'contextPanel.browser.devServers.hide': 'Port {port} in dieser Liste ausblenden',
+  'contextPanel.browser.devServers.showHiddenSingle': '{count} ausgeblendeten Port anzeigen',
+  'contextPanel.browser.devServers.showHiddenPlural': '{count} ausgeblendete Ports anzeigen',
 };

@@ -3769,4 +3769,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': 'Se archivará {count} sesión. Las sesiones fijadas, en ejecución y «En curso» se quedan.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': 'Se archivarán {count} sesiones. Las sesiones fijadas, en ejecución y «En curso» se quedan.',
   'sessions.sidebar.project.archiveAll.nothing': 'Nada que archivar: todas las sesiones están fijadas, en ejecución o «En curso».',
+  'contextPanel.browser.devServers.hide': 'Ocultar el puerto {port} de esta lista',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Mostrar {count} puerto oculto',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Mostrar {count} puertos ocultos',
 };

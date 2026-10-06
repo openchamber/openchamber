@@ -3767,4 +3767,7 @@ export const dict = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} session passe dans les archives. Les sessions épinglées, en cours d’exécution et « En cours » restent.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessions passent dans les archives. Les sessions épinglées, en cours d’exécution et « En cours » restent.',
   'sessions.sidebar.project.archiveAll.nothing': 'Rien à archiver : chaque session ici est épinglée, en cours d’exécution ou « En cours ».',
+  'contextPanel.browser.devServers.hide': 'Masquer le port {port} de cette liste',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Afficher {count} port masqué',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Afficher {count} ports masqués',
 } as const;

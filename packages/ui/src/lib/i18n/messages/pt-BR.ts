@@ -3769,4 +3769,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} sessão vai para o arquivo. Sessões fixadas, em execução e "Em andamento" ficam.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessões vão para o arquivo. Sessões fixadas, em execução e "Em andamento" ficam.',
   'sessions.sidebar.project.archiveAll.nothing': 'Nada para arquivar: todas as sessões aqui estão fixadas, em execução ou "Em andamento".',
+  'contextPanel.browser.devServers.hide': 'Ocultar a porta {port} desta lista',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Mostrar {count} porta oculta',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Mostrar {count} portas ocultas',
 };

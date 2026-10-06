@@ -3769,4 +3769,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 个会话将被归档。已置顶、正在运行和进行中的会话会保留。',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 个会话将被归档。已置顶、正在运行和进行中的会话会保留。',
   'sessions.sidebar.project.archiveAll.nothing': '没有可归档的会话：这里的每个会话都已置顶、正在运行或进行中。',
+  'contextPanel.browser.devServers.hide': '从此列表中隐藏端口 {port}',
+  'contextPanel.browser.devServers.showHiddenSingle': '显示 {count} 个已隐藏端口',
+  'contextPanel.browser.devServers.showHiddenPlural': '显示 {count} 个已隐藏端口',
 };

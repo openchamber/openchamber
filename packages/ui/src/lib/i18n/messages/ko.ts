@@ -3768,4 +3768,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '세션 {count}개가 보관됩니다. 고정된 세션, 실행 중인 세션, 작업 중인 세션은 남습니다.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '세션 {count}개가 보관됩니다. 고정된 세션, 실행 중인 세션, 작업 중인 세션은 남습니다.',
   'sessions.sidebar.project.archiveAll.nothing': '보관할 세션이 없습니다. 모든 세션이 고정되었거나 실행 중이거나 작업 중입니다.',
+  'contextPanel.browser.devServers.hide': '이 목록에서 포트 {port} 숨기기',
+  'contextPanel.browser.devServers.showHiddenSingle': '숨긴 포트 {count}개 표시',
+  'contextPanel.browser.devServers.showHiddenPlural': '숨긴 포트 {count}개 표시',
 };

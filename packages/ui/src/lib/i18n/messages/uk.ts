@@ -3769,4 +3769,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} сесію буде архівовано. Закріплені, запущені й ті, що «В роботі», лишаються.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': 'Буде архівовано сесій: {count}. Закріплені, запущені й ті, що «В роботі», лишаються.',
   'sessions.sidebar.project.archiveAll.nothing': 'Нічого архівувати: усі сесії тут закріплені, запущені або «В роботі».',
+  'contextPanel.browser.devServers.hide': 'Сховати порт {port} з цього списку',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Показати приховані порти: {count}',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Показати приховані порти: {count}',
 };

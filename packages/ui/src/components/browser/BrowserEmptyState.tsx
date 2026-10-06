@@ -8,6 +8,7 @@ import { fetchDevServers, mergeDevServerCandidates, type DevServerDiscovery } fr
 import { clearAnnouncedDevServers, useAnnouncedDevServers } from '@/lib/browser/announcedServers';
 import { browserUrlLabel } from '@/lib/browser/url';
 import { isRemoteWebLoopbackUrl } from '@/lib/browser/devTunnel';
+import { hideDevServerPort, showHiddenDevServerPorts, useHiddenDevServerPorts } from '@/lib/browser/hiddenDevServers';
 
 /**
  * What the panel shows before anything is loaded.
@@ -73,6 +74,14 @@ export const BrowserEmptyState: React.FC<{
     announced,
     discovered: discovery.kind === 'ready' ? discovery.servers : null,
   }), [announced, discovery]);
+  // A server that just announced itself is shown even on a hidden port: the
+  // user started it, so it is no longer noise.
+  const hiddenPorts = useHiddenDevServerPorts();
+  const visibleCandidates = React.useMemo(
+    () => candidates.filter((candidate) => candidate.announced || !hiddenPorts.includes(candidate.port)),
+    [candidates, hiddenPorts],
+  );
+  const hiddenCount = candidates.length - visibleCandidates.length;
 
   return (
     // The whole panel must not scroll: a centred column that overflows clips its
@@ -98,29 +107,56 @@ export const BrowserEmptyState: React.FC<{
             </span>
           ) : null}
           <div className="flex min-h-0 flex-col gap-1 overflow-y-auto pr-0.5">
-            {candidates.map((candidate) => (
-              <Button
-                key={candidate.port}
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full shrink-0 justify-start gap-2"
-                disabled={remoteOnly}
-                onClick={() => {
-                  // The offer is answered; leaving it up would keep suggesting
-                  // servers behind a page the user is already looking at.
-                  clearAnnouncedDevServers(directory);
-                  onOpen(candidate.url);
-                }}
-              >
-                <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">{browserUrlLabel(candidate.url) || candidate.url}</span>
-                <span className="ml-auto truncate typography-micro text-muted-foreground">
-                  {pathLabel(candidate.url)}
-                </span>
-              </Button>
+            {visibleCandidates.map((candidate) => (
+              <div key={candidate.port} className="group/server flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-w-0 flex-1 justify-start gap-2"
+                  disabled={remoteOnly}
+                  onClick={() => {
+                    // The offer is answered; leaving it up would keep suggesting
+                    // servers behind a page the user is already looking at.
+                    clearAnnouncedDevServers(directory);
+                    onOpen(candidate.url);
+                  }}
+                >
+                  <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{browserUrlLabel(candidate.url) || candidate.url}</span>
+                  <span className="ml-auto truncate typography-micro text-muted-foreground">
+                    {pathLabel(candidate.url)}
+                  </span>
+                </Button>
+                {candidate.announced ? null : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-7 shrink-0 text-muted-foreground opacity-0 group-hover/server:opacity-100 focus-visible:opacity-100"
+                    onClick={() => hideDevServerPort(candidate.port)}
+                    aria-label={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
+                    title={t('contextPanel.browser.devServers.hide', { port: candidate.port })}
+                  >
+                    <Icon name="eye-off" className="size-3.5" aria-hidden="true" />
+                  </Button>
+                )}
+              </div>
             ))}
           </div>
+          {hiddenCount > 0 ? (
+            <Button
+              type="button"
+              variant="link"
+              size="xs"
+              className="h-auto shrink-0 self-start p-0 typography-micro text-muted-foreground"
+              onClick={showHiddenDevServerPorts}
+            >
+              {hiddenCount === 1
+                ? t('contextPanel.browser.devServers.showHiddenSingle', { count: hiddenCount })
+                : t('contextPanel.browser.devServers.showHiddenPlural', { count: hiddenCount })}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

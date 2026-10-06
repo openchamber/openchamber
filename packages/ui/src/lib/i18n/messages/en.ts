@@ -3768,6 +3768,9 @@ export const dict = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} session moves to the archive. Pinned, running and In work sessions stay.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} sessions move to the archive. Pinned, running and In work sessions stay.',
   'sessions.sidebar.project.archiveAll.nothing': 'Nothing to archive: every session here is pinned, running or In work.',
+  'contextPanel.browser.devServers.hide': 'Hide port {port} from this list',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Show {count} hidden port',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Show {count} hidden ports',
 } as const;
 
 export type I18nKey = keyof typeof dict;

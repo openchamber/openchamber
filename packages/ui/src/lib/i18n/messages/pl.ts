@@ -3773,4 +3773,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} sesja trafi do archiwum. Przypięte, działające i oznaczone „W toku” zostają.',
   'sessions.sidebar.project.archiveAll.descriptionPlural': 'Do archiwum trafi sesji: {count}. Przypięte, działające i oznaczone „W toku” zostają.',
   'sessions.sidebar.project.archiveAll.nothing': 'Nic do archiwizacji: każda sesja jest przypięta, działa albo jest „W toku”.',
+  'contextPanel.browser.devServers.hide': 'Ukryj port {port} na tej liście',
+  'contextPanel.browser.devServers.showHiddenSingle': 'Pokaż ukryte porty: {count}',
+  'contextPanel.browser.devServers.showHiddenPlural': 'Pokaż ukryte porty: {count}',
 } as const;

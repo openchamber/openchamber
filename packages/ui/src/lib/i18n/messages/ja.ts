@@ -3768,4 +3768,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.project.archiveAll.descriptionSingle': '{count} 件のセッションがアーカイブされます。ピン留め、実行中、作業中のセッションは残ります。',
   'sessions.sidebar.project.archiveAll.descriptionPlural': '{count} 件のセッションがアーカイブされます。ピン留め、実行中、作業中のセッションは残ります。',
   'sessions.sidebar.project.archiveAll.nothing': 'アーカイブするものはありません。すべてのセッションがピン留め、実行中、または作業中です。',
+  'contextPanel.browser.devServers.hide': 'ポート {port} をこの一覧から隠す',
+  'contextPanel.browser.devServers.showHiddenSingle': '隠したポート {count} 件を表示',
+  'contextPanel.browser.devServers.showHiddenPlural': '隠したポート {count} 件を表示',
 };
