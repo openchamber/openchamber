@@ -2219,7 +2219,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.collapsibleThinkingBlocks": "Увімкнути згортальні блоки міркувань",
   "settings.openchamber.visual.field.expandReasoningWhileStreaming": "Розгортати міркування під час стримінгу",
   "settings.openchamber.visual.field.expandReasoningWhileStreamingAria": "Розгортати блоки міркувань, поки модель думає",
-  "settings.openchamber.visual.field.expandReasoningWhileStreamingInfo": "Показує міркування моделі, поки вони надходять. Коли вимкнено, блок згорнутий і відкривається кліком.",
+  "settings.openchamber.visual.field.expandReasoningWhileStreamingInfo": "Показує міркування моделі та підсумок стиснення розмови, поки вони надходять. Коли вимкнено, блоки згорнуті й відкриваються кліком.",
   "settings.openchamber.visual.field.collapsibleUserMessagesAria": "Згортати довгі повідомлення користувача",
   "settings.openchamber.visual.field.collapsibleUserMessages": "Згортати довгі повідомлення користувача",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Закріплений заголовок користувача",

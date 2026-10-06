@@ -2168,7 +2168,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Zusammenklappbare Denkblöcke aktivieren',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': 'Denkblöcke beim Streaming aufklappen',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': 'Denkblöcke aufklappen, während das Modell nachdenkt',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Zeigt die Gedanken des Modells, während sie eintreffen. Wenn aus, bleibt der Block eingeklappt und öffnet sich per Klick.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Zeigt die Gedanken des Modells und die Zusammenfassung beim Komprimieren, während sie eintreffen. Wenn aus, bleiben die Blöcke eingeklappt und öffnen sich per Klick.',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': 'Lange Benutzernachrichten einklappen',
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Lange Benutzernachrichten einklappen',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Fixierter Benutzerheader',

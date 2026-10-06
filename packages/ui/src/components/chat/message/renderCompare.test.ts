@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import type { CompactionMessage } from '@/lib/opencode/model';
 import type { TurnGroupingContext } from '../lib/turns/types';
-import { areRelevantTurnGroupingContextsEqual } from './renderCompare';
+import { areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './renderCompare';
 
 const finalAnswerContext: TurnGroupingContext = {
   turnId: 'turn',
@@ -47,5 +48,20 @@ describe('completed-turn changed files', () => {
     const before = { ...finalAnswerContext, changedFiles: files };
     const after = { ...finalAnswerContext, changedFiles: [{ ...files[0] }] };
     expect(areRelevantTurnGroupingContextsEqual(before, after, 'answer', false)).toBe(true);
+  });
+});
+
+describe('running compaction', () => {
+  const running: CompactionMessage = {
+    id: 'msg_compact', sessionID: 'ses_1', role: 'compaction', time: { created: 1 }, status: 'running', reason: 'auto', summary: '',
+  };
+
+  test('re-renders as the summary streams in', () => {
+    const grown = { ...running, summary: 'Summary so far' };
+    expect(areRenderRelevantMessagesEqual({ info: running, parts: [] }, { info: grown, parts: [] })).toBe(false);
+  });
+
+  test('preserves an equivalent rebuilt record', () => {
+    expect(areRenderRelevantMessagesEqual({ info: running, parts: [] }, { info: { ...running }, parts: [] })).toBe(true);
   });
 });

@@ -1234,7 +1234,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Włącz zwijalne bloki rozumowania',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': 'Rozwijaj rozumowanie podczas streamingu',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': 'Rozwijaj bloki rozumowania, gdy model myśli',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Pokazuje rozumowanie modelu na bieżąco. Gdy wyłączone, blok jest zwinięty i otwiera się kliknięciem.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Pokazuje rozumowanie modelu i podsumowanie kompaktowania na bieżąco. Gdy wyłączone, bloki są zwinięte i otwierają się kliknięciem.',
   'settings.openchamber.visual.field.collapsibleThinkingBlocksAria': 'Włącz zwijalne bloki rozumowania',
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Zwijaj długie wiadomości użytkownika',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': 'Zwijaj długie wiadomości użytkownika',

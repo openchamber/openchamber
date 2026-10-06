@@ -2121,7 +2121,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Activer les blocs de raisonnement pliables',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': 'Déplier le raisonnement pendant le streaming',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': 'Déplier les blocs de raisonnement pendant que le modèle réfléchit',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Affiche le raisonnement du modèle au fil de l\'eau. Désactivé, le bloc reste replié et s\'ouvre d\'un clic.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Affiche le raisonnement du modèle et le résumé de compaction au fil de l\'eau. Désactivé, ces blocs restent repliés et s\'ouvrent d\'un clic.',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': 'Réduire les longs messages utilisateur',
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Réduire les longs messages utilisateur',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'En-tête utilisateur collant',

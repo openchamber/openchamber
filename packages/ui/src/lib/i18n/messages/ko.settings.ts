@@ -2219,7 +2219,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': '접을 수 있는 추론 블록 활성화',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': '스트리밍 중 추론 펼치기',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': '모델이 생각하는 동안 추론 블록 펼치기',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': '모델의 생각을 도착하는 대로 보여줍니다. 끄면 블록이 접힌 채로 있고 클릭하면 열립니다.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': '모델의 생각과 대화 압축 요약을 도착하는 대로 보여줍니다. 끄면 블록이 접힌 채로 있고 클릭하면 열립니다.',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': '긴 사용자 메시지 접기',
   'settings.openchamber.visual.field.collapsibleUserMessages': '긴 사용자 메시지 접기',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '고정 사용자 헤더',

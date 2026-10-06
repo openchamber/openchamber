@@ -2219,7 +2219,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.collapsibleThinkingBlocks": "Habilitar Bloques de Razonamiento Colapsables",
   "settings.openchamber.visual.field.expandReasoningWhileStreaming": "Expandir el razonamiento durante el streaming",
   "settings.openchamber.visual.field.expandReasoningWhileStreamingAria": "Expandir los bloques de razonamiento mientras el modelo piensa",
-  "settings.openchamber.visual.field.expandReasoningWhileStreamingInfo": "Muestra el razonamiento del modelo a medida que llega. Si está desactivado, el bloque queda plegado y se abre con un clic.",
+  "settings.openchamber.visual.field.expandReasoningWhileStreamingInfo": "Muestra el razonamiento del modelo y el resumen de la compactación a medida que llegan. Si está desactivado, los bloques quedan plegados y se abren con un clic.",
   "settings.openchamber.visual.field.collapsibleUserMessagesAria": "Contraer mensajes largos del usuario",
   "settings.openchamber.visual.field.collapsibleUserMessages": "Contraer mensajes largos del usuario",
   "settings.openchamber.visual.field.stickyUserHeaderAria": "Encabezado del usuario fijo",

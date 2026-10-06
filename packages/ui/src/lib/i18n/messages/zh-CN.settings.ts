@@ -2219,7 +2219,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': '启用可折叠推理块',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': '流式输出时展开推理',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': '模型思考时展开推理块',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': '在模型思考时实时显示推理。关闭后推理块保持折叠，点击即可展开。',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': '在内容到达时实时显示模型的推理和对话压缩摘要。关闭后这些块保持折叠，点击即可展开。',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': '折叠较长的用户消息',
   'settings.openchamber.visual.field.collapsibleUserMessages': '折叠较长的用户消息',
   'settings.openchamber.visual.field.stickyUserHeaderAria': '固定用户消息头',

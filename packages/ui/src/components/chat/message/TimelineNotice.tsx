@@ -40,13 +40,15 @@ const NoticeRow: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction' }> }> = ({ message }) => {
     const { t } = useI18n();
+    const expandWhileStreaming = useUIStore((state) => state.expandReasoningWhileStreaming);
     const running = message.status === 'running';
     const failed = message.status === 'failed';
     const summary = message.summary.trim();
 
     // A compaction reads like a thinking row: one collapsible tool-style line
     // whose body is the summary as Markdown. The summary streams in while the
-    // compaction runs, so the body is open and follows its end until it settles.
+    // compaction runs; the reasoning setting decides whether the body opens and
+    // follows its end until it settles, or stays folded.
     return (
         <NoticeRow>
             <ReasoningTimelineBlock
@@ -54,6 +56,7 @@ const CompactionNotice: React.FC<{ message: Extract<Message, { role: 'compaction
                 variant="thinking"
                 blockId={message.id}
                 isStreaming={running}
+                expandWhileStreaming={expandWhileStreaming}
                 presentation={{
                     icon: failed ? 'error-warning' : 'scissors',
                     iconClassName: failed ? 'text-[var(--status-error)]' : undefined,

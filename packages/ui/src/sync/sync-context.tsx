@@ -2093,6 +2093,7 @@ export function handleEvent(
       break
     case "message.updated":
     case "message.patched":
+    case "message.compaction.delta":
       cloneField("message", (value) => ({ ...value }))
       break
     case "message.removed":

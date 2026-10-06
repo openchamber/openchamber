@@ -2242,7 +2242,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.collapsibleThinkingBlocks': 'Invouwbare redeneringsblokken aanzetten',
   'settings.openchamber.visual.field.expandReasoningWhileStreaming': 'Redenering uitklappen tijdens het streamen',
   'settings.openchamber.visual.field.expandReasoningWhileStreamingAria': 'Redeneringsblokken uitklappen terwijl het model nadenkt',
-  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Toont de redenering van het model terwijl die binnenkomt. Uit: het blok blijft ingeklapt en opent met een klik.',
+  'settings.openchamber.visual.field.expandReasoningWhileStreamingInfo': 'Toont de redenering van het model en de samenvatting bij het inkorten terwijl die binnenkomen. Uit: de blokken blijven ingeklapt en openen met een klik.',
   'settings.openchamber.visual.field.collapsibleUserMessagesAria': 'Vouw lange gebruikersberichten samen',
   'settings.openchamber.visual.field.collapsibleUserMessages': 'Lange gebruikersberichten samenvouwen',
   'settings.openchamber.visual.field.stickyUserHeaderAria': 'Vaste gebruikerskop',
