@@ -78,6 +78,21 @@ does not use the fallback. The mobile sheet, Recent, and Timeline use this
 same ownership resolver; rows keep the session's own directory while
 taking display ownership (project id, labels) from the index.
 
+The sidebar and mobile sessions sheet offer **Import Projects** only
+after `project.list` has succeeded and there are unconfigured canonical roots.
+The picker imports selected roots through `useProjectsStore.addProjects`, so
+they become ordinary persisted OpenChamber projects. Eligibility compares exact
+normalized paths; a configured ancestor such as the home directory does not
+block a nested root. OpenCode sandbox directories appear under their canonical
+project and are not separate import choices. VS Code stays limited to workspace
+folders and does not show the import action. OpenChamber-managed Chats session
+directories are not import candidates. Before offering candidates, the UI checks
+each remaining path with `/api/fs/directory-stat`; confirmed-missing paths are
+excluded, while failed/unsupported checks remain unknown rather than being
+treated as missing. Candidate labels use the same path-derived folder name as
+the configured sidebar project; OpenCode's optional display name is not imported.
+The server still validates paths when persisting settings.
+
 Web and desktop show managed Chats before optional Recent activity (off by
 default since the timeline view exists; the display menu toggles it). Chats use
 their shared managed root for folders and never expose worktree actions. Project

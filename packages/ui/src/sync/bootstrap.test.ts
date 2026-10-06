@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createStore } from "zustand/vanilla"
 import { opencodeClient } from "@/lib/opencode/client"
-import type { FormRequest, Session } from "@/lib/opencode/model"
-import { bootstrapDirectory } from "./bootstrap"
-import { INITIAL_STATE, type State } from "./types"
+import type { FormRequest, Project, Session } from "@/lib/opencode/model"
+import { bootstrapDirectory, bootstrapGlobal } from "./bootstrap"
+import { INITIAL_STATE, type GlobalState, type State } from "./types"
 import { getBackgroundNetworkState, runBackgroundNetworkTask } from "../lib/background-network"
 
 const deferred = <T>() => {
@@ -13,7 +13,10 @@ const deferred = <T>() => {
 }
 
 const location = spyOn(opencodeClient, "getLocation")
+const filesystemHome = spyOn(opencodeClient, "getFilesystemHome")
+const filesystemHomeInfo = spyOn(opencodeClient, "getFilesystemHomeInfo")
 const config = spyOn(opencodeClient, "getConfig")
+const projects = spyOn(opencodeClient, "listProjects")
 const statuses = spyOn(opencodeClient, "getActiveSessionStatuses")
 const commands = spyOn(opencodeClient, "listCommands")
 const mcp = spyOn(opencodeClient, "listMcpServers")
@@ -22,7 +25,7 @@ const forms = spyOn(opencodeClient, "listPendingForms")
 const permissions = spyOn(opencodeClient, "listPendingPermissions")
 // `commands` and `mcp` are spied so the regression test can assert bootstrap
 // never touches them; they are not part of directory initialization.
-const spies = [location, config, statuses, vcs, forms, permissions]
+const spies = [location, filesystemHome, filesystemHomeInfo, config, projects, statuses, vcs, forms, permissions]
 
 beforeEach(() => {
   for (const spy of [...spies, commands, mcp]) spy.mockReset()
@@ -30,7 +33,10 @@ beforeEach(() => {
     directory: directory ?? "/repo",
     project: { id: "project-a", directory: directory ?? "/repo", canonical: directory ?? "/repo" },
   }))
+  filesystemHome.mockResolvedValue("/home")
+  filesystemHomeInfo.mockResolvedValue({ home: "/home", chatsRoot: "/home/.config/openchamber/chats" })
   config.mockResolvedValue({})
+  projects.mockResolvedValue([])
   statuses.mockResolvedValue({})
   commands.mockResolvedValue([])
   mcp.mockResolvedValue([])
@@ -240,5 +246,46 @@ describe("bootstrapDirectory", () => {
     await bootstrap.sessions
     expect(await bootstrap.environment).toBe("complete")
     expect(input.store.getState().form.session).toEqual([updated, added])
+  })
+})
+
+describe("bootstrapGlobal project list", () => {
+  const project: Project = {
+    id: "opencode-project",
+    worktree: "/repo",
+    sandboxes: [],
+    time: { created: 1, updated: 1 },
+  }
+
+  test("marks a successful empty project list as loaded", async () => {
+    projects.mockResolvedValue([])
+    const patches: Partial<GlobalState>[] = []
+
+    await bootstrapGlobal((patch) => patches.push(patch))
+
+    expect(patches.some((patch) => patch.hasLoadedProjects === true && patch.projects?.length === 0)).toBe(true)
+  })
+
+  test("publishes a successful project list as loaded", async () => {
+    projects.mockResolvedValue([project])
+    const patches: Partial<GlobalState>[] = []
+
+    await bootstrapGlobal((patch) => patches.push(patch))
+
+    expect(patches.some((patch) => patch.hasLoadedProjects === true && patch.projects?.[0] === project)).toBe(true)
+  })
+
+  test("does not publish a project list after the request fails", async () => {
+    projects.mockRejectedValue(Object.assign(new Error("project list unavailable"), { status: 400 }))
+    const patches: Partial<GlobalState>[] = []
+    const consoleError = spyOn(console, "error").mockImplementation(() => undefined)
+
+    try {
+      await bootstrapGlobal((patch) => patches.push(patch))
+      expect(patches.some((patch) => patch.hasLoadedProjects === true)).toBe(false)
+      expect(patches.some((patch) => Object.hasOwn(patch, "projects"))).toBe(false)
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })

@@ -41,7 +41,7 @@ export async function bootstrapGlobal(set: (patch: Partial<GlobalState>) => void
         const projects = data
           .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
           .sort((a, b) => cmp(a.id, b.id))
-        set({ projects })
+        set({ projects, hasLoadedProjects: true })
       }),
     ),
   ])

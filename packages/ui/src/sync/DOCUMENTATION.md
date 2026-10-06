@@ -139,6 +139,12 @@ second time `PROVIDER_REREAD_AFTER_CREDENTIAL_MS` after a credential change.
 | `provider` / `model` / `credential` | — | config-store providers (model-metadata cache invalidated; the current list stays until the new one lands; `credential` reads twice) |
 | `project` | global project list | — |
 
+The global state's `projects` list is OpenCode's `project.list` result, not
+OpenChamber's configured project registry. `hasLoadedProjects` becomes true only
+after a successful list response, including a successful empty response. A
+failed initial load leaves it false; a failed refresh keeps the last successful
+list and its loaded flag so failure cannot look like an empty catalog.
+
 ## Compaction records
 
 A compaction is one `compaction` message. `session.compaction.started` inserts

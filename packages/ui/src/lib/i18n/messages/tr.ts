@@ -6,6 +6,7 @@ import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { openCodeProjectImportI18n } from './open-code-project-import.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
@@ -69,6 +70,7 @@ export const dict = {
   ...routingI18n.tr,
   ...pluginPanelI18n.tr,
   ...surfacePanelI18n.tr,
+  ...openCodeProjectImportI18n.tr,
   ...fileArtifactsI18n.tr,
   ...usageStatsI18n.tr,
   ...webSearchI18n.tr,

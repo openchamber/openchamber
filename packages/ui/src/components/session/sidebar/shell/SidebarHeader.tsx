@@ -21,6 +21,7 @@ import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useUIStore } from '@/stores/useUIStore';
+import { OpenCodeProjectsImport } from '@/components/session/OpenCodeProjectsImport';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -293,6 +294,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
             </Tooltip>
+
+            <OpenCodeProjectsImport />
 
             <DropdownMenu>
               <Tooltip>

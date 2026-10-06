@@ -31,6 +31,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
+import { OpenCodeProjectsImport } from '@/components/session/OpenCodeProjectsImport';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { Button } from '@/components/ui/button';
@@ -1792,6 +1793,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     newChatButton || addProjectButton || sortToggle || editToggle ? (
       <>
         {addProjectButton}
+        {!editingOrder ? <OpenCodeProjectsImport mobile /> : null}
         {sortToggle}
         {editToggle}
         {newChatButton}
