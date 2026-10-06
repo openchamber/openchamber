@@ -3366,6 +3366,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   });
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
+  // The rendered preview follows the editor's font size, so zoom and the
+  // Editor Font Size setting resize both modes. At the default 13 px it
+  // renders at the old 14 px body and 12 px code.
+  // SAFETY: CSS custom properties are valid inline styles; React's type lists only standard ones.
+  const previewFontStyle = React.useMemo(() => ({
+    '--text-markdown': `${editorFontSize + 1}px`,
+    '--text-code': `${editorFontSize - 1}px`,
+  } as React.CSSProperties), [editorFontSize]);
 
   // Git change markers compare the open file with its HEAD version. The
   // server answers an empty original both for a new file and for one git does
@@ -4695,13 +4703,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     </div>
                   }
                 >
-                  <SimpleMarkdownRenderer
-                    content={fileContent}
-                    className="typography-markdown-body"
-                    stripFrontmatter
-                    enableFileReferences={false}
-                    allowRawHtml
-                  />
+                  <div style={previewFontStyle}>
+                    <SimpleMarkdownRenderer
+                      content={fileContent}
+                      className="typography-markdown-body"
+                      stripFrontmatter
+                      enableFileReferences={false}
+                      allowRawHtml
+                    />
+                  </div>
                 </ErrorBoundary>
               </div>
               {!isFullscreen && (
@@ -5081,13 +5091,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                   </div>
                 }
               >
-                <SimpleMarkdownRenderer
-                  content={fileContent}
-                  className="typography-markdown-body"
-                  stripFrontmatter
-                  enableFileReferences={false}
-                  allowRawHtml
-                />
+                <div style={previewFontStyle}>
+                  <SimpleMarkdownRenderer
+                    content={fileContent}
+                    className="typography-markdown-body"
+                    stripFrontmatter
+                    enableFileReferences={false}
+                    allowRawHtml
+                  />
+                </div>
               </ErrorBoundary>
             </div>
               <MarkdownPreviewSearch

@@ -27,7 +27,8 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
       const state = useUIStore.getState();
       const isTerminal = isTerminalEventTarget(active)
         || active?.matches('[data-terminal-hidden-input="true"]') === true;
-      const isEditor = active?.closest('.cm-editor') != null
+      // The rendered Markdown preview is sized by the editor font too.
+      const isEditor = active?.closest('.cm-editor, .oc-file-preview') != null
         && active?.closest('[data-chat-input="true"]') == null;
       if (action === 'zoom-reset') {
         if (isTerminal) state.setTerminalFontSize(14);
