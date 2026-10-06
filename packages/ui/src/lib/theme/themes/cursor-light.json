@@ -26,7 +26,7 @@
       "elevated": "#f2f2f2"
     },
     "interactive": {
-      "border": "#50586026",
+      "border": "#5058601e",
       "selection": "#E1E1E1",
       "borderHover": "#50586040",
       "borderFocus": "#2567A8B3",
@@ -97,13 +97,13 @@
       "inlineCode": "#126B63",
       "inlineCodeBackground": "#f9f9f9",
       "blockquote": "#60656B",
-      "blockquoteBorder": "#73879752",
+      "blockquoteBorder": "#73879746",
       "listMarker": "#2567A899",
       "bold": "#3e4348",
       "italic": "#454a50"
     },
     "tools": {
-      "border": "#50586023",
+      "border": "#5058601e",
       "icon": "#66696f",
       "title": "#454a50",
       "description": "#66696f",

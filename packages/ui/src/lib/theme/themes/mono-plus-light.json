@@ -30,7 +30,7 @@
     "interactive": {
       "border": "#e3e3e3f2",
       "selection": "#00000015",
-      "borderHover": "#b3b3b3b2",
+      "borderHover": "#b3b3b3ac",
       "borderFocus": "#000000",
       "focus": "#000000",
       "focusRing": "#00000040",
@@ -100,7 +100,7 @@
       "italic": "#454545"
     },
     "tools": {
-      "border": "#b3b3b34e",
+      "border": "#b3b3b347",
       "icon": "#6a6a6a",
       "title": "#454545",
       "description": "#6a6a6a",

@@ -29,7 +29,7 @@
       "subtle": "#1e1e1e"
     },
     "interactive": {
-      "border": "#292929d0",
+      "border": "#292929cd",
       "selection": "#eeeeee18",
       "borderHover": "#3c3c3c",
       "borderFocus": "#00000000",

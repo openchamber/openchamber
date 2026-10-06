@@ -30,7 +30,7 @@
       "overlay": "#39393420"
     },
     "interactive": {
-      "border": "#e5e1de",
+      "border": "#e5e1debf",
       "selection": "#a9998f2b",
       "borderHover": "#cbc7c2",
       "focusRing": "#b3501755",
@@ -93,7 +93,7 @@
       "italic": "#44443d"
     },
     "tools": {
-      "border": "#d8d5d099",
+      "border": "#d8d5d073",
       "icon": "#696960",
       "title": "#44443d",
       "description": "#696960",

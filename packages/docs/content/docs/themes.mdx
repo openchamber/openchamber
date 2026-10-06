@@ -25,13 +25,19 @@ If the file uses `include` or references a separate token file, run **Developer:
 mkdir -p ~/.config/openchamber/themes
 ```
 
-2. Add your JSON file to that directory (for example `my-theme.json`).
-3. Open OpenChamber, then go to **Settings -> Theme -> Reload themes**.
+2. Copy a [built-in theme JSON](https://github.com/openchamber/openchamber/tree/main/packages/ui/src/lib/theme/themes) or the [starter example](https://github.com/openchamber/openchamber/blob/main/docs/CUSTOM_THEMES.md#create-your-own-theme) into that directory as `my-theme.json`. Give it a unique `metadata.id` and your own `metadata.name`, then edit the colors.
+3. Open OpenChamber, then go to **Settings → Appearance → Reload themes**.
 4. Pick your theme from the dropdown. It applies right away.
+
+Use **Reload themes** after saving further edits. For a light/dark pair, create two files with different IDs and set `metadata.variant` to `light` or `dark`. Select each in its matching dropdown.
+
+Start with the backgrounds, body text and accent. Keep borders and selected rows subtle, and give inline code a readable color of its own. Check your palette in chat, settings and diffs. Custom JSON keeps your explicit colors; the automatic adjustments used for VS Code imports do not run on these files.
 
 ## Theme location
 
 - macOS/Linux: `~/.config/openchamber/themes/`
+
+This folder belongs to the machine running your OpenChamber server. If you connect to a remote server, save the files there. A custom OpenChamber data directory uses its own `themes` folder.
 
 ## Full JSON format reference
 

@@ -28,7 +28,7 @@
       "subtle": "#1A1A1A"
     },
     "interactive": {
-      "border": "#232323d2",
+      "border": "#232323c6",
       "selection": "#ffffff1f",
       "borderHover": "#333333",
       "borderFocus": "#FFFFFF",

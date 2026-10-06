@@ -1,5 +1,11 @@
 # Custom themes
 
+Create a theme by copying the JSON example below or a built-in palette from
+[`packages/ui/src/lib/theme/themes/`](../packages/ui/src/lib/theme/themes/).
+Give your copy a unique `metadata.id` and a name, then edit its colors.
+
+## Import a VS Code theme
+
 Open **Settings → Appearance → Import VS Code theme** to search Open VSX.
 Choose a package, compare the variant previews, and select the variants to import.
 Batch import keeps your current theme active. Open VSX is a separate catalog;
@@ -11,9 +17,9 @@ even when connected to a remote server. Browsers and mobile use their own picker
 UI colors use the same
 surface mapping as the VS Code runtime adapter; general TextMate and semantic
 token colors populate the syntax palette, and diff colors remain separate.
-Regular imports adapt generic border intensity to OpenChamber's standard light
-and dark palettes while retaining the source hue. High-contrast themes keep
-their authored borders.
+Regular imports soften borders and selected rows, adjust text for readability,
+and adapt backgrounds and status colors to OpenChamber. Syntax colors retain
+the source palette. High-contrast themes keep stronger contrast.
 The theme is saved on the connected server and selected in its light/dark mode.
 Package imports resolve JSON `include` and token files inside the downloaded VSIX.
 For individual files with those references, export the active theme with
@@ -24,9 +30,21 @@ This includes valid themes you added directly to the server's `themes` folder.
 Deleting a selected theme restores the standard OpenChamber theme for that mode.
 Built-in themes cannot be deleted. Delete and reimport a theme to update it.
 
-Save a JSON file in `~/.config/openchamber/themes/`, then open **Settings → Theme → Reload themes** and select it. A custom OpenChamber data directory uses its own `themes` folder.
+## Create your own theme
 
-## Start with the base colors
+Save the example below as `~/.config/openchamber/themes/my-theme-dark.json` on
+the machine running your OpenChamber server. Create the `themes` directory if
+it does not exist. A custom OpenChamber data directory uses its own `themes`
+folder. When connected to a remote server, put the file on that server.
+
+Open **Settings → Appearance → Reload themes**, then select your theme in the
+dark theme dropdown. After editing the file, use **Reload themes** again.
+
+For a light companion, create another file with a different ID, such as
+`my-theme-light`, and set `metadata.variant` to `light`. Both files can share
+the same display name. Choose each variant in its matching dropdown.
+
+### Start with the base colors
 
 This is a complete theme. OpenChamber supplies omitted states, foregrounds, syntax aliases and diff backgrounds.
 
@@ -38,7 +56,7 @@ This is a complete theme. OpenChamber supplies omitted states, foregrounds, synt
     "surface": {
       "background": "#120f0e",
       "foreground": "#c9c5ba",
-      "muted": "#171615",
+      "muted": "#0e0c0b",
       "mutedForeground": "#8f8b81",
       "elevated": "#181715"
     },
@@ -66,6 +84,10 @@ This is a complete theme. OpenChamber supplies omitted states, foregrounds, synt
 ```
 
 Use hex or `rgb()`/`rgba()` colors for automatic contrast adjustment. Hex alpha is supported, such as `#ffffff20`. Surfaces can be opaque or translucent; there is no required alpha value.
+
+Custom OpenChamber JSON files use your explicit colors as written. The VS Code
+import adjustments do not run on these files. OpenChamber fills in omitted
+roles, but you should check the contrast of colors you override yourself.
 
 ## Color roles
 
@@ -98,6 +120,37 @@ Add an override only when the default relationship does not fit your palette.
 Built-in JSON files in `packages/ui/src/lib/theme/themes/` show the supported overrides. The full syntax mapping is in `packages/ui/src/lib/theme/syntax.ts`.
 
 Optional `config.fonts` accepts `sans`, `mono` and `heading`. Optional `config.transitions` accepts `fast`, `normal` and `slow` CSS transition values.
+
+## Tune the theme in the app
+
+- Start with the backgrounds. Keep `surface.muted`, used by the sidebar, a little
+  darker than the chat. Make `surface.elevated` slightly lighter in dark themes
+  and slightly darker in light themes. A black canvas can share the sidebar color.
+- Keep body text comfortable to read and secondary text visibly quieter. Aim
+  for at least 4.5:1 text contrast against the backgrounds where it appears.
+  `surface.mutedForeground` also colors the unchecked switch thumb, so check it
+  against the switch track, which uses `interactive.border`.
+- Use a quiet `interactive.border`. Check it on the sidebar, chat and menus,
+  especially if you use alpha. The same translucent border looks different on
+  each background.
+- Give selected rows a subtle fill with `interactive.selection`. Leave
+  `selectionForeground` out to derive readable text from your body color.
+  A selected row does not need the same bright fill as a primary button.
+- Set `markdown.inlineCode` to a distinct, readable accent and use
+  `markdown.inlineCodeBackground` for its quiet background. Keep `markdown.bold`
+  neutral, with a little more contrast than body text. Retired heading-color
+  fields do not affect the theme.
+- Add a little of your accent to `chat.userMessageBackground`. Keep the tint
+  faint enough that messages do not compete with buttons and selected rows.
+- Use blue for info, green for success, red for errors and amber for warnings.
+  PR open and closed colors inherit success and error. Set `pr.blocked` to orange
+  if you want it distinct from warnings; merged defaults to purple and draft to
+  secondary text. A monochrome theme can use neutral equivalents.
+
+Before sharing, check a chat with Markdown and code, a selected autocomplete
+row, settings with switches both on and off, and a diff. Test both variants if
+you made a light/dark pair. Share the JSON files; recipients can place them in
+their server's `themes` folder and reload.
 
 ## Existing themes
 

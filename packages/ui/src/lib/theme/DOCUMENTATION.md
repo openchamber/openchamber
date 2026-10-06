@@ -30,9 +30,9 @@ The command uses `--theme ID`, `--mode`, `--output`, `--list` and `--dry-run`.
 The previous positional/TUI converter and its `--force` option are replaced.
 Output retains the personal library's IDs and compact format. Publication skips
 identical files and refuses edited files or symlinks; use a fresh output directory
-to review regenerated palettes. Markdown bold derives from body text rather than
-the upstream syntax accent. Status hue adaptation is inherited from the personal
-converter, so review status and PR semantics before promoting output to built-ins.
+to review regenerated palettes. Markdown, surfaces, text, borders, bubbles and
+status/PR semantics follow the shared VS Code adaptation. The converter adds source
+metadata, the overlay and the syntax regex token without overriding adapted UI roles.
 
 Elevated surfaces scope `--foreground` to `surface.elevatedForeground`, so neutral
 children do not accidentally paint canvas text inside a popup. Opaque canvas
@@ -90,10 +90,15 @@ Readability takes precedence over ceilings. Bubble text is checked after adding
 the faint primary tint. Bold uses stronger neutral text. Code backgrounds stay
 within 1.10 of the canvas; syntax token and diff colors retain their source values.
 
-Borders use the matching OpenChamber role's maximum contrast as a cap, including
-explicit tool and quote borders. Quieter authored borders remain intact. Hover
-and pressed fills have their own quiet caps; selection keeps a readable paired
-foreground. Focus retains its source color unless effectively invisible.
+Borders use the matching OpenChamber role's contrast on each corresponding
+surface as a baseline, including explicit tool and quote borders. Each cap allows
+20% of the gap toward the role's strongest reference contrast to retain a little
+more definition. The sidebar's
+stronger edge is not the budget for an elevated control. Quieter authored borders remain intact. Hover
+and pressed fills have their own quiet caps. Selection retains its hue with a
+quiet fill capped at 1.50 on elevated surfaces, and derives readable labels from
+body text rather than a harsh source selection foreground. High contrast keeps
+the authored selection pair. Focus retains its source color unless effectively invisible.
 
 An unusable button fill falls back to a visible authored link, badge or highlight
 accent. Status shades may retain the source color only within the semantic hue

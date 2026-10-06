@@ -66,24 +66,40 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
   }
   // Selection is a state, not a substitute for the sidebar surface.
   interactive.selection = toward(interactive.selection, mixColor(primary.base, canvas, 0.18, canvas), (color) => minimum(color) >= 1.1);
-  interactive.selectionForeground = readableText(interactive.selectionForeground, interactive.selection, canvas);
+  // OpenChamber reference contrasts, in canvas/sidebar/elevated order. A
+  // sidebar's stronger edge must not become the budget for floating controls.
+  const caps = dark ? {
+    border: [1.217, 1.245, 1.117], hover: [2.304, 2.356, 2.115],
+    tools: [1.199, 1.207, 1.156], divider: [1.410, 1.442, 1.294],
+  } as const : {
+    border: [1.268, 1.203, 1.162], hover: [1.640, 1.557, 1.503],
+    tools: [1.231, 1.195, 1.171], divider: [1.427, 1.355, 1.308],
+  } as const;
   // Alpha must be measured over each surface, not flattened onto the canvas.
-  const border = (seed: string, cap: number) => {
-    if (surfaces.every((background) => contrast(seed, background) <= cap)) return seed;
+  const border = (seed: string, [cap, sidebarCap, elevatedCap]: readonly [number, number, number]) => {
+    // Restore a little definition while keeping most of the per-surface relief.
+    const strongest = Math.max(cap, sidebarCap, elevatedCap);
+    const relaxed = (limit: number) => limit + (strongest - limit) * 0.2;
+    const quiet = (color: string) => contrast(color, canvas) <= relaxed(cap)
+      && contrast(color, surface.muted) <= relaxed(sidebarCap)
+      && contrast(color, surface.elevated) <= relaxed(elevatedCap);
+    if (quiet(seed)) return seed;
     let low = 0, high = 1;
     let result = withOpacity(seed, 0);
     for (let step = 0; step < 16; step++) {
       const alpha = (low + high) / 2;
       const candidate = withOpacity(seed, alpha);
-      if (surfaces.every((background) => contrast(candidate, background) <= cap)) { low = alpha; result = candidate; }
+      if (quiet(candidate)) { low = alpha; result = candidate; }
       else high = alpha;
     }
     return result;
   };
-  interactive.border = border(interactive.border, dark ? 1.245 : 1.268);
-  interactive.borderHover = border(interactive.borderHover, dark ? 2.356 : 1.64);
-  interactive.hover = border(interactive.hover, 1.18);
-  interactive.active = border(interactive.active, 1.25);
+  interactive.border = border(interactive.border, caps.border);
+  interactive.borderHover = border(interactive.borderHover, caps.hover);
+  interactive.hover = border(interactive.hover, [1.18, 1.18, 1.18]);
+  interactive.active = border(interactive.active, [1.25, 1.25, 1.25]);
+  interactive.selection = border(interactive.selection, [1.6, 1.7, 1.45]);
+  interactive.selectionForeground = readableText(surface.foreground, interactive.selection, canvas);
 
   // Semantic hue families stay stable even when the source diagnostics reuse
   // a brand accent. Shades within the family remain authored where possible.
@@ -125,11 +141,11 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     chat.inputWorkingBorderColor1 = authored['chat.inputWorkingBorderColor1'] ?? primary.base;
     chat.inputWorkingBorderColor2 = authored['chat.inputWorkingBorderColor2'] ?? primary.hover;
     chat.inputWorkingBorderColor3 = authored['chat.inputWorkingBorderColor3'] ?? primary.muted;
-    chat.divider = border(chat.divider ?? interactive.border, dark ? 1.442 : 1.427);
+    chat.divider = border(chat.divider ?? interactive.border, caps.divider);
   }
   if (theme.colors.pr) theme.colors.pr.draft = surface.mutedForeground;
   if (tools) {
-    tools.border = border(tools.border ?? interactive.border, dark ? 1.207 : 1.231);
+    tools.border = border(tools.border ?? interactive.border, caps.tools);
     tools.title = surface.foreground;
     tools.description = surface.mutedForeground;
     tools.icon = surface.mutedForeground;
@@ -138,13 +154,13 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     markdown.bold = mixColor(neutral, surface.foreground, 0.12, canvas);
     markdown.italic = surface.foreground;
     markdown.blockquote = surface.mutedForeground;
-    markdown.blockquoteBorder = border(markdown.blockquoteBorder ?? interactive.border, dark ? 1.442 : 1.427);
-    markdown.hr = border(markdown.hr ?? interactive.border, dark ? 1.442 : 1.427);
+    markdown.blockquoteBorder = border(markdown.blockquoteBorder ?? interactive.border, caps.divider);
+    markdown.hr = border(markdown.hr ?? interactive.border, caps.divider);
     markdown.link = readable(authored['textLink.foreground'] ?? primary.base);
     markdown.linkHover = readable(authored['textLink.activeForeground'] ?? primary.hover);
     markdown.listMarker = withOpacity(primary.base, 0.6);
-    markdown.inlineCode = surface.foreground;
     markdown.inlineCodeBackground = surface.subtle;
+    markdown.inlineCode = readableText(readable(authored['textPreformat.foreground'] ?? primary.base), surface.subtle, canvas);
   }
   syntax.base.background = toward(syntax.base.background, canvas, (color) => contrast(color, canvas) <= 1.1);
   syntax.base.foreground = readableText(surface.foreground, syntax.base.background, canvas);

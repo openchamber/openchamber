@@ -14,12 +14,18 @@ import cursor_dark_Raw from './cursor-dark.json';
 import cursor_light_Raw from './cursor-light.json';
 import dracula_dark_Raw from './dracula-dark.json';
 import dracula_light_Raw from './dracula-light.json';
+import everforest_dark_Raw from './everforest-dark.json';
+import everforest_light_Raw from './everforest-light.json';
+import github_dark_Raw from './github-dark.json';
+import github_light_Raw from './github-light.json';
 import gruvbox_dark_Raw from './gruvbox-dark.json';
 import gruvbox_light_Raw from './gruvbox-light.json';
 import jetbrains_dark_Raw from './jetbrains-dark.json';
 import jetbrains_light_Raw from './jetbrains-light.json';
 import kanagawa_dark_Raw from './kanagawa-dark.json';
 import kanagawa_light_Raw from './kanagawa-light.json';
+import material_dark_Raw from './material-dark.json';
+import material_light_Raw from './material-light.json';
 import monokai_dark_Raw from './monokai-dark.json';
 import monokai_light_Raw from './monokai-light.json';
 import nightowl_dark_Raw from './nightowl-dark.json';
@@ -34,12 +40,16 @@ import onedarkpro_dark_Raw from './onedarkpro-dark.json';
 import onedarkpro_light_Raw from './onedarkpro-light.json';
 import opencode_dark_Raw from './opencode-dark.json';
 import opencode_light_Raw from './opencode-light.json';
+import rosepine_dark_Raw from './rosepine-dark.json';
+import rosepine_light_Raw from './rosepine-light.json';
 import solarized_dark_Raw from './solarized-dark.json';
 import solarized_light_Raw from './solarized-light.json';
 import tokyonight_dark_Raw from './tokyonight-dark.json';
 import tokyonight_light_Raw from './tokyonight-light.json';
 import vesper_dark_Raw from './vesper-dark.json';
 import vesper_light_Raw from './vesper-light.json';
+import vercel_dark_Raw from './vercel-dark.json';
+import vercel_light_Raw from './vercel-light.json';
 import mono_plus_dark_Raw from './mono-plus-dark.json';
 import mono_plus_light_Raw from './mono-plus-light.json';
 import mono_dark_Raw from './mono-dark.json';
@@ -62,12 +72,18 @@ export const presetThemes: Theme[] = [
   cursor_light_Raw,
   dracula_dark_Raw,
   dracula_light_Raw,
+  everforest_dark_Raw,
+  everforest_light_Raw,
+  github_dark_Raw,
+  github_light_Raw,
   gruvbox_dark_Raw,
   gruvbox_light_Raw,
   jetbrains_dark_Raw,
   jetbrains_light_Raw,
   kanagawa_dark_Raw,
   kanagawa_light_Raw,
+  material_dark_Raw,
+  material_light_Raw,
   monokai_dark_Raw,
   monokai_light_Raw,
   nightowl_dark_Raw,
@@ -80,12 +96,16 @@ export const presetThemes: Theme[] = [
   onedarkpro_light_Raw,
   opencode_dark_Raw,
   opencode_light_Raw,
+  rosepine_dark_Raw,
+  rosepine_light_Raw,
   solarized_dark_Raw,
   solarized_light_Raw,
   tokyonight_dark_Raw,
   tokyonight_light_Raw,
   vesper_dark_Raw,
   vesper_light_Raw,
+  vercel_dark_Raw,
+  vercel_light_Raw,
   mono_plus_dark_Raw,
   mono_plus_light_Raw,
   mono_dark_Raw,

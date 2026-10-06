@@ -8,10 +8,9 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { resolveThemeVariant } from '../../opencode/packages/ui/src/theme/resolve';
 import { resolveThemeVariantV2 } from '../../opencode/packages/ui/src/theme/v2/resolve';
-import { hexToOklch } from '../../opencode/packages/ui/src/theme/color';
 import { importVSCodeTheme } from '../packages/ui/src/lib/theme/vscode/import';
 import { compactTheme, requireTheme, type ThemeDefinition } from '../packages/ui/src/lib/theme/definition';
-import { chromaticDistance, contrastRatio, mixColor, onColor, readableText, rotateColorHue, withOpacity } from '../packages/ui/src/lib/theme/color';
+import { mixColor, onColor, readableText } from '../packages/ui/src/lib/theme/color';
 
 // The source checkout must be installed beside OpenChamber. It is read-only.
 const sourceRoot = resolve(import.meta.dirname, '../../opencode/packages/ui/src');
@@ -70,22 +69,14 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
   const canvas = mixColor(color('v2-background-bg-base'), dark ? '#000000' : '#ffffff', 1);
   const sidebar = mixColor(color('v2-background-bg-deep'), canvas, 1);
   const elevated = mixColor(color('v2-background-bg-layer-01'), canvas, 1);
-  const text = readableText(readableText(color('v2-text-text-base'), canvas), sidebar, canvas);
-  // Some palettes collapse the canvas and first layer. Keep the bubble visible
-  // before choosing its shared text, so contrast adaptation can keep both.
-  const bubble = (contrastRatio(elevated, canvas) ?? 0) >= 1.1 ? elevated
-    : [0.08, 0.12, 0.16, 0.24, 0.32].map((amount) => mixColor(text, canvas, amount))
-      .find((background) => (contrastRatio(background, canvas) ?? 0) >= 1.1);
-  if (!bubble) throw new Error(`Cannot derive a visible message background for ${source.id}/${mode}`);
-  const foreground = readableText(text, bubble, canvas);
+  const foreground = color('v2-text-text-base');
   const selection = color('v2-background-bg-layer-03');
   const accent = color('v2-text-text-accent');
   const palette = {
     'chat.list.background': canvas,
     'foreground': foreground,
     'interactive-session.foreground': foreground,
-    // Lift subdued source hints while retaining their secondary role.
-    'descriptionForeground': mixColor(foreground, readableText(color('v2-text-text-muted'), canvas), 0.1, canvas),
+    'descriptionForeground': color('v2-text-text-muted'),
     'sideBar.background': sidebar,
     'sideBar.foreground': foreground,
     'editorWidget.background': elevated,
@@ -117,7 +108,7 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
     'gitDecoration.modifiedResourceForeground': color('icon-diff-modified-base'),
     'diffEditor.insertedLineBackground': color('surface-diff-add-base'),
     'diffEditor.removedLineBackground': color('surface-diff-delete-base'),
-    'chat.requestBubbleBackground': bubble,
+    'chat.requestBubbleBackground': elevated,
     'textPreformat.foreground': color('markdown-code'),
     'textPreformat.background': color('background-stronger'),
     'textBlockQuote.foreground': color('markdown-block-quote'),
@@ -140,43 +131,6 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
       { scope: 'constant.character.escape', settings: { foreground: color('syntax-constant') } },
     ],
   }), `${source.id}.json`);
-  // Add 3 percentage points of border opacity, preserving hue and dividers.
-  const previousBorder = imported.colors.interactive.border;
-  const alpha = /^#[\da-f]{6}([\da-f]{2})$/i.exec(previousBorder)?.[1];
-  if (!alpha) throw new Error(`Expected a normalized alpha border for ${source.id}/${mode}`);
-  const border = withOpacity(previousBorder, Math.min(1, parseInt(alpha, 16) / 255 + 0.03));
-  imported.colors.interactive.border = border;
-  if (imported.colors.chat?.divider === previousBorder) imported.colors.chat.divider = border;
-  if (imported.colors.tools?.border === previousBorder) imported.colors.tools.border = border;
-  if (imported.colors.markdown?.blockquoteBorder === previousBorder) imported.colors.markdown.blockquoteBorder = border;
-  // Small activity dots need different hues, not just different saturation.
-  // Prefer an authored syntax accent; preserve syntax itself unchanged.
-  const resolved = requireTheme(imported);
-  const { primary, status, interactive } = resolved.colors;
-  const surfaces = [canvas, sidebar, elevated, mixColor(interactive.selection, sidebar, 1, canvas)]
-    .filter((background) => onColor(background, canvas) === onColor(sidebar, canvas));
-  const readableInfo = (seed: string) => surfaces.reduce((value, background) => readableText(value, background, canvas), seed);
-  const distinctInfo = (candidate: string) => surfaces.every((background) => {
-    const first = hexToOklch(hex.parse(mixColor(primary.base, background, 1, canvas)));
-    const second = hexToOklch(hex.parse(mixColor(candidate, background, 1, canvas)));
-    const hueGap = Math.abs(((second.h - first.h + 540) % 360) - 180);
-    return (chromaticDistance(primary.base, candidate, background, canvas) ?? 0) >= 0.12
-      && (first.c < 0.025 || hueGap >= 70);
-  });
-  if (!distinctInfo(status.info)) {
-    const candidates = ['syntax-constant', 'syntax-keyword', 'syntax-type', 'syntax-property', 'syntax-string']
-      .map(color).map(readableInfo);
-    const avoidsOtherStatuses = (candidate: string) => [status.error, status.warning, status.success]
-      .every((other) => (chromaticDistance(candidate, other, sidebar, canvas) ?? 0) >= 0.1);
-    const rotated = [90, -90, 120, -120, 180].map((angle) => readableInfo(rotateColorHue(primary.base, angle, 0.18)));
-    const info = [...candidates, ...rotated].find((candidate) => distinctInfo(candidate) && avoidsOtherStatuses(candidate))
-      ?? rotated.find(distinctInfo);
-    if (!info) throw new Error(`Cannot separate primary and info for ${source.id}/${mode}`);
-    imported.colors.status.info = info;
-    imported.colors.status.infoForeground = onColor(info, canvas);
-    imported.colors.status.infoBackground = withOpacity(info, dark ? 0.16 : 0.12);
-    imported.colors.status.infoBorder = withOpacity(info, dark ? 0.45 : 0.35);
-  }
   const result = compactTheme({
     ...imported,
     metadata: {
@@ -191,13 +145,6 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
       syntax: {
         ...imported.colors.syntax,
         tokens: { ...imported.colors.syntax.tokens, regex: color('syntax-regexp') },
-      },
-      markdown: {
-        ...imported.colors.markdown,
-        link: color('markdown-link'), linkHover: color('markdown-link-text'),
-        inlineCode: color('markdown-code'), blockquote: color('markdown-block-quote'),
-        listMarker: color('markdown-list-item'), bold: mixColor(dark ? '#ffffff' : '#000000', imported.colors.surface.foreground, 0.1, canvas),
-        italic: color('markdown-emph'), hr: color('markdown-horizontal-rule'),
       },
     },
   });

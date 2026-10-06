@@ -45,8 +45,8 @@ describe('VS Code theme import', () => {
     expect(contrastRatio(theme.colors.surface.elevated, theme.colors.surface.background)).toBeLessThanOrEqual(1.1);
     expect(contrastRatio(theme.colors.surface.elevatedForeground, theme.colors.surface.elevated)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(theme.colors.surface.muted, '#000000')).toBeLessThan(contrastRatio(theme.colors.surface.background, '#000000')!);
-    expect(theme.colors.interactive.selection).toBe('#223366');
-    expect(theme.colors.interactive.selectionForeground).toBe('#ccddff');
+    expect(contrastRatio(theme.colors.interactive.selection, theme.colors.surface.elevated, theme.colors.surface.background)).toBeLessThanOrEqual(1.5);
+    expect(contrastRatio(theme.colors.interactive.selectionForeground, theme.colors.interactive.selection, theme.colors.surface.background)).toBeGreaterThanOrEqual(4.5);
     expect(theme.colors.syntax.base.keyword).toBe('#aa66ff');
     expect(theme.colors.syntax.tokens?.keywordImport).toBe('#cc88ff');
     expect(theme.colors.syntax.base.function).toBe('#55bbff');

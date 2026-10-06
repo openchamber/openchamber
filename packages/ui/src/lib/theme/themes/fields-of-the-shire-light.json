@@ -31,7 +31,7 @@
       "subtle": "#f1ece1"
     },
     "interactive": {
-      "border": "#1a16121c",
+      "border": "#1a161215",
       "selection": "#1a16121a",
       "borderHover": "#1a161230",
       "focusRing": "#4a603040",
@@ -108,7 +108,7 @@
       "italic": "#514a40"
     },
     "tools": {
-      "border": "#1a16121a",
+      "border": "#1a161215",
       "icon": "#6c6459",
       "title": "#514a40",
       "description": "#6c6459",

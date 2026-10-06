@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { convertTheme, saveTheme, sourceSchema, tokenColor } from './port-opencode-theme';
 import { compactTheme, requireTheme } from '../packages/ui/src/lib/theme/definition';
-import { chromaticDistance, contrastRatio, mixColor } from '../packages/ui/src/lib/theme/color';
+import { colorHue, contrastRatio, mixColor } from '../packages/ui/src/lib/theme/color';
 import { resolveThemeVariant } from '../../opencode/packages/ui/src/theme/resolve';
 import { resolveThemeVariantV2 } from '../../opencode/packages/ui/src/theme/v2/resolve';
 
@@ -42,9 +42,19 @@ test('all App variants retain syntax and diff colors, readable roles and round-t
       assert.ok((contrastRatio(theme.colors.surface.foreground, bubble, theme.colors.surface.background) ?? 0) >= 4.5, `${source.id}/${mode} message text`);
       assert.ok((contrastRatio(theme.colors.primary.base, theme.colors.surface.muted) ?? 0) >= 4.5, `${source.id}/${mode} primary`);
       assert.ok((contrastRatio(theme.colors.status.info, theme.colors.surface.muted) ?? 0) >= 4.5, `${source.id}/${mode} info`);
-      assert.ok((chromaticDistance(theme.colors.primary.base, theme.colors.status.info, theme.colors.surface.muted, theme.colors.surface.background) ?? 0) >= 0.12,
-        `${source.id}/${mode} distinct activity colors`);
-      assert.equal(theme.colors.markdown?.bold, mixColor(mode === 'dark' ? '#ffffff' : '#000000', theme.colors.surface.foreground, 0.1, theme.colors.surface.background));
+      for (const [color, low, high] of [
+        [theme.colors.status.info, 230, 275], [theme.colors.status.success, 125, 165],
+        [theme.colors.status.error, 10, 40], [theme.colors.status.warning, 65, 100],
+        [theme.colors.pr?.merged ?? '', 285, 325], [theme.colors.pr?.blocked ?? '', 40, 65],
+      ] as const) {
+        const hue = colorHue(color, theme.colors.surface.background);
+        assert.ok(hue !== null && hue >= low && hue <= high, `${source.id}/${mode} semantic hue ${color}`);
+      }
+      for (const background of [theme.colors.surface.background, theme.colors.surface.muted, theme.colors.surface.elevated]) {
+        assert.ok((contrastRatio(theme.colors.interactive.border, background, theme.colors.surface.background) ?? Infinity) <= (mode === 'dark' ? 1.245 : 1.268), `${source.id}/${mode} quiet border`);
+      }
+      assert.equal(theme.colors.markdown?.bold, mixColor(mode === 'dark' ? '#ffffff' : '#000000', theme.colors.surface.foreground, 0.12, theme.colors.surface.background));
+      assert.equal(theme.colors.markdown?.italic, theme.colors.surface.foreground);
       assert.ok(!JSON.stringify(theme).includes('var(--'));
       assert.ok(!ids.has(theme.metadata.id));
       ids.add(theme.metadata.id);

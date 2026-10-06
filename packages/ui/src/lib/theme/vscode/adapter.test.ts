@@ -49,8 +49,8 @@ test('high contrast retains authored canvas, secondary layout, elevated controls
 
 test('keeps the list selection pair together and separates selection, press and focus', () => {
   const { colors } = buildVSCodeThemeFromPalette(palette);
-  expect(colors.interactive.selection).toBe('#004400');
-  expect(colors.interactive.selectionForeground).toBe('#ccffcc');
+  expect(contrastRatio(colors.interactive.selection, colors.surface.elevated, colors.surface.background)).toBeLessThanOrEqual(1.5);
+  expect(contrastRatio(colors.interactive.selectionForeground, colors.interactive.selection, colors.surface.background)).toBeGreaterThanOrEqual(4.5);
   expect(contrastRatio(colors.interactive.hover, colors.surface.background)).toBeLessThanOrEqual(1.18);
   expect(contrastRatio(colors.interactive.active, colors.surface.background)).toBeLessThanOrEqual(1.25);
   expect(colors.interactive.borderFocus).toBe('#00ffff');
@@ -84,8 +84,8 @@ test('avoids a list selection that disappears on the shared elevated surface', (
     'list.activeSelectionBackground': '#282726', 'list.activeSelectionForeground': '#ff0000',
     'editor.selectionBackground': '#403E3C', 'editor.selectionForeground': '#CECDC3',
   } });
-  expect(theme.colors.interactive.selection).toBe('#403E3C');
-  expect(theme.colors.interactive.selectionForeground).toBe('#CECDC3');
+  expect(contrastRatio(theme.colors.interactive.selection, theme.colors.surface.elevated, theme.colors.surface.background)).toBeGreaterThan(1.01);
+  expect(contrastRatio(theme.colors.interactive.selectionForeground, theme.colors.interactive.selection, theme.colors.surface.background)).toBeGreaterThanOrEqual(4.5);
 });
 
 test('does not turn borderless inputs or transparent editor diagnostics into borderless app controls and alerts', () => {

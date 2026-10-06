@@ -102,7 +102,7 @@
     },
     "chat": {
       "userMessageBackground": "#292722",
-      "divider": "#f0e6d81c",
+      "divider": "#f0e6d81a",
       "background": "#1b1815"
     },
     "markdown": {
@@ -111,13 +111,13 @@
       "inlineCode": "#93a56b",
       "inlineCodeBackground": "#191613",
       "blockquote": "#a89888",
-      "blockquoteBorder": "#f0e6d81c",
+      "blockquoteBorder": "#f0e6d81a",
       "listMarker": "#c47a3a99",
       "bold": "#cec5b6",
       "italic": "#c9beae"
     },
     "tools": {
-      "border": "#f0e6d812",
+      "border": "#f0e6d80f",
       "icon": "#978e7f",
       "title": "#c9beae",
       "description": "#978e7f",
