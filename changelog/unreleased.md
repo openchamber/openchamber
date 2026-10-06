@@ -15,7 +15,6 @@ title: Initialize Git and keep your picked model
 - Startup: when the app takes more than 10 seconds to start, a line under the logo says so (thanks to @yulia-ivashko).
 - Sidebar: Shift+click deletes a worktree that was never pushed without asking, when it has no changes and all its commits are already in main (thanks to @yulia-ivashko).
 - Extensions: installing a private repository you have no access to says so and points you to its SSH address.
-- Issue and PR picker: titles stand out from ids, authors and labels, and search sits next to the tabs.
 
 ### Fixes
 - Chat: on a phone or a remote browser whose clock runs ahead of the server, a sent message no longer stays stuck on "OpenCode did not start a reply" until you reload.
@@ -24,6 +23,7 @@ title: Initialize Git and keep your picked model
 - Commit messages, PR descriptions, walkthroughs and session assist stay on the provider and model you picked.
 - Settings: the interface language stays after browser storage is cleared and carries over to your other devices (thanks to @yulia-ivashko).
 - Sidebar: sessions you marked done stay out of "In work" (thanks to @yulia-ivashko).
+- Settings/Providers: a custom Jev endpoint is used exactly as you paste it, so a company proxy that serves Jev on its own path works.
 - Usage: xAI Grok with a SuperGrok subscription stays signed in overnight (thanks to @DeryFerd).
 - Login: on a server with a UI password, the first message after logging in from a new browser sends (thanks to @yulia-ivashko).
 - Sidebar: on a fresh install, the chats group shows the first chat without a "Could not initialize workspace" error (thanks to @yulia-ivashko).
