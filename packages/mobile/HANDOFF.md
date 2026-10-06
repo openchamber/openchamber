@@ -148,6 +148,27 @@ iOS Simulator helpers: `mobile:sim:{boot,install,launch,run,serve,list,kill}` (s
   the Capacitor shell.
 - **Android push needs the app rebuilt with `google-services.json`**; without it `register()` used
   to crash ("Default FirebaseApp is not initialized"). Registration is gated to iOS/Android natives.
+- **User scripts go in `capacitorDidLoad()`.** Capacitor replaces the `userContentController` after
+  `webViewConfiguration(for:)`, silently dropping scripts added there (`BridgeViewController` in
+  `AppDelegate.swift`).
+- **`embedded.mobileprovision` decodes as `.isoLatin1`.** It is a binary CMS envelope around a plist;
+  `.ascii`/`.utf8` return nil and the APNs environment silently falls back. APNs delivery is grouped
+  per token by the environment it registered with (Xcode build → sandbox, TestFlight/App Store →
+  production); `OPENCHAMBER_APNS_ENVIRONMENT` is only a global override. For "no push on the phone",
+  check `~/.config/openchamber/apns-tokens.json` and remember the phone talks to the installed
+  desktop app's server, which runs its own (possibly older) code.
+- **Native HTTP always sends the WebView's cookies**, whatever `credentials` says, so a leftover
+  `oc_ui_session` rides along with every request. That is why `/auth/session` lets an explicit
+  `Authorization: Bearer` decide alone: a revoked bearer must answer 401 even with a valid cookie.
+  curl never reproduces this; an on-screen log of the cold-start decisions on the device did.
+- **Touch-target floors in `mobile.css` beat Tailwind sizes.** `button`, `[role=button]` and inputs
+  get `min-height: 36px` under `:root.mobile-pointer:not(.desktop-runtime)`, more specific than any
+  utility. Size mobile rows with an explicit `h-*` (`h-9` is exactly the floor); go below it only with
+  an inline `minHeight: 0`.
+- **A custom Control Center icon** must be a custom SF Symbol (`swiftdraw --format sfsymbol`, default
+  Small variants) built from an SVG that keeps its `transform` attributes, drawn with bold strokes,
+  referenced as `Label("…", image: "OCLogoSymbol")`. Control Center caches icons system-wide: after
+  changing one, reboot the device.
 
 ## Validation
 

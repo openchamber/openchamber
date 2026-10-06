@@ -20,6 +20,16 @@ again; turning it off deletes the reasoning rows at once. The UI asks without
 reasoning (`reasoning=0`) while the reader hides reasoning traces. On the maintainer's machine
 that is ~3 MB of text in ~13 MB of index; tool output alone would be ~200 MB.
 
+Scale, measured 2026-10-01 on a synthetic 9072-session / 196k-message index:
+a rare word answers in 1 ms, a very common one in 15 ms (max 25), a
+single-session search in 12 ms, and the file is ~560 MB (the trigram index is
+about five times the text; a word tokenizer would be ~200 MB but loses in-word
+and CJK matching). A full backfill of 189 root sessions against a real
+OpenCode took 13.7 s and 700 requests with no event-loop block over 50 ms;
+blocking is bounded per page, not by session count. To bench against a
+throwaway OpenCode: `env -i HOME PATH TMPDIR OPENCODE_SERVER_PASSWORD=<throwaway> opencode serve --port 4999`
+(Basic auth user `opencode`).
+
 ## Opt-in
 
 Search is off until `messageSearchEnabled` (instance scope, `settings.json`)

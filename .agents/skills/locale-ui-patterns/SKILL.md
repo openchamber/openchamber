@@ -9,6 +9,10 @@ description: Use when creating or modifying OpenChamber UI text, labels, buttons
 
 User-facing UI text must go through `@/lib/i18n`; do not hardcode English strings in components.
 
+## What the text says
+
+UI text tells the person what they get and what to do: what an option gives them, what happened, what fixes it. Engineering reasons (layout jumps, races, what the code avoids) belong in code comments and commit messages. Example: "Shows the model's thinking as it arrives. When off, the block stays folded and opens with a click." An error names the known cause and the action ("reconnect the repository's account in Settings"), never a generic "something went wrong" when the cause is known; correcting such text is ordinary implementation work, not a product decision.
+
 ## Translate everything immediately (no English placeholders)
 
 Every key you add to a non-English dictionary MUST contain a real translation in that language — never the English source string as a stand-in. There is NO "leave it in English for now" convention in this project; if an agent told you there was, it was wrong. Copying the English value into `es.ts`/`fr.ts`/`ko.ts`/`pl.ts`/`pt-BR.ts`/`uk.ts`/`zh-CN.ts`/`zh-TW.ts` is a defect, not a deferral. The app ships every locale at once, so an untranslated key is a visible bug for those users.

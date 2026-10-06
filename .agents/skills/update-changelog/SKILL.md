@@ -46,6 +46,12 @@ Where a change goes:
 - **SDK** — capabilities and API changes for extension authors, under `## App`, after Fixes and before Misc. Name the API and what an author can build with it. User-visible extension features and fixes stay in the regular groups.
 - **Misc** — bundled tool versions, packaging, platform support, retirements. Rarely more than a few lines.
 
+The maintainer's calls on the borderline cases:
+
+- A rework of something that already existed (multi-run moved into the composer) is an **Improvement**, however large.
+- Something that made the app hang or stutter (tooltips or menus jolting the whole window) is a **Fix**, named by that symptom.
+- Minor polish (a dialog laid out in two columns, quieter metadata text) gets no bullet at all.
+
 The generator emits the groups in this order whatever order the source lists them and drops empty ones; version, date, and headers are its concern, not yours.
 
 ## The title

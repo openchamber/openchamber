@@ -47,6 +47,51 @@ cd <a project directory> && node <repo>/packages/web/bin/cli.js serve --port 459
 `profile:idle` and `profile:session` need a running server; `profile:animation`
 serves its own fixture and needs nothing.
 
+## Running An Isolated Copy
+
+Any server, dev shell or Electron an agent starts for a check runs beside the
+maintainer's own app and dev shell, on the same machine.
+
+- **Own data dir, own env.** Use a scratch `OPENCHAMBER_DATA_DIR` (and `HOME`
+  where the run needs one); a headless client on the real
+  `~/.config/openchamber` writes its default theme into the user's settings and
+  the desktop app flips themes. Copy `settings.json` in, minus
+  `desktopUiPassword`, when the run needs the saved projects or hosts. A shell
+  inside the desktop app inherits its `OPENCHAMBER_*` variables (UI password,
+  dist dir, agent-tool URL and token) and `OPENCODE_PASSWORD`: start copies
+  with `env -i HOME USER PATH SHELL TMPDIR` or unset them first, and use
+  `OPENCODE_BINARY=/Applications/OpenChamber.app/Contents/Resources/opencode-cli/opencode`
+  when `~/.opencode/bin/opencode` lags the version the repo needs.
+- **Dev server:** from the repo root, after the env is clean,
+  `OPENCHAMBER_DATA_DIR=<scratch>/oc-data OPENCHAMBER_HMR_UI_PORT=5391 OPENCHAMBER_HMR_API_PORT=3991 bun run dev`
+  in the background; the UI is at `http://127.0.0.1:5391/`. It runs React
+  StrictMode, which detaches and reattaches ref callbacks right after mount.
+- **Packaged-UI Electron** (the `openchamber-ui://` origin, host windows,
+  shared localStorage): `bun run --cwd packages/electron build:web-assets`,
+  then from `packages/electron`, in the background,
+  `env -i … OPENCHAMBER_ELECTRON_DEV=1 OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1 OPENCHAMBER_DISABLE_PWA_DEV=1 OPENCHAMBER_DATA_DIR=<scratch>/oc-data OPENCHAMBER_DESKTOP_USER_DATA_DIR=<scratch>/electron-userdata bun x electron ./entry.mjs --remote-debugging-port=9339`.
+  The userData override avoids the installed app's single-instance lock; the
+  window does appear on screen, and its logs mix into
+  `~/Library/Logs/OpenChamber/main.log`.
+- **Probes:** drive pages through `cdp.mjs` (`http://127.0.0.1:<port>/json/list`).
+  Wait about 10 s after load before clicking, or navigation is ignored. Keep
+  probe scripts in the gitignored `tmp/`. For chat scrolling, sample
+  `scrollTop`/`scrollHeight` every frame against the fixture provider
+  (`fixture-provider.mjs`, model `perf/stream-300cps`), with the project
+  directory outside `/tmp` (the `/private/tmp` symlink changes behaviour), and
+  run 4 to 6 times per variant, because scroll bugs are often intermittent.
+  The in-app browser panel cannot wheel-scroll the inner chat scroller, and
+  an occluded preview tab runs one frame per 500 ms, so its measurements lie.
+- **One heavy job at a time.** A UI type-check, a build, a dev stack and a
+  headless Chrome each take gigabytes; several at once have frozen the machine.
+  Run at most one type-check or build per round (parallel agents run only
+  single-file tests), and one live probe per round, at the end.
+- **Stop exactly what you started.** Record each PID at launch and stop that
+  process tree; a pattern kill (`pkill -f vite`, `pkill -f "cli.js serve"`)
+  also hits the maintainer's dev shell, which runs the same scripts. Before a
+  heavy run, check for orphaned headless Chromes and `opencode serve`
+  processes from earlier probes and report them.
+
 ## profile:idle
 
 Loads the app, lets it settle, then records a window during which no input is
@@ -298,6 +343,12 @@ to construct and its first `ready-to-show` follows ~70 ms later; importing
 the server module graph costs ~300 ms of main-thread time. A window whose
 first paint is queued behind that import shows at ~600 ms; created on `ready`
 and given the thread until it is on screen, it shows at ~320 ms.
+
+The next known cost: `getLoginShellEnvSnapshot` in
+`packages/web/server/lib/opencode/env-runtime.js` runs `$SHELL -lic 'env -0'`
+synchronously on the Electron main thread during OpenCode bootstrap, although
+Desktop already merged the same probe into `process.env`, so the user's shell
+startup is paid twice.
 
 ## Reading The Results
 

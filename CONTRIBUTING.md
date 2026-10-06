@@ -178,6 +178,11 @@ module-level singletons, so `scripts/run-isolated-tests.mjs` gives each test fil
 its own process instead of letting load order decide the result. Run a single
 file directly while iterating (`bun test <file>`).
 
+UI tests run on happy-dom, where DOMPurify stops visiting the siblings of a node
+it removed: test each malicious payload in its own call, or a combined payload
+passes or fails for the wrong reason. The UI's `bun:test` type shim is trimmed
+(no `test.each`, no `toMatch`): use loops and `regex.test()` with `toBe`.
+
 For docs-only changes, validation may be enough:
 
 ```bash

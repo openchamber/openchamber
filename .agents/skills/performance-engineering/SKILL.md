@@ -186,6 +186,8 @@ Before virtualizing a collection, define:
 - initialization, remount, and activation-threshold behavior;
 - interactions that depend on mounted DOM, including incremental reveal, focus, selection, drag-and-drop, menus, and accessibility traversal.
 
+Lists here use `@tanstack/react-virtual`; the chat transcript uses LegendList (`components/chat/lib/scroll/DOCUMENTATION.md`). Known traps: a virtualizer enabled before its scroll element exists caches offset 0 and scrolls the scroller to the top on attach, so enable it only once the element is known; row margins collapse in plain flow but not across virtual wrappers, so spacing doubles when virtualization kicks in; `getVirtualItems()[0]` is the overscan boundary, not the first visible row; a scroller hosting a virtualizer sets `overflow-anchor: none`. `bun-patches/@tanstack+virtual-core+*.patch` clamps the render range to real scroll bounds inside a shared scroller: carry it over when bumping the dependency.
+
 When activation is threshold-based, test threshold minus one, threshold, and threshold plus one. Also test applicable collapsed/expanded, hidden/visible, filtered/unfiltered, and short/long transitions. If the current DOM or scroll topology cannot expose the virtual tail reliably, correct that topology or retain normal rendering rather than virtualizing solely by item count.
 
 ## Caching Rules
@@ -203,6 +205,13 @@ Do not introduce a cache merely to make an abstraction reusable or prepare for f
 
 A cache inside an `O(consumers × entities × candidates)` loop is a mitigation, not automatically a complete fix.
 
+## Known Costs In This Codebase
+
+- **On-demand surfaces load through `useOnDemandComponent`** (`hooks/useOnDemandComponent.ts`): import first, then render. A `React.lazy` component behind `Suspense` holds its real content at least 300 ms after the fallback shows (React's fallback throttle), whatever the CPU.
+- **A whole-UI freeze with a fast server and no event-loop lag is browser connection-pool starvation.** Server timing starts when Express receives a request; the browser's queue is invisible there. Background fan-out goes through the `lib/background-network.ts` gate (a cap, not `priority: 'low'`, which changes nothing), and slow third-party reads get a cap and a timeout.
+- **Freshness comes from signals, never idle traffic.** Relay bytes are paid, so nothing polls or streams while nothing happens: refresh from events the client already gets (agent tool calls, git status, own operations), only for what is visible, batched (the Files tree re-lists at most once per 2 s per surface and never auto-re-lists a folder whose last listing had over 1000 entries).
+- **Count processes on server Git paths.** Look for a git spawn per item, the same read repeated within one operation, and network calls (`ls-remote`, `fetch`) where local refs answer. Batch into one read (`git remote -v`, not `get-url` per remote), keep a fallback when the batched read fails, prove the output matches the old method, and parse with `/\r?\n/`: Git for Windows may print CRLF, and spawns cost more there.
+
 ## Repository Tooling
 
 `scripts/perf/DOCUMENTATION.md` is the entry point: it covers every capture
@@ -218,7 +227,6 @@ and extend them when a scenario is missing rather than measuring by hand.
 | `bun run profile:idle` | What the app does while nobody interacts with it. Supports `--session`, `--tab`, `--then-tab`, `--panel`, `--expand-projects` to reach a specific mounted state, plus `--baseline` and `--budget-*` for regression gating. |
 | `bun run profile:session` | What a streaming assistant response costs. Creates a session, dispatches a prompt through the `openchamber session` CLI, and records until the session reports idle. Reports the long-task distribution, a timeline-trace breakdown, running animations, and output-normalised metrics. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. Animate only `transform` and `opacity`; everything else recalculates style every frame. |
-| `bun run profile:switch` | How long switching sessions from the sidebar takes: `ack` (the clicked row highlights) and `content` (the target session's messages are on screen), cold and warm, plus the requests each switch fires. Use it as the regression gate for any change in the sidebar, header, chat container, or markdown first paint. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes: `ack` (the clicked row highlights) and `content` (the target session's messages are on screen), cold and warm, plus the requests each switch fires. Use it as the regression gate for any change in the sidebar, header, chat container, or markdown first paint. |
 | `bun run profile:browser` | A manually driven capture when the interaction cannot be scripted. |
 

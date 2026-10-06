@@ -58,6 +58,7 @@ Do not introduce raw `<Tooltip>`-based info icons, direct Remixicon components, 
 ## Description Policy (info hints)
 
 - Explanatory prose goes behind the info icon via the `info` prop by default.
+- An info hint is one or two short sentences that add what the label or summary does not say. It names no list of every action and carries no caveat that stopped being true (for example "applies after OpenCode restarts" for tools that now apply live).
 - When labels alone cannot explain the differences, consequences, or conditions needed to choose a setting, use a title, a visible description, then checkbox or radio controls. Option lists whose labels already read as complete choices (large-text paste modes, send shortcut) keep the explanation behind `info` even when it carries an exception. Having multiple options or a group title alone does not require a description; see `references/controls.md` for composition.
 - Stays visible: security/data-loss warnings, destructive consequences, required syntax/placeholder lists the user reads while typing, dynamic status, empty states, validation errors, active-flow wizard instructions.
 - Mixed text: keep the warning sentence visible, move the explanation to `info`.

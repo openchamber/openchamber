@@ -85,6 +85,36 @@ Open asks upstream (OpenCode Slack): declaring 500 bodies on session
 mutations. Dropped: an import route for missing 1.x
 sessions (the top-up workaround is enough). Check the newest tag before re-asking.
 
+## Behaviour to expect
+
+Verified against live 2.x servers; re-check on a newer tag before relying on a
+gap.
+
+- **A cold location's catalog is not authoritative.** The first provider/model
+  read for a directory not started yet answers an empty list, then a partial
+  one without plugin providers, and the full list about two seconds later,
+  announced by `provider.updated` / `model.updated` with that
+  `location.directory`. Recovery rides on those events (`markConfigCatalogStale`).
+- **Plugin providers exist only in the running OpenCode.** Nothing about them
+  reaches `opencode.json` or `auth.json`; `/api/provider` is the only view, and
+  it strips `options.fetch`, so nothing tells a directly callable provider from
+  one that only works through OpenCode. Without a zen login OpenCode sets
+  `options.apiKey = "public"` on zen and trims it to free models: those run on
+  OpenCode's infrastructure and are called only through OpenCode.
+- **A session whose directory was deleted** still reads, but location-scoped
+  requests answer 404 `LocationNotFoundError`. `STATUS_BY_TAG` does not map it
+  to 404 on purpose: `fetchPermission` reads 404 as "settled", which would let
+  auto-accept fail open. `POST /api/session/:id/move` works on such a session.
+- **A background shell has no clean cancel.** `shell.remove` kills the process
+  but hands the agent a `Shell.NotFoundError`, and agents relaunch the command,
+  so `stopBackgroundShell` posts a cancellation note to the agent first.
+- **`opencode run --agent X` uses the default model**, not the agent's: pass
+  `-m provider/model#variant` in batch runs.
+- **A scratch `opencode serve` started from the app's shell answers 401**:
+  the shell inherits the desktop's `OPENCODE_PASSWORD`, which wins over
+  `OPENCODE_SERVER_PASSWORD`. Start it with `env -u OPENCODE_PASSWORD` (Basic
+  auth user `opencode`).
+
 ## Sources of truth
 
 - Reference checkout `~/projects/opencode`, branch `origin/v2` and its

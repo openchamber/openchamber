@@ -48,6 +48,20 @@ export const presetThemes: Theme[] = [
 bun run type-check && bun run lint && bun run build
 ```
 
+### Judging a palette
+
+- Status colours keep their everyday meaning in light and dark variants:
+  success green, info blue, error red, warning amber. A purple info read as an
+  error and was rejected; tune the shade to its background, not the hue family.
+- Contrast numbers only point at candidates; the verdict comes from the real UI.
+  Look at body text, bold chat text and borders on the canvas, the sidebar and
+  elevated surfaces. Several dark built-ins (Dracula, Carbonfox, Aura, Monokai,
+  Mono Plus) were judged too harsh this way, Mono Plus's bold text and borders
+  most of all. For scale: dark Osaka Jade became comfortable when main text went
+  from about 11.9:1 to 10:1 and secondary from 7.4:1 to 5.9:1, with backgrounds
+  and accent unchanged. That is an example, not a target to flatten every
+  palette to.
+
 ## Authoring Tools
 
 Both do the mechanical work of steps 1–2 and are run by hand:
