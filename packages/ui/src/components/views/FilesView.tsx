@@ -101,6 +101,7 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopFileInApp, openDesktopPath } from '@/lib/desktop';
+import { registerCloseTabTarget } from '@/lib/closeTabTarget';
 import { isFileMissingError } from '@/lib/api/files-errors';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
 import { useKeybind, useKeybinds } from '@/hooks/useKeybind';
@@ -2510,6 +2511,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       setShowMobilePageContent(false);
     }
   }, [getNextOpenFile, handleSelectFile, isDirty, isMobile, openFiles, removeOpenPath, root, selectedFile?.path, setSelectedPath]);
+
+  // While a file is open here, Cmd/Ctrl+W closes its tab (asking first when
+  // it has unsaved edits) instead of the whole window.
+  const handleCloseFileRef = React.useRef(handleCloseFile);
+  React.useEffect(() => {
+    handleCloseFileRef.current = handleCloseFile;
+  }, [handleCloseFile]);
+  const closeTargetPath = selectedFile?.path ?? null;
+  React.useEffect(() => {
+    if (!visible || !closeTargetPath) return;
+    return registerCloseTabTarget(() => handleCloseFileRef.current(closeTargetPath));
+  }, [closeTargetPath, visible]);
 
   const openPathSet = React.useMemo(() => new Set(openPaths), [openPaths]);
   const statusIndex = React.useMemo(() => buildFileTreeStatusIndex(treeEnabled ? gitStatus?.files ?? [] : []), [gitStatus?.files, treeEnabled]);

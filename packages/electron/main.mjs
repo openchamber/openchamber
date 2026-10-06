@@ -2095,6 +2095,22 @@ const dispatchDomEventToWindow = (browserWindow, event, detail) => {
   void browserWindow.webContents.executeJavaScript(script, true).catch(() => {});
 };
 
+const closeTabTargets = new WeakSet();
+const closeTabWatched = new WeakSet();
+
+/** Cmd/Ctrl+W: the page's own tab when it has one open, else the window. */
+const closeTabOrWindow = () => {
+  // Only the focused window: with an About panel or nothing of ours in front,
+  // falling back to the main window would close the wrong thing.
+  const target = BrowserWindow.getFocusedWindow();
+  if (!target || target.isDestroyed()) return;
+  if (closeTabTargets.has(target.webContents)) {
+    dispatchDomEventToWindow(target, 'openchamber:close-tab');
+    return;
+  }
+  target.close();
+};
+
 const getMenuTargetWindow = () => {
   const focused = BrowserWindow.getFocusedWindow();
   if (focused && !focused.isDestroyed()) return focused;
@@ -3841,6 +3857,27 @@ const closeAllDevTunnels = () => {
 
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    // The page says whether Cmd/Ctrl+W has a tab of its own to close (a file
+    // open in Files). The menu decides in this process, so a page that never
+    // reports one, older or remote, keeps closing the window as before.
+    case 'desktop_set_close_tab_target': {
+      const contents = browserWindow && !browserWindow.isDestroyed() ? browserWindow.webContents : null;
+      if (!contents) return null;
+      if (args?.active === true) {
+        closeTabTargets.add(contents);
+        // A reload or navigation drops the page that registered; until the
+        // new page reports again, the shortcut closes the window.
+        if (!closeTabWatched.has(contents)) {
+          closeTabWatched.add(contents);
+          const forget = () => closeTabTargets.delete(contents);
+          contents.on('did-navigate', forget);
+          contents.on('render-process-gone', forget);
+        }
+      } else {
+        closeTabTargets.delete(contents);
+      }
+      return null;
+    }
     case 'desktop_pick_theme_file': {
       const { pickThemeFile } = await import('./theme-file-picker.mjs');
       return pickThemeFile({ showDialog: (options) => dialog.showOpenDialog(browserWindow || undefined, options) });
@@ -4911,7 +4948,7 @@ const buildMacMenu = (locale = 'en') => {
         { type: 'separator' },
         { label: t('addWorkspace'), click: () => dispatchAction('change-workspace') },
         { type: 'separator' },
-        roleItem('close', 'close'),
+        { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
     },
     {
@@ -4957,7 +4994,7 @@ const buildMacMenu = (locale = 'en') => {
         { label: t('zoomOut'), accelerator: 'CmdOrCtrl+-', click: () => dispatchAction('zoom-out') },
         { label: t('resetZoom'), accelerator: 'CmdOrCtrl+0', click: () => dispatchAction('zoom-reset') },
         { type: 'separator' },
-        roleItem('close', 'close'),
+        { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
     },
     {
@@ -5077,7 +5114,7 @@ const buildAutoHiddenMenu = (locale = 'en') => {
         { label: t('resetZoom'), accelerator: 'Ctrl+0', click: () => dispatchAction('zoom-reset') },
         roleItem('togglefullscreen', 'toggleFullScreen'),
         { type: 'separator' },
-        roleItem('close', 'close'),
+        { label: t('close'), accelerator: 'CmdOrCtrl+W', click: closeTabOrWindow },
       ],
     },
     {
@@ -5180,6 +5217,7 @@ const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_new_window_for_host',
   'desktop_set_window_title',
   'desktop_set_window_theme',
+  'desktop_set_close_tab_target',
   'desktop_is_window_fullscreen',
   'desktop_start_window_drag',
   'desktop_minimize_current_window',
