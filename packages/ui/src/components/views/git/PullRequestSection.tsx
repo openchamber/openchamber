@@ -57,8 +57,8 @@ import {
   hasUnknownMutationOutcomeCode,
   reconcileUnknownMutationOutcome,
 } from './sourceControlMutationOutcome';
+import { readMergeMethod, rememberMergeMethod, type MergeMethod } from './mergeMethodPreference';
 
-type MergeMethod = 'merge' | 'squash' | 'rebase';
 type PrSegment = 'overview' | 'checks' | 'comments';
 type PullRequest = NonNullable<SourceControlStatus['pr']>;
 
@@ -360,7 +360,7 @@ export const PullRequestSection: React.FC<{
     }
     return normalizeBranchRef(baseBranch);
   });
-  const [mergeMethod, setMergeMethod] = React.useState<MergeMethod>('squash');
+  const [mergeMethod, setMergeMethod] = React.useState<MergeMethod>(readMergeMethod);
 
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
@@ -1707,7 +1707,10 @@ export const PullRequestSection: React.FC<{
                 <>
                   <Select
                     value={mergeMethod}
-                    onValueChange={(value) => setMergeMethod(value as MergeMethod)}
+                    onValueChange={(value) => {
+                      setMergeMethod(value as MergeMethod);
+                      rememberMergeMethod(value as MergeMethod);
+                    }}
                     disabled={isMerging || pr.state !== 'open'}
                   >
                     <SelectTrigger size="sm" className="h-7 w-auto min-w-0">
