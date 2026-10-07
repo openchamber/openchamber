@@ -3,7 +3,7 @@ export const openCodeProjectImportI18n = {
   en: {
     'sessions.sidebar.projectImport.button': 'Import Projects',
     'sessions.sidebar.projectImport.title': 'Import Projects',
-    'sessions.sidebar.projectImport.description': 'Choose which OpenCode projects to add to OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Choose which existing OpenCode projects to add to OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Select all',
     'sessions.sidebar.projectImport.clearSelection': 'Clear selection',
     'sessions.sidebar.projectImport.selectProject': 'Select {project}',
@@ -14,7 +14,7 @@ export const openCodeProjectImportI18n = {
   de: {
     'sessions.sidebar.projectImport.button': 'Projekte importieren',
     'sessions.sidebar.projectImport.title': 'Projekte importieren',
-    'sessions.sidebar.projectImport.description': 'Wähle aus, welche OpenCode-Projekte zu OpenChamber hinzugefügt werden sollen.',
+    'sessions.sidebar.projectImport.description': 'Wähle aus, welche bestehenden OpenCode-Projekte zu OpenChamber hinzugefügt werden sollen.',
     'sessions.sidebar.projectImport.selectAll': 'Alle auswählen',
     'sessions.sidebar.projectImport.clearSelection': 'Auswahl aufheben',
     'sessions.sidebar.projectImport.selectProject': '{project} auswählen',
@@ -25,7 +25,7 @@ export const openCodeProjectImportI18n = {
   es: {
     'sessions.sidebar.projectImport.button': 'Importar proyectos',
     'sessions.sidebar.projectImport.title': 'Importar proyectos',
-    'sessions.sidebar.projectImport.description': 'Elige qué proyectos de OpenCode quieres añadir a OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Elige qué proyectos existentes de OpenCode quieres añadir a OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Seleccionar todos',
     'sessions.sidebar.projectImport.clearSelection': 'Borrar selección',
     'sessions.sidebar.projectImport.selectProject': 'Seleccionar {project}',
@@ -36,7 +36,7 @@ export const openCodeProjectImportI18n = {
   fr: {
     'sessions.sidebar.projectImport.button': 'Importer des projets',
     'sessions.sidebar.projectImport.title': 'Importer des projets',
-    'sessions.sidebar.projectImport.description': 'Choisissez les projets OpenCode à ajouter à OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Choisissez les projets OpenCode existants à ajouter à OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Tout sélectionner',
     'sessions.sidebar.projectImport.clearSelection': 'Effacer la sélection',
     'sessions.sidebar.projectImport.selectProject': 'Sélectionner {project}',
@@ -47,7 +47,7 @@ export const openCodeProjectImportI18n = {
   ja: {
     'sessions.sidebar.projectImport.button': 'プロジェクトをインポート',
     'sessions.sidebar.projectImport.title': 'プロジェクトをインポート',
-    'sessions.sidebar.projectImport.description': 'OpenChamber に追加する OpenCode プロジェクトを選択してください。',
+    'sessions.sidebar.projectImport.description': 'OpenChamber に追加する既存の OpenCode プロジェクトを選択してください。',
     'sessions.sidebar.projectImport.selectAll': 'すべて選択',
     'sessions.sidebar.projectImport.clearSelection': '選択を解除',
     'sessions.sidebar.projectImport.selectProject': '{project} を選択',
@@ -58,7 +58,7 @@ export const openCodeProjectImportI18n = {
   ko: {
     'sessions.sidebar.projectImport.button': '프로젝트 가져오기',
     'sessions.sidebar.projectImport.title': '프로젝트 가져오기',
-    'sessions.sidebar.projectImport.description': 'OpenChamber에 추가할 OpenCode 프로젝트를 선택하세요.',
+    'sessions.sidebar.projectImport.description': 'OpenChamber에 추가할 기존 OpenCode 프로젝트를 선택하세요.',
     'sessions.sidebar.projectImport.selectAll': '모두 선택',
     'sessions.sidebar.projectImport.clearSelection': '선택 지우기',
     'sessions.sidebar.projectImport.selectProject': '{project} 선택',
@@ -69,7 +69,7 @@ export const openCodeProjectImportI18n = {
   nl: {
     'sessions.sidebar.projectImport.button': 'Projecten importeren',
     'sessions.sidebar.projectImport.title': 'Projecten importeren',
-    'sessions.sidebar.projectImport.description': 'Kies welke OpenCode-projecten je aan OpenChamber wilt toevoegen.',
+    'sessions.sidebar.projectImport.description': 'Kies welke bestaande OpenCode-projecten je aan OpenChamber wilt toevoegen.',
     'sessions.sidebar.projectImport.selectAll': 'Alles selecteren',
     'sessions.sidebar.projectImport.clearSelection': 'Selectie wissen',
     'sessions.sidebar.projectImport.selectProject': '{project} selecteren',
@@ -80,7 +80,7 @@ export const openCodeProjectImportI18n = {
   pl: {
     'sessions.sidebar.projectImport.button': 'Importuj projekty',
     'sessions.sidebar.projectImport.title': 'Importuj projekty',
-    'sessions.sidebar.projectImport.description': 'Wybierz projekty OpenCode, które chcesz dodać do OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Wybierz istniejące projekty OpenCode, które chcesz dodać do OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Zaznacz wszystkie',
     'sessions.sidebar.projectImport.clearSelection': 'Wyczyść wybór',
     'sessions.sidebar.projectImport.selectProject': 'Zaznacz {project}',
@@ -91,7 +91,7 @@ export const openCodeProjectImportI18n = {
   'pt-BR': {
     'sessions.sidebar.projectImport.button': 'Importar projetos',
     'sessions.sidebar.projectImport.title': 'Importar projetos',
-    'sessions.sidebar.projectImport.description': 'Escolha quais projetos do OpenCode adicionar ao OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Escolha quais projetos existentes do OpenCode adicionar ao OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Selecionar todos',
     'sessions.sidebar.projectImport.clearSelection': 'Limpar seleção',
     'sessions.sidebar.projectImport.selectProject': 'Selecionar {project}',
@@ -102,7 +102,7 @@ export const openCodeProjectImportI18n = {
   uk: {
     'sessions.sidebar.projectImport.button': 'Імпортувати проєкти',
     'sessions.sidebar.projectImport.title': 'Імпортувати проєкти',
-    'sessions.sidebar.projectImport.description': 'Виберіть проєкти OpenCode, які потрібно додати до OpenChamber.',
+    'sessions.sidebar.projectImport.description': 'Виберіть наявні проєкти OpenCode, які потрібно додати до OpenChamber.',
     'sessions.sidebar.projectImport.selectAll': 'Вибрати всі',
     'sessions.sidebar.projectImport.clearSelection': 'Очистити вибір',
     'sessions.sidebar.projectImport.selectProject': 'Вибрати {project}',
@@ -113,7 +113,7 @@ export const openCodeProjectImportI18n = {
   'zh-CN': {
     'sessions.sidebar.projectImport.button': '导入项目',
     'sessions.sidebar.projectImport.title': '导入项目',
-    'sessions.sidebar.projectImport.description': '选择要添加到 OpenChamber 的 OpenCode 项目。',
+    'sessions.sidebar.projectImport.description': '选择要添加到 OpenChamber 的现有 OpenCode 项目。',
     'sessions.sidebar.projectImport.selectAll': '全选',
     'sessions.sidebar.projectImport.clearSelection': '清除选择',
     'sessions.sidebar.projectImport.selectProject': '选择 {project}',
@@ -124,7 +124,7 @@ export const openCodeProjectImportI18n = {
   'zh-TW': {
     'sessions.sidebar.projectImport.button': '匯入專案',
     'sessions.sidebar.projectImport.title': '匯入專案',
-    'sessions.sidebar.projectImport.description': '選擇要新增至 OpenChamber 的 OpenCode 專案。',
+    'sessions.sidebar.projectImport.description': '選擇要新增至 OpenChamber 的現有 OpenCode 專案。',
     'sessions.sidebar.projectImport.selectAll': '全選',
     'sessions.sidebar.projectImport.clearSelection': '清除選取',
     'sessions.sidebar.projectImport.selectProject': '選取 {project}',
@@ -135,7 +135,7 @@ export const openCodeProjectImportI18n = {
   tr: {
     'sessions.sidebar.projectImport.button': 'Projeleri içe aktar',
     'sessions.sidebar.projectImport.title': 'Projeleri içe aktar',
-    'sessions.sidebar.projectImport.description': 'OpenChamber’a eklenecek OpenCode projelerini seçin.',
+    'sessions.sidebar.projectImport.description': 'OpenChamber’a eklenecek mevcut OpenCode projelerini seçin.',
     'sessions.sidebar.projectImport.selectAll': 'Tümünü seç',
     'sessions.sidebar.projectImport.clearSelection': 'Seçimi temizle',
     'sessions.sidebar.projectImport.selectProject': '{project} seç',
