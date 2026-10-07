@@ -3208,15 +3208,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     {!inlineMobileSelection && renderVariantSelector()}
                     {renderModelSelector()}
                     {inlineMobileSelection && renderVariantSelector()}
-                    {(!selection || agentSelectable) && !isAutoSelected && renderAgentSelector()}
+                    {(!selection || agentSelectable) && renderAgentSelector()}
                 </div>
             </div>
 
             {renderMobileModelPanel()}
             {renderMobileVariantPanel()}
-            {!selection && !isAutoSelected && renderMobileAgentPanel()}
+            {!selection && renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
-            {!selection && !isAutoSelected && renderMobileAgentTooltip()}
+            {!selection && renderMobileAgentTooltip()}
         </>
     );
 

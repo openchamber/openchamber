@@ -211,6 +211,7 @@ const useUIStore = create(() => ({
   isModelSelectorOpen: false,
   hiddenModels: [],
   providerOrder: [],
+  favoriteAgents: [],
   shortcutOverrides: {},
   isFavoriteModel: () => false,
   toggleFavoriteModel: () => undefined,
@@ -958,6 +959,38 @@ describe('ModelControls effort restore', () => {
       }
     });
 
+    for (const mobile of [false, true]) {
+      // A session can switch agent while the composer is on Auto, and the agent
+      // still decides how the next send runs, so the composer has to show it.
+      test(`shows the agent while Auto is selected (${mobile ? 'mobile' : 'desktop'})`, async () => {
+        withModels();
+        useUIStore.setState({ isMobile: mobile });
+        useConfigStore.setState({ agents: [agent, planAgent], agentsLoaded: true });
+        const selections = useSelectionStore.getState();
+        const auto = { providerId: AUTO_PROVIDER_ID, modelId: AUTO_MODEL_ID };
+        const spies = [spyOn(selections, 'getSessionModelSelection'), spyOn(selections, 'getAgentModelForSession')];
+        for (const spy of spies) spy.mockReturnValue(auto);
+        useRoutingStore.setState({ available: true, autoReady: true });
+        useConfigStore.setState({ currentProviderId: AUTO_PROVIDER_ID, currentModelId: AUTO_MODEL_ID });
+        setSessionRecord(recordWith(OTHER_MODEL_ID));
+        const { dom, cleanup } = await renderModelControls();
+        const agentLabel = () => dom.container.querySelector('.model-controls__agent-label')?.textContent;
+        try {
+          expect(agentLabel()).toBe('Build');
+          await act(async () => setSessionRecord(recordWith(OTHER_MODEL_ID, 'plan')));
+          await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
+          expect(useConfigStore.getState().currentModelId).toBe(AUTO_MODEL_ID);
+          expect(agentLabel()).toBe('Plan');
+        } finally {
+          await cleanup();
+          for (const spy of spies) spy.mockRestore();
+          useSelectionStore.setState(selections);
+          useUIStore.setState({ isMobile: false });
+          useRoutingStore.setState({ available: false, autoReady: false });
+        }
+      });
+    }
+
     for (const change of ['agent', 'model'] as const) {
       test(`Auto stays on screen when the session switches ${change}`, async () => {
         withModels();
@@ -980,7 +1013,8 @@ describe('ModelControls effort restore', () => {
           const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState();
           expect([currentProviderId, currentModelId]).toEqual([AUTO_PROVIDER_ID, AUTO_MODEL_ID]);
           expect(saveModel.mock.calls.some(([, providerId, modelId]) => !isAutoModel(providerId, modelId))).toBe(false);
-          // Auto hides the agent picker; the agent still follows for sends.
+          // The agent still decides how the next send runs, so it follows the
+          // record and stays on screen.
           if (change === 'agent') expect(currentAgentName).toBe('plan');
         } finally {
           await cleanup();

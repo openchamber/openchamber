@@ -212,8 +212,10 @@ Vercel or a custom endpoint is picked or answering (`legacyClassifier`). Current
 events (`selectSafetyNetAvailable` gates the safety-net mode everywhere);
 `hooks/useRoutingSync.ts` keeps it current and shows the skipped-check toast. `lib/routing/autoModel.ts` owns the sentinel; `useConfigStore` accepts it
 as a valid selection while `autoReady`. `ModelPickerList` renders it as the
-pinned `leadingEntry`; `ModelControls` hides the agent and thinking controls
-while Auto is selected. `PermissionCard` shows the hold reason. Settings →
+pinned `leadingEntry`; `ModelControls` hides the thinking control while Auto
+is selected, because the router picks the model and its effort. The agent
+control stays: a category without an agent keeps the composer's, so the agent
+still decides how the next send runs. `PermissionCard` shows the hold reason. Settings →
 Routing (`components/sections/routing/RoutingPage.tsx`) edits the config with
 debounced saves. Settings → Providers → Classification providers
 (`components/sections/classification/ClassificationProvidersPage.tsx`) picks
