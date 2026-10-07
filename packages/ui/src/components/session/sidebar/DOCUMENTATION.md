@@ -78,10 +78,19 @@ does not use the fallback. The mobile sheet, Recent, and Timeline use this
 same ownership resolver; rows keep the session's own directory while
 taking display ownership (project id, labels) from the index.
 
-The sidebar and mobile sessions sheet offer **Import Projects** only
+The sidebar and mobile sessions sheet offer **Import projects from OpenCode** only
 after `project.list` has succeeded and there are unconfigured canonical roots.
-The picker imports selected roots through `useProjectsStore.addProjects`, so
-they become ordinary persisted OpenChamber projects. Eligibility compares exact
+On the first eligible load, the existing selection dialog opens automatically
+once per OpenChamber runtime, two seconds after project and directory checks
+finish. The delay is canceled if eligibility changes or the runtime switches.
+The shown flag is stored as an instance-scoped setting in that runtime's
+`settings.json`, and the settings write queue grants the claim atomically just
+before opening. Dismissing or completing the import prevents another automatic
+prompt. Separate local and WSL runtimes keep separate settings. The manual
+action stays available and opens immediately. Using it during the delay cancels
+the automatic prompt for that runtime until the app is restarted. The picker
+imports selected roots through `useProjectsStore.addProjects`,
+so they become ordinary persisted OpenChamber projects. Eligibility compares exact
 normalized paths; a configured ancestor such as the home directory does not
 block a nested root. OpenCode sandbox directories appear under their canonical
 project and are not separate import choices. VS Code stays limited to workspace

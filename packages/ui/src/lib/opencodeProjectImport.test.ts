@@ -4,6 +4,7 @@ import {
   excludeMissingOpenCodeProjectImportCandidates,
   getOpenCodeProjectImportDisplayName,
   getOpenCodeProjectImportCandidates,
+  shouldAutoOpenOpenCodeProjectImportPrompt,
 } from './opencodeProjectImport';
 
 const project = (worktree: string, sandboxes: string[] = [], name?: string): Project => ({
@@ -12,6 +13,23 @@ const project = (worktree: string, sandboxes: string[] = [], name?: string): Pro
   sandboxes,
   name,
   time: { created: 1, updated: 1 },
+});
+
+describe('shouldAutoOpenOpenCodeProjectImportPrompt', () => {
+  const eligible = {
+    runtime: 'supported',
+    projects: 'loaded',
+    directories: 'checked',
+    importableCount: 1,
+  } satisfies Parameters<typeof shouldAutoOpenOpenCodeProjectImportPrompt>[0];
+
+  test('opens only after a supported runtime has loaded and checked importable projects', () => {
+    expect(shouldAutoOpenOpenCodeProjectImportPrompt(eligible)).toBe(true);
+    expect(shouldAutoOpenOpenCodeProjectImportPrompt({ ...eligible, runtime: 'vscode' })).toBe(false);
+    expect(shouldAutoOpenOpenCodeProjectImportPrompt({ ...eligible, projects: 'loading' })).toBe(false);
+    expect(shouldAutoOpenOpenCodeProjectImportPrompt({ ...eligible, directories: 'checking' })).toBe(false);
+    expect(shouldAutoOpenOpenCodeProjectImportPrompt({ ...eligible, importableCount: 0 })).toBe(false);
+  });
 });
 
 describe('getOpenCodeProjectImportCandidates', () => {

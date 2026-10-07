@@ -13,18 +13,28 @@ import {
   excludeMissingOpenCodeProjectImportCandidates,
   getOpenCodeProjectImportDisplayName,
   getOpenCodeProjectImportCandidates,
+  shouldAutoOpenOpenCodeProjectImportPrompt,
 } from '@/lib/opencodeProjectImport';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
+import {
+  getRuntimeKey,
+  isTransientRuntimeKey,
+  subscribeRuntimeEndpointChanged,
+  subscribeRuntimeEndpointWillChange,
+} from '@/lib/runtime-switch';
 
 type Props = {
   mobile?: boolean;
 };
 
+const AUTO_OPEN_PROMPT_DELAY_MS = 2000;
+const manuallyOpenedPromptRuntimeKeys = new Set<string>();
+
 export const OpenCodeProjectsImport = ({ mobile = false }: Props) => {
   const { t } = useI18n();
-  const { runtime } = useRuntimeAPIs();
+  const { runtime, openCodeProjectImportPrompt } = useRuntimeAPIs();
   const openCodeProjects = useGlobalSyncStore((state) => state.projects);
   const hasLoadedProjects = useGlobalSyncStore((state) => state.hasLoadedProjects);
   const configuredProjects = useProjectsStore((state) => state.projects);
@@ -33,6 +43,27 @@ export const OpenCodeProjectsImport = ({ mobile = false }: Props) => {
   const [open, setOpen] = React.useState(false);
   const [selectedPaths, setSelectedPaths] = React.useState<string[]>([]);
   const [isImporting, setIsImporting] = React.useState(false);
+  const [activeRuntimeKey, setActiveRuntimeKey] = React.useState(getRuntimeKey);
+  const [isRuntimeSwitching, setIsRuntimeSwitching] = React.useState(false);
+  const promptClaimRef = React.useRef<{
+    runtimeKey: string;
+    promise: ReturnType<typeof openCodeProjectImportPrompt.claim>;
+    hasOpenedPrompt: boolean;
+  } | null>(null);
+  const autoPromptTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    setActiveRuntimeKey(getRuntimeKey());
+    const unsubscribeWillChange = subscribeRuntimeEndpointWillChange(() => setIsRuntimeSwitching(true));
+    const unsubscribeChanged = subscribeRuntimeEndpointChanged(({ runtimeKey }) => {
+      setActiveRuntimeKey(runtimeKey);
+      setIsRuntimeSwitching(false);
+    });
+    return () => {
+      unsubscribeWillChange();
+      unsubscribeChanged();
+    };
+  }, []);
 
   const candidates = React.useMemo(
     () => getOpenCodeProjectImportCandidates(openCodeProjects, configuredProjects, homeDirectory),
@@ -71,6 +102,72 @@ export const OpenCodeProjectsImport = ({ mobile = false }: Props) => {
     [candidates, missingPaths],
   );
   const isCheckingDirectories = hasLoadedProjects && candidates.length > 0 && missingPaths === null;
+  const canAutoOpenPrompt = shouldAutoOpenOpenCodeProjectImportPrompt({
+    runtime: runtime.isVSCode ? 'vscode' : 'supported',
+    projects: hasLoadedProjects ? 'loaded' : 'loading',
+    directories: isCheckingDirectories ? 'checking' : 'checked',
+    importableCount: importableCandidates.length,
+  });
+  const autoPromptStateRef = React.useRef({ canAutoOpenPrompt, activeRuntimeKey, isRuntimeSwitching });
+  autoPromptStateRef.current = { canAutoOpenPrompt, activeRuntimeKey, isRuntimeSwitching };
+
+  React.useEffect(() => {
+    if (
+      !canAutoOpenPrompt
+      || isRuntimeSwitching
+      || isTransientRuntimeKey(activeRuntimeKey)
+      || manuallyOpenedPromptRuntimeKeys.has(activeRuntimeKey)
+    ) return;
+
+    let current = true;
+    const runtimeKey = activeRuntimeKey;
+    const timer = window.setTimeout(() => {
+      autoPromptTimerRef.current = null;
+      const latestState = autoPromptStateRef.current;
+      if (
+        !current
+        || !latestState.canAutoOpenPrompt
+        || latestState.isRuntimeSwitching
+        || latestState.activeRuntimeKey !== runtimeKey
+        || getRuntimeKey() !== runtimeKey
+        || isTransientRuntimeKey(runtimeKey)
+        || manuallyOpenedPromptRuntimeKeys.has(runtimeKey)
+      ) return;
+
+      let pendingClaim = promptClaimRef.current;
+      if (!pendingClaim || pendingClaim.runtimeKey !== runtimeKey) {
+        pendingClaim = {
+          runtimeKey,
+          promise: openCodeProjectImportPrompt.claim(),
+          hasOpenedPrompt: false,
+        };
+        promptClaimRef.current = pendingClaim;
+      }
+
+      void pendingClaim.promise.then((result) => {
+        if (
+          !current
+          || getRuntimeKey() !== runtimeKey
+          || result !== 'claimed'
+          || pendingClaim.hasOpenedPrompt
+          || manuallyOpenedPromptRuntimeKeys.has(runtimeKey)
+        ) return;
+        pendingClaim.hasOpenedPrompt = true;
+        setSelectedPaths([]);
+        setOpen(true);
+      }).catch(() => {
+        if (promptClaimRef.current === pendingClaim) promptClaimRef.current = null;
+        console.error('Failed to claim the OpenCode project import prompt for this runtime.');
+      });
+    }, AUTO_OPEN_PROMPT_DELAY_MS);
+    autoPromptTimerRef.current = timer;
+
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+      if (autoPromptTimerRef.current === timer) autoPromptTimerRef.current = null;
+    };
+  }, [activeRuntimeKey, canAutoOpenPrompt, isRuntimeSwitching, openCodeProjectImportPrompt]);
   const selectedPathSet = React.useMemo(
     () => new Set(selectedPaths.filter((path) => importableCandidates.some((candidate) => candidate.path === path))),
     [importableCandidates, selectedPaths],
@@ -114,6 +211,11 @@ export const OpenCodeProjectsImport = ({ mobile = false }: Props) => {
       aria-label={label}
       title={mobile ? label : undefined}
       onClick={() => {
+        manuallyOpenedPromptRuntimeKeys.add(activeRuntimeKey);
+        if (autoPromptTimerRef.current !== null) {
+          window.clearTimeout(autoPromptTimerRef.current);
+          autoPromptTimerRef.current = null;
+        }
         setSelectedPaths([]);
         setOpen(true);
       }}

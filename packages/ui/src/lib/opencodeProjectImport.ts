@@ -8,6 +8,16 @@ type OpenCodeProjectImportCandidate = {
   sandboxes: string[];
 };
 
+export const shouldAutoOpenOpenCodeProjectImportPrompt = (state: {
+  runtime: 'supported' | 'vscode';
+  projects: 'loading' | 'loaded';
+  directories: 'checking' | 'checked';
+  importableCount: number;
+}): boolean => state.runtime === 'supported'
+  && state.projects === 'loaded'
+  && state.directories === 'checked'
+  && state.importableCount > 0;
+
 export const getOpenCodeProjectImportCandidates = (
   openCodeProjects: readonly OpenCodeProject[],
   configuredProjects: readonly { path: string }[],

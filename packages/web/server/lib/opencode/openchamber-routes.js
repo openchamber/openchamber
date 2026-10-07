@@ -71,6 +71,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     modelsDevApiUrl,
     modelsMetadataCacheTtl,
     readSettingsFromDiskMigrated,
+    claimOpenCodeProjectImportPrompt,
     fetchFreeZenModels,
     getCachedZenModels,
     desktopUpdater,
@@ -115,6 +116,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   // Pinned endpoints and keys never leave the server.
   app.get('/api/openchamber/enterprise-policy', (_req, res) => {
     res.json(publicEnterprisePolicy());
+  });
+
+  app.post('/api/openchamber/project-import-prompt/claim', async (_req, res) => {
+    try {
+      const claimed = await claimOpenCodeProjectImportPrompt();
+      return res.json({ claimed });
+    } catch (error) {
+      console.error('Failed to claim OpenCode project import prompt:', error);
+      return res.status(500).json({ error: 'Failed to claim project import prompt' });
+    }
   });
 
   app.get('/api/openchamber/update-check', async (req, res) => {

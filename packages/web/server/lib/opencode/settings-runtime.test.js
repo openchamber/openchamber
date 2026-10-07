@@ -9,8 +9,9 @@ import { createSettingsRuntime } from './settings-runtime.js';
 const createRuntime = async ({
   mergePersistedSettings = (_current, changes) => changes,
   onManagedPluginSettingsChanged = undefined,
+  tempRoot: existingTempRoot,
 } = {}) => {
-  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
+  const tempRoot = existingTempRoot ?? await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
     fsPromises,
@@ -37,12 +38,49 @@ const createRuntime = async ({
     settingsFilePath,
     tempRoot,
     cleanup: async () => {
-      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+      if (!existingTempRoot) await fsPromises.rm(tempRoot, { recursive: true, force: true });
     },
   };
 };
 
 describe('settings runtime', () => {
+  it('atomically claims the project import prompt once and keeps it in instance settings', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
+    try {
+      await runtime.persistSettings({ homeDirectory: '/runtime-home' });
+
+      const claims = await Promise.all(Array.from({ length: 8 }, () => runtime.claimOpenCodeProjectImportPrompt()));
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(claims.filter((claimed) => !claimed)).toHaveLength(7);
+      await expect(runtime.readSettingsFromDisk()).resolves.toMatchObject({
+        homeDirectory: '/runtime-home',
+        openCodeProjectImportPromptShown: true,
+      });
+      expect(JSON.parse(await fsPromises.readFile(settingsFilePath, 'utf8'))).toMatchObject({
+        homeDirectory: '/runtime-home',
+        openCodeProjectImportPromptShown: true,
+      });
+
+      const restartedRuntime = await createRuntime({ tempRoot });
+      await expect(restartedRuntime.runtime.claimOpenCodeProjectImportPrompt()).resolves.toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps project import prompt claims independent between runtime settings files', async () => {
+    const localRuntime = await createRuntime();
+    const wslRuntime = await createRuntime();
+    try {
+      await expect(localRuntime.runtime.claimOpenCodeProjectImportPrompt()).resolves.toBe(true);
+      await expect(wslRuntime.runtime.claimOpenCodeProjectImportPrompt()).resolves.toBe(true);
+      await expect(localRuntime.runtime.claimOpenCodeProjectImportPrompt()).resolves.toBe(false);
+      await expect(wslRuntime.runtime.claimOpenCodeProjectImportPrompt()).resolves.toBe(false);
+    } finally {
+      await Promise.all([localRuntime.cleanup(), wslRuntime.cleanup()]);
+    }
+  });
+
   it('refreshes the managed OpenCode config only when a managed plugin setting changed', async () => {
     const onManagedPluginSettingsChanged = vi.fn(async () => {});
     const { runtime, cleanup } = await createRuntime({ onManagedPluginSettingsChanged });
