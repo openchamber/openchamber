@@ -203,6 +203,18 @@ describe('edge swipe selection isolation', () => {
       expect(opened).toEqual([]);
     });
 
+    test(`${side}: at the end of wide content the strict angle bar decides`, () => {
+      scroller.scrollLeft = side === 'left' ? 0 : 510;
+      const longEndX = side === 'left' ? startX + 160 : startX - 160;
+      // 160px across: 60px down (0.375) is flat enough; 70px down (0.4375) is not.
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', longEndX, 170, cell);
+      expect(opened).toEqual([]);
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', longEndX, 160, cell);
+      expect(opened).toEqual([side]);
+    });
+
     test(`${side}: a long deliberate swipe at the end of wide content opens the drawer`, () => {
       scroller.scrollLeft = side === 'left' ? 0 : 510;
       const longEndX = side === 'left' ? startX + 160 : startX - 160;
