@@ -21,6 +21,7 @@ Le relais est un coursier aveugle, pas un intermédiaire :
 - **Seuls vos appareils peuvent se connecter.** Un appareil doit détenir un token émis par *votre* serveur via l’[association à usage unique](/connect-devices/). Personne ne peut découvrir votre serveur via le relais ni s’y connecter sans un token que vous avez créé — et vous pouvez révoquer n’importe quel token à tout moment.
 - **Les liens d’association sont à usage unique.** Un QR code d’association fonctionne exactement une fois et expire s’il n’est pas utilisé ; un vieux lien qui fuite ne vaut donc rien.
 - **Rien n’est partagé sans votre accord.** Le relais reste éteint tant que vous ne l’activez pas ou que vous n’associez pas d’appareil via celui-ci, et vous pouvez le désactiver à tout moment — les appareils connectés à travers lui sont coupés immédiatement.
+- **Les clés de relais de votre serveur restent sur votre machine.** Elles se trouvent dans `~/.config/openchamber/relay-identity.json`, que seul votre compte utilisateur peut lire. Quiconque possède une copie de ce fichier peut se faire passer pour votre serveur auprès du relais : ne le joignez pas à un rapport de bug, à une sauvegarde partagée ni à un dépôt de dotfiles.
 
 ## Quand il s’exécute
 

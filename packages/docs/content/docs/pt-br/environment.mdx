@@ -78,6 +78,12 @@ Altera o endpoint de verificação de atualizações. A maioria dos usuários de
 
 Força o gerenciador de pacotes usado em atualizações quando a detecção automática estiver errada.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Envia por um proxy as requisições de saída do próprio OpenChamber, como limites de uso e catálogos de skills. Nomes em minúsculas também funcionam. Hosts em `NO_PROXY` se conectam diretamente, e `localhost`, `127.0.0.1` e `::1` sempre se conectam, então os retornos de login e o servidor local do OpenCode continuam funcionando.
+
 ## Servidor OpenCode
 
 ### `OPENCODE_HOST`

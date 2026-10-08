@@ -160,6 +160,12 @@ export const readThemeSource = () => {
   return 'system';
 };
 
+// The UI language, for the few strings main shows before the renderer runs.
+export const readPreferredLocale = () => {
+  const settings = { ...readSettingsRoot(), ...readPreferencesValues() };
+  return typeof settings.locale === 'string' ? settings.locale : 'en';
+};
+
 export const getWindowIconPath = () => {
   if (process.platform !== 'win32' && process.platform !== 'linux') return undefined;
   const iconFileName = process.platform === 'linux' ? 'icon.png' : 'icon.ico';

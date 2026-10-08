@@ -1187,6 +1187,24 @@ describe('gh CLI account consent', () => {
     await expect(getOctokitForAccountId('github.com#cli:9')).resolves.toMatchObject({ accountId: 'github.com#cli:9', source: 'cli' });
   });
 
+  it('offers the gh account as a Git transport credential only while the user has switched to it', async () => {
+    const fetch = stubGitHubUsers();
+    const { getGitHubCliCredential } = await import('./octokit.js');
+
+    await expect(getGitHubCliCredential('github.com#cli:9')).resolves.toBeNull();
+    expect(usedCliToken(fetch)).toBe(false);
+
+    auth.setGhCliActive(true);
+    await expect(getGitHubCliCredential('github.com#cli:9')).resolves.toMatchObject({
+      credentialId: 'github.com#cli:9', credentialRevision: 1, providerUserId: 'github.com#9',
+      accessToken: 'cli-token', status: 'valid',
+    });
+    await expect(getGitHubCliCredential('github.com#cli:9', 2)).resolves.toBeNull();
+    // gh signed in as somebody else is not the account the request named.
+    await expect(getGitHubCliCredential('github.com#cli:8')).resolves.toBeNull();
+    await expect(getGitHubCliCredential('github.com#9')).resolves.toBeNull();
+  });
+
   it('stops using the gh token after switching back to a saved account', async () => {
     const fetch = stubGitHubUsers();
     const saved = await auth.setGitHubAuth({ accessToken: 'token-a', user: { id: 7, login: 'saved-user' } });

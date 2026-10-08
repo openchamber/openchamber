@@ -9,7 +9,7 @@ interface FireworksState {
   cycle: number;
 }
 
-export interface UseFireworksResult {
+interface UseFireworksResult {
   isActive: boolean;
   burstKey: number;
   triggerFireworks: () => void;

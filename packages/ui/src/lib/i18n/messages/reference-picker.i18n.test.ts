@@ -6,13 +6,14 @@ const locales = ['en', 'de', 'fr', 'nl', 'es', 'ja', 'pt-BR', 'uk', 'ko', 'pl', 
 
 // Words these languages use as is, so the translation is the English word.
 const sameAsEnglish = {
-  de: ['references.picker.tab.issues', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels'],
-  fr: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.labels'],
-  nl: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.filter.open', 'references.picker.state.open', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels'],
-  es: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls'],
-  'pt-BR': ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.branch'],
+  de: ['references.picker.tab.issues', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels', 'references.picker.filter.label', 'references.picker.filter.group.status'],
+  fr: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.labels', 'references.picker.preview.commitsSingle', 'references.picker.preview.commitsPlural'],
+  nl: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.filter.open', 'references.picker.state.open', 'references.picker.preview.team', 'references.picker.preview.branch', 'references.picker.preview.checks', 'references.picker.preview.review', 'references.picker.preview.labels', 'references.picker.preview.reviewers', 'references.picker.preview.commitsSingle', 'references.picker.preview.commitsPlural', 'references.picker.filter.label', 'references.picker.filter.group.status', 'references.picker.filter.linear.status.open', 'references.picker.filter.linear.status.backlog'],
+  es: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.commitsSingle', 'references.picker.preview.commitsPlural'],
+  'pt-BR': ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls', 'references.picker.preview.branch', 'references.picker.preview.commitsSingle', 'references.picker.preview.commitsPlural', 'references.picker.filter.group.status'],
   uk: ['references.picker.tab.mergeRequests', 'references.picker.tab.issues', 'references.picker.tab.pulls'],
-  pl: ['references.picker.tab.issues', 'references.picker.preview.review'],
+  pl: ['references.picker.tab.issues', 'references.picker.preview.review', 'references.picker.preview.commitsSingle', 'references.picker.filter.group.status'],
+  tr: ['references.picker.preview.commitsSingle'],
 } satisfies Partial<Record<(typeof locales)[number], readonly string[]>>;
 
 const allowedSame = (locale: string): readonly string[] => Object.entries(sameAsEnglish).find(([name]) => name === locale)?.[1] ?? [];

@@ -1,5 +1,5 @@
 import type { Message, Part } from "@/lib/opencode/model"
-import { blocksOnForm } from "@/lib/opencode/tools"
+import { isQuestionTool } from "@/lib/opencode/tools"
 
 type MessageRecord = {
   info: Message
@@ -13,7 +13,7 @@ const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
  * today is `question`.
  */
 const isActiveFormTool = (part: Part): boolean => {
-  if (part.type !== "tool" || !blocksOnForm(part.tool)) return false
+  if (part.type !== "tool" || !isQuestionTool(part.tool)) return false
   const status = part.state.status
   return status === "pending" || status === "running"
 }

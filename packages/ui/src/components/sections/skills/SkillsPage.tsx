@@ -62,7 +62,7 @@ import { cn } from '@/lib/utils';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
-export interface SkillsPageProps {
+interface SkillsPageProps {
   view?: 'installed' | 'catalog';
 }
 

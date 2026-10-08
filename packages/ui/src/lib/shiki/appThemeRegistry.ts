@@ -4,7 +4,7 @@ import type { Theme } from '@/types/theme';
 import type { VSCodeTextMateTheme, VSCodeTokenColorRule } from './vscodeTextMateTheme';
 import { buildTextMateThemeFromAppTheme } from './textMateThemeFromAppTheme';
 
-export type ShikiThemeRegistrationResolvedLike = VSCodeTextMateTheme & {
+type ShikiThemeRegistrationResolvedLike = VSCodeTextMateTheme & {
   settings: VSCodeTokenColorRule[];
   fg: string;
   bg: string;

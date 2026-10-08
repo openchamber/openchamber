@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
  * (busy/retry), a pause kept open by a background subagent or a background
  * command, or a finished turn the user has not seen.
  */
-export type SessionActivityIndicatorState = 'running' | 'subagent' | 'shell' | 'unread';
+type SessionActivityIndicatorState = 'running' | 'subagent' | 'shell' | 'unread';
 
 const PRESENTATION = {
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },

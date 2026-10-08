@@ -39,7 +39,7 @@ export const wsUrlToTunnelPath = (url: string): string => {
   }
 };
 
-export interface NormalizedTunnelRequest {
+interface NormalizedTunnelRequest {
   method: string;
   path: string;
   query: string;

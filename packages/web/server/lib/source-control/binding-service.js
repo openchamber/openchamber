@@ -1,3 +1,4 @@
+import { isPlainObject, isString } from '../shared/guards.js';
 import { normalizeSourceControlProviderInstance } from './provider-instance.js';
 import { resolvePrivateRepositoryIdentity } from './repository-identity.js';
 import { fingerprintRemoteUrl, redactRemoteUrl } from './url-redaction.js';
@@ -11,10 +12,6 @@ const bindingInputError = (message) => {
   return error;
 };
 
-const isPlainObject = (value) => value === Object(value)
-  && !Array.isArray(value)
-  && Object.getPrototypeOf(value) === Object.prototype;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 const safePresentationText = (value, maximum = 512) => isString(value) && value.length > 0
   && value.length <= maximum && value.trim() === value && !/[\0\r\n]/.test(value);
 const safeProviderUsername = (value) => safePresentationText(value, 255) && /^[A-Za-z0-9_.-]+$/.test(value);

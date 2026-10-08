@@ -20,7 +20,7 @@ import { useStreamingStore } from '@/sync/streaming';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-export interface DebugMessageInfo {
+interface DebugMessageInfo {
   messageId: string;
   role: string;
   timestamp: number;

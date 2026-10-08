@@ -19,6 +19,12 @@ test('single-chord combos convert to Electron accelerators', () => {
   assert.equal(convertShortcutComboToAccelerator('mod+enter'), 'CommandOrControl+Enter');
   assert.equal(convertShortcutComboToAccelerator('mod+/'), 'CommandOrControl+/');
   assert.equal(convertShortcutComboToAccelerator('alt+['), 'Alt+[');
+  // Control apart from Command on macOS, and every modifier at once (a hyper key).
+  assert.equal(convertShortcutComboToAccelerator('ctrl+n'), 'Control+N');
+  assert.equal(convertShortcutComboToAccelerator('mod+shift+alt+n'), 'CommandOrControl+Shift+Alt+N');
+  assert.equal(convertShortcutComboToAccelerator('mod+ctrl+shift+alt+n'), 'CommandOrControl+Control+Shift+Alt+N');
+  assert.equal(convertShortcutComboToAccelerator('super+n'), 'Super+N');
+  assert.equal(convertShortcutComboToAccelerator('mod+super+shift+n'), 'CommandOrControl+Super+Shift+N');
   assert.equal(convertShortcutComboToAccelerator('  mod+alt+n  '), 'CommandOrControl+Alt+N');
 });
 

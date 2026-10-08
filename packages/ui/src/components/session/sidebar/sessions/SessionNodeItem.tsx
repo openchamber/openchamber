@@ -46,13 +46,14 @@ import type { SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { openExternalUrl } from '@/lib/url';
+import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
 import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
 import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionUnseenCount } from '@/sync/notification-store';
@@ -81,6 +82,7 @@ import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   getSessionWorktreeMenuState,
@@ -545,6 +547,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
   const primaryRef = refLines[0] ?? null;
   const moreRefCount = Math.max(0, refLines.length - 1);
+  const openOnBoard = useOpenOnBoard();
   const refBadgeLabel = refLines.map((line) => line.text).join(', ');
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
@@ -898,7 +901,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           key={session.id}
           style={{ paddingLeft: ROW_GUTTER_LEFT_PX + 4 }}
           className={cn(
-            'group relative my-0.5 flex items-center rounded-md pr-2.5',
+            'oc-ref-tint-scope group relative my-0.5 flex items-center rounded-md pr-2.5',
             isTimelineChatRow ? 'py-1' : 'py-1.5',
             isActive && 'bg-interactive-selection/70 text-interactive-selection-foreground',
           )}
@@ -916,8 +919,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             directoryIndicator={null}
             prBadge={primaryRef ? (
               <span
-                className={cn('inline-flex flex-shrink-0 items-center gap-1 typography-micro', !primaryRef.color && 'text-muted-foreground')}
-                style={primaryRef.color ? { color: primaryRef.color } : undefined}
+                className={cn('inline-flex flex-shrink-0 items-center gap-1 typography-micro', primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground')}
+                style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
               >
                 <Icon name={primaryRef.icon} className="h-3 w-3" />
                 <span className="leading-none tabular-nums">{primaryRef.label}</span>
@@ -1482,11 +1485,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           disabled={!sessionDirectory}
           onClick={() => {
             if (!sessionDirectory) return;
-            openContextPanelTab(sessionDirectory, {
+            // The tab lives under the main chat's directory, which is the one
+            // the panel reads; the session's own directory rides along so a
+            // chat from another project (or Chat) still resolves itself.
+            const panelDirectory = resolveEffectiveDirectory() ?? sessionDirectory;
+            openContextPanelTab(panelDirectory, {
               mode: 'chat',
               dedupeKey: `session:${session.id}`,
               label: sessionTitle,
               sessionTitleFallback: sessionTitle,
+              targetDirectory: sessionDirectory,
             });
           }}
           className="[&>svg]:mr-1"
@@ -1591,9 +1599,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           type="button"
           className={cn(
             'inline-flex flex-shrink-0 items-center gap-1 rounded typography-micro hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline',
-            !primaryRef.color && 'text-muted-foreground',
+            primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground',
           )}
-          style={primaryRef.color ? { color: primaryRef.color } : undefined}
+          style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
           disabled={!primaryRef.url}
           aria-label={refBadgeLabel}
           onPointerDown={handleRowActionPointerDown}
@@ -1601,17 +1609,19 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (primaryRef.url) void openExternalUrl(primaryRef.url);
+            // The `+N` only counts the others; the tooltip lists them.
+            if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
+            if (primaryRef.url) openOnBoard(primaryRef.url, sessionDirectory, event);
           }}
           onKeyDown={(event) => event.stopPropagation()}
         >
           <Icon name={primaryRef.icon} className="h-3 w-3" />
           <span className="leading-none tabular-nums">{primaryRef.label}</span>
-          {moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
+          {moreRefCount > 0 ? <span data-ref-more className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={6} className="max-w-xs">
-        <SidebarRefLinks items={refLines} />
+        <SidebarRefLinks items={refLines} directory={sessionDirectory} />
       </TooltipContent>
     </Tooltip>
   ) : null;
@@ -1740,7 +1750,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                 // on the right (their left edge is the status/chevron gutter).
                 style={{ paddingLeft: isTimelineRow ? ROW_GUTTER_LEFT_PX + 4 : ROW_TEXT_LEFT_PX + depth * ROW_DEPTH_STEP_PX }}
                 className={cn(
-                  'group relative my-0.5 flex cursor-pointer items-center rounded-md pr-2.5',
+                  'oc-ref-tint-scope group relative my-0.5 flex cursor-pointer items-center rounded-md pr-2.5',
                   isTimelineRow && !isTimelineChatRow ? 'py-1.5' : 'py-1',
                   isTimelineRow && !(isActive || isRowSelected) && 'hover:bg-interactive-hover/60',
                   (isActive || isRowSelected) && 'bg-interactive-selection/70 text-interactive-selection-foreground',
@@ -1810,8 +1820,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                               {showInlineBranchMarker ? (
                                 <Icon
                                   name="git-branch"
-                                  className={cn('h-3 w-3', !branchPrIconColor && 'text-muted-foreground/60')}
-                                  style={branchPrIconColor ? { color: branchPrIconColor } : undefined}
+                                  className={cn('h-3 w-3', branchPrIconColor ? 'oc-ref-tint' : 'text-muted-foreground/60')}
+                                  style={branchPrIconColor ? refTintStyle(branchPrIconColor) : undefined}
                                 />
                               ) : null}
                               {sessionCompactUpdatedLabel}
@@ -1837,8 +1847,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                                 {showInlineBranchMarker ? (
                                   <Icon
                                     name="git-branch"
-                                    className={cn('h-3 w-3', !branchPrIconColor && 'text-muted-foreground/60')}
-                                    style={branchPrIconColor ? { color: branchPrIconColor } : undefined}
+                                    className={cn('h-3 w-3', branchPrIconColor ? 'oc-ref-tint' : 'text-muted-foreground/60')}
+                                    style={branchPrIconColor ? refTintStyle(branchPrIconColor) : undefined}
                                   />
                                 ) : null}
                                 {/* The recent activity list shows its compact
@@ -1891,11 +1901,11 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                     ) : null}
                     {tooltipBranchLabel ? (
                       <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                        <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={branchPrIconColor ? { color: branchPrIconColor } : undefined} />
+                        <Icon name="git-branch" className={cn('h-3 w-3 flex-shrink-0', branchPrIconColor && 'oc-ref-tint')} style={branchPrIconColor ? refTintStyle(branchPrIconColor) : undefined} />
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
-                    {refLines.length > 0 ? <SidebarRefLinks items={refLines} /> : null}
+                    {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={sessionDirectory} /> : null}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}

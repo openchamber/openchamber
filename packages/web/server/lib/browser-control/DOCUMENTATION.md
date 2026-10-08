@@ -64,6 +64,12 @@ itself; it can only ask and wait.
   pane. `browser.capture` never opens the panel or switches its tab: a hidden
   pane is drawn at zero opacity inside the window for the screenshot, because
   Chromium composites a transparent webview but not a hidden or clipped one.
+  Agent work never takes keyboard focus from the user
+  (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
+  while the user can see it and no agent action is driving it, otherwise focus
+  goes straight back to where it was. `browser.click` and `browser.type` focus
+  the page on purpose, so it can use the clipboard, and return focus when they
+  finish.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).

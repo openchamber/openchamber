@@ -61,6 +61,8 @@ interface SettingsCardProps {
   title: string;
   /** Monospace second line: an id, command or URL. */
   subtitle?: string;
+  /** Plain text under the title saying what the item is; up to two lines. */
+  description?: string;
   /** Top-right pills (status, update available). */
   badges?: React.ReactNode;
   /** Bottom row content: counts and chips. */
@@ -82,7 +84,7 @@ const ActionLabel: React.FC<{ action: SettingsCardAction }> = ({ action }) => (
   </>
 );
 
-export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, badges, footer, muted, onOpen, actions, actionsLabel }) => {
+export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitle, description, badges, footer, muted, onOpen, actions, actionsLabel }) => {
   const hasActions = (actions?.length ?? 0) > 0;
   const body = (
     <>
@@ -96,6 +98,9 @@ export const SettingsCard: React.FC<SettingsCardProps> = ({ icon, title, subtitl
         <div className="truncate text-sm font-semibold text-foreground" title={title}>{title}</div>
         {subtitle ? (
           <div className="mt-0.5 truncate font-mono typography-micro text-muted-foreground" title={subtitle}>{subtitle}</div>
+        ) : null}
+        {description ? (
+          <div className="mt-1 line-clamp-2 typography-micro text-muted-foreground">{description}</div>
         ) : null}
       </div>
       <div className={cn('mt-auto flex min-w-0 items-center gap-2 pt-3 typography-micro text-muted-foreground', hasActions && 'pr-8')}>
@@ -183,7 +188,7 @@ export const SettingsAddCard: React.FC<{
     data-settings-item={settingsItem}
     className={cn(
       CARD_CLASS,
-      'items-center justify-center gap-2 border-dashed border-[var(--interactive-border)] text-muted-foreground hover:bg-[var(--interactive-hover)]/50 hover:text-foreground',
+      'items-center justify-center gap-2 text-center border-dashed border-[var(--interactive-border)] text-muted-foreground hover:bg-[var(--interactive-hover)]/50 hover:text-foreground',
     )}
   >
     <span className="flex size-10 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">

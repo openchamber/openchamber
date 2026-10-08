@@ -5,7 +5,7 @@ type RuntimeAuthCredential =
   | { type: 'bearer'; token: string }
   | null;
 
-export type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promise<RuntimeAuthCredential>;
+type RuntimeAuthCredentialProvider = () => RuntimeAuthCredential | Promise<RuntimeAuthCredential>;
 
 let credentialProvider: RuntimeAuthCredentialProvider = () => null;
 let runtimeBearerToken = '';

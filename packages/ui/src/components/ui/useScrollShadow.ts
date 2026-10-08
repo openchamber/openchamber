@@ -10,7 +10,7 @@ import React from "react";
 export type ScrollShadowOrientation = "vertical" | "horizontal";
 export type ScrollShadowVisibility = "both" | "none" | "top" | "bottom" | "left" | "right";
 
-export type UseScrollShadowOptions = {
+type UseScrollShadowOptions = {
   orientation?: ScrollShadowOrientation;
   offset?: number;
   isEnabled?: boolean;

@@ -72,7 +72,7 @@ export const probeLoopbackStatus = async (url: string): Promise<number | null> =
   }
 };
 
-export type DevServerCandidate = {
+type DevServerCandidate = {
   readonly url: string;
   readonly port: number;
   /** Present when a server announced this address itself. */

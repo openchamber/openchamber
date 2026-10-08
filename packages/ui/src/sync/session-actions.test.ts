@@ -496,6 +496,30 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().message["session-a"]).toBe(undefined)
     expect(destination.getState().part["message-a"]).toBe(undefined)
   })
+
+  test("keeps the move the session.moved event already applied", async () => {
+    const message = { id: "message-a", sessionID: "session-a", role: "user", time: { created: 1 } } as Message
+    const requested = { id: "session-a", title: "Before", directory: "/source" } as Session
+    const source = createStore({}, {
+      session: [{ ...requested, title: "Renamed", directory: "/destination" } as Session],
+      sessionTotal: 1,
+      message: { "session-a": [message] },
+    })
+    const destination = createStore({})
+    const childStores = createChildStores([["/source", source], ["/destination", destination]])
+    const { adoptSessionMove, moveSessionToDirectory, setActionRefs } = await import("./session-actions")
+    setActionRefs(childStores, () => "/source")
+
+    adoptSessionMove("session-a", "/source", "/destination")
+    await moveSessionToDirectory(requested, "/source", "/destination")
+
+    expect(source.getState().session).toHaveLength(0)
+    expect(destination.getState().session).toHaveLength(1)
+    expect(destination.getState().session[0]?.title).toBe("Renamed")
+    expect(destination.getState().sessionTotal).toBe(1)
+    expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
+    expect((globalUpsertedSessions.at(-1) as Session).title).toBe("Renamed")
+  })
 })
 
 describe("confirmed session removal", () => {

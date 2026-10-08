@@ -37,6 +37,7 @@
  * the markdown file; it continues to live in the project config/state store.
  */
 
+import { asNonEmptyString } from '../shared/guards.js';
 import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -46,14 +47,6 @@ import { MAX_TASK_NAME_LENGTH } from '../projects/project-config.js';
 
 const LOOP_DIR_NAME = 'loops';
 const USER_LOOP_ROOT = () => path.join(os.homedir(), '.agents', LOOP_DIR_NAME);
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 /**
  * Split a `provider/model` string into its two parts. Splits on the first `/`

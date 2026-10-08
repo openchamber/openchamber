@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
+import { buildCodeMirrorCommentWidgets, FilePreviewCommentMenu, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { useDeviceInfo } from '@/lib/device';
@@ -214,6 +214,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   // `resolvedPath` so nothing downstream can mistake a project plan for a file
   // the user could open, edit, or be shown a path for.
   const [loadedProjectPlanId, setLoadedProjectPlanId] = React.useState<string | null>(null);
+  // Where a saved plan's markdown lives, only to name it in comments: an
+  // agent given just "plan" cannot tell which plan a comment is about.
+  const [loadedProjectPlanPath, setLoadedProjectPlanPath] = React.useState<string | null>(null);
   const hasDocument = Boolean(resolvedPath) || Boolean(loadedProjectPlanId);
   const displayPath = React.useMemo(() => {
     if (!resolvedPath || !sessionDirectory || !homeDirectory) {
@@ -229,6 +232,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   const planFileLabel = React.useMemo(() => {
     return displayPath ? displayPath.split('/').pop() || t('planView.file.defaultName') : t('planView.file.defaultName');
   }, [displayPath, t]);
+  // Comments name the plan by its full path, as Files does for a file.
+  const commentFileLabel = resolvedPath ?? loadedProjectPlanPath ?? planFileLabel;
   const parsedTitle = React.useMemo(() => {
     if (!content.trim()) {
       return t('planView.title.default');
@@ -244,6 +249,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   const [lineSelection, setLineSelection] = React.useState<SelectedLineRange | null>(null);
   const editorViewRef = React.useRef<EditorView | null>(null);
   const editorWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const previewRef = React.useRef<HTMLDivElement | null>(null);
 
   const MD_VIEWER_MODE_KEY = 'openchamber:plan:md-viewer-mode';
 
@@ -292,7 +298,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
 
   const commentController = useInlineCommentController<SelectedLineRange>({
     source: 'plan',
-    fileLabel: planFileLabel,
+    fileLabel: commentFileLabel,
     language: resolvedPath ? getLanguageFromExtension(resolvedPath) || 'markdown' : 'markdown',
     getCodeForRange: (range) => extractSelectedCode(content, normalizeLineRange(range)),
     toStoreRange: (range) => ({ startLine: range.start, endLine: range.end }),
@@ -485,6 +491,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       docRef.current = { key: null, target: null, content: '', editRevision: 0, savedRevision: 0, runtimeKey: '' };
       setResolvedPath(null);
       setLoadedProjectPlanId(null);
+      setLoadedProjectPlanPath(null);
       setContent('');
       setLoading(false);
       return;
@@ -522,6 +529,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       docRef.current = { key: null, target: null, content: '', editRevision: 0, savedRevision: 0, runtimeKey: '' };
       setResolvedPath(null);
       setLoadedProjectPlanId(null);
+      setLoadedProjectPlanPath(null);
       setContent('');
       setSaveError(null);
       setLoadError(null);
@@ -555,6 +563,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
           };
           setContent(plan.raw);
           setLoadedProjectPlanId(savedPlanId);
+          setLoadedProjectPlanPath(plan.path ?? null);
         } catch (error) {
           if (cancelled) return;
           setLoadError(error instanceof Error ? error.message : 'Plan load failed');
@@ -966,7 +975,13 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
             <div className="relative h-full">
               <div className="h-full">
                 {mdViewMode === 'preview' ? (
-                  <div className="h-full overflow-auto p-3">
+                  <div className="h-full overflow-auto p-3" ref={previewRef}>
+                    {/* Same comment-on-selection as a markdown file preview. */}
+                    <FilePreviewCommentMenu
+                      containerRef={previewRef}
+                      filePath={commentFileLabel}
+                      fileContent={content}
+                    />
                     <ErrorBoundary
                       fallback={
                         <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">

@@ -10,6 +10,7 @@ test('refuses an extension frame leaving for any other address', () => {
   for (const url of [
     'https://example.com/?data=conversation',
     'http://127.0.0.1:3902/api/session',
+    'http://127.0.0.1:3902/api/fs/raw?path=/tmp/document.pdf',
     'http://127.0.0.1:3902/',
     'http://127.0.0.1:9999/api/guests/demo/index.html',
     'javascript:alert(1)',
@@ -18,6 +19,66 @@ test('refuses an extension frame leaving for any other address', () => {
     assert.equal(guest(url), true, url);
   }
 });
+
+for (const pathname of ['/api/fs/raw', '/openchamber/api/fs/raw']) {
+  test(`allows the app to load a PDF into an empty direct child through ${pathname}`, () => {
+    const mainFrame = {};
+    const frame = { url: '', parent: mainFrame };
+    const url = `http://127.0.0.1:3902${pathname}?path=/tmp/document.pdf&oc_url_token=x`;
+
+    const blocked = shouldBlockGuestFrameNavigation({
+      isMainFrame: false, frameOrigin: 'null', frame, initiator: mainFrame, mainFrame, url, isAppOrigin,
+    });
+
+    assert.equal(blocked, false);
+  });
+}
+
+for (const [name, setup] of [
+  ['a loaded extension', (mainFrame) => ({ frame: { url: 'http://127.0.0.1:3902/api/guests/demo/index.html', parent: mainFrame }, initiator: mainFrame })],
+  ['an HTML preview', (mainFrame) => ({ frame: { url: 'http://127.0.0.1:3902/api/fs/preview/grant-a/tmp/index.html', parent: mainFrame }, initiator: mainFrame })],
+  ['an empty frame navigating itself', (mainFrame) => { const frame = { url: '', parent: mainFrame }; return { frame, initiator: frame }; }],
+  ['an extension initiating an empty frame', (mainFrame) => ({ frame: { url: '', parent: mainFrame }, initiator: { url: 'http://127.0.0.1:3902/api/guests/demo/index.html' } })],
+  ['a nested frame', (mainFrame) => ({ frame: { url: '', parent: {} }, initiator: mainFrame })],
+  ['an unknown initiator', () => ({ frame: { url: '' }, initiator: null })],
+  ['a detached frame URL', (mainFrame) => ({ frame: { get url() { throw new Error('detached'); }, parent: mainFrame }, initiator: mainFrame })],
+  ['a detached frame parent', (mainFrame) => ({ frame: { url: '', get parent() { throw new Error('detached'); } }, initiator: mainFrame })],
+]) {
+  test(`refuses raw file navigation from ${name}`, () => {
+    const mainFrame = {};
+    const { frame, initiator } = setup(mainFrame);
+    const url = 'http://127.0.0.1:3902/api/fs/raw?path=/tmp/document.pdf';
+
+    const blocked = shouldBlockGuestFrameNavigation({
+      isMainFrame: false, frameOrigin: 'null', frame, initiator, mainFrame, url, isAppOrigin,
+    });
+
+    assert.equal(blocked, true);
+  });
+}
+
+for (const url of [
+  'https://example.com/api/fs/raw?path=/tmp/document.pdf',
+  'http://127.0.0.1:9999/api/fs/raw?path=/tmp/document.pdf',
+  'http://127.0.0.1:3902/api/fs/raw/extra?path=/tmp/document.pdf',
+  'http://127.0.0.1:3902/api/session',
+  'http://127.0.0.1:3902/api/fs/serve/tmp/document.pdf',
+  'http://127.0.0.1:3902/api/spaces/0123456789ab/fs/raw?path=/tmp/document.pdf',
+  'http://127.0.0.1:3902/api/other/api/fs/raw?path=/tmp/document.pdf',
+  'openchamber-ui://app/api/fs/raw?path=/tmp/document.pdf',
+]) {
+  test(`refuses an app-initiated empty frame loading ${url}`, () => {
+    const mainFrame = {};
+    const frame = { url: '', parent: mainFrame };
+
+    const blocked = shouldBlockGuestFrameNavigation({
+      isMainFrame: false, frameOrigin: 'null', frame, initiator: mainFrame, mainFrame, url,
+      isAppOrigin: (value) => value.startsWith('openchamber-ui:') || isAppOrigin(value),
+    });
+
+    assert.equal(blocked, true);
+  });
+}
 
 test('lets an extension frame load its own pages and local documents', () => {
   for (const url of [

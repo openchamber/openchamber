@@ -7,7 +7,8 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from './session-ui-store';
 import { replaceGlobalSessionStatusById } from './global-session-status';
-import { buildSessionRetentionCandidates, runSessionRetentionCleanup, useSessionRetentionRunStore } from './session-retention';
+import { buildSessionRetentionCandidates, isSessionKeptByUser, runSessionRetentionCleanup, useSessionRetentionRunStore } from './session-retention';
+import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 
 const now = Date.now();
 const day = 86_400_000;
@@ -59,6 +60,20 @@ describe('retention eligibility', () => {
       sessions: [...recent, ...sessions], cutoffDays: 30, currentSessionId: 'current', action: 'delete',
       activeSessionIds: new Set(['busy']), now,
     })).toEqual(['old']);
+  });
+
+  test('keeps pinned and In work sessions however old they are', () => {
+    useSessionPinnedStore.getState().toggle({ directory: '/retention-project', sessionId: 'pinned' });
+    const inWork = session('in-work', { metadata: { openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'user' } } } });
+    const doneWork = session('done-work', { metadata: { openchamber: { work: { state: 'done', openedAt: 1, openedBy: 'user', doneAt: 2 } } } });
+    try {
+      expect(buildSessionRetentionCandidates({
+        sessions: [...recent, session('old'), session('pinned'), inWork, doneWork], cutoffDays: 30, currentSessionId: null,
+        action: 'archive', activeSessionIds: new Set(), isKept: isSessionKeptByUser, now,
+      }).sort()).toEqual(['done-work', 'old']);
+    } finally {
+      useSessionPinnedStore.getState().toggle({ directory: '/retention-project', sessionId: 'pinned' });
+    }
   });
 
   test('protects every ancestor of a recent or archived child from cascade deletion', () => {

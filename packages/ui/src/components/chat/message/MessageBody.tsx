@@ -405,15 +405,26 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
     // One expanded state for the whole message: text parts and context cards
-    // collapse and expand together, with a single collapse control up here
-    // instead of one per part.
+    // collapse and expand together, with a single show more / show less link
+    // under the text instead of one control per part.
     const collapsibleUserMessages = useUIStore((state) => state.collapsibleUserMessages);
     const [messageExpanded, setMessageExpanded] = React.useState(false);
+    const [truncatedPartIndexes, setTruncatedPartIndexes] = React.useState<ReadonlySet<number>>(() => new Set());
     const expandMessage = React.useCallback(() => setMessageExpanded(true), []);
-    const collapseMessage = React.useCallback((event: React.MouseEvent) => {
+    const toggleMessageExpanded = React.useCallback((event: React.MouseEvent) => {
         event.stopPropagation();
-        setMessageExpanded(false);
+        setMessageExpanded((value) => !value);
     }, []);
+    const handlePartTruncationChange = React.useCallback((partIndex: number, truncated: boolean) => {
+        setTruncatedPartIndexes((current) => {
+            if (current.has(partIndex) === truncated) return current;
+            const next = new Set(current);
+            if (truncated) next.add(partIndex);
+            else next.delete(partIndex);
+            return next;
+        });
+    }, []);
+    const showMessageExpandToggle = collapsibleUserMessages && (messageExpanded || truncatedPartIndexes.size > 0);
     React.useEffect(() => {
         if (!collapsibleUserMessages) setMessageExpanded(false);
     }, [collapsibleUserMessages]);
@@ -426,6 +437,10 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
             return false;
         });
     }, [parts]);
+
+    const attachmentFilenames = React.useMemo(() => parts.flatMap((part) => (
+        part.type === 'file' && part.filename ? [part.filename] : []
+    )), [parts]);
 
     const mentionToken = agentMention?.token;
     let mentionInjected = false;
@@ -754,16 +769,13 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
             style={CONTAIN_LAYOUT_STYLE}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
-            {collapsibleUserMessages && messageExpanded && (
-                <button
-                    type="button"
-                    onClick={collapseMessage}
-                    className="absolute top-0 right-0 z-10 flex items-center justify-center rounded-sm bg-surface-elevated p-0.5 text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
-                    aria-label={t('chat.message.userText.collapseAria')}
-                >
-                    <Icon name="arrow-up-s" className="h-3.5 w-3.5" />
-                </button>
-            )}
+            {/* Attachments lead the bubble, above the text. */}
+            <MessageFilesDisplay
+                files={parts}
+                onShowPopup={onShowPopup}
+                compact
+                className={userContentParts.length > 0 ? 'mb-2' : 'mt-0'}
+            />
             <div
                 className={cn(
                     'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
@@ -794,12 +806,28 @@ const UserMessageBody = React.memo(({ messageId, parts, messageCreatedAt, isMobi
                                 agentMention={mentionForPart}
                                 messageExpanded={messageExpanded}
                                 onExpandMessage={expandMessage}
+                                partIndex={index}
+                                onTruncationChange={handlePartTruncationChange}
+                                attachmentFilenames={attachmentFilenames}
                             />
                         </React.Fragment>
                     );
                 })}
             </div>
-            <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} compact />
+            {showMessageExpandToggle && (
+                // A quiet text link, not a button: the collapsed text itself is
+                // already the large tap target. Inline min sizes opt out of the
+                // mobile 36px button minimum, which turned this into a block.
+                <button
+                    type="button"
+                    onClick={toggleMessageExpanded}
+                    className="ms-auto mt-1 block py-0.5 text-end text-sm text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:underline focus-visible:outline-none focus-visible:text-foreground"
+                    style={{ minHeight: 0, minWidth: 0 }}
+                    aria-expanded={messageExpanded}
+                >
+                    {t(messageExpanded ? 'chat.message.userText.showLess' : 'chat.message.userText.showFullMessage')}
+                </button>
+            )}
             {actionsBlock}
         </div>
     );
@@ -2561,7 +2589,7 @@ const AssistantMessageBody = React.memo(({
 function AgentModelIcon({ agentName }: { agentName: string | undefined }) {
     // Roster/color changes need to update this icon, not rerender the transcript body.
     const getAgentColor = useAgentColors();
-    return <Icon name="brain-ai-3" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: `var(${getAgentColor(agentName).var})` }} />;
+    return <Icon name="brain-ai-3" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: getAgentColor(agentName).color }} />;
 }
 
 const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {

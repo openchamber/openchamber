@@ -1,0 +1,74 @@
+---
+title: Issues e PRs
+description: Veja as issues e pull requests de um projeto, ou suas issues do Linear, e comece a trabalhar a partir de uma.
+---
+
+# Issues e PRs
+
+O quadro **Issues and PRs** é uma página inteira que lista as issues e pull requests do GitHub ou do GitLab de um projeto (merge requests no GitLab), ou suas issues do Linear. Escolha um item e a prévia abre ao lado da lista. Olhar outro projeto aqui não muda o projeto em que o resto do app está.
+
+## Abra o quadro
+
+- Clique no ícone de pull request no cabeçalho da barra lateral, ao lado das tarefas agendadas e do arquivo.
+- Escolha **Issues and PRs** na paleta de comandos.
+- Pressione <kbd>⌘K</kbd> e depois <kbd>B</kbd> (<kbd>Ctrl+K</kbd> e depois <kbd>B</kbd> no Windows e no Linux). As mesmas teclas fecham o quadro.
+
+No celular, toque no botão de pull request no rodapé do menu de sessões. O quadro não existe na extensão do VS Code.
+
+O quadro reabre no projeto, na aba e no time em que você o deixou.
+
+## Encontre itens
+
+Tudo fica numa só linha da barra de ferramentas. À esquerda fica o seletor de projeto, com ícones de projeto e busca. Ao lado, você alterna entre **Issues**, **Pull requests** e **Linear**. Issues e pull requests vêm do host do próprio projeto, GitHub ou GitLab. Um projeto sem esse remoto mostra só **Linear**.
+
+Em **Linear**, o seletor de projeto vira um seletor de time: escolha **All teams** ou um time. Se você conectou mais de um workspace do Linear, troque de workspace no mesmo menu. Como conectar o Linear está em [Integrações](/pt-br/integrations/).
+
+A busca aceita um título, um número ou um link colado. O menu de filtros continua aberto enquanto você escolhe, então dá para combinar filtros.
+
+Para GitHub e GitLab:
+
+- Status: **Open**, **Closed**, **All**, e **Merged** para pull requests
+- Pessoas: **Anyone**, **Assigned to me**, **Created by me**, e **Review requested** para pull requests
+
+Para o Linear:
+
+- Status: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Pessoas: **Anyone**, **Assigned to me**, **Created by me**
+- Prioridade: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Leia um item
+
+A prévia mostra a descrição, as labels e os comentários. Numa issue do Linear, clique na pílula de status para passá-la para outro estado do time.
+
+A linha **Labels** tem um botão de lápis que abre uma lista pesquisável das labels do repositório. Marque ou desmarque as que quiser. A mudança é salva quando você fecha a lista, então vários cliques contam como uma só mudança. Um pull request aberto (merge request no GitLab) também tem uma linha **Reviewers** que funciona do mesmo jeito, com as pessoas que podem revisar no repositório. No GitHub, o autor do pull request não aparece entre as opções. Issues do Linear não têm nenhuma das duas linhas.
+
+## Comente e revise
+
+Abaixo da atividade de uma issue ou pull request há uma caixa de comentário. **Comment** publica seu texto no GitHub ou no GitLab, assim como <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> no Windows e no Linux). O texto fica na caixa até ser publicado, então um envio que falhou não perde nada. Ao trocar para outro item, a caixa é limpa. Issues do Linear não têm essa caixa.
+
+Um pull request aberto (merge request no GitLab) também tem **Approve** e **Request changes**, e o que estiver na caixa vai junto com a revisão. **Request changes** precisa de um texto dizendo o que mudar. A revisão vale para os commits mostrados na prévia. Se alguém fez push depois disso, ela é recusada e a prévia é atualizada para você olhar de novo. No GitLab, **Request changes** funciona quando você é revisor do merge request, e o texto da revisão é publicado como um comentário separado. Se só esse comentário falhar, a revisão vale mesmo assim e seu texto fica na caixa.
+
+## Comece o trabalho
+
+As ações ficam no rodapé da prévia.
+
+- **New session** abre uma nova sessão no projeto com o item anexado à caixa de mensagem. Você mesmo escreve a primeira mensagem.
+- **Start in worktree…** numa issue, ou **Check out in worktree…** num pull request, abre a caixa de diálogo New Worktree com o item já escolhido. Um pull request faz checkout do próprio branch. Veja [Sessões de Worktree](/pt-br/worktrees/).
+
+Numa issue do Linear, **Start in** mostra o projeto em que a sessão vai começar. É o projeto mapeado para o time da issue no cartão do Linear em [Integrações](/pt-br/integrations/). Sem mapeamento de time, é o projeto padrão e, sem ele, o último projeto que o quadro mostrou. Ali você pode escolher outro projeto para essa issue.
+
+## Pull requests
+
+A prévia de um pull request também mostra o branch, o tamanho (linhas adicionadas e removidas, e arquivos alterados), os checks e a revisão. O feed **Activity** coloca comentários, veredictos de revisão e os commits mais recentes na ordem em que aconteceram. Commits seguidos ficam agrupados, assim você vê a quais commits uma revisão respondeu.
+
+Ao lado do tamanho há dois botões. **Changes** abre o diff do pull request no painel lateral, e **Walkthrough** abre o [percurso pelas mudanças](/pt-br/walkthrough/). Se o app estiver em outro projeto, ele muda primeiro para o projeto do PR. Os dois existem só no desktop e na web.
+
+No rodapé, **Merge** pergunta antes de fazer o merge e usa seu método de merge de sempre. Um rascunho também tem **Ready for review**.
+
+Uma issue ou um pull request aberto também tem no rodapé **Close issue** ou **Close pull request** (**Close merge request** no GitLab), e um fechado tem **Reopen issue** ou **Reopen pull request** (**Reopen merge request**). Nenhum dos dois pede confirmação, porque dá para desfazer. Um pull request já mesclado não pode ser fechado nem reaberto. No GitHub, a issue é fechada como concluída.
+
+## Relacionado
+
+- [Issues e PRs do GitHub](/pt-br/github/): conecte o GitHub e anexe issues às mensagens
+- [Sessões de Worktree](/pt-br/worktrees/): onde as sessões de worktree começam
+- [Integrações](/pt-br/integrations/): conecte o Linear e mapeie times para projetos

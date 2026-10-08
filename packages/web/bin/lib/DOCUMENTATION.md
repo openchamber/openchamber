@@ -88,9 +88,10 @@ These modules hold reusable, non-presentational logic for commands.
     in the running app can observe a torn file), a strict read that throws on
     corrupt/unreadable payloads, and the same `0600` file mode.
   - The strict read gates relay identity regeneration exactly like the server
-    runtime: a swallowed read failure can never mint a replacement signing or
-    encryption keypair, which would change `serverId` and orphan every paired
-    device and push binding.
+    runtime (`server/lib/relay/key-store.js`, which may still find legacy keys
+    in settings.json): a swallowed read failure can never mint a replacement
+    signing or encryption keypair, which would change `serverId` and orphan
+    every paired device and push binding.
 
 - `cli-process.js`
   - PID files, instance registry files, process identity checks, runtime metadata checks, and process termination helpers.
@@ -127,6 +128,7 @@ These modules hold reusable, non-presentational logic for commands.
 - `cli-startup.js`
   - Native startup service detection, install/uninstall/status helpers, and platform-specific startup command execution.
   - The service runs the CLI by its resolved path. A pnpm global install resolves into a versioned `.pnpm` store directory that an update leaves behind, so the entrypoint is mapped back to the stable `node_modules/@openchamber/web` link when it exists.
+  - The macOS LaunchAgent leaves `ProcessType` unset so launchd does not force the managed OpenCode child into background-tier scheduling. Re-running `startup enable` replaces an existing plist.
 
 - `cli-tunnel-profiles.js`
   - Tunnel profile normalization, token resolution/redaction, profile storage, migration, file-permission warnings, and managed-remote pair persistence.

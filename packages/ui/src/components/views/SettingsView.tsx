@@ -46,6 +46,7 @@ import type { OpenChamberSection } from '@/components/sections/openchamber/types
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
+import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
 import {
   SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -67,6 +68,8 @@ import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/set
 
 // UI Kit: fixed split-page sidebar width
 const SETTINGS_SPLIT_SIDEBAR_WIDTH = 280;
+// The desktop close button: top-1 offset plus its h-7 height.
+const SETTINGS_CLOSE_BUTTON_CLEARANCE = 32;
 const SETTINGS_DETAIL_HISTORY_KEY = '__openchamberSettingsDetail';
 /** How long (in frames, ~0.5 s) a search result or a link waits for its item to render. */
 const PENDING_ITEM_MAX_FRAMES = 30;
@@ -1058,22 +1061,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return null;
     }
 
+    // The floating close button sits over the content's top-right corner, so
+    // the content scrollbar starts below it.
+    const scrollbarTopClearance = onClose ? SETTINGS_CLOSE_BUTTON_CLEARANCE : 0;
+    const content = (
+      <SettingsScrollbarTopClearanceContext.Provider value={scrollbarTopClearance}>
+        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+      </SettingsScrollbarTopClearanceContext.Provider>
+    );
+
     if (activePageMeta.kind === 'split') {
       return (
         <div className="flex h-full min-h-0 overflow-hidden">
           <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
-          <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background" disableHorizontal>
-            <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+          <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background" disableHorizontal verticalTrackStart={scrollbarTopClearance}>
+            {content}
           </ScrollableOverlay>
         </div>
       );
     }
 
     return (
-      <ScrollableOverlay outerClassName="h-full min-h-0" className="bg-background" disableHorizontal>
-        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+      <ScrollableOverlay outerClassName="h-full min-h-0" className="bg-background" disableHorizontal verticalTrackStart={scrollbarTopClearance}>
+        {content}
       </ScrollableOverlay>
     );
   };

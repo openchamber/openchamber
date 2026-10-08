@@ -179,18 +179,47 @@ describe('edge swipe selection isolation', () => {
       expect(opened).toEqual([]);
     });
 
-    test(`${side}: a swipe on wide content scrolls it until it reaches its end`, () => {
+    test(`${side}: wide content owns the gesture until it reaches its end`, () => {
       // Right-edge swipes pull content in from the right, left-edge ones from the left.
       const scrollable = side === 'left' ? 510 : 0;
-      const atEnd = side === 'left' ? 0 : 510;
       scroller.scrollLeft = scrollable;
       touch('touchstart', startX, 100, cell);
       touch('touchend', endX, 100, cell);
       expect(opened).toEqual([]);
+    });
 
-      scroller.scrollLeft = atEnd;
+    test(`${side}: a normal swipe at the end of wide content does not open the drawer`, () => {
+      scroller.scrollLeft = side === 'left' ? 0 : 510;
       touch('touchstart', startX, 100, cell);
       touch('touchend', endX, 100, cell);
+      expect(opened).toEqual([]);
+    });
+
+    test(`${side}: a diagonal swipe at the end of wide content stays with the content`, () => {
+      scroller.scrollLeft = side === 'left' ? 0 : 510;
+      touch('touchstart', startX, 100, cell);
+      // 120px across but 60px down: inside the normal axis tolerance, past the strict one.
+      touch('touchend', endX, 160, cell);
+      expect(opened).toEqual([]);
+    });
+
+    test(`${side}: at the end of wide content the strict angle bar decides`, () => {
+      scroller.scrollLeft = side === 'left' ? 0 : 510;
+      const longEndX = side === 'left' ? startX + 160 : startX - 160;
+      // 160px across: 60px down (0.375) is flat enough; 70px down (0.4375) is not.
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', longEndX, 170, cell);
+      expect(opened).toEqual([]);
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', longEndX, 160, cell);
+      expect(opened).toEqual([side]);
+    });
+
+    test(`${side}: a long deliberate swipe at the end of wide content opens the drawer`, () => {
+      scroller.scrollLeft = side === 'left' ? 0 : 510;
+      const longEndX = side === 'left' ? startX + 160 : startX - 160;
+      touch('touchstart', startX, 100, cell);
+      touch('touchend', longEndX, 100, cell);
       expect(opened).toEqual([side]);
     });
 
@@ -203,8 +232,9 @@ describe('edge swipe selection isolation', () => {
       expect(opened).toEqual([]);
 
       scroller.scrollLeft = side === 'left' ? -510 : 0;
+      const longEndX = side === 'left' ? startX + 160 : startX - 160;
       touch('touchstart', startX, 100, cell);
-      touch('touchend', endX, 100, cell);
+      touch('touchend', longEndX, 100, cell);
       expect(opened).toEqual([side]);
     });
 

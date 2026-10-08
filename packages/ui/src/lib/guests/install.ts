@@ -107,7 +107,7 @@ const readInstallError = async (
   }
 };
 
-export type InstallGuestOptions = {
+type InstallGuestOptions = {
   replace?: boolean;
   gitIdentityId?: string;
 };

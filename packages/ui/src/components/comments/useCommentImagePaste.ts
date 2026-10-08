@@ -23,6 +23,13 @@ const clipboardImages = (data: DataTransfer): File[] => {
   return Array.from(images.values());
 };
 
+/** Where a paste's citations go: replace `[from, to)` of the comment with `insertion`. */
+interface CommentImageInsertion {
+  from: number;
+  to: number;
+  insertion: string;
+}
+
 /**
  * Images pasted into a comment. The comment text gets a `[image-1.png]`
  * citation, the same one the composer writes for a pasted image; the image
@@ -33,18 +40,23 @@ const clipboardImages = (data: DataTransfer): File[] => {
 export const useCommentImagePaste = () => {
   const { t } = useI18n();
   const pendingRef = React.useRef(new Map<string, File>());
+  // Live set of the pending names, read by the comment editor so a citation
+  // renders as a chip the moment it is inserted.
+  const pendingFilenamesRef = React.useRef(new Set<string>());
 
   /**
-   * Takes the images out of a paste into `textarea` and returns the text with
-   * their citations at the caret, or null when the paste carries no image
-   * and belongs to the textarea.
+   * Takes the images out of a paste into a comment whose text is `value` with
+   * `selection` selected, and returns where their citations go, or null when
+   * the paste carries no image and belongs to the field. The caller cancels
+   * the paste and applies the insertion.
    */
   const takePastedImages = React.useCallback((
-    event: React.ClipboardEvent<HTMLTextAreaElement>,
-  ): { text: string; caret: number } | null => {
-    const images = clipboardImages(event.clipboardData);
+    clipboardData: DataTransfer,
+    value: string,
+    selection: { start: number; end: number },
+  ): CommentImageInsertion | null => {
+    const images = clipboardImages(clipboardData);
     if (images.length === 0) return null;
-    event.preventDefault();
 
     const filenames = assignImageAttachmentFilenames(images, [
       ...useInputStore.getState().attachedFiles.map((file) => file.filename),
@@ -52,18 +64,16 @@ export const useCommentImagePaste = () => {
     ]);
     filenames.forEach((filename, index) => {
       pendingRef.current.set(filename, renameFileForAttachmentCitation(images[index], filename));
+      pendingFilenamesRef.current.add(filename);
     });
 
-    const { value, selectionStart, selectionEnd } = event.currentTarget;
-    const before = value.slice(0, selectionStart);
-    const after = value.slice(selectionEnd);
     // Text that came along with the images stays, as in the composer.
     const insertion = withInlineInsertionBoundaries(
-      buildImagePasteInsertion(event.clipboardData.getData('text'), buildAttachmentCitationText(filenames)),
-      before,
-      after,
+      buildImagePasteInsertion(clipboardData.getData('text'), buildAttachmentCitationText(filenames)),
+      value.slice(0, selection.start),
+      value.slice(selection.end),
     );
-    return { text: `${before}${insertion}${after}`, caret: before.length + insertion.length };
+    return { from: selection.start, to: selection.end, insertion };
   }, []);
 
   /** Attaches the pasted images still cited in the final comment text. */
@@ -72,6 +82,7 @@ export const useCommentImagePaste = () => {
       .filter(([filename]) => commentText.includes(buildAttachmentCitationText([filename])))
       .map(([, file]) => file);
     pendingRef.current.clear();
+    pendingFilenamesRef.current.clear();
 
     const { addAttachedFile } = useInputStore.getState();
     for (const file of cited) {
@@ -82,7 +93,15 @@ export const useCommentImagePaste = () => {
 
   const discardPastedImages = React.useCallback(() => {
     pendingRef.current.clear();
+    pendingFilenamesRef.current.clear();
   }, []);
 
-  return { takePastedImages, attachCitedImages, discardPastedImages };
+  return {
+    takePastedImages,
+    attachCitedImages,
+    discardPastedImages,
+    pendingFilenames: pendingFilenamesRef.current,
+  };
 };
+
+export type CommentImagePaste = ReturnType<typeof useCommentImagePaste>;

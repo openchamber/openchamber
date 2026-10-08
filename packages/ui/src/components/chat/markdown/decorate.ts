@@ -1,4 +1,5 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { SKILL_CHIP_ICON_HREF } from '@/lib/messages/inlineMessageLinks';
 import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
@@ -90,6 +91,29 @@ const decorateImageLabels = (root: HTMLElement): void => {
     icon.setAttribute('data-openchamber-markdown-image-label-icon', 'true');
     setIcon(icon, 'image');
     label.prepend(icon);
+  }
+};
+
+const prependChipIcon = (chip: HTMLElement, href: string): void => {
+  if (chip.querySelector('svg')) return;
+  const svg = chip.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'block size-[1.1em] shrink-0');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const use = chip.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', href);
+  svg.appendChild(use);
+  chip.prepend(svg);
+};
+
+/** Reference chips in user messages: file-type icons on attachment citations, a book on skills. */
+const decorateReferenceChipIcons = (root: HTMLElement): void => {
+  for (const chip of Array.from(root.querySelectorAll<HTMLElement>('[data-attachment-citation]'))) {
+    const iconId = chip.getAttribute('data-attachment-citation') ?? '';
+    if (iconId) prependChipIcon(chip, `#${iconId}`);
+  }
+  for (const chip of Array.from(root.querySelectorAll<HTMLElement>('a[data-skill-name]'))) {
+    prependChipIcon(chip, SKILL_CHIP_ICON_HREF);
   }
 };
 
@@ -746,6 +770,7 @@ export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void 
   }
   decorateDisclosures(root);
   decorateImageLabels(root);
+  decorateReferenceChipIcons(root);
   decorateInlineCode(root);
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);

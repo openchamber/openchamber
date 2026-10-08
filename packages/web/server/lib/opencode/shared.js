@@ -919,7 +919,6 @@ export {
   readWorktreeDirectorySetting,
   getConfigForPath,
   writeConfig,
-  lookupSectionEntry,
   getJsonEntrySource,
   getJsonWriteTarget,
   getAncestors,
@@ -933,5 +932,5 @@ export {
   listSkillSupportingFiles,
   readSkillSupportingFile,
   writeSkillSupportingFile,
-  deleteSkillSupportingFile,
+  deleteSkillSupportingFile
 };

@@ -31,7 +31,7 @@ type FilesViewTabsActions = {
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 };
 
-export type FilesViewTabsStore = FilesViewTabsState & FilesViewTabsActions;
+type FilesViewTabsStore = FilesViewTabsState & FilesViewTabsActions;
 
 const MAX_ROOTS = 20;
 const MAX_RUNTIME_SNAPSHOTS = 8;

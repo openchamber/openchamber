@@ -104,6 +104,19 @@ If your machines already have OpenCode installed and OpenChamber should use that
 - The CLI has to be OpenCode 2.x, at least the version OpenChamber asks for. With an older one, OpenChamber stops at the "update OpenCode" screen.
 - A folder works too, if it holds `opencode` (`opencode.exe` on Windows). There's no environment variable for this, since a user can set those themselves.
 
+
+### Hide the built-in skills catalogs
+
+OpenChamber ships with a few public skills catalogs (Anthropic, OpenAI, Cursor, Matt Pocock). If your organization keeps its own, add it as a custom catalog and hide the built-in ones in the policy file. This works with or without enterprise mode.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+Settings then offers only the catalogs people add themselves, and OpenChamber won't load a built-in one even if asked directly. There's no environment variable for this, since a user can set those themselves.
+
 ### Examples
 
 Put the policy file on a Mac. Run in Terminal as an administrator:

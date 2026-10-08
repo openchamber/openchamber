@@ -56,6 +56,7 @@ import {
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
+import { isStageShown, useWebviewFocusGuard } from './useWebviewFocusGuard';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -98,12 +99,8 @@ const VIEW_READY_TIMEOUT_MS = 15_000;
  * alone. Style overrides only: moving the node would reload its webview.
  */
 const revealStageForCapture = (stage: HTMLElement | null): (() => void) => {
-  if (!stage) return () => {};
+  if (!stage || isStageShown(stage)) return () => {};
   const rect = stage.getBoundingClientRect();
-  const insideWindow = rect.width > 0 && rect.left >= 0 && rect.right <= window.innerWidth;
-  if (insideWindow && stage.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
-    return () => {};
-  }
   const previousStyle = stage.style.cssText;
   Object.assign(stage.style, {
     position: 'fixed',
@@ -380,7 +377,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     }
   }, []);
 
-  const runControlAction = React.useCallback(async (
+  const performControlAction = React.useCallback(async (
     action: string,
     parameters: Record<string, unknown>,
   ): Promise<unknown> => {
@@ -543,6 +540,15 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     }
     return result;
   }, [annotationHost, loadUrl, waitForIdle, waitForView]);
+
+  // The agent works this page while the user types elsewhere in the app.
+  const guardAgentAction = useWebviewFocusGuard(webviewElement, stageRef);
+  const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>) => (
+    guardAgentAction(
+      action === 'browser.click' || action === 'browser.type',
+      () => performControlAction(action, parameters),
+    )
+  ), [guardAgentAction, performControlAction]);
 
   const describeTab = React.useCallback(() => {
     const webview = webviewRef.current;

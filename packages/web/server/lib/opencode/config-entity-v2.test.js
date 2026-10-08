@@ -11,7 +11,7 @@ process.env.XDG_CONFIG_HOME = path.join(root, 'xdg');
 delete process.env.OPENCODE_CONFIG;
 
 const { parseMdFile } = await import('./shared.js');
-const { getAgentConfig, getAgentPermissions, updateAgent, createAgent } = await import('./agents.js');
+const { getAgentConfig, getAgentPermissions, updateAgent, createAgent, listDisabledAgents } = await import('./agents.js');
 const { getCommandConfig, updateCommand } = await import('./commands.js');
 const { getMcpConfig, listMcpConfigs, updateMcpConfig } = await import('./mcp.js');
 
@@ -313,5 +313,20 @@ describe('entity modules speak OpenCode 2 shapes', () => {
       disabled: true,
       timeout: { catalog: 30000, execution: 30000 },
     });
+  });
+
+  it('lists agents switched off in files and config sections, and forgets them once enabled', () => {
+    write('.opencode/agents/incident.md', ['---', 'description: Incident response', 'disabled: true', '---', '', 'Handle incidents.'].join('\n'));
+    write('.opencode/agents/ops/oncall.md', ['---', 'disable: true', '---', '', 'On call.'].join('\n'));
+    write('.opencode/agents/reviewer.md', ['---', 'description: Reviewer', '---', '', 'Review.'].join('\n'));
+    write('opencode.json', JSON.stringify({ agents: { plan: { disabled: true }, build: { color: '#112233' } } }));
+
+    expect(listDisabledAgents(projectDir).map((agent) => agent.name)).toEqual(['incident', 'ops/oncall', 'plan']);
+    expect(listDisabledAgents(projectDir)[0]).toMatchObject({ name: 'incident', scope: 'project', description: 'Incident response' });
+
+    updateAgent('incident', { disabled: null }, projectDir);
+    updateAgent('plan', { disabled: null }, projectDir);
+    expect(listDisabledAgents(projectDir).map((agent) => agent.name)).toEqual(['ops/oncall']);
+    expect(getAgentConfig('incident', projectDir).config.description).toBe('Incident response');
   });
 });

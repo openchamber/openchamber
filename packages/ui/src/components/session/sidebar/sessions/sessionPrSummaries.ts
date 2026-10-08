@@ -93,7 +93,7 @@ type IssueStatusLabelKey =
   | 'sessions.sidebar.group.issue.status.notPlanned';
 
 /** A linked issue the way a session row shows it. */
-export type SessionIssueItem = {
+type SessionIssueItem = {
   key: string;
   /** `#12` for GitHub, the tracker's identifier otherwise. */
   label: string;

@@ -18,7 +18,8 @@ interface CodeLineContentProps {
 }
 
 const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status }) => {
-  if (status === 'ready' && html !== undefined) {
+  // Ready lines, and unchanged lines carried while an update tokenizes.
+  if (html !== undefined) {
     return <span className="whitespace-pre-wrap break-all" dangerouslySetInnerHTML={{ __html: html }} />;
   }
   if (status === 'loading') {
@@ -26,6 +27,10 @@ const CodeLineContent: React.FC<CodeLineContentProps> = ({ content, html, status
   }
   return <span className="whitespace-pre-wrap break-all">{content}</span>;
 };
+
+const highlightedLineAt = (result: WorkerHighlightedLinesResult, index: number): string | undefined => (
+    result.status === 'loading' ? result.carriedLines[index] : result.lines?.[index]
+);
 
 interface DiffPreviewProps {
     diff: string;
@@ -56,7 +61,7 @@ export const DiffPreview: React.FC<DiffPreviewProps> = ({ diff, filePath }) => {
 
                     <div>
                         {hunk.lines.map((line, lineIdx) => {
-                            const html = highlighted.lines?.[lineCursor];
+                            const html = highlightedLineAt(highlighted, lineCursor);
                             lineCursor += 1;
                             return (
                                 <div
@@ -120,7 +125,7 @@ export const WritePreview: React.FC<WritePreviewProps> = ({ content, filePath })
                         <div className="flex-1 min-w-0">
                             <CodeLineContent
                                 content={line || ' '}
-                                html={highlighted.lines?.[lineIdx]}
+                                html={highlightedLineAt(highlighted, lineIdx)}
                                 status={highlighted.status}
                             />
                         </div>

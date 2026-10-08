@@ -304,7 +304,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
         : requestedTarget?.source.kind === 'branch'
           ? { source: branchSource ?? requestedTarget.source }
           : requestedTarget ?? { source: { kind: 'working-tree', scope } },
-    [branchSource, isCommitScope, isPrScope, readContext, requestedTarget, scope, selectedCommitHash, selectedPr]
+    [branchSource, isCommitScope, isPrScope, readContext, readsChangeRequests, requestedTarget, scope, selectedCommitHash, selectedPr]
   );
   const source = target.source;
   // A scope the person picked before its subject exists: the base of a branch
@@ -334,7 +334,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     if (!choosingPr || !selectedPr || !readsChangeRequests || !readContext) return;
     requestTarget(directory, { source: selectedPr, context: readContext });
     setPendingSourceSelection(null);
-  }, [choosingPr, directory, readContext, requestTarget, selectedPr]);
+  }, [choosingPr, directory, readContext, readsChangeRequests, requestTarget, selectedPr]);
   useEffect(() => {
     if (!choosingBranchBase || !branchSource) return;
     requestTarget(directory, { source: branchSource });
@@ -937,10 +937,10 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       <div className={cn('flex min-h-0 flex-1', showToc ? 'flex-row' : 'flex-col')}>
         {prNeedsSelection ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            {!prComparison.error && !prComparison.loading && <Icon name="git-pull-request" className="size-6 text-muted-foreground" />}
             <p className="typography-meta text-muted-foreground">{prComparison.error ?? (prComparison.loading
               ? t(changeRequestCopy('session.githubPrPicker.loading.pullRequests', changeRequestProvider))
-              : t(changeRequestCopy('pullRequestComparison.select', changeRequestProvider)))}</p>
-            {!prComparison.loading && <PullRequestComparisonSelector comparison={prComparison} />}
+              : t(changeRequestCopy('pullRequestComparison.pickAbove', changeRequestProvider)))}</p>
           </div>
         ) : commitNeedsSelection ? (
           <div className="flex flex-1 items-center justify-center gap-2 p-8 typography-meta text-muted-foreground">

@@ -5,6 +5,7 @@ import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import type { ContextPartPayload } from '@/lib/messages/contextParts';
 import { cn } from '@/lib/utils';
+import { withAttachmentChips } from './attachmentCitationChips';
 import { legacyChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import { useChatQuoteHighlightApi } from '../../hooks/chatQuoteHighlightStore';
 
@@ -38,7 +39,9 @@ const ContextCard: React.FC<{
     onExpand?: () => void;
     /** Scroll to where the quote came from, with the button's label. */
     reveal?: { label: string; onReveal: () => void };
-}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal }) => {
+    /** The message's file names: `[name]` in the user's comment renders as a file chip. */
+    attachmentFilenames: readonly string[];
+}> = ({ icon, summary, title, body, text, mono, collapsed, onExpand, reveal, attachmentFilenames }) => {
     const [expanded, setExpanded] = React.useState(false);
     const hasBody = body.trim().length > 0;
     const hasText = text.trim().length > 0;
@@ -67,7 +70,7 @@ const ContextCard: React.FC<{
                 <span className="truncate">
                     {comment.length > 0 ? `${summary}: ` : summary}
                     {comment.length > 0 ? (
-                        <span className="text-sm text-[var(--surface-foreground)]">{comment}</span>
+                        <span className="text-sm text-[var(--surface-foreground)]">{withAttachmentChips(comment, attachmentFilenames, 'comment')}</span>
                     ) : null}
                 </span>
                 <Icon name="arrow-down-s" className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
@@ -114,7 +117,9 @@ const ContextCard: React.FC<{
                 ) : null}
             </div>
             {hasText ? (
-                <div className="mt-1.5 whitespace-pre-wrap break-words font-sans text-sm text-[var(--surface-foreground)]">{text}</div>
+                <div className="mt-1.5 whitespace-pre-wrap break-words font-sans text-sm text-[var(--surface-foreground)]">
+                    {withAttachmentChips(text, attachmentFilenames, 'comment')}
+                </div>
             ) : null}
         </div>
     );
@@ -130,10 +135,11 @@ const UserContextPart: React.FC<{
     /** Message-level collapse state, shared with the text parts. */
     collapsed?: boolean;
     onExpand?: () => void;
-}> = ({ payload, collapsed, onExpand }) => {
+    attachmentFilenames: readonly string[];
+}> = ({ payload, collapsed, onExpand, attachmentFilenames }) => {
     const { t } = useI18n();
     const quoteHighlights = useChatQuoteHighlightApi();
-    const shared = { collapsed, onExpand };
+    const shared = { collapsed, onExpand, attachmentFilenames };
 
     switch (payload.kind) {
         case 'code-comment': {

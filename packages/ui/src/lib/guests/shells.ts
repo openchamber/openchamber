@@ -1,6 +1,7 @@
-import type { GuestRunningShell, GuestRunningShellsSnapshot, GuestShellsScope } from '@openchamber/sdk';
-import { GUEST_SHELLS_MAX } from '@openchamber/sdk';
-import { sessionsInTree, useBackgroundShellsStore } from '@/sync/background-shells';
+import type { GuestEndedShell, GuestRunningShell, GuestRunningShellsSnapshot, GuestShellOutputResult, GuestShellsScope } from '@openchamber/sdk';
+import { GUEST_SHELLS_MAX, HostRequestError } from '@openchamber/sdk';
+import { OpencodeApiError, opencodeClient } from '@/lib/opencode/client';
+import { sessionsInTree, useBackgroundShellsStore, type EndedShell, type TrackedShell } from '@/sync/background-shells';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -33,21 +34,59 @@ const scopeSessionIds = (scope: GuestShellsScope): ReadonlySet<string> | null =>
     return ids;
   }
   const known = new Set<string>();
-  for (const shell of useBackgroundShellsStore.getState().byId.values()) known.add(shell.sessionID);
+  const store = useBackgroundShellsStore.getState();
+  for (const shell of store.byId.values()) known.add(shell.sessionID);
+  for (const shell of store.ended.values()) known.add(shell.sessionID);
   return new Set(sessionsInTree(known, scope.sessionId, (id) => sessions.get(id)?.parentID ?? undefined));
 };
 
-/** The running shells a scope covers, oldest first. Local store only; never a network read. */
+const guestShell = (shell: TrackedShell): GuestRunningShell => ({
+  id: shell.id, sessionID: shell.sessionID, command: shell.command, startedAt: shell.startedAt, background: shell.background,
+});
+
+const guestEndedShell = (shell: EndedShell): GuestEndedShell => (shell.exit === undefined
+  ? { ...guestShell(shell), status: shell.status, endedAt: shell.endedAt }
+  : { ...guestShell(shell), status: shell.status, exit: shell.exit, endedAt: shell.endedAt });
+
+/**
+ * The running shells a scope covers, oldest first, and the ones that ended,
+ * oldest end first with the newest kept. Local store only; never a network read.
+ */
 export const readGuestShells = (scope: GuestShellsScope): GuestRunningShellsSnapshot => {
   const store = useBackgroundShellsStore.getState();
   const inScope = scopeSessionIds(scope);
   const shells: GuestRunningShell[] = [];
   for (const shell of store.byId.values()) {
     if (inScope && !inScope.has(shell.sessionID)) continue;
-    shells.push({ id: shell.id, sessionID: shell.sessionID, command: shell.command, startedAt: shell.startedAt, background: shell.background });
+    shells.push(guestShell(shell));
   }
   shells.sort((left, right) => left.startedAt - right.startedAt || left.id.localeCompare(right.id));
-  return { kind: 'shells', scope, shells: shells.slice(0, GUEST_SHELLS_MAX) };
+  const ended: GuestEndedShell[] = [];
+  for (const shell of store.ended.values()) {
+    if (inScope && !inScope.has(shell.sessionID)) continue;
+    ended.push(guestEndedShell(shell));
+  }
+  ended.sort((left, right) => left.endedAt - right.endedAt || left.id.localeCompare(right.id));
+  return { kind: 'shells', scope, shells: shells.slice(0, GUEST_SHELLS_MAX), ended: ended.slice(-GUEST_SHELLS_MAX) };
+};
+
+/**
+ * One page of a command's output, running or ended. OpenCode keeps an ended
+ * command's output until it evicts the command (it retains the latest 25 per
+ * directory); a stopped command's output goes with it at once.
+ */
+export const readGuestShellOutput = async (shellId: string, cursor?: number, tailBytes?: number): Promise<GuestShellOutputResult> => {
+  const store = useBackgroundShellsStore.getState();
+  const ended = store.ended.get(shellId);
+  if (ended?.status === 'stopped') throw new HostRequestError('NOT_FOUND', 'A stopped shell keeps no output.');
+  const shell = store.byId.get(shellId) ?? ended;
+  if (!shell) throw new HostRequestError('NOT_FOUND', 'OpenChamber has not seen that shell.');
+  try {
+    return await opencodeClient.readShellOutput(shell.id, shell.directory, cursor, tailBytes);
+  } catch (error) {
+    if (error instanceof OpencodeApiError && error.status === 404) throw new HostRequestError('NOT_FOUND', 'OpenCode no longer keeps that shell\'s output.');
+    throw error;
+  }
 };
 
 const scopeKey = (scope: GuestShellsScope): string => {

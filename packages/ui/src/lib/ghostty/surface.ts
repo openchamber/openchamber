@@ -378,6 +378,59 @@ export function isTerminalPasteShortcut(
   return isMacPlatform(platform) ? event.metaKey : event.ctrlKey && event.shiftKey;
 }
 
+// How long a delivered shortcut read keeps waiting for its native paste event.
+// WebKit dispatches that event after a UI-process round trip, so it can land
+// after the clipboard read has already resolved.
+const SHORTCUT_PASTE_ECHO_MS = 1000;
+
+/**
+ * Decides which of the racing paste paths reaches the shell. A paste shortcut
+ * starts a clipboard read and also lets the browser fire its own paste event;
+ * whichever arrives first delivers. Native-first is settled by the token: the
+ * event invalidates the read. Read-first (WebKit) leaves the native event of
+ * the same keystroke still to come, so the read records it as owed and the
+ * event is swallowed when it arrives. Browsers that never fire the event let
+ * the debt expire after `SHORTCUT_PASTE_ECHO_MS`.
+ */
+export class TerminalPasteArbiter {
+  private token = 0;
+  private owedNativePastes = 0;
+  private lastShortcutReadAt = 0;
+
+  /** Claims the race for a clipboard read about to start. */
+  beginRead(): number {
+    return ++this.token;
+  }
+
+  /**
+   * Whether the read for `token` delivers. `owesNativePaste` marks a read that
+   * delivers text for a keystroke whose native paste event may still come.
+   */
+  settleRead(token: number, owesNativePaste: boolean, now: number): boolean {
+    if (this.token !== token) return false;
+    this.token += 1;
+    if (owesNativePaste) {
+      this.expireOwedPastes(now);
+      this.owedNativePastes += 1;
+      this.lastShortcutReadAt = now;
+    }
+    return true;
+  }
+
+  /** Whether a native paste event with text delivers. */
+  settleNativePaste(now: number): boolean {
+    this.token += 1;
+    this.expireOwedPastes(now);
+    if (this.owedNativePastes === 0) return true;
+    this.owedNativePastes -= 1;
+    return false;
+  }
+
+  private expireOwedPastes(now: number): void {
+    if (now - this.lastShortcutReadAt > SHORTCUT_PASTE_ECHO_MS) this.owedNativePastes = 0;
+  }
+}
+
 function isTerminalCompositionCommitInput(event: Pick<InputEvent, 'inputType'>): boolean {
   return (
     event.inputType === '' ||
@@ -629,7 +682,7 @@ export class GhosttyTerminalSurface {
   private canvasConfigured = false;
   private theme: GhosttyTheme;
   private readonly suppressedKeyCodes = new Set<string>();
-  private pasteShortcutToken = 0;
+  private readonly pasteArbiter = new TerminalPasteArbiter();
   private copyShortcutToken = 0;
   private clearSelectionAfterCopy = false;
   private primedCopySelection = '';
@@ -973,12 +1026,13 @@ export class GhosttyTerminalSurface {
     readText: () => Promise<string>,
     isCurrent: () => boolean = () => true,
   ): Promise<void> {
-    const token = ++this.pasteShortcutToken;
+    const token = this.pasteArbiter.beginRead();
     const text = await readText();
-    if (this.disposed || this.pasteShortcutToken !== token || !isCurrent()) return;
-    // As in every paste path, delivering bumps the token so a clipboard read
-    // still in flight cannot land after this text reaches the shell.
-    this.pasteShortcutToken += 1;
+    if (this.disposed || !isCurrent()) return;
+    // Settling invalidates any other clipboard read still in flight, so it
+    // cannot land after this text reaches the shell. A menu read has no
+    // native paste event behind it.
+    if (!this.pasteArbiter.settleRead(token, false, performance.now())) return;
     if (text.length === 0) return;
     const encoded = this.core.encodePaste(text);
     if (encoded.length > 0) this.options.onData(encoded);
@@ -1189,16 +1243,16 @@ export class GhosttyTerminalSurface {
       this.suppressedKeyCodes.add(event.code);
       const clipboard = navigator.clipboard;
       if (clipboard) {
-        // Race the async clipboard read against the browser's own paste event:
-        // the native event (dispatched synchronously with the default action)
-        // always claims the token first when it fires, and the read covers
-        // browsers whose paste shortcut produces no paste event. Not preventing
-        // the default keeps the native path alive when the read is denied.
-        const token = ++this.pasteShortcutToken;
+        // Race the async clipboard read against the browser's own paste event;
+        // TerminalPasteArbiter lets exactly one of them deliver. The read
+        // covers browsers whose paste shortcut produces no paste event. Not
+        // preventing the default keeps the native path alive when the read is
+        // denied.
+        const token = this.pasteArbiter.beginRead();
         void clipboard.readText().then(
           (text) => {
-            if (this.disposed || this.pasteShortcutToken !== token) return;
-            this.pasteShortcutToken += 1;
+            if (this.disposed) return;
+            if (!this.pasteArbiter.settleRead(token, text.length > 0, performance.now())) return;
             if (text.length > 0) this.options.onData(this.core.encodePaste(text));
           },
           () => {
@@ -1310,9 +1364,10 @@ export class GhosttyTerminalSurface {
     event.preventDefault();
     const data = event.clipboardData?.getData('text/plain') ?? '';
     if (data.length === 0) return;
-    // The native paste won the race with actual text; a pending clipboard read
-    // must not double. An empty native paste leaves the read as the only path.
-    this.pasteShortcutToken += 1;
+    // An empty native paste leaves the clipboard read as the only path. With
+    // text, the arbiter cancels a pending read, or swallows this event when
+    // the shortcut's read already delivered the same paste.
+    if (!this.pasteArbiter.settleNativePaste(performance.now())) return;
     this.options.onData(this.core.encodePaste(data));
   };
 

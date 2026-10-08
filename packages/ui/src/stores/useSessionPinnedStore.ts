@@ -6,7 +6,7 @@ import { getDeferredSafeStorage } from './utils/safeStorage';
 const STORAGE_KEY = 'oc.sessions.pinned.v2';
 const LEGACY_STORAGE_KEY = 'oc.sessions.pinned';
 
-export type SessionPinnedTarget = { directory: string; sessionId: string };
+type SessionPinnedTarget = { directory: string; sessionId: string };
 
 type PersistedPins = { version: 2; sessions: Record<string, number> };
 

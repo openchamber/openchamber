@@ -402,20 +402,6 @@ export type NewSessionDraftState = {
   preparedChatDirectory?: string | null
 }
 
-export type ViewportAnchor = {
-  sessionId: string
-  value: number
-}
-
-export type SessionHistoryMeta = {
-  limit: number
-  hasMore: boolean
-  complete: boolean
-  isLoading: boolean
-  loading?: boolean
-  nextCursor?: string
-}
-
 export type SessionUIState = {
   currentSessionId: string | null
   currentSessionDirectory: string | null

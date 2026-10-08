@@ -18,9 +18,9 @@ import {
   type WalkthroughTarget,
 } from '@/lib/walkthrough/types';
 
-export type WalkthroughEntryStatus = 'idle' | 'loading' | 'generating' | 'ready' | 'error';
+type WalkthroughEntryStatus = 'idle' | 'loading' | 'generating' | 'ready' | 'error';
 
-export interface WalkthroughEntry {
+interface WalkthroughEntry {
   status: WalkthroughEntryStatus;
   stage: WalkthroughStage | null;
   result: WalkthroughResult | null;

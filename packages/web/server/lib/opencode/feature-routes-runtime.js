@@ -39,7 +39,7 @@ import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
 import { registerOpenCodeRoutes } from './routes.js';
 import { getProviderSources, removeProviderConfig, upsertProviderConfig } from './providers.js';
-import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent } from './agents.js';
+import { getAgentSources, getAgentConfig, getAgentPermissions, createAgent, updateAgent, deleteAgent, listDisabledAgents } from './agents.js';
 import { getCommandSources, getCommandConfig, createCommand, updateCommand, deleteCommand } from './commands.js';
 import { listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from './mcp.js';
 import { listSnippets, getSnippet, createSnippet, updateSnippet, deleteSnippet, expandSnippets } from './snippets.js';
@@ -66,6 +66,7 @@ import { installSkillsFromRepository } from '../skills-catalog/install.js';
 import { fetchGitHubRepoMetas } from '../skills-catalog/github-meta.js';
 import crypto from 'node:crypto';
 import { getGitHubAuthByAccountId } from '../github/auth.js';
+import { getGitHubCliCredential } from '../github/octokit.js';
 import { createSourceControlAuthStore } from '../gitlab/auth-storage.js';
 import { refreshGitLabAccessToken, resolveGitLabClientId } from '../gitlab/device-flow.js';
 import { createGitCredentialResolver, createHttpsCredentialReference, parseGitCredentialReference } from '../git/credential-resolver.js';
@@ -326,6 +327,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       getAgentSources,
       getAgentConfig,
       getAgentPermissions,
+      listDisabledAgents,
       createAgent,
       updateAgent,
       deleteAgent,
@@ -419,11 +421,22 @@ export const createFeatureRoutesRuntime = (dependencies) => {
         origin, refreshToken, clientId: await resolveGitLabClientId(origin, readSettingsFromDisk),
       }),
     });
-    const resolveSourceControlAccount = ({ provider, instance, accountId, credentialRevision }) => provider === 'github'
-      ? getGitHubAuthByAccountId(accountId, credentialRevision)
-      : gitlabAuthStore.readAccount(instance, accountId, credentialRevision);
+    // A GitHub account is either one OpenChamber stores or the gh CLI login
+    // the user switched to; reads already accept both, so Git transport
+    // (fork PR worktrees, clones) must too.
+    const resolveSourceControlAccount = async ({ provider, instance, accountId, credentialRevision }) => {
+      if (provider !== 'github') return gitlabAuthStore.readAccount(instance, accountId, credentialRevision);
+      return await getGitHubAuthByAccountId(accountId, credentialRevision)
+        ?? getGitHubCliCredential(accountId, credentialRevision);
+    };
     const resolveTransportRepository = createPrivateRepositoryIdentityResolver({
       getTransportRevision: (directory) => readEffectiveGitTransportRevision(directory, { gitBinary }),
+    });
+    const contributorProvenance = createContributorProvenanceStore({
+      filePath: path.join(openchamberDataDir, 'git-contributor-provenance.json'),
+      resolveRepositoryIdentity: resolveTransportRepository,
+      resolveGitPaths: resolveRepositoryGitPaths,
+      fsImpl: fsPromises,
     });
     const sourceControlAuditStore = createSourceControlAuditStore({
       filePath: path.join(openchamberDataDir, 'source-control-audit.json'),
@@ -478,6 +491,11 @@ export const createFeatureRoutesRuntime = (dependencies) => {
           directory, parentEndpoint, parentRemoteName,
         });
         return inspection.requirements.find((entry) => entry.kind === kind && entry.path === checkoutPath) ?? null;
+      },
+      github: {
+        // A worktree made from a fork PR has no upstream; its provenance says
+        // which remote the branch came from, so PR status can find the PR.
+        readContributorProvenance: contributorProvenance.read,
       },
       gitlab: {
         configRoot: openchamberDataDir,
@@ -558,12 +576,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       if (!profile) throw new Error('Git identity profile is unavailable');
       return profile;
     };
-    const contributorProvenance = createContributorProvenanceStore({
-      filePath: path.join(openchamberDataDir, 'git-contributor-provenance.json'),
-      resolveRepositoryIdentity: resolveTransportRepository,
-      resolveGitPaths: resolveRepositoryGitPaths,
-      fsImpl: fsPromises,
-    });
     const networkOperationStore = createGitNetworkOperationStore({
       filePath: path.join(openchamberDataDir, 'git-network-operations.json'),
       fsImpl: fsPromises,

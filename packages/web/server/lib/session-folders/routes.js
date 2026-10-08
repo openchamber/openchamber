@@ -1,6 +1,6 @@
-const MAX_BODY_BYTES = 4 * 1024 * 1024;
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 const hasValidFolderShape = (folder) => (
   isObjectRecord(folder)

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { Session } from "@/lib/opencode/model"
 import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { getBtwSessionID } from '@/lib/sessionBtwMetadata';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionPinned, useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type SessionRetentionAction } from '@/stores/useUIStore';
 import { useSessionUIStore } from './session-ui-store';
@@ -23,6 +25,11 @@ const isOlderThanCutoff = (session: Session, cutoff: number, onlyArchived: boole
   return Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff;
 };
 
+/** Sessions the user asked to keep: pinned on this client, or in the In work block. */
+export const isSessionKeptByUser = (session: Session, pinnedIds: Set<string> = useSessionPinnedStore.getState().ids): boolean => (
+  isSessionInWork(session) || isSessionPinned(pinnedIds, session.directory, session.id)
+);
+
 type CandidateOptions = {
   sessions: readonly Session[];
   currentSessionId: string | null;
@@ -30,12 +37,13 @@ type CandidateOptions = {
   action: SessionRetentionAction;
   onlyArchived?: boolean;
   activeSessionIds: ReadonlySet<string>;
+  isKept?: (session: Session) => boolean;
   now?: number;
 };
 
 /** The unselected scope stays protected, including from cascading parent deletion. */
 export function buildSessionRetentionCandidates({
-  sessions, currentSessionId, cutoffDays, action, onlyArchived = false, activeSessionIds, now = Date.now(),
+  sessions, currentSessionId, cutoffDays, action, onlyArchived = false, activeSessionIds, isKept, now = Date.now(),
 }: CandidateOptions): string[] {
   if (!Number.isFinite(cutoffDays) || cutoffDays < 1) return [];
   const cutoff = now - cutoffDays * DAY_MS;
@@ -45,7 +53,7 @@ export function buildSessionRetentionCandidates({
   const protectedIds = new Set(sorted.slice(0, RETENTION_KEEP_RECENT).map((session) => session.id));
   for (const session of sessions) {
     if (isArchived(session) !== onlyArchived || getBtwSessionID(session) || session.id === currentSessionId
-      || activeSessionIds.has(session.id) || !isOlderThanCutoff(session, cutoff, onlyArchived)) {
+      || activeSessionIds.has(session.id) || isKept?.(session) || !isOlderThanCutoff(session, cutoff, onlyArchived)) {
       protectedIds.add(session.id);
     }
   }
@@ -122,6 +130,7 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
       action,
       onlyArchived,
       activeSessionIds: useGlobalSessionStatusStore.getState().activeSessionIds,
+      isKept: isSessionKeptByUser,
       now,
     });
     if (candidateIds.length === 0) return { ...result, skippedReason: 'no-candidates' };
@@ -138,7 +147,7 @@ export async function runSessionRetentionCleanup({ force = false } = {}): Promis
       const session = state.entityById.get(id);
       if (!session) continue;
       if (isArchived(session) !== onlyArchived || getBtwSessionID(session) || session.id === useSessionUIStore.getState().currentSessionId
-        || useGlobalSessionStatusStore.getState().activeSessionIds.has(id)
+        || useGlobalSessionStatusStore.getState().activeSessionIds.has(id) || isSessionKeptByUser(session)
         || !isOlderThanCutoff(session, now - settings.autoDeleteAfterDays * DAY_MS, onlyArchived)) continue;
       if (action === 'delete') {
         if (archivedSnapshot !== state.archivedSessions) {

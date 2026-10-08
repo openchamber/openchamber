@@ -80,6 +80,12 @@ Nadpisuje endpoint sprawdzania aktualizacji. Większość użytkowników nie pow
 
 Wymusza package manager używany do aktualizacji, gdy automatyczne wykrywanie się pomyli.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Kieruje przez proxy własne żądania wychodzące OpenChamber, takie jak limity użycia i katalogi skilli. Nazwy pisane małymi literami też działają. Hosty z `NO_PROXY` łączą się bezpośrednio, a `localhost`, `127.0.0.1` i `::1` zawsze, więc wywołania zwrotne logowania i lokalny serwer OpenCode działają dalej.
+
 ## Serwer OpenCode
 
 ### `OPENCODE_HOST`

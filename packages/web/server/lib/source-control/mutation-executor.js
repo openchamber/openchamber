@@ -129,7 +129,7 @@ export function createMutationExecutor({ store, auditStore, runtimeIdentity }) {
     }
     const existing = await auditStore.read(auditId(record));
     const target = {
-      kind: 'change-request',
+      kind: record.kind.startsWith('issue-') ? 'issue' : 'change-request',
       operation: record.kind,
       projectId: record.target.project.id,
     };

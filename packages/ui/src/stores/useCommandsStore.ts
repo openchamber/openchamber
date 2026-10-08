@@ -8,6 +8,7 @@ import {
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
+import { waitForOpenCodeConnection } from "@/stores/waitForOpenCodeConnection";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
@@ -45,7 +46,7 @@ export interface Command extends CommandConfig {
 const BUILTIN_COMMAND_NAMES = new Set(['init', 'review']);
 
 /** What `GET /api/config/commands/:name/config` answers. */
-export interface CommandEntityEnvelope {
+interface CommandEntityEnvelope {
   source: 'md' | 'json' | 'none';
   scope: CommandScope | null;
   path: string | null;
@@ -191,14 +192,7 @@ const getRequestDirectory = (): string | null => {
   return null;
 };
 
-const MAX_HEALTH_WAIT_MS = 20000;
-const FAST_HEALTH_POLL_INTERVAL_MS = 300;
-const FAST_HEALTH_POLL_ATTEMPTS = 4;
-const SLOW_HEALTH_POLL_BASE_MS = 800;
-const SLOW_HEALTH_POLL_INCREMENT_MS = 200;
-const SLOW_HEALTH_POLL_MAX_MS = 2000;
-
-export interface CommandDraft {
+interface CommandDraft {
   name: string;
   scope: CommandScope;
   description?: string;
@@ -593,50 +587,6 @@ export const useCommandsStore = create<CommandsStore>()(
 
 if (typeof window !== "undefined") {
   window.__zustand_commands_store__ = useCommandsStore;
-}
-
-async function waitForOpenCodeConnection(delayMs?: number) {
-  const initialPause = typeof delayMs === "number" && delayMs > 0
-    ? Math.min(delayMs, FAST_HEALTH_POLL_INTERVAL_MS)
-    : 0;
-
-  if (initialPause > 0) {
-    await sleep(initialPause);
-  }
-
-  const start = Date.now();
-  let attempt = 0;
-  let lastError: unknown = null;
-
-  while (Date.now() - start < MAX_HEALTH_WAIT_MS) {
-    attempt += 1;
-    updateConfigUpdateMessage(`Waiting for OpenCode… (attempt ${attempt})`);
-
-    try {
-      const isHealthy = await opencodeClient.checkHealth();
-      if (isHealthy) {
-        return;
-      }
-      lastError = new Error("OpenCode health check reported not ready");
-    } catch (error) {
-      lastError = error;
-    }
-
-    const elapsed = Date.now() - start;
-
-    const waitMs =
-      attempt <= FAST_HEALTH_POLL_ATTEMPTS && elapsed < 1200
-        ? FAST_HEALTH_POLL_INTERVAL_MS
-        : Math.min(
-            SLOW_HEALTH_POLL_BASE_MS +
-              Math.max(0, attempt - FAST_HEALTH_POLL_ATTEMPTS) * SLOW_HEALTH_POLL_INCREMENT_MS,
-            SLOW_HEALTH_POLL_MAX_MS,
-          );
-
-    await sleep(waitMs);
-  }
-
-  throw lastError || new Error("OpenCode did not become ready in time");
 }
 
 async function performFullConfigRefresh(options: { message?: string; delayMs?: number } = {}) {

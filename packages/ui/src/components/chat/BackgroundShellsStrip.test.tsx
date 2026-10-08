@@ -134,7 +134,7 @@ describe('BackgroundShellsStrip', () => {
 
       // The row leaves when OpenCode reports the end.
       await act(async () => {
-        applyBackgroundShellEvents('/repo', [{ type: 'shell.ended', properties: { shellID: 'sh_child' } }]);
+        applyBackgroundShellEvents('/repo', [{ type: 'shell.ended', properties: { shellID: 'sh_child', end: { kind: 'removed' }, endedAt: 2000 } }]);
       });
       expect(host.innerHTML).toBe('');
     } finally {

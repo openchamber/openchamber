@@ -104,6 +104,19 @@ Staat OpenCode al op je computers en moet OpenChamber die installatie gebruiken,
 - De CLI moet OpenCode 2.x zijn, minstens de versie die OpenChamber vraagt. Met een oudere blijft OpenChamber staan op het scherm "OpenCode bijwerken".
 - Een map kan ook, als die `opencode` bevat (`opencode.exe` op Windows). Een omgevingsvariabele hiervoor is er niet, omdat gebruikers die zelf kunnen instellen.
 
+
+### Ingebouwde skillcatalogi verbergen
+
+OpenChamber wordt geleverd met een paar openbare skillcatalogi (Anthropic, OpenAI, Cursor, Matt Pocock). Heeft uw organisatie een eigen catalogus, voeg die dan toe als aangepaste catalogus en verberg de ingebouwde in het beleidsbestand. Dit werkt met of zonder enterprisemodus.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+Instellingen biedt dan alleen catalogi aan die mensen zelf toevoegen, en OpenChamber laadt geen ingebouwde, ook niet op direct verzoek. Hier is geen omgevingsvariabele voor, omdat een gebruiker die zelf kan instellen.
+
 ### Voorbeelden
 
 Om het beleidsbestand op een Mac te plaatsen, voert u dit in Terminal uit als beheerder:

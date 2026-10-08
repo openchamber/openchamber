@@ -10,6 +10,7 @@ type ModelPrefsPayload = {
   collapsedModelProviders: string[];
   recentModels: ModelRef[];
   recentAgents: string[];
+  favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
   customProviderIcons: Record<string, CustomProviderIcon>;
 };
@@ -54,6 +55,7 @@ const snapshotModelPrefs = (): ModelPrefsPayload => {
     collapsedModelProviders: state.collapsedModelProviders,
     recentModels: state.recentModels,
     recentAgents: state.recentAgents,
+    favoriteAgents: state.favoriteAgents,
     recentEfforts: state.recentEfforts,
     customProviderIcons: state.customProviderIcons,
   };
@@ -65,6 +67,7 @@ const modelPrefsEqual = (a: ModelPrefsPayload, b: ModelPrefsPayload): boolean =>
   stringsEqual(a.collapsedModelProviders, b.collapsedModelProviders) &&
   refsEqual(a.recentModels, b.recentModels) &&
   stringsEqual(a.recentAgents, b.recentAgents) &&
+  stringsEqual(a.favoriteAgents, b.favoriteAgents) &&
   recentEffortsEqual(a.recentEfforts, b.recentEfforts) &&
   customProviderIconsEqual(a.customProviderIcons, b.customProviderIcons)
 );
@@ -75,6 +78,7 @@ const cloneModelPrefs = (prefs: ModelPrefsPayload): ModelPrefsPayload => ({
   collapsedModelProviders: prefs.collapsedModelProviders.slice(),
   recentModels: prefs.recentModels.slice(),
   recentAgents: prefs.recentAgents.slice(),
+  favoriteAgents: prefs.favoriteAgents.slice(),
   recentEfforts: Object.fromEntries(Object.entries(prefs.recentEfforts).map(([key, variants]) => [key, variants.slice()])),
   customProviderIcons: { ...prefs.customProviderIcons },
 });
@@ -109,6 +113,7 @@ export const startModelPrefsAutoSave = () => {
       collapsedModelProviders: state.collapsedModelProviders,
       recentModels: state.recentModels,
       recentAgents: state.recentAgents,
+      favoriteAgents: state.favoriteAgents,
       recentEfforts: state.recentEfforts,
       customProviderIcons: state.customProviderIcons,
     };
@@ -118,6 +123,7 @@ export const startModelPrefsAutoSave = () => {
       collapsedModelProviders: prevState.collapsedModelProviders,
       recentModels: prevState.recentModels,
       recentAgents: prevState.recentAgents,
+      favoriteAgents: prevState.favoriteAgents,
       recentEfforts: prevState.recentEfforts,
       customProviderIcons: prevState.customProviderIcons,
     };

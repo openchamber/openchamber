@@ -1,0 +1,74 @@
+---
+title: Issue'lar ve PR'lar
+description: Bir projenin issue ve pull request'lerine ya da Linear issue'larınıza göz atın ve birinden işe başlayın.
+---
+
+# Issue'lar ve PR'lar
+
+**Issues and PRs** panosu, bir projenin GitHub veya GitLab issue'larını ve pull request'lerini (GitLab'de merge request'ler) ya da Linear issue'larınızı listeleyen tam bir sayfadır. Bir öğe seçin, önizlemesi listenin yanında açılır. Burada başka bir projeye bakmak, uygulamanın geri kalanının bulunduğu projeyi değiştirmez.
+
+## Panoyu açın
+
+- Kenar çubuğu başlığında, zamanlanmış görevlerin ve arşivin yanındaki pull request simgesine tıklayın.
+- Komut paletinde **Issues and PRs** seçin.
+- <kbd>⌘K</kbd> ve ardından <kbd>B</kbd> tuşlarına basın (Windows ve Linux'ta <kbd>Ctrl+K</kbd> ve ardından <kbd>B</kbd>). Aynı tuşlar panoyu kapatır.
+
+Telefonda oturum menüsünün altındaki pull request düğmesine dokunun. VS Code eklentisinde pano yoktur.
+
+Pano, bıraktığınız proje, sekme ve takımla yeniden açılır.
+
+## Öğeleri bulun
+
+Her şey araç çubuğunun tek bir satırındadır. Solda proje simgeleri ve aramayla proje seçici bulunur. Yanında **Issues**, **Pull requests** ve **Linear** arasında geçiş yaparsınız. Issue'lar ve pull request'ler projenin kendi barındırıcısından, GitHub ya da GitLab'den gelir. Böyle bir remote'u olmayan proje yalnızca **Linear** gösterir.
+
+**Linear**'da proje seçici takım seçiciye dönüşür: **All teams** ya da tek bir takım seçin. Birden fazla Linear çalışma alanı bağladıysanız çalışma alanını aynı menüden değiştirin. Linear'ı bağlamak [Entegrasyonlar](/tr/integrations/) sayfasında anlatılıyor.
+
+Arama bir başlık, bir numara ya da yapıştırılmış bir bağlantı kabul eder. Filtre menüsü siz seçerken açık kalır, böylece filtreleri birleştirebilirsiniz.
+
+GitHub ve GitLab için:
+
+- Durum: **Open**, **Closed**, **All**, pull request'lerde ayrıca **Merged**
+- Kişiler: **Anyone**, **Assigned to me**, **Created by me**, pull request'lerde ayrıca **Review requested**
+
+Linear için:
+
+- Durum: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Kişiler: **Anyone**, **Assigned to me**, **Created by me**
+- Öncelik: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Bir öğeyi okuyun
+
+Önizleme açıklamayı, etiketleri ve yorumları gösterir. Bir Linear issue'sunda durum etiketine tıklayarak onu takımın başka bir durumuna taşıyın.
+
+**Labels** satırında, deponun etiketlerini aranabilir bir liste olarak açan bir kalem düğmesi vardır. Etiketleri işaretleyin ya da işaretlerini kaldırın. Değişiklik listeyi kapattığınızda kaydedilir, böylece birkaç tıklama tek bir değişiklik sayılır. Açık bir pull request'te (GitLab'de merge request) aynı şekilde çalışan bir **Reviewers** satırı da bulunur; listede depoda inceleme yapabilen kişiler yer alır. GitHub'da pull request'in yazarı listede önerilmez. Linear issue'larında bu satırların hiçbiri yoktur.
+
+## Yorum yapın ve inceleyin
+
+Bir issue'nun ya da pull request'in etkinliğinin altında bir yorum kutusu bulunur. **Comment** yazdığınızı GitHub'a ya da GitLab'e gönderir; <kbd>⌘</kbd>+<kbd>Enter</kbd> (Windows ve Linux'ta <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) da aynısını yapar. Metin gönderilene kadar kutuda kalır, böylece başarısız bir gönderimde hiçbir şey kaybolmaz. Başka bir öğeye geçmek kutuyu temizler. Linear issue'larında bu kutu yoktur.
+
+Açık bir pull request'te (GitLab'de merge request) ayrıca **Approve** ve **Request changes** bulunur; kutudaki metin incelemeyle birlikte gider. **Request changes** için neyin değişmesi gerektiğini söyleyen bir metin gerekir. İnceleme, önizlemede gösterilen commit'ler içindir. O zamandan beri biri push yaptıysa inceleme reddedilir ve önizleme yenilenir, böylece tekrar bakabilirsiniz. GitLab'de **Request changes**, merge request'in incelemecisiyseniz çalışır; inceleme metni ayrı bir yorum olarak gönderilir. Yalnızca bu yorum başarısız olursa inceleme yine de geçerli sayılır ve metniniz kutuda kalır.
+
+## İşe başlayın
+
+Eylemler önizlemenin altındadır.
+
+- **New session**, öğe mesaj kutusuna eklenmiş halde projede yeni bir oturum açar. İlk mesajı kendiniz yazarsınız.
+- Issue'da **Start in worktree…**, pull request'te **Check out in worktree…**, öğe önceden seçili olarak New Worktree iletişim kutusunu açar. Bir pull request kendi branch'ini checkout eder. Bkz. [Worktree Oturumları](/tr/worktrees/).
+
+Bir Linear issue'sunda **Start in**, oturumun başlayacağı projeyi gösterir. Bu, [Entegrasyonlar](/tr/integrations/) içindeki Linear kartında issue'nun takımına eşlenen projedir. Takım eşlemesi yoksa varsayılan proje, o da yoksa panonun en son gösterdiği proje kullanılır. Bu issue için orada başka bir proje seçebilirsiniz.
+
+## Pull request'ler
+
+Bir pull request'in önizlemesi ayrıca branch'ini, boyutunu (eklenen ve silinen satırlar ile değişen dosyalar), kontrollerini ve incelemesini gösterir. **Activity** akışı yorumları, inceleme kararlarını ve en yeni commit'leri oldukları sırayla dizer. Art arda gelen commit'ler gruplanır, böylece bir incelemenin hangi commit'lere yanıt verdiğini görürsünüz.
+
+Boyutun yanında iki düğme vardır. **Changes**, pull request'in diff'ini yan panelde açar; **Walkthrough** ise [değişiklik incelemesini](/tr/walkthrough/) açar. Uygulama başka bir projedeyse önce PR'ın projesine geçer. İkisi de yalnızca masaüstü ve web'de bulunur.
+
+Altta **Merge**, birleştirmeden önce sorar ve her zamanki merge yönteminizi kullanır. Taslaklarda ayrıca **Ready for review** bulunur.
+
+Açık bir issue'da ya da pull request'te altta ayrıca **Close issue** veya **Close pull request** (GitLab'de **Close merge request**), kapalı olanda ise **Reopen issue** veya **Reopen pull request** (**Reopen merge request**) bulunur. Geri alınabildiği için onay sorulmaz. Birleştirilmiş bir pull request kapatılamaz ve yeniden açılamaz. GitHub'da issue tamamlandı olarak kapanır.
+
+## İlgili
+
+- [GitHub issue'ları ve PR'lar](/tr/github/): GitHub'ı bağlayın ve issue'ları mesajlara ekleyin
+- [Worktree Oturumları](/tr/worktrees/): worktree oturumlarının başladığı yer
+- [Entegrasyonlar](/tr/integrations/): Linear'ı bağlayın ve takımları projelere eşleyin

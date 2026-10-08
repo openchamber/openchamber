@@ -86,7 +86,7 @@ export const extractProxiedPorts = (text: string): number[] => {
   return ports;
 };
 
-export type AnnouncementOptions = {
+type AnnouncementOptions = {
   /** Ports earlier output said portless put behind a name. */
   readonly proxiedPorts?: readonly number[];
   /**

@@ -78,6 +78,12 @@ Güncelleme kontrolü API uç noktasını geçersiz kılar. Çoğu kullanıcı b
 
 Otomatik algılama yanlışsa, güncelleme işlemlerinin kullandığı package manager'ı zorlar.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+OpenChamber’ın kendi giden isteklerini, örneğin kullanım limitlerini ve skill kataloglarını, bir proxy üzerinden gönderir. Küçük harfli adlar da çalışır. `NO_PROXY` içindeki sunucular doğrudan bağlanır; `localhost`, `127.0.0.1` ve `::1` her zaman doğrudan bağlanır, böylece oturum açma geri çağrıları ve yerel OpenCode sunucusu çalışmaya devam eder.
+
 ## OpenCode sunucusu
 
 ### `OPENCODE_HOST`

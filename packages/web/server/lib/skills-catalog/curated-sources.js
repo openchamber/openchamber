@@ -1,3 +1,5 @@
+import { readEnterprisePolicy } from '../enterprise-mode.js';
+
 const CURATED_SKILLS_SOURCES = [
   {
     id: 'anthropic',
@@ -35,6 +37,8 @@ const CURATED_SKILLS_SOURCES = [
   },
 ];
 
-export function getCuratedSkillsSources() {
+/** The built-in catalogs, or none when the machine policy hides them. */
+export function getCuratedSkillsSources(policyOptions) {
+  if (readEnterprisePolicy(policyOptions).hideBuiltinSkillCatalogs) return [];
   return CURATED_SKILLS_SOURCES.slice();
 }

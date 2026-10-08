@@ -80,6 +80,12 @@ OpenChamber 存储的所有内容都位于此目录下：设置、认证、项�
 
 当自动检测错误时，强制指定更新操作使用的 package manager。
 
+## 代理
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+OpenChamber 自身发出的请求（例如用量限额和技能目录）会通过代理发送。小写变量名同样有效。`NO_PROXY` 中的主机直接连接，`localhost`、`127.0.0.1` 和 `::1` 始终直接连接，因此登录回调和本地 OpenCode 服务器不受影响。
+
 ## OpenCode 服务器
 
 ### `OPENCODE_HOST`

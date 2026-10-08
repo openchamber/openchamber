@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { guestSessionWorktreeSchema, guestStorageRequestSchema, guestStorageResultSchema, guestWorkspaceQuerySchema, guestWorkspaceSnapshotSchema } from './workspace-schemas.ts';
 import { guestStatusControlEventSchema, guestStatusControlsSchema } from './status-control-schemas.ts';
 import { guestPopoverClosedEventSchema, guestPopoverDataSchema, guestPopoverRequestSchema } from './popover-schemas.ts';
-import { GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
+import { GUEST_SHELL_END_STATUSES, GUEST_SHELL_ID_MAX, GUEST_SHELLS_MAX, GUEST_SHELL_OUTPUT_TAIL_MAX } from './shells.ts';
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
 import {
@@ -298,22 +298,28 @@ const hostResultSchema = z.object({
   };
 });
 
-export const guestRunningShellSchema = z.object({
+const guestRunningShellSchema = z.object({
   id: z.string().min(1).max(GUEST_SHELL_ID_MAX),
   sessionID: z.string().min(1).max(1024),
   command: z.string(),
   startedAt: z.number().nonnegative(),
   background: z.boolean(),
 }).strict();
-export const guestShellsScopeSchema = z.discriminatedUnion('kind', [
+const guestEndedShellSchema = guestRunningShellSchema.extend({
+  status: z.enum(GUEST_SHELL_END_STATUSES),
+  exit: z.number().int().optional(),
+  endedAt: z.number().nonnegative(),
+}).strict();
+const guestShellsScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('session'), sessionId: z.string().min(1).max(1024) }).strict(),
   z.object({ kind: z.literal('project'), projectId: z.string().min(1).max(1024) }).strict(),
   z.object({ kind: z.literal('global') }).strict(),
 ]);
-export const guestRunningShellsSnapshotSchema = z.object({
+const guestRunningShellsSnapshotSchema = z.object({
   kind: z.literal('shells'),
   scope: guestShellsScopeSchema,
   shells: z.array(guestRunningShellSchema).max(GUEST_SHELLS_MAX),
+  ended: z.array(guestEndedShellSchema).max(GUEST_SHELLS_MAX),
 }).strict();
 
 export const hostMessageSchema = z.union([

@@ -41,7 +41,7 @@ const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon, label, onClick, dis
   </Tooltip>
 );
 
-export type BrowserToolbarProps = {
+type BrowserToolbarProps = {
   address: string;
   /** Addresses already visited in this project, offered while typing. */
   suggestions?: readonly BrowserHistoryEntry[];

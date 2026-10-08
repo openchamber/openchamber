@@ -2,18 +2,35 @@ import type { Agent } from '@/lib/opencode/model';
 import type { Theme } from '@/types/theme';
 import { chromaticDistance, contrastRatio } from './theme/color';
 
-const BUILD_COLOR = { var: '--status-success', class: 'agent-success' } as const;
+/** `color` is a CSS color: a theme variable, or the hex the agent's config sets. */
+export type AgentColor = { color: string };
+
+const BUILD_COLOR: AgentColor = { color: 'var(--status-success)' };
 const SYNTAX_COLORS = [
-  { key: 'keyword', var: '--syntax-keyword', class: 'agent-keyword' },
-  { key: 'type', var: '--syntax-type', class: 'agent-type' },
-  { key: 'function', var: '--syntax-function', class: 'agent-function' },
-  { key: 'number', var: '--syntax-number', class: 'agent-number' },
-  { key: 'string', var: '--syntax-string', class: 'agent-string' },
-  { key: 'operator', var: '--syntax-operator', class: 'agent-operator' },
-  { key: 'variable', var: '--syntax-variable', class: 'agent-variable' },
+  { key: 'keyword', color: 'var(--syntax-keyword)' },
+  { key: 'type', color: 'var(--syntax-type)' },
+  { key: 'function', color: 'var(--syntax-function)' },
+  { key: 'number', color: 'var(--syntax-number)' },
+  { key: 'string', color: 'var(--syntax-string)' },
+  { key: 'operator', color: 'var(--syntax-operator)' },
+  { key: 'variable', color: 'var(--syntax-variable)' },
 ] as const;
 const MIN_SEPARATION = 0.055;
-type AgentColor = typeof BUILD_COLOR | (typeof SYNTAX_COLORS)[number];
+
+/** OpenCode v2 stores an agent colour only as six-digit hex. */
+const CONFIGURED_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+// OpenCode's v1 migration writes #aaaaaa for theme names it cannot keep
+// ("primary", "accent"), so it stands for "no colour chosen", not grey.
+const MIGRATED_COLOR_PLACEHOLDER = '#aaaaaa';
+
+export const isAgentHexColor = (value: string): boolean => CONFIGURED_COLOR_PATTERN.test(value);
+
+/** The colour set in the agent's config, when it is one OpenCode v2 accepts. */
+export const configuredAgentColor = (color: string | null | undefined): string | null => {
+  const value = color?.trim();
+  if (!value || !isAgentHexColor(value) || value.toLowerCase() === MIGRATED_COLOR_PLACEHOLDER) return null;
+  return value;
+};
 
 function hashName(name: string): number {
   let hash = 0;
@@ -22,8 +39,10 @@ function hashName(name: string): number {
 }
 
 /** Allocate against the complete visible roster, never a filtered picker list.
- * Build owns success; other agents exhaust distinct syntax colors before reuse. */
-export function createAgentColorResolver(theme: Theme, agents: readonly (Pick<Agent, 'name'> & Partial<Pick<Agent, 'mode'>>)[]) {
+ * Build owns success; other agents exhaust distinct syntax colors before reuse.
+ * A colour set in an agent's config wins over the allocation, Build included;
+ * the others keep the colours they would have had. */
+export function createAgentColorResolver(theme: Theme, agents: readonly (Pick<Agent, 'name'> & Partial<Pick<Agent, 'mode' | 'color'>>)[]) {
   const { surface, syntax, status } = theme.colors;
   const backgrounds = [surface.background, surface.muted, surface.elevated];
   const distance = (a: string, b: string) => Math.min(...backgrounds.map((background) =>
@@ -62,11 +81,18 @@ export function createAgentColorResolver(theme: Theme, agents: readonly (Pick<Ag
     const colorful = available.filter((index) => distance(palette[index].value, '#808080') >= 0.035);
     const choices = colorful.length ? colorful : available;
     const index = choices[hashName(agent.name) % choices.length];
-    assigned.set(agent.name, palette[index]);
+    assigned.set(agent.name, { color: palette[index].color });
     used.add(index);
   }
-  return (name: string | undefined) => {
+  const configured = new Map<string, AgentColor>();
+  for (const agent of agents) {
+    const color = configuredAgentColor(agent.color);
+    if (color) configured.set(agent.name, { color });
+  }
+  return (name: string | undefined): AgentColor => {
+    const own = name ? configured.get(name) : undefined;
+    if (own) return own;
     if (!name || name === 'build') return BUILD_COLOR;
-    return assigned.get(name) ?? palette[hashName(name) % palette.length];
+    return assigned.get(name) ?? { color: palette[hashName(name) % palette.length].color };
   };
 }

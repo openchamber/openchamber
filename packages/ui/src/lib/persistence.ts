@@ -296,7 +296,7 @@ type SettingsWrite = {
   changes: Partial<DesktopSettings>;
 };
 /** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
-export type SettingsWriteResult = { ok: boolean };
+type SettingsWriteResult = { ok: boolean };
 type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
 type SettingsOperation = { revision: number };
 

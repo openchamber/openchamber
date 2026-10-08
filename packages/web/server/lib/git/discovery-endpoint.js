@@ -1,8 +1,8 @@
+import { isString } from '../shared/guards.js';
 import path from 'node:path';
 
 const CONTROL_PATTERN = /[\0-\x20\x7f]/;
 const SCP_PATTERN = /^(?:([^@/:\s]+)@)?([A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?):([^\\]+)$/;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 const discoveryError = (message) => Object.assign(new Error(message), {
   code: 'INVALID_GIT_DISCOVERY_ENDPOINT',

@@ -7,7 +7,7 @@ import { findCatalogModel, type Model, type Provider } from '@/lib/opencode/mode
 type ProviderModel = Model;
 type ProviderWithModelList = Provider & { models: ProviderModel[] };
 
-export interface ModelListItem {
+interface ModelListItem {
   provider: ProviderWithModelList;
   model: ProviderModel;
   providerID: string;

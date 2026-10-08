@@ -224,11 +224,15 @@ These methods need the `shells` capability. They expose the running shell comman
 
 | Method | Result |
 | --- | --- |
-| `onRunningShells(scope, listener)` | subscription: the running shell commands in scope — one session and its subagents (`{ kind: 'session', sessionId }`), a registered project (`{ kind: 'project', projectId }`), or every session (`{ kind: 'global' }`) — oldest first, with each command's `background` flag |
-| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a command's output; `tailBytes` is capped at 65536 |
+| `onRunningShells(scope, listener)` | subscription: the running shell commands in scope — one session and its subagents (`{ kind: 'session', sessionId }`), a registered project (`{ kind: 'project', projectId }`), or every session (`{ kind: 'global' }`) — oldest first, with each command's `background` flag, plus the ones that ended since OpenChamber started watching |
+| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a running or ended command's output; `tailBytes` is capped at 65536 |
 | `stopShell(shellId)` | sends the agent the stop note first, then removes the command |
 
-Await subscription registration to handle refusal, then retain its returned unsubscribe function. Each subscription sends an initial snapshot, then changes, and counts against the same 32-subscription limit as the workspace subscriptions. The snapshot is `{ kind: 'shells', scope, shells }`, where `scope` echoes the subscription's scope; each shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for, and `false` while the turn that ran it is blocked on it. `readShellOutput` returns `{ output, cursor, skipped }`; omit `cursor` to start `tailBytes` before the end, and `skipped` says earlier output was dropped. A shell that is not running is `NOT_FOUND`. An unapproved `shells` capability is `NOT_GRANTED`.
+Await subscription registration to handle refusal, then retain its returned unsubscribe function. Each subscription sends an initial snapshot, then changes, and counts against the same 32-subscription limit as the workspace subscriptions. The snapshot is `{ kind: 'shells', scope, shells, ended }`, where `scope` echoes the subscription's scope; each shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for, and `false` while the turn that ran it is blocked on it.
+
+`ended` holds the commands in scope that OpenChamber saw running and saw end, oldest end first, at most 200 with the newest kept. Each adds `status`, `endedAt`, and `exit` when the command exited with a code. `status` is `exited`, `timeout`, `killed` (a signal), `stopped` (by a user: Stop in the app, `stopShell`, or aborting the turn that waited on it), or `unknown` (the end fell into a reconnect and OpenChamber only saw the command gone). The list lives in memory: it starts empty when the app loads and resets on a runtime switch, so keep anything you show across reloads in extension storage.
+
+`readShellOutput` returns `{ output, cursor, skipped }`; omit `cursor` to start `tailBytes` before the end, and `skipped` says earlier output was dropped. OpenCode keeps an ended command's output until it evicts the command (the latest 25 ended commands per directory); a stopped command's output is removed with it. A shell OpenChamber has not seen, a stopped one, and one whose output OpenCode no longer keeps are `NOT_FOUND`; `stopShell` on a shell that is not running is `NOT_FOUND` too. An unapproved `shells` capability is `NOT_GRANTED`.
 
 ### Extension storage
 

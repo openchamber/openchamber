@@ -34,7 +34,6 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { getCycledPrimaryAgentName } from '@/components/chat/mobileControlsUtils';
 import { focusChatInput } from '@/components/chat/composer/editor/dom';
@@ -130,6 +129,12 @@ export const useKeyboardShortcuts = () => {
     },
     open_timeline_dialog: () => {
       useUIStore.getState().setTimelineDialogOpen(true);
+    },
+    toggle_source_board: () => {
+      // A desktop and web page: the phone shell and VS Code have no board.
+      const state = useUIStore.getState();
+      if (state.isMobile || isVSCodeRuntime()) return false;
+      state.setSourceBoardOpen(!state.isSourceBoardOpen);
     },
     open_session_list: () => {
       const state = useUIStore.getState();
@@ -244,7 +249,7 @@ export const useKeyboardShortcuts = () => {
       const backward = combo && !combo.includes('shift') ? normalizeCombo(`shift+${combo}`) : '';
       const direction = backward && eventMatchesShortcut(event, backward) ? -1 : 1;
       const config = useConfigStore.getState();
-      const next = getCycledPrimaryAgentName(config.getVisibleAgents(), config.currentAgentName, direction);
+      const next = getCycledPrimaryAgentName(config.getVisibleAgents(), config.currentAgentName, direction, state.favoriteAgents);
       if (!next) return false;
       config.setAgent(next);
       state.addRecentAgent(next);
@@ -538,7 +543,6 @@ export const useKeyboardShortcuts = () => {
             isVSCode: isVSCodeRuntime(),
             screenWidth: window.innerWidth,
             tabs: panel?.tabs ?? [],
-            linearConnected: useLinearAuthStore.getState().status?.connected === true,
             sourceControlConnected: Object.values(useSourceControlAuthStore.getState().entries).some((entry) => entry.status?.status === 'connected'),
             extras: enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
           });

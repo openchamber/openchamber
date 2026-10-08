@@ -21,6 +21,7 @@ De relay stuurt verkeer door zonder de inhoud te kunnen lezen:
 - **Alleen uw apparaten kunnen verbinden.** Een apparaat moet een token hebben dat *uw* server via [eenmalige koppeling](/nl/connect-devices/) heeft uitgegeven. Niemand kan uw server via de relay ontdekken of zonder een door u aangemaakt token verbinden. U kunt elk token op ieder moment intrekken.
 - **Koppelingslinks zijn eenmalig.** Een QR-code werkt precies één keer en verloopt als ze ongebruikt blijft. Een oude uitgelekte link is dus waardeloos.
 - **Pas na uw keuze wordt de relay gebruikt.** De relay blijft uit totdat u die inschakelt of er een apparaat mee koppelt. U kunt hem altijd uitschakelen; verbindingen via de relay worden dan direct verbroken.
+- **De relay-sleutels van uw server blijven op uw computer.** Ze staan in `~/.config/openchamber/relay-identity.json`, dat alleen uw gebruikersaccount kan lezen. Wie een kopie van dat bestand heeft, kan zich op de relay als uw server voordoen. Houd het dus buiten bugrapporten, gedeelde back-ups en dotfiles-repo's.
 
 ## Wanneer draait de relay?
 

@@ -40,7 +40,7 @@ export const readLastMessageState = (last: Message | null | undefined): LastMess
  * The later reads keep running under a visible notice so a late reply still
  * replaces it; a genuine no-reply stops costing requests after the last offset.
  */
-export const UNANSWERED_RECHECK_DELAYS_MS: readonly number[] = [0, 10_000, 30_000];
+const UNANSWERED_RECHECK_DELAYS_MS: readonly number[] = [0, 10_000, 30_000];
 
 type RecheckScheduler = {
   setTimeout: (callback: () => void, ms: number) => number;

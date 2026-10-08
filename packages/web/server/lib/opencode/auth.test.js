@@ -36,6 +36,37 @@ describe('projectCredentialEntries', () => {
       custom: { type: 'api', key: 'k', metadata: { region: 'eu' } },
     });
   });
+
+  it('keeps only the Console server and organization from OpenCode Console metadata', () => {
+    const projected = projectCredentialEntries([
+      entry('opencode', true, {
+        type: 'oauth',
+        methodID: 'console',
+        access: 'console-access',
+        refresh: 'console-refresh',
+        expires: 42,
+        metadata: {
+          server: 'https://opencode.ai/console',
+          orgID: 'org_TESTORG123',
+          accountID: 'acc_console',
+          email: 'person@example.com',
+          orgName: 'Example',
+        },
+      }),
+    ]);
+
+    expect(projected).toEqual({
+      opencode: {
+        type: 'oauth',
+        access: 'console-access',
+        refresh: 'console-refresh',
+        expires: 42,
+        accountId: 'acc_console',
+        server: 'https://opencode.ai/console',
+        orgID: 'org_TESTORG123',
+      },
+    });
+  });
 });
 
 describe('projectEnvironmentKeys', () => {

@@ -86,7 +86,27 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     const wrapperRef = React.useRef<HTMLDivElement>(null);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number; minHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
-    const effectiveResizedHeight = controlledResizedHeight ?? resizedHeight;
+    const storedResizedHeight = controlledResizedHeight ?? resizedHeight;
+    // A stored height can be shorter than the field now needs: it may predate
+    // a taller footer or padding. Measured floor: the textarea minimum plus the
+    // wrapper's padding, gap and footer row. CSS cannot hold this line, since
+    // the inner column is 100% of the stored height.
+    const [heightFloor, setHeightFloor] = React.useState(0);
+    React.useLayoutEffect(() => {
+      if (storedResizedHeight === null) return;
+      const wrapper = wrapperRef.current;
+      const column = wrapper?.querySelector<HTMLElement>(':scope > div');
+      const footer = wrapper?.querySelector<HTMLElement>('[data-textarea-footer]');
+      if (!wrapper || !column || !footer) return;
+      const wrapperStyle = window.getComputedStyle(wrapper);
+      const floor = TEXTAREA_MIN_HEIGHT
+        + footer.offsetHeight
+        + (Number.parseFloat(window.getComputedStyle(column).rowGap) || 0)
+        + (Number.parseFloat(wrapperStyle.paddingTop) || 0)
+        + (Number.parseFloat(wrapperStyle.paddingBottom) || 0);
+      setHeightFloor((current) => (current === floor ? current : floor));
+    }, [storedResizedHeight]);
+    const effectiveResizedHeight = storedResizedHeight === null ? null : Math.max(storedResizedHeight, heightFloor);
 
     const handleResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
       const wrapper = wrapperRef.current;
@@ -226,7 +246,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
               disabled={disabled}
               {...props}
             />
-          <div className="flex items-center justify-end gap-1.5 pl-3 pr-2.5">
+          <div data-textarea-footer className="flex items-center justify-end gap-1.5 pl-3 pr-2.5">
             {endSlot}
             <ResizeHandle onResizeStart={handleResizeStart} ariaLabel={t('textarea.resizeHandleAria')} />
           </div>

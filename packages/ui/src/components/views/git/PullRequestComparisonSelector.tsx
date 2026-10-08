@@ -39,7 +39,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     <span className="truncate">{selected ? reference(selected.number) : label}</span>
     <Icon name="arrow-down-s" className="size-3.5" />
   </Button>;
-  const picker = <Command shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
+  const picker = <Command className="min-h-0" shouldFilter={false} onKeyDown={(event) => { if (event.key !== 'Escape') event.stopPropagation(); }}>
     <CommandInput autoFocus={!sheet} value={comparison.query} onValueChange={comparison.setQuery}
       placeholder={t('session.githubPrPicker.searchPlaceholder')} aria-label={t('session.githubPrPicker.searchPlaceholder')} />
     {comparison.loading ? <div className="flex items-center gap-2 p-4 typography-meta text-muted-foreground">
@@ -47,7 +47,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     </div> : comparison.error && comparison.prs.length === 0 ? <div className="flex flex-col items-center gap-2 p-4 typography-meta text-muted-foreground">
       <span>{comparison.error}</span>
       <Button variant="outline" size="sm" onClick={() => void comparison.refresh()}>{t('diffView.actions.retry')}</Button>
-    </div> : <CommandList className={mobile ? 'max-h-[min(45dvh,24rem)]' : undefined}>
+    </div> : <CommandList className={cn('min-h-0', mobile && 'max-h-[min(45dvh,24rem)]')}>
       <CommandEmpty>{t('session.githubPrPicker.empty.noPullRequestsFound')}</CommandEmpty>
       <CommandGroup>
         {open && comparison.prs.map((pr) => {
@@ -76,6 +76,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
   if (sheet) return <>{trigger}<MobileOverlayPanel open={open} title={label} onClose={() => changeOpen(false)}>{picker}</MobileOverlayPanel></>;
   return <DropdownMenu open={open} onOpenChange={changeOpen}>
     <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-    <DropdownMenuContent align="start" className="w-[32rem] max-w-[calc(100vw-2rem)] p-0">{picker}</DropdownMenuContent>
+    {/* Kept to the room the popup has: the list scrolls inside it instead of running past its edge. */}
+    <DropdownMenuContent align="start" className="flex max-h-[min(var(--available-height),32rem)] w-[32rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0">{picker}</DropdownMenuContent>
   </DropdownMenu>;
 }

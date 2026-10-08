@@ -2,7 +2,7 @@ import { create } from "zustand"
 import type { GlobalState } from "./types"
 import { INITIAL_GLOBAL_STATE } from "./types"
 
-export type GlobalSyncStore = GlobalState & {
+type GlobalSyncStore = GlobalState & {
   actions: {
     set: (patch: Partial<GlobalState>) => void
     reset: () => void

@@ -1,0 +1,74 @@
+---
+title: Issues and PRs
+description: Browse a project's issues and pull requests, or your Linear issues, and start work from one.
+---
+
+# Issues and PRs
+
+The **Issues and PRs** board is a full page that lists a project's GitHub or GitLab issues and pull requests (merge requests on GitLab), or your Linear issues. Pick an item and its preview opens beside the list. Looking at another project here doesn't change the project the rest of the app is on.
+
+## Open the board
+
+- Click the pull-request icon in the sidebar header, next to scheduled tasks and the archive.
+- Choose **Issues and PRs** in the command palette.
+- Press <kbd>⌘K</kbd> then <kbd>B</kbd> (<kbd>Ctrl+K</kbd> then <kbd>B</kbd> on Windows and Linux). The same keys close it.
+
+On a phone, tap the pull-request button in the footer of the sessions menu. The board isn't available in the VS Code extension.
+
+The board reopens on the project, tab and team you left it on.
+
+## Find items
+
+Everything sits in one toolbar row. On the left is the project picker, with project icons and a search. Next to it you switch between **Issues**, **Pull requests** and **Linear**. Issues and pull requests come from the project's own host, GitHub or GitLab. A project with neither remote shows only **Linear**.
+
+On **Linear** the project picker becomes a team picker: choose **All teams** or one team. If you've connected more than one Linear workspace, switch workspaces from the same menu. Connecting Linear is covered in [Integrations](/integrations/).
+
+Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters.
+
+For GitHub and GitLab:
+
+- Status: **Open**, **Closed**, **All**, and **Merged** for pull requests
+- People: **Anyone**, **Assigned to me**, **Created by me**, and **Review requested** for pull requests
+
+For Linear:
+
+- Status: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- People: **Anyone**, **Assigned to me**, **Created by me**
+- Priority: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Read an item
+
+The preview shows the description, labels and comments. On a Linear issue, click the status pill to move it to another of the team's states.
+
+The **Labels** row has a pencil button that opens a searchable list of the repository's labels. Check or uncheck them. The change is saved when you close the list, so several clicks count as one change. An open pull request (merge request on GitLab) also has a **Reviewers** row that works the same way, with the people who can review in the repository. On GitHub, the pull request's author isn't offered. Linear issues have neither row.
+
+## Comment and review
+
+Below an issue's or pull request's activity is a comment box. **Comment** posts your text to GitHub or GitLab, and so does <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> on Windows and Linux). The text stays in the box until it's posted, so a failed post loses nothing. Switching to another item clears the box. Linear issues don't have one.
+
+An open pull request (merge request on GitLab) also has **Approve** and **Request changes**, and the text in the box goes with the review. **Request changes** needs text saying what to change. The review is for the commits the preview shows: if someone pushed since, it's refused and the preview refreshes so you can look again. On GitLab, **Request changes** works when you're a reviewer of the merge request, and the review text is posted as a separate comment. If only that comment fails, the review still counts and your text stays in the box.
+
+## Start work
+
+The actions sit at the bottom of the preview.
+
+- **New session** opens a new session in the project with the item attached to the message box. You write the first message yourself.
+- **Start in worktree…** on an issue, or **Check out in worktree…** on a pull request, opens the New Worktree dialog with the item already chosen. A pull request checks out its own branch. See [Worktree Sessions](/worktrees/).
+
+For a Linear issue, **Start in** shows the project the session will start in. That's the project mapped to the issue's team in the Linear card in [Integrations](/integrations/). Without a team mapping it's the default project, and without that, the project the board showed last. You can pick another project there for this issue.
+
+## Pull requests
+
+A pull request's preview also shows its branch, its size (lines added and removed, and files changed), its checks and its review. The **Activity** feed puts comments, review verdicts and the newest commits in the order they happened. Commits that came in a row are grouped, so you can see which commits a review answered.
+
+Two buttons sit beside the size. **Changes** opens the pull request's diff in the side panel, and **Walkthrough** opens its [walkthrough](/walkthrough/). If the app is on another project, it switches to the PR's project first. Both are on desktop and web only.
+
+At the bottom, **Merge** asks before merging and uses your usual merge method. A draft also gets **Ready for review**.
+
+An open issue or pull request also has **Close issue** or **Close pull request** (**Close merge request** on GitLab); a closed one has **Reopen issue** or **Reopen pull request** (**Reopen merge request**). Neither asks first, since it can be undone. A merged pull request can't be closed or reopened. On GitHub, an issue closes as completed.
+
+## Related
+
+- [GitHub Issues & PRs](/github/): connect GitHub and attach issues to messages
+- [Worktree Sessions](/worktrees/): where worktree sessions start
+- [Integrations](/integrations/): connect Linear and map teams to projects

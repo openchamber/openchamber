@@ -4,7 +4,7 @@ export type ContextWindowLimits = {
   output: number;
 };
 
-export const NO_CONTEXT_WINDOW_LIMITS: ContextWindowLimits = { context: 0, output: 0 };
+const NO_CONTEXT_WINDOW_LIMITS: ContextWindowLimits = { context: 0, output: 0 };
 
 type AnsweringMessage = { role?: string; providerID?: string; modelID?: string };
 

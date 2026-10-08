@@ -15,6 +15,9 @@ const MODIFIER_TO_ACCELERATOR = {
   meta: 'Super',
   cmd: 'Super',
   command: 'Super',
+  // The Windows / Super key the settings recorder writes on Windows and Linux.
+  super: 'Super',
+  win: 'Super',
 };
 
 const KEY_TO_ACCELERATOR = {

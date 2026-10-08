@@ -4,7 +4,7 @@ import { LocalSetupScreen } from './LocalSetupScreen';
 import { RecoveryScreen } from './RecoveryScreen';
 import type { RecoveryVariant } from './DesktopConnectionRecovery';
 
-export type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
+type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
 
 type OnboardingScreenProps = {
   /** Callback when user goes back from local-setup */

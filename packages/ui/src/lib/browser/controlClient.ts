@@ -33,7 +33,7 @@ type BrowserControlRequest = {
 };
 
 /** Implemented by the mounted browser pane. */
-export type BrowserController = {
+type BrowserController = {
   /** The browser tab this view belongs to; the id agents pass as `tabId`. */
   readonly tabId: string;
   /** What the tab shows now, for the tab list in snapshots. */
@@ -43,7 +43,7 @@ export type BrowserController = {
 };
 
 /** A browser tab whose page has not been loaded, registered by the panel. */
-export type SleepingBrowserTab = {
+type SleepingBrowserTab = {
   readonly tabId: string;
   /** What the tab showed when it was last loaded, from its saved state. */
   readonly describe: () => { title: string; url: string };
@@ -55,7 +55,7 @@ export type SleepingBrowserTab = {
  * Opens a URL in a new background tab for the agent and returns that tab's id,
  * or null when this client has nowhere to open one.
  */
-export type BrowserOpener = (url: string) => string | null;
+type BrowserOpener = (url: string) => string | null;
 
 /**
  * How long a freshly opened tab is given to mount its view. A pane appears

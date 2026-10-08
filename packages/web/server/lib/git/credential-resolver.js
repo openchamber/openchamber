@@ -1,3 +1,4 @@
+import { isPlainObject, isString } from '../shared/guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -10,10 +11,6 @@ const VERSIONED_REFERENCE_PREFIX = 'ocgit:v2';
 const DEFAULT_PORTS = Object.freeze({ http: 80, https: 443, ssh: 22 });
 const MAX_SSH_PRIVATE_KEY_BYTES = 128 * 1024;
 const SSH_PRIVATE_KEY_MARKER = /-----BEGIN (?:OPENSSH |RSA |DSA |EC |ENCRYPTED )?PRIVATE KEY-----/;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
-const isPlainObject = (value) => value === Object(value)
-  && !Array.isArray(value)
-  && Object.getPrototypeOf(value) === Object.prototype;
 
 const requiredString = (value, name) => {
   if (!isString(value) || !value || value.trim() !== value || /[\0\r\n]/.test(value)) {

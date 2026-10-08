@@ -10,7 +10,7 @@ import {
 
 import { dropGuestTokens, getGuestAuth, patchGuestAuth } from './auth-store.js';
 
-export const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
+const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
 
 const pendingByState = new Map();
 const pendingByGuestId = new Map();
@@ -262,7 +262,7 @@ export const storedTokensUsable = (stored, integration) => (
  * the package names now. Anything else is treated as missing.
  * @returns {{ clientId: string, clientSecret: string }}
  */
-export const usableClientCredentials = (stored, integration) => {
+const usableClientCredentials = (stored, integration) => {
   if (!sameTarget(stored?.clientTarget, credentialTarget(integration))) {
     return { clientId: '', clientSecret: '' };
   }

@@ -67,7 +67,7 @@ Confirm that `headRefOid` exactly matches `REVIEW_HEAD_SHA` before reviewing. If
 Repository guidance is part of correctness review, not a separate style pass.
 
 1. Read `AGENTS.md`, `CONTRIBUTING.md`, and `.github/PULL_REQUEST_TEMPLATE.md` from the base checkout on every run. Treat `CONTRIBUTING.md` as the canonical policy and the pull request template as the required handoff structure.
-2. Use the trigger table in `AGENTS.md`, the diff's behavior, surrounding code, and affected runtime/contracts to determine all matching skills. Do not use a hardcoded skill list and do not select skills from file paths alone.
+2. Use each project skill's `description`, the diff's behavior, surrounding code, and affected runtime/contracts to determine all matching skills. Do not use a hardcoded skill list and do not select skills from file paths alone.
 3. Discover available project skills from the base checkout, then read every matching `SKILL.md` in full. If a skill requires task-specific references, read every reference matching this review.
 4. Read the nearest package README and module `DOCUMENTATION.md` for each affected owning module. Follow links needed to understand an invariant or contract.
 5. Apply the discovered rules while reviewing implementation correctness, tests, runtime parity, UX, security, performance, and evidence.

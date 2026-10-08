@@ -151,3 +151,70 @@ describe('composerLanguage — bidirectional technical fragments', () => {
         expect(next.facet(EditorView.bidiIsolatedRanges)[0]).toBe(state.facet(EditorView.bidiIsolatedRanges)[0]);
     });
 });
+
+/** Every chip replacement as [replaced text, chip label]. */
+const citationChips = (state: EditorState) => {
+    const found: Array<[string, string]> = [];
+    for (const source of state.facet(EditorView.decorations)) {
+        if (source instanceof Function) continue;
+        const iterator = source.iter();
+        while (iterator.value) {
+            const widget = iterator.value.spec.widget;
+            if (widget) found.push([state.doc.sliceString(iterator.from, iterator.to), widget.label]);
+            iterator.next();
+        }
+    }
+    return found;
+};
+
+describe('composerLanguage — attachment citations', () => {
+    test('draws a citation of an attached file as a chip', () => {
+        const state = stateWith('see [shot@2x.png] and [notes]', context({ attachmentFilenames: ['shot@2x.png'] }));
+        expect(citationChips(state)).toEqual([['[shot@2x.png]', 'shot@2x.png']]);
+    });
+
+    test('shell mode keeps citations as text', () => {
+        const state = stateWith('[shot.png]', context({ inputMode: 'shell', attachmentFilenames: ['shot.png'] }));
+        expect(citationChips(state)).toEqual([]);
+    });
+
+    test('keeps a token being typed as text and chips it once typing moves on', () => {
+        const skills = context({ knownSkillNames: new Set(['review-pr']) });
+        const typing = stateWith('run  now', skills)
+            .update({ changes: { from: 4, insert: '$review-pr' }, userEvent: 'input.type' }).state;
+        expect(citationChips(typing)).toEqual([]);
+
+        const moved = typing.update({ changes: { from: 14, insert: ',' }, userEvent: 'input.type' }).state;
+        expect(citationChips(moved)).toEqual([['$review-pr', 'review-pr']]);
+    });
+
+    test('chips a token that arrives whole, as from a restored draft', () => {
+        const skills = context({ knownSkillNames: new Set(['review-pr']) });
+        expect(citationChips(stateWith('$review-pr first', skills))).toEqual([['$review-pr', 'review-pr']]);
+        expect(citationChips(stateWith('run $review-pr', skills))).toEqual([['$review-pr', 'review-pr']]);
+    });
+
+    test('a skill name after a slash is not a skill', () => {
+        const skills = context({ knownSkillNames: new Set(['review-pr']) });
+        const state = stateWith('/review-pr now', skills);
+        expect(citationChips(state)).toEqual([]);
+        expect(decoratedText(state)).toEqual([]);
+    });
+
+    test('chips file and agent mentions and snippets; commands keep their color only', () => {
+        const state = stateWith('ask @build about @docs/README.md with #sig then /review x');
+        expect(citationChips(state)).toEqual([
+            ['@build', 'build'],
+            ['@docs/README.md', 'README.md'],
+            ['#sig', 'sig'],
+        ]);
+    });
+
+    test('draws a citation as a chip while its file is still attaching', () => {
+        const pending = new Set<string>();
+        const base = stateWith('', context({ pendingAttachmentFilenames: pending }));
+        pending.add('image-1.png');
+        const next = base.update({ changes: { from: 0, insert: '[image-1.png] ' } }).state;
+        expect(citationChips(next)).toEqual([['[image-1.png]', 'image-1.png']]);
+    });
+});

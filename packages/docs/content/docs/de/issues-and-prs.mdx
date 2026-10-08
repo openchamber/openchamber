@@ -1,0 +1,74 @@
+---
+title: Issues und PRs
+description: Durchsuche die Issues und Pull Requests eines Projekts oder deine Linear-Issues und starte die Arbeit an einem davon.
+---
+
+# Issues und PRs
+
+Das Board **Issues and PRs** ist eine ganze Seite mit den GitHub- oder GitLab-Issues und Pull Requests eines Projekts (auf GitLab Merge Requests) oder deinen Linear-Issues. Wählst du einen Eintrag, öffnet sich seine Vorschau neben der Liste. Wenn du hier ein anderes Projekt ansiehst, wechselt der Rest der App nicht mit.
+
+## Board öffnen
+
+- Klicke auf das Pull-Request-Symbol im Kopf der Seitenleiste, neben geplanten Aufgaben und dem Archiv.
+- Wähle **Issues and PRs** in der Befehlspalette.
+- Drücke <kbd>⌘K</kbd> und dann <kbd>B</kbd> (<kbd>Ctrl+K</kbd> und dann <kbd>B</kbd> unter Windows und Linux). Dieselben Tasten schließen es wieder.
+
+Auf dem Telefon tippst du auf die Pull-Request-Schaltfläche unten im Sitzungsmenü. In der VS-Code-Erweiterung gibt es das Board nicht.
+
+Das Board öffnet sich wieder mit dem Projekt, dem Tab und dem Team, bei dem du es verlassen hast.
+
+## Einträge finden
+
+Alles liegt in einer Zeile der Werkzeugleiste. Links ist die Projektauswahl mit Projektsymbolen und Suche. Daneben wechselst du zwischen **Issues**, **Pull requests** und **Linear**. Issues und Pull Requests kommen vom eigenen Host des Projekts, GitHub oder GitLab. Ein Projekt ohne solches Remote zeigt nur **Linear**.
+
+Unter **Linear** wird die Projektauswahl zur Teamauswahl: Wähle **All teams** oder ein Team. Hast du mehr als einen Linear-Workspace verbunden, wechselst du den Workspace im selben Menü. Wie du Linear verbindest, steht unter [Integrationen](/de/integrations/).
+
+Die Suche nimmt einen Titel, eine Nummer oder einen eingefügten Link. Das Filtermenü bleibt offen, während du wählst, sodass du Filter kombinieren kannst.
+
+Für GitHub und GitLab:
+
+- Status: **Open**, **Closed**, **All** und bei Pull Requests **Merged**
+- Personen: **Anyone**, **Assigned to me**, **Created by me** und bei Pull Requests **Review requested**
+
+Für Linear:
+
+- Status: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Personen: **Anyone**, **Assigned to me**, **Created by me**
+- Priorität: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Einen Eintrag lesen
+
+Die Vorschau zeigt Beschreibung, Labels und Kommentare. Bei einem Linear-Issue klickst du auf die Status-Pille, um es in einen anderen Status des Teams zu verschieben.
+
+In der Zeile **Labels** öffnet ein Stift-Button eine durchsuchbare Liste der Labels des Repositorys. Hake sie an oder ab. Gespeichert wird beim Schließen der Liste, mehrere Klicks zählen also als eine Änderung. Ein offener Pull Request (auf GitLab Merge Request) hat außerdem eine Zeile **Reviewers**, die genauso funktioniert, mit den Personen, die im Repository reviewen können. Auf GitHub wird der Autor des Pull Requests nicht angeboten. Linear-Issues haben keine dieser Zeilen.
+
+## Kommentieren und Review abgeben
+
+Unter der Aktivität eines Issues oder Pull Requests steht ein Kommentarfeld. **Comment** postet deinen Text auf GitHub oder GitLab, ebenso <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> unter Windows und Linux). Der Text bleibt im Feld, bis er gepostet ist, bei einem Fehlschlag geht also nichts verloren. Wechselst du zu einem anderen Eintrag, wird das Feld geleert. Linear-Issues haben kein Kommentarfeld.
+
+Ein offener Pull Request (auf GitLab Merge Request) hat außerdem **Approve** und **Request changes**, und der Text im Feld geht mit dem Review mit. **Request changes** braucht Text, der sagt, was geändert werden soll. Das Review gilt für die Commits, die die Vorschau zeigt. Hat seitdem jemand gepusht, wird es abgelehnt, und die Vorschau lädt neu, damit du noch einmal hinsehen kannst. Auf GitLab funktioniert **Request changes**, wenn du Reviewer des Merge Requests bist, und der Review-Text wird als eigener Kommentar gepostet. Schlägt nur dieser Kommentar fehl, zählt das Review trotzdem, und dein Text bleibt im Feld.
+
+## Mit der Arbeit beginnen
+
+Die Aktionen stehen unten in der Vorschau.
+
+- **New session** öffnet eine neue Sitzung im Projekt, mit dem Eintrag im Nachrichtenfeld angehängt. Die erste Nachricht schreibst du selbst.
+- **Start in worktree…** bei einem Issue oder **Check out in worktree…** bei einem Pull Request öffnet den Dialog New Worktree mit dem Eintrag schon ausgewählt. Ein Pull Request checkt seinen eigenen Branch aus. Siehe [Worktree-Sitzungen](/de/worktrees/).
+
+Bei einem Linear-Issue zeigt **Start in** das Projekt, in dem die Sitzung startet. Das ist das Projekt, das in der Linear-Karte unter [Integrationen](/de/integrations/) dem Team des Issues zugeordnet ist. Ohne Teamzuordnung ist es das Standardprojekt, und ohne dieses das Projekt, das das Board zuletzt gezeigt hat. Dort kannst du für dieses Issue ein anderes Projekt wählen.
+
+## Pull Requests
+
+Die Vorschau eines Pull Requests zeigt außerdem seinen Branch, seine Größe (hinzugefügte und entfernte Zeilen sowie geänderte Dateien), die Checks und das Review. Der Feed **Activity** ordnet Kommentare, Review-Urteile und die neuesten Commits so, wie sie passiert sind. Aufeinanderfolgende Commits werden gruppiert, so siehst du, auf welche Commits ein Review geantwortet hat.
+
+Neben der Größe stehen zwei Schaltflächen. **Changes** öffnet den Diff des Pull Requests im Seitenpanel, **Walkthrough** öffnet seinen [Änderungsrundgang](/de/walkthrough/). Ist die App gerade auf einem anderen Projekt, wechselt sie zuerst zum Projekt des PRs. Beide gibt es nur auf Desktop und im Web.
+
+Unten fragt **Merge** vor dem Mergen nach und nutzt deine übliche Merge-Methode. Ein Entwurf bekommt zusätzlich **Ready for review**.
+
+Ein offenes Issue oder ein offener Pull Request hat unten außerdem **Close issue** oder **Close pull request** (auf GitLab **Close merge request**), ein geschlossener **Reopen issue** oder **Reopen pull request** (**Reopen merge request**). Beides fragt nicht nach, weil es sich rückgängig machen lässt. Ein gemergter Pull Request lässt sich weder schließen noch wieder öffnen. Auf GitHub wird ein Issue als erledigt geschlossen.
+
+## Verwandt
+
+- [GitHub-Issues und PRs](/de/github/): GitHub verbinden und Issues an Nachrichten hängen
+- [Worktree-Sitzungen](/de/worktrees/): wo Worktree-Sitzungen starten
+- [Integrationen](/de/integrations/): Linear verbinden und Teams Projekten zuordnen

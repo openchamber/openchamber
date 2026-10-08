@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import {
     DndContext,
     MouseSensor,
@@ -25,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
+import { withAttachmentChips } from './message/parts/attachmentCitationChips';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -41,6 +43,11 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
     const firstLine = getQueuedMessagePreview(message);
 
     const attachmentCount = message.attachments?.length ?? 0;
+    // `[image-1.png]` citations of the message's own files read as file chips.
+    const attachmentFilenames = React.useMemo(
+        () => (message.attachments ?? []).map((file) => file.filename),
+        [message.attachments],
+    );
 
     return (
         <div
@@ -59,29 +66,33 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 <Icon name="draggable" className="h-4 w-4" aria-hidden="true" />
             </button>
             <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
-                {firstLine || t('chat.queuedMessage.empty')}
+                {firstLine ? withAttachmentChips(firstLine, attachmentFilenames, `queued-${message.id}`) : t('chat.queuedMessage.empty')}
                 {attachmentCount > 0 && (
                     <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
-            <Button
-                type="button"
-                variant="secondary"
-                size="xs"
-                onClick={() => onEdit(message)}
-            >
-                <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
-                {t('chat.queuedMessage.edit')}
-            </Button>
-            <Button
-                type="button"
-                variant="secondary"
-                size="xs"
-                onClick={() => onSend(message)}
-            >
-                <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
-                {t('chat.queuedMessage.send')}
-            </Button>
+            {!message.scheduledTask ? (
+                <>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => onEdit(message)}
+                    >
+                        <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
+                        {t('chat.queuedMessage.edit')}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => onSend(message)}
+                    >
+                        <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
+                        {t('chat.queuedMessage.send')}
+                    </Button>
+                </>
+            ) : null}
             <button
                 type="button"
                 onClick={() => removeFromQueue(target, message.id)}
@@ -163,12 +174,12 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    if (hidden || queuedMessages.length === 0 || !target) {
-        return null;
-    }
+    const visible = !hidden && queuedMessages.length > 0;
 
     return (
-        <ComposerFloatingPanel role="region" ariaLabel={t('chat.queuedMessage.title')} compact={collapsed} header={
+        <AnimatePresence>
+        {visible && target ? (
+        <ComposerFloatingPanel key="queue" role="region" ariaLabel={t('chat.queuedMessage.title')} compact={collapsed} header={
                 <Button
                     type="button"
                     variant="ghost"
@@ -213,6 +224,8 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
                 </DndContext>
             )}
         </ComposerFloatingPanel>
+        ) : null}
+        </AnimatePresence>
     );
 });
 

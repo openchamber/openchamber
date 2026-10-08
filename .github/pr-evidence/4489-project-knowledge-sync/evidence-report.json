@@ -1,0 +1,149 @@
+{
+  "chromium": "153.0.8010.12",
+  "scenarios": [
+    {
+      "name": "baseline-1440-light",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "Notes0Todo0Plans0",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 1,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full light device-desktop",
+        "background": "rgb(253, 252, 250)",
+        "surface": "desktop"
+      }
+    },
+    {
+      "name": "fixed-1440-light",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "Notes1Todo1Plans0",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 5,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full light device-desktop",
+        "background": "rgb(253, 252, 250)",
+        "surface": "desktop"
+      }
+    },
+    {
+      "name": "baseline-430-light",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "0Todo00",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 1,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full mobile-pointer light device-mobile",
+        "background": "rgb(253, 252, 250)",
+        "surface": "mobile"
+      }
+    },
+    {
+      "name": "fixed-430-light",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "1Todo10",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 5,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full mobile-pointer light device-mobile",
+        "background": "rgb(253, 252, 250)",
+        "surface": "mobile"
+      }
+    },
+    {
+      "name": "baseline-1440-dark",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "Notes0Todo0Plans0",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 1,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full dark device-desktop",
+        "background": "rgb(18, 15, 14)",
+        "surface": "desktop"
+      }
+    },
+    {
+      "name": "fixed-1440-dark",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "Notes1Todo1Plans0",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 5,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full dark device-desktop",
+        "background": "rgb(18, 15, 14)",
+        "surface": "desktop"
+      }
+    },
+    {
+      "name": "baseline-430-dark",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "0Todo00",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 1,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full mobile-pointer dark device-mobile",
+        "background": "rgb(18, 15, 14)",
+        "surface": "mobile"
+      }
+    },
+    {
+      "name": "fixed-430-dark",
+      "owner": "path_L3RtcC9vcGVuY29kZS9pc3N1ZS00NDg5LlhISWlIRi9ydW4vY2hhdHM",
+      "panelText": "1Todo10",
+      "authoritative": {
+        "notes": 1,
+        "todos": 1,
+        "completed": true
+      },
+      "reads": 5,
+      "navigations": 1,
+      "errors": [],
+      "visual": {
+        "scheme": "h-full mobile-pointer dark device-mobile",
+        "background": "rgb(18, 15, 14)",
+        "surface": "mobile"
+      }
+    }
+  ]
+}

@@ -148,6 +148,7 @@ const resetModelPrefsState = (): void => {
     collapsedModelProviders: [],
     recentModels: [],
     recentAgents: [],
+    favoriteAgents: [],
     recentEfforts: {},
   });
 };
@@ -866,6 +867,7 @@ describe('updateDesktopSettings', () => {
         collapsedModelProviders: ['openai'],
         recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
         recentAgents: ['build'],
+        favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
       });
 
@@ -878,6 +880,7 @@ describe('updateDesktopSettings', () => {
         collapsedModelProviders: ['openai'],
         recentModels: [{ providerID: 'google', modelID: 'gemini-pro' }],
         recentAgents: ['build'],
+        favoriteAgents: ['plan'],
         recentEfforts: { 'openai/gpt-5': ['low'] },
         customProviderIcons: {},
       });
@@ -905,6 +908,7 @@ describe('updateDesktopSettings', () => {
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
+        favoriteAgents: [],
         recentEfforts: {},
         customProviderIcons: {},
       }]);
@@ -1509,6 +1513,7 @@ describe('unload lifecycle flush (#2197)', () => {
         collapsedModelProviders: [],
         recentModels: [],
         recentAgents: [],
+        favoriteAgents: [],
         recentEfforts: {},
         customProviderIcons: {},
       }]);

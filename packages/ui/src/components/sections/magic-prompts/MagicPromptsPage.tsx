@@ -45,14 +45,6 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'git.pr.generate.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
     ],
   },
-  'linear.issue.review': {
-    titleKey: 'settings.magicPrompts.page.group.linearIssueReview.title',
-    descriptionKey: 'settings.magicPrompts.page.group.linearIssueReview.description',
-    blocks: [
-      { id: 'linear.issue.review.visible', titleKey: 'settings.magicPrompts.page.block.visiblePrompt' },
-      { id: 'linear.issue.review.instructions', titleKey: 'settings.magicPrompts.page.block.instructions' },
-    ],
-  },
   'git.conflict.resolve': {
     titleKey: 'settings.magicPrompts.page.group.gitConflictResolve.title',
     descriptionKey: 'settings.magicPrompts.page.group.gitConflictResolve.description',

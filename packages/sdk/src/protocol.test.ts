@@ -922,8 +922,17 @@ describe('actions, commands, and badge wire shapes', () => {
     expect(parseGuestMessage({ ...envelope, type: 'shell-output', id: 'c4', payload: { shellId: 'sh_1', tailBytes: 65537 } })).toBeNull();
     expect(parseGuestMessage({ ...envelope, type: 'shell-output', id: 'c5', payload: { shellId: 'sh_1', cursor: -1 } })).toBeNull();
     expect(parseGuestMessage({ ...envelope, type: 'shell-stop', id: 'c6', payload: { shellId: 'sh_1' } })?.type).toBe('shell-stop');
-    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'global' }, shells: [{ id: 'sh_1', sessionID: 'ses_1', command: 'sleep 1', startedAt: 1, background: true }] } } })?.type).toBe('shells');
-    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'session', sessionId: 'ses_1' }, shells: [] } } })?.type).toBe('shells');
+    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'global' }, shells: [{ id: 'sh_1', sessionID: 'ses_1', command: 'sleep 1', startedAt: 1, background: true }], ended: [] } } })?.type).toBe('shells');
+    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'session', sessionId: 'ses_1' }, shells: [], ended: [] } } })?.type).toBe('shells');
+  });
+
+  test('accepts ended shells with a known status and refuses anything else', () => {
+    const snapshot = (ended: unknown[]) => ({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'global' }, shells: [], ended } } });
+    const done = { id: 'sh_1', sessionID: 'ses_1', command: 'make', startedAt: 1, background: true, endedAt: 2 };
+    expect(parseHostMessage(snapshot([{ ...done, status: 'exited', exit: 0 }, { ...done, id: 'sh_2', status: 'stopped' }]))?.type).toBe('shells');
+    expect(parseHostMessage(snapshot([{ ...done, status: 'crashed' }]))).toBeNull();
+    expect(parseHostMessage(snapshot([{ ...done, status: 'exited', exit: 1.5 }]))).toBeNull();
+    expect(parseHostMessage({ ...envelope, type: 'shells', payload: { subscriptionId: 's1', snapshot: { kind: 'shells', scope: { kind: 'global' }, shells: [] } } })).toBeNull();
   });
 
   test('accepts shell output and shell stop result payloads', () => {

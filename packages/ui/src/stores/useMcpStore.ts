@@ -4,7 +4,7 @@ import type { McpServerStatus } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
-export type McpStatusMap = Record<string, McpServerStatus>;
+type McpStatusMap = Record<string, McpServerStatus>;
 type McpRuntimeDiagnostic = {
   status: 'failed';
   error: string;

@@ -9,7 +9,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
 import { describeSessionActionError } from './sessionActionError';
 
-export type DeleteSessionSource = {
+type DeleteSessionSource = {
   archivedBucket?: boolean;
   hardDelete?: boolean;
   /** Bypass the confirmation dialog and delete/archive immediately. */
@@ -43,7 +43,6 @@ type Args = {
 
 export const useSessionActions = (args: Args) => {
   const { t } = useI18n();
-  const copyTimeout = React.useRef<number | null>(null);
   const editingIdRef = React.useRef(args.editingId);
   const editTitleRef = React.useRef(args.editTitle);
   const deleteSessionConfirmRef = React.useRef(args.deleteSessionConfirm);
@@ -74,14 +73,6 @@ export const useSessionActions = (args: Args) => {
     editingOccurrenceKey,
     setEditTitle,
   } = args;
-
-  React.useEffect(() => {
-    return () => {
-      if (copyTimeout.current) {
-        clearTimeout(copyTimeout.current);
-      }
-    };
-  }, []);
 
   const handleSessionSelect = React.useCallback(
     (sessionId: string, sessionDirectory?: string | null) => {

@@ -1,6 +1,6 @@
 import type { QuotaProviderId } from '@/types';
 
-export interface QuotaProviderMeta {
+interface QuotaProviderMeta {
   id: QuotaProviderId;
   name: string;
 }

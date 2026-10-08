@@ -46,7 +46,7 @@ export const extractUserCode = (instructions: string): string | undefined =>
  * Fields the editor can render and answer. `external` fields only point the
  * user at a URL, so they never take part in the answer payload.
  */
-export type AnswerableField = Exclude<FormField, { type: 'external' }>;
+type AnswerableField = Exclude<FormField, { type: 'external' }>;
 
 export const isAnswerableField = (field: FormField): field is AnswerableField =>
   field.type !== 'external';

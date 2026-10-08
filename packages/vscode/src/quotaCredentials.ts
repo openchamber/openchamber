@@ -6,7 +6,7 @@ import { fetchExeDevUsage } from './exeDevQuota';
 import { fetchOllamaUsage } from './ollamaQuota';
 
 export type ManagedProvider = 'exe-dev' | 'ollama-cloud' | 'cursor' | 'zenmux';
-export type ManagedCredential = Record<string, string>;
+type ManagedCredential = Record<string, string>;
 const providers = new Set<ManagedProvider>(['exe-dev', 'ollama-cloud', 'cursor', 'zenmux']);
 const directory = () => path.join(process.env.OPENCHAMBER_DATA_DIR ? path.resolve(process.env.OPENCHAMBER_DATA_DIR) : path.join(os.homedir(), '.config', 'openchamber'), 'quota');
 const target = (provider: ManagedProvider) => {

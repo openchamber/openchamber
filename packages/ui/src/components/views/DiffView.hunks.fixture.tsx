@@ -462,3 +462,68 @@ export async function exerciseMobileComparisonContextExpansion() {
     await restore();
   }
 }
+
+// Hidden whitespace drops a re-indented hunk, keeps the real edit, withholds
+// the hunk actions that would also apply the hidden whitespace, and turns a
+// whitespace-only file into a note.
+export async function exerciseHiddenWhitespace() {
+  const { dom, restore } = installFixtureDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
+  const { createWebAPIs } = await import('../../../../web/src/api/index');
+  const { MultiFileDiffEntry } = await import('@/components/views/DiffView');
+  const { SyncProvider } = await import('@/sync/sync-context');
+  const { opencodeClient } = await import('@/lib/opencode/client');
+  const { useGitStore } = await import('@/stores/useGitStore');
+  const header = `diff --git a/file.txt b/file.txt\nindex ${'a'.repeat(40)}..${'b'.repeat(40)} 100644\n--- a/file.txt\n+++ b/file.txt\n`;
+  const reindented = '@@ -1,6 +1,6 @@\n-line0\n-line1\n-line2\n+  line0\n+  line1\n+  line2\n line3\n line4\n line5\n';
+  const edited = '@@ -28,7 +28,7 @@\n line27\n line28\n line29\n-line30\n+changed30\n line31\n line32\n line33\n';
+  let patch = header + reindented + edited;
+  const file = { path: 'file.txt', index: 'M', working_dir: 'M', insertions: 4, deletions: 4, isNew: false };
+  const status: GitStatus = { current: 'feature', tracking: null, ahead: 0, behind: 0, files: [file], isClean: false, diffStats: { staged: {}, working: { 'file.txt': { insertions: 4, deletions: 4 } } } };
+  const base = createWebAPIs();
+  const apis = { ...base, git: { ...base.git,
+    checkIsGitRepository: async () => true,
+    getGitStatus: async () => status,
+    getGitDiff: async () => ({ diff: patch, submodule: null }),
+  } };
+  useGitStore.getState().setActiveDirectory('/repo');
+  const container = document.createElement('div');
+  container.dataset.diffVirtualRoot = '';
+  container.getBoundingClientRect = () => new dom.DOMRect(0, 0, 1280, 2000);
+  Object.defineProperty(container, 'clientHeight', { value: 2000 });
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (key: string, hideWhitespace: boolean) => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
+    <MultiFileDiffEntry key={key} directory="/repo" file={file} layout="inline" wrapLines={false} hideWhitespace={hideWhitespace} isSelected={false}
+      isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}} hunkActionsEnabled />
+  </RuntimeAPIContext.Provider></SyncProvider></I18nProvider>));
+  const shadowText = () => container.querySelector('diffs-container')?.shadowRoot?.textContent ?? '';
+  const waitFor = async (label: string, condition: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (workerFailures.length > 0) throw workerFailures[0];
+      if (condition()) return;
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    }
+    throw new Error(`Timed out waiting for ${label}: ${shadowText().slice(-400)}`);
+  };
+  try {
+    await render('both', false);
+    await waitFor('both hunks with actions', () => container.querySelectorAll('[data-hunk-actions]').length === 2);
+    expect(shadowText()).toContain('line1');
+
+    await render('both', true);
+    await waitFor('the edit alone', () => shadowText().includes('changed30') && !shadowText().includes('line1'));
+    expect(container.querySelector('[data-hunk-actions]')).toBeNull();
+
+    patch = header + reindented;
+    await render('whitespace-only', true);
+    await waitFor('the whitespace note', () => container.textContent?.includes('Only whitespace changed in this file.') === true);
+    expect(container.querySelector('diffs-container')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    await restore();
+  }
+}

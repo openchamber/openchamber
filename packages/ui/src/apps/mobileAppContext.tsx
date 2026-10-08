@@ -8,6 +8,8 @@ export type MobileAppActions = {
   openFiles: () => void;
   /** Open the Settings surface as a modal. */
   openSettings: () => void;
+  /** Open the issues and PRs board page; what it shows is set in its store first. */
+  openSourceBoard: () => void;
 };
 
 const DedicatedMobileAppContext = React.createContext<MobileAppActions | null>(null);

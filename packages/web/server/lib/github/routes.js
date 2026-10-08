@@ -324,6 +324,20 @@ export function registerGitHubRoutes(app, options = {}) {
     oauthFlowRegistry = createOAuthFlowRegistry();
     return oauthFlowRegistry;
   };
+  // A worktree checked out from a contributor's fork PR deliberately has no
+  // upstream, so the branch alone looks like it came from the primary remote.
+  // Its provenance names the fork remote the branch really came from. Without
+  // provenance (or when it cannot be read) status resolves as for any branch.
+  const readContributorSourceRemote = async (directory, branch) => {
+    if (!(options.readContributorProvenance instanceof Function)) return null;
+    try {
+      const { provenance } = await options.readContributorProvenance(directory);
+      return provenance?.kind === 'contributor-fork' && provenance.provider === 'github'
+        && provenance.sourceRef === `refs/heads/${branch}` ? provenance.remoteName : null;
+    } catch {
+      return null;
+    }
+  };
   const sendOAuthFlowError = (res, error) => {
     if (error?.code === 'SOURCE_CONTROL_OAUTH_FLOW_BUSY') {
       return res.status(409).json({ error: 'OAuth flow is busy', code: error.code });
@@ -441,6 +455,25 @@ export function registerGitHubRoutes(app, options = {}) {
     error.status = status;
     return error;
   };
+  // GitHub's own limit for a comment body.
+  const COMMENT_MAX_LENGTH = 65536;
+  const commentText = (value, required) => {
+    if (value === undefined && !required) return undefined;
+    if (!isProviderString(value) || !value.trim()) throw canonicalMutationError('body is required');
+    if (value.length > COMMENT_MAX_LENGTH) throw canonicalMutationError('body is too long');
+    return value;
+  };
+  const ISSUE_KINDS = new Set(['issue-comment', 'issue-state', 'issue-labels']);
+  // Labels or reviewers as one whole set, so a repeat asks for the same result.
+  const nameList = (value, name, limit) => {
+    if (!Array.isArray(value) || value.length > limit
+      || value.some((entry) => !isProviderString(entry) || !entry.trim() || entry.length > 256)) {
+      throw canonicalMutationError(`${name} are invalid`);
+    }
+    return [...new Set(value)].sort();
+  };
+  const sameNames = (left, right) => left.length === right.length && [...left].sort().every((entry, index) => entry === right[index]);
+  const mutationRecordKind = (kind) => (ISSUE_KINDS.has(kind) ? kind : `change-request-${kind}`);
   const requiredMutationText = (value, name) => {
     if (!isProviderString(value) || !value.trim()) throw canonicalMutationError(`${name} is required`);
     return value.trim();
@@ -517,7 +550,28 @@ export function registerGitHubRoutes(app, options = {}) {
     const { number, ...result } = receipt.result;
     return { ...receipt, target: { ...receipt.target, number }, result };
   };
-  const reconcileExistingMutation = async (octokit, kind, target) => {
+  const reconcileExistingMutation = async (octokit, kind, target, operation) => {
+    // A comment or a review leaves nothing that tells a lost write from one
+    // never sent short of guessing from its text, so the outcome stays unknown.
+    if (kind === 'comment' || kind === 'review' || kind === 'issue-comment') return { state: 'outcome-unknown' };
+    if (kind === 'labels' || kind === 'issue-labels') {
+      const current = await octokit.rest.issues.listLabelsOnIssue({
+        owner: target.project.owner, repo: target.project.name, issue_number: target.number, per_page: 100,
+      });
+      const names = requireProviderArray(current?.data, 'GitHub returned an invalid label list').map((label) => label?.name);
+      // Another edit since may have changed them either way: only a match is certain.
+      return names.every(isProviderString) && sameNames(names, operation.labels) ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    }
+    if (kind === 'reviewers') {
+      const current = await requestedReviewers(octokit, target.project, target.number);
+      return sameNames(current, operation.reviewers) ? { state: 'succeeded', result: {} } : { state: 'outcome-unknown' };
+    }
+    if (kind === 'issue-state') {
+      const current = await octokit.rest.issues.get({ owner: target.project.owner, repo: target.project.name, issue_number: target.number });
+      const state = current?.data?.state;
+      if (state !== 'open' && state !== 'closed') return { state: 'outcome-unknown' };
+      return state === operation.state ? { state: 'succeeded', result: { state } } : definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
+    }
     const current = await octokit.rest.pulls.get({
       owner: target.project.owner,
       repo: target.project.name,
@@ -531,6 +585,10 @@ export function registerGitHubRoutes(app, options = {}) {
       if (currentPr.state === 'open' && currentPr.merged === false) {
         return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
       }
+    } else if (kind === 'state') {
+      // A merged pull request reads `closed` too, and can no longer be reopened.
+      if (currentPr.state === operation.state) return { state: 'succeeded', result: { state: currentPr.state } };
+      if (currentPr.state === 'open' || currentPr.state === 'closed') return definiteFailure('SOURCE_CONTROL_MUTATION_NOT_APPLIED');
     } else if (kind === 'ready') {
       if (currentPr.draft === false) return { state: 'succeeded', result: { ready: true } };
       if (currentPr.draft === true && currentPr.state === 'open') {
@@ -547,6 +605,73 @@ export function registerGitHubRoutes(app, options = {}) {
       return 'failed';
     }
     return 'outcome-unknown';
+  };
+  // GitHub's own reason for refusing a write (a locked conversation, a review
+  // of your own pull request) is what the user needs to read; the generic
+  // mutation error would hide it.
+  const providerRejection = (error) => {
+    const status = error?.response?.status ?? error?.status;
+    if (![403, 404, 422].includes(status)) return error;
+    const data = error?.response?.data;
+    const first = Array.isArray(data?.errors) ? data.errors[0] : undefined;
+    const detail = [first, first?.message, data?.message].find((value) => isProviderString(value) && value.trim());
+    return canonicalMutationError(detail ?? 'GitHub refused the change', 'SOURCE_CONTROL_MUTATION_REJECTED', status);
+  };
+  const postComment = async (octokit, project, number, body) => {
+    let response;
+    try {
+      response = await octokit.rest.issues.createComment({ owner: project.owner, repo: project.name, issue_number: number, body });
+    } catch (error) {
+      throw providerRejection(error);
+    }
+    if (!isPlainObject(response?.data) || !Number.isSafeInteger(response.data.id)) {
+      throw invalidProviderPayload('GitHub returned an invalid comment');
+    }
+    return {};
+  };
+  const setLabels = async (octokit, project, number, labels) => {
+    let response;
+    try {
+      response = await octokit.rest.issues.setLabels({ owner: project.owner, repo: project.name, issue_number: number, labels });
+    } catch (error) {
+      throw providerRejection(error);
+    }
+    requireProviderArray(response?.data, 'GitHub returned an invalid label list');
+    return {};
+  };
+  const requestedReviewers = async (octokit, project, number) => {
+    const response = await octokit.rest.pulls.listRequestedReviewers({ owner: project.owner, repo: project.name, pull_number: number });
+    const users = response?.data?.users;
+    if (!Array.isArray(users) || users.some((user) => !isProviderString(user?.login))) {
+      throw invalidProviderPayload('GitHub returned an invalid reviewer list');
+    }
+    return users.map((user) => user.login);
+  };
+  // GitHub adds and removes review requests separately. Asking again for the
+  // same set is safe, so a failure between the two is fixed by trying again.
+  const setReviewers = async (octokit, project, number, reviewers) => {
+    const current = await requestedReviewers(octokit, project, number);
+    const add = reviewers.filter((login) => !current.includes(login));
+    const remove = current.filter((login) => !reviewers.includes(login));
+    const pull = { owner: project.owner, repo: project.name, pull_number: number };
+    try {
+      if (add.length) await octokit.rest.pulls.requestReviewers({ ...pull, reviewers: add });
+      if (remove.length) await octokit.rest.pulls.removeRequestedReviewers({ ...pull, reviewers: remove });
+    } catch (error) {
+      throw providerRejection(error);
+    }
+    return {};
+  };
+  // Closing or reopening an issue or a pull request; GitHub refuses to reopen a merged one.
+  const setState = async (update, state) => {
+    let response;
+    try {
+      response = await update();
+    } catch (error) {
+      throw providerRejection(error);
+    }
+    if (response?.data?.state !== state) throw invalidProviderPayload('GitHub returned an unexpected state');
+    return { state };
   };
   const sendCanonicalMutationError = async (res, error) => {
     if (error?.status === 401) await invalidateRequestAccount(error);
@@ -617,12 +742,45 @@ export function registerGitHubRoutes(app, options = {}) {
       return { method, digest: (target) => digestMutationInput({ kind, actor, credential, target, method }) };
     }
     if (kind === 'ready') return { digest: (target) => digestMutationInput({ kind, actor, credential, target }) };
+    if (kind === 'labels' || kind === 'issue-labels') {
+      const labels = nameList(req.body?.labels, 'labels', 100);
+      return { labels, digest: (target) => digestMutationInput({ kind, actor, credential, target, labels }) };
+    }
+    if (kind === 'reviewers') {
+      const reviewers = nameList(req.body?.reviewers, 'reviewers', 50);
+      return { reviewers, digest: (target) => digestMutationInput({ kind, actor, credential, target, reviewers }) };
+    }
+    if (kind === 'state' || kind === 'issue-state') {
+      const state = req.body?.state;
+      if (state !== 'open' && state !== 'closed') throw canonicalMutationError('state is invalid');
+      return { state, digest: (target) => digestMutationInput({ kind, actor, credential, target, state }) };
+    }
+    if (kind === 'comment' || kind === 'issue-comment') {
+      const body = commentText(req.body?.body, true);
+      return { body, digest: (target) => digestMutationInput({ kind, actor, credential, target, body }) };
+    }
+    if (kind === 'review') {
+      const verdict = req.body?.verdict;
+      if (verdict !== 'approve' && verdict !== 'request-changes') throw canonicalMutationError('review verdict is invalid');
+      // A verdict names the commit it is for; without one it would land on whatever was pushed last.
+      requiredMutationText(context.target.headSha, 'target headSha');
+      // GitHub asks for the reason when changes are requested.
+      const body = commentText(req.body?.body, verdict === 'request-changes');
+      return {
+        verdict, body,
+        digest(target) {
+          const input = { kind, actor, credential, target, verdict };
+          if (body !== undefined) input.body = body;
+          return digestMutationInput(input);
+        },
+      };
+    }
     throw canonicalMutationError('Mutation kind is invalid');
   };
   const storedMutationAuthorityMatches = (record, kind, actor, context) => {
     const target = record?.target;
     const expected = context.target;
-    return record?.kind === `change-request-${kind}`
+    return record?.kind === mutationRecordKind(kind)
       && record.actor?.provider === actor.provider
       && record.actor?.instance === actor.instance
       && record.actor?.accountId === actor.accountId
@@ -702,7 +860,7 @@ export function registerGitHubRoutes(app, options = {}) {
             if (!sourceProject) return { state: 'outcome-unknown' };
             return reconcileCreateMutation(octokit, expectedProject, sourceProject, operation.head, operation.base);
           }
-          return reconcileExistingMutation(octokit, kind, target);
+          return reconcileExistingMutation(octokit, kind, target, operation);
         };
         const execution = await options.mutationExecutor.execute({
           record: {
@@ -771,6 +929,34 @@ export function registerGitHubRoutes(app, options = {}) {
           return { number: created.number };
         };
         reconcile = () => reconcileCreateMutation(octokit, expectedProject, sourceProject, head, base);
+      } else if (ISSUE_KINDS.has(kind)) {
+        const expected = context.target;
+        if (!Number.isSafeInteger(expected.number) || expected.number < 1
+          || expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
+          throw canonicalMutationError('Issue target is invalid');
+        }
+        const response = await octokit.rest.issues.get({
+          owner: expectedProject.owner, repo: expectedProject.name, issue_number: expected.number,
+        });
+        const issue = response?.data;
+        if (!isPlainObject(issue) || issue.number !== expected.number) throw invalidProviderPayload('GitHub returned an invalid issue');
+        // GitHub lists pull requests among issues; this write is for issues only.
+        if (issue.pull_request) {
+          throw canonicalMutationError('GitHub issue is a pull request', 'SOURCE_CONTROL_MUTATION_TARGET_INVALID', 409);
+        }
+        target = {
+          repositoryId: context.repositoryId,
+          bindingRevision: context.bindingRevision,
+          primaryRemote: context.primaryRemote,
+          project: { id: `${expectedProject.owner}/${expectedProject.name}`, owner: expectedProject.owner, name: expectedProject.name },
+          number: issue.number,
+        };
+        if (kind === 'issue-comment') perform = () => postComment(octokit, expectedProject, target.number, operation.body);
+        else if (kind === 'issue-labels') perform = () => setLabels(octokit, expectedProject, target.number, operation.labels);
+        else perform = () => setState(() => octokit.rest.issues.update({
+            owner: expectedProject.owner, repo: expectedProject.name, issue_number: target.number, state: operation.state,
+          }), operation.state);
+        reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
       } else {
         if (!Number.isSafeInteger(context.target.number) || context.target.number < 1) {
           throw canonicalMutationError('target number is required');
@@ -815,6 +1001,45 @@ export function registerGitHubRoutes(app, options = {}) {
             return { merged: data.merged };
           };
           reconcile = () => reconcileExistingMutation(octokit, kind, target);
+        } else if (kind === 'labels') {
+          perform = () => setLabels(octokit, expectedProject, target.number, operation.labels);
+          reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
+        } else if (kind === 'reviewers') {
+          perform = () => setReviewers(octokit, expectedProject, target.number, operation.reviewers);
+          reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
+        } else if (kind === 'state') {
+          perform = () => setState(() => octokit.rest.pulls.update({
+            owner: expectedProject.owner, repo: expectedProject.name, pull_number: target.number, state: operation.state,
+          }), operation.state);
+          reconcile = () => reconcileExistingMutation(octokit, kind, target, operation);
+        } else if (kind === 'comment') {
+          perform = () => postComment(octokit, expectedProject, target.number, operation.body);
+          reconcile = () => reconcileExistingMutation(octokit, kind, target);
+        } else if (kind === 'review') {
+          const { verdict, body } = operation;
+          perform = async () => {
+            const reviewInput = {
+              owner: expectedProject.owner,
+              repo: expectedProject.name,
+              pull_number: target.number,
+              // The verdict is for the commit the user read.
+              commit_id: target.headSha,
+              event: verdict === 'approve' ? 'APPROVE' : 'REQUEST_CHANGES',
+            };
+            if (body !== undefined) reviewInput.body = body;
+            let response;
+            try {
+              response = await octokit.rest.pulls.createReview(reviewInput);
+            } catch (error) {
+              throw providerRejection(error);
+            }
+            if (response?.data?.state !== (verdict === 'approve' ? 'APPROVED' : 'CHANGES_REQUESTED')) {
+              throw invalidProviderPayload('GitHub returned an invalid review');
+            }
+            // GitHub posts the verdict and its text as one review.
+            return { commented: body !== undefined };
+          };
+          reconcile = () => reconcileExistingMutation(octokit, kind, target);
         } else {
           const alreadyReady = pr.draft === false;
           const nodeId = optionalMutationText(pr.node_id, 'pull request node id', true);
@@ -840,7 +1065,7 @@ export function registerGitHubRoutes(app, options = {}) {
         record: {
           key: context.idempotencyKey,
           inputDigest: operation.digest(target),
-          kind: `change-request-${kind}`,
+          kind: mutationRecordKind(kind),
           actor,
           target,
         },
@@ -1359,12 +1584,14 @@ export function registerGitHubRoutes(app, options = {}) {
 
       const resolveGitHubPrStatus = options.resolveGitHubPrStatus
         ?? (await import('./pr-status.js')).resolveGitHubPrStatus;
+      const sourceRemoteName = await readContributorSourceRemote(directory, branch);
       const resolvedStatus = await withTimeout(
         resolveGitHubPrStatus({
           octokit,
           directory,
           branch,
           remoteName: remote,
+          sourceRemoteName,
           force,
         }),
         PR_STATUS_RESOLVE_TIMEOUT_MS,
@@ -1537,6 +1764,22 @@ export function registerGitHubRoutes(app, options = {}) {
 
   app.post(canonicalGitHubRoutePath('/pr/ready'), (req, res) => runCanonicalMutation('ready', req, res));
 
+  app.post(canonicalGitHubRoutePath('/pr/comment'), (req, res) => runCanonicalMutation('comment', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/review'), (req, res) => runCanonicalMutation('review', req, res));
+
+  app.post(canonicalGitHubRoutePath('/issues/comment'), (req, res) => runCanonicalMutation('issue-comment', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/state'), (req, res) => runCanonicalMutation('state', req, res));
+
+  app.post(canonicalGitHubRoutePath('/issues/state'), (req, res) => runCanonicalMutation('issue-state', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/labels'), (req, res) => runCanonicalMutation('labels', req, res));
+
+  app.post(canonicalGitHubRoutePath('/issues/labels'), (req, res) => runCanonicalMutation('issue-labels', req, res));
+
+  app.post(canonicalGitHubRoutePath('/pr/reviewers'), (req, res) => runCanonicalMutation('reviewers', req, res));
+
   app.get(canonicalGitHubRoutePath('/repo/upstream'), async (req, res) => {
     try {
       const directory = readQueryString(req, 'directory');
@@ -1701,7 +1944,7 @@ export function registerGitHubRoutes(app, options = {}) {
   // repository network. Failures are errors, never an empty page: the picker
   // keeps what it showed and offers a retry.
   app.get(canonicalGitHubRoutePath('/references'), async (req, res) => {
-    const { readReferenceFilter, readReferenceKind, searchGitHubReferences } = await import('./reference-search.js');
+    const { readReferencePeople, readReferenceKind, readReferenceState, searchGitHubReferences } = await import('./reference-search.js');
     const directory = readQueryString(req, 'directory');
     const kind = readReferenceKind(req.query?.kind);
     if (!directory || !kind) {
@@ -1735,7 +1978,8 @@ export function registerGitHubRoutes(app, options = {}) {
         octokit,
         repos,
         kind,
-        filter: readReferenceFilter(req.query?.filter),
+        state: readReferenceState(req.query?.state),
+        people: readReferencePeople(req.query?.people),
         text: readQueryString(req, 'query'),
         cursor: readQueryString(req, 'cursor') || null,
       });
@@ -1823,6 +2067,60 @@ export function registerGitHubRoutes(app, options = {}) {
       console.error('Failed to load GitHub issue or pull request detail:', error);
       return res.status(500).json({ error: error.message || 'Failed to load issue or pull request detail' });
     }
+  });
+
+  // The repository's labels and the people who can be asked to review in it,
+  // for the board's pickers. The repository must be in the bound project's
+  // network, as for the detail above; one page of 100 is what the pickers show.
+  const readRepositoryChoices = (suffix, read) => app.get(canonicalGitHubRoutePath(suffix), async (req, res) => {
+    const directory = readQueryString(req, 'directory');
+    const owner = readQueryString(req, 'owner');
+    const repoName = readQueryString(req, 'repo');
+    if (!directory || !owner || !repoName) {
+      return res.status(400).json({ error: 'directory, owner and repo are required' });
+    }
+    try {
+      const trustedContext = await validateReadContext(req, directory);
+      if (!trustedContext) return res.status(501).json({ error: 'Bound source control read is unavailable' });
+      const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+      if (!octokit) return res.json({ connected: false });
+      const repo = await resolveRepoForRequest(octokit, directory, { owner, repo: repoName }, trustedContext.primaryRemote, {
+        resolveGitHubRepoFromDirectory: options.resolveGitHubRepoFromDirectory,
+        resolveRepoNetwork: options.resolveRepoNetwork,
+        strictNetworkErrors: true,
+        strictMetadataErrors: true,
+        requireResolvedRepo: true,
+      });
+      if (!repo) return res.status(400).json({ error: 'Repository is not part of this project' });
+      return res.json({ connected: true, items: await read(octokit, repo) });
+    } catch (error) {
+      if (isReadContextError(error)) return res.status(error.status ?? 400).json(readContextErrorBody(error));
+      const accountError = sendExactAccountError(res, error);
+      if (accountError) return accountError;
+      if (error?.status === 401) {
+        await invalidateRequestAccount(error);
+        return res.json({ connected: false });
+      }
+      return res.status(500).json({ error: error.message || 'Failed to read the repository' });
+    }
+  });
+
+  readRepositoryChoices('/references/labels', async (octokit, repo) => {
+    const response = await octokit.rest.issues.listLabelsForRepo({ owner: repo.owner, repo: repo.repo, per_page: 100 });
+    return requireProviderArray(response?.data, 'GitHub returned an invalid label list').flatMap((label) => {
+      if (!isProviderString(label?.name) || !label.name) return [];
+      return [isProviderString(label.color) && label.color ? { name: label.name, color: label.color } : { name: label.name }];
+    });
+  });
+
+  readRepositoryChoices('/references/reviewers', async (octokit, repo) => {
+    const response = await octokit.rest.issues.listAssignees({ owner: repo.owner, repo: repo.repo, per_page: 100 });
+    return requireProviderArray(response?.data, 'GitHub returned an invalid user list').flatMap((user) => {
+      if (!isProviderString(user?.login) || !user.login) return [];
+      return [isProviderString(user.avatar_url) && user.avatar_url
+        ? { id: user.login, login: user.login, avatarUrl: user.avatar_url }
+        : { id: user.login, login: user.login }];
+    });
   });
 
   // What colours the PRs a picker page shows: checks and mergeability, from

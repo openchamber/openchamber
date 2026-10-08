@@ -707,7 +707,7 @@ const findBranchPrCandidates = async ({ octokit, target, branch, sourceCandidate
 // Exported for focused unit tests of open-versus-historical branch matching.
 export { findBranchPrCandidates };
 
-export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, force = false }) {
+export async function resolveGitHubPrStatus({ octokit, directory, branch, remoteName, sourceRemoteName = null, force = false }) {
   // A deleted worktree can still have a session in the sidebar that keeps
   // requesting its PR status. Bail before touching git or GitHub for a
   // directory that no longer exists — otherwise every poll spends a git call
@@ -755,10 +755,15 @@ export async function resolveGitHubPrStatus({ octokit, directory, branch, remote
   // forks — are places to look for an open PR, but their `owner:branch`
   // heads are unrelated branches that merely share a name; treating them as
   // sources made a fork's closed `main` PR show up on the local main.
+  // A branch checked out from a contributor's fork PR comes from that fork's
+  // remote, which the caller knows from the worktree's provenance.
   const primaryRemoteName = resolvedTargets[0]?.remoteName ?? null;
-  const sourceCandidates = resolvedTargets.filter(
-    (target) => target.remoteName === primaryRemoteName,
-  );
+  const contributorSources = sourceRemoteName
+    ? resolvedTargets.filter((target) => target.remoteName === sourceRemoteName)
+    : [];
+  const sourceCandidates = contributorSources.length > 0
+    ? contributorSources
+    : resolvedTargets.filter((target) => target.remoteName === primaryRemoteName);
   // When every consulted repo list was complete, a no-PR result is
   // authoritative and the expensive Search API fallback is pointless.
   const coverage = { authoritative: true };

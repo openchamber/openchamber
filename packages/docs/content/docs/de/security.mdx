@@ -104,6 +104,19 @@ Wenn OpenCode auf deinen Rechnern schon installiert ist und OpenChamber genau di
 - Die CLI muss OpenCode 2.x sein, mindestens die Version, die OpenChamber verlangt. Mit einer älteren bleibt OpenChamber beim Bildschirm „OpenCode aktualisieren“ stehen.
 - Ein Ordner geht auch, wenn er `opencode` enthält (`opencode.exe` unter Windows). Eine Umgebungsvariable dafür gibt es nicht, weil Nutzer diese selbst setzen können.
 
+
+### Integrierte Skill-Kataloge ausblenden
+
+OpenChamber bringt einige öffentliche Skill-Kataloge mit (Anthropic, OpenAI, Cursor, Matt Pocock). Wenn deine Organisation einen eigenen pflegt, füge ihn als eigenen Katalog hinzu und blende die integrierten in der Richtliniendatei aus. Das funktioniert mit oder ohne Enterprise-Modus.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+Die Einstellungen bieten dann nur Kataloge an, die Personen selbst hinzufügen, und OpenChamber lädt keinen integrierten, auch nicht auf direkte Anfrage. Eine Umgebungsvariable gibt es dafür nicht, da Nutzer diese selbst setzen können.
+
 ### Beispiele
 
 Die Richtliniendatei auf einem Mac ablegen. Führen Sie im Terminal als Administrator aus:

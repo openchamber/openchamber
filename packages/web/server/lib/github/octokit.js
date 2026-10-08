@@ -108,6 +108,37 @@ export async function getOctokitOrNull() {
   return createOctokit(token, accountId);
 }
 
+/**
+ * The gh CLI account as a credential record shaped like a persisted one, for
+ * Git transport. Same consent rule as getOctokitForAccountId: only while the
+ * user has switched to the gh account, and only when gh is still signed in
+ * as that same GitHub user. The CLI credential has no revisions beyond 1.
+ */
+export async function getGitHubCliCredential(accountId, revision) {
+  if (!accountId.startsWith('github.com#cli:') || !isGhCliActive() || isGhCliDisabled()) return null;
+  if (revision !== undefined && revision !== 1) return null;
+  const token = getGhCliToken();
+  if (!token) return null;
+  let response;
+  try {
+    response = await createOctokit(token, accountId).rest.users.getAuthenticated();
+  } catch (error) {
+    if (error?.status === 401) return null;
+    throw error;
+  }
+  if (githubCliAccountId(response.data.id) !== accountId) return null;
+  return {
+    credentialId: accountId,
+    accountId,
+    credentialRevision: 1,
+    providerUserId: githubAccountId(response.data.id),
+    accessToken: token,
+    source: 'cli',
+    status: 'valid',
+    user: response.data,
+  };
+}
+
 export async function getOctokitForAccountId(accountId, options = {}) {
   const auth = await getGitHubAuthByAccountId(accountId);
   if (auth) {

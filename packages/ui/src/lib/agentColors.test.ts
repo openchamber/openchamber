@@ -5,6 +5,8 @@ import { chromaticDistance } from './theme/color';
 import type { Theme } from '@/types/theme';
 
 const roster = ['architect', 'build', 'plan', 'simplifier'].map((name) => ({ name }));
+// 'var(--syntax-keyword)' -> '--syntax-keyword'
+const tokenOf = ({ color }: { color: string }) => color.slice(4, -1);
 function colorValue(theme: Theme, token: string) {
   const values = new Map<string, string>(Object.entries(theme.colors.syntax.base).map(([key, value]) => [`--syntax-${key}`, value]));
   values.set('--status-success', theme.colors.status.success);
@@ -18,9 +20,9 @@ test('Build keeps success and four visible agents get distinct Monokai colors', 
     const theme = getThemeById(id);
     if (!theme) throw new Error(`Missing theme ${id}`);
     const resolve = createAgentColorResolver(theme, roster);
-    expect(resolve('build')).toEqual({ var: '--status-success', class: 'agent-success' });
-    expect(new Set(roster.map(({ name }) => colorValue(theme, resolve(name).var))).size).toBe(4);
-    const resolved = roster.map(({ name }) => colorValue(theme, resolve(name).var));
+    expect(resolve('build')).toEqual({ color: 'var(--status-success)' });
+    expect(new Set(roster.map(({ name }) => colorValue(theme, tokenOf(resolve(name))))).size).toBe(4);
+    const resolved = roster.map(({ name }) => colorValue(theme, tokenOf(resolve(name))));
     for (let i = 0; i < resolved.length; i++) {
       for (let j = i + 1; j < resolved.length; j++) {
         expect(chromaticDistance(resolved[i], resolved[j], theme.colors.surface.elevated, theme.colors.surface.background)).toBeGreaterThanOrEqual(0.055);
@@ -36,7 +38,7 @@ test('aliases, near-duplicates and the Build green do not consume separate palet
     function: theme.colors.status.success, string: theme.colors.status.success,
   });
   const resolve = createAgentColorResolver(theme, roster);
-  const selected = roster.map(({ name }) => colorValue(theme, resolve(name).var));
+  const selected = roster.map(({ name }) => colorValue(theme, tokenOf(resolve(name))));
   expect(new Set(selected).size).toBe(4);
   for (let i = 0; i < selected.length; i++) {
     for (let j = i + 1; j < selected.length; j++) {
@@ -44,8 +46,8 @@ test('aliases, near-duplicates and the Build green do not consume separate palet
     }
   }
   for (const { name } of roster.filter(({ name }) => name !== 'build')) {
-    expect(resolve(name).var.startsWith('--syntax-')).toBe(true);
-    expect(chromaticDistance(colorValue(theme, resolve(name).var), theme.colors.status.success, theme.colors.surface.background, theme.colors.surface.background)).toBeGreaterThanOrEqual(0.055);
+    expect(resolve(name).color.startsWith('var(--syntax-')).toBe(true);
+    expect(chromaticDistance(colorValue(theme, tokenOf(resolve(name))), theme.colors.status.success, theme.colors.surface.background, theme.colors.surface.background)).toBeGreaterThanOrEqual(0.055);
   }
 });
 
@@ -58,7 +60,7 @@ test('roster order and additional subagents do not change primary assignments', 
     expect(reordered(name)).toEqual(first(name));
     expect(withSubagent(name)).toEqual(first(name));
   }
-  expect(first(undefined).var).toBe('--status-success');
+  expect(first(undefined).color).toBe('var(--status-success)');
   expect(first('removed-agent')).toEqual(first('removed-agent'));
 });
 
@@ -70,8 +72,28 @@ test('sparse palettes reuse syntax colors without borrowing new status colors', 
   const agents = Array.from({ length: 50 }, (_, index) => ({ name: `agent-${index}` }));
   const resolve = createAgentColorResolver(theme, agents);
   for (const { name } of agents) {
-    expect(resolve(name).var.startsWith('--syntax-')).toBe(true);
-    expect(colorValue(theme, resolve(name).var)).toBe('#dddddd');
+    expect(resolve(name).color.startsWith('var(--syntax-')).toBe(true);
+    expect(colorValue(theme, tokenOf(resolve(name)))).toBe('#dddddd');
   }
-  expect(resolve('build').var).toBe('--status-success');
+  expect(resolve('build').color).toBe('var(--status-success)');
+});
+
+test('a colour set in the agent config wins, and the rest keep their colours', () => {
+  const theme = getDefaultTheme(true);
+  const plain = createAgentColorResolver(theme, roster);
+  const configured = createAgentColorResolver(theme, roster.map((agent) => (
+    agent.name === 'plan' ? { ...agent, color: '#ff6b6b' } : agent.name === 'build' ? { ...agent, color: '#112233' } : agent
+  )));
+  expect(configured('plan')).toEqual({ color: '#ff6b6b' });
+  expect(configured('build')).toEqual({ color: '#112233' });
+  for (const name of ['architect', 'simplifier']) expect(configured(name)).toEqual(plain(name));
+});
+
+test('ignores colours OpenCode v2 does not accept and the migration placeholder', () => {
+  const theme = getDefaultTheme(true);
+  const plain = createAgentColorResolver(theme, roster);
+  for (const color of ['primary', '#abc', '#aaaaaa', '#AAAAAA', '']) {
+    const resolve = createAgentColorResolver(theme, roster.map((agent) => (agent.name === 'plan' ? { ...agent, color } : agent)));
+    expect(resolve('plan')).toEqual(plain('plan'));
+  }
 });

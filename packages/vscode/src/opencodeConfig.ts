@@ -1953,6 +1953,62 @@ export const getAgentConfig = (agentName: string, workingDirectory?: string): {
   return { source: 'none', scope: null, path: null, legacy: false, config: {} };
 };
 
+/** Agent ids under one agents directory, nested ones as `group/name`. */
+const collectAgentIds = (dir: string, prefix: string, ids: Set<string>): void => {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      ids.add(`${prefix}${entry.name.slice(0, -3)}`);
+    }
+  }
+};
+
+export type DisabledAgent = { name: string; scope: AgentScope | null; path: string | null; description?: string };
+
+/**
+ * Agents switched off with `disabled: true`, which OpenCode drops from its
+ * agent list. Mirrors `listDisabledAgents` in the web server's agents.js.
+ */
+export const listDisabledAgents = (workingDirectory?: string): DisabledAgent[] => {
+  const names = new Set<string>();
+  for (const dir of USER_AGENT_DIRS) collectAgentIds(dir, '', names);
+  if (workingDirectory) {
+    const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+    for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+      for (const dirName of PROJECT_AGENT_DIR_NAMES) {
+        collectAgentIds(path.join(base, '.opencode', dirName), '', names);
+      }
+    }
+  }
+  const { mergedConfig } = readConfigLayers(workingDirectory);
+  for (const sectionKey of ['agents', 'agent', 'mode']) {
+    const section = mergedConfig[sectionKey];
+    if (section && typeof section === 'object' && !Array.isArray(section)) {
+      for (const name of Object.keys(section)) names.add(name);
+    }
+  }
+
+  const disabled: DisabledAgent[] = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const entry = getAgentConfig(name, workingDirectory);
+    if (entry.config.disabled !== true) continue;
+    disabled.push({
+      name,
+      scope: entry.scope,
+      path: entry.path,
+      ...(typeof entry.config.description === 'string' ? { description: entry.config.description } : {}),
+    });
+  }
+  return disabled;
+};
+
 const writeAgentMd = (targetPath: string, entity: AgentEntity): void => {
   const { fields, system } = fromAgentEntity(entity);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });

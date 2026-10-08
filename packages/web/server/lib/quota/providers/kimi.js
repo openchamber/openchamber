@@ -8,8 +8,39 @@ import {
   toTimestamp,
   durationToLabel,
   durationToSeconds,
-  asNonEmptyString
+  asNonEmptyString,
+  formatMoney,
+  asObject
 } from '../utils/index.js';
+
+const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
+
+// A pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code
+// subscription) is refused by the Kimi Code usage address. Its balance is read
+// from the platform instead: USD, what remains, with no spent figure.
+// Resolves to the credits_balance windows, or null when they cannot be read.
+const fetchMoonshotBalanceWindows = async (apiKey, fetchImpl) => {
+  try {
+    const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (!response.ok) return null;
+    const balance = asObject(asObject(await response.json())?.data)?.available_balance;
+    if (!Number.isFinite(balance)) return null;
+    return {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance)}`
+      })
+    };
+  } catch {
+    return null;
+  }
+};
 
 export const providerId = 'kimi-for-coding';
 export const providerName = 'Kimi for Coding';
@@ -18,7 +49,7 @@ export const providerName = 'Kimi for Coding';
 // works at the api.kimi.com usage address, and a pre-split `kimi-for-coding`
 // key left behind with a dead credential must not shadow it. The global plan
 // stays last, as before, since its key is not known to work at that address.
-export const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
+const aliases = ['kimi-code-plan-cn', 'kimi-for-coding', 'kimi', 'kimi-code-plan-global'];
 
 // Kimi's weekly `usage` block reports `used`; its rate-limit `limits[].detail`
 // blocks report `remaining` instead. Neither field is guaranteed present, so
@@ -64,6 +95,18 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        if (balanceWindows) {
+          return buildResult({
+            providerId,
+            providerName,
+            ok: true,
+            configured: true,
+            usage: { windows: balanceWindows }
+          });
+        }
+      }
       return buildResult({
         providerId,
         providerName,

@@ -9,7 +9,7 @@ import {
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR, readConfigLayers } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
-import { parseWebSearchSelection } from './config-v2.js';
+import { parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
 import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
 import {
   CREDENTIAL_LIST_ERROR,
@@ -19,6 +19,7 @@ import {
   isProviderConnectRequest,
 } from '../enterprise-mode.js';
 import { discoverProviderModels } from './model-discovery.js';
+import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
@@ -268,6 +269,31 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
+  // Providers turned off in the user's OpenCode config. OpenCode leaves them
+  // out of its provider list, so Settings reads them here to offer them back.
+  app.get('/api/provider/disabled', (_req, res) => {
+    try {
+      return res.json({ providers: readDisabledProviders(null) });
+    } catch (error) {
+      console.error('Failed to read disabled providers:', error);
+      return res.status(500).json({ error: 'Failed to read disabled providers' });
+    }
+  });
+
+  app.put('/api/provider/:providerId/disabled', async (req, res) => {
+    if (typeof req.body?.disabled !== 'boolean') {
+      return res.status(400).json({ error: 'disabled must be true or false' });
+    }
+    try {
+      const providers = setProviderDisabled(req.params.providerId, req.body.disabled, null);
+      return res.json({ providers, ...buildAppliedResponse('Provider updated.') });
+    } catch (error) {
+      if (error?.statusCode === 400) return res.status(400).json({ error: error.message });
+      console.error('Failed to update disabled providers:', error);
+      return res.status(500).json({ error: 'Failed to update disabled providers' });
+    }
+  });
+
   app.get('/api/provider/:providerId/source', async (req, res) => {
     try {
       const { providerId } = req.params;
@@ -403,7 +429,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           const { getProviderAuth } = await getAuthLibrary();
           const storedAuth = await getProviderAuth(providerID);
           storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string' ? storedAuth.key : null;
-          storedBaseURL = readConfigLayers().mergedConfig?.provider?.[providerID]?.options?.baseURL;
+          const { value: rawProvider } = readSectionEntry(readConfigLayers().mergedConfig, 'providers', providerID);
+          const providerEntity = rawProvider ? toProviderEntity(rawProvider) : null;
+          storedBaseURL = providerEntity?.settings?.baseURL;
+          if (!storedApiKey) {
+            // OpenCode tries each `env` name in order, so pick the first one
+            // that is set; when none is, keep the first so discovery can name
+            // it in the error instead of failing as an anonymous 401. This
+            // reads the server's environment: a variable that exists only in
+            // the managed OpenCode launch environment (Settings user env) is
+            // not visible here.
+            const envName = providerEntity?.env?.find((name) => process.env[name]) ?? providerEntity?.env?.[0];
+            storedApiKey = providerEntity?.settings?.apiKey || (envName ? `{env:${envName}}` : null);
+          }
         } catch {
           storedApiKey = null;
         }

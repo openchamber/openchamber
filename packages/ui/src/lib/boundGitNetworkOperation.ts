@@ -481,7 +481,7 @@ export type GitPublishTargets = {
   fetch?: { remoteName: string; ref: string };
 };
 
-export type GitFetchTarget = {
+type GitFetchTarget = {
   remoteName: string;
   sourceRef: string;
   destinationRef: string;

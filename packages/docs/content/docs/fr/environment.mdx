@@ -78,6 +78,12 @@ Remplace l’endpoint API de vérification des mises à jour. La plupart des uti
 
 Force le gestionnaire de paquets utilisé par les opérations de mise à jour lorsque l’auto-détection se trompe.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Fait passer par un proxy les requêtes sortantes propres à OpenChamber, comme les limites d’utilisation et les catalogues de skills. Les noms en minuscules fonctionnent aussi. Les hôtes de `NO_PROXY` se connectent directement, et `localhost`, `127.0.0.1` et `::1` toujours, donc les retours de connexion et le serveur OpenCode local continuent de fonctionner.
+
 ## Serveur OpenCode
 
 ### `OPENCODE_HOST`

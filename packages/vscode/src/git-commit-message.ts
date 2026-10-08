@@ -5,7 +5,7 @@
 export const COMMIT_DIFF_FILE_LIMIT = 30;
 export const COMMIT_DIFF_TOTAL_CHAR_LIMIT = 120_000;
 export const COMMIT_STYLE_SAMPLE_COUNT = 10;
-export const COMMIT_STYLE_SUBJECT_CHAR_LIMIT = 200;
+const COMMIT_STYLE_SUBJECT_CHAR_LIMIT = 200;
 
 export type GitStatusFileLike = {
   path: string;

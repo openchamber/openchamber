@@ -12,6 +12,7 @@
 // this file) use the same code paths so a value reads back the same on every
 // surface.
 
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 import crypto from 'node:crypto';
 
 const ACTION_NAME_MAX_LENGTH = 80;
@@ -23,8 +24,6 @@ const SETUP_COMMANDS_MAX = 50;
 
 const ACTION_PLATFORMS = new Set(['macos', 'linux', 'windows']);
 const SETUP_WORKTREE_MODES = new Set(['append', 'replace']);
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const clamp = (value, maxLength) => (value.length > maxLength ? value.slice(0, maxLength) : value);
 

@@ -94,7 +94,7 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
                 'touch-none',
                 className
             )}
-            style={{ color: `var(${agentColor.var})` }}
+            style={{ color: agentColor.color }}
             title={agentLabel}
         >
             <span className="flex h-full w-full min-w-0 items-center">

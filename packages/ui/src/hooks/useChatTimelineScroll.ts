@@ -117,7 +117,7 @@ interface UseChatTimelineScrollOptions {
 
 
 
-export interface UseChatTimelineScrollResult {
+interface UseChatTimelineScrollResult {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     // The live scroll element, as state, so effects that must re-bind when the
     // list remounts (session switch) can depend on it.

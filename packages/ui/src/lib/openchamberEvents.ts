@@ -73,6 +73,9 @@ type AgentMemoryChangedEvent = {
   projectId?: string;
 };
 
+const projectContextChangedSchema = z.object({ projectId: z.string().min(1) });
+type ProjectContextChangedEvent = { type: 'project-context-changed' } & z.infer<typeof projectContextChangedSchema>;
+
 /**
  * The extension chosen as browser provider can no longer serve (paused,
  * removed, or approval withdrawn), so the server put the in-app browser back.
@@ -163,6 +166,7 @@ type OpenChamberEvent =
   | BrowserControlRequestEvent
   | FileOpenRequestEvent
   | BrowserProviderResetEvent
+  | ProjectContextChangedEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
@@ -399,6 +403,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:browser-provider-reset') {
     const parsed = browserProviderResetSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'browser-provider-reset', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:project-context-changed') {
+    const parsed = projectContextChangedSchema.safeParse(envelope.properties);
+    if (parsed.success) for (const listener of listeners) listener({ type: 'project-context-changed', ...parsed.data });
     return;
   }
 

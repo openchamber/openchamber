@@ -16,7 +16,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { resolveDefaultSourceBranch } from '@/lib/worktrees/worktreeSourceBranchPreference';
 import { useI18n } from '@/lib/i18n';
 
-export interface BranchSelectorProps {
+interface BranchSelectorProps {
   /** Current directory to check for git repository */
   directory: string | null;
   /** Currently selected branch */

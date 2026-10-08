@@ -14,14 +14,13 @@
  * it survives compaction: the tab goes on believing the agent still has context
  * that has just been summarised away.
  */
+import { isRecord } from '../shared/guards.js';
 
 const KNOWLEDGE_METADATA_KEY = 'knowledge_context_delivered';
 const PINS_METADATA_KEY = 'project_context_pins';
 
 /** Total budget for the assembled block; anything past it is cut, loudly. */
 const KNOWLEDGE_MAX_LENGTH = 8000;
-
-const isRecord = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 const truncate = (value, budget) => (
   value.length <= budget ? value : `${value.slice(0, Math.max(0, budget - 1))}…`

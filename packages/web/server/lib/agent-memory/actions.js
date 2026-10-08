@@ -17,15 +17,10 @@
  * which is also what the user means by "this project".
  */
 
+import { asNonEmptyString } from '../shared/guards.js';
 import { MEMORY_BODY_MAX_LENGTH } from './runtime.js';
 
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 /** Everything the agent is told about an entry it has not opened yet. */
 const toSummary = (entry, scope) => ({

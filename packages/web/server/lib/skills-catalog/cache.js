@@ -54,8 +54,9 @@ const scheduleDiskWrite = () => {
   }
 };
 
-export function getCacheKey({ normalizedRepo, subpath, identityId }) {
-  const safeRepo = String(normalizedRepo || '').trim();
+export function getCacheKey({ normalizedRepo, ref, subpath, identityId }) {
+  // Branches of one repository are different catalogs.
+  const safeRepo = `${String(normalizedRepo || '').trim()}${ref ? `#${ref}` : ''}`;
   const safeSubpath = String(subpath || '').trim();
   const safeIdentity = String(identityId || '').trim();
   return `${safeRepo}::${safeSubpath}::${safeIdentity}`;

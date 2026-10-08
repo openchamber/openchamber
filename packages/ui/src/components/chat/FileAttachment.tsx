@@ -7,6 +7,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
+import { formatFileSize } from '@/lib/fileSize';
 import { getLanguageFromExtension, isDrawioFile, isExcalidrawFile } from '@/lib/toolHelpers';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -251,13 +252,6 @@ const useFileDetails = (file: AttachedFile) => {
   const getFileExtension = (filename: string): string => {
     const parts = filename.split('.');
     return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   const extractFilename = (path: string): string => {
@@ -622,9 +616,11 @@ interface MessageFilesDisplayProps {
   files: FilePart[];
   onShowPopup?: (content: ToolPopupContent) => void;
   compact?: boolean;
+  /** Compact only: replaces the default top margin, for placement above content. */
+  className?: string;
 }
 
-export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }: MessageFilesDisplayProps) => {
+export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, className }: MessageFilesDisplayProps) => {
   const { t } = useI18n();
 
   const fileItems = files.filter(f => f.type === 'file' && (f.mime || f.url));
@@ -646,13 +642,6 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     }
     return extractFilename(file.filename || file.url);
   }, []);
-
-  const formatFileSize = (bytes?: number) => {
-    if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
 
   const imageFiles = fileItems.filter(f => f.mime?.startsWith('image/') && f.url);
   const otherFiles = fileItems.filter(f => !f.mime?.startsWith('image/'));
@@ -737,7 +726,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
 
   if (compact) {
     return (
-      <div className="space-y-1.5 mt-1.5">
+      <div className={cn('space-y-1.5', className ?? 'mt-1.5')}>
         {otherFiles.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {otherFiles.map((file, index) => {

@@ -1,4 +1,4 @@
-export type ParsedMultiRunTitle = {
+type ParsedMultiRunTitle = {
   groupSlug: string;
   runGroup?: string;
   providerID: string;

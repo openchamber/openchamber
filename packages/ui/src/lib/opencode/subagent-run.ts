@@ -109,6 +109,49 @@ export function findSubagentRun(messages: readonly Message[], childSessionID: st
   return undefined
 }
 
+// --- Stopping a subagent -----------------------------------------------------
+//
+// OpenCode 2.0.23 has no route that cancels a subagent job. Interrupting the
+// child session ends its job as cancelled, and the agent hears about it as a
+// failure: a foreground call fails with "Subagent cancelled", a background
+// one reports `state="cancelled"`. Agents answer a failed subagent by
+// starting it again, so OpenChamber tells the agent first, in a synthetic
+// message that does not resume the session, that the stop was the user's.
+// Like the shell note, it corrects the reading of the failure and must not
+// forbid the work.
+
+const CANCELLATION_METADATA_KEY = "openchamberSubagentCancellation"
+
+const cancellationMetadataSchema = z.object({
+  [CANCELLATION_METADATA_KEY]: z.object({ sessionID: z.string().min(1) }),
+})
+
+/** The note that precedes stopping a subagent. Model-facing text, never shown in the UI. */
+export function subagentCancellationNote(input: { childSessionID: string; description: string | undefined }) {
+  const named = input.description ? `the subagent "${input.description}"` : "a subagent"
+  return {
+    text: [
+      `The user stopped ${named} (sessionID: ${input.childSessionID}).`,
+      "The result for it that follows reports that the subagent was cancelled.",
+      "That is how the stop shows up: the subagent did not fail on its own, the user cancelled it.",
+      "Do not start it again just because of that result. The same work is fine to delegate later when the task or the user needs it.",
+    ].join(" "),
+    description: "Subagent stopped by the user",
+    metadata: { [CANCELLATION_METADATA_KEY]: { sessionID: input.childSessionID } } satisfies Metadata,
+  }
+}
+
+/** Whether the user stopped the subagent running in one child session. */
+export function findSubagentCancellation(messages: readonly Message[], childSessionID: string): boolean {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== "synthetic") continue
+    const parsed = cancellationMetadataSchema.safeParse(message.metadata ?? {})
+    if (parsed.success && parsed.data[CANCELLATION_METADATA_KEY].sessionID === childSessionID) return true
+  }
+  return false
+}
+
 /**
  * The records with only the subagent reports of `subagent: true` commands
  * that started inside them. A report never opens a row of its own at the end

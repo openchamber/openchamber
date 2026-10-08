@@ -289,6 +289,16 @@ describe('getInjectedBootOutcome', () => {
     }
   });
 
+  test('keeps the default SSH instance a local boot fell back from', () => {
+    const w = mockWindow();
+    w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', localAvailable: true, sshStartupFallbackHostId: 'ssh-1' };
+    try {
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok', sshStartupFallbackHostId: 'ssh-1' });
+    } finally {
+      restoreWindow();
+    }
+  });
+
   test('returns null for non-object payload', () => {
     const w = mockWindow();
     w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = 'not-an-object';

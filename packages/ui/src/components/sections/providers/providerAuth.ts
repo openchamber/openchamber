@@ -13,8 +13,6 @@ import type { ConnectionInfo, IntegrationInfo, IntegrationKeyMethod, Integration
 import { z } from 'zod';
 import type { Provider } from '@/lib/opencode/model';
 
-export type ProviderIntegration = IntegrationInfo;
-
 export type CredentialConnection = Extract<ConnectionInfo, { type: 'credential' }>;
 
 /**
@@ -85,7 +83,7 @@ export const getCredentialConnections = (
     (connection): connection is CredentialConnection => connection.type === 'credential',
   );
 
-export interface ProviderCredentialInput {
+interface ProviderCredentialInput {
   /**
    * Connections the provider's integration reports. A stored credential or a
    * resolved environment variable both count as a usable login.

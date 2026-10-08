@@ -69,7 +69,7 @@ import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { linkGuestSession, promptGuestSession, startGuestSession } from '@/lib/guests/start-session';
 import { useGuestsStore } from '@/lib/guests/store';
 import { readGuestWorkspace, observeGuestWorkspace, openGuestSession } from '@/lib/guests/workspace';
-import { observeGuestShells } from '@/lib/guests/shells';
+import { observeGuestShells, readGuestShellOutput } from '@/lib/guests/shells';
 import { guestStorageOperation } from '@/lib/guests/storage';
 import { getGuestPopoverController, guestPopoverOwnerBlocked, positionGuestPopover, type GuestPopoverActivation, type GuestPopoverPosition } from '@/lib/guests/popovers';
 import { createGuestStatusControls, type GuestStatusControlBinding } from '@/lib/guests/status-controls';
@@ -600,9 +600,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
         shellsUnsubscribe: (id) => { subscriptions.get(id)?.(); subscriptions.delete(id); },
         shellOutput: async ({ shellId, cursor, tailBytes }) => {
           requireShells();
-          const shell = useBackgroundShellsStore.getState().byId.get(shellId);
-          if (!shell) throw new HostRequestError('NOT_FOUND', 'That shell is not running.');
-          return opencodeClient.readShellOutput(shell.id, shell.directory, cursor, tailBytes);
+          return readGuestShellOutput(shellId, cursor, tailBytes);
         },
         shellStop: async ({ shellId }) => {
           requireShells();

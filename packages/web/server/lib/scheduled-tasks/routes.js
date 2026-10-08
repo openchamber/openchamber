@@ -1,11 +1,5 @@
+import { asNonEmptyString } from '../shared/guards.js';
 import { randomUUID } from 'node:crypto';
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 const parseProjectID = (req) => asNonEmptyString(req?.params?.projectId);
 const parseTaskID = (req) => asNonEmptyString(req?.params?.taskId);
@@ -124,7 +118,13 @@ export const registerScheduledTaskRoutes = (app, dependencies) => {
     try {
       return res.json({ ok: true, ...await scheduledTaskService.run(projectID, taskID) });
     } catch (error) {
-      if (error?.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.task ? { task: error.task } : {}) });
+      if (error?.statusCode) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.task ? { task: error.task } : {}),
+          ...(error.busy ? { busy: error.busy } : {}),
+        });
+      }
       console.error('[ScheduledTasks] failed to run task:', error);
       return res.status(500).json({ error: 'Failed to run scheduled task' });
     }

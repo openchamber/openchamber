@@ -6,6 +6,7 @@ import type { IconName } from '@/components/icon/icons';
 import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import { resolveProjectContextId, type ProjectRef, type ProjectTodoItem } from '@/lib/projectContextApi';
+import { observeProjectContext } from '@/lib/projectContextSync';
 import { cn } from '@/lib/utils';
 import { selectProjectMemoryForPath, useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
 import { countHighlightedMemories, memoryViewKey } from '@/lib/agentMemoryBadges';
@@ -25,6 +26,7 @@ const PlanView = React.lazy(() => import('@/components/views/PlanView').then((mo
 
 interface ProjectNotesTodoPanelProps {
   projectRef: ProjectRef | null;
+  visible?: boolean;
   projectLabel?: string | null;
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
@@ -74,6 +76,7 @@ const matches = (haystack: string, needle: string): boolean => (
  */
 export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   projectRef,
+  visible = true,
   projectLabel,
   canCreateWorktree = false,
   onActionComplete,
@@ -86,7 +89,6 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const contextEntry = useProjectContextStore(
     (state) => (projectContextId ? state.entries[projectContextId] : undefined) ?? EMPTY_PROJECT_CONTEXT_ENTRY,
   );
-  const loadProjectContext = useProjectContextStore((state) => state.load);
   const saveTodos = useProjectContextStore((state) => state.saveTodos);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
@@ -243,11 +245,11 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const send = useProjectTodoSend({ projectRef, canCreateWorktree, onActionComplete });
 
   React.useEffect(() => {
-    if (!projectRef) {
+    if (!projectRef || !visible) {
       return;
     }
-    void loadProjectContext(projectRef);
-  }, [loadProjectContext, projectRef]);
+    return observeProjectContext(projectRef);
+  }, [projectRef, visible]);
 
   // Surface a load failure once. The store keeps whatever it already had, so
   // the panel never blanks out over an unreachable server.

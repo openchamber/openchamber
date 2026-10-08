@@ -49,7 +49,7 @@ export const OPENCHAMBER_ACTIONS = ['openchamber', 'openchamber_web', 'openchamb
  * v1 permission keys OpenCode 2 no longer checks. Rules on them are inert, so
  * the editor neither shows nor writes them back: the next save drops them.
  */
-export const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
+const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
   'bash',
   'task',
   'write',
@@ -63,14 +63,14 @@ export const LEGACY_ACTIONS: ReadonlySet<string> = new Set([
   'plan_exit',
 ]);
 
-export const isLegacyAction = (action: string): boolean => LEGACY_ACTIONS.has(action);
+const isLegacyAction = (action: string): boolean => LEGACY_ACTIONS.has(action);
 
 /**
  * The ordered base policy every agent starts with (OpenCode docs,
  * "Permissions → Defaults"). Global config rules come after it and the agent's
  * own rules last.
  */
-export const OPENCODE_DEFAULT_RULES: readonly PermissionRule[] = [
+const OPENCODE_DEFAULT_RULES: readonly PermissionRule[] = [
   { action: '*', resource: '*', effect: 'allow' },
   { action: 'external_directory', resource: '*', effect: 'ask' },
   { action: 'read', resource: '*.env', effect: 'ask' },

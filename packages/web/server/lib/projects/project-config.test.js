@@ -23,6 +23,19 @@ const createRuntime = async () => {
 };
 
 describe('project-config runtime', () => {
+  it('round-trips target tasks, terminal states and agent-only overrides without changing legacy model requirements', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const input = { name: 'Reuse', enabled: true, targetSessionId: 'ses_target', schedule: { kind: 'daily', time: '09:00' }, execution: { prompt: 'Continue', agent: 'plan' } };
+      const saved = await runtime.upsertScheduledTask('project-test', input);
+      for (const lastStatus of ['queued', 'sent', 'skipped', 'failed', 'cancelled']) {
+        await runtime.updateScheduledTaskState('project-test', saved.task.id, { lastStatus, lastSessionId: 'ses_target' });
+        expect((await runtime.listScheduledTasks('project-test'))[0]).toMatchObject({ targetSessionId: 'ses_target', state: { lastStatus, lastSessionId: 'ses_target' } });
+      }
+      await expect(runtime.upsertScheduledTask('project-test', { ...input, targetSessionId: '../bad' })).rejects.toThrow('targetSessionId is invalid');
+      await expect(runtime.upsertScheduledTask('project-test', { ...input, targetSessionId: '' })).rejects.toThrow('execution.providerID is required');
+    } finally { await cleanup(); }
+  });
   it('creates and persists a scheduled task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -48,6 +61,23 @@ describe('project-config runtime', () => {
       expect(reloaded[0].name).toBe('Nightly digest');
       expect(reloaded[0].schedule.timezone).toBe('UTC');
       expect(reloaded[0].schedule.times).toEqual(['09:30']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('accepts a task that follows the session defaults without a model, and still needs one when pinned', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    const task = (execution) => ({
+      name: 'Follow defaults',
+      enabled: true,
+      schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+      execution: { prompt: 'Summarize', ...execution },
+    });
+    try {
+      const result = await runtime.upsertScheduledTask('project-test', task({ useDefaults: true }));
+      expect(result.task.execution).toEqual({ prompt: 'Summarize', useDefaults: true });
+      await expect(runtime.upsertScheduledTask('project-test', task({}))).rejects.toThrow('execution.providerID is required');
     } finally {
       await cleanup();
     }

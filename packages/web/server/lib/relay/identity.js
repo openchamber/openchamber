@@ -2,8 +2,7 @@
 // the push relay via signing-key.js — same storage, same serverId) plus a NEW
 // long-lived ECDH P-256 encryption keypair for the E2EE channel (WebCrypto
 // keys are single-purpose, so signing and encryption keys must differ).
-// The encryption keypair is persisted as `settings.relayEncryptionKey =
-// { privateJwk, publicJwk }`, mirroring the relaySigningKey precedent.
+// Both keypairs are stored by key-store.js.
 
 import {
   canonicalPublicJwkString,
@@ -13,48 +12,26 @@ import {
 } from './signing-key.js';
 import { exportPublicKeyJwk, generateEcdhKeyPair, importEcdhPrivateKey } from './e2ee.js';
 
-const isJwkPair = (value) => Boolean(value && typeof value === 'object' && value.privateJwk && value.publicJwk);
-
 /**
  * @param {{
  *   crypto: typeof import('node:crypto'),
- *   readSettingsFromDiskMigrated: () => Promise<object>,
- *   writeSettingsToDisk: (settings: object) => Promise<void>,
- *   readSettingsStrict?: () => Promise<object>,
+ *   relayKeyStore: ReturnType<typeof import('./key-store.js').createRelayKeyStore>,
  * }} deps
  */
 export const createRelayIdentityRuntime = (deps) => {
-  const { crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict } = deps;
+  const { crypto, relayKeyStore } = deps;
 
   let cachedIdentity = null;
 
-  const getOrCreateEncryptionKeypair = async () => {
-    const settings = await readSettingsFromDiskMigrated();
-    const existing = settings?.relayEncryptionKey;
-    if (isJwkPair(existing)) {
-      return existing;
-    }
-    // Same regeneration gate as the signing key: never mint a replacement
-    // identity key off a swallowed read failure — a new encryption key breaks
-    // the E2EE trust anchor pinned by every paired device. Verify "missing" via
-    // the strict reader (throws on corrupt/unreadable) before generating.
-    let verifiedSettings = settings;
-    if (readSettingsStrict) {
-      verifiedSettings = await readSettingsStrict();
-      const verified = verifiedSettings?.relayEncryptionKey;
-      if (isJwkPair(verified)) {
-        return verified;
-      }
-    }
+  const getOrCreateEncryptionKeypair = () => relayKeyStore.getOrCreate('encryption', async () => {
     // Loud on purpose: a new encryption key invalidates the E2EE trust anchor of
     // every paired device. Expected exactly once, on first relay use.
     console.warn('[relay-identity] Generating NEW relay encryption keypair (E2EE trust anchor changes; previously paired devices must re-pair)');
     const keyPair = await generateEcdhKeyPair();
     const privateJwk = await globalThis.crypto.subtle.exportKey('jwk', keyPair.privateKey);
     const publicJwk = await exportPublicKeyJwk(keyPair.publicKey);
-    await writeSettingsToDisk({ ...settings, ...(verifiedSettings || {}), relayEncryptionKey: { privateJwk, publicJwk } });
     return { privateJwk, publicJwk };
-  };
+  });
 
   /**
    * @returns {Promise<{
@@ -66,7 +43,7 @@ export const createRelayIdentityRuntime = (deps) => {
    */
   const getRelayIdentity = async () => {
     if (cachedIdentity) return cachedIdentity;
-    const signing = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+    const signing = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
     const serverId = deriveServerId({ crypto }, signing.publicJwk);
     const encryption = await getOrCreateEncryptionKeypair();
     const hostEncPrivateKey = await importEcdhPrivateKey(encryption.privateJwk);

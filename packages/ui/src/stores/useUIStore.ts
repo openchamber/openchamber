@@ -10,7 +10,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import type { LinearIssueListAssignee, LinearIssueListPriority, LinearIssueListStatus, TerminalShell } from '@/lib/api/types';
+import type { TerminalShell } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/projectContextApi';
 import type { PermissionMode } from './utils/permissionAutoAccept';
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from '@/stores/useTerminalStore';
@@ -18,7 +18,6 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { noteBrowserTabOpenedWithAddress, requestBrowserTabLoad } from '@/lib/browser/devServerWait';
 import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
-import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
 import { sanitizeWorkStatusSectionOrder, type WorkStatusPanelSectionId } from '@/components/chat/work-status/sections';
 
 export type PendingDiffScope = 'working' | 'staged' | 'turn' | 'branch' | 'commit' | 'pr';
@@ -28,27 +27,27 @@ export type { ContextPanelMode };
 export const clampContextEditorTreeWidth = (width: number): number =>
   Math.min(480, Math.max(200, Math.round(width)));
 
-const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'linear', 'notes', 'terminal']);
+const contextPanelModeSchema = z.enum(['diff', 'walkthrough', 'file', 'context', 'plan', 'chat', 'browser', 'git', 'pr', 'notes', 'terminal']);
 const persistedPanelWidthsSchema = z.object({
   widthByMode: z.record(z.string(), z.number().finite().optional().catch(undefined)).catch({}),
   widthFractionByMode: z.record(z.string(), z.number().positive().max(1).optional().catch(undefined)).catch({}),
 });
-export type MermaidRenderingMode = 'svg' | 'ascii';
-export type UserMessageRenderingMode = 'markdown' | 'plain';
-export type ChatRenderMode = 'sorted' | 'live';
-export type ActivityRenderMode = 'collapsed' | 'summary';
+type MermaidRenderingMode = 'svg' | 'ascii';
+type UserMessageRenderingMode = 'markdown' | 'plain';
+type ChatRenderMode = 'sorted' | 'live';
+type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
 export type TimeFormatPreference = 'auto' | '12h' | '24h';
-export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
-export type DesktopWindowControlsPosition = 'left' | 'right';
-export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
+type WeekStartPreference = 'auto' | 'sunday' | 'monday';
+type DesktopWindowControlsPosition = 'left' | 'right';
+type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type FileEditorKeymap = 'default' | 'vim';
 export type LargeTextPasteBehavior = 'ask' | 'attach' | 'inline' | 'inline-double-paste';
 export type SessionGoalChecker = 'classifier' | 'small-model';
 
-export const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
+const DEFAULT_LARGE_TEXT_PASTE_BEHAVIOR: LargeTextPasteBehavior = 'ask';
 
-export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
+const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteBehavior => {
   if (value === 'attach' || value === 'inline' || value === 'ask' || value === 'inline-double-paste') {
     return value;
   }
@@ -57,69 +56,6 @@ export const normalizeLargeTextPasteBehavior = (value: unknown): LargeTextPasteB
 
 function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
   return value === 'vim' ? 'vim' : 'default';
-}
-
-export const LINEAR_ISSUE_LIST_ALL_TEAMS = 'all';
-
-function sanitizeLinearIssueListStatus(value: unknown): LinearIssueListStatus {
-  return value === 'all'
-    || value === 'backlog'
-    || value === 'todo'
-    || value === 'started'
-    || value === 'inReview'
-    || value === 'completed'
-    || value === 'canceled'
-    || value === 'duplicate'
-    ? value
-    : 'all';
-}
-
-function sanitizeLinearIssueListAssignee(value: unknown): LinearIssueListAssignee {
-  return value === 'me' || value === 'any' ? value : 'any';
-}
-
-function sanitizeLinearIssueListTeamId(value: unknown): string {
-  if (typeof value !== 'string') return LINEAR_ISSUE_LIST_ALL_TEAMS;
-  const teamId = value.trim();
-  return teamId || LINEAR_ISSUE_LIST_ALL_TEAMS;
-}
-
-/**
- * Store the team filter under the connected instance, dropping the entry when
- * it falls back to all teams so the map does not accumulate defaults. Transient
- * keys (uninitialised, mobile-disconnected) name no instance and are not written.
- */
-function writeLinearTeamIdForRuntime(
-  entries: Record<string, string>,
-  teamId: string,
-): Record<string, string> {
-  const runtimeKey = getRuntimeKey();
-  if (isTransientRuntimeKey(runtimeKey)) return entries;
-  const next = { ...entries };
-  if (teamId === LINEAR_ISSUE_LIST_ALL_TEAMS) {
-    delete next[runtimeKey];
-  } else {
-    next[runtimeKey] = teamId;
-  }
-  return next;
-}
-
-function sanitizeLinearIssueListTeamIdByRuntime(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const entries: Record<string, string> = {};
-  // SAFETY: guarded above as a non-array object; every value is re-checked below.
-  for (const [runtimeKey, teamId] of Object.entries(value as Record<string, unknown>)) {
-    if (!runtimeKey.trim() || typeof teamId !== 'string') continue;
-    const sanitized = sanitizeLinearIssueListTeamId(teamId);
-    if (sanitized !== LINEAR_ISSUE_LIST_ALL_TEAMS) entries[runtimeKey] = sanitized;
-  }
-  return entries;
-}
-
-function sanitizeLinearIssueListPriority(value: unknown): LinearIssueListPriority {
-  return value === 'none' || value === 'urgent' || value === 'high' || value === 'medium' || value === 'low' || value === 'all'
-    ? value
-    : 'all';
 }
 
 type ContextPanelTab = {
@@ -183,7 +119,7 @@ type PendingFileNavigation = {
   column: number;
 };
 
-export type EventStreamStatus =
+type EventStreamStatus =
   | 'idle'
   | 'connecting'
   | 'connected'
@@ -293,6 +229,13 @@ const normalizeContextTargetDirectory = (value: string | null | undefined): stri
   return normalizeContextPanelDirectoryKey(normalizedPath) || null;
 };
 
+// A terminal may run in another directory than the panel it lives in, and a
+// chat tab may show a session from another project (or Chat) next to the
+// main chat; every other mode works in the panel's own directory.
+const contextPanelModeKeepsTargetDirectory = (mode: ContextPanelMode): boolean => {
+  return mode === 'terminal' || mode === 'chat';
+};
+
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -361,7 +304,7 @@ const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): stri
 
 const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPanelTab => {
   const normalizedTargetPath = normalizeContextTargetPath(descriptor.targetPath);
-  const normalizedTargetDirectory = descriptor.mode === 'terminal'
+  const normalizedTargetDirectory = contextPanelModeKeepsTargetDirectory(descriptor.mode)
     ? normalizeContextTargetDirectory(descriptor.targetDirectory)
     : null;
   const dedupeKey = normalizeContextPanelTabDedupeKey(
@@ -465,7 +408,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
-    const targetDirectory = candidate.mode === 'terminal'
+    const targetDirectory = contextPanelModeKeepsTargetDirectory(candidate.mode)
       ? normalizeContextTargetDirectory(candidate.targetDirectory)
       : null;
     const projectPlanId = typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
@@ -894,6 +837,8 @@ interface UIStore {
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
   isUsageStatsPageOpen: boolean;
+  /** The issues and pull requests board. */
+  isSourceBoardOpen: boolean;
   openGuestPageId: string | null;
   worktreesPageProjectId: string | null;
   /** The project whose isolated spaces fill the main area, opened from its menu in the sidebar. */
@@ -940,6 +885,10 @@ interface UIStore {
   sessionWorkEnabled: boolean;
   /** Let Jev move a session into work when real work starts in it. */
   sessionWorkAutoOpen: boolean;
+  /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
+  sessionReviewOfferEnabled: boolean;
+  /** Keep a session in work listed under its project group and folders too. */
+  sessionWorkKeepInGroup: boolean;
   sessionGoalEnabled: boolean;
   /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
@@ -990,11 +939,14 @@ interface UIStore {
   /** `provider/model` last picked in a chat composer; a new session starts on it when nothing is configured. */
   lastSelectedModel: string | undefined;
   recentAgents: string[];
+  /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
+  favoriteAgents: string[];
   recentEfforts: Record<string, string[]>;
 
   diffLayoutPreference: 'dynamic' | 'inline' | 'side-by-side';
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
+  diffHideWhitespace: boolean;
   diffFileListMode: 'flat' | 'tree';
   /** Width of the diff view's file tree column, in pixels. */
   diffFileTreeWidth: number;
@@ -1002,21 +954,6 @@ interface UIStore {
   walkthroughTocWidth: number;
   gitChangesViewMode: 'flat' | 'tree';
   toolJsonViewMode: 'summary' | 'formatted' | 'raw';
-  linearIssueListStatus: LinearIssueListStatus;
-  linearIssueListAssignee: LinearIssueListAssignee;
-  /**
-   * Team filter for the instance currently connected. A Linear team belongs to
-   * one workspace, and each OpenChamber instance has its own Linear login, so
-   * this is derived from `linearIssueListTeamIdByRuntime` rather than persisted
-   * on its own — a team id carried across a switch filters the new instance's
-   * list down to nothing.
-   */
-  linearIssueListTeamId: string;
-  /** Team filter per instance, keyed the same way every runtime-scoped cache is. */
-  linearIssueListTeamIdByRuntime: Record<string, string>;
-  linearIssueListPriority: LinearIssueListPriority;
-  /** One-shot identifier for opening a Linear issue in the rail panel. Not persisted. */
-  linearIssueFocus: string | null;
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -1113,6 +1050,8 @@ interface UIStore {
   reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
   fileEditorKeymap: FileEditorKeymap;
+  /** vimrc map lines applied whenever the file editor runs in Vim mode. */
+  fileEditorVimMappings: string;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -1176,10 +1115,11 @@ interface UIStore {
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
+  setSourceBoardOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
   setSpacesPageProjectId: (projectId: string | null) => void;
-  /** Close every full-page surface (Scheduled, Archive, Usage, Worktrees, Spaces, Multi-run). */
+  /** Close every full-page surface (Scheduled, Archive, Usage, Issues and PRs, Worktrees, Spaces, Multi-run). */
   closeMainSurfaces: () => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
@@ -1202,6 +1142,8 @@ interface UIStore {
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
   setSessionWorkAutoOpen: (value: boolean) => void;
+  setSessionReviewOfferEnabled: (value: boolean) => void;
+  setSessionWorkKeepInGroup: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
   setSessionGoalMaxAutoTurns: (value: number) => void;
@@ -1256,23 +1198,17 @@ interface UIStore {
   addRecentModel: (providerID: string, modelID: string) => void;
   setLastSelectedModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
+  toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
   setDiffLayoutPreference: (mode: 'dynamic' | 'inline' | 'side-by-side') => void;
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
+  setDiffHideWhitespace: (hide: boolean) => void;
   setDiffFileListMode: (mode: 'flat' | 'tree') => void;
   setDiffFileTreeWidth: (width: number) => void;
   setWalkthroughTocWidth: (width: number) => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
-  setLinearIssueListStatus: (status: LinearIssueListStatus) => void;
-  setLinearIssueListAssignee: (assignee: LinearIssueListAssignee) => void;
-  setLinearIssueListTeamId: (teamId: string) => void;
-  /** Re-read the team filter for the instance now connected. */
-  applyLinearIssueListFiltersForRuntime: () => void;
-  setLinearIssueListPriority: (priority: LinearIssueListPriority) => void;
-  resetLinearIssueListFilters: () => void;
-  setLinearIssueFocus: (identifier: string | null) => void;
   setRunOverviewKey: (runKey: string | null) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setPromptNavigatorPanelOpen: (open: boolean) => void;
@@ -1346,6 +1282,7 @@ interface UIStore {
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
   setFileEditorKeymap: (value: FileEditorKeymap) => void;
+  setFileEditorVimMappings: (value: string) => void;
 }
 
 
@@ -1393,6 +1330,7 @@ export const useUIStore = create<UIStore>()(
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
         isUsageStatsPageOpen: false,
+        isSourceBoardOpen: false,
         openGuestPageId: null,
         worktreesPageProjectId: null,
         spacesPageProjectId: null,
@@ -1417,6 +1355,8 @@ export const useUIStore = create<UIStore>()(
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
         sessionWorkAutoOpen: true,
+        sessionReviewOfferEnabled: false,
+        sessionWorkKeepInGroup: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
@@ -1457,21 +1397,17 @@ export const useUIStore = create<UIStore>()(
         recentModels: [],
         lastSelectedModel: undefined,
         recentAgents: [],
+        favoriteAgents: [],
         recentEfforts: {},
         diffLayoutPreference: 'inline',
         diffFileLayout: {},
         diffWrapLines: false,
+        diffHideWhitespace: false,
         diffFileListMode: 'flat',
         diffFileTreeWidth: 240,
         walkthroughTocWidth: 224,
         gitChangesViewMode: 'flat',
         toolJsonViewMode: 'summary',
-        linearIssueListStatus: 'all',
-        linearIssueListAssignee: 'any',
-        linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
-        linearIssueListTeamIdByRuntime: {},
-        linearIssueListPriority: 'all',
-        linearIssueFocus: null,
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
@@ -1545,6 +1481,7 @@ export const useUIStore = create<UIStore>()(
         reportUsage: true,
         shortcutOverrides: {},
         fileEditorKeymap: 'default',
+        fileEditorVimMappings: '',
 
         setTheme: (theme) => {
           set({ theme });
@@ -2207,48 +2144,55 @@ export const useUIStore = create<UIStore>()(
 
         setScheduledTasksDialogOpen: (open) => {
           set(open
-            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isScheduledTasksDialogOpen: true, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isScheduledTasksDialogOpen: false });
         },
 
         setArchivePageOpen: (open) => {
           set(open
-            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
         },
 
         setUsageStatsPageOpen: (open) => {
           set(open
-            ? { isUsageStatsPageOpen: true, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isUsageStatsPageOpen: true, isSourceBoardOpen: false, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isUsageStatsPageOpen: false });
+        },
+
+        setSourceBoardOpen: (open) => {
+          set(open
+            ? { isSourceBoardOpen: true, isUsageStatsPageOpen: false, isArchivePageOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            : { isSourceBoardOpen: false });
         },
 
         setWorktreesPageProjectId: (projectId) => {
           set(projectId
-            ? { worktreesPageProjectId: projectId, spacesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, runOverviewKey: null, openGuestPageId: null }
+            ? { worktreesPageProjectId: projectId, spacesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
             : { worktreesPageProjectId: null });
         },
 
         setSpacesPageProjectId: (projectId) => {
           set(projectId
-            ? { spacesPageProjectId: projectId, worktreesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, runOverviewKey: null, openGuestPageId: null }
+            ? { spacesPageProjectId: projectId, worktreesPageProjectId: null, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, runOverviewKey: null, openGuestPageId: null }
             : { spacesPageProjectId: null });
         },
 
         setOpenGuestPage: (id) => {
-          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
+          set(id ? { openGuestPageId: id, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null }
             : { openGuestPageId: null });
         },
 
         closeMainSurfaces: () => {
           const state = get();
-          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.worktreesPageProjectId && !state.spacesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
+          if (!state.isScheduledTasksDialogOpen && !state.isArchivePageOpen && !state.isUsageStatsPageOpen && !state.isSourceBoardOpen && !state.worktreesPageProjectId && !state.spacesPageProjectId && !state.runOverviewKey && !state.openGuestPageId) {
             return;
           }
           set({
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             isUsageStatsPageOpen: false,
+            isSourceBoardOpen: false,
             worktreesPageProjectId: null,
             spacesPageProjectId: null,
             runOverviewKey: null,
@@ -2342,6 +2286,14 @@ export const useUIStore = create<UIStore>()(
 
         setSessionWorkAutoOpen: (value) => {
           set({ sessionWorkAutoOpen: value });
+        },
+
+        setSessionReviewOfferEnabled: (value) => {
+          set({ sessionReviewOfferEnabled: value });
+        },
+
+        setSessionWorkKeepInGroup: (value) => {
+          set({ sessionWorkKeepInGroup: value });
         },
 
         setSessionGoalEnabled: (value) => {
@@ -2565,6 +2517,10 @@ export const useUIStore = create<UIStore>()(
           set({ diffWrapLines: wrap });
         },
 
+        setDiffHideWhitespace: (hide) => {
+          set({ diffHideWhitespace: hide });
+        },
+
         setWalkthroughTocWidth: (width) => {
           set({ walkthroughTocWidth: Math.round(width) });
         },
@@ -2575,53 +2531,6 @@ export const useUIStore = create<UIStore>()(
 
         setToolJsonViewMode: (mode) => {
           set({ toolJsonViewMode: mode });
-        },
-
-        setLinearIssueListStatus: (status) => {
-          set({ linearIssueListStatus: sanitizeLinearIssueListStatus(status) });
-        },
-
-        setLinearIssueListAssignee: (assignee) => {
-          set({ linearIssueListAssignee: sanitizeLinearIssueListAssignee(assignee) });
-        },
-
-        setLinearIssueListTeamId: (teamId) => {
-          const sanitized = sanitizeLinearIssueListTeamId(teamId);
-          set((state) => ({
-            linearIssueListTeamId: sanitized,
-            linearIssueListTeamIdByRuntime: writeLinearTeamIdForRuntime(state.linearIssueListTeamIdByRuntime, sanitized),
-          }));
-        },
-
-        applyLinearIssueListFiltersForRuntime: () => {
-          const runtimeKey = getRuntimeKey();
-          set((state) => ({
-            linearIssueListTeamId: isTransientRuntimeKey(runtimeKey)
-              ? LINEAR_ISSUE_LIST_ALL_TEAMS
-              : state.linearIssueListTeamIdByRuntime[runtimeKey] ?? LINEAR_ISSUE_LIST_ALL_TEAMS,
-          }));
-        },
-
-        setLinearIssueListPriority: (priority) => {
-          set({ linearIssueListPriority: sanitizeLinearIssueListPriority(priority) });
-        },
-
-        resetLinearIssueListFilters: () => {
-          set((state) => ({
-            linearIssueListStatus: 'all',
-            linearIssueListAssignee: 'any',
-            linearIssueListTeamId: LINEAR_ISSUE_LIST_ALL_TEAMS,
-            linearIssueListTeamIdByRuntime: writeLinearTeamIdForRuntime(
-              state.linearIssueListTeamIdByRuntime,
-              LINEAR_ISSUE_LIST_ALL_TEAMS,
-            ),
-            linearIssueListPriority: 'all',
-          }));
-        },
-
-        setLinearIssueFocus: (identifier) => {
-          const trimmed = identifier?.trim() ?? '';
-          set({ linearIssueFocus: trimmed || null });
         },
 
         setInputBarOffset: (offset) => {
@@ -2812,6 +2721,16 @@ export const useUIStore = create<UIStore>()(
           set({ lastSelectedModel: next });
         },
 
+        toggleFavoriteAgent: (agentName) => {
+          const normalized = agentName.trim();
+          if (!normalized) return;
+          set((state) => ({
+            favoriteAgents: state.favoriteAgents.includes(normalized)
+              ? state.favoriteAgents.filter((name) => name !== normalized)
+              : [...state.favoriteAgents, normalized],
+          }));
+        },
+
         addRecentAgent: (agentName) => {
           const normalized = typeof agentName === 'string' ? agentName.trim() : '';
           if (!normalized) {
@@ -2869,7 +2788,7 @@ export const useUIStore = create<UIStore>()(
         // opening it closes the other surfaces and vice versa.
         setRunOverviewKey: (runKey) => {
           set(runKey
-            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
+            ? { runOverviewKey: runKey, isSessionSwitcherOpen: false, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, isUsageStatsPageOpen: false, isSourceBoardOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, openGuestPageId: null }
             : { runOverviewKey: null });
         },
 
@@ -3104,6 +3023,11 @@ export const useUIStore = create<UIStore>()(
           set({ fileEditorKeymap: normalizeFileEditorKeymap(value) });
         },
 
+        setFileEditorVimMappings: (value) => {
+          // Same cap as the settings registry field.
+          set({ fileEditorVimMappings: value.slice(0, 10_000) });
+        },
+
         toggleExpandedInput: () => {
           set((state) => ({ isExpandedInput: !state.isExpandedInput }));
         },
@@ -3115,7 +3039,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 21,
+        version: 22,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -3332,14 +3256,13 @@ export const useUIStore = create<UIStore>()(
             }
           }
 
-          state.linearIssueListStatus = sanitizeLinearIssueListStatus(state.linearIssueListStatus);
-          state.linearIssueListAssignee = sanitizeLinearIssueListAssignee(state.linearIssueListAssignee);
-          // v18 -> v19: the team filter became per instance. The legacy flat
-          // value names a team in one workspace with nothing to say which
-          // instance it came from, so it is dropped rather than guessed at.
+          // The Linear rail panel's list filters went with the panel; Linear
+          // lists on the issues and PRs board now.
+          delete state.linearIssueListStatus;
+          delete state.linearIssueListAssignee;
           delete state.linearIssueListTeamId;
-          state.linearIssueListTeamIdByRuntime = sanitizeLinearIssueListTeamIdByRuntime(state.linearIssueListTeamIdByRuntime);
-          state.linearIssueListPriority = sanitizeLinearIssueListPriority(state.linearIssueListPriority);
+          delete state.linearIssueListTeamIdByRuntime;
+          delete state.linearIssueListPriority;
 
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
           state.largeTextPasteBehavior = normalizeLargeTextPasteBehavior(state.largeTextPasteBehavior);
@@ -3395,6 +3318,8 @@ export const useUIStore = create<UIStore>()(
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
           sessionWorkAutoOpen: state.sessionWorkAutoOpen,
+          sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
+          sessionWorkKeepInGroup: state.sessionWorkKeepInGroup,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
@@ -3433,18 +3358,16 @@ export const useUIStore = create<UIStore>()(
           recentModels: state.recentModels,
           lastSelectedModel: state.lastSelectedModel,
           recentAgents: state.recentAgents,
+          favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
+          diffHideWhitespace: state.diffHideWhitespace,
           diffFileListMode: state.diffFileListMode,
           diffFileTreeWidth: state.diffFileTreeWidth,
           walkthroughTocWidth: state.walkthroughTocWidth,
           gitChangesViewMode: state.gitChangesViewMode,
           toolJsonViewMode: state.toolJsonViewMode,
-          linearIssueListStatus: state.linearIssueListStatus,
-          linearIssueListAssignee: state.linearIssueListAssignee,
-          linearIssueListTeamIdByRuntime: state.linearIssueListTeamIdByRuntime,
-          linearIssueListPriority: state.linearIssueListPriority,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
@@ -3501,6 +3424,7 @@ export const useUIStore = create<UIStore>()(
           draftStartersVisible: state.draftStartersVisible,
           shortcutOverrides: state.shortcutOverrides,
           fileEditorKeymap: state.fileEditorKeymap,
+          fileEditorVimMappings: state.fileEditorVimMappings,
         })
       }
     ),

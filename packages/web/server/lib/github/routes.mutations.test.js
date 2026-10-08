@@ -558,6 +558,245 @@ describe('canonical GitHub mutations', () => {
     if (status === 200) expect(response.body.target.number).toBe(7);
   });
 
+  describe('comments and reviews', () => {
+    const pullTarget = { project: { owner: 'acme', name: 'app' }, number: 7 };
+    const recordRequests = (respond) => {
+      const requests = [];
+      vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+        const entry = { method: options.method, path: new URL(String(url)).pathname, body: options.body ? JSON.parse(options.body) : null };
+        requests.push(entry);
+        return respond(entry);
+      }));
+      return requests;
+    };
+
+    it('comments on a pull request after checking it belongs to the bound repository', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => (entry.method === 'GET' ? jsonResponse(pullRequest()) : jsonResponse({ id: 11 }, 201)));
+      const { app, store } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/pr/comment')
+        .send({ ...context(account.accountId, { target: pullTarget }), body: 'Looks good' }).expect(200);
+
+      expect(response.body.result).toEqual({});
+      expect(requests).toEqual([
+        { method: 'GET', path: '/repos/acme/app/pulls/7', body: null },
+        { method: 'POST', path: '/repos/acme/app/issues/7/comments', body: { body: 'Looks good' } },
+      ]);
+      expect(store.records.get('request-one')).toMatchObject({ kind: 'change-request-comment', state: 'succeeded' });
+    });
+
+    it('reviews the head commit the client read, with the text as the review body', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => (entry.method === 'GET'
+        ? jsonResponse(pullRequest())
+        : jsonResponse({ id: 12, state: entry.body.event === 'APPROVE' ? 'APPROVED' : 'CHANGES_REQUESTED' })));
+      const { app } = makeApp();
+      const target = { ...pullTarget, headSha: 'abc123' };
+
+      const approved = await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target }), verdict: 'approve' }).expect(200);
+      const requested = await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target, idempotencyKey: 'request-two' }), verdict: 'request-changes', body: 'Rename it' }).expect(200);
+
+      expect(approved.body.result).toEqual({ commented: false });
+      expect(requested.body.result).toEqual({ commented: true });
+      expect(requests.filter((entry) => entry.method === 'POST')).toEqual([
+        { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'APPROVE' } },
+        { method: 'POST', path: '/repos/acme/app/pulls/7/reviews', body: { commit_id: 'abc123', event: 'REQUEST_CHANGES', body: 'Rename it' } },
+      ]);
+    });
+
+    it('refuses a review once the pull request moved past the commit the client read', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests(() => jsonResponse(pullRequest({ head: { ...pullRequest().head, sha: 'def456' } })));
+      const { app } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target: { ...pullTarget, headSha: 'abc123' } }), verdict: 'approve' }).expect(409);
+
+      expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_CHANGED');
+      expect(requests.map((entry) => entry.method)).toEqual(['GET']);
+    });
+
+    it('asks for text before requesting changes and for the reviewed commit, and writes nothing', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests(() => jsonResponse(pullRequest()));
+      const { app } = makeApp();
+
+      await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target: { ...pullTarget, headSha: 'abc123' } }), verdict: 'request-changes', body: '  ' }).expect(400);
+      await request(app).post('/api/source-control/github/pr/comment')
+        .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-two' }) }).expect(400);
+      await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), verdict: 'approve' }).expect(400);
+
+      expect(requests).toEqual([]);
+    });
+
+    it("passes GitHub's reason when it refuses a review", async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      recordRequests((entry) => (entry.method === 'GET'
+        ? jsonResponse(pullRequest())
+        : jsonResponse({ message: 'Unprocessable Entity', errors: ['Review Can not approve your own pull request'] }, 422)));
+      const { app, store } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/pr/review')
+        .send({ ...context(account.accountId, { target: { ...pullTarget, headSha: 'abc123' } }), verdict: 'approve' }).expect(422);
+
+      expect(response.body).toEqual({ error: 'Review Can not approve your own pull request', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+      expect(store.records.get('request-one')).toMatchObject({ state: 'failed', result: { failureStatus: 422 } });
+    });
+
+    it('comments on an issue and refuses a pull request number on the issue route', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => {
+        if (entry.method === 'POST') return jsonResponse({ id: 13 }, 201);
+        return entry.path.endsWith('/issues/8')
+          ? jsonResponse({ number: 8, pull_request: { url: 'https://api.github.com/repos/acme/app/pulls/8' } })
+          : jsonResponse({ number: 5 });
+      });
+      const { app, store } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/issues/comment')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 5 } }), body: 'On it' }).expect(200);
+      const refused = await request(app).post('/api/source-control/github/issues/comment')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 8 }, idempotencyKey: 'request-two' }), body: 'On it' }).expect(409);
+
+      expect(response.body.target).toEqual({
+        repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+        project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+      });
+      expect(refused.body.code).toBe('SOURCE_CONTROL_MUTATION_TARGET_INVALID');
+      expect(requests.filter((entry) => entry.method === 'POST')).toEqual([
+        { method: 'POST', path: '/repos/acme/app/issues/5/comments', body: { body: 'On it' } },
+      ]);
+      expect(store.records.get('request-one')).toMatchObject({ kind: 'issue-comment', state: 'succeeded' });
+    });
+
+    it('closes a pull request and reopens an issue, and passes GitHub\'s reason for a merged one', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => {
+        if (entry.path.endsWith('/pulls/7')) {
+          return entry.method === 'GET' ? jsonResponse(pullRequest()) : jsonResponse(pullRequest({ state: 'closed' }));
+        }
+        if (entry.path.endsWith('/pulls/9')) {
+          return entry.method === 'GET'
+            ? jsonResponse(pullRequest({ number: 9, html_url: 'https://github.com/acme/app/pull/9', state: 'closed', merged: true }))
+            : jsonResponse({ message: 'Validation Failed', errors: [{ message: 'state cannot be changed. The pull request has been merged.' }] }, 422);
+        }
+        return entry.method === 'GET' ? jsonResponse({ number: 5, state: 'closed' }) : jsonResponse({ number: 5, state: 'open' });
+      });
+      const { app, store } = makeApp();
+
+      const closed = await request(app).post('/api/source-control/github/pr/state')
+        .send({ ...context(account.accountId, { target: pullTarget }), state: 'closed' }).expect(200);
+      const reopened = await request(app).post('/api/source-control/github/issues/state')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 5 }, idempotencyKey: 'request-two' }), state: 'open' }).expect(200);
+      const merged = await request(app).post('/api/source-control/github/pr/state')
+        .send({ ...context(account.accountId, { target: { ...pullTarget, number: 9 }, idempotencyKey: 'request-three' }), state: 'open' }).expect(422);
+      await request(app).post('/api/source-control/github/pr/state')
+        .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-four' }), state: 'merged' }).expect(400);
+
+      expect(closed.body.result).toEqual({ state: 'closed' });
+      expect(reopened.body.result).toEqual({ state: 'open' });
+      expect(merged.body).toEqual({ error: 'state cannot be changed. The pull request has been merged.', code: 'SOURCE_CONTROL_MUTATION_REJECTED' });
+      expect(requests.filter((entry) => entry.method === 'PATCH')).toEqual([
+        { method: 'PATCH', path: '/repos/acme/app/pulls/7', body: { state: 'closed' } },
+        { method: 'PATCH', path: '/repos/acme/app/issues/5', body: { state: 'open' } },
+        { method: 'PATCH', path: '/repos/acme/app/pulls/9', body: { state: 'open' } },
+      ]);
+      expect(store.records.get('request-two')).toMatchObject({ kind: 'issue-state', state: 'succeeded', result: { state: 'open' } });
+    });
+
+    it.each([
+      ['closed', 'succeeded'],
+      ['open', 'failed'],
+    ])('reconciles an interrupted close from the issue being %s without writing again', async (current, outcome) => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const target = {
+        repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+        project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+      };
+      const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+      const input = { kind: 'issue-state', actor, credential: credentialFor(account), target, state: 'closed' };
+      const store = makeStore([{ key: 'request-one', inputDigest: digestMutationInput(input), kind: 'issue-state', actor, target, state: 'running' }]);
+      const fetch = vi.fn(async () => jsonResponse({ number: 5, state: current }));
+      vi.stubGlobal('fetch', fetch);
+      const { app } = makeApp({ store });
+
+      await request(app).post('/api/source-control/github/issues/state')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 5 } }), state: 'closed' })
+        .expect(outcome === 'succeeded' ? 200 : 409);
+
+      expect(store.records.get('request-one').state).toBe(outcome);
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('sets labels as one sorted set on pull requests and issues', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => {
+        if (entry.method === 'PUT') return jsonResponse(entry.body.labels.map((name) => ({ name })));
+        return entry.path.endsWith('/pulls/7') ? jsonResponse(pullRequest()) : jsonResponse({ number: 5, state: 'open' });
+      });
+      const { app, store } = makeApp();
+
+      await request(app).post('/api/source-control/github/pr/labels')
+        .send({ ...context(account.accountId, { target: pullTarget }), labels: ['docs', 'bug', 'docs'] }).expect(200);
+      await request(app).post('/api/source-control/github/issues/labels')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 5 }, idempotencyKey: 'request-two' }), labels: [] }).expect(200);
+      await request(app).post('/api/source-control/github/pr/labels')
+        .send({ ...context(account.accountId, { target: pullTarget, idempotencyKey: 'request-three' }), labels: ['  '] }).expect(400);
+
+      expect(requests.filter((entry) => entry.method === 'PUT')).toEqual([
+        { method: 'PUT', path: '/repos/acme/app/issues/7/labels', body: { labels: ['bug', 'docs'] } },
+        { method: 'PUT', path: '/repos/acme/app/issues/5/labels', body: { labels: [] } },
+      ]);
+      expect(store.records.get('request-two')).toMatchObject({ kind: 'issue-labels', state: 'succeeded' });
+    });
+
+    it('asks and stops asking reviewers so the requested set matches', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const requests = recordRequests((entry) => {
+        if (entry.path.endsWith('/requested_reviewers') && entry.method === 'GET') {
+          return jsonResponse({ users: [{ login: 'ann' }, { login: 'bob' }], teams: [] });
+        }
+        if (entry.path.endsWith('/requested_reviewers')) return jsonResponse(pullRequest());
+        return jsonResponse(pullRequest());
+      });
+      const { app } = makeApp();
+
+      const response = await request(app).post('/api/source-control/github/pr/reviewers')
+        .send({ ...context(account.accountId, { target: pullTarget }), reviewers: ['cid', 'ann'] }).expect(200);
+
+      expect(response.body.result).toEqual({});
+      expect(requests.filter((entry) => entry.method !== 'GET')).toEqual([
+        { method: 'POST', path: '/repos/acme/app/pulls/7/requested_reviewers', body: { reviewers: ['cid'] } },
+        { method: 'DELETE', path: '/repos/acme/app/pulls/7/requested_reviewers', body: { reviewers: ['bob'] } },
+      ]);
+    });
+
+    it('leaves a comment interrupted mid-write as outcome unknown instead of posting it again', async () => {
+      const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
+      const target = {
+        repositoryId: 'repo-one', bindingRevision: 3, primaryRemote: 'origin',
+        project: { id: 'acme/app', owner: 'acme', name: 'app' }, number: 5,
+      };
+      const actor = { provider: 'github', instance: 'github.com', accountId: account.accountId };
+      const input = { kind: 'issue-comment', actor, credential: credentialFor(account), target, body: 'On it' };
+      const store = makeStore([{ key: 'request-one', inputDigest: digestMutationInput(input), kind: 'issue-comment', actor, target, state: 'running' }]);
+      const fetch = vi.fn(async () => jsonResponse({}));
+      vi.stubGlobal('fetch', fetch);
+      const { app } = makeApp({ store });
+
+      const response = await request(app).post('/api/source-control/github/issues/comment')
+        .send({ ...context(account.accountId, { target: { project: pullTarget.project, number: 5 } }), body: 'On it' }).expect(409);
+
+      expect(response.body.code).toBe('SOURCE_CONTROL_MUTATION_OUTCOME_UNKNOWN');
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
   it('does not retry or invalidate after a definite provider rejection', async () => {
     const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 1, login: 'actor' } });
     const fetch = vi.fn(async () => jsonResponse({ message: 'rejected private payload' }, 422));

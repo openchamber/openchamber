@@ -287,4 +287,31 @@ describe('web notifications API', () => {
     // read the key only to assert it is omitted when there is no session.
     expect((shown[0]?.options as { data?: unknown } | undefined)?.data).toBeUndefined();
   });
+
+  it('forwards the owning runtime key through the desktop bridge', async () => {
+    installWindowMock();
+    installFocusedDocument();
+    installEmptyNavigator();
+    const invoke = vi.fn(async () => null);
+    // SAFETY: `installWindowMock` installed `globalThis.window` for this test,
+    // so the asserted shape describes this own mock; the bridge reads only its
+    // `invoke`.
+    (globalThis.window as { __OPENCHAMBER_DESKTOP__?: unknown }).__OPENCHAMBER_DESKTOP__ = { invoke };
+
+    const { createWebNotificationsAPI } = await import('./notifications');
+    const api = createWebNotificationsAPI();
+
+    await expect(api.notifyAgentCompletion({
+      title: 'Ready',
+      body: 'Done',
+      tag: 'ready-ses_123',
+      sessionId: 'ses_123',
+      runtimeKey: 'host:abc123',
+    })).resolves.toBe(true);
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('desktop_notify', {
+      payload: expect.objectContaining({ sessionId: 'ses_123', runtimeKey: 'host:abc123' }),
+    });
+  });
 });

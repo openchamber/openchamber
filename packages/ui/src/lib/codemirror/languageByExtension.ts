@@ -14,6 +14,7 @@ import { python } from '@codemirror/lang-python';
 import { Language, LanguageDescription, StreamLanguage, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { getLanguageFromExtension } from '@/lib/toolHelpers';
 
 const shellLanguage = StreamLanguage.define(shell);
 
@@ -70,7 +71,17 @@ const matchLanguageDescriptionForFile = (filePath: string): LanguageDescription 
   if (!filename) {
     return null;
   }
-  return LanguageDescription.matchFilename(languages, filename);
+  const byFilename = LanguageDescription.matchFilename(languages, filename);
+  if (byFilename) {
+    return byFilename;
+  }
+  // The chat and diff highlighter knows more extensions (.tpl as PHP, .jsonl,
+  // .svelte...); reuse its language name so the editor colours them too.
+  const languageName = getLanguageFromExtension(filePath);
+  if (!languageName || languageName === 'text') {
+    return null;
+  }
+  return LanguageDescription.matchLanguageName(languages, languageName);
 };
 
 const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([

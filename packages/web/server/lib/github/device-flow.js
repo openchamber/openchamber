@@ -1,3 +1,5 @@
+import { isString } from '../shared/guards.js';
+
 const DEVICE_CODE_URL = 'https://github.com/login/device/code';
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
@@ -10,8 +12,6 @@ const encodeForm = (params) => {
   }
   return body.toString();
 };
-
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 async function postForm(url, params, { fetch: fetchImpl = fetch, timeoutMs = 10_000 } = {}) {
   const response = await fetchImpl(url, {

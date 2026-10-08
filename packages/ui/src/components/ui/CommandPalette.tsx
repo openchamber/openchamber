@@ -332,6 +332,15 @@ export const CommandPalette: React.FC = () => {
     // agents running in them live in the server and continue.
     if (!isVSCodeRuntime()) {
       list.push({
+        id: 'open-source-board',
+        secondary: true,
+        title: t('sourceBoard.title'),
+        icon: <Icon name="todo" className="mr-2 h-4 w-4" />,
+        shortcutId: 'toggle_source_board',
+        searchText: t('sourceBoard.title'),
+        onSelect: run(() => useUIStore.getState().setSourceBoardOpen(true)),
+      });
+      list.push({
         id: 'reload-ui',
         secondary: true,
         title: t('commandPalette.item.reloadUi'),

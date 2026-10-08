@@ -25,3 +25,25 @@ describe('repository-qualified PR sources', () => {
     expect(received).toEqual(['/repo', 42, readContext, { sourceRepo: source.sourceRepo }]);
   });
 });
+
+describe('GitLab namespace owners', () => {
+  it('accepts a subgroup namespace owner so MR walkthrough selection works below the root group', () => {
+    const source = parseSource({ kind: 'pr', number: 12, sourceRepo: { owner: 'group/subgroup', repo: 'repo' } });
+    expect(source.sourceRepo).toEqual({ owner: 'group/subgroup', repo: 'repo' });
+    expect(sourceKey(source)).toBe('pr:group/subgroup/repo:12');
+  });
+
+  it('accepts deeper nesting and dot/underscore segments as GitLab namespaces spell them', () => {
+    for (const owner of ['group/sub/sub', 'group.name/sub_group']) {
+      const source = parseSource({ kind: 'pr', number: 3, sourceRepo: { owner, repo: 'repo' } });
+      expect(source.sourceRepo.owner).toBe(owner);
+    }
+  });
+
+  it('keeps rejecting values that are not owner paths', () => {
+    for (const owner of ['group/../repo', '/group/repo', 'group/repo/', 'group//repo', '.', 'group/./repo']) {
+      expect(() => parseSource({ kind: 'pr', number: 3, sourceRepo: { owner, repo: 'repo' } }))
+        .toThrow('pr sources require a valid repository');
+    }
+  });
+});

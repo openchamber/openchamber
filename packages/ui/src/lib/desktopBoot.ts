@@ -7,6 +7,8 @@
  * needed for the loading/chooser/recovery/main decision.
  */
 
+import { z } from 'zod';
+
 // ── Boot outcome (must match Rust injection) ──
 
 /**
@@ -21,8 +23,9 @@
 type DesktopBootAvailability = { localAvailable?: boolean };
 
 export type DesktopBootOutcome =
-  // Main screens - CLI or remote connection is working
-  | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability)
+  // Main screens - CLI or remote connection is working. A local boot may be
+  // the fallback for a default SSH instance whose tunnel did not open.
+  | ({ target: 'local'; status: 'ok'; sshStartupFallbackHostId?: string } & DesktopBootAvailability)
   | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
 
   // First launch - user hasn't made a choice yet
@@ -96,7 +99,12 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   if (target === 'remote' || target === 'local') {
     if (status === 'ok' && target === 'local') {
       // { target: 'local'; status: 'ok' } is valid
-      return { valid: true, outcome: { target: 'local', status: 'ok', ...availability } };
+      const outcome: Extract<DesktopBootOutcome, { target: 'local'; status: 'ok' }> = { target: 'local', status: 'ok', ...availability };
+      const fallbackHostId = z.string().min(1).safeParse(record.sshStartupFallbackHostId);
+      if (fallbackHostId.success) {
+        outcome.sshStartupFallbackHostId = fallbackHostId.data;
+      }
+      return { valid: true, outcome };
     }
 
     if (status === 'ok' && target === 'remote') {

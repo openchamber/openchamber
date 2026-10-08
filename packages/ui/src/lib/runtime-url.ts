@@ -4,7 +4,7 @@ type QueryValue = string | number | boolean | null | undefined;
 
 export type RuntimeUrlQuery = Record<string, QueryValue> | URLSearchParams;
 
-export interface RuntimeUrlConfig {
+interface RuntimeUrlConfig {
   apiBaseUrl?: string | null;
   realtimeBaseUrl?: string | null;
   currentHref?: () => string;

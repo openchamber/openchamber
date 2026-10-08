@@ -46,7 +46,7 @@ import type { Theme } from '@/types/theme';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 
-export interface BranchOption {
+interface BranchOption {
     value: string;
     label: string;
     pending?: boolean;

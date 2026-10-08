@@ -415,12 +415,15 @@ describe("shell commands", () => {
     expect(translateWireEvent({ ...base, type: "shell.created", data: { info: { ...info, metadata: {} } } })).toEqual([])
   })
 
-  test("exit and removal both end the command", () => {
+  test("exit and removal both end the command, saying how and when", () => {
     expect(translateWireEvent({ ...base, type: "shell.exited", data: { id: "sh_1", exit: 0, status: "exited" } })).toEqual([
-      { type: "shell.ended", properties: { shellID: "sh_1" } },
+      { type: "shell.ended", properties: { shellID: "sh_1", end: { kind: "exited", status: "exited", exit: 0 }, endedAt: 1000 } },
+    ])
+    expect(translateWireEvent({ ...base, type: "shell.exited", data: { id: "sh_1", status: "timeout" } })).toEqual([
+      { type: "shell.ended", properties: { shellID: "sh_1", end: { kind: "exited", status: "timeout" }, endedAt: 1000 } },
     ])
     expect(translateWireEvent({ ...base, type: "shell.deleted", data: { id: "sh_1" } })).toEqual([
-      { type: "shell.ended", properties: { shellID: "sh_1" } },
+      { type: "shell.ended", properties: { shellID: "sh_1", end: { kind: "removed" }, endedAt: 1000 } },
     ])
   })
 

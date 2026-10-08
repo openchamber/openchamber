@@ -9,7 +9,7 @@ compatibility: opencode
 
 The changelog is written once per release, by the maintainer, as one story. `changelog/` stays untouched by every other task; a fix or a merged PR lands without a changelog line. Proceed only when the current message asks to update the changelog.
 
-Write `changelog/unreleased.md` and nothing else. Generation is not your job: `oc-dev create-release` turns the file into `changelog/<version>.md` with the date and renders `packages/vscode/CHANGELOG.md` and `changelog/index.json` from it. Never run the generator or touch those files. `bun run changelog:check` only validates the shape of what you wrote and writes nothing; `changelog/README.md` describes the format.
+Write `changelog/unreleased.md` and nothing else. Generation is not your job: `oc-dev create-release` turns the file into `changelog/<version>.md` with the date and renders `packages/vscode/CHANGELOG.md` and `changelog/index.json` from it. `CHANGELOG.md` at the root is a legacy copy for older installs. Never run the generator or touch any of these files. `bun run changelog:check` only validates the shape of what you wrote and writes nothing; `changelog/README.md` describes the format.
 
 `unreleased.md` opens with a `title:` front matter line (see The title) and holds two sections:
 

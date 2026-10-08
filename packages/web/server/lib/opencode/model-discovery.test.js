@@ -89,6 +89,23 @@ describe('provider model discovery', () => {
     expect(requests).toEqual(['Bearer stored-key', 'Bearer replacement-key']);
   });
 
+  test('resolves environment variables in stored keys', async () => {
+    const requests = [];
+    const fetchMock = async (_url, init) => {
+      requests.push(init.headers.Authorization);
+      return new Response(JSON.stringify({ data: [{ id: 'local' }] }), { status: 200 });
+    };
+
+    await discoverProviderModels({ baseURL: 'https://provider.test', enrich: false }, {
+      fetch: fetchMock,
+      storedApiKey: '{env:STORED_KEY}',
+      storedBaseURL: 'https://provider.test',
+      env: { STORED_KEY: 'resolved-secret' },
+    });
+
+    expect(requests).toEqual(['Bearer resolved-secret']);
+  });
+
   test('never sends the stored key to a base URL other than the saved one', async () => {
     const requests = [];
     const fetchMock = async (_url, init) => {

@@ -93,8 +93,16 @@ const projectCredentialValue = (value) => {
   const entry = { type: 'oauth', access: value.access, refresh: value.refresh, expires: value.expires };
   const accountId = metadataString.safeParse(value.metadata?.accountID).data;
   const enterpriseUrl = metadataString.safeParse(value.metadata?.enterpriseUrl).data;
+  // OpenCode Console signs in through the `opencode` integration and records the
+  // Console server and selected organization on the credential. Only these two
+  // travel on: the rest of the metadata (email, account name) is not needed by
+  // any consumer, and account identifiers stay out of the read path.
+  const server = metadataString.safeParse(value.metadata?.server).data;
+  const orgID = metadataString.safeParse(value.metadata?.orgID).data;
   if (accountId !== undefined) entry.accountId = accountId;
   if (enterpriseUrl !== undefined) entry.enterpriseUrl = enterpriseUrl;
+  if (server !== undefined) entry.server = server;
+  if (orgID !== undefined) entry.orgID = orgID;
   return entry;
 };
 

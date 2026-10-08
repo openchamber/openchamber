@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   patchInputFiles,
-  blocksOnForm,
+  isQuestionTool,
   carriesFileDiffs,
   executeOutputTruncation,
   executeScript,
@@ -30,7 +30,7 @@ describe("tool identity", () => {
     expect(isExplorationTool("list")).toBe(false)
     expect(isExplorationTool("grep")).toBe(true)
     expect(isWebTool("webfetch")).toBe(true)
-    expect(blocksOnForm("question")).toBe(true)
+    expect(isQuestionTool("question")).toBe(true)
   })
 
   test("normalizes namespaced and deduplicated names", () => {

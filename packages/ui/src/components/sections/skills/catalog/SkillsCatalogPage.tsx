@@ -435,7 +435,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
             </div>
           </div>
 
-          {isSelectedSourceLoading || (isLoadingSource && filtered.length === 0) ? (
+          {isSelectedSourceLoading || (isLoadingSource && filtered.length === 0) || (isLoadingCatalog && sources.length === 0) ? (
               <div className="py-8 text-center text-muted-foreground">
                 <Icon name="refresh" className="mx-auto mb-3 h-5 w-5 animate-spin opacity-50" />
                 <p className="typography-meta">{t('settings.skills.catalog.page.loading.skills')}</p>

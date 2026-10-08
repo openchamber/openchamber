@@ -31,7 +31,7 @@ export const isIPadDevice = (): boolean => {
     || (/Macintosh|MacIntel/i.test(userAgent) && maxTouchPoints > 1);
 };
 
-export type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
+type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
 
 /**
  * The runtime surface this client is. Used by the push presence model: only 'ios'/'android'

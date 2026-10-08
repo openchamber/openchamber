@@ -5,6 +5,8 @@ export type { GuestLoadState, GuestProject, GuestWorktree, GuestSessionActivity,
 export { GUEST_STORAGE_KEY_MAX, GUEST_STORAGE_KEYS_MAX, GUEST_STORAGE_VALUE_BYTES, GUEST_STORAGE_TOTAL_BYTES, GUEST_DEVICE_STORAGE_TOTAL_BYTES } from './workspace.ts';
 export type {
   GuestRunningShell,
+  GuestEndedShell,
+  GuestShellEndStatus,
   GuestRunningShellsSnapshot,
   GuestShellsScope,
   GuestShellsSubscription,
@@ -13,6 +15,7 @@ export type {
   GuestShellStopResult,
 } from './shells.ts';
 export {
+  GUEST_SHELL_END_STATUSES,
   GUEST_SHELL_ID_MAX,
   GUEST_SHELLS_MAX,
   GUEST_SHELL_OUTPUT_TAIL_MAX,

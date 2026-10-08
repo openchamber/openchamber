@@ -41,6 +41,7 @@ describe('enterprise policy', () => {
       allowedExtensions: [],
       allowLocalExtensions: false,
       opencodeBinary: null,
+      hideBuiltinSkillCatalogs: false,
     });
   });
 
@@ -70,6 +71,25 @@ describe('enterprise policy', () => {
       allowedExtensions: [],
       allowLocalExtensions: false,
       opencodeBinary: null,
+      hideBuiltinSkillCatalogs: false,
+    });
+  });
+
+  describe('hidden built-in skill catalogs', () => {
+    it('comes from the file with or without enterprise mode', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"hideBuiltinSkillCatalogs": true}' })))
+        .toMatchObject({ enterpriseMode: false, hideBuiltinSkillCatalogs: true });
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"enterpriseMode": true, "hideBuiltinSkillCatalogs": true}' })).hideBuiltinSkillCatalogs)
+        .toBe(true);
+    });
+
+    it('is never taken from the environment', () => {
+      expect(readEnterprisePolicy(machine({}, { env: { OPENCHAMBER_ENTERPRISE_MODE: '1', OPENCHAMBER_HIDE_BUILTIN_SKILL_CATALOGS: '1' } })).hideBuiltinSkillCatalogs)
+        .toBe(false);
+    });
+
+    it('hides them when the file is broken', () => {
+      expect(readEnterprisePolicy(machine({ [LINUX_POLICY]: '{"hideBuiltinSkillCatalogs": "yes"}' })).hideBuiltinSkillCatalogs).toBe(true);
     });
   });
 

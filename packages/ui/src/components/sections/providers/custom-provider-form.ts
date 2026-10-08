@@ -31,7 +31,7 @@ export type CustomProviderTranslator = (
 ) => string;
 
 /** One reasoning level as OpenCode stores it: an id plus the request change. */
-export type ModelVariantConfig = Model['variants'][number];
+type ModelVariantConfig = Model['variants'][number];
 /** What one reasoning level changes on the request. */
 export type ModelVariantOverlay = Omit<ModelVariantConfig, 'id'>;
 
@@ -266,7 +266,7 @@ export const modelRowFromDiscovery = (model: DiscoveredModel): ModelRow => {
  * it for its own providers of the same protocol (core/src/variant.ts). The
  * `aisdk:` packages a custom provider uses get no automatic levels there.
  */
-export function customVariantOverlay(protocol: CustomProviderProtocol, effort: string): ModelVariantOverlay {
+function customVariantOverlay(protocol: CustomProviderProtocol, effort: string): ModelVariantOverlay {
   switch (protocol) {
     case 'openai-chat':
       return { settings: { reasoningEffort: effort } };
@@ -279,7 +279,7 @@ export function customVariantOverlay(protocol: CustomProviderProtocol, effort: s
   }
 }
 
-export function parseVariantIDs(value: string): string[] {
+function parseVariantIDs(value: string): string[] {
   const ids = value.split(/[,\s]+/).map((id) => id.trim()).filter(Boolean);
   return ids.filter((id, index) => ids.indexOf(id) === index);
 }

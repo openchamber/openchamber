@@ -1,3 +1,4 @@
+import { isString } from '../shared/guards.js';
 import { normalizeDiscoveryEndpoint, resolveGitRelativeEndpoint } from './discovery-endpoint.js';
 
 export const LFS_DISCOVERY_LIMITS = Object.freeze({
@@ -25,7 +26,6 @@ const SAFE_FILTERS = Object.freeze({
   'filter.lfs.smudge': 'git-lfs smudge -- %f',
   'filter.lfs.process': 'git-lfs filter-process',
 });
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 const lfsError = (message, code = 'INVALID_LFS_DISCOVERY_INPUT') => Object.assign(new Error(message), { code });
 

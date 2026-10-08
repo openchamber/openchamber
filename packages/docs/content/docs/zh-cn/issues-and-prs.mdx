@@ -1,0 +1,74 @@
+---
+title: Issue 与 PR
+description: 浏览项目的 issue 和拉取请求，或你的 Linear issue，并从中开始工作。
+---
+
+# Issue 与 PR
+
+**Issues and PRs** 看板是一个完整页面，列出项目在 GitHub 或 GitLab 上的 issue 和拉取请求（GitLab 上叫合并请求），或你的 Linear issue。选中一项，它的预览会在列表旁打开。在这里查看其他项目，不会改变应用其余部分所在的项目。
+
+## 打开看板
+
+- 点击侧边栏顶部的拉取请求图标，它在定时任务和归档旁边。
+- 在命令面板中选择 **Issues and PRs**。
+- 按 <kbd>⌘K</kbd> 再按 <kbd>B</kbd>（Windows 和 Linux 上为 <kbd>Ctrl+K</kbd> 再按 <kbd>B</kbd>）。同样的按键会关闭它。
+
+在手机上，点按会话菜单底部的拉取请求按钮。VS Code 扩展中没有这个看板。
+
+看板再次打开时，会回到你离开时的项目、标签页和团队。
+
+## 查找条目
+
+所有控件都在工具栏的一行里。左边是项目选择器，带项目图标和搜索。旁边可以在 **Issues**、**Pull requests** 和 **Linear** 之间切换。issue 和拉取请求来自项目自己的托管平台，即 GitHub 或 GitLab。没有这类远程仓库的项目只显示 **Linear**。
+
+在 **Linear** 下，项目选择器会变成团队选择器：选择 **All teams** 或某一个团队。如果你连接了多个 Linear 工作区，在同一个菜单里切换工作区。连接 Linear 的方法见 [集成](/zh-cn/integrations/)。
+
+搜索支持标题、编号或粘贴的链接。筛选菜单在你选择时保持打开，所以可以组合多个筛选条件。
+
+GitHub 和 GitLab：
+
+- 状态：**Open**、**Closed**、**All**，拉取请求还有 **Merged**
+- 人员：**Anyone**、**Assigned to me**、**Created by me**，拉取请求还有 **Review requested**
+
+Linear：
+
+- 状态：**Open**、**All**、**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**
+- 人员：**Anyone**、**Assigned to me**、**Created by me**
+- 优先级：**All priorities**、**Urgent**、**High**、**Medium**、**Low**、**No priority**
+
+## 查看条目
+
+预览显示描述、标签和评论。对于 Linear issue，点击状态标签可以把它改到团队的另一个状态。
+
+**Labels** 一行有一个铅笔按钮，点击会打开仓库标签列表，可以搜索。勾选或取消勾选即可。关闭列表时才会保存，所以多次点击只算一次修改。打开状态的拉取请求（GitLab 上为合并请求）还有一行 **Reviewers**，用法相同，列出的是在该仓库中可以评审的人。在 GitHub 上，拉取请求的作者不会出现在列表中。Linear issue 没有这两行。
+
+## 评论与评审
+
+issue 或拉取请求的动态下方有一个评论框。**Comment** 会把你写的内容发布到 GitHub 或 GitLab，按 <kbd>⌘</kbd>+<kbd>Enter</kbd>（Windows 和 Linux 上为 <kbd>Ctrl</kbd>+<kbd>Enter</kbd>）效果相同。文字在发布成功前一直留在框里，所以发布失败也不会丢失内容。切换到其他条目会清空评论框。Linear issue 没有评论框。
+
+打开状态的拉取请求（GitLab 上为合并请求）还有 **Approve** 和 **Request changes**，框里的内容会随评审一起提交。**Request changes** 需要填写文字，说明要改什么。评审针对的是预览中显示的提交。如果此后有人推送了新提交，评审会被拒绝，预览会刷新，方便你重新查看。在 GitLab 上，只有当你是该合并请求的评审者时，**Request changes** 才可用；评审文字会作为一条单独的评论发布。如果只是这条评论发布失败，评审仍然有效，你的文字也会留在框里。
+
+## 开始工作
+
+操作按钮在预览底部。
+
+- **New session** 在项目中打开一个新会话，并把该条目附加到消息框。第一条消息由你自己来写。
+- issue 上的 **Start in worktree…**，或拉取请求上的 **Check out in worktree…**，会打开 New Worktree 对话框，并已选好该条目。拉取请求会检出它自己的分支。参阅 [Worktree 会话](/zh-cn/worktrees/)。
+
+对于 Linear issue，**Start in** 显示会话将在哪个项目中启动。它是在 [集成](/zh-cn/integrations/) 的 Linear 卡片中映射到该 issue 所属团队的项目。没有团队映射时使用默认项目，再没有的话，就是看板上次显示的项目。你可以在那里为这个 issue 改选其他项目。
+
+## 拉取请求
+
+拉取请求的预览还会显示它的分支、大小（增加和删除的行数，以及改动的文件数）、检查和评审。**Activity** 动态按发生顺序排列评论、评审结论和最新的提交。连续的提交会合并成一组，这样你能看出某次评审回应的是哪些提交。
+
+大小旁边有两个按钮。**Changes** 在侧边面板中打开拉取请求的 diff，**Walkthrough** 打开它的 [改动导读](/zh-cn/walkthrough/)。如果应用当前在另一个项目上，会先切换到该 PR 的项目。这两个按钮只在桌面端和网页端提供。
+
+底部的 **Merge** 会先确认再合并，并使用你平常的合并方式。草稿还会有 **Ready for review**。
+
+打开状态的 issue 或拉取请求底部还有 **Close issue** 或 **Close pull request**（GitLab 上为 **Close merge request**），已关闭的则有 **Reopen issue** 或 **Reopen pull request**（**Reopen merge request**）。这些操作可以撤回，所以不会先确认。已合并的拉取请求不能关闭，也不能重新打开。在 GitHub 上，issue 会以已完成的状态关闭。
+
+## 相关内容
+
+- [GitHub 工单与 PR](/zh-cn/github/) — 连接 GitHub，并把 issue 附加到消息
+- [Worktree 会话](/zh-cn/worktrees/) — worktree 会话从哪里开始
+- [集成](/zh-cn/integrations/) — 连接 Linear，并把团队映射到项目

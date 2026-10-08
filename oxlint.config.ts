@@ -20,6 +20,8 @@ export default defineConfig({
     ".opencode/**",
     ".openchamber/**",
     ".tmp/**",
+    // Bundles built from the TypeScript sources beside them; the sources are linted.
+    "packages/sdk/examples/**/*.js",
     "patches/**",
     "bun-patches/**",
     "tools/oxlint/anti-slop/**",

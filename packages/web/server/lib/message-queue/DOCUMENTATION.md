@@ -71,7 +71,29 @@ never replaces editable text or delivered parts. Older items without a summary
 derive one from the attached comment metadata or the first non-instruction
 context text. This optional field needs no queue-file migration.
 
-## Persistence
+## Scheduled items
+
+Scheduled tasks use the same items with an optional `scheduledTask` field
+containing `projectId` and `taskId`. Reuse does not change the target's goal or
+auto-accept policy.
+Only the server can enqueue this provenance. Enqueue deduplicates the project
+and task across all session queues. A scheduled item can omit its model to
+keep the target session selection. Normal composer items still require their
+captured model. The UI retains both kinds in the same projection.
+
+Scheduled send guards and terminal result callbacks apply only to scheduled
+items. A definitive before-send target or task refusal with 404 or 409 removes
+that item and lets the next item proceed. This includes removed or retargeted
+tasks and moved targets. Other validation errors and all send failures use the
+existing queue retry policy, including model-switch 404 or 409 responses.
+Successful send reports `sent` without waiting for an assistant reply. Removing,
+clearing or evicting a waiting scheduled item reports `cancelled`. Scheduled
+items can be reordered and removed, but cannot be taken for editing or manual
+send. Bulk take returns only ordinary items and leaves scheduled items queued.
+Disable, delete and retarget use `cancelScheduledTask`. Existing composer
+persistence, retries, directory query and delivery gates remain unchanged.
+
+## Queue file
 
 `<data-dir>/message-queue.json` (`OPENCHAMBER_DATA_DIR` or
 `~/.config/openchamber`): `{ version, revision, sessions: { [sessionId]:

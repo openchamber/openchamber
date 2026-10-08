@@ -133,7 +133,7 @@ const hasBackgroundWork = (sessionId: string, activeSessionIds: ReadonlySet<stri
  * it started in the background runs. The session's own run wins; a pause with
  * both kinds of background work reports the subagent.
  */
-export type SessionTurnActivity = 'running' | 'subagent' | 'shell';
+type SessionTurnActivity = 'running' | 'subagent' | 'shell';
 
 export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity | null => {
   const status = useGlobalSessionStatusStore((state): SessionTurnActivity | null => {
@@ -143,9 +143,6 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
   const waitingOnShell = useBackgroundShellsStore((state) => state.sessionIds.has(sessionId));
   return status ?? (waitingOnShell ? 'shell' : null);
 };
-
-/** The session's turn is still open (see `useSessionTurnActivity`). */
-export const useSessionTurnActive = (sessionId: string): boolean => useSessionTurnActivity(sessionId) !== null;
 
 // The last background command of an idle session ending closes its turn,
 // the way the last subagent finishing does below.

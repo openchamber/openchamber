@@ -10,7 +10,7 @@
 
 import type { ComposerReference } from '@/components/chat/composer/composerReferences';
 import type { ChangeRequestContext, Issue, IssueComment, LinearIssue, SourceControlAPI, SourceControlReadContext } from '@/lib/api/types';
-import { buildIssueContextText as buildLinearContextText } from '@/lib/linearStartSession';
+import { buildIssueContextText as buildLinearContextText } from '@/lib/linearIssueContext';
 
 import { referencePickerItemKey, type ReferencePickerSelection } from './referencePickerItems';
 

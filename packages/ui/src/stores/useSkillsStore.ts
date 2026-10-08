@@ -7,6 +7,7 @@ import {
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
+import { waitForOpenCodeConnection } from "@/stores/waitForOpenCodeConnection";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from "@/lib/background-network";
@@ -141,7 +142,7 @@ export interface PendingFile {
   content: string;
 }
 
-export interface SkillDraft {
+interface SkillDraft {
   name: string;
   scope: SkillScope;
   source?: SkillSource;
@@ -212,7 +213,7 @@ let skillsGeneration = 0;
  * are kept instead of vanishing on one failed fetch. Managed-root skills
  * (`renamable`) are covered by the disk scan, so their absence is real.
  */
-export const mergePartialSkills = (
+const mergePartialSkills = (
   partial: DiscoveredSkill[],
   previous: DiscoveredSkill[],
 ): DiscoveredSkill[] => {
@@ -275,13 +276,6 @@ const removeSkillLocal = (
   }
   set(nextState);
 };
-
-const MAX_HEALTH_WAIT_MS = 20000;
-const FAST_HEALTH_POLL_INTERVAL_MS = 300;
-const FAST_HEALTH_POLL_ATTEMPTS = 4;
-const SLOW_HEALTH_POLL_BASE_MS = 800;
-const SLOW_HEALTH_POLL_INCREMENT_MS = 200;
-const SLOW_HEALTH_POLL_MAX_MS = 2000;
 
 const EMPTY_SKILLS: DiscoveredSkill[] = [];
 
@@ -733,50 +727,6 @@ export const useSkillsStore = create<SkillsStore>()(
 
 if (typeof window !== "undefined") {
   window.__zustand_skills_store__ = useSkillsStore;
-}
-
-async function waitForOpenCodeConnection(delayMs?: number) {
-  const initialPause = typeof delayMs === "number" && delayMs > 0
-    ? Math.min(delayMs, FAST_HEALTH_POLL_INTERVAL_MS)
-    : 0;
-
-  if (initialPause > 0) {
-    await sleep(initialPause);
-  }
-
-  const start = Date.now();
-  let attempt = 0;
-  let lastError: unknown = null;
-
-  while (Date.now() - start < MAX_HEALTH_WAIT_MS) {
-    attempt += 1;
-    updateConfigUpdateMessage(`Waiting for OpenCode… (attempt ${attempt})`);
-
-    try {
-      const isHealthy = await opencodeClient.checkHealth();
-      if (isHealthy) {
-        return;
-      }
-      lastError = new Error("OpenCode health check reported not ready");
-    } catch (error) {
-      lastError = error;
-    }
-
-    const elapsed = Date.now() - start;
-
-    const waitMs =
-      attempt <= FAST_HEALTH_POLL_ATTEMPTS && elapsed < 1200
-        ? FAST_HEALTH_POLL_INTERVAL_MS
-        : Math.min(
-            SLOW_HEALTH_POLL_BASE_MS +
-              Math.max(0, attempt - FAST_HEALTH_POLL_ATTEMPTS) * SLOW_HEALTH_POLL_INCREMENT_MS,
-            SLOW_HEALTH_POLL_MAX_MS,
-          );
-
-    await sleep(waitMs);
-  }
-
-  throw lastError || new Error("OpenCode did not become ready in time");
 }
 
 export async function refreshSkillsAfterOpenCodeRestart(options?: { message?: string; delayMs?: number }) {

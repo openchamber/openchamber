@@ -16,7 +16,7 @@ export const isMacOS = (): boolean => {
   return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
 };
 
-const isWindows = (): boolean => {
+export const isWindows = (): boolean => {
   if (typeof navigator === 'undefined') return false;
   return /Windows/.test(navigator.userAgent || '');
 };

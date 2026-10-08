@@ -117,8 +117,9 @@ const entry = () => store().getEntry(PROJECT);
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => { resolve = res; });
-  return { promise, resolve };
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
 };
 
 const failWith = (message: string) => async (): Promise<never> => {
@@ -212,6 +213,99 @@ describe('load', () => {
   test('concurrent loads issue a single request', async () => {
     await Promise.all([store().load(PROJECT), store().load(PROJECT), store().load(PROJECT)]);
     expect(calls.fetch).toBe(1);
+  });
+
+  test('coalesces refreshes requested during a load into one authoritative trailing read', async () => {
+    const gate = deferred<ContextPayload>();
+    handlers.fetch = () => calls.fetch === 1
+      ? gate.promise
+      : Promise.resolve({ notes: [note({ body: 'peer change' })], todos: [], plans: [] });
+
+    const initial = store().load(PROJECT);
+    await Promise.resolve();
+    const firstRefresh = store().load(PROJECT, { force: true });
+    const secondRefresh = store().load(PROJECT, { force: true });
+    gate.resolve(emptyPayload());
+    await Promise.all([initial, firstRefresh, secondRefresh]);
+
+    expect(entry().notes.map((item) => item.body)).toEqual(['peer change']);
+    expect(calls.fetch).toBe(2);
+  });
+
+  test('a refresh cannot undo a local write that completed after the read began', async () => {
+    handlers.fetch = async () => ({ notes: [note()], todos: [], plans: [] });
+    await store().load(PROJECT);
+    const gate = deferred<ContextPayload>();
+    handlers.fetch = () => gate.promise;
+    const refresh = store().load(PROJECT, { force: true });
+    await Promise.resolve();
+    handlers.updateNote = async () => note({ body: 'new local body', updatedAt: 2 });
+    await store().saveNoteBody(PROJECT, 'n1', 'new local body');
+    gate.resolve({ notes: [note()], todos: [], plans: [] });
+    await refresh;
+
+    expect(entry().notes[0].body).toBe('new local body');
+  });
+
+  test('a peer change during a local note save is read after that save settles', async () => {
+    handlers.fetch = async () => ({ notes: [note()], todos: [], plans: [] });
+    await store().load(PROJECT);
+    const gate = deferred<NotePayload | null>();
+    handlers.updateNote = () => gate.promise;
+    const saving = store().saveNoteBody(PROJECT, 'n1', 'local edit');
+    handlers.fetch = async () => ({
+      notes: [note({ body: 'local edit' }), note({ id: 'peer', body: 'peer note' })],
+      todos: [],
+      plans: [],
+    });
+    const refresh = store().load(PROJECT, { force: true });
+    await Promise.resolve();
+    gate.resolve(note({ body: 'local edit' }));
+    await Promise.all([saving, refresh]);
+
+    expect(entry().notes.map((item) => item.body)).toEqual(['local edit', 'peer note']);
+  });
+
+  for (const failureOrder of ['before the read', 'after the read']) {
+    test(`a local write failing ${failureOrder} cannot hide the peer snapshot`, async () => {
+      handlers.fetch = async () => ({ notes: [note()], todos: [], plans: [] });
+      await store().load(PROJECT);
+      const reading = deferred<ContextPayload>();
+      handlers.fetch = () => reading.promise;
+      const refresh = store().load(PROJECT, { force: true });
+      await Promise.resolve();
+      const writing = deferred<NotePayload | null>();
+      handlers.updateNote = () => writing.promise;
+      const saving = store().saveNoteBody(PROJECT, 'n1', 'rejected local edit');
+      await Promise.resolve();
+      const peer = { notes: [note(), note({ id: 'peer', body: 'peer note' })], todos: [], plans: [] };
+      handlers.fetch = async () => peer;
+      if (failureOrder === 'after the read') {
+        reading.resolve(peer);
+        await Promise.resolve();
+        await Promise.resolve();
+      }
+      writing.reject(new Error('save failed'));
+      expect(await saving).toBe(false);
+      if (failureOrder === 'before the read') reading.resolve(peer);
+      await refresh;
+
+      expect(entry().notes.map((item) => item.body)).toEqual(['body', 'peer note']);
+    });
+  }
+
+  test('reset rejects an old runtime read even when the project id is reused', async () => {
+    const gate = deferred<ContextPayload>();
+    handlers.fetch = () => gate.promise;
+    const obsolete = store().load(PROJECT);
+    await Promise.resolve();
+    store().reset();
+    handlers.fetch = async () => ({ notes: [note({ body: 'new runtime' })], todos: [], plans: [] });
+    await store().load(PROJECT);
+    gate.resolve({ notes: [note({ body: 'old runtime' })], todos: [], plans: [] });
+    await obsolete;
+
+    expect(entry().notes[0].body).toBe('new runtime');
   });
 });
 

@@ -30,7 +30,7 @@ export const BATCH_FRAME_LENGTH_BYTES = 4;
 // Worst-case per-frame envelope overhead inside a batch (tag + length prefix).
 // Reserved from the tunnel payload budget so any single frame — even at the
 // maximum size — still fits inside one 64 KiB encrypted plaintext once wrapped.
-export const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
+const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
 export const MAX_TUNNEL_PAYLOAD_BYTES =
   MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES - BATCH_ENVELOPE_RESERVED_BYTES;
 

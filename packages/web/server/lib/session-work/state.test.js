@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearSuggestionPatch, openByJevPatch, readWork, suggestDonePatch } from './state.js';
+import { clearSuggestionPatch, openByJevPatch, readWork, offerReviewPatch, suggestDonePatch } from './state.js';
 
 const withWork = (work) => ({ openchamber: { goal: { id: 'g' }, work } });
 
@@ -30,5 +30,12 @@ describe('session work state', () => {
     expect(suggestDonePatch({}, { now: 3 })).toBeNull();
     expect(clearSuggestionPatch(withWork({ state: 'open', suggestDoneAt: 3 }))).toEqual({ openchamber: { work: { suggestDoneAt: null } } });
     expect(clearSuggestionPatch(withWork({ state: 'open' }))).toBeNull();
+  });
+
+  it('offers a review on any session, and a new turn retires both hints', () => {
+    expect(offerReviewPatch({}, { now: 3 })).toEqual({ openchamber: { reviewOffer: { at: 3 } } });
+    expect(clearSuggestionPatch({ openchamber: { reviewOffer: { at: 3 } } })).toEqual({ openchamber: { reviewOffer: null } });
+    expect(clearSuggestionPatch({ openchamber: { work: { state: 'open', suggestDoneAt: 3 }, reviewOffer: { at: 3 } } }))
+      .toEqual({ openchamber: { work: { suggestDoneAt: null }, reviewOffer: null } });
   });
 });

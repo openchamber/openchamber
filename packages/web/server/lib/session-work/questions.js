@@ -36,9 +36,30 @@ const TOWARD_CHANGE = {
  * held-out 70 hints in 106 work sessions (18 followed by more edits) against
  * 60 (16), and 47 of 81 shipping steps hinted against 33. The threshold then
  * went from 0.85 to 0.8: 80 hints (22), 53 of 81 shipping steps, so a closing
- * turn whose answer hands the user a last check still gets the hint.
+ * turn whose answer hands the user a last check still gets the hint. The
+ * answer excerpt then grew from 300+300 to 500+500 characters for
+ * `review_ready`; re-run with the production request cut, wrap-up held: 80
+ * hints (22) against 81 (24), 53 of 77 shipping steps either way.
  */
 const WRAP_UP = 'Does this turn close out the work in this conversation: in `request` the user confirms it works or is good, thanks the agent, or asks to commit, push, merge, sync, or release it, without asking for any further change, and `answer` reports that step done?';
+
+/**
+ * Asked with `wrap_up`: the turn handed over changes the user could look over
+ * (the composer then offers an AI review or a walkthrough). Measured against
+ * whether the turn ran an edit tool, which Jev never sees: on 190 held-out
+ * sessions at 0.7, with a looks-done hint taking precedence, it hinted after
+ * 271 of 362 edit turns and after 14 of 823 turns without edits. Two other
+ * wordings (handed over as done; no criteria) hinted 4-7x more on turns
+ * without edits. Most false hints are cleanups outside the code (deleted
+ * builds); most misses say "did not change the app" after scratch edits.
+ */
+const REVIEW_READY = {
+  question: 'Did the agent change the project in this turn, so there are new changes the user could look over now?',
+  criteria: {
+    true: '`answer` reports that the agent itself edited the project in this turn: implemented, fixed, added, removed, refactored, or rewrote code, UI, docs, tests, or configuration.',
+    false: 'The agent only explained, answered a question, investigated, reviewed code or a PR, proposed or planned a change without making it, drafted a message, ran commands to show output, or committed, pushed, or merged changes made earlier; or it failed before changing anything.',
+  },
+};
 
 const RECAP = {
   question: 'Is there substantive work or a finding in this conversation worth a one-line reminder later: something the agent changed, fixed, found out, or a decision that was reached?',
@@ -59,6 +80,7 @@ const NEXT_STEP = {
 /** Open when either passes (measured together). */
 const OPEN_THRESHOLDS = { change: 0.85, towardChange: 0.9 };
 const WRAP_UP_THRESHOLD = 0.8;
+const REVIEW_READY_THRESHOLD = 0.7;
 /** The recap is skipped only when Jev is nearly sure there is nothing to remind. */
 const RECAP_SKIP_BELOW = 0.3;
 const NEXT_STEP_THRESHOLD = 0.5;
@@ -81,7 +103,8 @@ export const buildSendRequest = ({ history, request }) => ({
 /**
  * The request Jev reads when a turn ended, or null when nothing is asked.
  * `ask` names the groups: `open` (the session is not in work), `wrapUp` (it
- * is), `recap` and `nextStep` (the assist fields the user has on).
+ * is), `reviewReady` (the review offer is on), `recap` and `nextStep` (the
+ * assist fields the user has on).
  */
 export const buildTurnEndRequest = ({ history, request, answer, ask }) => {
   const questions = {};
@@ -90,6 +113,7 @@ export const buildTurnEndRequest = ({ history, request, answer, ask }) => {
     questions.toward_change = noul(TURN_END_CONTEXT, TOWARD_CHANGE);
   }
   if (ask.wrapUp) questions.wrap_up = noul(TURN_END_CONTEXT, { question: WRAP_UP });
+  if (ask.reviewReady) questions.review_ready = noul(TURN_END_CONTEXT, REVIEW_READY);
   if (ask.recap) questions.recap = noul(TURN_END_CONTEXT, RECAP);
   if (ask.nextStep) questions.next_step = noul(TURN_END_CONTEXT, NEXT_STEP);
   if (Object.keys(questions).length === 0) return null;
@@ -110,6 +134,11 @@ export const decideOpen = (answers) => {
 export const decideWrapUp = (answers) => {
   const score = answerOf(answers, 'wrap_up');
   return score !== null && score >= WRAP_UP_THRESHOLD;
+};
+
+export const decideReviewReady = (answers) => {
+  const score = answerOf(answers, 'review_ready');
+  return score !== null && score >= REVIEW_READY_THRESHOLD;
 };
 
 /**

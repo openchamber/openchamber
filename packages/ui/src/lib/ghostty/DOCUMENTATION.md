@@ -18,6 +18,7 @@ The viewport owns the desktop Copy/Paste context menu. Its trigger accepts only 
 
 ## Invariants
 
+- The paste shortcut starts a clipboard read and keeps the browser's native paste event; `TerminalPasteArbiter` lets exactly one deliver. Chromium fires the native event first and it cancels the read. WebKit resolves the read first, so the native event of the same keystroke is swallowed when it arrives within one second.
 - On macOS, unshifted Option+Left/Right sends ESC+b/f and Option+Backspace sends Ctrl+W at legacy prompts. `core.encodeMacWordShortcut` checks the active screen and Kitty keyboard flags before translating; alternate-screen and Kitty-enabled programs receive the original keys. `surface.ts` consumes the matching keyup for translated shortcuts. Other platforms, extra modifiers and Option character input retain normal encoding.
 - The grid is measured after the faces that will render are loaded (`document.fonts.load` for every style plus the bundled symbols font). A face that finishes loading later triggers a re-measure through `loadingdone`. Never size the grid from a fallback face on purpose.
 - Generic keywords Chromium's canvas parser rejects (`ui-monospace`, `system-ui`) are stripped before any `context.font` assignment; an invalid shorthand silently no-ops and the grid would be measured with the previous font.

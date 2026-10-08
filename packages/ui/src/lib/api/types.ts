@@ -12,6 +12,11 @@ import type {
   PageResult,
   ProjectUpstream,
   ReadyChangeRequestInput,
+  CommentInput,
+  ReviewChangeRequestInput,
+  SetStateInput,
+  SetLabelsInput,
+  SetReviewersInput,
   SourceControlAuthStatus,
   SourceControlCapabilities,
   SourceControlDeviceFlowComplete,
@@ -21,6 +26,8 @@ import type {
   SourceControlMergeMutationResult,
   SourceControlMutationReceipt,
   SourceControlReadyMutationResult,
+  SourceControlReviewMutationResult,
+  SourceControlStateMutationResult,
   SourceControlBindingRead,
   SourceControlProvider,
   SourceControlProviderBindingMutation,
@@ -388,7 +395,7 @@ export interface GitNetworkRedactedDestination {
   fingerprint: string;
 }
 
-export interface GitNetworkRuntimeIdentity {
+interface GitNetworkRuntimeIdentity {
   id: string;
   platform: RuntimePlatform;
   label?: string;
@@ -684,14 +691,14 @@ export type GitCheckoutHydrationStatus =
   | 'cancelled'
   | 'not-needed';
 
-export interface GitCheckoutHydrationItemResult {
+interface GitCheckoutHydrationItemResult {
   path: string;
   status: GitCheckoutHydrationStatus;
   endpoint?: GitNetworkRedactedEndpoint;
   error?: GitNetworkOperationError;
 }
 
-export interface GitCheckoutLfsResult {
+interface GitCheckoutLfsResult {
   path: string;
   status: GitCheckoutHydrationStatus;
   endpoint?: GitNetworkRedactedEndpoint;
@@ -1319,6 +1326,10 @@ export interface NotificationPayload {
   kind?: string;
   sessionId?: string;
   directory?: string;
+  // Runtime key of the instance that owns the session ('local' or 'host:<id>').
+  // The desktop shell uses it to route a notification click to the owning
+  // instance instead of the currently active one.
+  runtimeKey?: string;
   requireHidden?: boolean;
   showWhenFocused?: boolean;
 }
@@ -1623,11 +1634,16 @@ export type GitHubIssuesListResult = {
 export type GitHubReferenceKind = 'issue' | 'pull';
 
 /** Which slice of open items the picker lists; `reviewRequested` is for PRs. */
-export type GitHubReferenceFilter = 'open' | 'assigned' | 'created' | 'reviewRequested';
+/** A repository list's state; `merged` applies to change requests. */
+export type RepositoryReferenceState = 'open' | 'closed' | 'merged' | 'all';
+/** Whose items a repository list shows; review requests apply to change requests. */
+export type RepositoryReferencePeople = 'any' | 'assigned' | 'created' | 'reviewRequested';
+export type RepositoryReferenceFilter = { state: RepositoryReferenceState; people: RepositoryReferencePeople };
 
 export type GitHubReferencesOptions = {
   kind: GitHubReferenceKind;
-  filter?: GitHubReferenceFilter;
+  state?: RepositoryReferenceState;
+  people?: RepositoryReferencePeople;
   /** Search text, or a pasted link or number, which names one item of either kind. */
   query?: string;
   cursor?: string | null;
@@ -1681,6 +1697,13 @@ export type GitHubReferenceComment = {
   review: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | null;
 };
 
+/** Someone asked to review, or who can be; `id` is what the host names them by (a login on GitHub). */
+export type GitHubReferenceReviewer = {
+  id: string;
+  login: string;
+  avatarUrl?: string;
+};
+
 /** What the preview adds for one item; too slow to ask for a whole page. */
 export type GitHubReferenceDetail = {
   number: number;
@@ -1691,6 +1714,8 @@ export type GitHubReferenceDetail = {
   /** Null for an issue. */
   pull: {
     reviewDecision: 'approved' | 'changes_requested' | 'review_required' | null;
+    /** Asked to review and not done yet (GitHub); everyone set as a reviewer (GitLab). */
+    reviewers: GitHubReferenceReviewer[];
     additions: number;
     deletions: number;
     changedFiles: number;
@@ -1699,7 +1724,21 @@ export type GitHubReferenceDetail = {
      * checks come with its status, the answer that also colours it.
      */
     checks?: GitHubChecksSummary | null;
+    /** The newest commits, oldest first, for the timeline beside the comments. */
+    commits: GitHubReferenceCommit[];
+    /** How many commits the PR has in all; null when the host does not say. */
+    commitTotal: number | null;
   } | null;
+};
+
+export type GitHubReferenceCommit = {
+  sha: string;
+  headline: string;
+  /** The host account behind the commit, when it is known. */
+  author: { login: string; avatarUrl?: string } | null;
+  authorName: string | null;
+  committedAt: string | null;
+  url: string | null;
 };
 
 export type GitHubReferenceDetailResult =
@@ -1815,19 +1854,37 @@ export interface SourceControlAPI {
   changeRequestUpdate(payload: UpdateChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
   changeRequestMerge(payload: MergeChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlMergeMutationResult>>;
   changeRequestReady(payload: ReadyChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReadyMutationResult>>;
+  changeRequestComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestReview(payload: ReviewChangeRequestInput): Promise<SourceControlMutationReceipt<SourceControlReviewMutationResult>>;
+  issueComment(payload: CommentInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
+  issueSetState(payload: SetStateInput): Promise<SourceControlMutationReceipt<SourceControlStateMutationResult>>;
+  changeRequestSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  issueSetLabels(payload: SetLabelsInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  changeRequestSetReviewers(payload: SetReviewersInput): Promise<SourceControlMutationReceipt<SourceControlEmptyMutationResult>>;
+  /** One page of a project's labels, for the board's picker. */
+  referenceLabels(context: SourceControlReadContext, project: GitHubRepoSelector): Promise<GitHubIssueLabel[]>;
+  /** One page of the people who can be asked to review in a project. */
+  referenceReviewers(context: SourceControlReadContext, project: GitHubRepoSelector): Promise<GitHubReferenceReviewer[]>;
   changeRequestsList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
   ): Promise<PageResult<ChangeRequest>>;
   changeRequestContext(
     context: SourceControlReadContext,
     number: number,
-    options?: { includeDiff?: boolean; includeCIDetails?: boolean; project?: { owner: string; name: string } },
+    options?: {
+      includeDiff?: boolean;
+      includeCIDetails?: boolean;
+      /** Also its commits and review verdicts, for a timeline. GitLab only; GitHub's preview reads them with its detail. */
+      includeTimeline?: boolean;
+      project?: { owner: string; name: string };
+    },
   ): Promise<ChangeRequestContext>;
 
   issuesList(
     context: SourceControlReadContext,
-    options?: { page?: number; query?: string },
+    options?: { page?: number; query?: string; state?: RepositoryReferenceState; people?: RepositoryReferencePeople },
   ): Promise<PageResult<Issue>>;
   issueGet(
     context: SourceControlReadContext,
@@ -2017,8 +2074,20 @@ export type LinearIssueSummary = {
   assignee?: LinearIssueAssignee | null;
   team?: LinearIssueTeam | null;
   priority?: LinearIssuePriority | null;
+  /** Absent on a related issue (a parent, a sub-issue): Linear is not asked for them there. */
   labels?: LinearIssueLabel[];
   updatedAt?: string | null;
+  /** The issue this one is a sub-issue of. */
+  parent?: LinearIssueSummary | null;
+  /** Null without sub-issues. Only the first few are counted; `more` says there are others. */
+  subIssueProgress?: LinearSubIssueProgress | null;
+};
+
+export type LinearSubIssueProgress = {
+  total: number;
+  /** Completed, canceled or a duplicate. */
+  done: number;
+  more: boolean;
 };
 
 export type LinearIssueComment = {
@@ -2031,10 +2100,15 @@ export type LinearIssueComment = {
 export type LinearIssue = LinearIssueSummary & {
   description?: string | null;
   comments?: LinearIssueComment[];
+  /** In Linear's order; the first page only, `subIssuesMore` says there are others. */
+  subIssues?: LinearIssueSummary[];
+  subIssuesMore?: boolean;
 };
 
-export type LinearIssueListStatus = 'all' | 'backlog' | 'todo' | 'started' | 'inReview' | 'completed' | 'canceled' | 'duplicate';
-export type LinearIssueListAssignee = 'any' | 'me';
+/** `open`: not done, canceled or a duplicate; the server's default. */
+export type LinearIssueListStatus = 'open' | 'all' | 'backlog' | 'todo' | 'started' | 'inReview' | 'completed' | 'canceled' | 'duplicate';
+/** Whose issues: anyone's, assigned to me, or created by me. */
+export type LinearIssueListAssignee = 'any' | 'me' | 'created';
 export type LinearIssueListPriority = 'all' | 'none' | 'urgent' | 'high' | 'medium' | 'low';
 
 export type LinearIssuesListOptions = {

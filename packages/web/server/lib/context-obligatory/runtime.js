@@ -1,9 +1,8 @@
+import { isRecord } from '../shared/guards.js';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
-
-const isRecord = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 const readContextState = (session) => {
   const metadata = isRecord(session?.metadata) ? session.metadata : {};

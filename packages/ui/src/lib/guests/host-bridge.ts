@@ -172,7 +172,7 @@ export const guestSessionLifecyclePhase = (
   return null;
 };
 
-export type GuestSessionSource = {
+type GuestSessionSource = {
   id: string;
   title?: string | null;
   busy?: boolean;

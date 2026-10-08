@@ -55,6 +55,7 @@ const PROJECT_MEMORY_MAX_ITEMS = 200;
  */
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
+import { asNonEmptyString, isRecord as isObjectRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { findThreatPattern } from './threat-patterns.js';
 
@@ -133,12 +134,6 @@ const findSupersededEntry = (entries, title, body) => {
   return best;
 };
 
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
 const clampLength = (value, maxLength) => {
   if (typeof value !== 'string') return '';
   return value.length > maxLength ? value.slice(0, maxLength) : value;
@@ -150,8 +145,6 @@ const clampLength = (value, maxLength) => {
  * test below answers it, and its message is the truthful one.
  */
 const bodyFitsLimit = (value) => (asNonEmptyString(value)?.length ?? 0) <= MEMORY_BODY_MAX_LENGTH;
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const limitForScope = (scope) => (scope === 'global' ? GLOBAL_MEMORY_MAX_ITEMS : PROJECT_MEMORY_MAX_ITEMS);
 

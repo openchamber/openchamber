@@ -95,7 +95,9 @@ PR mode uses the same searchable, paginated selector as Changes. Its list loads
 only while PR mode is visible. Selection ownership and handoff rules are in
 `packages/ui/src/stores/DOCUMENTATION.md`.
 
-PR sources may include `sourceRepo: { owner, repo }`. It qualifies the cache/job
+PR sources may include `sourceRepo: { owner, repo }`. `owner` is a single
+segment on GitHub and a namespace path on GitLab (`group/subgroup`), matching
+what each provider's project mapper produces. It qualifies the cache/job
 key as `pr:<owner>/<repo>:<number>`, so equal numbers in different repositories
 stay apart. Number-only sources keep `pr:<number>` and read the repository behind
 the bound primary remote. A named repository is honoured only inside the bound

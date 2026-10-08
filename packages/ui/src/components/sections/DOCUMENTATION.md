@@ -97,10 +97,25 @@ icon field. "Default" stores nothing, so the provider's own logo (or the
 generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
 provider logos, so Settings and every model picker agree.
 
-The "Add provider" list is `GET /api/integration` minus the integrations that
-already have a connection and minus MCP OAuth registrations (`mcp_*`); v2's
-`GET /api/provider` lists only what is configured or connected right now, so
-it cannot offer anything new.
+The "Connect provider" page lists `GET /api/integration` minus the
+integrations that already have a connection, MCP OAuth registrations
+(`mcp_*`), web search providers, and providers OpenCode already lists (those
+connect from their own page); v2's `GET /api/provider` lists only what is
+configured or connected right now, so it cannot offer anything new
+(`providers/connectableProviders.ts`). Popular providers come first as cards,
+in the fixed order of `POPULAR_PROVIDERS`, with a one-line note and a
+Recommended pill on the ones the maintainer recommends; every other provider
+is a compact row behind "Show all", and the search covers all of them.
+
+The integration list is kept for the app session by
+`lib/opencode/integration-catalog.ts`, so the page opens on it without a
+loading state. The desktop/web/VS Code app reads it once at startup when the
+browser is idle (`hooks/useIntegrationCatalogPrefetch.ts`); the phone layout
+and relay connections skip that read, because relay bytes are paid, and read
+it when Settings opens. The snapshot is only a starting point: the page reads
+the list again on every visit and after every credential write, a read
+started earlier never replaces a later one, and a snapshot from another
+runtime is ignored.
 
 ### MCP OAuth
 

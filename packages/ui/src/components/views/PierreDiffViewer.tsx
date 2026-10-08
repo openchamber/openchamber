@@ -4,6 +4,7 @@ import {
   areFilesEqual,
   areOptionsEqual,
   FileDiff as PierreFileDiff,
+  parseDiffFromFile,
   VirtualizedFileDiff,
   Virtualizer,
   type FileContents,
@@ -33,6 +34,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { hideWhitespaceChanges } from '@/lib/diff/hideWhitespaceChanges';
 import type { PatchHunkAnchor } from '@/lib/diff/patchFileDiff';
 
 /**
@@ -76,6 +78,11 @@ interface PierreDiffViewerProps {
   wrapLines?: boolean;
   layout?: 'fill' | 'inline';
   enableComments?: boolean;
+  /**
+   * Shows lines that changed only by whitespace as unchanged. Hunk actions are
+   * dropped meanwhile: they act on the whole hunk, whitespace included.
+   */
+  hideWhitespace?: boolean;
   hunkActions?: DiffHunkActions;
   /**
    * Present when the owner can replace a partial diff with full file contents.
@@ -702,7 +709,36 @@ const wakeVirtualizer = (
   };
 };
 
-export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
+export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({ hideWhitespace = false, ...props }) => {
+  const { t } = useI18n();
+  const { original, modified, fileDiff, fileName } = props;
+  const sourceDiff = useMemo(() => {
+    if (!hideWhitespace || fileDiff) return fileDiff;
+    return parseDiffFromFile({ name: fileName ?? '', contents: original }, { name: fileName ?? '', contents: modified });
+  }, [fileDiff, fileName, hideWhitespace, modified, original]);
+  const visibleDiff = useMemo(
+    () => (hideWhitespace && sourceDiff ? hideWhitespaceChanges(sourceDiff) : fileDiff),
+    [fileDiff, hideWhitespace, sourceDiff],
+  );
+
+  if (hideWhitespace && sourceDiff && sourceDiff.hunks.length > 0 && visibleDiff?.hunks.length === 0) {
+    return (
+      <div className="px-3 py-2 typography-meta text-muted-foreground">
+        {t('diffView.state.whitespaceOnly')}
+      </div>
+    );
+  }
+
+  return (
+    <PierreDiffViewerBody
+      {...props}
+      fileDiff={visibleDiff}
+      hunkActions={hideWhitespace ? undefined : props.hunkActions}
+    />
+  );
+};
+
+const PierreDiffViewerBody: React.FC<Omit<PierreDiffViewerProps, 'hideWhitespace'>> = ({
   original,
   modified,
   fileDiff: incomingFileDiff,

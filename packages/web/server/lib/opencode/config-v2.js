@@ -11,6 +11,7 @@
  * Reference: OpenCode `packages/core/src/config/normalize.ts`,
  * `packages/core/src/v1/config/migrate.ts`, and `services/www` migrate-v1 docs.
  */
+import { isRecord } from '../shared/guards.js';
 
 // ============== SECTIONS ==============
 
@@ -18,15 +19,12 @@
  * Config section keys per entity. `v2` is what OpenChamber writes; `v1` is the
  * legacy key OpenCode still decodes and OpenChamber still reads.
  */
+
 const SECTIONS = {
   agents: { v2: 'agents', v1: 'agent' },
   commands: { v2: 'commands', v1: 'command' },
   providers: { v2: 'providers', v1: 'provider' },
 };
-
-function isRecord(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function sectionKeys(kind) {
   const section = SECTIONS[kind];

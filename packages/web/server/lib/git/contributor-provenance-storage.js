@@ -1,3 +1,4 @@
+import { isPlainObject, isString } from '../shared/guards.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,10 +7,6 @@ import { withSourceControlFileLock } from '../source-control/file-lock.js';
 
 const VERSION = 1;
 const DEFAULT_MAX_RECORDS = 512;
-const isPlainObject = (value) => value === Object(value)
-  && !Array.isArray(value)
-  && Object.getPrototypeOf(value) === Object.prototype;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 const isIdentifier = (value) => isString(value) && value.length > 0 && value.length <= 512
   && value.trim() === value && !/[\0\r\n]/.test(value);
 const exactKeys = (value, keys) => {
@@ -163,10 +160,16 @@ export function createContributorProvenanceStore({
     return enqueue(async () => {
       const [state, identities] = await Promise.all([
         readState(),
-        Promise.all(directories.map(resolveIdentity)),
+        // A listing entry whose git directory no longer resolves (a worktree
+        // deleted outside git, a bare repository root, a broken .git link)
+        // has no identity to look up. It reads as no provenance rather than
+        // failing the whole listing; action-time reads stay strict.
+        Promise.all(directories.map((directory) => resolveIdentity(directory).catch(() => null))),
       ]);
       const recordsByWorktree = new Map(state.records.map((record) => [record.worktreeId, record]));
-      return identities.map((identity) => recordForIdentity(recordsByWorktree.get(identity.worktreeId), identity));
+      return identities.map((identity) => (identity
+        ? recordForIdentity(recordsByWorktree.get(identity.worktreeId), identity)
+        : { revision: 0, provenance: null }));
     });
   };
   const compareAndSwap = (directory, expectedRevision, provenance) => {

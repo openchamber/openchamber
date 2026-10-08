@@ -35,8 +35,11 @@ const Harness = () => {
       value={text}
       onChange={(event) => setText(event.target.value)}
       onPaste={(event) => {
-        const pasted = takePastedImages(event);
-        if (pasted) setText(pasted.text);
+        const { value, selectionStart, selectionEnd } = event.currentTarget;
+        const pasted = takePastedImages(event.clipboardData, value, { start: selectionStart, end: selectionEnd });
+        if (!pasted) return;
+        event.preventDefault();
+        setText(`${value.slice(0, pasted.from)}${pasted.insertion}${value.slice(pasted.to)}`);
       }}
     />
   );

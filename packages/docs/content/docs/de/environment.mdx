@@ -78,6 +78,12 @@ Aktiviert ausführliche HTTP-Request-Logs, wenn auf `true` oder `1` gesetzt.
 
 Erzwingt den Paketmanager, den Update-Operationen verwenden, wenn die automatische Erkennung falsch liegt.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Leitet die eigenen ausgehenden Anfragen von OpenChamber, etwa Nutzungslimits und Skill-Kataloge, über einen Proxy. Kleingeschriebene Namen funktionieren ebenfalls. Hosts in `NO_PROXY` verbinden sich direkt, `localhost`, `127.0.0.1` und `::1` immer, sodass Anmelde-Callbacks und der lokale OpenCode-Server weiter funktionieren.
+
 ## OpenCode-Server
 
 ### `OPENCODE_HOST`

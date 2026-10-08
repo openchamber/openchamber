@@ -17,7 +17,7 @@ export const FILL_VIEWPORT: BrowserViewport = { kind: 'fill' };
 export const MIN_VIEWPORT_SIZE = 240;
 export const MAX_VIEWPORT_SIZE = 3840;
 
-export type ViewportPreset = {
+type ViewportPreset = {
   readonly id: string;
   readonly label: string;
   readonly width: number;
@@ -64,7 +64,7 @@ export const rotateViewport = (viewport: BrowserViewport): BrowserViewport => {
   return { kind: 'custom', width: viewport.height, height: viewport.width };
 };
 
-export type ViewportLayout = {
+type ViewportLayout = {
   /** Size to lay the page out at, in CSS pixels. */
   readonly width: number;
   readonly height: number;
@@ -108,7 +108,7 @@ export const describeViewport = (viewport: BrowserViewport): string => {
  * user nothing about what was actually checked.
  */
 const VIEWPORT_MODES = ['mobile', 'tablet', 'desktop', 'fill'] as const;
-export type BrowserViewportMode = (typeof VIEWPORT_MODES)[number];
+type BrowserViewportMode = (typeof VIEWPORT_MODES)[number];
 
 const MODE_PRESETS: Record<Exclude<BrowserViewportMode, 'fill'>, string> = {
   mobile: 'iphone-14',

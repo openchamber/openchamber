@@ -1,7 +1,8 @@
 /**
  * "In work": Jev moves a session into work when real work starts in it, and
- * says when a turn looks like the end of that work. The user closes; this
- * runtime never does. See DOCUMENTATION.md.
+ * says when a turn looks like the end of that work, or handed over changes
+ * worth a look. The user closes; this runtime never does. See
+ * DOCUMENTATION.md.
  *
  * Two moments ask Jev:
  * - a user message was sent (`message.updated`, role user): only while the
@@ -26,9 +27,10 @@ import {
   buildTurnEndRequest,
   decideAssist,
   decideOpen,
+  decideReviewReady,
   decideWrapUp,
 } from './questions.js';
-import { clearSuggestionPatch, openByJevPatch, readWork, suggestDonePatch } from './state.js';
+import { clearSuggestionPatch, offerReviewPatch, openByJevPatch, readWork, suggestDonePatch } from './state.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -37,17 +39,20 @@ const OPENCHAMBER_SETTINGS_FILE = path.join(
   'settings.json',
 );
 
-/** Both default on; read at every use so a change applies without a restart. */
+/** In work and auto-open default on, the review offer off; read at every use so a change applies without a restart. */
 const readSessionWorkSettings = () => {
   const settings = readMergedSettingsSync({ fs, path, settingsFilePath: OPENCHAMBER_SETTINGS_FILE });
   return {
     enabled: settings.sessionWorkEnabled !== false,
     autoOpen: settings.sessionWorkAutoOpen !== false,
+    reviewOffer: settings.sessionReviewOfferEnabled === true,
   };
 };
 
 const READ_TIMEOUT_MS = 5_000;
 const REQUEST_CHARS = 1_500;
+/** Head and tail of the turn's answer: what was changed sits early, the outcome late. */
+const ANSWER_EDGE_CHARS = 500;
 const SEEN_MESSAGES_LIMIT = 500;
 
 const errorMessage = (error) => (error instanceof Error ? error.message : String(error));
@@ -75,7 +80,7 @@ const reviewSessionSchema = z.object({ openchamber: z.object({ kind: z.literal('
 export function createSessionWorkRuntime({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
-  /** `{ enabled, autoOpen }` as currently saved. */
+  /** `{ enabled, autoOpen, reviewOffer }` as currently saved. */
   getSettings = readSessionWorkSettings,
   /** The classification provider's endpoint, or null when there is no Jev. */
   classifierEndpoint,
@@ -98,12 +103,12 @@ export function createSessionWorkRuntime({
   };
   let stopped = false;
   const seenMessages = new Set();
-  // Sessions where this process wrote a done hint, so a new turn can retire it
+  // Sessions where this process wrote a hint, so a new turn can retire it
   // without reading every session's metadata at every turn start.
   const suggested = new Map();
   // A turn counter per session, moved by every turn start and every new user
   // message. A turn-end check captures it before asking Jev and writes the
-  // done hint only if no newer turn began in the meantime: a late answer about
+  // hint only if no newer turn began in the meantime: a late answer about
   // the previous turn must not land on the next one.
   // Values come from one process-wide counter, so they never repeat: a session
   // evicted from the bounded map reads 0, which no pending check captured
@@ -180,7 +185,7 @@ export function createSessionWorkRuntime({
     const directory = suggested.get(sessionId);
     suggested.delete(sessionId);
     Promise.resolve(updateMetadata(sessionId, clearSuggestionPatch, { directory }))
-      .catch((error) => console.warn('[session-work] could not retire a done hint:', errorMessage(error)));
+      .catch((error) => console.warn('[session-work] could not retire a hint:', errorMessage(error)));
   };
 
   const processPayload = (payload, directoryHint = '') => {
@@ -216,7 +221,7 @@ export function createSessionWorkRuntime({
   const evaluateTurnEnd = async ({ sessionId, directory, assist }) => {
     if (stopped || lineage?.isChild(sessionId) === true) return null;
     const settings = getSettings();
-    if (!settings.enabled && !assist.recap && !assist.suggestion) return null;
+    if (!settings.enabled && !settings.reviewOffer && !assist.recap && !assist.suggestion) return null;
     // Never capture 0: an evicted session also reads 0.
     if (!turnGenerations.has(sessionId)) advanceTurn(sessionId);
     const generation = turnGeneration(sessionId);
@@ -231,6 +236,7 @@ export function createSessionWorkRuntime({
       const ask = {
         open: settings.enabled && settings.autoOpen && work?.state !== 'open',
         wrapUp: settings.enabled && work?.state === 'open',
+        reviewReady: settings.reviewOffer,
         recap: assist.recap,
         nextStep: assist.suggestion,
       };
@@ -240,7 +246,7 @@ export function createSessionWorkRuntime({
       const request = buildTurnEndRequest({
         history: turnsToHistory(context.turns.slice(0, -1)),
         request: excerptHead(turn.user.text, REQUEST_CHARS),
-        answer: excerptHeadTail(turn.assistant.text, 300, 300),
+        answer: excerptHeadTail(turn.assistant.text, ANSWER_EDGE_CHARS, ANSWER_EDGE_CHARS),
         ask,
       });
       if (!request) return null;
@@ -250,12 +256,16 @@ export function createSessionWorkRuntime({
         const requestAt = turn.user.created ?? now();
         await updateMetadata(sessionId, (metadata) => openByJevPatch(metadata, { requestAt, now: now() }), { directory });
       }
-      if (ask.wrapUp && decideWrapUp(answers)) {
+      // Looks done wins over a review offer from the same turn.
+      const suggest = ask.wrapUp && decideWrapUp(answers)
+        ? suggestDonePatch
+        : ask.reviewReady && decideReviewReady(answers) ? offerReviewPatch : null;
+      if (suggest) {
         // Decided at write time: a turn that started while Jev was answering
         // makes this answer about an older turn.
         const { changed } = await updateMetadata(
           sessionId,
-          (metadata) => (turnGeneration(sessionId) === generation ? suggestDonePatch(metadata, { now: now() }) : null),
+          (metadata) => (turnGeneration(sessionId) === generation ? suggest(metadata, { now: now() }) : null),
           { directory },
         );
         if (changed) markSuggested(sessionId, directory);

@@ -90,14 +90,18 @@ export const useSessionRowMenuState = ({
   // window blur, so the popover stays rendered while the app is in the
   // background. When the user returns, clicks outside no longer dismiss it
   // because Base UI's internal pointer tracking was reset.
+  // The blur listener lives as long as a menu stays open; it reads the
+  // handlers of the latest render, so a close follows current deferred work.
+  const openChangeHandlersRef = React.useRef({ menu: handleMenuOpenChange, contextMenu: handleContextMenuOpenChange });
+  openChangeHandlersRef.current = { menu: handleMenuOpenChange, contextMenu: handleContextMenuOpenChange };
   React.useEffect(() => {
     if (!isMenuOpen && !isContextMenuOpen) return;
     const onBlur = () => {
       if (isContextMenuOpen) {
-        handleContextMenuOpenChange(false);
+        openChangeHandlersRef.current.contextMenu(false);
       }
       if (isMenuOpen) {
-        handleMenuOpenChange(false);
+        openChangeHandlersRef.current.menu(false);
       }
     };
     window.addEventListener('blur', onBlur);

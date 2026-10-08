@@ -33,7 +33,7 @@ function mergeProps(childProps: AnyProps, slotProps: AnyProps): AnyProps {
   return merged;
 }
 
-export interface SlotProps extends React.HTMLAttributes<HTMLElement> {
+interface SlotProps extends React.HTMLAttributes<HTMLElement> {
   children?: React.ReactNode;
 }
 

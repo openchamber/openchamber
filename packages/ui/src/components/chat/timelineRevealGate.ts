@@ -27,7 +27,7 @@ export type TimelineRevealGate = {
   onEmpty: (() => void) | null;
 };
 
-export const TIMELINE_REVEAL_CAP_MS = 250;
+const TIMELINE_REVEAL_CAP_MS = 250;
 
 export const createTimelineRevealGate = (): TimelineRevealGate => {
   let holds = 0;

@@ -210,6 +210,8 @@ const useUIStore = create(() => ({
   isMobile: false,
   isModelSelectorOpen: false,
   hiddenModels: [],
+  favoriteAgents: [],
+  toggleFavoriteAgent: () => undefined,
   providerOrder: [],
   shortcutOverrides: {},
   isFavoriteModel: () => false,

@@ -21,6 +21,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   /** Suppress the bottom fade while retaining scroll-state tracking. */
   hideBottomScrollShadow?: boolean;
   userIntentOnly?: boolean;
+  /** Pixels kept clear above the vertical scrollbar track. */
+  verticalTrackStart?: number;
   /** Forwarded to the inner element (e.g. textarea). */
   disabled?: boolean;
 };
@@ -44,6 +46,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     hideTopScrollShadow = false,
     hideBottomScrollShadow = false,
     userIntentOnly = false,
+    verticalTrackStart,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
@@ -102,6 +105,7 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
           disableHorizontal={disableHorizontal}
           observeMutations={observeMutations}
           userIntentOnly={userIntentOnly}
+          verticalTrackStart={verticalTrackStart}
         />
       </div>
     );

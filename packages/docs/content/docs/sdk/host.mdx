@@ -172,11 +172,15 @@ With the `shells` capability, watch the shell commands running in the background
 
 | Call | What it does |
 | --- | --- |
-| `onRunningShells(scope, listener)` | subscribe to the running shell commands in scope: `{ kind: 'session', sessionId }` covers the session and its subagents, `{ kind: 'project', projectId }` covers a registered project, and `{ kind: 'global' }` covers every session. Oldest first, with each command's `background` flag. Returns an unsubscribe function. |
-| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a command's output. Without `cursor` it starts `tailBytes` (up to 65536) before the end. Returns `{ output, cursor, skipped }`. |
+| `onRunningShells(scope, listener)` | subscribe to the shell commands in scope: `{ kind: 'session', sessionId }` covers the session and its subagents, `{ kind: 'project', projectId }` covers a registered project, and `{ kind: 'global' }` covers every session. You get the running commands oldest first, each with its `background` flag, and the ones that ended. Returns an unsubscribe function. |
+| `readShellOutput(shellId, { cursor?, tailBytes? })` | one page of a running or ended command's output. Without `cursor` it starts `tailBytes` (up to 65536) before the end. Returns `{ output, cursor, skipped }`. |
 | `stopShell(shellId)` | send the agent the stop note first, then remove the command. |
 
-The snapshot is `{ kind: "shells", scope, shells }`, with `scope` echoing the subscription's scope; each shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for. A shell that is not running is `NOT_FOUND`; an unapproved `shells` capability is `NOT_GRANTED`.
+The snapshot is `{ kind: "shells", scope, shells, ended }`, with `scope` echoing the subscription's scope. Each running shell is `{ id, sessionID, command, startedAt, background }`, at most 200, oldest first. `background` is `true` for a job the turn does not wait for.
+
+`ended` lists the commands OpenChamber saw end, oldest end first, at most 200 with the newest kept. Each one adds `status`, `endedAt`, and `exit` when the command exited with a code. The status is `exited`, `timeout`, `killed` by a signal, `stopped` by a user, or `unknown` when the end happened during a reconnect. OpenChamber keeps this list in memory only. It is empty after the app reloads, so save what your panel shows in extension storage.
+
+OpenCode keeps an ended command's output for its latest 25 ended commands per directory. A stopped command loses its output right away. Reading a shell OpenChamber never saw, or output OpenCode no longer has, is `NOT_FOUND`. So is stopping a shell that is not running. An unapproved `shells` capability is `NOT_GRANTED`.
 
 ## Persistent extension data
 

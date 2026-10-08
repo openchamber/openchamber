@@ -65,7 +65,7 @@ const parseHostRelay = (value: unknown): DesktopHostRelay | null => {
   return { relayUrl, serverId, hostEncPubJwk: jwk as JsonWebKey };
 };
 
-export type DesktopHostsConfig = {
+type DesktopHostsConfig = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
   initialHostChoiceCompleted: boolean;
@@ -73,7 +73,7 @@ export type DesktopHostsConfig = {
 };
 
 /** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
-export type DesktopHostsConfigInput = {
+type DesktopHostsConfigInput = {
   hosts: DesktopHost[];
   defaultHostId: string | null;
   initialHostChoiceCompleted?: boolean;
@@ -201,7 +201,7 @@ export type HostProbeResult = {
   latencyMs: number;
 };
 
-export type DesktopHostUrlResolution = {
+type DesktopHostUrlResolution = {
   persistedUrl: string;
   redeemUrl: string | null;
   kind: 'normal-host' | 'tunnel-connect-link';

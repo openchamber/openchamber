@@ -70,6 +70,8 @@ const settle = async <R,>(request: Promise<R>): Promise<Settled<R>> => {
 class KeyedStore<R> {
     private readonly records = new Map<string, R>();
     private readonly listeners = new Map<string, Set<Listener>>();
+    /** Counts every write, so a reader can tell whether anything changed since it last looked. */
+    version = 0;
 
     constructor(private readonly limit: number) {}
 
@@ -81,6 +83,7 @@ class KeyedStore<R> {
         // Re-inserting keeps the map in least-recently-written order.
         this.records.delete(key);
         this.records.set(key, record);
+        this.version += 1;
         for (const listener of this.listeners.get(key) ?? []) listener();
         this.evict();
     }
@@ -101,6 +104,7 @@ class KeyedStore<R> {
     clear(): void {
         const keys = [...this.records.keys()];
         this.records.clear();
+        this.version += 1;
         for (const key of keys) {
             for (const listener of this.listeners.get(key) ?? []) listener();
         }
@@ -229,8 +233,12 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
 }
 
 export type ValueCache<T> = {
-    /** The value for `key`, fetched once and again when stale; one request at a time. */
-    ensure: (key: string, fetch: () => Promise<T>) => Promise<T>;
+    /**
+     * The value for `key`, fetched once and again when stale; one request at
+     * a time. `force` asks again even when fresh, after any request already
+     * running, so an answer from before a change never wins over one after it.
+     */
+    ensure: (key: string, fetch: () => Promise<T>, options?: { force?: boolean }) => Promise<T>;
     /**
      * Every key of `keys` that is missing or stale, asked together: one
      * `fetch` per `batchSize` of them. `fetch` answers each key it was given;
@@ -239,6 +247,8 @@ export type ValueCache<T> = {
     ensureMany: (keys: string[], fetch: (keys: string[]) => Promise<ReadonlyMap<string, T>>, batchSize: number) => void;
     read: (key: string) => CachedValue<T> | null;
     subscribe: (key: string, listener: Listener) => () => void;
+    /** Changes on every write; a snapshot for readers of several keys at once. */
+    version: () => number;
     clear: () => void;
 };
 
@@ -269,12 +279,17 @@ export function createValueCache<T>(limit = 40, now: () => number = Date.now): V
         return promise;
     };
 
-    const ensure: ValueCache<T>['ensure'] = (key, fetch) => {
+    const ensure: ValueCache<T>['ensure'] = (key, fetch, options) => {
         const existing = store.get(key);
+        const running = inflight.get(key);
+        if (options?.force) {
+            const after = running ? running.then(() => undefined, () => undefined) : Promise.resolve();
+            return track(key, settle(after.then(fetch)));
+        }
         if (existing?.state.status === 'ready' && isFresh(key)) {
             return Promise.resolve(existing.state.value);
         }
-        return inflight.get(key) ?? track(key, settle(fetch()));
+        return running ?? track(key, settle(fetch()));
     };
 
     const ensureMany: ValueCache<T>['ensureMany'] = (keys, fetch, batchSize) => {
@@ -301,6 +316,7 @@ export function createValueCache<T>(limit = 40, now: () => number = Date.now): V
         ensureMany,
         read: (key) => store.get(key)?.state ?? null,
         subscribe: (key, listener) => store.subscribe(key, listener),
+        version: () => store.version,
         clear: () => {
             inflight.clear();
             store.clear();

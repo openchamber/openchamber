@@ -3,8 +3,9 @@
  *
  * Notes, todos, and plan markdown are owned by the server
  * (`packages/web/server/lib/project-context`). This module only speaks HTTP:
- * it resolves no storage paths and never reads plan files directly, so the
- * shared UI has no knowledge of where any of it lives on disk.
+ * it resolves no storage paths and never reads or writes plan files directly.
+ * The only paths it sees are the ones the server reports (a plan's `path`, the
+ * shared plans folder), and those only name files to the user or an agent.
  *
  * Every function throws on failure. An authoritative read must never resolve
  * to an empty value that a caller could mistake for "the project has nothing".
@@ -54,6 +55,12 @@ interface ProjectContextData {
 interface ProjectPlanContent extends ProjectPlanLink {
   body: string;
   raw: string;
+  /**
+   * Absolute path of the plan's markdown on the server's machine. Only for
+   * naming the plan to an agent (comments quote it); reads and writes stay
+   * addressed by id through these routes.
+   */
+  path?: string;
 }
 
 export interface ProjectRef {
@@ -73,7 +80,7 @@ export interface SavedProjectPlanTarget {
 }
 
 export const PROJECT_NOTE_BODY_MAX_LENGTH = 3000;
-export const PROJECT_TODO_TEXT_MAX_LENGTH = 120;
+export const PROJECT_TODO_TEXT_MAX_LENGTH = 1000;
 
 /**
  * Split a plan document into title and body, mirroring the server's own rule so

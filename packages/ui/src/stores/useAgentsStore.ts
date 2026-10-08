@@ -9,6 +9,7 @@ import {
   finishConfigUpdate,
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
+import { waitForOpenCodeConnection } from "@/stores/waitForOpenCodeConnection";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useConfigStore } from "@/stores/useConfigStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
@@ -16,7 +17,9 @@ import { useProjectsStore } from "@/stores/useProjectsStore";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { z } from "zod";
 import { formatModelSelection, parseModelSelection } from "@/lib/modelIdentifier";
+import { getRuntimeKey } from "@/lib/runtime-switch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
 // useDirectoryStore -> useAgentsStore (for refreshAfterOpenCodeRestart)
@@ -84,6 +87,7 @@ const agentsLastLoadedAt = new Map<string, number>();
 // settle and read again, and the newest generation's result is the one kept.
 const agentsLoadGeneration = new Map<string, number>();
 const agentsLoadInFlight = new Map<string, { generation: number; request: Promise<boolean> }>();
+let agentsGeneration = 0;
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
@@ -93,6 +97,7 @@ export const invalidateAgentsLoadCache = (directory: string | null = getConfigDi
   const cacheKey = getAgentsCacheKey(directory);
   agentsLastLoadedAt.delete(cacheKey);
   agentsLoadGeneration.set(cacheKey, (agentsLoadGeneration.get(cacheKey) ?? 0) + 1);
+  opencodeClient.invalidateAgentList(directory);
 };
 
 const buildAgentsSignature = (agents: Agent[]): string => {
@@ -167,7 +172,8 @@ export interface AgentEntity {
   hidden?: boolean;
   color?: string | null;
   steps?: number | null;
-  disabled?: boolean;
+  /** null removes the key, which turns a disabled agent back on. */
+  disabled?: boolean | null;
   request?: AgentRequest | null;
   permissions?: PermissionRule[] | null;
 }
@@ -187,7 +193,7 @@ export interface AgentEntityEnvelope {
 }
 
 /** What `GET /api/config/agents/:name/permissions` answers. */
-export interface AgentPermissionsEnvelope {
+interface AgentPermissionsEnvelope {
   global: PermissionRule[];
   agent: PermissionRule[];
   effective: Array<PermissionRule & { source: 'global' | 'agent' }>;
@@ -268,12 +274,6 @@ export const isAgentManageable = (agent: Agent): boolean => {
 
 const CONFIG_EVENT_SOURCE = "useAgentsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const MAX_HEALTH_WAIT_MS = 20000;
-const FAST_HEALTH_POLL_INTERVAL_MS = 300;
-const FAST_HEALTH_POLL_ATTEMPTS = 4;
-const SLOW_HEALTH_POLL_BASE_MS = 800;
-const SLOW_HEALTH_POLL_INCREMENT_MS = 200;
-const SLOW_HEALTH_POLL_MAX_MS = 2000;
 
 const hasValue = <T>(value: T | null | undefined): value is T => value !== null && value !== undefined;
 
@@ -329,7 +329,7 @@ const upsertOptimisticAgentLocal = (
   }
 };
 
-export interface AgentDraft {
+interface AgentDraft {
   name: string;
   scope: AgentScope;
   description?: string;
@@ -357,6 +357,7 @@ interface AgentsStore {
   setSelectedAgent: (name: string | null) => void;
   setAgentDraft: (draft: AgentDraft | null) => void;
   loadAgents: (directory?: string | null) => Promise<boolean>;
+  resetForRuntimeSwitch: () => void;
   /** The agent's own config entry, as stored — never the resolved `AgentInfo`. */
   fetchAgentEntity: (name: string, directory?: string | null) => Promise<AgentEntityEnvelope | null>;
   /** Global + agent + effective permission rules for one agent. */
@@ -365,6 +366,10 @@ interface AgentsStore {
   updateAgent: (name: string, config: Partial<AgentConfig>, directory?: string | null) => Promise<AgentMutationResult>;
   deleteAgent: (name: string, scope?: AgentScope, directory?: string | null) => Promise<AgentMutationResult>;
   getAgentByName: (name: string, directory?: string | null) => Agent | undefined;
+  /** Agents switched off with `disabled: true`, per directory. OpenCode leaves them out of its list. */
+  disabledAgentsByDirectory: Record<string, DisabledAgent[]>;
+  /** Re-read the disabled agents; a failed read keeps the previous list. */
+  loadDisabledAgents: (directory?: string | null) => Promise<boolean>;
   // Returns only visible agents (excludes hidden internal agents)
   getVisibleAgents: (directory?: string | null) => Agent[];
 }
@@ -376,6 +381,24 @@ declare global {
 }
 
 const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_DISABLED_AGENTS: DisabledAgent[] = [];
+
+const DisabledAgentsResponseSchema = z.object({
+  agents: z.array(z.object({
+    name: z.string().min(1),
+    scope: z.enum(['user', 'project']).nullable(),
+    path: z.string().nullable(),
+    description: z.string().optional(),
+  })),
+});
+
+type DisabledAgent = z.infer<typeof DisabledAgentsResponseSchema>['agents'][number];
+
+/** Disabled agents of one project; an omitted directory means the project the app is on. */
+export const selectDisabledAgentsForDirectory = (
+  state: Pick<AgentsStore, 'disabledAgentsByDirectory'>,
+  directory?: string | null,
+): DisabledAgent[] => state.disabledAgentsByDirectory[getAgentsCacheKey(resolveDirectory(directory))] ?? EMPTY_DISABLED_AGENTS;
 
 /**
  * Read one of the agent config sub-resources. Returns null on any failure so a
@@ -429,8 +452,31 @@ export const useAgentsStore = create<AgentsStore>()(
         selectedAgentName: null,
         agents: [],
         agentsByDirectory: {},
+        disabledAgentsByDirectory: {},
         isLoading: false,
         agentDraft: null,
+
+        loadDisabledAgents: async (requestedDirectory?: string | null) => {
+          const configDirectory = resolveDirectory(requestedDirectory);
+          const query = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
+          try {
+            const response = await runtimeFetch(`/api/config/disabled-agents${query}`, {
+              headers: {
+                'Cache-Control': 'no-cache',
+                ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
+              },
+            });
+            if (!response.ok) return false;
+            const parsed = DisabledAgentsResponseSchema.safeParse(await response.json().catch(() => null));
+            if (!parsed.success) return false;
+            const cacheKey = getAgentsCacheKey(configDirectory);
+            set((state) => ({ disabledAgentsByDirectory: { ...state.disabledAgentsByDirectory, [cacheKey]: parsed.data.agents } }));
+            return true;
+          } catch (error) {
+            console.warn('[AgentsStore] Failed to read disabled agents:', error);
+            return false;
+          }
+        },
 
         setSelectedAgent: (name: string | null) => {
           set({ selectedAgentName: name });
@@ -438,6 +484,15 @@ export const useAgentsStore = create<AgentsStore>()(
 
         setAgentDraft: (draft: AgentDraft | null) => {
           set({ agentDraft: draft });
+        },
+
+        resetForRuntimeSwitch: () => {
+          agentsGeneration += 1;
+          agentsLastLoadedAt.clear();
+          agentsLoadInFlight.clear();
+          agentsLoadGeneration.clear();
+          opencodeClient.clearAgentListRequests();
+          set({ agents: [], agentsByDirectory: {}, isLoading: false });
         },
 
         loadAgents: async (requestedDirectory?: string | null) => {
@@ -452,10 +507,22 @@ export const useAgentsStore = create<AgentsStore>()(
             return true;
           }
 
+          const runtimeGeneration = agentsGeneration;
+          const runtimeKey = getRuntimeKey();
+          // A catalog event may retire the read a create/delete is waiting for.
+          // That caller still needs the current list, not a failed mutation toast.
+          const wasRetired = (loadGeneration: number) => (
+            agentsGeneration === runtimeGeneration
+            && getRuntimeKey() === runtimeKey
+            && (agentsLoadGeneration.get(cacheKey) ?? 0) !== loadGeneration
+          );
+
           let inFlight = agentsLoadInFlight.get(cacheKey);
           while (inFlight) {
             if (inFlight.generation === (agentsLoadGeneration.get(cacheKey) ?? 0)) {
-              return inFlight.request;
+              const joined = inFlight;
+              const loaded = await joined.request;
+              return wasRetired(joined.generation) ? get().loadAgents(configDirectory) : loaded;
             }
             // Started before the latest invalidation: let it settle so it cannot
             // commit after this read, then read again.
@@ -464,6 +531,11 @@ export const useAgentsStore = create<AgentsStore>()(
           }
 
           const generation = agentsLoadGeneration.get(cacheKey) ?? 0;
+          const isCurrentLoad = () => (
+            agentsGeneration === runtimeGeneration
+            && (agentsLoadGeneration.get(cacheKey) ?? 0) === generation
+            && getRuntimeKey() === runtimeKey
+          );
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -472,6 +544,7 @@ export const useAgentsStore = create<AgentsStore>()(
             const previousSignature = buildAgentsSignature(previousAgents);
 
             for (let attempt = 0; attempt < 3; attempt++) {
+              if (!isCurrentLoad()) return false;
               try {
                 const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
@@ -533,6 +606,9 @@ export const useAgentsStore = create<AgentsStore>()(
                   })
                 );
 
+                // Invalidation retires requests formed before the catalog
+                // change. Their lists and TTLs must not replace the fresh load.
+                if (!isCurrentLoad()) return false;
                 const nextSignature = buildAgentsSignature(agentsWithScope);
                 if (previousSignature !== nextSignature) {
                   set((state) => {
@@ -552,21 +628,26 @@ export const useAgentsStore = create<AgentsStore>()(
                 }
                 return true;
               } catch {
+                if (!isCurrentLoad()) return false;
                 // ignore error
               }
             }
 
-            set({ isLoading: false });
+            if (isCurrentLoad()) {
+              set({ isLoading: false });
+            }
             return false;
           })();
 
           const entry = { generation, request };
           agentsLoadInFlight.set(cacheKey, entry);
+          let loaded: boolean;
           try {
-            return await request;
+            loaded = await request;
           } finally {
             if (agentsLoadInFlight.get(cacheKey) === entry) agentsLoadInFlight.delete(cacheKey);
           }
+          return wasRetired(generation) ? get().loadAgents(configDirectory) : loaded;
         },
 
         fetchAgentEntity: async (name: string, requestedDirectory?: string | null) => {
@@ -654,6 +735,7 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.system !== undefined) agentConfig.system = config.system;
             if ('color' in config) agentConfig.color = config.color ?? null;
             if (config.hidden !== undefined) agentConfig.hidden = config.hidden;
+            if ('disabled' in config) agentConfig.disabled = config.disabled ? true : null;
             // `request` is replaced wholesale, so a caller must send the full
             // block it wants persisted, not just the field it changed.
             if (config.request !== undefined) agentConfig.request = config.request;
@@ -685,7 +767,10 @@ export const useAgentsStore = create<AgentsStore>()(
             }
 
             // OpenCode 2 re-reads the file itself; the store just refreshes its list.
-            const loaded = await get().loadAgents(configDirectory);
+            const [loaded] = await Promise.all([
+              get().loadAgents(configDirectory),
+              'disabled' in config ? get().loadDisabledAgents(configDirectory) : Promise.resolve(true),
+            ]);
             if (loaded) {
               emitConfigChange("agents", { source: CONFIG_EVENT_SOURCE });
             }
@@ -770,50 +855,6 @@ export const useAgentsStore = create<AgentsStore>()(
 
 if (typeof window !== "undefined") {
   window.__zustand_agents_store__ = useAgentsStore;
-}
-
-async function waitForOpenCodeConnection(delayMs?: number) {
-  const initialPause = typeof delayMs === "number" && delayMs > 0
-    ? Math.min(delayMs, FAST_HEALTH_POLL_INTERVAL_MS)
-    : 0;
-
-  if (initialPause > 0) {
-    await sleep(initialPause);
-  }
-
-  const start = Date.now();
-  let attempt = 0;
-  let lastError: unknown = null;
-
-  while (Date.now() - start < MAX_HEALTH_WAIT_MS) {
-    attempt += 1;
-    updateConfigUpdateMessage(`Waiting for OpenCode… (attempt ${attempt})`);
-
-    try {
-      const isHealthy = await opencodeClient.checkHealth();
-      if (isHealthy) {
-        return;
-      }
-      lastError = new Error("OpenCode health check reported not ready");
-    } catch (error) {
-      lastError = error;
-    }
-
-    const elapsed = Date.now() - start;
-
-    const waitMs =
-      attempt <= FAST_HEALTH_POLL_ATTEMPTS && elapsed < 1200
-        ? FAST_HEALTH_POLL_INTERVAL_MS
-        : Math.min(
-            SLOW_HEALTH_POLL_BASE_MS +
-              Math.max(0, attempt - FAST_HEALTH_POLL_ATTEMPTS) * SLOW_HEALTH_POLL_INCREMENT_MS,
-            SLOW_HEALTH_POLL_MAX_MS,
-          );
-
-    await sleep(waitMs);
-  }
-
-  throw lastError || new Error("OpenCode did not become ready in time");
 }
 
 type ConfigRefreshMode = "active" | "projects";

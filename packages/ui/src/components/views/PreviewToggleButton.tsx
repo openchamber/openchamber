@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
 
-export type PreviewToggleButtonProps = {
+type PreviewToggleButtonProps = {
   /** Current mode - determines which icon is displayed */
   currentMode: 'preview' | 'edit';
   /** Callback fired when toggle button is clicked */

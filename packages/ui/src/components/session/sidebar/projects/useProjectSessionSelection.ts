@@ -24,7 +24,7 @@ type Args = {
   setSessionSwitcherOpen: (open: boolean) => void;
 };
 
-export type MissingProjectSessionSelection =
+type MissingProjectSessionSelection =
   | { kind: 'preserve-current' }
   | { kind: 'open-draft' }
   | { kind: 'select-session'; sessionId: string }
@@ -39,7 +39,7 @@ export type MissingProjectSessionSelection =
  * while a session missing from every rendered map is preserved so stale
  * worktree metadata can catch up.
  */
-export function resolveMissingProjectSessionSelection<T>({
+function resolveMissingProjectSessionSelection<T>({
   activeProjectId,
   currentSessionId,
   currentSessionOwnerProjectId,
@@ -87,7 +87,7 @@ export function resolveMissingProjectSessionSelection<T>({
   return { kind: 'select-session', sessionId: targetSessionId };
 }
 
-export const useProjectSessionSelection = (args: Args): void => {
+const useProjectSessionSelection = (args: Args): void => {
   const {
     projectSections,
     activeProjectId,

@@ -80,6 +80,12 @@ Overrides the update-check API endpoint. Most users should leave this unset.
 
 Forces the package manager used by update operations when auto-detection is wrong.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Sends OpenChamber's own outgoing requests, such as usage limits and skill catalogs, through a proxy. Lowercase names work too. Hosts in `NO_PROXY` connect directly, and `localhost`, `127.0.0.1` and `::1` always do, so sign-in callbacks and the local OpenCode server keep working.
+
 ## OpenCode server
 
 ### `OPENCODE_HOST`

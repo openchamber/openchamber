@@ -22,21 +22,20 @@ description: 连接 OpenChamber 所使用的服务和订阅。
 
 ### 浏览 issue
 
-连接工作区后，右侧上下文栏会出现 **Linear** 面板。它列出当前工作区的 issue，你可以：
+Linear issue 位于 **Issues and PRs** 看板。点击侧边栏顶部的拉取请求图标打开它，或按 <kbd>⌘K</kbd> 再按 <kbd>B</kbd>（Windows 和 Linux 上为 <kbd>Ctrl+K</kbd> 再按 <kbd>B</kbd>），然后在顶部选择 **Linear**。看板列出当前工作区的 issue，你可以：
 
-- 按状态（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、负责人（**Anyone** 或 **Assigned to me**）、团队和优先级筛选
-- 按标题、标识符或 Linear URL 搜索
-- 打开 issue 查看描述、评论、标签和优先级
-- 修改其 **Status** 或选择 **Close issue**
-- 切换当前 **Workspace**
+- 显示单个团队或 **All teams**
+- 连接了多个工作区时切换当前工作区
+- 同时按状态、归属（**Assigned to me** 或 **Created by me**）和优先级筛选，并按标题或标识符搜索
+- 在列表旁查看 issue 的描述、评论、标签和优先级
+- 修改其 **Status**
 
 ### 从 issue 开始会话
 
-- 在 Linear 面板中打开 issue 并选择 **Start session**。滚动 issue 时按钮始终停留在底部。
-- 在聊天中选择 **New Session From Linear Issue** 从列表中挑选；需要新分支时选择 **Create in worktree**。
-- 在 **New Worktree** 对话框中选择一个 Linear issue。新会话打开时该 issue 已附加在消息框中，第一条消息由你自己来写。
+- 在看板上选中一个 issue，选择 **Start in worktree…** 在新分支中工作，或选择 **New session** 直接在项目当前状态下工作。
+- 在 **New Worktree** 对话框中选择一个 Linear issue。
 
-从 Linear 面板和聊天开始时，会话会在映射到该 issue 所属团队的项目中打开，issue 作为第一条提示。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。未映射的团队会先要求你完成映射。第一条消息由 **Issue Review** 魔法提示生成，可在 **设置 → Magic Prompts → Linear** 中编辑。
+无论哪种方式，会话打开时该 issue 都已附加在消息框中，第一条消息由你自己来写。看板会在映射到该 issue 所属团队的项目中启动会话，该项目显示在 **Start in** 旁边；如有需要，可在那里改选其他项目。在 Linear 卡片中映射团队：**Default project** 适用于所有团队，**Team projects** 可按团队覆盖。没有映射时，看板使用它上次显示的项目。
 
 ### 将 issue 关联到消息
 
@@ -84,4 +83,3 @@ Excalidraw 让你直接在 Files 中绘制 `.excalidraw` 文件和 Obsidian 的 
 
 - [GitHub Issue 与 PR](/zh-cn/github/) — GitHub 在 OpenChamber 中能做的一切
 - [工作树会话](/zh-cn/worktrees/) — issue 会话可以从哪里开始
-- [Magic Prompts](/zh-cn/magic-prompts/) — 编辑 Linear 会话的起始提示

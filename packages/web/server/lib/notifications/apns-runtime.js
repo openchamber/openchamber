@@ -43,9 +43,8 @@ export const createApnsRuntime = (deps) => {
     http2,
     APNS_TOKENS_FILE_PATH,
     readSettingsFromDiskMigrated,
-    writeSettingsToDisk,
-    // Strict settings reader gating identity regeneration (see signing-key.js).
-    readSettingsStrict,
+    // Host relay identity keys, shared with the private relay (relay/key-store.js).
+    relayKeyStore,
   } = deps;
 
   let persistLock = Promise.resolve();
@@ -55,8 +54,8 @@ export const createApnsRuntime = (deps) => {
   let warnedUnconfigured = false;
 
   // ---------------------------------------------------------------------------
-  // Per-server relay signing identity (ECDSA P-256). Auto-generated + persisted in settings
-  // (mirrors getOrCreateVapidKeys). The relay derives serverId = SHA-256(publicKey), verifies
+  // Per-server relay signing identity (ECDSA P-256). Auto-generated + persisted by
+  // relay/key-store.js. The relay derives serverId = SHA-256(publicKey), verifies
   // each request's signature, and only delivers to tokens this server registered — so a leaked
   // device token alone can't be used to push. Zero-config: the keypair generates on first use.
   // ---------------------------------------------------------------------------
@@ -65,7 +64,7 @@ export const createApnsRuntime = (deps) => {
   // relay identity — same keypair, same storage, same serverId derivation).
   const getOrCreateRelayKeypair = async () => {
     if (cachedRelayKey) return cachedRelayKey;
-    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+    cachedRelayKey = await getOrCreateRelaySigningKeypair({ crypto, relayKeyStore });
     return cachedRelayKey;
   };
 

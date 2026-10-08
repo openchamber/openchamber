@@ -194,7 +194,7 @@ const useProjectIconImageObjectUrl = (
   return url;
 };
 
-export type ProjectIconImageProps = {
+type ProjectIconImageProps = {
   project: Pick<ProjectEntry, 'id' | 'iconImage'>;
   options?: ProjectIconImageOptions;
   className?: string;

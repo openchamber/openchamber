@@ -10,6 +10,7 @@ import { loadOpenAI } from './openai-sdk.js';
 import { normalizeCustomOpenAIBaseURL } from './base-url.js';
 
 // Voice options from OpenAI
+/** @public */
 export const TTS_VOICES = [
   'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
   'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
@@ -47,7 +48,8 @@ async function getOpenAIApiKey() {
   return null;
 }
 
-class TTSService {
+/** @public */
+export class TTSService {
   constructor() {
     this._client = null;
     this._lastApiKey = null;
@@ -182,5 +184,5 @@ class TTSService {
 }
 
 // Export singleton instance
+/** @public */
 export const ttsService = new TTSService();
-export { TTSService };

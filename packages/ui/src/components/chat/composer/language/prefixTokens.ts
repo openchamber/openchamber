@@ -1,12 +1,12 @@
 /**
- * The composer's prefix-token grammar: `/skill`, `/command` and `#snippet`.
+ * The composer's prefix-token grammar: `/command`, `$skill` and `#snippet`.
  *
  * Structurally these are the same construct — a sigil at a word boundary
  * followed by an identifier — and they were previously scanned by three
  * different regexes per sigil (highlighting, send-time collection, and the
  * autocomplete trigger), each with its own idea of the valid character set.
  * The send-time skill scanner, for instance, accepted only lowercase names, so
- * a `/My_Skill` token was painted as a command but never collected.
+ * a `My_Skill` token was painted but never collected.
  *
  * Scanning is deliberately generous: it finds every syntactically plausible
  * token and leaves the decision of what exists to the caller, which holds the
@@ -18,13 +18,13 @@
 
 /**
  * Identifier body shared by all prefix tokens: starts alphanumeric, then
- * alphanumerics, `-` and `_`. Kept in one place so `/` and `#` cannot drift
+ * alphanumerics, `-` and `_`. Kept in one place so the sigils cannot drift
  * apart again.
  */
 const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
 
-/** Sigils that introduce a prefix token. */
-export type TokenPrefix = '/' | '#';
+/** Sigils that introduce a prefix token: commands, skills, snippets. */
+export type TokenPrefix = '/' | '$' | '#';
 
 export interface PrefixToken {
     /** Offset of the sigil. */
@@ -39,6 +39,7 @@ export interface PrefixToken {
 
 const SCANNERS: Record<TokenPrefix, RegExp> = {
     '/': new RegExp(`(^|\\s)\\/(${TOKEN_NAME})`, 'g'),
+    '$': new RegExp(`(^|\\s)\\$(${TOKEN_NAME})`, 'g'),
     '#': new RegExp(`(^|\\s)#(${TOKEN_NAME})`, 'g'),
 };
 
@@ -68,8 +69,8 @@ export function scanPrefixTokens(text: string, prefix: TokenPrefix): PrefixToken
 
 /**
  * The tokens whose name is present in `known`, in document order. `compare`
- * decides how a token name is matched against the set — snippets and slash
- * invocations both match case-insensitively, while the skill-instruction
+ * decides how a token name is matched against the set — snippets and commands
+ * both match case-insensitively, while the skill-instruction
  * builder matches the exact registered name.
  */
 export function filterKnownTokens(

@@ -1,0 +1,74 @@
+---
+title: Issues y PRs
+description: Revisa las issues y pull requests de un proyecto, o tus issues de Linear, y empieza a trabajar desde una.
+---
+
+# Issues y PRs
+
+El tablero **Issues and PRs** es una página completa que lista las issues y pull requests de GitHub o GitLab de un proyecto (merge requests en GitLab), o tus issues de Linear. Elige un elemento y su vista previa se abre junto a la lista. Mirar otro proyecto aquí no cambia el proyecto en el que está el resto de la app.
+
+## Abre el tablero
+
+- Haz clic en el icono de pull request en la cabecera de la barra lateral, junto a las tareas programadas y el archivo.
+- Elige **Issues and PRs** en la paleta de comandos.
+- Pulsa <kbd>⌘K</kbd> y luego <kbd>B</kbd> (<kbd>Ctrl+K</kbd> y luego <kbd>B</kbd> en Windows y Linux). Las mismas teclas lo cierran.
+
+En un teléfono, toca el botón de pull request en el pie del menú de sesiones. El tablero no está disponible en la extensión de VS Code.
+
+El tablero se vuelve a abrir en el proyecto, la pestaña y el equipo en que lo dejaste.
+
+## Encuentra elementos
+
+Todo está en una sola fila de la barra de herramientas. A la izquierda está el selector de proyecto, con iconos de proyecto y búsqueda. Al lado cambias entre **Issues**, **Pull requests** y **Linear**. Las issues y los pull requests vienen del host propio del proyecto, GitHub o GitLab. Un proyecto sin ese remoto muestra solo **Linear**.
+
+En **Linear**, el selector de proyecto pasa a ser un selector de equipo: elige **All teams** o un equipo. Si conectaste más de un espacio de trabajo de Linear, cámbialo desde el mismo menú. Cómo conectar Linear está en [Integraciones](/es/integrations/).
+
+La búsqueda acepta un título, un número o un enlace pegado. El menú de filtros sigue abierto mientras eliges, así que puedes combinar filtros.
+
+Para GitHub y GitLab:
+
+- Estado: **Open**, **Closed**, **All**, y **Merged** para pull requests
+- Personas: **Anyone**, **Assigned to me**, **Created by me**, y **Review requested** para pull requests
+
+Para Linear:
+
+- Estado: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Personas: **Anyone**, **Assigned to me**, **Created by me**
+- Prioridad: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Lee un elemento
+
+La vista previa muestra la descripción, las etiquetas y los comentarios. En una issue de Linear, haz clic en la píldora de estado para pasarla a otro estado del equipo.
+
+La fila **Labels** tiene un botón de lápiz que abre una lista con buscador de las etiquetas del repositorio. Márcalas o desmárcalas. El cambio se guarda al cerrar la lista, así que varios clics cuentan como un solo cambio. Un pull request abierto (merge request en GitLab) también tiene una fila **Reviewers** que funciona igual, con las personas que pueden revisar en el repositorio. En GitHub no se ofrece al autor del pull request. Las issues de Linear no tienen ninguna de las dos filas.
+
+## Comenta y revisa
+
+Debajo de la actividad de una issue o un pull request hay un cuadro de comentario. **Comment** publica tu texto en GitHub o GitLab, igual que <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> en Windows y Linux). El texto se queda en el cuadro hasta que se publica, así que un envío fallido no pierde nada. Al pasar a otro elemento, el cuadro se vacía. Las issues de Linear no lo tienen.
+
+Un pull request abierto (merge request en GitLab) también tiene **Approve** y **Request changes**, y el texto del cuadro va con la revisión. **Request changes** necesita un texto que diga qué cambiar. La revisión es para los commits que muestra la vista previa. Si alguien hizo push desde entonces, se rechaza y la vista previa se actualiza para que vuelvas a mirar. En GitLab, **Request changes** funciona si eres revisor del merge request, y el texto de la revisión se publica como un comentario aparte. Si solo falla ese comentario, la revisión cuenta igual y tu texto se queda en el cuadro.
+
+## Empieza a trabajar
+
+Las acciones están al pie de la vista previa.
+
+- **New session** abre una sesión nueva en el proyecto con el elemento adjunto al cuadro de mensaje. El primer mensaje lo escribes tú.
+- **Start in worktree…** en una issue, o **Check out in worktree…** en un pull request, abre el diálogo New Worktree con el elemento ya elegido. Un pull request hace checkout de su propia rama. Consulta [Sesiones de worktree](/es/worktrees/).
+
+En una issue de Linear, **Start in** muestra el proyecto donde empezará la sesión. Es el proyecto asignado al equipo de la issue en la tarjeta de Linear de [Integraciones](/es/integrations/). Sin asignación de equipo es el proyecto por defecto y, si tampoco lo hay, el último proyecto que mostró el tablero. Ahí puedes elegir otro proyecto para esa issue.
+
+## Pull requests
+
+La vista previa de un pull request también muestra su rama, su tamaño (líneas añadidas y quitadas, y archivos cambiados), sus checks y su revisión. El feed **Activity** ordena los comentarios, los veredictos de revisión y los commits más recientes tal como ocurrieron. Los commits seguidos se agrupan, así ves a qué commits respondió una revisión.
+
+Junto al tamaño hay dos botones. **Changes** abre el diff del pull request en el panel lateral, y **Walkthrough** abre su [recorrido por los cambios](/es/walkthrough/). Si la app está en otro proyecto, primero cambia al proyecto del PR. Los dos están solo en escritorio y web.
+
+Al pie, **Merge** pregunta antes de fusionar y usa tu método de merge habitual. Un borrador también tiene **Ready for review**.
+
+Una issue o un pull request abiertos también tienen al pie **Close issue** o **Close pull request** (**Close merge request** en GitLab), y uno cerrado tiene **Reopen issue** o **Reopen pull request** (**Reopen merge request**). No piden confirmación, porque se puede deshacer. Un pull request fusionado no se puede cerrar ni reabrir. En GitHub, una issue se cierra como completada.
+
+## Relacionado
+
+- [Issues y PRs de GitHub](/es/github/): conecta GitHub y adjunta issues a los mensajes
+- [Sesiones de worktree](/es/worktrees/): dónde empiezan las sesiones de worktree
+- [Integraciones](/es/integrations/): conecta Linear y asigna equipos a proyectos

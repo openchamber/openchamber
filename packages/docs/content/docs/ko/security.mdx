@@ -104,6 +104,19 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 - CLI는 OpenCode 2.x이고, OpenChamber가 요구하는 버전 이상이어야 합니다. 더 오래된 버전이면 OpenChamber는 "OpenCode 업데이트" 화면에서 멈춥니다.
 - `opencode`(Windows에서는 `opencode.exe`)가 들어 있는 폴더를 지정해도 됩니다. 사용자가 직접 설정할 수 있기 때문에 이를 위한 환경 변수는 없습니다.
 
+
+### 기본 제공 스킬 카탈로그 숨기기
+
+OpenChamber에는 몇 가지 공개 스킬 카탈로그(Anthropic, OpenAI, Cursor, Matt Pocock)가 함께 제공됩니다. 조직에서 자체 카탈로그를 운영한다면 사용자 지정 카탈로그로 추가하고 정책 파일에서 기본 제공 카탈로그를 숨기세요. 엔터프라이즈 모드와 관계없이 작동합니다.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+그러면 설정에는 사람들이 직접 추가한 카탈로그만 표시되고, 직접 요청하더라도 OpenChamber는 기본 제공 카탈로그를 불러오지 않습니다. 사용자가 직접 설정할 수 있으므로 이를 위한 환경 변수는 없습니다.
+
 ### 예시
 
 Mac에 정책 파일을 두려면 터미널에서 관리자 권한으로 다음을 실행하세요.

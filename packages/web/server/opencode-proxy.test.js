@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import express from 'express';
 import path from 'path';
 
@@ -400,6 +401,68 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(data.body).toEqual(payload);
     expect(data.transferEncoding).toBeNull();
     expect(Number(data.contentLength)).toBe(JSON.stringify(payload).length);
+  });
+
+  it('drops the copied transfer-encoding from an empty chunked request before forwarding it', async () => {
+    const upstream = express();
+    upstream.post('/api/session/abc/interrupt', (req, res) => {
+      res.json({
+        transferEncoding: req.headers['transfer-encoding'] ?? null,
+        contentLength: req.headers['content-length'] ?? null,
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    // An empty POST with no content-type, the way a tunnel forwards the
+    // interrupt request: nothing for a body parser to grab, so no body is
+    // replayed. http-proxy must not carry the copied `transfer-encoding`
+    // header onto the outgoing request. The outgoing client picks its own
+    // framing (Bun writes content-length for bodies it can size, empty ones
+    // included), and OpenCode rejects a request with both framing headers
+    // as ambiguous. The spy is the discriminator: whatever framing the
+    // client would have added by itself, the copied header may not ride
+    // along on top of it.
+    const originalRemoveHeader = http.ClientRequest.prototype.removeHeader;
+    const removedHeaders = [];
+    vi.spyOn(http.ClientRequest.prototype, 'removeHeader').mockImplementation(function (name) {
+      removedHeaders.push(name);
+      return originalRemoveHeader.call(this, name);
+    });
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/interrupt`, {
+      method: 'POST',
+      headers: {},
+      body: new Blob([]).stream(),
+      duplex: 'half',
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    const framings = [data.transferEncoding !== null, data.contentLength !== null].filter(Boolean);
+    expect(framings).toHaveLength(1);
+    expect(removedHeaders).toContain('transfer-encoding');
   });
 
   it.each([

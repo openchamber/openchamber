@@ -16,7 +16,7 @@ export type PermissionTarget = {
   file?: string;
 };
 
-export type PermissionSummary = {
+type PermissionSummary = {
   titleKey: I18nKey;
   /** Only set for `chat.permissionCard.summary.tool`. */
   tool?: string;
@@ -39,12 +39,12 @@ export const permissionSummaryMetadataSchema = z.object({
   path: optionalText,
 }).catch({});
 
-export type PermissionSummaryMetadata = z.infer<typeof permissionSummaryMetadataSchema>;
+type PermissionSummaryMetadata = z.infer<typeof permissionSummaryMetadataSchema>;
 
 const DIRECTORY_GLOB = /\/\*$/;
 
 /** `/abs/dir/*` → `/abs/dir`; anything else is returned unchanged. */
-export const stripDirectoryGlob = (pattern: string): string => (DIRECTORY_GLOB.test(pattern) && pattern !== '/*' ? pattern.replace(DIRECTORY_GLOB, '') : pattern);
+const stripDirectoryGlob = (pattern: string): string => (DIRECTORY_GLOB.test(pattern) && pattern !== '/*' ? pattern.replace(DIRECTORY_GLOB, '') : pattern);
 
 const fileName = (filePath: string): string => filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
 

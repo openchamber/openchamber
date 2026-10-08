@@ -83,8 +83,6 @@ export const SETTINGS_PAGE_TITLE_CLASS =
 /** L2 — section title inside a settings page. */
 export const SETTINGS_SECTION_TITLE_CLASS =
   'typography-settings-section-title text-foreground';
-/** Split-pane sidebar panel title — same level as section titles. */
-export const SETTINGS_PANEL_TITLE_CLASS = SETTINGS_SECTION_TITLE_CLASS;
 /** L3 — control-group heading inside a section. */
 const SETTINGS_GROUP_TITLE_CLASS =
   'typography-settings-group-title text-foreground';

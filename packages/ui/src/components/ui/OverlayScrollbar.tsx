@@ -18,11 +18,13 @@ type OverlayScrollbarProps = {
   suppressVisibility?: boolean;
   /** Requires recent user input in the default auto-hide mode. */
   userIntentOnly?: boolean;
+  /** Pixels kept clear above the vertical track, for controls floating over the scroller's top edge. */
+  verticalTrackStart?: number;
 };
 
 type ScrollbarOptions = Required<Pick<
   OverlayScrollbarProps,
-  "minThumbSize" | "hideDelayMs" | "disableHorizontal" | "observeMutations" | "suppressVisibility" | "userIntentOnly"
+  "minThumbSize" | "hideDelayMs" | "disableHorizontal" | "observeMutations" | "suppressVisibility" | "userIntentOnly" | "verticalTrackStart"
 >> & { alwaysVisible: boolean };
 
 // The inset is part of both rendering and drag math; changing it must preserve that shared track.
@@ -30,8 +32,8 @@ const TRACK_INSET = 8;
 const USER_INTENT_DURATION_MS = 1000;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
 
-function calculateThumb(viewportLength: number, contentLength: number, minThumbSize: number) {
-  const trackLength = Math.max(viewportLength - TRACK_INSET * 2, 0);
+function calculateThumb(viewportLength: number, contentLength: number, minThumbSize: number, trackStart = 0) {
+  const trackLength = Math.max(viewportLength - TRACK_INSET * 2 - trackStart, 0);
   const scrollRange = Math.max(contentLength - viewportLength, 0);
   if (trackLength === 0 || scrollRange === 0) return null;
 
@@ -111,7 +113,7 @@ function bindScrollbar(
     const scrollHeight = container.scrollHeight;
     const clientWidth = options.disableHorizontal ? 0 : container.clientWidth;
     const scrollWidth = options.disableHorizontal ? 0 : container.scrollWidth;
-    const vertical = calculateThumb(clientHeight, scrollHeight, options.minThumbSize);
+    const vertical = calculateThumb(clientHeight, scrollHeight, options.minThumbSize, options.verticalTrackStart);
     const horizontal = options.disableHorizontal
       ? null
       : calculateThumb(clientWidth, scrollWidth, options.minThumbSize);
@@ -138,7 +140,7 @@ function bindScrollbar(
   const positionThumbs = () => {
     // This is the hot path: cached scales leave only scroll offsets to read and transforms to write.
     if (!verticalThumb.hidden) {
-      verticalThumb.style.transform = `translate3d(0, ${TRACK_INSET + container.scrollTop * verticalThumbPixelsPerScrollPixel}px, 0)`;
+      verticalThumb.style.transform = `translate3d(0, ${TRACK_INSET + options.verticalTrackStart + container.scrollTop * verticalThumbPixelsPerScrollPixel}px, 0)`;
     }
     if (!horizontalThumb.hidden) {
       horizontalThumb.style.transform = `translate3d(${TRACK_INSET + container.scrollLeft * horizontalThumbPixelsPerScrollPixel}px, 0, 0)`;
@@ -339,7 +341,8 @@ function bindScrollbar(
     update(nextOptions: ScrollbarOptions) {
       const visibilityChanged = nextOptions.alwaysVisible !== options.alwaysVisible;
       const mustMeasure = nextOptions.disableHorizontal !== options.disableHorizontal
-        || nextOptions.minThumbSize !== options.minThumbSize;
+        || nextOptions.minThumbSize !== options.minThumbSize
+        || nextOptions.verticalTrackStart !== options.verticalTrackStart;
       if (nextOptions.observeMutations !== options.observeMutations) {
         setMutationObservation(nextOptions.observeMutations);
         if (nextOptions.observeMutations) observeSizes();
@@ -397,6 +400,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   observeMutations = true,
   suppressVisibility = false,
   userIntentOnly = false,
+  verticalTrackStart = 0,
 }) => {
   const alwaysVisible = useUIStore((state) => state.alwaysShowScrollbars === true);
   const rootRef = React.useRef<HTMLDivElement>(null);
@@ -412,6 +416,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     observeMutations,
     suppressVisibility,
     userIntentOnly,
+    verticalTrackStart,
   });
   optionsRef.current = {
     alwaysVisible,
@@ -421,6 +426,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     observeMutations,
     suppressVisibility,
     userIntentOnly,
+    verticalTrackStart,
   };
 
   // Follow the LIVE container node, not the ref object: the chat timeline's
@@ -460,8 +466,9 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       observeMutations,
       suppressVisibility,
       userIntentOnly,
+      verticalTrackStart,
     });
-  }, [alwaysVisible, disableHorizontal, hideDelayMs, minThumbSize, observeMutations, suppressVisibility, userIntentOnly]);
+  }, [alwaysVisible, disableHorizontal, hideDelayMs, minThumbSize, observeMutations, suppressVisibility, userIntentOnly, verticalTrackStart]);
 
   return (
     <div ref={rootRef} className={cn("overlay-scrollbar", className)} aria-hidden="true">

@@ -1,4 +1,5 @@
 import React from 'react';
+import { AnimatePresence } from 'motion/react';
 import type { FormField } from '@opencode/client';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { Button } from '@/components/ui/button';
@@ -61,11 +62,16 @@ export const FormDock: React.FC<FormDockProps> = ({ sessionId, directory, hidden
     // elicitation, owned by no session) follows and shows in every session
     // of the directory that raised it.
     const form = forms[0];
-    if (hidden || !form) return null;
-    const webSearchConsent = readWebSearchConsent(form);
-    if (webSearchConsent) return <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />;
-    // Keyed on the form id so a different request starts from a clean slate.
-    return <FormDockPanel key={form.id} form={form} waiting={forms.length - 1} />;
+    const webSearchConsent = form ? readWebSearchConsent(form) : null;
+    // Keyed on the form id so a different request starts from a clean slate
+    // (and the panels cross-fade instead of swapping content in place).
+    return (
+        <AnimatePresence>
+            {hidden || !form ? null : webSearchConsent
+                ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
+                : <FormDockPanel key={form.id} form={form} waiting={forms.length - 1} />}
+        </AnimatePresence>
+    );
 };
 
 type FormDraft = { fieldsSignature: string; values: FormValues; step: number };

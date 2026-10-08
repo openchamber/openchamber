@@ -88,8 +88,6 @@ export const createMobilePasswordOperationTracker = () => {
   };
 };
 
-export type MobileConnectionMode = 'direct' | 'relay';
-
 // Persisted relay transport config. This is connection metadata, not a secret
 // (the host public key is public by construction) — but never log it raw; mask
 // the key coordinates in any debug output.
@@ -104,11 +102,11 @@ export type MobileRelayConfig = {
 // first — LAN preferred, relay fallback) plus a single client token, and the app
 // re-probes them on every connect/reconnect so the same device works at home
 // (direct) and away (relay) without re-pairing.
-export type MobileTransportCandidate =
+type MobileTransportCandidate =
   | { kind: 'direct'; url: string }
   | { kind: 'relay'; relay: MobileRelayConfig };
 
-export type MobileSavedConnection = {
+type MobileSavedConnection = {
   id: string;
   label: string;
   candidates: MobileTransportCandidate[];
@@ -119,7 +117,7 @@ export type MobileSavedConnection = {
   clientToken?: string;
 };
 
-export type MobilePendingConnection = {
+type MobilePendingConnection = {
   id: string;
   label: string;
   candidates: MobileTransportCandidate[];
@@ -130,7 +128,7 @@ export type MobilePendingConnection = {
 
 // Input to `connect`. Either a raw URL/candidates for a NEW connection, or an
 // existing saved connection's `id` + candidates for reconnect.
-export type MobileConnectInput = {
+type MobileConnectInput = {
   id?: string;
   url?: string;
   candidates?: MobileTransportCandidate[];
@@ -1185,7 +1183,7 @@ export const isActiveRuntimeConnection = (connection: MobileSavedConnection): bo
   return Boolean(runtimeKey) && secureTokenKeyOf(connection) === runtimeKey;
 };
 
-export type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
+type ReprobeOutcome = 'switched' | 'unchanged' | 'unreachable' | 'needs-login' | 'no-connection';
 
 // App-resume re-probe: when the app wakes (Capacitor `isActive`), the network may
 // have changed while it slept, so re-select the active device's transport and
@@ -1375,7 +1373,7 @@ const scheduleCandidateRefresh = (): void => {
 // Shared connection controller
 // ---------------------------------------------------------------------------
 
-export type UseMobileConnection = {
+type UseMobileConnection = {
   connections: MobileSavedConnection[];
   isBusy: boolean;
   isPasswordBusy: boolean;

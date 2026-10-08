@@ -1,3 +1,4 @@
+import { isPlainObject, isString } from '../shared/guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +17,11 @@ const GIT_OPERATIONS = new Set([
 ]);
 const PROVIDER_OPERATIONS = new Set([
   'change-request-create', 'change-request-update', 'change-request-merge', 'change-request-ready',
+  'change-request-comment', 'change-request-review', 'issue-comment', 'change-request-state', 'issue-state',
+  'change-request-labels', 'issue-labels', 'change-request-reviewers',
 ]);
+// What a provider write acts on: `issue-*` names an issue, everything else a change request.
+const providerTargetKind = (operation) => (operation.startsWith('issue-') ? 'issue' : 'change-request');
 const RESULT_STEPS = new Set([
   'validated', 'authenticated', 'transferred', 'updated-local-repository', 'checked-out', 'cleaned-up',
   'fetch:succeeded', 'fetch:skipped', 'fetch:conflicted', 'fetch:failed', 'fetch:cancelled',
@@ -26,10 +31,6 @@ const RESULT_STEPS = new Set([
 ]);
 
 const emptyState = () => ({ version: VERSION, records: {} });
-const isPlainObject = (value) => value === Object(value)
-  && !Array.isArray(value)
-  && Object.getPrototypeOf(value) === Object.prototype;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 const hasExactKeys = (value, required, optional = []) => {
   const keys = Object.keys(value);
   return required.every((key) => keys.includes(key))
@@ -113,8 +114,8 @@ const isGitTarget = (value) => isPlainObject(value)
     && isSafeText(value.destination.displayName) && isSafeText(value.destination.fingerprint, 1024)));
 const isProviderTarget = (value) => isPlainObject(value)
   && hasExactKeys(value, ['kind', 'operation', 'projectId'], ['number', 'head', 'base', 'headSha'])
-  && value.kind === 'change-request'
   && PROVIDER_OPERATIONS.has(value.operation)
+  && value.kind === providerTargetKind(value.operation)
   && isSafeText(value.projectId, 1024)
   && (value.number === undefined || isPositiveInteger(value.number))
   && (value.head === undefined || isSafeText(value.head, 1024))
@@ -150,7 +151,7 @@ const isRecord = (value, id) => {
     || !EXECUTORS.has(value.executorKind) || !isRuntime(value.runtime)
     || !isNullableText(value.repositoryId) || !isNullableAccountId(value.providerAccountId)
     || !isTransportReference(value.transportReference) || !isTarget(value.target)
-    || (value.executorKind === 'provider-api' && (value.transportReference !== null || value.target.kind !== 'change-request'))
+    || (value.executorKind === 'provider-api' && (value.transportReference !== null || !isProviderTarget(value.target)))
     || (value.executorKind === 'openchamber-server-git' && (value.target.kind !== 'git-network'
       || !hydrationTransportMatchesTarget(value.transportReference, value.target)))
     || (value.target.kind === 'git-network' && value.target.operation === 'checkout-hydration'

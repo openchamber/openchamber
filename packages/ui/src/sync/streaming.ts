@@ -20,7 +20,7 @@ type MessageStreamState = {
   completedAt?: number
 }
 
-export type StreamingStore = {
+type StreamingStore = {
   /** Currently streaming message per session */
   streamingMessageIds: Map<string, string | null>
   /** Lifecycle phase per message */

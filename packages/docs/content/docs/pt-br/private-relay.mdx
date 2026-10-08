@@ -21,6 +21,7 @@ O relay é um mensageiro cego, não um intermediário:
 - **Só os seus dispositivos podem conectar.** Um dispositivo precisa ter um token emitido pelo *seu* servidor por meio do [pareamento de uso único](/pt-br/connect-devices/). Ninguém consegue descobrir seu servidor pelo relay nem se conectar a ele sem um token criado por você — e você pode revogar qualquer token a qualquer momento.
 - **Os links de pareamento são de uso único.** Um código QR de pareamento funciona exatamente uma vez e expira se não for usado, então um link antigo vazado não vale nada.
 - **Nada é compartilhado até você optar por isso.** O relay fica desligado até você ativá-lo ou parear um dispositivo por ele, e você pode desativá-lo a qualquer momento — os dispositivos conectados por ele são cortados imediatamente.
+- **As chaves do relay do seu servidor ficam na sua máquina.** Elas ficam em `~/.config/openchamber/relay-identity.json`, que só a sua conta de usuário consegue ler. Quem tiver uma cópia desse arquivo pode se passar pelo seu servidor no relay, então não inclua o arquivo em relatórios de bug, backups compartilhados ou repositórios de dotfiles.
 
 ## Quando ele funciona
 

@@ -1386,7 +1386,7 @@ describe('routeMessage skill invocation', () => {
       skills: { names: ['grill-with-docs'] },
     });
     // Without a caller builder the skill is still named if it cannot attach.
-    expect(sendMessageCalls[0].skills.instructionFor(['grill-with-docs'])).toContain('/grill-with-docs');
+    expect(sendMessageCalls[0].skills.instructionFor(['grill-with-docs'])).toContain('$grill-with-docs');
     expect(liveLookupCalls).toEqual([]);
   });
 

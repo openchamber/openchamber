@@ -324,6 +324,46 @@ describe('NewWorktreeDialog behavior', () => {
       });
     }
   }
+  test('opens on "PR or issue" with the item it was given already chosen', async () => {
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <NewWorktreeDialog
+            open
+            onOpenChange={() => undefined}
+            initialSelection={{
+              source: 'github',
+              includeDiff: false,
+              reference: {
+                kind: 'issue',
+                number: 7,
+                title: 'Started from the board',
+                url: 'https://github.com/acme/project/issues/7',
+                body: '',
+                bodyTruncated: false,
+                createdAt: null,
+                updatedAt: null,
+                author: null,
+                labels: [],
+                commentCount: 0,
+                sourceRepo: { owner: 'acme', repo: 'project', source: 'origin' },
+                state: 'open',
+              },
+            }}
+          />
+        </I18nProvider>,
+      ));
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      expect(branchInput?.value).toBe('issue-7-draft-name');
+      expect(dom.container.textContent).toContain('Started from the board');
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+
   test('preserves selected issue values when available worktree names change', async () => {
     const dom = installDom();
     const root = createRoot(dom.container);

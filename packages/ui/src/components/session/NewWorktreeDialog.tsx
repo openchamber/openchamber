@@ -121,6 +121,8 @@ interface NewWorktreeDialogProps {
   project?: { id: string; path: string };
   /** The dialog is closed by then; a chosen issue or PR follows as a composer chip. */
   onWorktreeCreated?: (worktreePath: string) => void;
+  /** Opens on "PR or issue" with this item already chosen. */
+  initialSelection?: ReferencePickerSelection;
 }
 
 export function NewWorktreeDialog({
@@ -128,6 +130,7 @@ export function NewWorktreeDialog({
   onOpenChange,
   project,
   onWorktreeCreated,
+  initialSelection,
 }: NewWorktreeDialogProps) {
   const { t } = useI18n();
   const { sourceControl, git, linear } = useRuntimeAPIs();
@@ -220,6 +223,8 @@ export function NewWorktreeDialog({
   const [isCreating, setIsCreating] = React.useState(false);
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
   const initializedForCurrentOpen = React.useRef(false);
+  // The item the dialog was opened with, until it is chosen.
+  const pendingInitialSelection = React.useRef<ReferencePickerSelection | null>(null);
 
   const linkedPr = mode === 'from-item' && linked?.kind === 'pr' ? linked.pr : null;
   const linkedPrContext = mode === 'from-item' && linked?.kind === 'pr' ? linked.context : null;
@@ -262,14 +267,15 @@ export function NewWorktreeDialog({
     initializedForCurrentOpen.current = true;
 
     const uniqueSlug = generateUniqueSlug();
-    setMode('new-branch');
+    pendingInitialSelection.current = initialSelection ?? null;
+    setMode(initialSelection ? 'from-item' : 'new-branch');
     setNewBranch({ branchName: uniqueSlug, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
     setLinked(null);
     setExistingBranch({ selectedBranch: '', worktreeName: '' });
     setSourceBranch('');
     setValidation({ isValidating: false, branchError: null, worktreeError: null, touched: false });
-  }, [open, generateUniqueSlug]);
+  }, [open, generateUniqueSlug, initialSelection]);
 
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {
@@ -548,6 +554,20 @@ export function NewWorktreeDialog({
     linkItem({ kind: 'pr', pr, context: githubContext, includeDiff: choice.includeDiff, selection: choice }, reference.head);
     return null;
   };
+
+  // A PR is chosen once the project's read context is known: its branch is
+  // fetched through it. Issues need none.
+  const handleReferenceConfirmRef = React.useRef(handleReferenceConfirm);
+  handleReferenceConfirmRef.current = handleReferenceConfirm;
+  React.useEffect(() => {
+    const choice = pendingInitialSelection.current;
+    if (!open || !choice) return;
+    if (choice.source === 'github' && choice.reference.kind === 'pull' && githubContext === null) return;
+    pendingInitialSelection.current = null;
+    void handleReferenceConfirmRef.current([choice]).then((failure) => {
+      if (failure) toast.error(failure.message);
+    });
+  }, [githubContext, open]);
 
   const handleGuestSelect = (issue: AttachIssueRequest): void => {
     const kind = issue.kind === 'pull' ? 'pull' : 'issue';

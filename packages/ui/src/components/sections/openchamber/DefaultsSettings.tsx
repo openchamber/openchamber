@@ -21,6 +21,7 @@ import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint'
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
@@ -75,6 +76,8 @@ export const DefaultsSettings: React.FC = () => {
     agentIsPicked && currentSessionId && getSessionAgentSelection(currentSessionId),
   );
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
+  const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
@@ -374,6 +377,18 @@ export const DefaultsSettings: React.FC = () => {
               ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
             />
             <SessionWarmingCheckbox />
+            {isVSCode ? null : (
+              <SettingsCheckboxRow
+                settingsItem="sessions.show-chats"
+                checked={showChatsSection}
+                onChange={(checked) => {
+                  setShowChatsSection(checked);
+                  void updateDesktopSettings({ sidebarShowChatsSection: checked });
+                }}
+                label={t('settings.openchamber.defaults.field.showChats')}
+                ariaLabel={t('settings.openchamber.defaults.field.showChats')}
+              />
+            )}
           </SettingsInset>
 
           <div className="space-y-3 pt-6">

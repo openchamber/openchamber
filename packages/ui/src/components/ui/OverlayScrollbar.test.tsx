@@ -280,6 +280,21 @@ describe('OverlayScrollbar', () => {
     expect(scrollbarCommits).toBe(0);
   });
 
+  test('keeps the vertical track clear of a reserved top area', async () => {
+    useUIStore.getState().setAlwaysShowScrollbars(true);
+    await renderScrollbar({ verticalTrackStart: 32 });
+    const thumb = host.querySelector<HTMLElement>('[data-overlay-scrollbar-thumb="vertical"]');
+    // Track: 100 - 8*2 - 32 = 52px; thumb: max(32, 100/500 * 52) = 32px.
+    expect(thumb?.style.height).toBe('32px');
+    expect(thumb?.style.transform).toBe('translate3d(0, 40px, 0)');
+
+    scrollTop = 400;
+    scroller.dispatchEvent(new window.Event('scroll'));
+    await flushFrames();
+    // At the end the thumb's bottom sits on the usual bottom inset: 60 + 32 = 100 - 8.
+    expect(thumb?.style.transform).toBe('translate3d(0, 60px, 0)');
+  });
+
   test('coalesces scroll and resize updates into one animation frame', async () => {
     await renderScrollbar();
 

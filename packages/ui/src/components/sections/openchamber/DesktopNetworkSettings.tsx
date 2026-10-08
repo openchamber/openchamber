@@ -657,6 +657,7 @@ export const DesktopNetworkSettings: React.FC = () => {
           }
         }}
         maxChords={1}
+        maxKeys={5}
       />
     </SettingsSection>
   );

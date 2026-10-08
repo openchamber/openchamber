@@ -22,21 +22,20 @@ Kolejną organizację Linear połączysz przez **Add workspace**. Bieżąca jest
 
 ### Przeglądaj issues
 
-Gdy przestrzeń robocza jest połączona, w prawym pasku kontekstu pojawia się panel **Linear**. Wyświetla issues bieżącej przestrzeni i pozwala:
+Issues z Linear znajdziesz na tablicy **Issues and PRs**. Otwórz ją ikoną pull requesta w nagłówku paska bocznego albo naciśnij <kbd>⌘K</kbd>, a potem <kbd>B</kbd> (<kbd>Ctrl+K</kbd>, a potem <kbd>B</kbd> w Windows i Linuksie), i wybierz **Linear** na górze. Tablica wyświetla issues bieżącej przestrzeni roboczej i pozwala:
 
-- filtrować po statusie (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), osobie przypisanej (**Anyone** lub **Assigned to me**), zespole i priorytecie
-- szukać po tytule, identyfikatorze lub adresie URL Linear
-- otworzyć issue, aby przeczytać opis, komentarze, etykiety i priorytet
-- zmienić jego **Status** lub wybrać **Close issue**
-- przełączyć bieżący **Workspace**
+- pokazać jeden zespół albo **All teams**
+- przełączyć bieżącą przestrzeń roboczą, gdy połączonych jest kilka
+- zawęzić listę jednocześnie po statusie, po tym, czyje to zgłoszenia (**Assigned to me** lub **Created by me**), i po priorytecie, oraz szukać po tytule lub identyfikatorze
+- czytać opis, komentarze, etykiety i priorytet issue obok listy
+- zmienić jego **Status**
 
 ### Rozpocznij sesję z issue
 
-- W panelu Linear otwórz issue i wybierz **Start session**. Przycisk zostaje w stopce, gdy przewijasz issue.
-- W czacie wybierz **New Session From Linear Issue**, aby wybrać z listy, z opcją **Create in worktree**, jeśli chcesz świeżej gałęzi.
-- W oknie **New Worktree** wybierz issue z Linear. Nowa sesja otwiera się z issue dołączonym do pola wiadomości, a pierwszą wiadomość piszesz sam.
+- Na tablicy wybierz issue, a potem **Start in worktree…**, jeśli chcesz świeżej gałęzi, albo **New session**, aby pracować w projekcie w obecnym stanie.
+- W oknie **New Worktree** wybierz issue z Linear.
 
-Z panelu Linear i z czatu sesja otwiera się w projekcie zmapowanym do zespołu issue, a issue staje się pierwszym promptem. Zespoły mapujesz na karcie Linear: **Default project** obejmuje wszystkie zespoły, a **Team projects** nadpisuje go dla poszczególnych. Niezmapowany zespół najpierw poprosi o mapowanie. Pierwsza wiadomość powstaje z magic promptu **Issue Review**, który edytujesz w **Ustawienia → Magic Prompts → Linear**.
+W obu przypadkach sesja otwiera się z issue dołączonym do pola wiadomości, a pierwszą wiadomość piszesz sam. Tablica uruchamia ją w projekcie zmapowanym do zespołu issue, widocznym obok **Start in**; w razie potrzeby wybierz tam inny projekt. Zespoły mapujesz na karcie Linear: **Default project** obejmuje wszystkie zespoły, a **Team projects** nadpisuje go dla poszczególnych. Bez mapowania tablica używa projektu, który pokazywała ostatnio.
 
 ### Dołącz issue do wiadomości
 
@@ -84,4 +83,3 @@ Karta aktualizuje rozszerzenie, gdy pojawi się nowa wersja, włącza je ponowni
 
 - [Issues i PR na GitHub](/pl/github/) — wszystko, co GitHub potrafi w OpenChamber
 - [Sesje worktree](/pl/worktrees/) — gdzie mogą zaczynać się sesje z issue
-- [Magic Prompts](/pl/magic-prompts/) — edytuj prompt, od którego zaczyna się sesja Linear

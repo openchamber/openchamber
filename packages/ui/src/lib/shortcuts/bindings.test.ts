@@ -163,3 +163,22 @@ describe('layout-independent key matching', () => {
     expect(resolveShortcutEventDigit({ key: 'a', code: 'KeyA' })).toBe(null);
   });
 });
+
+describe('the Super / Windows key', () => {
+  test('normalizes its aliases and orders it after Control', () => {
+    expect(normalizeCombo('shift+win+n')).toBe('super+shift+n');
+    expect(normalizeCombo('super+ctrl+n')).toBe('ctrl+super+n');
+  });
+
+  test('shows as Win on Windows and Super elsewhere', () => {
+    expect(formatShortcutForDisplay('super+n', 'Unassigned', 'windows')).toBe('Win + N');
+    expect(formatShortcutForDisplay('mod+super+n', 'Unassigned', 'other')).toBe('Ctrl + Super + N');
+  });
+
+  test('outside macOS, Meta matches only a combo that asks for Super', () => {
+    expect(eventMatchesShortcut(keydown('n', { meta: true }), 'super+n')).toBe(true);
+    expect(eventMatchesShortcut(keydown('n', { ctrl: true }), 'super+n')).toBe(false);
+    expect(eventMatchesShortcut(keydown('n', { ctrl: true, meta: true }), 'mod+n')).toBe(false);
+    expect(eventMatchesShortcut(keydown('n', { ctrl: true, meta: true }), 'mod+super+n')).toBe(true);
+  });
+});

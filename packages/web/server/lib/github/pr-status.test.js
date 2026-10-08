@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test, vi } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
-import { findBranchPrCandidates, invalidateRepoPullsCache, isHistoricalPrOfCheckout } from './pr-status.js';
+import { findBranchPrCandidates, invalidateRepoPullsCache, isHistoricalPrOfCheckout, resolveGitHubPrStatus } from './pr-status.js';
 import { createOctokit, getOctokitCacheIdentity } from './octokit.js';
 
 const listMock = mock(async () => ({ data: [] }));
@@ -273,6 +277,57 @@ describe('findBranchPrCandidates', () => {
 
     expect(listMock.mock.calls.some((entry) => entry[0]?.state === 'all')).toBe(true);
     expect(listMock.mock.calls.length).toBeGreaterThan(callsAfterFirst + 1);
+  });
+});
+
+describe('resolveGitHubPrStatus for a contributor fork checkout', () => {
+  let directory;
+
+  beforeEach(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-fork-'));
+    const git = (...args) => execFileSync('git', args, { cwd: directory, stdio: 'ignore' });
+    git('init', '-q', '-b', 'fix/thing');
+    git('remote', 'add', 'origin', 'https://github.com/acme/app.git');
+    git('remote', 'add', 'pr-contrib', 'https://github.com/contrib/app.git');
+    invalidateRepoPullsCache('acme', 'app');
+  });
+
+  afterEach(async () => {
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  const forkPr = {
+    number: 44,
+    state: 'open',
+    head: { ref: 'fix/thing', label: 'contrib:fix/thing', user: { login: 'contrib' }, repo: { owner: { login: 'contrib' }, name: 'app' } },
+  };
+  const octokit = () => ({
+    openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit('fork-token', 'fork-account')),
+    rest: {
+      repos: {
+        get: async ({ owner, repo }) => ({
+          data: owner === 'contrib'
+            ? { default_branch: 'main', parent: { owner: { login: 'acme' }, name: repo } }
+            : { default_branch: 'main' },
+        }),
+      },
+      pulls: { list: async ({ owner }) => ({ data: owner === 'acme' ? [forkPr] : [] }) },
+    },
+  });
+
+  test('finds the fork PR when the caller names the fork remote as the branch source', async () => {
+    const status = await resolveGitHubPrStatus({
+      octokit: octokit(), directory, branch: 'fix/thing', remoteName: 'origin', sourceRemoteName: 'pr-contrib', force: true,
+    });
+    expect(status.pr?.number).toBe(44);
+    expect(status.repo).toMatchObject({ owner: 'acme', repo: 'app' });
+  });
+
+  test('without a source remote a same-named fork branch is not this branch', async () => {
+    const status = await resolveGitHubPrStatus({
+      octokit: octokit(), directory, branch: 'fix/thing', remoteName: 'origin', force: true,
+    });
+    expect(status.pr).toBeNull();
   });
 });
 

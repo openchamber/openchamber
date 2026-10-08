@@ -36,6 +36,7 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { shikiHighlightExtension } from '@/lib/codemirror/shikiHighlight';
+import { syncVimMappings } from '@/lib/codemirror/vimModeExtension';
 import { getResolvedShikiTheme } from '@/lib/shiki/appThemeRegistry';
 import { File as PierreFile, VirtualizerContext, WorkerPoolContext } from '@pierre/diffs/react';
 import { useWorkerPool } from '@/contexts/DiffWorkerProvider';
@@ -1180,6 +1181,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
   const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
   const fileEditorKeymap = useUIStore((state) => state.fileEditorKeymap);
+  const fileEditorVimMappings = useUIStore((state) => state.fileEditorVimMappings);
+  // Vim mappings live in the Vim keymap, which is global; editing them in
+  // Settings applies to open editors on the next key press.
+  React.useEffect(() => {
+    if (fileEditorKeymap === 'vim') syncVimMappings(fileEditorVimMappings);
+  }, [fileEditorKeymap, fileEditorVimMappings]);
   const settingsDefaultFileViewerPreview = useConfigStore((state) => state.settingsDefaultFileViewerPreview);
   const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
 
@@ -1341,9 +1348,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return directoryRequests.run(normalizedDir, async (ownsRequest) => {
       const isCurrentRequest = () => ownsRequest() && treeScopeRef.current === scope && getRuntimeKey() === requestRuntime;
       try {
+        const respectGitignore = !showGitignored;
         const entries = files.listDirectory
-          ? (await files.listDirectory(normalizedDir)).entries
-          : await opencodeClient.listLocalDirectory(normalizedDir);
+          ? (await files.listDirectory(normalizedDir, { respectGitignore })).entries
+          : await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore });
         if (!isCurrentRequest()) return;
         const mapped = mapDirectoryEntries(normalizedDir, entries);
         loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -1376,7 +1384,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         }));
       }
     }, force);
-  }, [directoryRequests, files, mapDirectoryEntries, removeExpandedPathsByPrefix, root, treeActive]);
+  }, [directoryRequests, files, mapDirectoryEntries, removeExpandedPathsByPrefix, root, showGitignored, treeActive]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {
@@ -3949,6 +3957,20 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
+            {/* Always first: whatever app the OS has for this file type. */}
+            <DropdownMenuItem
+              className="flex items-center gap-2"
+              onClick={() => {
+                if (!selectedFile?.path) return;
+                void openDesktopPath(selectedFile.path).then((opened) => {
+                  if (!opened) toast.error(t('sidebarFilesTree.toast.operationFailed'));
+                });
+              }}
+            >
+              <Icon name="external-link" className="size-4" />
+              <span className="typography-ui-label text-foreground">{t('sidebarFilesTree.menu.openInDefaultApp')}</span>
+            </DropdownMenuItem>
+            {openInApps.length > 0 ? <DropdownMenuSeparator /> : null}
             {openInApps.map((app) => (
               <DropdownMenuItem
                 key={app.id}

@@ -27,6 +27,16 @@ export type RunningShell = {
   startedAt: number
 }
 
+/**
+ * How the shell service reported a command's end on the event stream. A
+ * command exits with a terminal status, or is removed: a running command by
+ * a user's Stop (the shell route) or by aborting the turn whose tool call
+ * waits on it, an exited one when OpenCode evicts it from its history.
+ */
+export type ShellEnd =
+  | { kind: "exited"; status: "exited" | "timeout" | "killed"; exit?: number }
+  | { kind: "removed" }
+
 /** How a background command ended, from its completion message. */
 export type ShellCompletion = {
   shellID: string

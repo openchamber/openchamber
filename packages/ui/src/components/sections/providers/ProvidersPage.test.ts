@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConnectionInfo, IntegrationInfo } from '@opencode/client';
-import { requiresProviderAuth, shouldLoadAvailableProviders } from './providerAvailability';
+import { requiresProviderAuth } from './providerAvailability';
 import {
   findIntegrationForProvider,
   getCredentialConnections,
@@ -25,13 +25,6 @@ const integration = (overrides: Partial<IntegrationInfo> = {}): IntegrationInfo 
 
 const credential: ConnectionInfo = { type: 'credential', id: 'cred_1', label: 'API key', method: 'key' };
 const envConnection: ConnectionInfo = { type: 'env', name: 'ANTHROPIC_API_KEY' };
-
-describe('ProvidersPage available provider loading', () => {
-  test('loads available providers only in add-provider mode', () => {
-    expect(shouldLoadAvailableProviders(false)).toBe(false);
-    expect(shouldLoadAvailableProviders(true)).toBe(true);
-  });
-});
 
 describe('ProvidersPage provider authentication', () => {
   test('does not require credentials for a custom provider defined in config', () => {

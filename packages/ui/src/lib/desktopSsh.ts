@@ -60,7 +60,7 @@ export type DesktopSshInstance = {
   portForwards: DesktopSshPortForward[];
 };
 
-export type DesktopSshInstancesConfig = {
+type DesktopSshInstancesConfig = {
   instances: DesktopSshInstance[];
 };
 

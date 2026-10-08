@@ -252,9 +252,7 @@ function buildMacosLaunchAgent(options = {}) {
   <array>
 ${argXml}
   </array>
-${envXml}  <key>ProcessType</key>
-  <string>Background</string>
-  <key>RunAtLoad</key>
+${envXml}  <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>

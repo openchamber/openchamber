@@ -13,7 +13,7 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { WorkerHighlightedCode } from '@/components/code/WorkerHighlightedCode';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages, useSessionMessages } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
 import { useRunningShell } from '@/sync/background-shells';
 import { findShellCancellation, findShellCompletion, readBackgroundShellID } from '@/lib/opencode/background-shell';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -43,7 +43,6 @@ import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
-import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
 import type { JsonValue } from '@openchamber/sdk';
@@ -55,14 +54,10 @@ import {
 } from '@/lib/guests/tool-presentation';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import {
-    buildTaskSummaryEntriesFromSession,
-    normalizeTaskSummaryEntries,
-    parseTaskMetadataBlock,
     prepareTaskToolOutput,
     readTaskSessionIdFromOutput,
     readTaskSessionIdFromRecord,
     resolveRunningTaskChildSessionId,
-    type TaskToolSummaryEntry,
 } from './taskToolModel';
 import { areRenderRelevantPartsEqual } from '../renderCompare';
 import { useI18n } from '@/lib/i18n';
@@ -88,13 +83,14 @@ import {
     executeToolCalls,
     isEditTool,
     isExecuteTool,
-    isReadTool,
     isFileChangeTool,
     isPatchTool,
     isQuestionTool,
     isShellTool,
     isSubagentTool,
     isWebSearchTool,
+    subagentAgent,
+    subagentDescription,
     isWriteTool,
     normalizeToolName,
     toolDescription, type ToolDescription,
@@ -106,8 +102,8 @@ import { ApplyPatchFileButtons } from './ApplyPatchFileButtons';
 import { openApplyPatchFileInEditor } from './applyPatchEditorAction';
 import { WebSearchResults } from './WebSearchResults';
 import { toBackgroundShellPart, type BackgroundShellPhase } from './backgroundShellPart';
-import { toBackgroundSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
-import { findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
+import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagentPhase } from './backgroundSubagentPart';
+import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useBackgroundShellOutput } from './useBackgroundShellOutput';
 
@@ -825,184 +821,6 @@ const ToolScrollableTextOutput: React.FC<{
 
 ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
-const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
-    // `title` only reaches here from a legacy `<task_metadata>` block; a live
-    // v2 call is described from its own input.
-    const title = entry.state?.title;
-    if (typeof title === 'string' && title.trim().length > 0) {
-        return title;
-    }
-
-    const described = toolDescription(entry.tool, entry.state?.input, undefined);
-    if (described?.kind === 'files') {
-        const names = described.files.slice(0, 3).map((path) => path.split(/[\\/]/).pop() || path);
-        const remaining = described.files.length - names.length;
-        return `${names.join(', ')}${remaining > 0 ? ` +${remaining}` : ''}`;
-    }
-    return described && (described.kind === 'path' || described.kind === 'text') ? described.value.trim() : '';
-};
-
-const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
-    if (!isReadTool(toolName) && !isFileChangeTool(toolName)) {
-        return false;
-    }
-
-    const trimmed = label.trim();
-    if (!trimmed || trimmed === 'Patch' || /^\d+\s+files$/.test(trimmed)) {
-        return false;
-    }
-
-    if (trimmed.includes('/') || trimmed.includes('\\')) {
-        return true;
-    }
-
-    const baseName = trimmed.split(/[\\/]/).pop() || trimmed;
-    if (baseName.startsWith('.') || baseName.includes('.')) {
-        return true;
-    }
-
-    return /^[A-Za-z0-9_-]+$/.test(baseName);
-};
-
-const getTaskSummaryEntryRenderSignature = (entry: TaskToolSummaryEntry): string => {
-    const toolName = normalizeToolName(entry.tool);
-    const status = entry.state?.status ?? '';
-    const label = getTaskSummaryLabel(entry);
-    return `${entry.id ?? ''}\u0001${toolName}\u0001${status}\u0001${label}`;
-};
-
-const areTaskSummaryEntriesRenderEqual = (
-    prevEntries: TaskToolSummaryEntry[],
-    nextEntries: TaskToolSummaryEntry[],
-): boolean => {
-    if (prevEntries === nextEntries) return true;
-    if (prevEntries.length !== nextEntries.length) return false;
-    for (let index = 0; index < prevEntries.length; index += 1) {
-        if (getTaskSummaryEntryRenderSignature(prevEntries[index]) !== getTaskSummaryEntryRenderSignature(nextEntries[index])) {
-            return false;
-        }
-    }
-    return true;
-};
-
-const TaskSummaryEntryRow = React.memo(({
-    entry,
-    isMobile,
-    animateTailText,
-    showToolFileIcons,
-}: {
-    entry: TaskToolSummaryEntry;
-    isMobile: boolean;
-    animateTailText: boolean;
-    showToolFileIcons: boolean;
-}) => {
-    const normalizedToolName = normalizeToolName(entry.tool);
-    const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
-    const label = getTaskSummaryLabel(entry);
-    const hasLabel = label.trim().length > 0;
-    const status = entry.state?.status;
-    const displayName = getToolMetadata(toolName).displayName;
-
-    return (
-        <ToolRevealOnMount animate={animateTailText} wipe>
-            {/* Single-line rows everywhere: the old mobile break-words mode
-                wrapped long shell commands into a hanging column and floated
-                the icon to the top of the block. Errors still wrap — they must
-                stay readable. */}
-            <div className={cn('flex gap-2 min-w-0 w-full', status === 'error' && isMobile ? 'items-start' : 'items-center')}>
-                <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
-                <span
-                    className="typography-meta text-foreground/80 flex-shrink-0"
-                    style={{ color: 'var(--tools-title)' }}
-                    title={displayName}
-                >
-                    {displayName}
-                </span>
-                {hasLabel ? (
-                    status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                        renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons, 'typography-meta')
-                    ) : (
-                        status === 'error' ? (
-                            <span className={cn(
-                                'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
-                                isMobile ? 'whitespace-normal break-words' : 'truncate',
-                            )}>
-                                {label}
-                            </span>
-                        ) : (
-                            <Text
-                                variant={animateTailText ? 'generate-effect' : 'static'}
-                                className="typography-meta flex-1 min-w-0 truncate text-muted-foreground/70"
-                                style={{ color: 'var(--tools-description)' }}
-                                title={label}
-                            >
-                                {label}
-                            </Text>
-                        )
-                    )
-                ) : null}
-            </div>
-        </ToolRevealOnMount>
-    );
-}, (prev, next) => {
-    return prev.isMobile === next.isMobile
-        && prev.animateTailText === next.animateTailText
-        && prev.showToolFileIcons === next.showToolFileIcons
-        && getTaskSummaryEntryRenderSignature(prev.entry) === getTaskSummaryEntryRenderSignature(next.entry);
-});
-
-TaskSummaryEntryRow.displayName = 'TaskSummaryEntryRow';
-
-const TaskSummaryEntriesList = React.memo(({
-    entries,
-    isExpanded,
-    isMobile,
-    animateTailText,
-    showToolFileIcons,
-}: {
-    entries: TaskToolSummaryEntry[];
-    isExpanded: boolean;
-    isMobile: boolean;
-    animateTailText: boolean;
-    showToolFileIcons: boolean;
-}) => {
-    const visibleEntries = isExpanded ? entries : entries.slice(-6);
-    const hiddenCount = Math.max(0, entries.length - visibleEntries.length);
-    const visibleStartIndex = entries.length - visibleEntries.length;
-
-    return (
-        <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} className="pt-0" disableHorizontal>
-            <div className="w-full min-w-0 space-y-1">
-                {hiddenCount > 0 ? (
-                    <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
-                ) : null}
-
-                {visibleEntries.map((entry, idx) => {
-                    const absoluteIndex = isExpanded ? idx : visibleStartIndex + idx;
-                    const rowKey = entry.id ?? `${getTaskSummaryEntryRenderSignature(entry)}:${absoluteIndex}`;
-                    return (
-                        <TaskSummaryEntryRow
-                            key={rowKey}
-                            entry={entry}
-                            isMobile={isMobile}
-                            animateTailText={animateTailText}
-                            showToolFileIcons={showToolFileIcons}
-                        />
-                    );
-                })}
-            </div>
-        </ToolScrollableSection>
-    );
-}, (prev, next) => {
-    return prev.isExpanded === next.isExpanded
-        && prev.isMobile === next.isMobile
-        && prev.animateTailText === next.animateTailText
-        && prev.showToolFileIcons === next.showToolFileIcons
-        && areTaskSummaryEntriesRenderEqual(prev.entries, next.entries);
-});
-
-TaskSummaryEntriesList.displayName = 'TaskSummaryEntriesList';
-
 const useRunningTaskChildSessionId = (part: ToolPartType | undefined, directory: string): string | undefined => {
     const startedAt = part?.state.status === 'running' ? part.state.time.start : undefined;
     const agent = part?.state.input.agent;
@@ -1037,127 +855,80 @@ const useRunningTaskChildSessionId = (part: ToolPartType | undefined, directory:
     return useDirectorySync(selector, directory || undefined);
 };
 
-const TaskToolSummary: React.FC<{
-    entries: TaskToolSummaryEntry[];
-    isExpanded: boolean;
+/**
+ * The child session a subagent call runs in. Progress/result metadata is the
+ * canonical join. Older parts keep their output IDs, and a resumed
+ * call can name its child in input.sessionID. A parent message loaded over
+ * REST mid-run lacks the progress-only join (see
+ * resolveRunningTaskChildSessionId); the child is then recovered from the
+ * session records until the authoritative id arrives.
+ */
+const useSubagentChildSessionId = (part: ToolPartType, directory: string): string | undefined => {
+    const state = part.state;
+    const authoritative = React.useMemo(() => {
+        if (state.status === 'pending') return readTaskSessionIdFromRecord({ sessionID: state.input.sessionID });
+        return readTaskSessionIdFromRecord(state.metadata)
+            ?? readTaskSessionIdFromOutput(state.status === 'running' ? undefined : state.output)
+            ?? readTaskSessionIdFromRecord({ sessionID: state.input.sessionID });
+    }, [state]);
+    const inferred = useRunningTaskChildSessionId(!authoritative && state.status === 'running' ? part : undefined, directory);
+    return authoritative ?? inferred;
+};
+
+/** Header action of a subagent row: opens the child session, whose own chat shows its work. */
+const OpenSubtaskButton: React.FC<{
+    sessionId: string;
+    agent: string | undefined;
     isMobile: boolean;
-    output?: string;
-    sessionId?: string;
-    onShowPopup?: (content: ToolPopupContent) => void;
-    input?: Record<string, unknown>;
-    animateTailText?: boolean;
-    isActive?: boolean;
-}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
+}> = ({ sessionId, agent, isMobile }) => {
     const { t } = useI18n();
     const currentDirectory = useEffectiveDirectory();
     const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const column = useChatColumnActions();
     const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-    const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const runtime = React.useContext(RuntimeAPIContext);
 
-    const trimmedOutput = prepareTaskToolOutput(output);
-    const hasOutput = trimmedOutput.length > 0;
-    const [isOutputExpanded, setIsOutputExpanded] = React.useState(false);
+    const agentType = agent ?? 'subagent';
+    const agentLabel = agentType.charAt(0).toUpperCase() + agentType.slice(1);
+    const label = t('chat.toolPart.openSubtask', { type: agentLabel });
 
-    const handleOpenSession = (event: React.MouseEvent) => {
+    const handleOpen = (event: React.MouseEvent) => {
         event.stopPropagation();
-        if (sessionId && currentDirectory) {
-            // A chat already in the side panel opens the subtask in place.
-            if (column.pinned) {
-                column.openSession(sessionId, currentDirectory);
-                return;
-            }
-            // Single-surface layouts (mobile, VS Code) navigate in place.
-            // Otherwise open a new side-panel tab.
-            if (isMobile || runtime?.runtime.isVSCode) {
-                setCurrentSession(sessionId, currentDirectory);
-                return;
-            }
-
-            openContextPanelTab(currentDirectory, {
-                mode: 'chat',
-                dedupeKey: `session:${sessionId}`,
-                label: agentType.charAt(0).toUpperCase() + agentType.slice(1),
-                readOnly: true,
-            });
+        if (!currentDirectory) return;
+        // A chat already in the side panel opens the subtask in place.
+        if (column.pinned) {
+            column.openSession(sessionId, currentDirectory);
+            return;
         }
+        // Single-surface layouts (mobile, VS Code) navigate in place.
+        // Otherwise open a new side-panel tab.
+        if (isMobile || runtime?.runtime.isVSCode) {
+            setCurrentSession(sessionId, currentDirectory);
+            return;
+        }
+        openContextPanelTab(currentDirectory, {
+            mode: 'chat',
+            dedupeKey: `session:${sessionId}`,
+            label: agentLabel,
+            readOnly: true,
+        });
     };
 
-    // v2 names the subagent to run in `input.agent`.
-    const agentType = typeof input?.agent === 'string'
-        ? input.agent
-        : 'subagent';
-
-    if (entries.length === 0 && !hasOutput && !sessionId) {
-        return (
-            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
-                <div className="typography-meta text-muted-foreground/70">
-                    {isActive ? 'Waiting for subagent activity...' : 'No subagent session id on task metadata.'}
-                </div>
-            </div>
-        );
-    }
-
     return (
-        <div
+        <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={handleOpen}
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]',
-                'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                'before:top-[-0.25rem] before:bottom-0'
+                'flex-shrink-0 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-interactive-hover',
+                'opacity-60 hover:opacity-100 focus-visible:opacity-100',
             )}
+            style={{ color: 'var(--tools-icon)' }}
+            title={label}
+            aria-label={label}
         >
-            {entries.length > 0 ? (
-                <TaskSummaryEntriesList
-                    entries={entries}
-                    isExpanded={isExpanded}
-                    isMobile={isMobile}
-                    animateTailText={animateTailText}
-                    showToolFileIcons={showToolFileIcons}
-                />
-            ) : null}
-
-            {sessionId && (
-                <button
-                    type="button"
-                    className="flex items-center gap-2 typography-meta text-primary hover:text-primary/80 w-full"
-                    onPointerDown={(event) => event.stopPropagation()}
-                    onClick={handleOpenSession}
-                >
-                    <Icon name="external-link" className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">{t('chat.toolPart.openSubtask', { type: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
-                </button>
-            )}
-
-            {hasOutput ? (
-                <div className={cn('space-y-1', (entries.length > 0 || sessionId) && 'pt-1')}
-                >
-                    <button
-                        type="button"
-                        className="flex items-center gap-2 typography-meta text-foreground/80 hover:text-foreground w-full"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                            event.stopPropagation();
-                            setIsOutputExpanded((prev) => !prev);
-                        }}
-                    >
-                        {isOutputExpanded ? (
-                            <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0" />
-                        ) : (
-                            <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0" />
-                        )}
-                        <span className="typography-meta text-foreground/80 font-medium">{t('chat.toolPart.output')}</span>
-                    </button>
-                    {isOutputExpanded ? (
-                        <ToolScrollableSection maxHeightClass="max-h-[50vh]">
-                            <div className="w-full min-w-0">
-                                <SimpleMarkdownRenderer content={trimmedOutput} variant="tool" onShowPopup={onShowPopup} />
-                            </div>
-                        </ToolScrollableSection>
-                    ) : null}
-                </div>
-            ) : null}
-        </div>
+            <Icon name="external-link" className="h-3 w-3" />
+        </button>
     );
 };
 
@@ -1552,7 +1323,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (isSubagentTool(part.tool) && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={coerceToText(outputString)} variant="tool" onShowPopup={onShowPopup} />
+                    <SimpleMarkdownRenderer content={prepareTaskToolOutput(outputString)} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1778,20 +1549,23 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-/** Header extras of a background shell command: its label, and a stop action while it runs. */
-type BackgroundShellHeader = {
-    phase: BackgroundShellPhase['kind'];
-    onStop?: () => void;
+/** Header extras of a row whose state comes from outside its own part: a label, and a stop action while it runs. */
+type ToolRowHeader = {
+    label?: 'background' | 'stopped';
+    /** The end of the call is not known yet, so the row shows no duration. */
+    durationUnknown?: boolean;
+    stop?: { onStop: () => void; ariaLabel: string };
 };
 
-const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHeader }> = ({
+const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subagentSessionId?: string }> = ({
     part,
     isExpanded,
     onToggle,
     isMobile,
     onShowPopup,
     animateTailText = true,
-    background,
+    header,
+    subagentSessionId: taskSessionId,
 }) => {
     const { t } = useI18n();
     const state = part.state;
@@ -1832,10 +1606,6 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
     const expandedContentRef = React.useRef<HTMLDivElement>(null);
 
     React.useLayoutEffect(() => {
-        if (isTaskTool) {
-            return;
-        }
-
         const element = expandedContentRef.current;
         if (!element) {
             return;
@@ -1843,9 +1613,8 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
 
         element.style.height = isExpanded ? 'auto' : '0px';
         element.style.overflow = isExpanded ? 'visible' : 'hidden';
-    }, [isExpanded, isTaskTool]);
+    }, [isExpanded]);
 
-    const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const time = stateWithData.time;
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>(() => ({
@@ -1905,85 +1674,6 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
         return Math.min(...candidates);
     }, [localStartAt, pinnedTime.start, time?.start]);
 
-    const taskOutputString = React.useMemo(() => {
-        return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
-    }, [stateWithData.output]);
-
-    const parsedTaskMetadata = React.useMemo(() => {
-        return parseTaskMetadataBlock(taskOutputString);
-    }, [taskOutputString]);
-
-    const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (!isTaskTool) {
-            return [];
-        }
-        const candidateSummary = (metadata as { summary?: unknown; entries?: unknown; tools?: unknown; calls?: unknown } | undefined);
-        const normalized = normalizeTaskSummaryEntries(
-            candidateSummary?.summary ?? candidateSummary?.entries ?? candidateSummary?.tools ?? candidateSummary?.calls
-        );
-
-        if (normalized.length > 0) {
-            return normalized;
-        }
-
-        return parsedTaskMetadata.summaryEntries;
-    }, [isTaskTool, metadata, parsedTaskMetadata.summaryEntries]);
-
-    const hasFinalMetadataTaskSummary = isFinalized && metadataTaskSummaryEntries.length > 0;
-
-    const authoritativeTaskSessionId = React.useMemo<string | undefined>(() => {
-        if (!isTaskTool) {
-            return undefined;
-        }
-
-        // Progress/result metadata is the canonical join. Older parts keep
-        // their metadata/output IDs, and a resumed call can name its child in
-        // input.sessionID before the discovery fallback runs.
-        const metadataSessionId = readTaskSessionIdFromRecord(metadata);
-        if (metadataSessionId) {
-            return metadataSessionId;
-        }
-
-        const partLevelSessionId = readTaskSessionIdFromRecord(partMetadata);
-        if (partLevelSessionId) {
-            return partLevelSessionId;
-        }
-
-        if (parsedTaskMetadata.sessionId) {
-            return parsedTaskMetadata.sessionId;
-        }
-        const outputSessionId = readTaskSessionIdFromOutput(taskOutputString);
-        if (outputSessionId) {
-            return outputSessionId;
-        }
-
-        return readTaskSessionIdFromRecord({ sessionID: input?.sessionID });
-    }, [input, isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
-
-    // A parent message loaded over REST mid-run lacks the progress-only join
-    // (see resolveRunningTaskChildSessionId); recover it from the child
-    // session records until the authoritative id arrives.
-    const inferredTaskSessionId = useRunningTaskChildSessionId(
-        isTaskTool && !authoritativeTaskSessionId && state.status === 'running' ? part : undefined,
-        currentDirectory,
-    );
-    const taskSessionId = authoritativeTaskSessionId ?? inferredTaskSessionId;
-
-    const childSessionLookupId = hasFinalMetadataTaskSummary ? '' : (taskSessionId ?? '');
-
-    const childSessionMessages = useSessionMessageRecords(childSessionLookupId, currentDirectory);
-    useEnsureSessionMessages(childSessionLookupId, currentDirectory);
-
-    const childSessionTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (!isTaskTool || !taskSessionId) {
-            return [];
-        }
-        if (!Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
-            return [];
-        }
-        return buildTaskSummaryEntriesFromSession(childSessionMessages);
-    }, [childSessionMessages, isTaskTool, taskSessionId]);
-
     React.useEffect(() => {
         if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {
             setLocalFinalizedAt(undefined);
@@ -2010,12 +1700,6 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
     const isActive = !isFinalized && activeLatched;
     const shouldTreatAsFinalized = isFinalized;
 
-    const taskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
-        if (childSessionTaskSummaryEntries.length > 0) {
-            return childSessionTaskSummaryEntries;
-        }
-        return metadataTaskSummaryEntries;
-    }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
     const diffStats = React.useMemo(() => {
         return (isEditTool(normalizedPartTool) || isPatchTool(normalizedPartTool))
             ? parseDiffStats(metadata)
@@ -2177,10 +1861,11 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
         openQuickTarget();
     };
 
-    const iconStyle = !isTaskTool && isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
-    const titleStyle = !isTaskTool && isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
-    const shouldRenderTaskSummary = useDeferredExpandedContent(isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || !!taskSessionId));
-    const shouldRenderExpandedContent = useDeferredExpandedContent(!isTaskTool && isExpanded);
+    const iconStyle = isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
+    const titleStyle = isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
+    const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+    // Shell and subagent rows carry their duration: live while they run, final once settled.
+    const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
 
     if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
@@ -2271,7 +1956,7 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                                     {isExpanded ? <Icon name="arrow-down-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-right-s" className="h-3.5 w-3.5" />}
                                 </div>
                             </div>
-                            <div className={cn('flex items-center min-w-0 flex-1', quickOpenTarget ? 'gap-1' : 'gap-2')}>
+                            <div className={cn('flex items-center min-w-0 flex-1', quickOpenTarget || taskSessionId ? 'gap-1' : 'gap-2')}>
                                 <MinDurationShineText
                                     active={Boolean(isActive && !isError)}
                                     minDurationMs={300}
@@ -2296,9 +1981,11 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                                         <Icon name="external-link" className="h-3 w-3" />
                                     </button>
                                 ) : null}
+                                {taskSessionId ? (
+                                    <OpenSubtaskButton sessionId={taskSessionId} agent={subagentAgent(input)} isMobile={isMobile} />
+                                ) : null}
                             </div>
-                            {/* A background command whose end is not known yet has no duration to show. */}
-                            {isShellTool(normalizedPartTool) && typeof effectiveTimeStart === 'number' && background?.phase !== 'unknown' ? (
+                            {showsDuration && typeof effectiveTimeStart === 'number' && !header?.durationUnknown ? (
                                 <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     <LiveDuration
                                         start={effectiveTimeStart}
@@ -2307,9 +1994,9 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                                     />
                                 </span>
                             ) : null}
-                            {background ? (
+                            {header?.label ? (
                                 <span className={cn('flex-shrink-0 text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
-                                    {background.phase === 'stopped'
+                                    {header.label === 'stopped'
                                         ? t('chat.toolPart.background.stoppedLabel')
                                         : t('chat.toolPart.background.label')}
                                 </span>
@@ -2357,7 +2044,7 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                                 </span>
                             )}
                         </div>
-                        {background?.onStop ? (
+                        {header?.stop ? (
                             // A labelled red action, the same one the composer's
                             // background commands strip offers. The negative
                             // margin keeps the header row at its text height.
@@ -2365,9 +2052,9 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                                 type="button"
                                 variant="ghost"
                                 size="xs"
-                                onClick={(event) => { event.stopPropagation(); background.onStop?.(); }}
+                                onClick={(event) => { event.stopPropagation(); header.stop?.onStop(); }}
                                 className="-my-0.5 flex-shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
-                                aria-label={t('chat.toolPart.background.stop')}
+                                aria-label={header.stop.ariaLabel}
                             >
                                 <Icon name="stop" className="size-3" />
                                 {t('chat.toolPart.background.stopLabel')}
@@ -2377,48 +2064,31 @@ const ToolPartContent: React.FC<ToolPartProps & { background?: BackgroundShellHe
                 )}
             </div>
 
-            {}
-            {shouldRenderTaskSummary ? (
-                <TaskToolSummary
-                    entries={taskSummaryEntries}
-                    isExpanded={isExpanded}
-                    isMobile={isMobile}
-                    output={taskOutputString}
-                    sessionId={taskSessionId}
-                    onShowPopup={onShowPopup}
-                    input={input}
-                    animateTailText={animateTailText}
-                    isActive={isActive}
-                />
-            ) : null}
-
-            {!isTaskTool ? (
-                <div
-                    ref={expandedContentRef}
-                    aria-hidden={!isExpanded}
-                    style={{
-                        height: isExpanded ? 'auto' : '0px',
-                        overflow: isExpanded ? 'visible' : 'hidden',
-                        overflowAnchor: 'none',
-                    }}
-                >
-                    {shouldRenderExpandedContent ? (
-                        <div
-                            className="relative ml-2 pl-3"
-                        >
-                            <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
-                            <ToolExpandedContent
-                                part={part}
-                                state={state}
-                                currentDirectory={currentDirectory}
-                                isExpanded={isExpanded}
-                                onShowPopup={onShowPopup}
-                                presentation={presentation}
-                            />
-                        </div>
-                    ) : null}
-                </div>
-            ) : null}
+            <div
+                ref={expandedContentRef}
+                aria-hidden={!isExpanded}
+                style={{
+                    height: isExpanded ? 'auto' : '0px',
+                    overflow: isExpanded ? 'visible' : 'hidden',
+                    overflowAnchor: 'none',
+                }}
+            >
+                {shouldRenderExpandedContent ? (
+                    <div
+                        className="relative ml-2 pl-3"
+                    >
+                        <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
+                        <ToolExpandedContent
+                            part={part}
+                            state={state}
+                            currentDirectory={currentDirectory}
+                            isExpanded={isExpanded}
+                            onShowPopup={onShowPopup}
+                            presentation={presentation}
+                        />
+                    </div>
+                ) : null}
+            </div>
         </div>
     );
 };
@@ -2514,26 +2184,82 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
         <ToolPartContent
             {...props}
             part={part}
-            background={{ phase: phase.kind, onStop: isRunning && !stopping ? stop : undefined }}
+            header={{
+                label: phase.kind === 'stopped' ? 'stopped' : 'background',
+                durationUnknown: phase.kind === 'unknown',
+                stop: isRunning && !stopping ? { onStop: stop, ariaLabel: t('chat.toolPart.background.stop') } : undefined,
+            }}
         />
     );
 };
 
-/** A subagent call that went to the background, rendered from its child and report (see `backgroundSubagentPart.ts`). */
-const BackgroundSubagentToolPartContent: React.FC<ToolPartProps & { childSessionID: string }> = ({ childSessionID, ...props }) => {
+/**
+ * A subagent call. The row follows the child: a background call is rebuilt
+ * from the child's status and report (see `backgroundSubagentPart.ts`), and a
+ * call the user stopped reads as stopped instead of failed. While the child
+ * runs the row offers the same stop the background shell rows do.
+ */
+const SubagentToolPartContent: React.FC<ToolPartProps> = (props) => {
+    const { t } = useI18n();
     const directory = useEffectiveDirectory();
-    const messages = useSessionMessages(props.part.sessionID, directory);
-    const run = React.useMemo(() => findSubagentRun(messages, childSessionID), [childSessionID, messages]);
-    const childRunning = useGlobalSessionStatusStore((state) => state.activeSessionIds.has(childSessionID));
+    const childSessionID = useSubagentChildSessionId(props.part, directory ?? '');
+    const backgroundChildID = readBackgroundSubagentChildID(props.part);
+    const status = props.part.state.status;
+    // The parent's messages carry the background report and the stop note;
+    // a foreground call that runs or succeeded needs neither.
+    const needsMessages = backgroundChildID !== undefined || status === 'error';
+    const messages = useSessionMessages(needsMessages ? props.part.sessionID : '', directory);
+    const run = React.useMemo(
+        () => (backgroundChildID ? findSubagentRun(messages, backgroundChildID) : undefined),
+        [backgroundChildID, messages],
+    );
+    const stoppedByUser = React.useMemo(
+        () => childSessionID !== undefined && findSubagentCancellation(messages, childSessionID),
+        [childSessionID, messages],
+    );
+    const backgroundRunning = useGlobalSessionStatusStore((state) => backgroundChildID !== undefined && state.activeSessionIds.has(backgroundChildID));
+    const [stopping, setStopping] = React.useState(false);
 
-    const phase = React.useMemo((): BackgroundSubagentPhase => {
+    const backgroundPhase = React.useMemo((): BackgroundSubagentPhase | undefined => {
+        if (!backgroundChildID) return undefined;
         if (run) return { kind: 'finished', run };
-        return childRunning ? { kind: 'running' } : { kind: 'unknown' };
-    }, [childRunning, run]);
-    const part = React.useMemo(() => toBackgroundSubagentPart(props.part, phase), [phase, props.part]);
-    const headerPhase: BackgroundShellPhase['kind'] = phase.kind === 'finished' && phase.run.state === 'cancelled' ? 'stopped' : phase.kind;
+        return backgroundRunning ? { kind: 'running' } : { kind: 'unknown' };
+    }, [backgroundChildID, backgroundRunning, run]);
 
-    return <ToolPartContent {...props} part={part} background={{ phase: headerPhase }} />;
+    const part = React.useMemo(() => {
+        if (backgroundPhase) return toBackgroundSubagentPart(props.part, backgroundPhase);
+        return stoppedByUser ? toStoppedSubagentPart(props.part, t('chat.toolPart.background.stoppedNotice')) : props.part;
+    }, [backgroundPhase, props.part, stoppedByUser, t]);
+
+    const isRunning = backgroundPhase ? backgroundPhase.kind === 'running' : status === 'running';
+    const description = subagentDescription(props.part.state.input);
+    const stop = React.useCallback(() => {
+        if (!childSessionID) return;
+        setStopping(true);
+        opencodeClient.stopSubagent({
+            sessionID: props.part.sessionID,
+            directory,
+            childSessionID,
+            description,
+        }).catch(() => {
+            setStopping(false);
+            toast.error(t('chat.toolPart.subagent.stopFailed'));
+        });
+    }, [childSessionID, description, directory, props.part.sessionID, t]);
+
+    const stopped = backgroundPhase
+        ? backgroundPhase.kind === 'finished' && backgroundPhase.run.state === 'cancelled'
+        : stoppedByUser;
+    const header: ToolRowHeader = {
+        // "in background" describes a call still running; a finished one is just finished.
+        label: stopped ? 'stopped' : backgroundPhase?.kind === 'running' ? 'background' : undefined,
+        durationUnknown: backgroundPhase?.kind === 'unknown',
+        stop: isRunning && childSessionID && !stopping
+            ? { onStop: stop, ariaLabel: t('chat.toolPart.subagent.stop') }
+            : undefined,
+    };
+
+    return <ToolPartContent {...props} part={part} header={header} subagentSessionId={childSessionID} />;
 };
 
 const ToolPart: React.FC<ToolPartProps> = (props) => {
@@ -2541,7 +2267,6 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
     const toolName = normalizeToolName(props.part.tool) || 'tool';
     const displayName = getToolMetadata(toolName).displayName;
     const backgroundShellID = isShellTool(toolName) ? readBackgroundShellID(props.part) : undefined;
-    const backgroundChildID = backgroundShellID ? undefined : readBackgroundSubagentChildID(props.part);
 
     return (
         <ToolPartErrorBoundary
@@ -2552,8 +2277,8 @@ const ToolPart: React.FC<ToolPartProps> = (props) => {
         >
             {backgroundShellID
                 ? <BackgroundShellToolPartContent {...props} shellID={backgroundShellID} />
-                : backgroundChildID
-                    ? <BackgroundSubagentToolPartContent {...props} childSessionID={backgroundChildID} />
+                : isSubagentTool(toolName)
+                    ? <SubagentToolPartContent {...props} />
                     : <ToolPartContent {...props} />}
         </ToolPartErrorBoundary>
     );

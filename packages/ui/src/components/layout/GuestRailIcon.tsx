@@ -16,7 +16,7 @@ type GuestRailIconProps = {
 
 
 /** Guest SVG as a currentColor silhouette. `<img>` cannot inherit the rail token. */
-export const GuestRailIcon: React.FC<GuestRailIconProps> = ({ src, className }) => {
+const GuestRailIcon: React.FC<GuestRailIconProps> = ({ src, className }) => {
   const resolvedSrc = useGuestIconSource(src);
   if (!resolvedSrc) return <Icon name={FALLBACK_GUEST_ICON} className={className} />;
   const mask = cssMaskUrl(resolvedSrc);

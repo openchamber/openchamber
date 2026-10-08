@@ -43,6 +43,20 @@
   mask-image: linear-gradient(to right, #000 calc(var(--oc-actions-edge) - 14px), transparent calc(var(--oc-actions-edge) - 2px));
 }
 
+/* A PR or issue reference coloured by its state (--oc-ref-tint). It is side
+   context, so it rests half-blended into the muted text and takes its full
+   colour on hover or focus, its own or that of an enclosing
+   .oc-ref-tint-scope row. */
+@utility oc-ref-tint {
+  color: color-mix(in oklab, var(--oc-ref-tint) 40%, var(--muted-foreground));
+
+  &:hover,
+  &:focus-visible,
+  :where(.oc-ref-tint-scope:hover, .oc-ref-tint-scope:focus-within) & {
+    color: var(--oc-ref-tint);
+  }
+}
+
 /* Buttons should never look selectable. */
 button,
 [role="button"] {

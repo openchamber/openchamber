@@ -1,9 +1,9 @@
-export interface ImageAttachmentCandidate {
+interface ImageAttachmentCandidate {
     name: string;
     type?: string;
 }
 
-export interface CitationRange {
+interface CitationRange {
     start: number;
     end: number;
 }

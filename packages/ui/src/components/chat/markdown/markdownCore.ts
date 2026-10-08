@@ -3,7 +3,7 @@ import markedLinkifyIt from 'marked-linkify-it';
 import remend from 'remend';
 import katex from 'katex';
 import DOMPurify, { type DOMPurify as DOMPurifyInstance } from 'dompurify';
-import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
+import { INLINE_REFERENCE_CHIP_CLASS, INTERACTIVE_REFERENCE_CHIP_CLASS, buildAgentMentionUrl, parseAgentHref, parseAttachmentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { isAppLinkUrl } from '@/lib/url';
 import { isSessionDeepLink } from '@/lib/sessionLinks';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -677,9 +677,16 @@ const createParser = (imageMode: MarkdownImageMode, rawHtml: MarkdownRawHtmlMode
           if (agentName) {
             return `<a href="${escapeAttr(buildAgentMentionUrl(agentName))}" data-openchamber-agent-mention="true" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${text}</a>`;
           }
+          // An attachment citation is a label, not a link: the file-type icon
+          // is added by the decoration pass (`decorateAttachmentCitations`).
+          const attachment = parseAttachmentHref(target);
+          if (attachment) {
+            return `<span class="${INLINE_REFERENCE_CHIP_CLASS}" data-attachment-citation="${escapeAttr(attachment.iconId)}" title="${escapeAttr(attachment.filename)}">${escapeAttr(attachment.filename)}</span>`;
+          }
           const skillName = parseSkillHref(target);
           if (skillName) {
-            return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="text-primary hover:underline">${text}</a>`;
+            // Drawn as a chip; `decorateReferenceChipIcons` adds the skill icon.
+            return `<a href="${escapeAttr(target)}" data-skill-name="${escapeAttr(skillName)}" class="${INTERACTIVE_REFERENCE_CHIP_CLASS}" title="$${escapeAttr(skillName)}">${escapeAttr(skillName)}</a>`;
           }
           const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
           return `<a href="${escapeAttr(target)}"${titleAttr} class="external-link" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -1076,7 +1083,7 @@ export const renderMarkdownSync = (
   return sanitize(withMath);
 };
 
-export type RenderedBlock = {
+type RenderedBlock = {
   // Stable identity across renders for per-block DOM reconciliation. Encodes
   // content + mode + highlight so any change forces that block (and only that
   // block) to re-morph; unchanged leading blocks are skipped entirely.

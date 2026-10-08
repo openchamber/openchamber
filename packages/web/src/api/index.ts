@@ -18,7 +18,7 @@ import { createWebLinearAPI } from './linear';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebSourceControlAPI } from './source-control';
 
-export interface WebAPIsOptions {
+interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
 }
 

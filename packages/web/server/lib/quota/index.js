@@ -5,6 +5,7 @@
  * @module quota
  */
 
+/** @public */
 export {
   listConfiguredQuotaProviders,
   fetchQuotaForProvider,

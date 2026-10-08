@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 
-export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
+export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 
 export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  targetSessionId?: string;
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */
   loopFile?: string;
@@ -21,8 +22,11 @@ export type ScheduledTask = {
   };
   execution: {
     prompt: string;
-    providerID: string;
-    modelID: string;
+    /** Absent on a task that follows the session defaults and was never pinned. */
+    providerID?: string;
+    modelID?: string;
+    /** Model, thinking level and agent come from the session defaults at run time. */
+    useDefaults?: boolean;
     variant?: string;
     agent?: string;
     goalEnabled?: boolean;
@@ -153,6 +157,16 @@ const RunNowResponseSchema = z.object({
   persistError: z.string().trim().min(1).optional().catch(undefined),
 });
 
+const BusyResponseSchema = z.object({ busy: z.enum(['running', 'queued']) });
+
+/** Run now refused because the task already has a run in flight or queued. */
+export class ScheduledTaskBusyError extends Error {
+  constructor(readonly busy: 'running' | 'queued', message: string) {
+    super(message);
+    this.name = 'ScheduledTaskBusyError';
+  }
+}
+
 export const runScheduledTaskNow = async (
   projectID: string,
   taskID: string,
@@ -165,6 +179,13 @@ export const runScheduledTaskNow = async (
       accept: 'application/json',
     },
   });
+  if (response.status === 409) {
+    const body = await response.json().catch(() => null);
+    const busy = BusyResponseSchema.safeParse(body);
+    if (busy.success) throw new ScheduledTaskBusyError(busy.data.busy, 'Scheduled task is already running');
+    const refusal = z.object({ error: z.string().min(1) }).safeParse(body);
+    throw new Error(refusal.success ? refusal.data.error : 'Failed to run scheduled task');
+  }
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));
   }

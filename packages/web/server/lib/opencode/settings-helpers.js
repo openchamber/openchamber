@@ -354,6 +354,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sidebarShowRecentSection === 'boolean') {
       result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
     }
+    if (typeof candidate.sidebarShowChatsSection === 'boolean') {
+      result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
+    }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
       result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
@@ -446,6 +449,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.diffWrapLines === 'boolean') {
       result.diffWrapLines = candidate.diffWrapLines;
     }
+    if (typeof candidate.diffHideWhitespace === 'boolean') {
+      result.diffHideWhitespace = candidate.diffHideWhitespace;
+    }
     if (typeof candidate.persistChatDraft === 'boolean') {
       result.persistChatDraft = candidate.persistChatDraft;
     }
@@ -470,6 +476,9 @@ export const createSettingsHelpers = (dependencies) => {
         result.fileEditorKeymap = mode;
       }
     }
+    if (typeof candidate.fileEditorVimMappings === 'string') {
+      result.fileEditorVimMappings = candidate.fileEditorVimMappings.slice(0, 10_000);
+    }
     if (Array.isArray(candidate.providerOrder)) {
       result.providerOrder = normalizeStringArray(candidate.providerOrder);
     }
@@ -484,6 +493,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sessionWorkAutoOpen === 'boolean') {
       result.sessionWorkAutoOpen = candidate.sessionWorkAutoOpen;
+    }
+    if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
+      result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
+    }
+    if (typeof candidate.sessionWorkKeepInGroup === 'boolean') {
+      result.sessionWorkKeepInGroup = candidate.sessionWorkKeepInGroup;
     }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
@@ -846,6 +861,9 @@ export const createSettingsHelpers = (dependencies) => {
 
     if (Array.isArray(candidate.recentAgents)) {
       result.recentAgents = normalizeStringArray(candidate.recentAgents);
+    }
+    if (Array.isArray(candidate.favoriteAgents)) {
+      result.favoriteAgents = normalizeStringArray(candidate.favoriteAgents);
     }
 
     const recentEfforts = sanitizeRecentEfforts(candidate.recentEfforts);

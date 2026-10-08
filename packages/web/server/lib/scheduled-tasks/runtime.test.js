@@ -350,6 +350,54 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[2].body).toMatchObject({ text: 'Review open issues' });
     expect(dispatch[2].body.resume).toBeUndefined();
   });
+
+  it('points a run that fails after creating its session at that session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST' && pathname.endsWith('/prompt')) {
+        return new Response(JSON.stringify({ error: 'provider down' }), { status: 500 });
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_failed' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1, lastSessionId: 'ses_previous' },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    // The start clears the previous run's session, creation records this one,
+    // and the failure keeps it.
+    const startIndex = patches.findIndex((patch) => patch.lastStatus === 'running');
+    expect(Object.hasOwn(patches[startIndex], 'lastSessionId')).toBe(true);
+    expect(patches[startIndex].lastSessionId).toBeUndefined();
+    expect(patches[startIndex + 1]).toEqual({ lastSessionId: 'ses_failed' });
+    expect(patches.at(-1)).toMatchObject({ lastStatus: 'error', lastSessionId: 'ses_failed' });
+  });
 });
 
 describe('scheduled-tasks runtime chats scope', () => {

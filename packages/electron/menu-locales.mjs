@@ -1,6 +1,7 @@
 export const MENU_LOCALE_DICTIONARIES = {
   en: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Connecting to {host}…',
     'about': 'About OpenChamber',
     'checkForUpdates': 'Check for Updates',
     'settings': 'Settings',
@@ -64,6 +65,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   de: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Verbindung zu {host} wird hergestellt…',
     'about': 'Über OpenChamber',
     'checkForUpdates': 'Nach Updates suchen',
     'settings': 'Einstellungen',
@@ -127,6 +129,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   es: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Conectando a {host}…',
     'about': 'Acerca de OpenChamber',
     'checkForUpdates': 'Buscar actualizaciones',
     'settings': 'Ajustes',
@@ -190,6 +193,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   fr: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Connexion à {host}…',
     'about': 'À propos d\'OpenChamber',
     'checkForUpdates': 'Rechercher des mises à jour',
     'settings': 'Réglages',
@@ -253,6 +257,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   ja: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': '{host} に接続中…',
     'about': 'OpenChamber について',
     'checkForUpdates': 'アップデートを確認',
     'settings': '設定',
@@ -316,6 +321,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   ko: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': '{host}에 연결 중…',
     'about': 'OpenChamber에 관하여',
     'checkForUpdates': '업데이트 확인',
     'settings': '설정',
@@ -379,6 +385,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   nl: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Verbinden met {host}…',
     'about': 'Over OpenChamber',
     'checkForUpdates': 'Zoek naar updates',
     'settings': 'Instellingen',
@@ -442,6 +449,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   pl: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Łączenie z {host}…',
     'about': 'O programie OpenChamber',
     'checkForUpdates': 'Sprawdź aktualizacje',
     'settings': 'Ustawienia',
@@ -505,6 +513,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   'pt-BR': {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Conectando a {host}…',
     'about': 'Sobre o OpenChamber',
     'checkForUpdates': 'Verificar atualizações',
     'settings': 'Configurações',
@@ -568,6 +577,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   tr: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': '{host} adresine bağlanılıyor…',
     'about': 'OpenChamber Hakkında',
     'checkForUpdates': 'Güncellemeleri Denetle',
     'settings': 'Ayarlar',
@@ -631,6 +641,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   uk: {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': 'Підключення до {host}…',
     'about': 'Про OpenChamber',
     'checkForUpdates': 'Перевірити оновлення',
     'settings': 'Налаштування',
@@ -694,6 +705,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   'zh-CN': {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': '正在连接到 {host}…',
     'about': '关于 OpenChamber',
     'checkForUpdates': '检查更新',
     'settings': '设置',
@@ -757,6 +769,7 @@ export const MENU_LOCALE_DICTIONARIES = {
   },
   'zh-TW': {
     'app.name': 'OpenChamber',
+    'splash.connectingTo': '正在連線到 {host}…',
     'about': '關於 OpenChamber',
     'checkForUpdates': '檢查更新',
     'settings': '設定',

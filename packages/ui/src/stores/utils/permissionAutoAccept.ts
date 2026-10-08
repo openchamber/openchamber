@@ -9,7 +9,7 @@ import type { Session } from "@/lib/opencode/model";
  * - `safety`: accepted unless the safety net (Jev) says the user should decide.
  * - `auto`: every request is accepted.
  */
-export const permissionModeSchema = z.enum(["ask", "safety", "auto"]);
+const permissionModeSchema = z.enum(["ask", "safety", "auto"]);
 
 export type PermissionMode = z.infer<typeof permissionModeSchema>;
 

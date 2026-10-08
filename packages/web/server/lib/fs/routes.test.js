@@ -1284,6 +1284,88 @@ describe('fs raw byte ranges', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it.each(['complete', 'disconnect', 'disconnect while opening'])('closes the real file handle on %s', async (scenario) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'oc-raw-stream-'));
+    const file = path.join(root, 'clip.mp4');
+    await nativeFs.writeFile(file, Buffer.alloc(256 * 1024));
+    let handle;
+    let stream;
+    let closed;
+    let bytesWritten = 0;
+    const res = new Writable({
+      write(chunk, _encoding, callback) {
+        bytesWritten += chunk.length;
+        if (scenario === 'disconnect') {
+          // Leave a pending write, as with a slow client that then goes away.
+          res.destroy();
+        } else {
+          callback();
+        }
+      },
+    });
+    Object.assign(res, {
+      status() { return res; },
+      type() { return res; },
+      setHeader() {},
+    });
+    const handler = registerRaw({
+      realpath: async () => file,
+      stat: async () => nativeFs.stat(file),
+      open: async () => {
+        handle = await nativeFs.open(file, 'r');
+        const createReadStream = handle.createReadStream.bind(handle);
+        vi.spyOn(handle, 'createReadStream').mockImplementation((options) => {
+          stream = createReadStream(options);
+          closed = new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('file stream did not close')), 1000);
+            stream.once('close', () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+          return stream;
+        });
+        if (scenario === 'disconnect while opening') res.destroy();
+        return handle;
+      },
+    });
+
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=0-' } }, res);
+      await closed;
+      expect(handle.fd).toBe(-1);
+      expect(res.listenerCount('close')).toBe(0);
+      if (scenario === 'complete') expect(bytesWritten).toBe(256 * 1024);
+      if (scenario === 'disconnect') expect(bytesWritten).toBeGreaterThan(0);
+      if (scenario === 'disconnect while opening') expect(bytesWritten).toBe(0);
+    } finally {
+      // Also clean up the descriptor when running against the broken version.
+      stream?.destroy();
+      if (handle) await handle.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 2000);
+
+  it('closes the file handle when stream creation throws', async () => {
+    const close = vi.fn(async () => {});
+    const handler = registerRaw({
+      stat: async () => ({ isFile: () => true, size: 10 }),
+      open: async () => ({
+        createReadStream: () => { throw new Error('stream setup failed'); },
+        close,
+      }),
+    });
+    const res = createMockResponse();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await handler({ query: { path: '/repo/clip.mp4' }, headers: { range: 'bytes=0-' } }, res);
+      expect(close).toHaveBeenCalledOnce();
+      expect(res.statusCode).toBe(500);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('rejects a span past the end with 416 and the file size', async () => {
     const { handler, open } = registerRawWithFile(Buffer.from('0123456789'));
     const res = createMockResponse();
@@ -1758,10 +1840,13 @@ describe('fs stat directory error handling', () => {
     try {
       await mkdir(path.join(directory, 'fs'));
       await mkdir(path.join(directory, 'git'));
+      await mkdir(path.join(directory, 'shared'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
+      await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));
       await copyFile(new URL('../git/redaction.js', import.meta.url), path.join(directory, 'git/redaction.js'));
+      await copyFile(new URL('../shared/guards.js', import.meta.url), path.join(directory, 'shared/guards.js'));
       expect(() => execFileSync('node', [
         '--input-type=module',
         '--eval',
@@ -2140,5 +2225,54 @@ describe('fs html preview grants', () => {
     const { grant } = (await mint('/workspace/site/index.html')).body;
     expect((await serve(`/api/fs/preview/${grant}/etc/passwd`)).statusCode).toBe(400);
     expect((await mint('/etc/passwd')).statusCode).toBe(400);
+  });
+});
+
+describe('GET /api/fs/find-by-name', () => {
+  let repo;
+  beforeEach(async () => {
+    repo = await mkdtemp(path.join(tmpdir(), 'oc-find-by-name-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await mkdir(path.join(repo, 'src', 'chat'), { recursive: true });
+    await mkdir(path.join(repo, 'lib'), { recursive: true });
+    await nativeFs.writeFile(path.join(repo, 'src', 'chat', 'Renderer.tsx'), 'x');
+    await nativeFs.writeFile(path.join(repo, 'lib', 'util.ts'), 'x');
+    await nativeFs.writeFile(path.join(repo, 'src', 'util.ts'), 'x');
+    await nativeFs.writeFile(path.join(repo, 'README.md'), 'x');
+    execFileSync('git', ['add', 'src/chat/Renderer.tsx', 'lib/util.ts'], { cwd: repo });
+  });
+  afterEach(async () => {
+    await rm(repo, { recursive: true, force: true });
+  });
+
+  it('finds tracked and untracked files by name anywhere in the workspace', async () => {
+    const { spawn } = await import('node:child_process');
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path,
+      fsPromises: nativeFs,
+      spawn,
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: repo }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const route = getRoute('GET', '/api/fs/find-by-name');
+    const ask = async (name) => {
+      const res = createMockResponse();
+      await route({ query: { name }, headers: {} }, res);
+      return res;
+    };
+
+    expect((await ask('Renderer.tsx')).body).toEqual({ paths: [path.join(repo, 'src/chat/Renderer.tsx')] });
+    expect((await ask('util.ts')).body.paths.sort()).toEqual([path.join(repo, 'lib/util.ts'), path.join(repo, 'src/util.ts')].sort());
+    expect((await ask('README.md')).body).toEqual({ paths: [path.join(repo, 'README.md')] });
+    expect((await ask('Missing.ts')).body).toEqual({ paths: [] });
+    for (const bad of ['src/util.ts', '*.ts', '', '..']) {
+      expect((await ask(bad)).statusCode, bad).toBe(400);
+    }
   });
 });

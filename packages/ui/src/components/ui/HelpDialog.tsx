@@ -207,6 +207,12 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          id: 'toggle_source_board',
+          descriptionKey: 'helpDialog.item.toggleSourceBoard',
+          icon: "todo",
+          keys: '',
+        },
+        {
           id: 'open_settings',
           descriptionKey: "helpDialog.item.openSettings",
           icon: "settings-3",

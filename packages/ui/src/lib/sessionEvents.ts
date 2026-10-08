@@ -4,7 +4,7 @@ import { isExecuteTool, isFileChangeTool, isShellTool } from '@/lib/opencode/too
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-export type SessionDeleteRequest = {
+type SessionDeleteRequest = {
   sessions: Session[];
   dateLabel?: string;
   mode?: 'session' | 'worktree';
@@ -14,7 +14,7 @@ export type SessionDeleteRequest = {
   skipDialogIfSafe?: boolean;
 };
 
-export type SessionCreateRequest = {
+type SessionCreateRequest = {
   worktreeMode?: 'main' | 'create' | 'reuse';
   parentID?: string | null;
   projectId?: string | null;

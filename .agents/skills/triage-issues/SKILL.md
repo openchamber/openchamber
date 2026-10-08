@@ -71,7 +71,11 @@ Execute approved closes/comments with retries and ~1s spacing; log results; re-v
 
 ## Phase 3 — Assessment fan-out
 
-For the surviving pool, fan out subagents (~15 issues each) that read the issue, its comments, and the relevant code, run both gates, and return per-issue verdict blocks. Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything that cleared gate 1 — bugs and features alike — as one numbered *wanted?* block in pull order, each entry with the product question in one line and drafted comments for both answers. Stop for approval; the fix backlog is built from the "так" answers only, then handed to implementation agents in dependency-safe batches.
+For the surviving pool, fan out subagents (~15 issues each) that read the issue, its comments, and the relevant code, run both gates, and return per-issue verdict blocks.
+
+Feature requests (`enhancement`) go to the `explore` subagent instead: write each batch's full issue text and comments to a file outside the repository, and tell it to follow `.agents/skills/triage-issues/references/feature-facts.md` for that file. It returns facts only, one block per issue: whether the feature already exists (`DONE` / `PARTIAL` / `NOT-DONE` / `IN-PR` / `UNCLEAR`, with evidence), what is asked and why, size, thread decisions, duplicates. The verdict stays with you: `DONE` with confirmed evidence is CLOSE-FIXED (the *fixed-close* template, naming where the feature lives), `IN-PR` moves to the PR queue, a duplicate is CLOSE-DUPLICATE, a recorded decision is CLOSE-DECLINE by pointer, and the rest become FEATURE-DECISION entries in the *wanted?* block, with `PARTIAL` naming the missing part as the question.
+
+Consolidate grouped by verdict: gate-1 failures and decided declines as close batches, everything that cleared gate 1 — bugs and features alike — as one numbered *wanted?* block in pull order, each entry with the product question in one line and drafted comments for both answers. Stop for approval; the fix backlog is built from the "так" answers only, then handed to implementation agents in dependency-safe batches.
 
 ## Message templates
 
@@ -79,16 +83,16 @@ For the surviving pool, fan out subagents (~15 issues each) that read the issue,
 > Closing as stale: the requested details never arrived, and without them this can't be reproduced. If you hit it again on a current version, a fresh report with the missing details is welcome.
 
 **fixed-close**
-> This was fixed by [ref] and ships in [release/next release]. Closing — if the problem persists there, comment and it will be reopened.
+> This was fixed by [ref] and ships in [release/next release]. If it still happens there, comment and I'll reopen it.
 
 **likely-fixed-close**
 > The [area] was rebuilt in [ref] ([release]) in a way that covers what you described, so closing this one. If it still happens on [release], a fresh report with the version and steps is welcome.
 
 **not-ours-close**
-> Closing: this behavior comes from [OpenCode / the provider / models.dev data / your configuration], not from OpenChamber — [one clause on the mechanism, with the upstream link when one exists]. Thanks for the report.
+> This comes from [OpenCode / the provider / models.dev data / your configuration]: [one clause on the mechanism, with the upstream link when one exists]. Closing it here, thanks for the report.
 
 **duplicate-close**
 > Closing as a duplicate of #[N], which tracks the same failure[: one clause on what this report added, if anything]. Follow that issue for updates.
 
 **decline-close**
-> Thanks — closing this one: [honest one-sentence reason grounded in product direction or maintenance cost]. [If a real ache underlies it: the welcome shape of a future change.]
+> Thanks for the idea. Closing this one: [honest one-sentence reason grounded in product direction or maintenance cost]. [If a real ache underlies it: the welcome shape of a future change.]

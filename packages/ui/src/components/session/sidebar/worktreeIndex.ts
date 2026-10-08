@@ -1,13 +1,13 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import { normalizePath } from '@/lib/pathNormalization';
 
-export type WorktreeIndexProject = {
+type WorktreeIndexProject = {
   id: string;
   normalizedPath: string | null | undefined;
   label?: string | null;
 };
 
-export type WorktreeIndexEntry<P extends WorktreeIndexProject = WorktreeIndexProject> = {
+type WorktreeIndexEntry<P extends WorktreeIndexProject = WorktreeIndexProject> = {
   meta: WorktreeMetadata;
   project: P;
 };

@@ -1,6 +1,5 @@
+import { isString } from '../shared/guards.js';
 import { normalizeGitLabInstance } from '../gitlab/instance.js';
-
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 export function normalizeSourceControlProviderInstance(provider, instance) {
   const value = isString(instance) ? instance.trim() : '';

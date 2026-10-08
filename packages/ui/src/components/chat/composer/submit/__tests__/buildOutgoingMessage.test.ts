@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { CONTEXT_METADATA_KEY, contextPayloadFromDraft } from '@/lib/messages/contextParts';
-import type { QueuedContextPart } from '@/stores/messageQueueStore';
+import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
 import {
     buildComposerContext,
     buildOutgoingMessage,
+    expandCommentSnippets,
     queuedContextToParts,
+    selectComposerQueue,
     type ComposerContextInput,
     type OutgoingMessageDeps,
     type OutgoingMessageInput,
@@ -76,6 +78,40 @@ describe('the composer text alone', () => {
 
     test('nothing at all is empty', () => {
         expect(buildOutgoingMessage(input(), deps()).isEmpty).toBe(true);
+    });
+});
+
+describe('manual queue projection', () => {
+    const ordinary: QueuedMessage = {
+        id: 'ordinary', content: 'User follow up', text: 'User follow up', createdAt: 1,
+        sendConfig: { providerID: 'openai', modelID: 'chosen', agent: 'plan' },
+    };
+    const scheduled: QueuedMessage = {
+        id: 'scheduled', content: 'Scheduled follow up', text: 'Scheduled follow up', createdAt: 1,
+        scheduledTask: { projectId: 'project-1', taskId: 'task-1' },
+    };
+
+    for (const sendConfig of [undefined, { providerID: 'other', modelID: 'other' }]) {
+        test(`a scheduled head with ${sendConfig ? 'explicit' : 'inherited'} selection does not supply config or text to mixed send-all`, () => {
+            const projection = selectComposerQueue([{ ...scheduled, sendConfig }, ordinary]);
+            expect(projection).toEqual([ordinary]);
+            expect(projection[0]?.sendConfig).toBe(ordinary.sendConfig);
+            const outgoing = buildOutgoingMessage(input({ queued: projection, composerText: 'Typed now' }), deps());
+            expect(outgoing.primaryText).toBe('User follow up');
+            expect(outgoing.additionalParts.map((part) => part.text)).toEqual(['Typed now']);
+        });
+    }
+
+    test('a scheduled-only queue has no manual sendable content', () => {
+        const projection = selectComposerQueue([scheduled]);
+        expect(projection.length).toBe(0);
+        expect(projection[0]?.sendConfig).toBeUndefined();
+        expect(buildOutgoingMessage(input({ queued: projection }), deps()).isEmpty).toBe(true);
+    });
+
+    test('ordinary queues keep their original items, order and identity', () => {
+        const queue = [ordinary, { ...ordinary, id: 'second' }];
+        expect(selectComposerQueue(queue)).toBe(queue);
     });
 });
 
@@ -498,6 +534,18 @@ describe('the composer send gate counts what the submission builder counts', () 
     // ChatInput cannot be mounted in bun test: its import graph pulls the composer editor,
     // Vite worker URLs and every runtime store. The gate is guarded at the source, the way
     // the neighbouring composer regression tests guard theirs.
+    test('queue counts and captured configuration use the ordinary-only projection', () => {
+        expect(gateExpression(/const composerQueuedMessages = ([^;\n]*);/, 'the manual queue projection'))
+            .toBe('selectComposerQueue(queuedMessages)');
+        expect(gateExpression(/const hasQueuedMessages = ([^;\n]*);/, 'the manual queue content gate'))
+            .toContain('composerQueuedMessages.length > 0');
+        const projection = gateExpression(/const queuedProjection = ([\s\S]*?);\n/, 'the captured queue projection');
+        expect(projection).toContain('composerQueuedMessages');
+        expect(projection).not.toContain('queuedMessages');
+        expect(gateExpression(/const capturedSendConfig = ([^;\n]*);/, 'the captured queue selection'))
+            .toContain('queuedProjection[0]?.sendConfig');
+    });
+
     test('every predicate the composer sends with counts a linked reference', () => {
         const gates = [
             gateExpression(/const hasContent = ([^;\n]*);/, 'the send-button gate'),
@@ -541,3 +589,33 @@ describe('the composer send gate counts what the submission builder counts', () 
     });
 });
 
+
+describe('expandCommentSnippets', () => {
+    const draft = (text: string, code = 'see #review here'): InlineCommentDraft => ({
+        id: text,
+        sessionKey: 's',
+        source: 'chat-quote',
+        fileLabel: 'm1',
+        startLine: 1,
+        endLine: 1,
+        code,
+        language: '',
+        text,
+        createdAt: 0,
+    });
+    const expandText = async (text: string) => text.replace('#review', 'Review this carefully.');
+
+    test('expands the comment words and leaves the quote verbatim', async () => {
+        const [expanded] = await expandCommentSnippets([draft('#review please')], expandText);
+        expect(expanded.text).toBe('Review this carefully. please');
+        expect(expanded.code).toBe('see #review here');
+    });
+
+    test('keeps a comment as written when expansion fails', async () => {
+        const original = draft('#review please');
+        const [kept] = await expandCommentSnippets([original], async () => {
+            throw new Error('offline');
+        });
+        expect(kept).toBe(original);
+    });
+});

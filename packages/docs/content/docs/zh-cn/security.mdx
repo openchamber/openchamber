@@ -104,6 +104,19 @@ OPENCHAMBER_ENTERPRISE_MODE=1
 - CLI 必须是 OpenCode 2.x，且不低于 OpenChamber 要求的版本。版本更旧时，OpenChamber 会停在"更新 OpenCode"的界面。
 - 也可以填一个文件夹，只要里面有 `opencode`（Windows 上是 `opencode.exe`）。这一项没有对应的环境变量，因为用户可以自己设置环境变量。
 
+
+### 隐藏内置技能目录
+
+OpenChamber 自带几个公开的技能目录（Anthropic、OpenAI、Cursor、Matt Pocock）。如果你的组织维护自己的目录，请将其添加为自定义目录，并在策略文件中隐藏内置目录。无论是否启用企业模式都有效。
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+此后设置中只提供用户自行添加的目录，即使直接请求，OpenChamber 也不会加载内置目录。由于用户可以自行设置环境变量，因此没有对应的环境变量。
+
 ### 示例
 
 要在 Mac 上放置策略文件，以管理员身份在终端中运行：

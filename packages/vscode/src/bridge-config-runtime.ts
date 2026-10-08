@@ -12,6 +12,7 @@ import {
   getAgentSources,
   getAgentConfig,
   getAgentPermissions,
+  listDisabledAgents,
   getCommandSources,
   getCommandConfig,
   getSnippet,
@@ -253,6 +254,11 @@ export async function handleConfigBridgeMessage(
     case 'api:config/reload': {
       await ctx?.manager?.restart();
       return { id, type, success: true, data: { restarted: true } };
+    }
+
+    case 'api:config/disabled-agents': {
+      const { directory } = (payload || {}) as { directory?: string };
+      return { id, type, success: true, data: { agents: listDisabledAgents(resolveWorkingDirectory(ctx, directory)) } };
     }
 
     case 'api:config/agents': {

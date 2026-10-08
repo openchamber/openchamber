@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Writing documents for agents. Use when creating or editing skills or modifying AGENTS.md.
+description: Writing documents for agents. Use when creating or editing skills, AGENTS.md, agent definitions, or docs agents reach through instructions or context pointers.
 author: Matt Pocock
 ---
 
@@ -79,3 +79,25 @@ You win twice: fewer tokens, and a sharper hook for the agent to hang its thinki
 - The **environment** is a source of truth too — `package.json` scripts, config files, the directory layout, `--help` output — and a document that restates it is a **cache**: a copy of a lookup, earning its load only when the lookup is expensive. Cache what the agent cannot find by looking: the unwritten convention, the reason behind a choice, the gotcha no config confesses. Leave the one-file, one-command lookups to the environment, where they cannot go stale.
 - Check every line for **relevance**: does it still bear on what the document does? A line loses relevance by never bearing on the task (mere exposition, or a branch that should be disclosed) or by going stale as the behaviour or world it describes changes. Shorter documents are easier to keep relevant. Without a pruning discipline the default fate is **sediment**: stale layers that settle because adding feels safe and removing feels risky, until you must core down through them to find what is still live.
 - Hunt **no-ops** sentence by sentence: an instruction the model already obeys by default pays load to say nothing. The test — does it change behaviour versus the default? — is model-relative, not reader-relative: two people disagreeing about a no-op disagree about the default, and settle it by running the document, not by debate. When a sentence fails, delete the whole sentence rather than trim words from it. The test also grades leading words: a word too weak to beat the default (_be thorough_ when the agent is already thorough-ish) is a no-op, and the fix is a stronger word (_relentless_), not a different technique.
+
+## Skill ownership in this repository
+
+Keep each cross-cutting rule with one canonical owner; companion skills add only domain-specific consequences and a pointer to that owner.
+
+| Concern | Canonical skill |
+|---|---|
+| Change scope, abstraction discipline, and validation risk | `openchamber-change-discipline` |
+| State authority, reconciliation, optimistic state, and lifecycle correctness | `sync-state-invariants` |
+| Isolated-space trust boundaries and the evidence that each one holds | `isolated-space-boundary` |
+| Enterprise mode: what counts as egress or exposure, how it is gated, and administrator knobs | `enterprise-boundary` |
+| Measurement, hot-path cost, caching performance, and optimization evidence | `performance-engineering` |
+| Shared UI API and runtime boundaries | `ui-api-decoupling` |
+| WebSocket/SSE and private relay mechanics | `relay-transport` |
+| Electron native ownership and privilege boundary | `desktop-shell` |
+| UI tokens, primitives, icons, and animation styling | `theme-system` |
+| Settings composition and search behavior | `settings-ui-patterns` |
+| How human-facing text and replies read | `communication-style` |
+| UI strings and localization | `locale-ui-patterns` |
+| Agent-facing document structure and context pointers | `writing-for-agents` |
+
+Before adding guidance to a skill, identify its canonical owner. If another skill owns the rule, add a precise companion pointer and only the local consequence; do not copy the rule.

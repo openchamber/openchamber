@@ -104,6 +104,19 @@ Se as suas máquinas já têm o OpenCode instalado e o OpenChamber deve usar ess
 - A CLI precisa ser o OpenCode 2.x, no mínimo na versão que o OpenChamber pede. Com uma mais antiga, o OpenChamber para na tela de "atualizar o OpenCode".
 - Uma pasta também serve, se tiver o `opencode` (`opencode.exe` no Windows). Não existe variável de ambiente para isso, porque o usuário pode defini-las por conta própria.
 
+
+### Ocultar os catálogos de skills embutidos
+
+O OpenChamber vem com alguns catálogos públicos de skills (Anthropic, OpenAI, Cursor, Matt Pocock). Se sua organização mantém um próprio, adicione-o como catálogo personalizado e oculte os embutidos no arquivo de política. Funciona com ou sem o modo empresarial.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+As configurações passam a oferecer só os catálogos que as pessoas adicionam, e o OpenChamber não carrega um embutido nem se for pedido diretamente. Não há variável de ambiente para isso, porque o usuário pode defini-las.
+
 ### Exemplos
 
 Para colocar o arquivo de política num Mac, rode no Terminal como administrador:

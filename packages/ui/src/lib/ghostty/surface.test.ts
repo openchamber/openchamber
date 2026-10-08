@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import type { GhosttyCell, GhosttyRow } from './core';
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
+  TerminalPasteArbiter,
   advanceTerminalSelectionClickSequence,
   isTerminalCopyShortcut,
   isTerminalLinkPointerGesture,
@@ -108,6 +109,29 @@ describe('shortcuts and gestures', () => {
     expect(isTerminalPasteShortcut({ key: 'v', ctrlKey: true, metaKey: false, shiftKey: false }, 'Win32')).toBe(false);
     expect(isTerminalPasteShortcut({ key: 'v', ctrlKey: true, metaKey: false, shiftKey: true }, 'Win32')).toBe(true);
     expect(isTerminalPasteShortcut({ key: 'Insert', ctrlKey: false, metaKey: false, shiftKey: true }, 'Win32')).toBe(true);
+  });
+
+  test('a paste shortcut delivers once whichever path arrives first', () => {
+    const nativeFirst = new TerminalPasteArbiter();
+    const lateRead = nativeFirst.beginRead();
+    expect(nativeFirst.settleNativePaste(10)).toBe(true);
+    expect(nativeFirst.settleRead(lateRead, true, 20)).toBe(false);
+
+    // WebKit: the read resolves before the keystroke's native paste event.
+    const readFirst = new TerminalPasteArbiter();
+    expect(readFirst.settleRead(readFirst.beginRead(), true, 10)).toBe(true);
+    expect(readFirst.settleNativePaste(60)).toBe(false);
+    expect(readFirst.settleNativePaste(70)).toBe(true);
+  });
+
+  test('a native paste with no event owed delivers after the echo window or a menu read', () => {
+    const noNativeEvent = new TerminalPasteArbiter();
+    expect(noNativeEvent.settleRead(noNativeEvent.beginRead(), true, 0)).toBe(true);
+    expect(noNativeEvent.settleNativePaste(5000)).toBe(true);
+
+    const menu = new TerminalPasteArbiter();
+    expect(menu.settleRead(menu.beginRead(), false, 0)).toBe(true);
+    expect(menu.settleNativePaste(10)).toBe(true);
   });
 
   test('link activation uses Command on macOS and Control elsewhere', () => {

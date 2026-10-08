@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { Message, Part, Session } from '@/lib/opencode/model';
+import type { Part, Session } from '@/lib/opencode/model';
 
 import {
-    buildTaskSummaryEntriesFromSession,
-    parseTaskMetadataBlock,
     prepareTaskToolOutput,
     readTaskSessionIdFromRecord,
     readTaskSessionIdFromOutput,
@@ -19,30 +17,10 @@ describe('taskToolModel', () => {
         expect(readTaskSessionIdFromRecord(undefined)).toBe(undefined);
     });
 
-    test('reads authoritative session and summary metadata', () => {
+    test('reads the child session from a legacy metadata block', () => {
         const output = 'result\n<task_metadata>{"sessionID":"child-1","calls":[{"id":"tool-1","tool":"read","title":"a.ts"}]}</task_metadata>';
-        expect(parseTaskMetadataBlock(output)).toEqual({
-            sessionId: 'child-1',
-            summaryEntries: [{ id: 'tool-1', tool: 'read', state: { status: undefined, title: 'a.ts', input: undefined } }],
-        });
         expect(readTaskSessionIdFromOutput(output)).toBe('child-1');
-    });
-
-    test('projects tool calls while excluding nested subagent calls', () => {
-        const message = {
-            info: { id: 'message-1', role: 'assistant' } as Message,
-            parts: [
-                { id: 'read-1', type: 'tool', tool: 'read', state: { status: 'completed', input: { path: 'a.ts' } } },
-                { id: 'subagent-1', type: 'tool', tool: 'subagent', state: { status: 'running' } },
-                { id: 'subagent-1', type: 'tool', tool: 'subagent', state: { status: 'completed' } },
-            ] as unknown as Part[],
-        };
-
-        expect(buildTaskSummaryEntriesFromSession([message])).toEqual([{
-            id: 'read-1',
-            tool: 'read',
-            state: { status: 'completed', input: { path: 'a.ts' } },
-        }]);
+        expect(readTaskSessionIdFromOutput('result\n<task_metadata>{broken</task_metadata>')).toBe(undefined);
     });
 
     test('strips task metadata and caps oversized task output before markdown rendering', () => {
@@ -129,7 +107,6 @@ describe('taskToolModel', () => {
 
         expect(prepareTaskToolOutput(output)).toBe('## Verdict');
         expect(readTaskSessionIdFromOutput(output)).toBe('child-1');
-        expect(parseTaskMetadataBlock(output).sessionId).toBe('child-1');
     });
 });
 

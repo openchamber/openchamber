@@ -30,7 +30,7 @@ const persistedSelectionSchema = z.object({
   lastUsedProvider: z.object({ providerID: z.string(), modelID: z.string() }).nullable().optional().catch(undefined),
 })
 
-export type SelectionState = {
+type SelectionState = {
   sessionModelSelections: Map<string, ModelSelection>
   sessionAgentSelections: Map<string, string>
   /** The agent OpenCode's session record held when the composer last followed it. */

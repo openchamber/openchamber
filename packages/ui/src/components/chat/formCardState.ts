@@ -19,7 +19,7 @@ import type { FormField, FormValue } from '@opencode/client';
  * a reply only when every external field answers `true`, so it records that
  * the user has seen the step with the link.
  */
-export type FieldValue = {
+type FieldValue = {
     text: string;
     number: number | null;
     boolean: boolean;

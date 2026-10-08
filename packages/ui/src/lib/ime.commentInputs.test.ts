@@ -15,21 +15,17 @@ const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const COMMENT_INPUTS: Array<{ name: string; file: string; handler: string; guard: RegExp }> = [
   {
-    name: 'diff and file comments',
-    file: 'components/comments/InlineCommentInput.tsx',
+    // Chat quote comments, diff and file comments, and editing a pending
+    // comment above the composer all type into this field.
+    name: 'comment text field',
+    file: 'components/comments/CommentTextEditor.tsx',
     handler: 'const handleKeyDown',
-    guard: /isIMECompositionEvent\(e\)\) return;/,
+    guard: /isIMECompositionEvent\(event\)\) return false;/,
   },
   {
-    name: 'chat quote comments',
-    file: 'components/chat/message/TextSelectionMenu.tsx',
-    handler: 'ref={commentInputRef}',
-    guard: /isIMECompositionEvent\(event\)\) return;/,
-  },
-  {
-    name: 'composer context chip editor',
-    file: 'components/chat/composer/ui/ComposerContextChips.tsx',
-    handler: 'ref={editRef}',
+    name: 'issues and PRs board reply',
+    file: 'components/sourceBoard/SourceBoardReply.tsx',
+    handler: 'const onKeyDown',
     guard: /isIMECompositionEvent\(event\)\) return;/,
   },
   {
@@ -53,12 +49,28 @@ describe('comment inputs ignore IME composition keystrokes', () => {
       const start = source.indexOf(input.handler);
       expect(start).toBeGreaterThan(-1);
 
-      const handler = source.slice(start, start + 900);
+      // From the input to the end of its key handler; the selection comment's
+      // input carries change, select and paste handlers before it.
+      const handler = source.slice(start, start + 1500);
       const guardIndex = handler.search(input.guard);
       const keyIndex = handler.search(/(event|e)\.key === '(Enter|Escape)'/);
 
       expect(guardIndex).toBeGreaterThan(-1);
       expect(keyIndex).toBeGreaterThan(guardIndex);
+    });
+  }
+});
+
+describe('comment surfaces type into the guarded comment field', () => {
+  for (const file of [
+    'components/comments/InlineCommentInput.tsx',
+    'components/chat/message/TextSelectionMenu.tsx',
+    'components/chat/composer/ui/ComposerContextChips.tsx',
+  ]) {
+    test(file, () => {
+      const source = readFileSync(join(srcDir, file), 'utf-8');
+      expect(source).toContain('<CommentTextEditor');
+      expect(source).not.toContain('<textarea');
     });
   }
 });

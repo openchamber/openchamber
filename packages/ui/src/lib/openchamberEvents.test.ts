@@ -268,6 +268,24 @@ describe('openchamber events', () => {
     unsubscribe();
   });
 
+  test('dispatches a project-context invalidation only with a valid owner id', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const owners: string[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => {
+      if (event.type === 'project-context-changed') owners.push(event.projectId);
+    });
+    try {
+      for (const properties of [{ projectId: 'path_chats' }, {}, { projectId: '' }, { projectId: 42 }]) {
+        MockEventSource.instances[0].onmessage?.({
+          data: JSON.stringify({ type: 'openchamber:project-context-changed', properties }),
+        });
+      }
+      expect(owners).toEqual(['path_chats']);
+    } finally {
+      unsubscribe();
+    }
+  });
+
   test('dispatches an agent file-open request and drops one without a path', async () => {
     const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
     const events: unknown[] = [];

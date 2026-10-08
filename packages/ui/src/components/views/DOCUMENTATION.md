@@ -78,6 +78,18 @@ patch opens with 3 lines of context, and expanding reads that file in full once
 expansion. A failed read toasts and keeps the patch. Working-tree files there
 already load both full sides, so they expand without a read.
 
+## Hidden whitespace
+
+`diffHideWhitespace` is a synced profile preference, toggled from the DiffView
+toolbar and the mobile diff header. `PierreDiffViewer` applies it to whatever
+diff it receives, every comparison mode alike, through
+`lib/diff/hideWhitespaceChanges.ts`: line pairs equal once all whitespace is
+removed become context, each side keeping its own text, and hunks are recut
+with 3 lines of context inside the original hunk. A file with nothing left shows
+a whitespace-only note. Hunk stage and discard actions are withheld meanwhile,
+because they act on the whole hunk, whitespace included. Line numbers do not
+move, so comments and context expansion work unchanged.
+
 Most focused tests use Bun. `MultiFileDiffEntry.vitest.tsx` exercises the real
 diff component through the web workspace's Vitest runner because its transitive
 UI imports require Vite asset transforms. The web test configuration includes

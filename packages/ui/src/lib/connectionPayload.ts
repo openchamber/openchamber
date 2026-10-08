@@ -8,13 +8,13 @@ const MAX_PAIRING_PAYLOAD_LENGTH = 16_384;
 // The one-time pairing `secret` (payload level) is the single auth credential,
 // redeemed over whichever transport connects first. Relay carries no embedded
 // bearer token — that is the v1 sin this format replaces.
-export type PairingDirectCandidate = {
+type PairingDirectCandidate = {
   type: 'lan' | 'tunnel';
   url: string;
   priority?: number;
 };
 
-export type PairingRelayCandidate = {
+type PairingRelayCandidate = {
   type: 'relay';
   relayUrl: string;
   serverId: string;

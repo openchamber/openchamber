@@ -16,7 +16,7 @@ import { toClaudeUsage } from './transforms.js';
 
 export const providerId = 'claude';
 export const providerName = 'Claude';
-export const aliases = ['anthropic', 'claude'];
+const aliases = ['anthropic', 'claude'];
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OAUTH_BETA_HEADER = 'oauth-2025-04-20';

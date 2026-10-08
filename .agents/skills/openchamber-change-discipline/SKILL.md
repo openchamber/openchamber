@@ -15,7 +15,6 @@ Make the smallest complete change and validate at the narrowest level that cover
 2. Classify every applicable change risk below.
 3. Identify every affected consumer, runtime, persisted format, and public export. This step is complete only when each risk has an owner and required validation.
 
-When instructions materially conflict, stop and resolve the conflict instead of silently choosing one.
 
 ## Risk Classification
 
@@ -66,9 +65,9 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 
 | Change | Minimum validation |
 |---|---|
-| Executable source | Focused tests plus package-scoped type-check and lint |
+| Executable source | Focused tests for the changed behavior; type-check and lint run in `bun run check:changed`. TypeScript and lint do not cover server JS, CLI JS, Electron helpers, or native code: run `node --check`, focused tests, or the build for those |
 | Cross-workspace/shared contract | Workspace-wide type-check and lint plus affected builds/tests |
-| Added/deleted/renamed source file, export/type/entrypoint/import shape | `bun run dead-code` in addition to relevant checks |
+| Added/deleted/renamed source file, export/type/entrypoint/import shape | `bun run check:changed` (covers dead code) in addition to relevant checks |
 | Persisted or external contract | Compatibility and round-trip tests plus the applicable failure/ordering cases: missing-versus-empty, malformed data, stale reads versus newer mutations, out-of-order writes, lifecycle handling for debounced writes, conversion, and failed-write/migration rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
 | Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. CI does not build the image. |
@@ -94,7 +93,7 @@ For type-only shared contracts, validate compile-time consumers. Add runtime ser
 ## Completion Standard
 
 - Implement the behavior end to end, including rollback and cleanup.
-- Run focused regression tests for the changed contract.
+- Run focused regression tests for the changed contract; when no test can cover it, say so in the report.
 - Preserve unrelated changes encountered in shared files.
 - Re-read the owning docs and update them when the implementation changed their truth.
-- Perform a final simplification pass: remove speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent.
+- Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent. Then `bun run check:changed` passes.

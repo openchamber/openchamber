@@ -1,4 +1,4 @@
-export type TerminalContext = {
+type TerminalContext = {
   terminalId: string;
   terminalLabel: string;
   startLine: number;
@@ -6,7 +6,7 @@ export type TerminalContext = {
   text: string;
 };
 
-export type ParsedTerminalContext = Omit<TerminalContext, 'terminalId'>;
+type ParsedTerminalContext = Omit<TerminalContext, 'terminalId'>;
 
 const BLOCK = /\n*<terminal_context>\n([\s\S]*?)\n<\/terminal_context>\s*$/;
 

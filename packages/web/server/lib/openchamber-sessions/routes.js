@@ -1,3 +1,4 @@
+import { asNonEmptyString } from '../shared/guards.js';
 import express from 'express';
 import {
   createWorktree as createWorktreeDefault,
@@ -15,12 +16,6 @@ import { createArchiveStore } from './archive-store.js';
 import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 const asList = (value) => (Array.isArray(value) ? value : []);
 

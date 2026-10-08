@@ -100,7 +100,7 @@ collision gets a numeric suffix. Sharing is refused only when the checkout canno
 | PATCH | `/api/project-context/:projectId/notes/:noteId` | patches `body`; legacy `pinned` input is ignored by session knowledge; `404` when unknown |
 | DELETE | `/api/project-context/:projectId/notes/:noteId` | `404` when unknown |
 | PATCH | `/api/project-context/:projectId/plans/:planId` | legacy project pin state only; session attachment uses session knowledge; `404` when unknown |
-| GET | `/api/project-context/:projectId/plans/:planId` | `404` when the link or its markdown is gone |
+| GET | `/api/project-context/:projectId/plans/:planId` | `404` when the link or its markdown is gone; the answer carries `path`, the markdown's absolute path, so comments on the plan name the file to the agent (reads and writes stay id-addressed) |
 | POST | `/api/project-context/:projectId/plans` | `201`; takes `{title, body}`, never a path |
 | PUT | `/api/project-context/:projectId/plans/:planId` | takes the whole `{raw}` document; `404` when the link or its markdown is gone |
 | DELETE | `/api/project-context/:projectId/plans/:planId` | `404` when unknown |
@@ -118,6 +118,12 @@ on a bare express app so that failure mode fails the suite instead of the user.
 `projectId` is validated against `/^[a-zA-Z0-9._:-]+$/`, which rejects
 separators and traversal. Validation failures are `400`; malformed stored data
 and I/O failures are `500`.
+
+## Change notifications
+
+After `writeContext` atomically commits `context.json`, the runtime calls its optional `onChanged(projectId)` dependency. The server broadcasts `openchamber:project-context-changed` with `{ projectId }` on the existing OpenChamber control stream. It carries the path-derived owner id, not the bounded storage stem or any note content. Failed writes and missing-entry no-ops announce nothing. Updating or deleting a shared plan through the API announces the same way after the file write, since shared plans have no manifest entry.
+
+Clients re-read authoritative context for the visible owner. This is a commit notification, not a filesystem watcher; direct changes to shared plan files outside the API retain their existing read-on-open behavior.
 
 ## Invariants
 

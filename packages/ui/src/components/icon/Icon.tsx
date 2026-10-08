@@ -53,7 +53,7 @@ function ensureSpriteSymbol(name: IconName) {
   sprite.appendChild(symbol)
 }
 
-export interface IconProps extends React.ComponentPropsWithoutRef<"svg"> {
+interface IconProps extends React.ComponentPropsWithoutRef<"svg"> {
   name: IconName
 }
 

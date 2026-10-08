@@ -1,3 +1,4 @@
+import { isString } from '../shared/guards.js';
 import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
@@ -11,7 +12,6 @@ const MAX_BODY_BYTES = 64 * 1024;
 const HELPER_PATH = fileURLToPath(new URL('./credential-helper.js', import.meta.url));
 /** Where the helper finds its lease nonce; set on the Git process, inherited by the helper. */
 export const GIT_CREDENTIAL_NONCE_ENV = 'OPENCHAMBER_GIT_CREDENTIAL_NONCE';
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 /**
  * Git's credential wire format: `key=value` lines, one per attribute. Exported

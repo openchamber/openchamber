@@ -4,14 +4,19 @@ import crypto from 'node:crypto';
 import { createRelayService } from './service.js';
 
 const makeService = (options = {}) => {
-  // In-memory settings store with a pre-seeded relay identity so the service
-  // never regenerates a signing key during the test.
+  // In-memory key store with a pre-seeded signing key so the service never
+  // regenerates the serverId during the test.
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
-  let settings = {
-    relaySigningKey: {
+  const keySlots = {
+    signing: {
       privateJwk: privateKey.export({ format: 'jwk' }),
       publicJwk: publicKey.export({ format: 'jwk' }),
     },
+  };
+  const relayKeyStore = {
+    getOrCreate: async (slot, generate) => (keySlots[slot] ??= await generate()),
+  };
+  let settings = {
     privateRelay: { enabled: true, relayUrl: 'wss://relay.example.test/ws' },
     ...options.settings,
   };
@@ -26,7 +31,7 @@ const makeService = (options = {}) => {
     crypto,
     readSettingsFromDiskMigrated: async () => settings,
     writeSettingsToDisk: async (next) => { settings = next; },
-    readSettingsStrict: async () => settings,
+    relayKeyStore,
     getLocalPort: () => 0,
     hasRelayDemand: options.hasRelayDemand ?? (async () => true),
     hostLock,

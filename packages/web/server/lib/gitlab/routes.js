@@ -84,6 +84,16 @@ function sendAuthStorageError(res, error) {
   return null;
 }
 
+/** A list's state and whose items, from the query; unknown values read as open and anyone. */
+function readListFilter(query) {
+  const state = requestText(query?.state);
+  const people = requestText(query?.people);
+  return {
+    state: ['open', 'closed', 'merged', 'all'].includes(state) ? state : 'open',
+    people: ['any', 'assigned', 'created', 'reviewRequested'].includes(people) ? people : 'any',
+  };
+}
+
 function requestText(value) {
   return isString(value) ? value.trim() : '';
 }
@@ -420,20 +430,21 @@ export function registerGitLabRoutes(app, options = {}) {
         record: mutationRecord(context, kind, actor, credential, existing.target, normalized.digest),
         providerAccountId: resource.providerUserId,
         perform: () => { throw mutationConflict(); },
-        reconcile: async () => reconcile(service, await resolveReplay()),
+        reconcile: async () => reconcile(service, await resolveReplay(), normalized),
         classifyError: classifyMutationError,
       });
       statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
       return mutationReceipt(execution.record, execution.replayed, resource.providerUserId);
     }
-    const resolved = kind === 'change-request-create'
-      ? await service.resolveCreateMutation(context, context.target, normalized)
-      : await service.resolveChangeRequestMutation(context, context.target);
+    let resolved;
+    if (kind === 'change-request-create') resolved = await service.resolveCreateMutation(context, context.target, normalized);
+    else if (kind.startsWith('issue-')) resolved = await service.resolveIssueMutation(context, context.target);
+    else resolved = await service.resolveChangeRequestMutation(context, context.target);
     const execution = await options.mutationExecutor.execute({
       record: mutationRecord(context, kind, actor, credential, resolved.target, normalized.digest),
       providerAccountId: resource.providerUserId,
       perform: () => perform(service, normalized, resolved),
-      reconcile: () => reconcile(service, resolved),
+      reconcile: () => reconcile(service, resolved, normalized),
       classifyError: classifyMutationError,
     });
     statusCache.invalidate({ instance: context.instance, accountId: context.accountId, repositoryId: context.repositoryId });
@@ -785,6 +796,156 @@ export function registerGitLabRoutes(app, options = {}) {
     }
   });
 
+  // A comment or a review leaves nothing that tells a lost write from one
+  // never sent short of guessing from its text, so the outcome stays unknown.
+  const unknownOutcome = () => ({ state: 'outcome-unknown' });
+  // GitLab's own limit for a note.
+  const NOTE_MAX_LENGTH = 1_000_000;
+  const noteText = (value, required) => {
+    if (value === undefined && !required) return undefined;
+    if (!isString(value) || !value.trim() || value.length > NOTE_MAX_LENGTH) {
+      throw invalidMutationContext('body is required and must fit a GitLab note');
+    }
+    return value;
+  };
+
+  app.post('/api/source-control/gitlab/pr/comment', async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      return res.json(await executeMutation(body, 'change-request-comment', (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const text = noteText(input.body, true);
+        return { body: text, digest: { body: text } };
+      }, async (service, normalized, resolved) => {
+        await service.commentChangeRequest({ providerTarget: resolved.providerTarget, body: normalized.body });
+        return {};
+      }, unknownOutcome));
+    } catch (error) {
+      return sendMutationError(res, error);
+    }
+  });
+
+  app.post('/api/source-control/gitlab/issues/comment', async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      return res.json(await executeMutation(body, 'issue-comment', (input, context) => {
+        if (!context.target.number) throw invalidMutationContext('target number is required');
+        const text = noteText(input.body, true);
+        return { body: text, digest: { body: text } };
+      }, async (service, normalized, resolved) => {
+        await service.commentIssue({ providerTarget: resolved.providerTarget, body: normalized.body });
+        return {};
+      }, unknownOutcome));
+    } catch (error) {
+      return sendMutationError(res, error);
+    }
+  });
+
+  // Close or reopen: `state` is what the item should become.
+  for (const [path, kind, method] of [
+    ['/api/source-control/gitlab/pr/state', 'change-request-state', 'setChangeRequestState'],
+    ['/api/source-control/gitlab/issues/state', 'issue-state', 'setIssueState'],
+  ]) {
+    app.post(path, async (req, res) => {
+      try {
+        const body = req.body ?? {};
+        return res.json(await executeMutation(body, kind, (input, context) => {
+          if (!context.target.number || !['open', 'closed'].includes(input.state)) {
+            throw invalidMutationContext('target number and state are required');
+          }
+          return { state: input.state, digest: { state: input.state } };
+        }, (service, normalized, resolved) => service[method]({
+          state: normalized.state,
+          providerTarget: resolved.providerTarget,
+          targetProject: resolved.target.project,
+          expectedTarget: resolved.target,
+        }), (service, resolved, normalized) => service.reconcileStateMutation(resolved.providerTarget, kind, normalized.state)));
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    });
+  }
+
+  // Labels and reviewers as one whole set, so a repeat asks for the same result.
+  const nameList = (value, limit) => {
+    if (!Array.isArray(value) || value.length > limit
+      || value.some((entry) => !isString(entry) || !entry.trim() || entry.length > 256)) {
+      throw invalidMutationContext('labels or reviewers are invalid');
+    }
+    return [...new Set(value)].sort();
+  };
+  for (const [path, kind, field, method] of [
+    ['/api/source-control/gitlab/pr/labels', 'change-request-labels', 'labels', 'setLabels'],
+    ['/api/source-control/gitlab/issues/labels', 'issue-labels', 'labels', 'setLabels'],
+    ['/api/source-control/gitlab/pr/reviewers', 'change-request-reviewers', 'reviewers', 'setReviewers'],
+  ]) {
+    app.post(path, async (req, res) => {
+      try {
+        const body = req.body ?? {};
+        return res.json(await executeMutation(body, kind, (input, context) => {
+          if (!context.target.number) throw invalidMutationContext('target number is required');
+          const names = nameList(input[field], field === 'labels' ? 100 : 50);
+          // GitLab names a reviewer by user id.
+          if (field === 'reviewers' && names.some((id) => !/^\d+$/.test(id))) throw invalidMutationContext('reviewers are invalid');
+          return { names, digest: { [field]: names } };
+        }, (service, normalized, resolved) => service[method]({
+          kind,
+          [field]: normalized.names,
+          providerTarget: resolved.providerTarget,
+          targetProject: resolved.target.project,
+          expectedTarget: resolved.target,
+        }), (service, resolved, normalized) => service.reconcileSetMutation(resolved.providerTarget, kind, normalized.names)));
+      } catch (error) {
+        return sendMutationError(res, error);
+      }
+    });
+  }
+
+  // The project's labels and who can review in it, for the board's pickers.
+  for (const [path, method] of [
+    ['/api/source-control/gitlab/references/labels', 'listLabels'],
+    ['/api/source-control/gitlab/references/reviewers', 'listReviewerCandidates'],
+  ]) {
+    app.get(path, async (req, res) => {
+      try {
+        const owner = requestText(req.query?.owner);
+        const repo = requestText(req.query?.repo);
+        if (!owner || !repo) return res.status(400).json({ error: 'a complete project selector is required' });
+        const origin = requestOrigin(req);
+        const directory = requestText(req.query?.directory);
+        const trustedContext = await validateReadContext(req, origin, directory);
+        if (!trustedContext) return res.status(501).json({ error: 'Bound source control status is unavailable' });
+        const service = await getResourceService(origin, trustedContext.accountId, true);
+        return res.json({ connected: true, items: await service[method](directory, { owner, name: repo }, trustedContext.primaryRemote) });
+      } catch (error) {
+        if (isReadContextError(error)) return res.status(error.status ?? 400).json(sourceControlErrorBody(error));
+        return sendResourceError(res, error);
+      }
+    });
+  }
+
+  app.post('/api/source-control/gitlab/pr/review', async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      return res.json(await executeMutation(body, 'change-request-review', (input, context) => {
+        // A verdict names the commit it is for; without one it would land on whatever was pushed last.
+        if (!context.target.number || !context.target.headSha || !['approve', 'request-changes'].includes(input.verdict)) {
+          throw invalidMutationContext('target number, head SHA and review verdict are required');
+        }
+        const text = noteText(input.body, false);
+        return { verdict: input.verdict, body: text, digest: { verdict: input.verdict, body: text ?? null } };
+      }, (service, normalized, resolved) => service.reviewChangeRequest({
+        verdict: normalized.verdict,
+        body: normalized.body,
+        providerTarget: resolved.providerTarget,
+        targetProject: resolved.target.project,
+        expectedTarget: resolved.target,
+      }), unknownOutcome));
+    } catch (error) {
+      return sendMutationError(res, error);
+    }
+  });
+
   app.get('/api/source-control/gitlab/pulls/list', async (req, res) => {
     try {
       const origin = requestOrigin(req);
@@ -795,6 +956,7 @@ export function registerGitLabRoutes(app, options = {}) {
       return res.json(await service.listChangeRequests(directory, {
         page: requestNumber(req.query?.page) ?? 1,
         query: requestText(req.query?.query) || undefined,
+        ...readListFilter(req.query),
         remote: trustedContext.primaryRemote,
       }));
     } catch (error) {
@@ -818,7 +980,7 @@ export function registerGitLabRoutes(app, options = {}) {
       if (!number) return res.status(400).json({ error: 'number is required' });
       const service = await getResourceService(origin, trustedContext.accountId, true);
       return res.json(await service.changeRequestContext(directory, number, {
-        includeDiff: req.query?.diff === '1', includeCIDetails: req.query?.checkDetails === '1',
+        includeDiff: req.query?.diff === '1', includeCIDetails: req.query?.checkDetails === '1', includeTimeline: req.query?.timeline === '1',
         project: owner ? { owner, name: repo } : undefined,
         remote: trustedContext.primaryRemote,
         constrainToPrimary: true,
@@ -840,6 +1002,7 @@ export function registerGitLabRoutes(app, options = {}) {
       const service = await getResourceService(origin, trustedContext.accountId, true);
       return res.json(await service.listIssues(directory, {
         page: requestNumber(req.query?.page) ?? 1, query: requestText(req.query?.query) || undefined,
+        ...readListFilter(req.query),
         remote: trustedContext.primaryRemote,
       }));
     } catch (error) {

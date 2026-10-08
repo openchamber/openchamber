@@ -40,3 +40,14 @@ export const toBackgroundSubagentPart = (part: ToolPart, phase: BackgroundSubage
             return part;
     }
 };
+
+/**
+ * A foreground subagent the user stopped. OpenCode fails the call with
+ * "Subagent cancelled"; the row shows it as stopped, not as a failure.
+ */
+export const toStoppedSubagentPart = (part: ToolPart, notice: string): ToolPart => {
+    const state = part.state;
+    if (state.status !== 'error') return part;
+    const { input, metadata, time } = state;
+    return { ...part, state: { status: 'completed', input, output: notice, metadata, time } };
+};

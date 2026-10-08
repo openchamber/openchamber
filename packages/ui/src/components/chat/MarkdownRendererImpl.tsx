@@ -54,7 +54,7 @@ import {
   parseFileReference,
   type ParsedFileReference,
 } from './fileReferenceParser';
-import { fileReferenceExists } from './fileReferenceStat';
+import { fileReferenceExists, findUniqueFileByName } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { detachedMarkdownDomCache, type DetachedMarkdownDomKey } from './markdown/detachedMarkdownDomCache';
 import { TimelineRevealGateContext } from './timelineRevealGate';
@@ -437,10 +437,14 @@ const useFileReferenceInteractions = ({
 
     const openFileReference = async (sourceElement: HTMLElement, options?: { external: boolean }) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
-      const resolved = getResolvedReference(raw, effectiveDirectory);
-      if (!resolved) {
+      const parsedReference = getResolvedReference(raw, effectiveDirectory);
+      if (!parsedReference) {
         return;
       }
+      // Annotation stored where the file really is, which differs from the
+      // written path when a bare name was found elsewhere in the workspace.
+      const storedPath = sourceElement.getAttribute('data-openchamber-file-path');
+      const resolved = storedPath ? { ...parsedReference, resolvedPath: storedPath } : parsedReference;
 
       // Cmd/Ctrl-click hands the file to the OS, which opens it with the app
       // that owns its type; where that is not possible it opens here as usual.
@@ -550,12 +554,17 @@ const useFileReferenceInteractions = ({
         linkedCount += 1;
 
         const outsideWorkspace = !isFilePathWithinDirectory(resolved.resolvedPath, effectiveDirectory);
-        const existsPromise = outsideWorkspace
-          ? Promise.resolve(true)
-          : fileReferenceExists(resolved.resolvedPath, effectiveDirectory);
+        // A bare name (`Renderer.tsx:42`) that is not at the root is looked up
+        // by name in the workspace, once per name; only a unique match links.
+        const isBareName = !resolved.path.includes('/') && !resolved.path.includes('\\');
+        const targetPromise: Promise<string | null> = outsideWorkspace
+          ? Promise.resolve(resolved.resolvedPath)
+          : fileReferenceExists(resolved.resolvedPath, effectiveDirectory).then((exists) => (
+            exists ? resolved.resolvedPath : isBareName ? findUniqueFileByName(resolved.path, effectiveDirectory) : null
+          ));
 
-        void existsPromise.then((exists) => {
-          if (cancelled || !exists || !container.contains(candidate)) {
+        void targetPromise.then((targetPath) => {
+          if (cancelled || !targetPath || !container.contains(candidate)) {
             return;
           }
 
@@ -567,7 +576,7 @@ const useFileReferenceInteractions = ({
 
           candidate.setAttribute('data-openchamber-file-link', 'true');
           candidate.setAttribute('data-openchamber-file-ref', latestRawCandidate);
-          candidate.setAttribute('data-openchamber-file-path', latestResolved.resolvedPath);
+          candidate.setAttribute('data-openchamber-file-path', targetPath);
           candidate.setAttribute('title', 'Open file');
           if (candidate.tagName.toLowerCase() !== 'a') {
             candidate.setAttribute('role', 'button');
@@ -1447,6 +1456,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   );
 };
 
+/** @public Consumed as a named export by the lazy Markdown renderer loader. */
 export const SimpleMarkdownRenderer = React.memo(SimpleMarkdownRendererImpl, (prev, next) => {
   const prevMermaidControls = prev.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;
   const nextMermaidControls = next.mermaidControls ?? DEFAULT_MERMAID_CONTROLS;

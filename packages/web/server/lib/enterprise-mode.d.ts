@@ -18,6 +18,7 @@ export interface EnterprisePolicy {
   allowLocalExtensions: boolean;
   /** OpenCode CLI path pinned by the policy file; null when nothing is pinned. */
   opencodeBinary: string | null;
+  hideBuiltinSkillCatalogs: boolean;
 }
 
 export type PublicEnterprisePolicy = Pick<EnterprisePolicy, 'enterpriseMode' | 'source' | 'organization' | 'policyError' | 'opencodeBinary'> & { networkAccessBlocked: boolean };

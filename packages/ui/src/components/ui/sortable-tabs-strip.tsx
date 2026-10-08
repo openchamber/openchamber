@@ -47,6 +47,9 @@ type SortableTabsStripProps = {
   activePillInsetClassName?: string;
   activePillButtonClassName?: string;
   inactiveTabsIconOnly?: boolean;
+  /** Every tab with an icon shows it alone, the active one too; the label
+      stays its accessible name and tooltip. For a row short on width. */
+  iconOnly?: boolean;
   animateActivePill?: boolean;
   activePillLowercase?: boolean;
   /** Position the active-pill indicator with left/top instead of translate3d.
@@ -54,6 +57,10 @@ type SortableTabsStripProps = {
       (e.g. a sliding mobile drawer): creating a composited layer mid-slide
       flickers in WKWebView. Tab-switch animation stays (layout transition). */
   nonCompositedIndicator?: boolean;
+  /** Size the strip by its labels rather than its parent's width. The track's
+      container query reads the parent, so a parent that sizes itself by its
+      content (a toolbar row) would leave the strip no width at all. */
+  intrinsicWidth?: boolean;
   /** Per-tab right-click context menu. Return the menu items for the given tab,
       or null/undefined to disable the context menu for that tab. */
   tabContextMenu?: (args: {
@@ -123,6 +130,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   animateActivePill,
   activePillLowercase = true,
   nonCompositedIndicator = false,
+  intrinsicWidth = false,
+  iconOnly = false,
   tabContextMenu,
   className,
 }) => {
@@ -415,7 +424,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         className={cn(
           'relative flex h-full min-w-0 flex-1',
           usesActivePillIndicator ? 'items-center overflow-x-hidden overflow-y-hidden' : 'items-stretch',
-          usesActivePillIndicator && '@container/pill-tabs',
+          usesActivePillIndicator && !intrinsicWidth && '@container/pill-tabs',
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
@@ -468,7 +477,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         ) : null}
         {items.map((item, index) => {
           const isActive = item.id === activeId;
-          const showInactiveIconOnly = inactiveTabsIconOnly && usesActivePillIndicator && !isActive && Boolean(item.icon);
+          const showInactiveIconOnly = (iconOnly || (inactiveTabsIconOnly && !isActive)) && usesActivePillIndicator && Boolean(item.icon);
           const shouldShowLabel = !showInactiveIconOnly;
           const shouldShowIcon = Boolean(item.icon);
           const useIntrinsicActiveTab = inactiveTabsIconOnly && usesActivePillIndicator && isActive && !isScrollable && !useIntrinsicPillSizing;

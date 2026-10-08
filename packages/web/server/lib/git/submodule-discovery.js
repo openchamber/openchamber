@@ -1,3 +1,4 @@
+import { isString } from '../shared/guards.js';
 import { normalizeDiscoveryEndpoint } from './discovery-endpoint.js';
 
 export const SUBMODULE_DISCOVERY_LIMITS = Object.freeze({
@@ -13,7 +14,6 @@ const CONFIG_KEY_PATTERN = /^submodule\.(.+)\.(path|url|update)$/i;
 const GITLINK_PATTERN = /^160000 (?:(?:commit )?([0-9a-f]{40}|[0-9a-f]{64})|([0-9a-f]{40}|[0-9a-f]{64}) 0)\t(.+)$/i;
 const CONTROL_PATTERN = /[\0-\x1f\x7f]/;
 const UPDATE_MODES = new Set(['checkout', 'merge', 'rebase', 'none']);
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 const manifestError = (message, code = 'INVALID_SUBMODULE_MANIFEST') => Object.assign(new Error(message), { code });
 

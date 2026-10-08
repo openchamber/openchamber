@@ -21,9 +21,10 @@ import {
   type CustomizableShortcutAction,
 } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
+import { isMacOS } from '@/lib/utils';
 
 const MODIFIER_KEYS = new Set(['shift', 'control', 'alt', 'meta']);
-const MAX_SHORTCUT_KEY_COUNT = 3;
+const DEFAULT_MAX_KEY_COUNT = 3;
 const SECOND_CHORD_TIMEOUT_MS = 3000;
 
 interface RecordingKeyboardEvent {
@@ -54,6 +55,40 @@ interface ShortcutRecordingDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Maximum number of chords in the sequence. OS-level global shortcuts only support one. @default 2 */
   maxChords?: number;
+  /**
+   * Most keys held at once, modifiers included. In-app shortcuts stay at three;
+   * a global shortcut needs room for all four modifiers plus a key (a "hyper"
+   * key sends Ctrl+Shift+Cmd+Option). @default 3
+   */
+  maxKeys?: number;
+}
+
+interface RecordingOptions {
+  maxKeys: number;
+  /** On macOS Control and Command are separate keys and record separately. */
+  macModifiers: boolean;
+}
+
+const DEFAULT_RECORDING_OPTIONS: RecordingOptions = { maxKeys: DEFAULT_MAX_KEY_COUNT, macModifiers: isMacOS() };
+
+// `mod` is Command on macOS and Control elsewhere. On macOS a held Control is
+// its own `ctrl` modifier, so Ctrl+N never records as Cmd+N; elsewhere Meta is
+// the Windows / Super key and records as `super`, never as Control.
+function modifierParts(
+  event: Pick<RecordingKeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>,
+  { macModifiers }: RecordingOptions,
+): string[] {
+  const parts: string[] = [];
+  if (macModifiers) {
+    if (event.metaKey) parts.push('mod');
+    if (event.ctrlKey) parts.push('ctrl');
+  } else {
+    if (event.ctrlKey) parts.push('mod');
+    if (event.metaKey) parts.push('super');
+  }
+  if (event.shiftKey) parts.push('shift');
+  if (event.altKey) parts.push('alt');
+  return parts;
 }
 
 function getPhysicalKeyCount(
@@ -75,39 +110,34 @@ function isCustomizableConflict(
   return conflict.action.customizable;
 }
 
-function getModifierPreview(event: RecordingKeyboardEvent): ShortcutCombo | null {
-  if (getPhysicalKeyCount(event) > MAX_SHORTCUT_KEY_COUNT) return null;
-  const parts: string[] = [];
-  if (event.metaKey || event.ctrlKey) parts.push('mod');
-  if (event.shiftKey) parts.push('shift');
-  if (event.altKey) parts.push('alt');
+function getModifierPreview(event: RecordingKeyboardEvent, options: RecordingOptions): ShortcutCombo | null {
+  if (getPhysicalKeyCount(event) > options.maxKeys) return null;
+  const parts = modifierParts(event, options);
   return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
 }
 
-function keyboardEventToCombo(event: RecordingKeyboardEvent): ShortcutCombo | null {
+function keyboardEventToCombo(event: RecordingKeyboardEvent, options: RecordingOptions): ShortcutCombo | null {
   if (MODIFIER_KEYS.has(event.key.toLowerCase())) return null;
-  if (getPhysicalKeyCount(event, true) > MAX_SHORTCUT_KEY_COUNT) return null;
+  if (getPhysicalKeyCount(event, true) > options.maxKeys) return null;
 
   const key = keyToShortcutToken(resolveShortcutEventKey(event));
   if (!key) return null;
 
-  const parts: string[] = [];
-  if (event.metaKey || event.ctrlKey) parts.push('mod');
-  if (event.shiftKey) parts.push('shift');
-  if (event.altKey) parts.push('alt');
-  parts.push(key);
-  return normalizeCombo(parts.join('+'));
+  return normalizeCombo([...modifierParts(event, options), key].join('+'));
 }
 
-function modifierKeyUpToCombo(event: React.KeyboardEvent<HTMLDivElement>): ShortcutCombo | null {
+function modifierKeyUpToCombo(event: React.KeyboardEvent<HTMLDivElement>, options: RecordingOptions): ShortcutCombo | null {
   const key = event.key.toLowerCase();
   if (!MODIFIER_KEYS.has(key)) return null;
-  if (getPhysicalKeyCount(event, true) > MAX_SHORTCUT_KEY_COUNT) return null;
+  if (getPhysicalKeyCount(event, true) > options.maxKeys) return null;
 
-  const parts: string[] = [];
-  if (event.metaKey || event.ctrlKey || key === 'meta' || key === 'control') parts.push('mod');
-  if (event.shiftKey || key === 'shift') parts.push('shift');
-  if (event.altKey || key === 'alt') parts.push('alt');
+  // The released modifier no longer shows in the event's flags; count it as held.
+  const parts = modifierParts({
+    metaKey: event.metaKey || key === 'meta',
+    ctrlKey: event.ctrlKey || key === 'control',
+    shiftKey: event.shiftKey || key === 'shift',
+    altKey: event.altKey || key === 'alt',
+  }, options);
   return parts.length > 0 ? normalizeCombo(parts.join('+')) : null;
 }
 
@@ -122,17 +152,19 @@ export function updateShortcutRecordingState(
   event: RecordingKeyboardEvent,
   phase: 'keydown' | 'keyup',
   maxChords = 2,
+  options: Partial<RecordingOptions> = {},
 ): ShortcutRecordingState {
+  const recordingOptions = { ...DEFAULT_RECORDING_OPTIONS, ...options };
   if (event.repeat || event.isComposing) return state;
   if (phase === 'keyup') {
-    return { ...state, livePreview: getModifierPreview(event) };
+    return { ...state, livePreview: getModifierPreview(event, recordingOptions) };
   }
 
   if (event.key === 'Backspace') {
     return { chords: state.chords.slice(0, -1), livePreview: null, settled: false };
   }
 
-  const chord = keyboardEventToCombo(event);
+  const chord = keyboardEventToCombo(event, recordingOptions);
   if (chord) {
     if (state.settled) {
       const chords = [chord];
@@ -146,7 +178,7 @@ export function updateShortcutRecordingState(
     };
   }
 
-  return { ...state, livePreview: getModifierPreview(event) };
+  return { ...state, livePreview: getModifierPreview(event, recordingOptions) };
 }
 
 export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = ({
@@ -155,6 +187,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
   onSave,
   onOpenChange,
   maxChords = 2,
+  maxKeys = DEFAULT_MAX_KEY_COUNT,
 }) => {
   const { t } = useI18n();
   const actionLabel = (shortcut: CustomizableShortcutAction) => t(shortcut.settingsLabelKey);
@@ -209,7 +242,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
 
     const isPrefixStyleAction = Boolean(action && 'prefixStyle' in action && action.prefixStyle);
     if (phase === 'keyup' && isPrefixStyleAction && recording.chords.length === 0) {
-      const modifierCombo = modifierKeyUpToCombo(event);
+      const modifierCombo = modifierKeyUpToCombo(event, { ...DEFAULT_RECORDING_OPTIONS, maxKeys });
       if (modifierCombo) {
         setRecording({ chords: [modifierCombo], livePreview: null, settled: true });
         return;
@@ -224,7 +257,7 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
       metaKey: event.metaKey,
       repeat: event.repeat,
       shiftKey: event.shiftKey,
-    }, phase, maxChords);
+    }, phase, maxChords, { maxKeys });
     setRecording(isPrefixStyleAction && nextRecording.chords.length > 1
       ? recording
       : nextRecording);

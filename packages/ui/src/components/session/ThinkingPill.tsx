@@ -8,7 +8,7 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 
-export type ThinkingPillProps = {
+type ThinkingPillProps = {
   value: string;
   options: string[];
   disabled?: boolean;

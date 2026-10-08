@@ -78,6 +78,12 @@ API 응답 압축을 제어합니다. `true` 또는 `1`은 켜고, `false` 또�
 
 자동 감지가 틀렸을 때 업데이트에 사용할 package manager를 강제로 지정합니다.
 
+## 프록시
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+사용량 한도나 스킬 카탈로그처럼 OpenChamber가 직접 보내는 요청을 프록시로 보냅니다. 소문자 이름도 동작합니다. `NO_PROXY`에 있는 호스트는 직접 연결되며, `localhost`, `127.0.0.1`, `::1`은 항상 직접 연결되므로 로그인 콜백과 로컬 OpenCode 서버는 그대로 동작합니다.
+
 ## OpenCode 서버
 
 ### `OPENCODE_HOST`

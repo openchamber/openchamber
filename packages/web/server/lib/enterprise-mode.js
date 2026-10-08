@@ -69,6 +69,11 @@ import { z } from 'zod';
  * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`,
  * `packages/vscode/src/opencode.ts`).
  *
+ * The file can also hide the skills catalogs OpenChamber ships with
+ * (`hideBuiltinSkillCatalogs`), with or without enterprise mode, so the only
+ * catalogs on offer are the ones the organization added
+ * (`skills-catalog/curated-sources.js`, `packages/vscode/src/skillsCatalog.ts`).
+ *
  * The VS Code extension host, which runs no OpenChamber server, reads the
  * same policy through this module for the parts it has (provider connection,
  * update checks).
@@ -108,6 +113,7 @@ const policyFileSchema = z.object({
   allowLocalExtensions: z.boolean().optional(),
   jev: z.object({ url: optionalText, model: optionalText, apiKey: optionalText }).optional(),
   opencodeBinary: optionalText,
+  hideBuiltinSkillCatalogs: z.boolean().optional(),
 }).refine((policy) => !policy.jev || policy.jev.url || (!policy.jev.model && !policy.jev.apiKey), {
   message: '"jev" needs a "url"',
   path: ['jev'],
@@ -128,7 +134,7 @@ const parsePolicyFile = (text) => {
     const field = issue.path.length > 0 ? `"${issue.path.join('.')}": ` : '';
     throw new Error(`${field}${issue.message}`);
   }
-  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary } = parsed.data;
+  const { enterpriseMode, organization, relayUrl, allowNetworkAccess, allowedExtensions, allowLocalExtensions, jev, opencodeBinary, hideBuiltinSkillCatalogs } = parsed.data;
   return {
     enterpriseMode: enterpriseMode === true,
     organization: organization ?? null,
@@ -138,6 +144,7 @@ const parsePolicyFile = (text) => {
     allowLocalExtensions,
     jev: jev?.url ? { url: jev.url, model: jev.model ?? null, apiKey: jev.apiKey ?? null } : undefined,
     opencodeBinary: opencodeBinary ?? null,
+    hideBuiltinSkillCatalogs: hideBuiltinSkillCatalogs === true,
   };
 };
 
@@ -208,6 +215,8 @@ export const readEnterprisePolicy = (options = {}) => {
       allowedExtensions: [],
       allowLocalExtensions: false,
       opencodeBinary: null,
+      // Fails closed like the rest: a broken policy offers no catalog it might have hidden.
+      hideBuiltinSkillCatalogs: true,
     };
   }
 
@@ -242,6 +251,8 @@ export const readEnterprisePolicy = (options = {}) => {
     // File only, in or out of enterprise mode: OPENCODE_BINARY already lets a
     // user pick a binary, and a pin they could override would not be one.
     opencodeBinary: fromFile?.opencodeBinary ?? null,
+    // File only, in or out of enterprise mode, for the same reason.
+    hideBuiltinSkillCatalogs: fromFile?.hideBuiltinSkillCatalogs === true,
   };
 };
 

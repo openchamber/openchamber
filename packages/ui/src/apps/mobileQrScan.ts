@@ -6,17 +6,17 @@
 
 import { parsePairingConnectionPayload, parsePairingConnectionPayloadString, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
-export type MobileConnectionPayload = {
+type MobileConnectionPayload = {
   url: string;
   clientToken?: string;
   label?: string;
 };
 
-export type MobilePairingPayload = {
+type MobilePairingPayload = {
   pairing: PairingConnectionPayload;
 };
 
-export type QrScanResult =
+type QrScanResult =
   | ({ status: 'ok' } & MobileConnectionPayload)
   | ({ status: 'pairing' } & MobilePairingPayload)
   | { status: 'cancelled' }

@@ -104,6 +104,19 @@ Makinelerinizde OpenCode zaten kuruluysa ve OpenChamber'ın bu kurulumu kullanma
 - CLI, OpenCode 2.x olmalı ve en az OpenChamber'ın istediği sürümde bulunmalı. Daha eskiyse OpenChamber "OpenCode'u güncelle" ekranında kalır.
 - `opencode` (Windows'ta `opencode.exe`) içeren bir klasör de olur. Bunun için ortam değişkeni yok, çünkü kullanıcı bunları kendisi ayarlayabilir.
 
+
+### Yerleşik skill kataloglarını gizle
+
+OpenChamber birkaç herkese açık skill kataloğuyla gelir (Anthropic, OpenAI, Cursor, Matt Pocock). Kuruluşunuzun kendi kataloğu varsa onu özel katalog olarak ekleyin ve yerleşik olanları ilke dosyasında gizleyin. Kurumsal mod açık olsun ya da olmasın çalışır.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+Ayarlar bundan sonra yalnızca kişilerin kendi eklediği katalogları sunar ve OpenChamber doğrudan istense bile yerleşik bir kataloğu yüklemez. Kullanıcı bunları kendisi ayarlayabildiği için bunun bir ortam değişkeni yoktur.
+
 ### Örnekler
 
 Politika dosyasını bir Mac'e koymak için Terminal'de yönetici olarak şunu çalıştırın:

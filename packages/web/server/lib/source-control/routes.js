@@ -5,7 +5,7 @@ import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
 import { createGitIdentityProvisioning } from '../git/identity-provisioning.js';
-import * as gitIdentityStore from '../git/identity-storage.js';
+import { createProfile, getProfiles, updateProfile } from '../git/identity-storage.js';
 import { resolveRepositoryIdentity } from './repository-identity.js';
 import { redactSensitiveText } from './url-redaction.js';
 import { createOAuthFlowRegistry } from './oauth-flow-registry.js';
@@ -73,7 +73,7 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
   // Connecting an account is the moment every part of an identity is known, so
   // the identity is made there instead of being asked for again later.
   const identityProvisioning = dependencies.identityProvisioning ?? createGitIdentityProvisioning({
-    store: gitIdentityStore,
+    store: { createProfile, getProfiles, updateProfile },
   });
   const listGitHubAccounts = dependencies.listGitHubAccounts ?? getGitHubAuthAccounts;
   const oauthFlowRegistry = dependencies.oauthFlowRegistry ?? createOAuthFlowRegistry();

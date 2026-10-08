@@ -63,28 +63,6 @@ export function sortModelFamilies(families: ModelFamily[]): ModelFamily[] {
 }
 
 /**
- * Group model names by family (for backward compatibility with Header.tsx)
- */
-export function groupModelsByFamily(
-  models: Record<string, unknown>,
-  providerId: QuotaProviderId
-): Map<string | null, string[]> {
-  const groups = new Map<string | null, string[]>();
-
-  for (const modelName of Object.keys(models)) {
-    const family = getModelFamily(modelName, providerId);
-    const familyId = family?.id ?? null;
-
-    if (!groups.has(familyId)) {
-      groups.set(familyId, []);
-    }
-    groups.get(familyId)!.push(modelName);
-  }
-
-  return groups;
-}
-
-/**
  * Group models by family with custom getter function (for UsagePage.tsx)
  */
 export function groupModelsByFamilyWithGetter<T>(

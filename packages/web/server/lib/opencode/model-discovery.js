@@ -319,7 +319,7 @@ export async function discoverProviderModels(input, options = {}) {
   const storedApiKey = isSameEndpoint(options.storedBaseURL, body.baseURL)
     ? optionalString(options.storedApiKey)
     : null;
-  const apiKey = requestedApiKey ?? storedApiKey;
+  const apiKey = requestedApiKey ?? resolveApiKey(storedApiKey, env);
   const response = await (options.fetch ?? fetch)(endpoint, {
     method: 'GET',
     headers: buildHeaders(body.headers, apiKey, env),

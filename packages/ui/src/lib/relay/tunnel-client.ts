@@ -149,7 +149,7 @@ export interface RelayTunnelStatus {
   lastError?: string;
 }
 
-export interface RelayTunnelClientOptions {
+interface RelayTunnelClientOptions {
   relayUrl: string;
   serverId: string;
   hostEncPubJwk: JsonWebKey;

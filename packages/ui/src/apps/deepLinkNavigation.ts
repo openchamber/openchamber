@@ -20,7 +20,7 @@ import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarge
  * appears. Only the most recent intent is kept (newest wins) — a burst of taps shouldn't queue.
  */
 
-export interface DeepLinkHandlers {
+interface DeepLinkHandlers {
   /** Open the sessions sheet, optionally pre-filtered (filter support is best-effort for now). */
   openSessions?: (filter?: SessionsFilter) => void;
   /** Open a non-session surface (files / mcp / instances / update). */

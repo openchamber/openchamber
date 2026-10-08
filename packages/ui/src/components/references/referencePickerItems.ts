@@ -1,5 +1,16 @@
 import type { IconName } from '@/components/icon/icons';
-import type { GitHubPullStatus, GitHubReference, GitHubReferenceFilter, GitHubReferenceKind, LinearIssueSummary } from '@/lib/api/types';
+import type {
+    GitHubPullStatus,
+    GitHubReference,
+    RepositoryReferenceFilter,
+    RepositoryReferencePeople,
+    RepositoryReferenceState,
+    GitHubReferenceKind,
+    LinearIssueListAssignee,
+    LinearIssueListPriority,
+    LinearIssueListStatus,
+    LinearIssueSummary,
+} from '@/lib/api/types';
 import type { I18nKey } from '@/lib/i18n';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 
@@ -15,7 +26,14 @@ export type ReferencePickerSelection =
     | { source: 'github'; reference: GitHubReference; includeDiff: boolean }
     | { source: 'linear'; issue: LinearIssueSummary };
 
-export type LinearReferenceFilter = 'open' | 'assigned';
+/** Linear lists combine a state, whose issues, and a priority. */
+export type LinearReferenceFilter = {
+    status: LinearIssueListStatus;
+    people: LinearIssueListAssignee;
+    priority: LinearIssueListPriority;
+};
+
+export const DEFAULT_LINEAR_FILTER: LinearReferenceFilter = { status: 'open', people: 'any', priority: 'all' };
 
 /** `#12` for an issue or a GitHub PR, `!12` for a GitLab merge request. */
 export const referenceNumberLabel = (reference: GitHubReference): string => (
@@ -32,19 +50,64 @@ export const referencePickerItemKey = (item: ReferencePickerItem | ReferencePick
     return `${host}:${sourceRepo.owner.toLowerCase()}/${sourceRepo.repo.toLowerCase()}${marker}${number}`;
 };
 
-export const GITHUB_FILTERS = {
-    issue: ['open', 'assigned', 'created'],
-    pull: ['open', 'created', 'reviewRequested'],
-} as const satisfies Record<GitHubReferenceKind, readonly GitHubReferenceFilter[]>;
+export const DEFAULT_REPOSITORY_FILTER: RepositoryReferenceFilter = { state: 'open', people: 'any' };
 
-export const LINEAR_FILTERS = ['open', 'assigned'] as const satisfies readonly LinearReferenceFilter[];
+/** What each kind can be narrowed to: only change requests merge and get review requests. */
+export const REPOSITORY_STATES = {
+    issue: ['open', 'closed', 'all'],
+    pull: ['open', 'merged', 'closed', 'all'],
+} as const satisfies Record<GitHubReferenceKind, readonly RepositoryReferenceState[]>;
+export const REPOSITORY_PEOPLE = {
+    issue: ['any', 'assigned', 'created'],
+    pull: ['any', 'assigned', 'created', 'reviewRequested'],
+} as const satisfies Record<GitHubReferenceKind, readonly RepositoryReferencePeople[]>;
 
-export const FILTER_LABEL_KEYS = {
+export const LINEAR_STATUS_FILTERS = [
+    'open', 'all', 'backlog', 'todo', 'started', 'inReview', 'completed', 'canceled', 'duplicate',
+] as const satisfies readonly LinearIssueListStatus[];
+export const LINEAR_PEOPLE_FILTERS = ['any', 'me', 'created'] as const satisfies readonly LinearIssueListAssignee[];
+export const LINEAR_PRIORITY_FILTERS = ['all', 'urgent', 'high', 'medium', 'low', 'none'] as const satisfies readonly LinearIssueListPriority[];
+
+export const LINEAR_STATUS_LABEL_KEYS = {
+    open: 'references.picker.filter.linear.status.open',
+    all: 'references.picker.filter.linear.status.all',
+    backlog: 'references.picker.filter.linear.status.backlog',
+    todo: 'references.picker.filter.linear.status.todo',
+    started: 'references.picker.filter.linear.status.started',
+    inReview: 'references.picker.filter.linear.status.inReview',
+    completed: 'references.picker.filter.linear.status.completed',
+    canceled: 'references.picker.filter.linear.status.canceled',
+    duplicate: 'references.picker.filter.linear.status.duplicate',
+} as const satisfies Record<LinearIssueListStatus, I18nKey>;
+
+export const LINEAR_PEOPLE_LABEL_KEYS = {
+    any: 'references.picker.filter.linear.people.any',
+    me: 'references.picker.filter.assigned',
+    created: 'references.picker.filter.created',
+} as const satisfies Record<LinearIssueListAssignee, I18nKey>;
+
+export const LINEAR_PRIORITY_LABEL_KEYS = {
+    all: 'references.picker.filter.linear.priority.all',
+    urgent: 'contextPanel.linear.priority.urgent',
+    high: 'contextPanel.linear.priority.high',
+    medium: 'contextPanel.linear.priority.medium',
+    low: 'contextPanel.linear.priority.low',
+    none: 'references.picker.filter.linear.priority.none',
+} as const satisfies Record<LinearIssueListPriority, I18nKey>;
+
+export const REPOSITORY_STATE_LABEL_KEYS = {
     open: 'references.picker.filter.open',
+    closed: 'references.picker.filter.state.closed',
+    merged: 'references.picker.filter.state.merged',
+    all: 'references.picker.filter.state.all',
+} as const satisfies Record<RepositoryReferenceState, I18nKey>;
+
+export const REPOSITORY_PEOPLE_LABEL_KEYS = {
+    any: 'references.picker.filter.linear.people.any',
     assigned: 'references.picker.filter.assigned',
     created: 'references.picker.filter.created',
     reviewRequested: 'references.picker.filter.reviewRequested',
-} as const satisfies Record<GitHubReferenceFilter, I18nKey>;
+} as const satisfies Record<RepositoryReferencePeople, I18nKey>;
 
 /** How a state is drawn: an icon in a theme colour. */
 type StateGlyph = { icon: IconName; color: string };
@@ -82,8 +145,11 @@ export const githubStateLook = (reference: GitHubReference, status: GitHubPullSt
 };
 
 /** Linear workflow types in the same colours; the state's own name is the label. */
-export const linearStateLook = (issue: LinearIssueSummary): StateGlyph => {
-    switch (issue.state?.type) {
+export const linearStateLook = (issue: LinearIssueSummary): StateGlyph => linearStateTypeLook(issue.state?.type ?? null);
+
+/** The look of a Linear workflow type, for a state that is not an issue's yet (a status menu). */
+export const linearStateTypeLook = (type: string | null): StateGlyph => {
+    switch (type) {
         case 'started':
             return { icon: 'record-circle', color: 'var(--pr-open)' };
         case 'completed':

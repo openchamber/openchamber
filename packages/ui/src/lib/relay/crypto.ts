@@ -64,7 +64,7 @@ export const generateHandshakeNonce = (): Uint8Array => {
   return nonce;
 };
 
-export interface SessionKeys {
+interface SessionKeys {
   clientToHost: CryptoKey;
   hostToClient: CryptoKey;
 }

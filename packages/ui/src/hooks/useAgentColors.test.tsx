@@ -35,7 +35,7 @@ test('consumers share allocations and update together on roster and theme change
   function Probe() {
     const resolve = useAgentColors();
     seen.add(resolve);
-    return <span>{resolve('build').var}</span>;
+    return <span>{resolve('build').color}</span>;
   }
   function Controls() {
     const theme = useThemeSystem();
@@ -53,7 +53,7 @@ test('consumers share allocations and update together on roster and theme change
     for (const { name } of agents) expect(hiddenAdded(name)).toEqual(initial(name));
     await act(async () => changeTheme());
     expect(seen.size).toBe(3);
-    for (const resolve of seen) expect(resolve('build').var).toBe('--status-success');
+    for (const resolve of seen) expect(resolve('build').color).toBe('var(--status-success)');
     expect(container.querySelectorAll('span').length).toBe(100);
   } finally {
     await act(async () => root.unmount());

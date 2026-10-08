@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { routingStateSchema } from './routingApi';
+import { parseClassifierTestResult, routingStateSchema } from './routingApi';
 
 const base = {
   available: true,
@@ -71,5 +71,22 @@ describe('routingStateSchema', () => {
     // A server from before the environment pin sends no `pinned`: editable.
     expect(state.customEndpoint).toEqual({ url: 'https://jev.example.com/v1/systemone', model: 'jev-latest', keyPresent: true, pinned: false });
     expect(routingStateSchema.parse(base).customEndpoint).toBeNull();
+  });
+});
+
+// Every shape the server's testClassifier answers with must parse here.
+describe('classifier test result', () => {
+  test('parses success and each failure the server reports', () => {
+    const answers = [
+      { ok: true, source: 'typesafe', model: 'jev-latest', ms: 120 },
+      { ok: false, reason: 'unavailable' },
+      { ok: false, reason: 'http', status: 401, source: 'custom', model: 'm' },
+      { ok: false, reason: 'timeout', source: 'zen-promo', model: 'm' },
+      { ok: false, reason: 'unparsable', source: 'openrouter', model: 'm' },
+      { ok: false, reason: 'network', message: 'ECONNREFUSED', source: 'vercel', model: 'm' },
+    ];
+    for (const answer of answers) {
+      expect(parseClassifierTestResult(answer)).toEqual(answer);
+    }
   });
 });

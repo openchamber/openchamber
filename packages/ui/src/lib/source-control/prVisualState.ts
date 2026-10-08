@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react';
+
 /** How a PR is coloured: the theme's `--pr-<state>` token. */
 export type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
 
@@ -22,3 +24,9 @@ export const prVisualStateOf = (pr: PrVisualInput): PrVisualState => {
   const conflicting = pr.mergeable === false || pr.mergeableState === 'dirty';
   return pr.checksState === 'failure' || conflicting ? 'blocked' : 'open';
 };
+
+/**
+ * Inline style for an element with the `oc-ref-tint` class: the state colour
+ * a PR or issue reference rests muted from and shows in full on hover.
+ */
+export const refTintStyle = (color: string): CSSProperties & { '--oc-ref-tint': string } => ({ '--oc-ref-tint': color });

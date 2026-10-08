@@ -1,6 +1,6 @@
 import type { EditPermissionMode } from '@/stores/types/sessionTypes';
 
-export interface EditModeColors {
+interface EditModeColors {
     text: string;
     border?: string;
     background?: string;

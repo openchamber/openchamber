@@ -3,8 +3,8 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
-import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
+import { CommentTextEditor } from './CommentTextEditor';
 import { useCommentImagePaste } from './useCommentImagePaste';
 
 export interface InlineCommentInputProps {
@@ -22,8 +22,9 @@ export interface InlineCommentInputProps {
 /**
  * The comment editor shown under selected diff/editor lines. Styled as the
  * same pill used by chat quote comments and browser annotations: a rounded
- * auto-growing textarea with a round attach button, and a muted context line
- * above naming the file and range.
+ * auto-growing field with a round attach button, and a muted context line
+ * above naming the file and range. Keys, image paste and snippets live in
+ * `CommentTextEditor`.
  */
 export function InlineCommentInput({
   initialText = '',
@@ -39,21 +40,13 @@ export function InlineCommentInput({
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const saveShortcut = formatShortcutForDisplay('enter');
   void isEditing;
 
   const handleTextChange = (value: string) => {
     setText(value);
     onTextChange?.(value);
-    resizeTextarea();
-  };
-
-  const resizeTextarea = () => {
-    const element = textareaRef.current;
-    if (!element) return;
-    element.style.height = 'auto';
-    element.style.height = `${Math.min(element.scrollHeight, 120)}px`;
   };
 
   // Stable range snapshot to prevent race with selection clearing
@@ -73,85 +66,18 @@ export function InlineCommentInput({
 
   const displayRange = normalizeRange(lineRange);
 
-  // Focus on mount (desktop only) or when becoming visible
+  // The field focuses itself without scrolling; on mobile bring the card
+  // into view above the keyboard.
   useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    resizeTextarea();
-
-    const scrollContainer = textarea.closest<HTMLElement>('.overlay-scrollbar-container');
-    const prevScrollTop = scrollContainer?.scrollTop ?? window.scrollY;
-    const prevScrollLeft = scrollContainer?.scrollLeft ?? window.scrollX;
-
-    if (isMobile) {
-      textarea.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-      try {
-        textarea.focus({ preventScroll: true });
-      } catch {
-        textarea.focus();
-      }
-      return;
-    }
-
-    try {
-      textarea.focus({ preventScroll: true });
-    } catch {
-      textarea.focus();
-    }
-
-    const len = textarea.value.length;
-    try {
-      textarea.setSelectionRange(len, len);
-    } catch (err) {
-      void err;
-    }
-
-    requestAnimationFrame(() => {
-      if (scrollContainer) {
-        scrollContainer.scrollTop = prevScrollTop;
-        scrollContainer.scrollLeft = prevScrollLeft;
-      } else {
-        window.scrollTo({ top: prevScrollTop, left: prevScrollLeft });
-      }
-    });
+    if (isMobile) rootRef.current?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
   }, [isMobile]);
 
-  // A pasted image becomes a citation in the text; the caret lands after it
-  // once the new text renders.
-  const { takePastedImages, attachCitedImages } = useCommentImagePaste();
-  const pendingCaretRef = useRef<number | null>(null);
-  React.useLayoutEffect(() => {
-    const caret = pendingCaretRef.current;
-    if (caret === null) return;
-    pendingCaretRef.current = null;
-    textareaRef.current?.setSelectionRange(caret, caret);
-  }, [text]);
-
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const pasted = takePastedImages(e);
-    if (!pasted) return;
-    pendingCaretRef.current = pasted.caret;
-    handleTextChange(pasted.text);
-  };
+  const imagePaste = useCommentImagePaste();
 
   const save = () => {
     if (text.trim()) {
       onSave(text, normalizeRange(stableRangeRef.current));
-      void attachCitedImages(text);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (isIMECompositionEvent(e)) return;
-
-    // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
-    // Keep Cmd/Ctrl+Enter available for hardware keyboards on mobile.
-    if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      save();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      onCancel();
+      void imagePaste.attachCitedImages(text);
     }
   };
 
@@ -172,6 +98,7 @@ export function InlineCommentInput({
       style={{
         maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
       }}
+      ref={rootRef}
       data-comment-input="true"
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
@@ -186,22 +113,20 @@ export function InlineCommentInput({
             ) : null}
           </div>
         ) : null}
-        <div className="flex items-end gap-2 py-1 pl-3 pr-1">
-        <textarea
-          ref={textareaRef}
-          rows={1}
+        <div className="relative flex items-end gap-2 py-1 pl-3 pr-1">
+        <CommentTextEditor
           value={text}
-          onChange={(e) => handleTextChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
+          onChange={handleTextChange}
+          onSubmit={save}
+          onCancel={onCancel}
+          // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
+          // Cmd/Ctrl+Enter stays available for hardware keyboards on mobile.
+          enterSubmits={!isMobile}
+          imagePaste={imagePaste}
           placeholder={isMobile
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
-          className={cn(
-            'min-w-0 flex-1 resize-none bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground placeholder:opacity-60',
-            isMobile ? 'py-1.5 text-base leading-6' : 'py-1.5'
-          )}
-          style={{ minHeight: 0, height: 'auto' }}
+          className={cn('py-1.5 text-sm leading-5 text-foreground', isMobile && 'text-base leading-6')}
         />
         <button
           type="button"

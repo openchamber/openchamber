@@ -77,7 +77,7 @@ interface UseChatTurnNavigationOptions {
     resumeToBottom: () => void;
 }
 
-export interface ChatTurnNavigation {
+interface ChatTurnNavigation {
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
     scrollToMessageId: (messageId: string, options?: { behavior?: ScrollBehavior; updateHash?: boolean }) => Promise<boolean>;
     scrollByTurnOffset: (offset: number, options?: { resumePastEnd?: boolean }) => Promise<boolean>;

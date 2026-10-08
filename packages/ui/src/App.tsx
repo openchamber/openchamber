@@ -6,6 +6,7 @@ import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SharedTrustConfirmDialog } from '@/components/projects/SharedTrustConfirmDialog';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
+import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfMemoryDebugEnabled } from '@/stores/utils/streamDebug';
@@ -23,11 +24,12 @@ import { useAgentMemorySync } from '@/hooks/useAgentMemorySync';
 import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
+import { useIntegrationCatalogPrefetch } from '@/hooks/useIntegrationCatalogPrefetch';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, openHostSession, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -196,6 +198,20 @@ function App({ apis }: AppProps) {
       : null;
   });
   const appReadyDispatchedRef = React.useRef(false);
+
+  // The desktop shell opened Local because the default SSH instance did not
+  // connect; say so once the app is up, or the switch looks like a lost setting.
+  const { t } = useI18n();
+  const sshFallbackNoticeShownRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!isInitialized || bootInjectionStatus !== 'valid' || sshFallbackNoticeShownRef.current) return;
+    const outcome = getInjectedBootOutcome();
+    if (outcome?.target !== 'local' || outcome.status !== 'ok' || !outcome.sshStartupFallbackHostId) return;
+    sshFallbackNoticeShownRef.current = true;
+    toast.error(t('desktopHostSwitcher.startup.title'), {
+      description: t('desktopHostSwitcher.startup.fellBackToLocal'),
+    });
+  }, [bootInjectionStatus, isInitialized, t]);
 
   React.useEffect(() => {
     setStreamPerfMemoryDebugEnabled(showMemoryDebug);
@@ -480,12 +496,19 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
+      // A notification click names the runtime that owns the session. When
+      // this window is on another instance, the desktop shell opens the
+      // session in a window for the owning one.
+      const runtimeKey = String(detail?.runtimeKey ?? '').trim();
+      if (runtimeKey && runtimeKey !== getRuntimeKey() && openHostSession(runtimeKey, sessionId)) {
+        return;
+      }
       // A link (a desktop deep link, a link to this window's instance) carries
       // no directory; the route opener resolves it from the global session
       // list, as for a web link.
@@ -592,6 +615,7 @@ function App({ apis }: AppProps) {
   useBrowserProviderSync();
   useRoutingSync();
   useEnterprisePolicySync();
+  useIntegrationCatalogPrefetch(isInitialized && isConnected, runtimeEndpointEpoch);
   usePwaInstallPrompt();
 
   useWindowTitle();

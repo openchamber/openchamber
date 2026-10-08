@@ -504,7 +504,7 @@ const INHERITED_SERVICE_ENV_NAMES = new Set([
 ]);
 
 /** @param {NodeJS.ProcessEnv} source */
-export const inheritedServiceEnv = (source) => {
+const inheritedServiceEnv = (source) => {
   /** @type {Record<string, string>} */
   const env = {};
   for (const [name, value] of Object.entries(source)) {

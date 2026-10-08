@@ -1,4 +1,4 @@
-export interface WorktreeSourceBranchArgs {
+interface WorktreeSourceBranchArgs {
   branches: readonly string[];
   /** The branch checked out at the project root, when known. */
   rootBranch: string | null;

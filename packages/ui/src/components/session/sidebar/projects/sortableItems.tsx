@@ -105,7 +105,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   );
 };
 
-export interface SortableProjectItemProps extends ProjectIdentityProps {
+interface SortableProjectItemProps extends ProjectIdentityProps {
   disabled?: boolean;
   projectDescription: string;
   projectDirectory?: string;

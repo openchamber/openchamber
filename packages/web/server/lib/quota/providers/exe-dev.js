@@ -3,7 +3,7 @@ import { asObject, buildResult, formatMoney, toNumber, toTimestamp, toUsageWindo
 
 export const providerId = 'exe-dev';
 export const providerName = 'exe.dev';
-export const aliases = ['exe-dev'];
+const aliases = ['exe-dev'];
 const EXEC_URL = 'https://exe.dev/exec';
 const USAGE_COMMAND = 'billing credits usage --group=day --json';
 

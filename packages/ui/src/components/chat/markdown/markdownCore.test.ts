@@ -118,6 +118,21 @@ describe('markdown sanitization', () => {
     expect(html).not.toContain('href="openchamber://connect');
   });
 
+  test('renders an attachment citation as a labelled chip without a link', () => {
+    const html = renderMarkdownSync('See [shot.png](#openchamber-attachment:png:shot%40%282x%29.png) here', 'inline');
+
+    expect(html).toContain('data-attachment-citation="png"');
+    expect(html).toContain('>shot@(2x).png</span>');
+    expect(html).not.toContain('href="#openchamber-attachment');
+  });
+
+  test('renders a skill link as a chip that still opens the skill', () => {
+    const html = renderMarkdownSync('Use [/review](#openchamber-skill:review) here', 'inline');
+
+    expect(html).toContain('data-skill-name="review"');
+    expect(html).toContain('title="$review">review</a>');
+  });
+
 });
 
 describe('Markdown parser failures', () => {

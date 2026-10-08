@@ -39,7 +39,7 @@ const MESSAGE_PAGE_LIMIT = 50;
 // is cut, and the agent can read the rest with session.messages.
 const ANSWER_CHAR_LIMIT = 50_000;
 
-export const DISPATCH_RESULT_SOURCE = 'openchamber-session';
+const DISPATCH_RESULT_SOURCE = 'openchamber-session';
 
 const ID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 

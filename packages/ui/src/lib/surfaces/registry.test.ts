@@ -12,7 +12,6 @@ const baseOptions = {
   isVSCode: false,
   screenWidth: 1200,
   tabs: [],
-  linearConnected: true,
   sourceControlConnected: true,
 } as const;
 
@@ -66,21 +65,9 @@ describe('getVisibleContextRailSurfaces', () => {
     expect(surfaces.slice(0, 2).map((surface) => surface.id)).toEqual(['git', 'context']);
   });
 
-  test('places Linear right after the walkthrough in the default order', () => {
-    const ids = getVisibleContextRailSurfaces(baseOptions).map((surface) => surface.id);
-    const walkthrough = ids.indexOf('walkthrough');
-    expect(walkthrough).toBeGreaterThanOrEqual(0);
-    expect(ids.indexOf('linear')).toBe(walkthrough + 1);
-  });
-
   test('hides the pull request surface until GitHub is connected', () => {
     expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: false }).some((s) => s.id === 'pr')).toBe(false);
     expect(getVisibleContextRailSurfaces({ ...baseOptions, sourceControlConnected: true }).some((s) => s.id === 'pr')).toBe(true);
-  });
-
-  test('hides Linear until a workspace is connected', () => {
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: false }).some((s) => s.id === 'linear')).toBe(false);
-    expect(getVisibleContextRailSurfaces({ ...baseOptions, linearConnected: true }).some((s) => s.id === 'linear')).toBe(true);
   });
 
   test('appends installed guest panels except on VS Code', () => {

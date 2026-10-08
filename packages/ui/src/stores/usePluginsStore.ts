@@ -69,7 +69,7 @@ export type RegistryResult =
  * (`scope`, see `getPluginsScopeKey`). `failed` means the read failed: every
  * plugin's status is unknown, never "all fine" and never "all failed".
  */
-export type PluginRuntimeSnapshot =
+type PluginRuntimeSnapshot =
   | { kind: 'idle' }
   | { kind: 'ready'; scope: string; plugins: PluginRuntimeInfo[] }
   | { kind: 'failed'; scope: string };
@@ -79,7 +79,7 @@ export type PluginPackageUpdate =
   | { kind: 'running' }
   | { kind: 'failed'; error: string };
 
-export interface PluginsStore {
+interface PluginsStore {
   entries: PluginEntry[];
   loadedDirectory: string | null | undefined;
   loadedRuntimeKey: string | undefined;

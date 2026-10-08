@@ -22,21 +22,20 @@ Conecte outra organização do Linear com **Add workspace**. Só um workspace é
 
 ### Navegue pelas issues
 
-Com um workspace conectado, o painel **Linear** aparece na barra de contexto à direita. Ele lista as issues do workspace atual e permite:
+As issues do Linear ficam no quadro **Issues and PRs**. Abra-o pelo ícone de pull request no cabeçalho da barra lateral, ou pressione <kbd>⌘K</kbd> e depois <kbd>B</kbd> (<kbd>Ctrl+K</kbd> e depois <kbd>B</kbd> no Windows e no Linux), e escolha **Linear** no topo. O quadro lista as issues do workspace atual e permite:
 
-- filtrar por status (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), responsável (**Anyone** ou **Assigned to me**), time e prioridade
-- buscar por título, identificador ou URL do Linear
-- abrir uma issue para ler descrição, comentários, labels e prioridade
-- mudar o **Status** ou escolher **Close issue**
-- trocar o **Workspace** atual
+- mostrar um time ou **All teams**
+- trocar o workspace atual, quando houver mais de um conectado
+- filtrar ao mesmo tempo por status, por de quem são (**Assigned to me** ou **Created by me**) e por prioridade, e buscar por título ou identificador
+- ler descrição, comentários, labels e prioridade de uma issue ao lado da lista
+- mudar o **Status**
 
 ### Inicie uma sessão a partir de uma issue
 
-- No painel do Linear, abra uma issue e escolha **Start session**. O botão fica no rodapé enquanto a issue rola.
-- No chat, escolha **New Session From Linear Issue** para escolher uma da lista, com **Create in worktree** se quiser um branch novo.
-- Na caixa de diálogo **New Worktree**, escolha uma issue do Linear. A nova sessão abre com a issue anexada à caixa de mensagem, e você mesmo escreve a primeira mensagem.
+- No quadro, escolha uma issue e depois **Start in worktree…** para um branch novo, ou **New session** para trabalhar no projeto como ele está.
+- Na caixa de diálogo **New Worktree**, escolha uma issue do Linear.
 
-A partir do painel do Linear e do chat, a sessão abre no projeto mapeado para o time da issue, com a issue como primeiro prompt. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Um time sem mapeamento pede que você o mapeie primeiro. A primeira mensagem é montada a partir do magic prompt **Issue Review**, editável em **Configurações → Magic Prompts → Linear**.
+Nos dois casos, a sessão abre com a issue anexada à caixa de mensagem, e você mesmo escreve a primeira mensagem. O quadro a inicia no projeto mapeado para o time da issue, mostrado ao lado de **Start in**; escolha outro projeto ali se precisar. Mapeie os times no cartão do Linear: **Default project** cobre todos os times e **Team projects** o sobrescreve por time. Sem mapeamento, o quadro usa o último projeto que mostrou.
 
 ### Vincule uma issue a uma mensagem
 
@@ -84,4 +83,3 @@ O cartão atualiza a extensão quando sai uma nova versão, reativa a extensão 
 
 - [Issues e PRs do GitHub](/pt-br/github/) — tudo o que o GitHub pode fazer no OpenChamber
 - [Sessões em worktree](/pt-br/worktrees/) — onde as sessões a partir de issues podem começar
-- [Magic Prompts](/pt-br/magic-prompts/) — edite o prompt com que uma sessão do Linear começa

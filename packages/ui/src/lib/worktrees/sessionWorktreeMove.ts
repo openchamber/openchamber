@@ -30,7 +30,7 @@ export const buildSessionTreeMoveMessages = (
 });
 
 /** The move request lost its answer after a new worktree was created; the worktree stays. */
-export class SessionMoveOutcomeUnknownError extends Error {
+class SessionMoveOutcomeUnknownError extends Error {
   constructor(cause: Error) {
     super(cause.message, { cause });
     this.name = 'SessionMoveOutcomeUnknownError';
@@ -51,6 +51,16 @@ export type SessionTreeMoveIntent =
       root: Session;
       descendants: Session[];
       sourceDirectory: string;
+      messages: SessionTreeMoveMessages;
+    }
+  | {
+      // A chat promoted into a project: the conversation moves to the
+      // project's root folder; files the chat wrote stay where they are.
+      kind: 'project';
+      root: Session;
+      descendants: Session[];
+      sourceDirectory: string;
+      projectDirectory: string;
       messages: SessionTreeMoveMessages;
     };
 
@@ -191,7 +201,8 @@ const moveSessionTreeTransaction = async (
   },
   prepareDestination: () => Promise<{
     directory: string;
-    metadata: WorktreeMetadata;
+    /** Null for a project root, which is not a worktree. */
+    metadata: WorktreeMetadata | null;
     onMoveFailure?: (error: Error) => Promise<never>;
   }>,
 ): Promise<string> => {
@@ -231,7 +242,7 @@ const moveSessionTreeTransaction = async (
         }
         moved.push(session);
         if (session.id === input.root.id) continue;
-        useSessionUIStore.getState().setWorktreeMetadata(session.id, getLatestWorktreeMetadata(destination.metadata));
+        useSessionUIStore.getState().setWorktreeMetadata(session.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null);
       }
     } catch (error) {
       const moveError = error instanceof Error ? error : new Error(String(error));
@@ -262,7 +273,7 @@ const moveSessionTreeTransaction = async (
       }
       throw moveError;
     }
-    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, getLatestWorktreeMetadata(destination.metadata));
+    useSessionUIStore.getState().setWorktreeMetadata(input.root.id, destination.metadata ? getLatestWorktreeMetadata(destination.metadata) : null);
 
     await refreshMovedDirectories(input.sourceDirectory, destination.directory);
     return destination.directory;
@@ -290,6 +301,18 @@ export const moveSessionTreeToExistingWorktree = async (input: {
     directory: input.destination.path,
     metadata: input.destination,
   }));
+};
+
+const moveSessionTreeToProject = async (input: {
+  root: Session;
+  descendants: Session[];
+  sourceDirectory: string;
+  projectDirectory: string;
+}): Promise<string> => {
+  if ((normalizePath(input.sourceDirectory) ?? input.sourceDirectory) === (normalizePath(input.projectDirectory) ?? input.projectDirectory)) {
+    throw new Error('Source and destination are the same');
+  }
+  return moveSessionTreeTransaction(input, async () => ({ directory: input.projectDirectory, metadata: null }));
 };
 
 const moveSessionTreeToQuickWorktree = async (input: {
@@ -330,6 +353,13 @@ const executeSessionTreeMove = (intent: SessionTreeMoveIntent): void => {
         descendants: intent.descendants,
         sourceDirectory: intent.sourceDirectory,
         destination: intent.destination,
+      })
+    : intent.kind === 'project'
+    ? moveSessionTreeToProject({
+        root: intent.root,
+        descendants: intent.descendants,
+        sourceDirectory: intent.sourceDirectory,
+        projectDirectory: intent.projectDirectory,
       })
     : moveSessionTreeToQuickWorktree({
         root: intent.root,

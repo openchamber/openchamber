@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionMetadataRecord } from './sessionReviewMetadata';
-import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, getDistinctLinkedIssues, getGitLabThreadRef, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedIssues, getLinkedSidebarChanges, getLinkedSidebarIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
 type LinkedRepositoryIssue = Extract<LinkedIssue, { kind: 'issue' | 'pull' }>;
 
@@ -292,44 +292,6 @@ describe('withLinkedIssue', () => {
       true,
     );
     expect((next.openchamber as { linked_issues: LinkedIssue[] }).linked_issues).toEqual([issue()]);
-  });
-});
-
-describe('canOpenLinearIssueInContextPanel', () => {
-  test('opens the rail when Linear is connected, the shell has a context panel, and a directory is known', () => {
-    expect(canOpenLinearIssueInContextPanel({
-      linearAvailable: true,
-      linearConnected: true,
-      inDedicatedMobileShell: false,
-      directory: '/repo',
-    })).toBe(true);
-  });
-
-  test('falls back when Linear is missing, disconnected, the mobile shell is open, or the directory is blank', () => {
-    expect(canOpenLinearIssueInContextPanel({
-      linearAvailable: false,
-      linearConnected: true,
-      inDedicatedMobileShell: false,
-      directory: '/repo',
-    })).toBe(false);
-    expect(canOpenLinearIssueInContextPanel({
-      linearAvailable: true,
-      linearConnected: false,
-      inDedicatedMobileShell: false,
-      directory: '/repo',
-    })).toBe(false);
-    expect(canOpenLinearIssueInContextPanel({
-      linearAvailable: true,
-      linearConnected: true,
-      inDedicatedMobileShell: true,
-      directory: '/repo',
-    })).toBe(false);
-    expect(canOpenLinearIssueInContextPanel({
-      linearAvailable: true,
-      linearConnected: true,
-      inDedicatedMobileShell: false,
-      directory: '  ',
-    })).toBe(false);
   });
 });
 

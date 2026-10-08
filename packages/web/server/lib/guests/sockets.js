@@ -23,7 +23,7 @@ export const expandHomePath = (value, home = process.env.HOME || os.homedir()) =
  * @param {NodeJS.Platform} [platform]
  * @param {string} [home]
  */
-export const platformSocketCandidates = (
+const platformSocketCandidates = (
   binding,
   platform = process.platform,
   home = process.env.HOME || os.homedir(),

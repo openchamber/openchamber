@@ -3,16 +3,32 @@ import { getProviderModelDisplayName, type DisplayProvider } from '@/lib/modelDi
 
 export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
 
+/** What agent cycling reads from an agent. */
+type CyclableAgent = Pick<Agent, 'name' | 'mode'>;
+
 export const isPrimaryMode = (mode?: string) => mode === 'primary' || mode === 'all' || mode === undefined || mode === null;
 
-const getCyclablePrimaryAgents = (agents: Agent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
+const getCyclablePrimaryAgents = (agents: readonly CyclableAgent[]) => agents.filter((agent) => isPrimaryMode(agent.mode));
 
+/**
+ * The agent Tab moves to. While any starred agent is available, the cycle runs
+ * through the starred ones only (from a non-starred agent it enters at the
+ * first or last of them); otherwise through every primary agent, as before.
+ */
 export const getCycledPrimaryAgentName = (
-    agents: Agent[],
+    agents: readonly CyclableAgent[],
     currentAgentName: string | undefined,
     direction: 1 | -1 = 1,
+    favoriteAgentNames: readonly string[] = [],
 ) => {
     const primaryAgents = getCyclablePrimaryAgents(agents);
+    const favorites = primaryAgents.filter((agent) => favoriteAgentNames.includes(agent.name));
+    if (favorites.length > 0) {
+        const index = favorites.findIndex((agent) => agent.name === currentAgentName);
+        if (index < 0) return (direction === 1 ? favorites[0] : favorites[favorites.length - 1]).name;
+        if (favorites.length === 1) return null;
+        return favorites[(index + direction + favorites.length) % favorites.length].name;
+    }
     if (primaryAgents.length <= 1) {
         return null;
     }

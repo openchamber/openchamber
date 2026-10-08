@@ -1,3 +1,4 @@
+import { isString } from '../shared/guards.js';
 import { getRepositoryRoot } from '../git/service.js';
 import { describeSmallModel, generateSmallModelText } from '../small-model/index.js';
 import { buildDigest } from './digest.js';
@@ -101,7 +102,6 @@ const jobs = new Map();
 const schemaRefusedBy = new Set();
 
 const modelKey = (model) => `${model.providerID}/${model.modelID}`;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 const addReadContext = (result, readContext) => {
   if (readContext) result.readContext = readContext;
   return result;
@@ -166,6 +166,7 @@ export function isGenerating(repoRoot, sourceKeyValue, readContext) {
  * Resolve the pair the job registry is keyed by, for callers that need to look
  * a job up without doing any diff work.
  */
+/** @public */
 export async function getRepositoryRootFor(directory, rawSource, rawReadContext) {
   const source = parseSource(rawSource);
   const readContext = readContextForSource(source, rawReadContext);
@@ -642,5 +643,3 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     ...resolveAgainstCurrent(walkthrough, hunkIndex),
   }, readContext);
 }
-
-export { WalkthroughSourceError };

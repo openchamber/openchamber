@@ -109,7 +109,7 @@ const ShellRow: React.FC<{ shell: TrackedShell; rootSessionId: string; rootDirec
         onClick={stop}
         onMouseDown={(event) => event.preventDefault()}
         aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
-        className="shrink-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
+        className="shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error"
       >
         {t('chat.backgroundShells.stop')}
       </Button>

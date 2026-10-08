@@ -17,7 +17,5 @@ export {
 } from './upstream-reader.js';
 
 export {
-  forwardTranslatedWireEvent,
-  translateWireEvent,
-  wireEventDirectory,
+  translateWireEvent
 } from './translate-v2.js';

@@ -282,7 +282,7 @@ describe("a background command keeps its session's turn open", () => {
     type: "shell.started",
     properties: { shell: { id: "sh_1", sessionID: "session", command: "sleep 300", file: "/tmp/sh_1.out", startedAt: 1 } },
   }
-  const ended: SyncEvent = { type: "shell.ended", properties: { shellID: "sh_1" } }
+  const ended: SyncEvent = { type: "shell.ended", properties: { shellID: "sh_1", end: { kind: "exited", status: "exited", exit: 0 }, endedAt: 2 } }
   const timing = () => useSessionActivityTimingStore.getState()
 
   beforeEach(() => resetBackgroundShells())

@@ -216,6 +216,12 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_sidebar.label',
     },
     {
+      id: 'toggle_source_board',
+      defaultBinding: 'mod+k b',
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.toggle_source_board.label',
+    },
+    {
       id: 'toggle_prompt_navigator',
       defaultBinding: 'mod+k n',
       customizable: true,

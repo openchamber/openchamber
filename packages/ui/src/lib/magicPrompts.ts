@@ -9,8 +9,6 @@ export type MagicPromptId =
   | 'git.conflict.resolve.instructions'
   | 'git.integrate.cherrypick.resolve.visible'
   | 'git.integrate.cherrypick.resolve.instructions'
-  | 'linear.issue.review.visible'
-  | 'linear.issue.review.instructions'
   | 'plan.todo.visible'
   | 'plan.todo.instructions'
   | 'plan.improve.visible'
@@ -45,7 +43,7 @@ export type MagicPromptId =
   | 'session.fusion.instructions'
   | 'session.fusion.codeInstructions';
 
-export interface MagicPromptDefinition {
+interface MagicPromptDefinition {
   id: MagicPromptId;
   title: string;
   description: string;
@@ -54,7 +52,7 @@ export interface MagicPromptDefinition {
   placeholders?: Array<{ key: string; description: string }>;
 }
 
-export interface MagicPromptOverridesPayload {
+interface MagicPromptOverridesPayload {
   version: number;
   overrides: Record<string, string>;
 }
@@ -143,61 +141,6 @@ Commits in range (base...head):
 
 Files changed across these commits:
 {{changed_files}}{{additional_context_block}}{{pr_template_block}}`,
-  },
-  {
-    id: 'linear.issue.review.visible',
-    title: 'Linear Issue Review Visible Prompt',
-    group: 'Linear',
-    description: 'Visible user message when creating a session from a Linear issue.',
-    placeholders: [
-      { key: 'identifier', description: 'Linear issue identifier, such as ENG-12.' },
-    ],
-    template: 'Review this Linear issue {{identifier}} using the provided issue context',
-  },
-  {
-    id: 'linear.issue.review.instructions',
-    title: 'Linear Issue Review Instructions',
-    group: 'Linear',
-    description: 'Hidden instructions attached when generating a Linear issue review response.',
-    template: `Review this Linear issue using the provided issue context.
-
-Process:
-- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- After gathering, if anything is still unclear or cannot be verified, do not speculate — state what's missing and ask targeted questions.
-
-Mode selection by type:
-- Bug / Question/Support / Ops: deliver the response directly using the matching template below. Do not bombard me with questions for straightforward diagnosis; use "Missing info" / "Repro/diagnostics needed" fields instead.
-- Feature request / Refactor with substantive unknowns: this is effectively a planning session. Do not emit the Feature template on the first turn. Instead, ask me focused clarifying questions in batches of at most 3, one topic at a time (scope, constraints, tradeoffs, UX, etc.), wait for answers, drop questions that became irrelevant, and repeat until you have no more substantive questions. Only then emit the Feature template.
-
-Output rules:
-- Compact output; pick ONE template below and omit the others.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed.
-- Reference evidence with file paths and line ranges when applicable; if exact lines are not available, cite the file and say "approx" + why.
-- Keep the entire response under ~300 words (applies to the final template output, not to clarifying-question turns).
-
-Templates (choose one):
-Bug:
-- Summary (1-2 sentences)
-- Likely cause (max 2)
-- Repro/diagnostics needed (max 3)
-- Fix approach (max 4 steps)
-- Verification (max 3)
-
-Feature:
-- Summary (1-2 sentences)
-- Requirements (max 4)
-- Unknowns/questions (max 4)
-- Proposed plan (max 5 steps)
-- Verification (max 3)
-
-Question/Support:
-- Summary (1-2 sentences)
-- Answer/guidance (max 6 lines)
-- Missing info (max 4)
-
-Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`,
   },
   {
     id: 'git.conflict.resolve.visible',
@@ -442,7 +385,7 @@ Respond in the same language the user used most in the conversation.`,
     id: 'session.review.instructions',
     title: 'Workspace Review Instructions',
     group: 'Session',
-    description: 'Hidden instructions attached to the /workspace-review command. Reviews the workspace diff for intent, correctness, and adequacy, with severity-classified findings.',
+    description: 'Hidden instructions attached to the /workspace-review command and to the first message of every review session. Reviews the workspace diff for intent, correctness, and adequacy, with severity-classified findings.',
     template: `Review the changes in this workspace and judge whether they are correct and adequate — not just whether they contain catastrophic bugs.
 
 The diff is the source of truth. Read the relevant code around the diff too, not only the diff itself, so you understand the change in context.
@@ -513,14 +456,15 @@ Keep the review concise and practical. Respond in the same language the user use
     title: 'Review Handoff Instructions',
     group: 'Session',
     description: 'Hidden instructions attached to the /handoff-review command. Produces a handoff for a separate review agent.',
-    template: `Produce a review handoff for another agent. Do not compact or mutate session history. Your output is an assistant message that OpenChamber will send to a separate reviewer agent.
+    template: `Produce a review handoff for another agent. Your output is an assistant message that OpenChamber will send to a separate reviewer agent, who checks whether the work actually came out right.
 
 Include:
 - The user's original intent and any later clarifications that changed the intent
+- Decisions the user made in this session and anything deliberately left out of scope, so the reviewer does not report them as gaps
 - What was implemented and why
-- Files changed, with brief purpose per file
+- Where the work lives: the files changed, with a brief purpose per file, or the commit range when the work is already committed. Say that other uncommitted changes in the workspace are not part of this work
 - Important design decisions and tradeoffs
-- Validation/tests run, if known
+- Validation: the exact checks and tests that ran with their results, and what was not checked
 - Known gaps, uncertainty, or areas the reviewer should inspect closely
 
 Formatting:
@@ -564,7 +508,7 @@ Focus on correctness, regressions, missing implementation, missing tests, and wh
     ],
     template: `Another agent reviewed your changes and left the feedback below.
 
-Please review the feedback, resolve the relevant issues, and explain what you changed.
+Fix the findings you agree with. When you think a finding is wrong, leave the code as it is and explain why. Then list what you changed and which findings you declined, with the reason for each.
 
 {{review_feedback}}`,
   },
@@ -578,7 +522,7 @@ Please review the feedback, resolve the relevant issues, and explain what you ch
     ],
     template: `The agent implementing the changes has responded to the previous review feedback.
 
-Please review the latest state again and report any remaining issues.
+Review the current diff again. For each earlier finding, say whether it is fixed, declined for a reason you accept, or still open; when you disagree with a decline, explain why. Report new findings only for problems the latest changes introduced.
 
 {{implementation_response}}`,
   },

@@ -53,6 +53,17 @@ describe('source-control audit storage', () => {
     expect(results.find((result) => !result.ok).error.code).toBe('SOURCE_CONTROL_AUDIT_CONFLICT');
   });
 
+  it('names an issue comment by its issue and refuses an issue target for other writes', async () => {
+    const { store } = await setup();
+    const issueTarget = { kind: 'issue', operation: 'issue-comment', projectId: 'project_one', number: 3 };
+    await expect(store.plan(plan('issue', { target: issueTarget }))).resolves.toBeTruthy();
+    await expect(store.plan(plan('review', { target: { kind: 'change-request', operation: 'change-request-review', projectId: 'project_one', number: 7 } })))
+      .resolves.toBeTruthy();
+    await expect(store.plan(plan('issue-state', { target: { ...issueTarget, operation: 'issue-state' } }))).resolves.toBeTruthy();
+    await expect(store.plan(plan('mismatch', { target: { ...issueTarget, operation: 'change-request-comment' } }))).rejects.toThrow();
+    await expect(store.plan(plan('mismatch-two', { target: { ...issueTarget, kind: 'change-request' } }))).rejects.toThrow();
+  });
+
   it('fails closed on busy reads and cleans failed snapshot writes', async () => {
     const { filePath, store } = await setup();
     await store.plan(plan('original'));

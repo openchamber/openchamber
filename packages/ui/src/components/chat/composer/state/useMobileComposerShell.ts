@@ -30,7 +30,7 @@ import { createComposerMorphController, type ComposerMorphController } from './m
  * down. Collapsing under an open sheet would unmount the focused editor and
  * kill the keyboard the sheet is about to hand back.
  */
-export interface MobileComposerHolders {
+interface MobileComposerHolders {
     controlsPanelOpen: boolean;
     attachMenuOpen: boolean;
     draftPickerOpen: boolean;

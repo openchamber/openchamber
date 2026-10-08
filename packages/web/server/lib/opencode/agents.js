@@ -539,7 +539,69 @@ function deleteAgent(agentName, workingDirectory, scope) {
   throw new Error(`Agent ${agentName} is built-in or not deletable`);
 }
 
+// ============== DISABLED ==============
+
+/** Agent ids under one agents directory, nested ones as `group/name`. */
+function collectAgentIds(dir, prefix, ids) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      collectAgentIds(path.join(dir, entry.name), `${prefix}${entry.name}/`, ids);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      ids.add(`${prefix}${entry.name.slice(0, -3)}`);
+    }
+  }
+}
+
+/**
+ * Agents switched off with `disabled: true`. OpenCode drops them from its
+ * agent list, so Settings learns about them here to offer turning them back
+ * on. Every agent defined in a file or a config section is read the way the
+ * editor reads it and kept when its own config says disabled.
+ */
+function listDisabledAgents(workingDirectory) {
+  const lookupCache = createAgentLookupCache();
+  const names = new Set();
+
+  buildUserAgentIndex(lookupCache);
+  for (const name of lookupCache.userAgentIndexByName.keys()) names.add(name);
+
+  if (workingDirectory) {
+    const worktreeRoot = findWorktreeRoot(workingDirectory) || path.resolve(workingDirectory);
+    for (const base of getAncestors(workingDirectory, worktreeRoot)) {
+      for (const dirName of PROJECT_AGENT_DIR_NAMES) {
+        collectAgentIds(path.join(base, '.opencode', dirName), '', names);
+      }
+    }
+  }
+
+  const { mergedConfig } = readConfigLayers(workingDirectory);
+  for (const sectionKey of ['agents', 'agent', 'mode']) {
+    const section = mergedConfig?.[sectionKey];
+    if (isRecord(section)) for (const name of Object.keys(section)) names.add(name);
+  }
+
+  const disabled = [];
+  for (const name of [...names].sort((a, b) => a.localeCompare(b))) {
+    const entry = getAgentConfig(name, workingDirectory, lookupCache);
+    if (entry.config.disabled !== true) continue;
+    disabled.push({
+      name,
+      scope: entry.scope,
+      path: entry.path,
+      ...(typeof entry.config.description === 'string' ? { description: entry.config.description } : {}),
+    });
+  }
+  return disabled;
+}
+
 export {
+  listDisabledAgents,
   getAgentSources,
   getAgentConfig,
   getAgentPermissions,

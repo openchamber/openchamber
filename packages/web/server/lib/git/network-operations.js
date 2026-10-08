@@ -1,3 +1,4 @@
+import { isString } from '../shared/guards.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -41,7 +42,6 @@ const MANAGED_ENV_NAMES = new Set([
   'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NETRC',
 ]);
 const SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 const operationError = (code, message, status = 500, details = {}) => Object.assign(new Error(message), { code, status, ...details });
 const publicError = (code, message) => ({ code, message });

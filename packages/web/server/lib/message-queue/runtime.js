@@ -133,7 +133,11 @@ export const parseQueuedItemInput = (value) => {
     throw new TypeError('item needs text, attachments, or context');
   }
   const sendConfig = parseSendConfig(raw.sendConfig);
-  if (!sendConfig) throw new TypeError('item sendConfig with providerID and modelID is required');
+  const provenance = asRecord(raw.scheduledTask);
+  const projectId = asNonEmptyString(provenance?.projectId);
+  const taskId = asNonEmptyString(provenance?.taskId);
+  if (provenance && (!projectId || !taskId)) throw new TypeError('invalid scheduledTask provenance');
+  if (!sendConfig && !provenance) throw new TypeError('item sendConfig with providerID and modelID is required');
   const item = { content, text };
   const agentMention = asNonEmptyString(raw.agentMention);
   if (agentMention) item.agentMention = agentMention;
@@ -141,7 +145,12 @@ export const parseQueuedItemInput = (value) => {
   item.context = context;
   const contextPreview = asNonEmptyString(raw.contextPreview).slice(0, 103);
   if (contextPreview) item.contextPreview = contextPreview;
-  item.sendConfig = sendConfig;
+  item.sendConfig = sendConfig ?? {};
+  if (provenance) {
+    item.scheduledTask = { projectId, taskId };
+    const agent = asNonEmptyString(raw.sendConfig?.agent);
+    if (agent) item.sendConfig.agent = agent;
+  }
   return item;
 };
 
@@ -177,6 +186,7 @@ const toPublicItem = (item) => {
       + (contextPreview.length > firstLine.length || firstLine.length > 100 ? '...' : '');
   }
   publicItem.sendConfig = { ...item.sendConfig };
+  if (item.scheduledTask) publicItem.scheduledTask = { ...item.scheduledTask };
   return publicItem;
 };
 
@@ -228,6 +238,9 @@ export function createMessageQueueRuntime({
   sessionKnowledgeRuntime = null,
   broadcastGlobalUiEvent,
   onPromptSent,
+  beforeScheduledTaskSend,
+  validateScheduledTaskTarget,
+  onScheduledTaskResult,
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
@@ -373,7 +386,16 @@ export function createMessageQueueRuntime({
     return { revision, session: sessionSnapshot(sessionId) };
   };
 
-  const setQueueItems = (sessionId, directory, items) => {
+  const reportScheduledResult = (item, status, error) => {
+    if (!item.scheduledTask) return;
+    Promise.resolve().then(() => onScheduledTaskResult?.(item.scheduledTask, status, error))
+      .catch((failure) => console.warn('[message-queue] scheduled task state write failed:', failure?.message ?? failure));
+  };
+
+  const setQueueItems = (sessionId, directory, items, status = 'cancelled', error) => {
+    for (const item of queues.get(sessionId)?.items ?? []) {
+      if (item.scheduledTask && !items.some((entry) => entry.id === item.id)) reportScheduledResult(item, status, error);
+    }
     directories.set(sessionId, directory);
     if (items.length === 0) {
       queues.delete(sessionId);
@@ -494,13 +516,13 @@ export function createMessageQueueRuntime({
 
     // Jev routing, when the queued send named the Auto sentinel. A failure
     // inside resolves to the fallback model; only a missing fallback throws.
-    const routed = await resolveAutoSelection?.({
+    const routed = providerID && modelID ? await resolveAutoSelection?.({
       sessionId,
       directory,
       model,
       agent,
       requestText: item.text,
-    });
+    }) : null;
     if (routed) {
       model = routed.model;
       agent = routed.agent ?? agent;
@@ -508,7 +530,7 @@ export function createMessageQueueRuntime({
 
     // v2 selects model and agent on the session, not per prompt: the choice is
     // switched once and then persists.
-    await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
+    if (!item.scheduledTask || (providerID && modelID)) await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/model`, {
       directory,
       method: 'POST',
       body: { model },
@@ -627,6 +649,19 @@ export function createMessageQueueRuntime({
 
     const idle = await isSessionIdle(sessionId, queue.directory);
     if (idle === null) {
+      if (head.scheduledTask && validateScheduledTaskTarget) {
+        try {
+          await validateScheduledTaskTarget(head.scheduledTask.projectId, sessionId);
+        } catch (error) {
+          if (error?.statusCode === 404 || error?.statusCode === 409) {
+            const after = queues.get(sessionId);
+            if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== head.id), 'failed', error.message);
+            commit(sessionId);
+            armDispatch(sessionId);
+            return;
+          }
+        }
+      }
       armDispatch(sessionId, retryDelayMs(1));
       return;
     }
@@ -651,9 +686,23 @@ export function createMessageQueueRuntime({
     sending.set(sessionId, item.id);
     broadcast(sessionId);
     try {
+      if (item.scheduledTask) {
+        try {
+          await beforeScheduledTaskSend?.(sessionId, current.directory, item);
+        } catch (error) {
+          if (error?.statusCode !== 404 && error?.statusCode !== 409) throw error;
+          sending.delete(sessionId);
+          const after = queues.get(sessionId);
+          if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id), 'failed', error.message);
+          failures.delete(sessionId);
+          commit(sessionId);
+          armDispatch(sessionId);
+          return;
+        }
+      }
       await sendItem(sessionId, current.directory, item);
       const after = queues.get(sessionId);
-      if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id));
+      if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id), 'sent');
       failures.delete(sessionId);
       sending.delete(sessionId);
       commit(sessionId);
@@ -693,6 +742,16 @@ export function createMessageQueueRuntime({
     if (!directory) throw new TypeError('directory is required');
     const parsed = parseQueuedItemInput(itemInput);
     await load();
+    if (parsed.scheduledTask) {
+      for (const queue of queues.values()) {
+        if (queue.items.some((entry) => entry.scheduledTask?.projectId === parsed.scheduledTask.projectId && entry.scheduledTask.taskId === parsed.scheduledTask.taskId)) {
+          throw httpError('task is already queued', 409);
+        }
+      }
+      if ((queues.get(sessionId)?.items.length ?? 0) >= MAX_ITEMS_PER_SESSION || (!queues.has(sessionId) && queues.size >= MAX_SESSIONS)) {
+        throw httpError('message queue is full', 409);
+      }
+    }
     const item = {
       id: `queued-${now()}-${Math.random().toString(36).slice(2, 9)}`,
       createdAt: now(),
@@ -700,7 +759,7 @@ export function createMessageQueueRuntime({
     };
     const existing = queues.get(sessionId);
     const items = [...(existing?.items ?? []), item].slice(-MAX_ITEMS_PER_SESSION);
-    queues.set(sessionId, { directory, items });
+    setQueueItems(sessionId, directory, items);
     directories.set(sessionId, directory);
     if (queues.size > MAX_SESSIONS) {
       const oldest = Array.from(queues.entries())
@@ -708,7 +767,7 @@ export function createMessageQueueRuntime({
         .sort((left, right) => (left[1].items[0]?.createdAt ?? 0) - (right[1].items[0]?.createdAt ?? 0))
         .slice(0, queues.size - MAX_SESSIONS);
       for (const [staleId] of oldest) {
-        queues.delete(staleId);
+        setQueueItems(staleId, directories.get(staleId), []);
         clearTimer(staleId);
         broadcast(staleId);
         directories.delete(staleId);
@@ -741,6 +800,7 @@ export function createMessageQueueRuntime({
     const queue = queues.get(sessionId);
     const item = queue?.items.find((entry) => entry.id === itemId);
     if (!queue || !item) throw httpError('queued message not found', 404);
+    if (item.scheduledTask) throw httpError('scheduled messages cannot be taken', 409);
     setQueueItems(sessionId, queue.directory, queue.items.filter((entry) => entry.id !== itemId));
     return { ...commit(sessionId), item };
   };
@@ -752,9 +812,9 @@ export function createMessageQueueRuntime({
     const queue = queues.get(sessionId);
     if (!queue) return { revision, session: sessionSnapshot(sessionId), items: [] };
     const sendingId = sending.get(sessionId) ?? null;
-    const items = queue.items.filter((item) => item.id !== sendingId);
+    const items = queue.items.filter((item) => item.id !== sendingId && !item.scheduledTask);
     if (items.length === 0) return { revision, session: sessionSnapshot(sessionId), items: [] };
-    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId));
+    setQueueItems(sessionId, queue.directory, queue.items.filter((item) => item.id === sendingId || item.scheduledTask));
     return { ...commit(sessionId), items };
   };
 
@@ -810,7 +870,7 @@ export function createMessageQueueRuntime({
     const deletedSessionId = extractDeletedSessionId(payload);
     if (deletedSessionId) {
       if (!queues.has(deletedSessionId)) return;
-      queues.delete(deletedSessionId);
+      setQueueItems(deletedSessionId, directories.get(deletedSessionId), []);
       clearTimer(deletedSessionId);
       failures.delete(deletedSessionId);
       commit(deletedSessionId);
@@ -870,11 +930,23 @@ export function createMessageQueueRuntime({
     timers.clear();
   };
 
+  const cancelScheduledTask = async (projectId, taskId) => {
+    await load();
+    for (const [sessionId, queue] of queues) {
+      const items = queue.items.filter((item) => item.scheduledTask?.projectId !== projectId || item.scheduledTask.taskId !== taskId || sending.get(sessionId) === item.id);
+      if (items.length === queue.items.length) continue;
+      setQueueItems(sessionId, queue.directory, items);
+      commit(sessionId);
+      armDispatch(sessionId);
+    }
+  };
+
   return {
     load,
     snapshot,
     sessionSnapshot,
     enqueue,
+    cancelScheduledTask,
     remove,
     take,
     takeAll,
@@ -906,6 +978,7 @@ export function registerMessageQueueRoutes(app, runtime) {
 
   app.post('/api/message-queue/sessions/:sessionId/items', async (req, res) => {
     try {
+      if (req.body?.item?.scheduledTask) throw new TypeError('scheduledTask is server-owned');
       res.json(await runtime.enqueue(req.params.sessionId, req.body?.directory, req.body?.item));
     } catch (error) {
       respondError(res, error, 'Failed to queue message');

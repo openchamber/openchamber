@@ -314,8 +314,42 @@ function removeProviderConfig(providerId, workingDirectory, scope = 'user') {
   return true;
 }
 
+/**
+ * Providers turned off in the user's OpenCode config (`disabled_providers`).
+ * OpenCode 2 drops them from its provider list, so this list is the only
+ * place Settings can still show them to turn them back on.
+ */
+function readDisabledProviders(workingDirectory) {
+  const layers = readConfigLayers(workingDirectory);
+  const config = getConfigForPath(layers, layers.paths.userPath);
+  return Array.isArray(config.disabled_providers)
+    ? config.disabled_providers.filter((entry) => typeof entry === 'string' && entry.length > 0)
+    : [];
+}
+
+function setProviderDisabled(providerId, disabled, workingDirectory) {
+  if (typeof providerId !== 'string' || !PROVIDER_ID_PATTERN.test(providerId)) {
+    const error = new Error('Invalid provider ID');
+    error.statusCode = 400;
+    throw error;
+  }
+  const layers = readConfigLayers(workingDirectory);
+  const targetPath = layers.paths.userPath;
+  const config = getConfigForPath(layers, targetPath);
+  const current = Array.isArray(config.disabled_providers)
+    ? config.disabled_providers.filter((entry) => entry !== providerId)
+    : [];
+  const next = disabled ? [...current, providerId] : current;
+  if (next.length > 0) config.disabled_providers = next;
+  else delete config.disabled_providers;
+  writeConfig(config, targetPath || CONFIG_FILE);
+  return next;
+}
+
 export {
   getProviderSources,
+  readDisabledProviders,
+  setProviderDisabled,
   removeProviderConfig,
   upsertProviderConfig,
   validateCustomProviderConfig,

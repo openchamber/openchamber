@@ -414,6 +414,23 @@
           }
         },
         {
+          "label": "Issues and PRs",
+          "link": "/issues-and-prs/",
+          "translations": {
+            "nl": "Issues en PR's",
+            "uk": "Issues і PR",
+            "zh-CN": "Issue 与 PR",
+            "es": "Issues y PRs",
+            "pt-BR": "Issues e PRs",
+            "ko": "이슈 및 PR",
+            "pl": "Issues i PR-y",
+            "fr": "Issues et PR",
+            "ja": "Issues と PR",
+            "de": "Issues und PRs",
+            "tr": "Issue'lar ve PR'lar"
+          }
+        },
+        {
           "label": "Magic Prompts",
           "link": "/magic-prompts/",
           "translations": {

@@ -18,7 +18,7 @@ export type SessionSubtreeStore = Pick<
   'archiveSession' | 'archiveSessions' | 'deleteSession' | 'deleteSessions'
 >;
 
-export type SessionSubtreeOutcome = {
+type SessionSubtreeOutcome = {
   succeededIds: string[];
   failedIds: string[];
 };

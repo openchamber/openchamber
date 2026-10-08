@@ -21,8 +21,7 @@
  *   assistant `message.updated`; only the last one carries `finish: "stop"`,
  *   which is the same signal v1 gave once per turn.
  */
-
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+import { isRecord } from '../shared/guards.js';
 
 const trimmed = (value) => (typeof value === 'string' ? value.trim() : '');
 

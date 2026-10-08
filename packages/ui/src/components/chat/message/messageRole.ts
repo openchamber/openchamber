@@ -1,6 +1,6 @@
 import type { Message } from '@/lib/opencode/model';
 
-export interface MessageRoleInfo {
+interface MessageRoleInfo {
     role: string;
     isUser: boolean;
 }

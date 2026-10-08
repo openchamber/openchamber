@@ -80,6 +80,12 @@ Vervangt het API-adres voor updatecontroles. Laat dit bij normaal gebruik ongemo
 
 Dwingt een pakketbeheerder voor updates af als automatische herkenning de verkeerde kiest.
 
+## Proxy
+
+### `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`
+
+Stuurt de eigen uitgaande verzoeken van OpenChamber, zoals gebruikslimieten en skill-catalogi, via een proxy. Namen in kleine letters werken ook. Hosts in `NO_PROXY` verbinden rechtstreeks, en `localhost`, `127.0.0.1` en `::1` altijd, zodat aanmeld-callbacks en de lokale OpenCode-server blijven werken.
+
 ## OpenCode-server
 
 ### `OPENCODE_HOST`

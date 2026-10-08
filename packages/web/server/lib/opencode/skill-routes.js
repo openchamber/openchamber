@@ -395,6 +395,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       const effectiveSubpath = src.defaultSubpath || parsed.effectiveSubpath || null;
       const cacheKey = getCacheKey({
         normalizedRepo: parsed.normalizedRepo,
+        ref: parsed.ref,
         subpath: effectiveSubpath || '',
         identityId: src.gitIdentityId || '',
       });

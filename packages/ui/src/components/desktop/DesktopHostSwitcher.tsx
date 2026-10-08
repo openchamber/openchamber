@@ -414,7 +414,8 @@ export function DesktopHostSwitcherDialog({
     };
   }, [open]);
 
-  const handleSwitch = React.useCallback(async (host: DesktopHost) => {
+  const handleSwitch = React.useCallback(async (selectedHost: DesktopHost) => {
+    let host = selectedHost;
     // Relay legs ride the E2EE tunnel activated in-renderer via
     // switchRuntimeEndpoint({ relay }); the runtime fetch/socket layers route
     // through the tunnel from the singleton registry.
@@ -436,20 +437,53 @@ export function DesktopHostSwitcherDialog({
       scheduleDesktopHostCandidateRefresh(host.id);
     };
 
+    // An SSH instance is reachable only through its tunnel. In the desktop app
+    // open it first, then switch with the host entry the connect rewrote
+    // (forward URL and client token); the row's Connect button does the same
+    // without switching.
+    if (isElectronShell() && host.id !== LOCAL_HOST_ID && sshHostIds[host.id] && sshStatusesById[host.id]?.phase !== 'ready') {
+      setSwitchingHostId(host.id);
+      try {
+        await desktopSshConnect(host.id);
+        await waitForSshReady(host.id, SSH_CONNECT_TIMEOUT_MS, (status) => {
+          setSshStatusesById((prev) => ({ ...prev, [status.id]: status }));
+        });
+        const refreshed = (await desktopHostsGet()).hosts.find((entry) => entry.id === host.id);
+        if (refreshed) host = refreshed;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message !== SSH_CONNECT_CANCELLED_ERROR) {
+          toast.error(t('desktopHostSwitcher.toast.sshFailedToConnect', { host: redactSensitiveUrl(host.label) }), {
+            description: message,
+          });
+        }
+        setSwitchingHostId(null);
+        return;
+      }
+    }
+
     const origin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(host.url) || '');
     const apiOrigin = host.id === LOCAL_HOST_ID ? localOrigin : (normalizeHostUrl(getDesktopHostApiUrl(host)) || '');
     const relayOnly = Boolean(host.relay) && !host.apiUrl && host.id !== LOCAL_HOST_ID;
-    if (!origin && !relayOnly) return;
+    if (!origin && !relayOnly) {
+      setSwitchingHostId(null);
+      return;
+    }
 
     if (isElectronShell()) {
-      if (!apiOrigin && !host.relay) return;
+      if (!apiOrigin && !host.relay) {
+        setSwitchingHostId(null);
+        return;
+      }
       setSwitchingHostId(host.id);
+      // A tunnel opened above makes the cached probe of the old forward stale.
+      const sshJustConnected = host !== selectedHost;
       const clientToken = host.id === LOCAL_HOST_ID ? await getLocalClientToken() : (host.clientToken || '');
 
       // The dropdown already probed every host when it opened — act on that
       // result instead of re-probing (re-probes doubled the switch latency and
       // flashed transient Unreachable states over a known-good host).
-      const cached = statusById[host.id];
+      const cached = sshJustConnected ? undefined : statusById[host.id];
       if (cached?.status === 'ok') {
         if (cached.via === 'relay' && host.relay) {
           activateRelay(host.relay);

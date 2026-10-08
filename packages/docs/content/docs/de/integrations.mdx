@@ -22,21 +22,20 @@ Eine weitere Linear-Organisation verbindest du mit **Add workspace**. Es ist imm
 
 ### Issues durchsuchen
 
-Sobald ein Workspace verbunden ist, erscheint das Panel **Linear** in der rechten Kontextleiste. Es listet die Issues des aktuellen Workspace und erlaubt dir:
+Linear-Issues findest du auf dem Board **Issues and PRs**. Öffne es über das Pull-Request-Symbol im Kopf der Seitenleiste oder drücke <kbd>⌘K</kbd> und dann <kbd>B</kbd> (<kbd>Ctrl+K</kbd> und dann <kbd>B</kbd> unter Windows und Linux), und wähle oben **Linear**. Das Board listet die Issues des aktuellen Workspace und erlaubt dir:
 
-- nach Status (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), Zuständigem (**Anyone** oder **Assigned to me**), Team und Priorität zu filtern
-- nach Titel, Kennung oder Linear-URL zu suchen
-- ein Issue zu öffnen und Beschreibung, Kommentare, Labels und Priorität zu lesen
-- seinen **Status** zu ändern oder **Close issue** zu wählen
-- den aktuellen **Workspace** zu wechseln
+- ein Team oder **All teams** anzuzeigen
+- den aktuellen Workspace zu wechseln, wenn mehrere verbunden sind
+- gleichzeitig nach Status, Zugehörigkeit (**Assigned to me** oder **Created by me**) und Priorität zu filtern und nach Titel oder Kennung zu suchen
+- Beschreibung, Kommentare, Labels und Priorität eines Issues neben der Liste zu lesen
+- seinen **Status** zu ändern
 
 ### Session aus einem Issue starten
 
-- Öffne im Linear-Panel ein Issue und wähle **Start session**. Der Button bleibt in der Fußzeile, während das Issue scrollt.
-- Wähle im Chat **New Session From Linear Issue**, um eines aus der Liste zu wählen, mit **Create in worktree**, wenn du einen frischen Branch möchtest.
-- Wähle im Dialog **New Worktree** ein Linear-Issue. Die neue Session öffnet sich mit dem Issue im Nachrichtenfeld angehängt, und die erste Nachricht schreibst du selbst.
+- Wähle auf dem Board ein Issue und dann **Start in worktree…** für einen frischen Branch oder **New session**, um im Projekt so zu arbeiten, wie es ist.
+- Wähle im Dialog **New Worktree** ein Linear-Issue.
 
-Aus dem Linear-Panel und dem Chat öffnet sich die Session im Projekt, das dem Team des Issues zugeordnet ist, mit dem Issue als erstem Prompt. Teams ordnest du in der Linear-Karte zu: **Default project** gilt für alle Teams, **Team projects** überschreibt es pro Team. Bei einem nicht zugeordneten Team wirst du zuerst um die Zuordnung gebeten. Die erste Nachricht entsteht aus dem Magic Prompt **Issue Review**, den du unter **Einstellungen → Magic Prompts → Linear** bearbeiten kannst.
+In beiden Fällen öffnet sich die Session mit dem Issue im Nachrichtenfeld angehängt, und die erste Nachricht schreibst du selbst. Das Board startet sie im Projekt, das dem Team des Issues zugeordnet ist; es steht neben **Start in**, und dort kannst du bei Bedarf ein anderes Projekt wählen. Teams ordnest du in der Linear-Karte zu: **Default project** gilt für alle Teams, **Team projects** überschreibt es pro Team. Ohne Zuordnung nimmt das Board das Projekt, das es zuletzt angezeigt hat.
 
 ### Issue an eine Nachricht hängen
 
@@ -84,4 +83,3 @@ Mit Excalidraw zeichnest du in `.excalidraw`-Dateien und Obsidian-Zeichnungen im
 
 - [GitHub Issues & PRs](/de/github/) — alles, was GitHub in OpenChamber kann
 - [Worktree-Sessions](/de/worktrees/) — wo Issue-Sessions starten können
-- [Magic Prompts](/de/magic-prompts/) — den Prompt bearbeiten, mit dem eine Linear-Session beginnt

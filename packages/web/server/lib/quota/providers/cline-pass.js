@@ -12,7 +12,7 @@ import {
 
 export const providerId = 'cline-pass';
 export const providerName = 'ClinePass';
-export const aliases = ['cline-pass'];
+const aliases = ['cline-pass'];
 const CLINE_USAGE_URL = 'https://api.cline.bot/api/v1/users/me/plan/usage-limits';
 
 // Cline reports a rolling five-hour window, a rolling weekly window, and a

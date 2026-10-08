@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { GitHubChecksSummary, GitHubIssueLabel, GitHubPullStatus, LinearIssueLabel } from '@/lib/api/types';
+import type { GitHubChecksSummary, GitHubIssueLabel, GitHubPullStatus, LinearIssueLabel, LinearSubIssueProgress } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
@@ -73,6 +73,20 @@ export const ReferenceLabelChips: React.FC<{ labels: Label[]; max?: number }> = 
     );
 };
 
+/** A parent issue's sub-issues: finished of all, or only how many when not all were counted. */
+const SubIssueCount: React.FC<{ progress: LinearSubIssueProgress }> = ({ progress }) => {
+    const { t } = useI18n();
+    const label = progress.more
+        ? t('references.picker.linear.subIssuesMany', { count: progress.total })
+        : t('references.picker.linear.subIssuesDone', { done: progress.done, total: progress.total });
+    return (
+        <span className="inline-flex items-center gap-0.5 tabular-nums" title={label} aria-label={label}>
+            <Icon name="node-tree" className="size-3.5" />
+            {progress.more ? `${progress.total}+` : `${progress.done}/${progress.total}`}
+        </span>
+    );
+};
+
 export const ChecksGlyph: React.FC<{ checks: GitHubChecksSummary | null }> = ({ checks }) => {
     if (!checks || checks.total === 0) return null;
     if (checks.state === 'failure') return <Icon name="close-circle" className="size-3.5 text-[var(--status-error)]" />;
@@ -125,7 +139,8 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             aria-selected={highlighted}
             className={cn(
                 'group flex cursor-pointer items-start gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors',
-                highlighted ? 'bg-interactive-selection text-interactive-selection-foreground' : 'hover:bg-interactive-hover',
+                // The sidebar's session rows: the same tints for the chosen row and hover.
+                highlighted ? 'bg-interactive-selection/70 text-interactive-selection-foreground' : 'hover:bg-interactive-hover/60',
             )}
             onClick={onHighlight}
             onDoubleClick={onActivate}
@@ -137,6 +152,13 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
             ) : null}
             <Icon name={look.icon} className="mt-0.5 size-4 shrink-0" style={{ color: look.color }} />
             <div className="min-w-0 flex-1">
+                {item.source === 'linear' && item.issue.parent ? (
+                    <div className={cn('mb-0.5 flex min-w-0 items-center gap-1 typography-micro', REFERENCE_META_TEXT)}>
+                        <Icon name="corner-down-right" className="size-3.5 shrink-0" />
+                        <span className="shrink-0 font-mono">{item.issue.parent.identifier}</span>
+                        <span className="truncate">{item.issue.parent.title}</span>
+                    </div>
+                ) : null}
                 <div className={cn('typography-ui-header font-semibold line-clamp-2 break-words', !highlighted && 'text-foreground')}>{title}</div>
                 <div className={cn('mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 typography-micro', REFERENCE_META_TEXT)}>
                     <span className="font-mono">{id}</span>
@@ -159,6 +181,9 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                         <span className="inline-flex items-center gap-0.5" title={t('references.picker.preview.includeDiff')}>
                             <Icon name="file-code" className="size-3.5" />
                         </span>
+                    ) : null}
+                    {item.source === 'linear' && item.issue.subIssueProgress ? (
+                        <SubIssueCount progress={item.issue.subIssueProgress} />
                     ) : null}
                     {item.source === 'linear' && item.issue.priority && item.issue.priority > 0 ? (
                         <span>{t(LINEAR_PRIORITY_KEYS[item.issue.priority])}</span>

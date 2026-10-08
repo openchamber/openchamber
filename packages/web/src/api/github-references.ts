@@ -97,9 +97,20 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
       commentTotal: z.number(),
       pull: z.object({
         reviewDecision: z.enum(['approved', 'changes_requested', 'review_required']).nullable(),
+        reviewers: z.array(z.object({ id: z.string(), login: z.string(), avatarUrl: z.string().optional() })).default([]),
+        checks: checksSummarySchema.nullable().optional(),
         additions: z.number(),
         deletions: z.number(),
         changedFiles: z.number(),
+        commits: z.array(z.object({
+          sha: z.string(),
+          headline: z.string(),
+          author: z.object({ login: z.string(), avatarUrl: z.string().optional() }).nullable(),
+          authorName: z.string().nullable(),
+          committedAt: z.string().nullable(),
+          url: z.string().nullable(),
+        })).default([]),
+        commitTotal: z.number().nullable().default(null),
       }).nullable(),
     }).nullable(),
   }),
@@ -152,7 +163,8 @@ export const fetchGitHubReferences = async (
 ): Promise<GitHubReferencesResult> => {
   const query = readContextQuery(context);
   query.set('kind', options.kind);
-  if (options.filter) query.set('filter', options.filter);
+  if (options.state) query.set('state', options.state);
+  if (options.people) query.set('people', options.people);
   if (options.query?.trim()) query.set('query', options.query.trim());
   if (options.cursor) query.set('cursor', options.cursor);
   const response = await fetch('/api/source-control/github/references', { query, headers: { Accept: 'application/json' } });

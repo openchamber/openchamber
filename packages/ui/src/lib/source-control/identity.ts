@@ -22,7 +22,7 @@ const getIdentityAuthority = (identity: SourceControlIdentity): string => {
   }
 };
 
-export type SourceControlTarget = {
+type SourceControlTarget = {
   identity: SourceControlIdentity;
   remote: GitRemote;
 };
@@ -100,7 +100,7 @@ export const hasSameSourceControlReadContext = (
   && left.directory === right.directory
   && left.primaryRemote === right.primaryRemote;
 
-export const appendMissingSourceControlItems = <T extends { number: number; project: { id: string } }>(
+const appendMissingSourceControlItems = <T extends { number: number; project: { id: string } }>(
   items: T[],
   candidates: T[],
 ): T[] => {
@@ -150,7 +150,7 @@ export const getSourceControlProviderLabel = (provider: SourceControlProvider): 
   provider === 'github' ? 'GitHub' : 'GitLab';
 
 /** GitLab addresses merge requests as `!N`; GitHub addresses pull requests as `#N`. */
-export const getChangeRequestReferencePrefix = (provider: SourceControlProvider): '#' | '!' =>
+const getChangeRequestReferencePrefix = (provider: SourceControlProvider): '#' | '!' =>
   provider === 'gitlab' ? '!' : '#';
 
 export const formatChangeRequestReference = (provider: SourceControlProvider | null | undefined, number: number): string =>

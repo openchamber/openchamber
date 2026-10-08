@@ -59,6 +59,7 @@ export const relayBlockedByEnterprise = () => isEnterpriseMode() && pinnedRelayU
  *   crypto: typeof import('node:crypto'),
  *   readSettingsFromDiskMigrated: () => Promise<object>,
  *   writeSettingsToDisk: (settings: object) => Promise<void>,
+ *   relayKeyStore: ReturnType<typeof import('./key-store.js').createRelayKeyStore>,
  *   getLocalPort: () => number,
  *   logger?: Pick<Console, 'warn'>,
  * }} deps
@@ -67,9 +68,8 @@ export const createRelayService = ({
   crypto,
   readSettingsFromDiskMigrated,
   writeSettingsToDisk,
-  // Strict settings reader (throws on corrupt/unreadable) gating identity
-  // regeneration — see identity.js/signing-key.js.
-  readSettingsStrict,
+  // Host relay identity keys, shared with the push relay (key-store.js).
+  relayKeyStore,
   getLocalPort,
   // Returns true when any paired device or pending pairing session uses the
   // relay transport. The relay lifecycle is driven purely by this demand.
@@ -86,7 +86,7 @@ export const createRelayService = ({
   allowPassiveHost = true,
   logger = console,
 }) => {
-  const identityRuntime = createRelayIdentityRuntime({ crypto, readSettingsFromDiskMigrated, writeSettingsToDisk, readSettingsStrict });
+  const identityRuntime = createRelayIdentityRuntime({ crypto, relayKeyStore });
 
   let hostClient = null;
   let status = { state: 'disabled', lastError: null, connectedClients: 0 };

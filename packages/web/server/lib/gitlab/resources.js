@@ -1,4 +1,4 @@
-import { mapGitLabCI, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject } from './mappers.js';
+import { mapGitLabCI, mapGitLabCommit, mapGitLabDiff, mapGitLabIssue, mapGitLabMergeRequest, mapGitLabNote, mapGitLabProject, mapGitLabUser, mapGitLabVerdictNote } from './mappers.js';
 import { resolveGitLabProjectsFromDirectory } from './repo.js';
 import { isPlainObject, isString } from './validation.js';
 
@@ -14,6 +14,11 @@ const PER_PAGE = 20;
 // end within this bound; past it the read fails instead of passing a capped
 // list off as complete.
 const COLLECTION_PER_PAGE = 100;
+// List filters: the picker's names to GitLab's.
+const LIST_STATES = { open: 'opened', closed: 'closed', merged: 'merged', all: 'all' };
+const LIST_SCOPES = { any: 'all', assigned: 'assigned_to_me', created: 'created_by_me' };
+// The preview's timeline shows the newest commits only.
+const TIMELINE_COMMIT_LIMIT = 50;
 const COLLECTION_MAX_PAGES = 20;
 
 function requireMapped(value, message) {
@@ -197,9 +202,30 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
   };
   const constrainedProject = async (...args) => (await constrainedProjectNetwork(...args)).target;
 
+  // The account's own user, read once: review requests are filtered by name.
+  let currentUsername = null;
+  const readCurrentUsername = async () => {
+    currentUsername ??= client.Users.showCurrentUser().then((user) => {
+      if (!isPlainObject(user) || !isString(user.username) || !user.username.trim()) throw new Error('GitLab returned an invalid current user');
+      return user.username;
+    });
+    return currentUsername;
+  };
+
+  /** A list's state and whose items, as GitLab's list parameters. */
+  const listFilter = async (options, kind) => {
+    const state = LIST_STATES[options.state] ?? 'opened';
+    const people = options.people ?? 'any';
+    if (people === 'reviewRequested') {
+      return kind === 'pull' ? { state, scope: 'all', reviewerUsername: await readCurrentUsername() } : { state, scope: 'all' };
+    }
+    return { state: kind === 'issue' && state === 'merged' ? 'closed' : state, scope: LIST_SCOPES[people] ?? 'all' };
+  };
+
   const listProjectMRs = (projectId, options) => client.MergeRequests.all({
     projectId,
-    scope: 'all',
+    scope: options.scope ?? 'all',
+    reviewerUsername: options.reviewerUsername,
     maxPages: 1,
     perPage: options.perPage ?? 100,
     page: options.page ?? 1,
@@ -391,6 +417,36 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
     };
   };
 
+  const postNote = async (create) => {
+    const raw = await create();
+    if (!isPlainObject(raw) || !Number.isInteger(raw.id)) throw new Error('GitLab returned an invalid note');
+  };
+
+  // Requesting changes exists only in GitLab's GraphQL API. The path is
+  // resolved against the REST base (/api/v4/), so it reaches /api/graphql
+  // through the same credential and no-redirect requester.
+  const REQUEST_CHANGES_MUTATION = `mutation($path: ID!, $iid: String!) {
+  mergeRequestRequestChanges(input: { projectPath: $path, iid: $iid }) {
+    mergeRequest { iid }
+    errors
+  }
+}`;
+  const requestChanges = async (project, number) => {
+    const response = await client.MergeRequests.requester.post('../graphql', {
+      body: { query: REQUEST_CHANGES_MUTATION, variables: { path: `${project.owner}/${project.name}`, iid: String(number) } },
+    });
+    const payload = response?.body;
+    const result = payload?.data?.mergeRequestRequestChanges;
+    const errors = [
+      ...(Array.isArray(payload?.errors) ? payload.errors.map((error) => error?.message) : []),
+      ...(Array.isArray(result?.errors) ? result.errors : []),
+    ].filter((message) => isString(message) && message.trim());
+    // GraphQL answers a refusal (not a reviewer, an older GitLab) with 200
+    // and errors: nothing was changed.
+    if (errors.length) throw Object.assign(new Error(errors.join('; ')), { status: 422 });
+    if (!isPlainObject(result?.mergeRequest)) throw new Error('GitLab returned an invalid request-changes result');
+  };
+
   const resolveMutationActionTarget = async (payload) => {
     if (payload.providerTarget) {
       return {
@@ -431,6 +487,149 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
     },
 
     resolveChangeRequestMutation: readMutationRequest,
+
+    async resolveIssueMutation(context, expected) {
+      if (expected.head !== undefined || expected.base !== undefined || expected.headSha !== undefined) {
+        throw Object.assign(new Error('GitLab issue target is invalid'), { code: 'INVALID_SOURCE_CONTROL_MUTATION_CONTEXT', status: 400 });
+      }
+      const target = await constrainedProject(context.directory, expected.project, context.primaryRemote);
+      const issue = requireIssue(await client.Issues.show(expected.number, { projectId: target.project.id }), target.project);
+      if (issue.number !== expected.number) throw new Error('GitLab returned an invalid issue');
+      return {
+        providerTarget: { projectId: target.project.id, number: issue.number },
+        target: resolvedMutationTarget(context, target.project, { number: issue.number }),
+      };
+    },
+
+    /** Close or reopen; GitLab refuses to reopen a merged merge request. */
+    async setChangeRequestState(payload) {
+      const { projectId, number } = payload.providerTarget;
+      const raw = await client.MergeRequests.edit(projectId, number, { stateEvent: payload.state === 'closed' ? 'close' : 'reopen' });
+      const request = requireMutationResponse(raw, payload.targetProject, payload.providerTarget, payload.expectedTarget);
+      if (request.state !== payload.state) throw new Error('GitLab returned an unexpected merge request state');
+      return { state: request.state };
+    },
+
+    async setIssueState(payload) {
+      const { projectId, number } = payload.providerTarget;
+      const raw = await client.Issues.edit(projectId, number, { stateEvent: payload.state === 'closed' ? 'close' : 'reopen' });
+      const issue = requireIssue(raw, payload.targetProject);
+      if (issue.number !== number || issue.state !== payload.state) throw new Error('GitLab returned an unexpected issue state');
+      return { state: issue.state };
+    },
+
+    /** One page of the project's labels, for the board's picker. */
+    async listLabels(directory, selector, remote) {
+      const target = await constrainedProject(directory, selector, remote);
+      const raw = await client.ProjectLabels.all(target.project.id, { perPage: 100, maxPages: 1 });
+      if (!Array.isArray(raw)) throw new Error('GitLab returned an invalid label list');
+      return raw.flatMap((label) => {
+        if (!isPlainObject(label) || !isString(label.name) || !label.name) return [];
+        return [isString(label.color) && label.color ? { name: label.name, color: label.color.replace(/^#/, '') } : { name: label.name }];
+      });
+    },
+
+    /** One page of the project's active members, inherited ones too: who can be asked to review. */
+    async listReviewerCandidates(directory, selector, remote) {
+      const target = await constrainedProject(directory, selector, remote);
+      const raw = await client.ProjectMembers.all(target.project.id, { includeInherited: true, perPage: 100, maxPages: 1 });
+      if (!Array.isArray(raw)) throw new Error('GitLab returned an invalid member list');
+      return raw.flatMap((member) => {
+        const user = member?.state === 'active' ? mapGitLabUser(member, identity) : null;
+        if (!user) return [];
+        return [user.avatarUrl ? { id: user.id, login: user.username, avatarUrl: user.avatarUrl } : { id: user.id, login: user.username }];
+      });
+    },
+
+    /** The whole label set; an empty one clears them. */
+    async setLabels(payload) {
+      const { projectId, number } = payload.providerTarget;
+      const update = { labels: payload.labels.join(',') };
+      const raw = payload.kind === 'issue-labels'
+        ? await client.Issues.edit(projectId, number, update)
+        : await client.MergeRequests.edit(projectId, number, update);
+      if (!isPlainObject(raw) || raw.iid !== number) throw new Error('GitLab returned an invalid edit result');
+      return {};
+    },
+
+    /** The whole reviewer set, by user id; an empty one removes them all. */
+    async setReviewers(payload) {
+      const { projectId, number } = payload.providerTarget;
+      const raw = await client.MergeRequests.edit(projectId, number, { reviewerIds: payload.reviewers.map(Number) });
+      requireMutationResponse(raw, payload.targetProject, payload.providerTarget, payload.expectedTarget);
+      return {};
+    },
+
+    /** Only a match is certain: another edit since may have moved the set either way. */
+    async reconcileSetMutation(providerTarget, kind, names) {
+      const { projectId, number } = providerTarget;
+      const raw = kind === 'issue-labels'
+        ? await client.Issues.show(number, { projectId })
+        : await client.MergeRequests.show(projectId, number);
+      const current = kind === 'change-request-reviewers'
+        ? (Array.isArray(raw?.reviewers) ? raw.reviewers.map((user) => String(user?.id)) : null)
+        : (Array.isArray(raw?.labels) ? raw.labels.map((label) => (isString(label) ? label : label?.name)) : null);
+      if (!current || current.length !== names.length || !current.every((entry) => names.includes(entry))) return { state: 'outcome-unknown' };
+      return { state: 'succeeded', result: {} };
+    },
+
+    async reconcileStateMutation(providerTarget, kind, state) {
+      const { projectId, number } = providerTarget;
+      const project = (await showProject(projectId)).project;
+      const current = kind === 'issue-state'
+        ? requireIssue(await client.Issues.show(number, { projectId }), project).state
+        : requireMutationMergeRequest(await client.MergeRequests.show(projectId, number), project).state;
+      if (current === state) return { state: 'succeeded', result: { state } };
+      if (current === 'open' || current === 'closed') {
+        return { state: 'failed', result: { failureStatus: 409, failureCode: 'SOURCE_CONTROL_MUTATION_NOT_APPLIED' } };
+      }
+      return { state: 'outcome-unknown' };
+    },
+
+    commentChangeRequest(payload) {
+      const { projectId, number } = payload.providerTarget;
+      return postNote(() => client.MergeRequestNotes.create(projectId, number, payload.body));
+    },
+
+    commentIssue(payload) {
+      const { projectId, number } = payload.providerTarget;
+      return postNote(() => client.IssueNotes.create(projectId, number, payload.body));
+    },
+
+    /**
+     * The verdict first, then its text as a note: GitLab has no review that
+     * carries both. A verdict that lands with a note that does not is still
+     * a verdict, reported as `commented: false` so the text is not lost.
+     */
+    async reviewChangeRequest(payload) {
+      const { projectId, number } = payload.providerTarget;
+      if (payload.verdict === 'approve') {
+        try {
+          // The approval is for the commit the user read.
+          await client.MergeRequestApprovals.approve(projectId, number, { sha: payload.expectedTarget.headSha });
+        } catch (error) {
+          const status = requestStatus(error);
+          if (status === 409) {
+            throw Object.assign(new Error('GitLab merge request headSha changed'), {
+              code: 'SOURCE_CONTROL_MUTATION_TARGET_MISMATCH', status: 409,
+            });
+          }
+          // GitLab answers an approval it does not allow (your own merge
+          // request, one already approved) with 401; the account is fine.
+          if (status === 401) throw Object.assign(new Error('GitLab did not allow this approval'), { status: 403 });
+          throw error;
+        }
+      } else {
+        await requestChanges(payload.targetProject, number);
+      }
+      if (payload.body === undefined) return { commented: false };
+      try {
+        await postNote(() => client.MergeRequestNotes.create(projectId, number, payload.body));
+        return { commented: true };
+      } catch {
+        return { commented: false };
+      }
+    },
 
     async reconcileCreateMutation(providerTarget, target) {
       const payload = readMergeRequestList(await listProjectMRs(providerTarget.targetProjectId, {
@@ -598,7 +797,7 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
       const targets = await expandTargets([resolved.projects[0]], { requireComplete: canonicalReads });
       const target = targets.at(-1);
       const page = readPage(await listProjectMRs(target.project.id, {
-        state: 'opened', page: options.page ?? 1, perPage: PER_PAGE, search: options.query, showExpanded: true,
+        ...await listFilter(options, 'pull'), page: options.page ?? 1, perPage: PER_PAGE, search: options.query, showExpanded: true,
       }));
       const rawItems = readMergeRequestList(page.items, target.project);
       const items = rawItems.map((raw) => canonicalReads
@@ -612,7 +811,7 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
         constrainToPrimary: options.constrainToPrimary,
         remote: options.remote,
       });
-      const [notes, diffs, ci, headProject] = await Promise.all([
+      const [notes, diffs, ci, headProject, commitPage] = await Promise.all([
         readCollection((page) => client.MergeRequestNotes.all(target.project.id, number, page), 'GitLab merge request has more notes than OpenChamber reads'),
         options.includeDiff
           ? readCollection((page) => client.MergeRequests.allDiffs(target.project.id, number, page), 'GitLab merge request has more changed files than OpenChamber reads')
@@ -621,6 +820,11 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
         // A fork merge request's branch lives in the source project.
         Number.isInteger(raw?.source_project_id) && raw.source_project_id !== target.raw?.id
           ? showProject(raw.source_project_id).then((item) => item.project)
+          : Promise.resolve(null),
+        // The newest commits, newest first as GitLab lists them; only the
+        // preview's timeline asks.
+        options.includeTimeline
+          ? client.MergeRequests.allCommits(target.project.id, number, { maxPages: 1, perPage: TIMELINE_COMMIT_LIMIT, showExpanded: true }).then(readPage)
           : Promise.resolve(null),
       ]);
       if (canonicalReads && !Array.isArray(notes)) throw new Error('GitLab returned an invalid merge request note list');
@@ -652,7 +856,7 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
         ? requireMergeRequest(raw, target.project)
         : requireMapped(mapGitLabMergeRequest(raw, identity, target.project), 'GitLab returned an invalid merge request');
       if (headProject) changeRequest.headProject = headProject;
-      return {
+      const context = {
         identity,
         project: target.project,
         changeRequest,
@@ -662,13 +866,33 @@ export function createGitLabResourceService({ origin, client, resolveProjects = 
         diff: files.map((file) => file.patch).filter(Boolean).join('\n'),
         ci,
       };
+      if (!options.includeTimeline) return context;
+      if (canonicalReads && !Array.isArray(commitPage?.items)) throw new Error('GitLab returned an invalid merge request commit list');
+      return {
+        ...context,
+        commits: asArray(commitPage?.items).flatMap((commit) => {
+          const mapped = mapGitLabCommit(commit);
+          return mapped ? [mapped] : [];
+        }).reverse(),
+        // More than one page means the list above is only the newest ones.
+        commitsComplete: !commitPage?.hasMore,
+        // Who is asked to review, for the preview's reviewer picker.
+        reviewers: asArray(raw.reviewers).flatMap((user) => {
+          const mapped = mapGitLabUser(user, identity);
+          return mapped ? [mapped] : [];
+        }),
+        verdicts: asArray(notes).flatMap((note) => {
+          const mapped = mapGitLabVerdictNote(note, identity, raw.web_url);
+          return mapped ? [mapped] : [];
+        }),
+      };
     },
 
     async listIssues(directory, options = {}) {
       const resolved = await resolveDirectoryProjects(directory, options.remote);
       const target = resolved.projects[0];
       const page = readPage(await client.Issues.all({
-        projectId: target.project.id, scope: 'all', state: 'opened', page: options.page ?? 1,
+        projectId: target.project.id, ...await listFilter(options, 'issue'), page: options.page ?? 1,
         perPage: PER_PAGE, maxPages: 1, search: options.query, showExpanded: true,
       }));
       if (canonicalReads && !Array.isArray(page.items)) throw new Error('GitLab returned an invalid issue list');

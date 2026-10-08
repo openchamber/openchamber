@@ -41,8 +41,7 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   (`useUIStore.contextRailHiddenSurfaces`, edited from the rail's trailing
   configure button — `ContextRailSurfacesDialog`), drops the plan surface
   unless plan mode is enabled,
-  drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides
-  Linear unless a workspace is connected, hides the pull-request surface
+  drops the walkthrough on VS Code and below `WALKTHROUGH_MIN_WIDTH`, hides the pull-request surface
   unless GitHub is connected (OAuth or `gh` CLI — signed in from Settings →
   Integrations), and hides `has-content` surfaces
   until a tab of their mode exists. Both consumers use it so the digit shown
@@ -81,24 +80,12 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   positions). Chat tab records stay open, but only the active chat tab's
   pinned chat column is mounted while the panel is open. A selected chat
   restores its state from the session stores. A closed panel mounts no chat.
-  Singleton surfaces (git, pr, linear, notes, plan, context) remount on switch. These
+  Singleton surfaces (git, pr, notes, plan, context) remount on switch. These
   surfaces must restore their state from stores or snapshots.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
-  Linear is a desktop/web singleton on this rail. VS Code and mobile omit it
-  (no this registry, and VS Code has no `RuntimeAPIs.linear`). The Linear
-  rail icon is hidden until a Linear workspace is connected. A persisted Linear
-  tab stays open across reload until auth has resolved; only a confirmed
-  disconnect closes the panel. The surface lists
-  issues with status (All, Backlog, To Do, In Progress, In Review, Done, Canceled, Duplicate), assignee, team, and priority filters, can switch
-  the current workspace, and keeps Start session in a footer on the issue card.
-  Those filters restore from `useUIStore` when the surface remounts. Non-default
-  status, assignee, team, priority, and search tint the filter icon `text-primary`,
-  same as the context rail; one control clears them. Workspace switch is not a
-  filter. Work-status Context sources
-  can open a specific issue here through `linearIssueFocus`. Below 520px
-  search and the filters other than status drop to icons; status keeps its label. The card
-  shows priority and labels. Changing filters keeps the previous list
-  until the next page arrives.
+  Linear has no rail surface: its issues list on the issues and PRs board
+  (`components/sourceBoard`). A Linear tab persisted by an older version is
+  dropped on load, like any unknown mode.

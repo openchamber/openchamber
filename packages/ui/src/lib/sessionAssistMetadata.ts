@@ -14,7 +14,7 @@ export interface SessionAssistPayload {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-export function getSessionAssist(session: Session | null | undefined): SessionAssistPayload | null {
+function getSessionAssist(session: Session | null | undefined): SessionAssistPayload | null {
   const metadata = (session as { metadata?: unknown } | null | undefined)?.metadata;
   if (!isRecord(metadata)) return null;
   const namespace = metadata.openchamber;

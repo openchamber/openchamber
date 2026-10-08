@@ -13,11 +13,10 @@
  * undefined and rejects every write as a malformed body.
  */
 
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 import express from 'express';
 
 const parseJsonBody = express.json({ limit: '1mb' });
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const isValidationError = (error) => {
   const message = error instanceof Error ? error.message : '';

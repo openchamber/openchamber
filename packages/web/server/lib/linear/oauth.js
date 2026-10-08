@@ -8,10 +8,10 @@ import {
 } from './auth.js';
 import { isPlainObject, isString, readFiniteNumber, readTrimmedString } from './parse.js';
 
-export const LINEAR_AUTHORIZE_URL = 'https://linear.app/oauth/authorize';
-export const LINEAR_TOKEN_URL = 'https://api.linear.app/oauth/token';
-export const LINEAR_REVOKE_URL = 'https://api.linear.app/oauth/revoke';
-export const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
+const LINEAR_AUTHORIZE_URL = 'https://linear.app/oauth/authorize';
+const LINEAR_TOKEN_URL = 'https://api.linear.app/oauth/token';
+const LINEAR_REVOKE_URL = 'https://api.linear.app/oauth/revoke';
+const PENDING_AUTHORIZATION_TTL_MS = 10 * 60_000;
 
 const pendingByState = new Map();
 const brokerPollsByState = new Map();
@@ -24,7 +24,7 @@ export class LinearOAuthError extends Error {
   }
 }
 
-export function createPkcePair() {
+function createPkcePair() {
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   return { verifier, challenge };

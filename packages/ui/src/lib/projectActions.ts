@@ -4,7 +4,7 @@ import type {
 } from '@/lib/desktopSsh';
 import type { IconName } from "@/components/icon/icons";
 
-export type ProjectActionIconKey =
+type ProjectActionIconKey =
   | 'play'
   | 'build'
   | 'lint'
@@ -70,7 +70,7 @@ export const toProjectActionRunKey = (directory: string, actionId: string): stri
   return `${normalizeProjectActionDirectory(directory)}::${actionId}`;
 };
 
-export type ProjectActionDesktopForwardOption = {
+type ProjectActionDesktopForwardOption = {
   id: string;
   label: string;
   url: string;

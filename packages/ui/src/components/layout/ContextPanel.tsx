@@ -18,8 +18,8 @@ const FilesView = lazyWithChunkRecovery(() => import('@/components/views/FilesVi
 const GitView = lazyWithChunkRecovery(() => import('@/components/views/GitView').then((m) => ({ default: m.GitView })));
 // The Linear rail icon stays hidden until a workspace is connected, so most
 // users never render this panel; keep it out of the main bundle.
-const LinearIssuesView = lazyWithChunkRecovery(() => import('@/components/views/LinearIssuesView').then((m) => ({ default: m.LinearIssuesView })));
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((m) => ({ default: m.PlanView })));
+import { areTitleMapsEqual, buildSessionTitleMap, EMPTY_SESSION_TITLE_MAP } from './contextPanelSessionTitles';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -31,7 +31,7 @@ import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { clampContextEditorTreeWidth, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
-import { setExternallyViewedSession, useDirectoryStore } from '@/sync/sync-context';
+import { setExternallyViewedSession, useChildStoreManager } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
 import { BrowserPane } from '@/components/browser/BrowserPane';
 import { browserUrlLabel } from '@/lib/browser/url';
@@ -96,7 +96,6 @@ const CONTEXT_CHAT_MIN_WIDTH = 400;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
 
 
 
@@ -168,7 +167,6 @@ const getModeLabel = (
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
-  if (mode === 'linear') return t('contextPanel.mode.linear');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'terminal') return t('layout.mainTab.terminal');
   if (isPluginContextPanelMode(mode)) {
@@ -271,10 +269,6 @@ const getTabIcon = (
 
   if (tab.mode === 'pr') {
     return <Icon name="github" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'linear') {
-    return <Icon name="linear" className="h-3.5 w-3.5" />;
   }
 
   if (tab.mode === 'notes') {
@@ -453,43 +447,30 @@ const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null
   return sessionID || null;
 };
 
-const areTitleMapsEqual = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean => {
-  if (a.size !== b.size) return false;
-  for (const [key, value] of a) {
-    if (b.get(key) !== value) return false;
-  }
-  return true;
-};
-
-const buildSessionTitleMap = (sessions: Array<{ id: string; title?: string | null }>, sessionIDs: readonly string[]): Map<string, string> => {
-  if (sessionIDs.length === 0) return EMPTY_SESSION_TITLE_MAP;
-  const wanted = new Set(sessionIDs);
-  const next = new Map<string, string>();
-  for (const session of sessions) {
-    if (!wanted.has(session.id)) continue;
-    const title = session.title?.trim();
-    if (title) next.set(session.id, title);
-  }
-  return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
-};
-
-const useSessionTitleMap = (directory: string | undefined, sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
-  const store = useDirectoryStore(directory);
+// Titles come from every live directory because a chat tab may show a
+// session from another project; an inactive tab whose directory is not
+// loaded keeps its sessionTitleFallback.
+const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, string> => {
+  const childStores = useChildStoreManager();
   const snapshotRef = React.useRef<ReadonlyMap<string, string>>(EMPTY_SESSION_TITLE_MAP);
   const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
 
   sessionIDsRef.current = sessionIDs;
 
   return React.useSyncExternalStore(
-    store.subscribe,
+    React.useCallback(
+      (notify: () => void) => childStores.subscribeAllSelected((state) => state.session, notify),
+      [childStores],
+    ),
     React.useCallback(() => {
-      const next = buildSessionTitleMap(store.getState().session, sessionIDsRef.current);
+      const liveStates = Array.from(childStores.children.values(), (store) => store.getState());
+      const next = buildSessionTitleMap(liveStates, sessionIDsRef.current);
       if (areTitleMapsEqual(snapshotRef.current, next)) {
         return snapshotRef.current;
       }
       snapshotRef.current = next;
       return next;
-    }, [store]),
+    }, [childStores]),
     () => EMPTY_SESSION_TITLE_MAP,
   );
 };
@@ -576,6 +557,7 @@ export const ContextPanel: React.FC = () => {
   React.useEffect(() => {
     if (shownBrowserTabId) setShownBrowserTab(shownBrowserTabId);
   }, [shownBrowserTabId]);
+  // The issues and PRs board stays beside it and narrows instead.
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
   const hasOpenEditorFile = React.useMemo(
@@ -615,7 +597,7 @@ export const ContextPanel: React.FC = () => {
     }
     return ids;
   }, [tabs]);
-  const sessionTitleById = useSessionTitleMap(directoryKey || undefined, chatSessionIDs);
+  const sessionTitleById = useSessionTitleMap(chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
@@ -844,24 +826,30 @@ export const ContextPanel: React.FC = () => {
   const activeChatTabID = isOpen && activeTab?.mode === 'chat' ? activeTab.id : null;
   const activeChatSessionID = isOpen && activeTab?.mode === 'chat' ? getSessionIDFromDedupeKey(activeTab.dedupeKey) : null;
   const activeChatTab = activeChatTabID ? chatTabs.find((tab) => tab.id === activeChatTabID) ?? null : null;
+  // A chat opened from another project (or Chat) carries its own directory;
+  // tabs opened without one (subtasks, reviews) belong to this panel's.
+  const activeChatDirectory = React.useMemo(() => {
+    const own = activeChatTab?.targetDirectory ? normalizeDirectoryKey(activeChatTab.targetDirectory) : '';
+    return own || directoryKey || null;
+  }, [activeChatTab?.targetDirectory, directoryKey]);
   const activeChatPinnedSession = React.useMemo(
-    () => (activeChatSessionID ? { sessionId: activeChatSessionID, directory: directoryKey || null } : null),
-    [activeChatSessionID, directoryKey],
+    () => (activeChatSessionID ? { sessionId: activeChatSessionID, directory: activeChatDirectory } : null),
+    [activeChatSessionID, activeChatDirectory],
   );
 
   React.useEffect(() => {
-    if (!isOpen || !directoryKey || !activeChatSessionID || typeof window === 'undefined') {
+    if (!isOpen || !activeChatDirectory || !activeChatSessionID || typeof window === 'undefined') {
       return;
     }
 
     const markActiveChatViewed = () => {
       if (document.visibilityState === 'hidden' || !document.hasFocus()) {
-        setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+        setExternallyViewedSession(activeChatDirectory, activeChatSessionID, false);
         return;
       }
 
       markSessionViewed(activeChatSessionID);
-      setExternallyViewedSession(directoryKey, activeChatSessionID, true);
+      setExternallyViewedSession(activeChatDirectory, activeChatSessionID, true);
     };
 
     markActiveChatViewed();
@@ -875,9 +863,9 @@ export const ContextPanel: React.FC = () => {
       window.removeEventListener('focus', markActiveChatViewed);
       window.removeEventListener('blur', markActiveChatViewed);
       document.removeEventListener('visibilitychange', markActiveChatViewed);
-      setExternallyViewedSession(directoryKey, activeChatSessionID, false);
+      setExternallyViewedSession(activeChatDirectory, activeChatSessionID, false);
     };
-  }, [activeChatSessionID, directoryKey, isOpen]);
+  }, [activeChatDirectory, activeChatSessionID, isOpen]);
 
 
   const handleDiffScopeChange = React.useCallback((nextScope: PendingDiffScope) => {
@@ -915,7 +903,7 @@ export const ContextPanel: React.FC = () => {
       closeLabel: t('contextPanel.tab.closeTabAria', { label }),
       preview: tab.preview,
     };
-  }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t]);
+  }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t, tabT]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent />
@@ -923,10 +911,8 @@ export const ContextPanel: React.FC = () => {
             ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
             : activeTab?.mode === 'pr'
                 ? <PullRequestView />
-            : activeTab?.mode === 'linear'
-                ? <React.Suspense fallback={null}><LinearIssuesView /></React.Suspense>
             : activeTab?.mode === 'notes'
-                ? <ProjectContextPanel />
+                ? <ProjectContextPanel visible={isOpen} />
         : activeTab?.mode === 'plan'
             ? <React.Suspense fallback={null}><PlanView
                 targetPath={activeTab.targetPath}

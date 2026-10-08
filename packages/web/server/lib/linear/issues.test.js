@@ -157,6 +157,8 @@ describe('Linear issue list/get', () => {
         priority: 1,
         labels: [{ id: 'label-bug', name: 'Bug', color: '#eb5757' }],
         updatedAt: '2026-09-30T10:00:00.000Z',
+        parent: null,
+        subIssueProgress: null,
       }],
       cursor: 'cursor-2',
       hasMore: true,
@@ -260,6 +262,18 @@ describe('Linear issue list/get', () => {
       teamId: 'team-eng',
       priority: 'urgent',
     });
+    expect(result.issues).toHaveLength(1);
+  });
+
+  it('lists the issues I created', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body).variables.filter).toEqual({
+        state: { type: { nin: ['completed', 'canceled', 'duplicate'] } },
+        creator: { isMe: { eq: true } },
+      });
+      return jsonResponse({ data: { issues: { nodes: [issueNode], pageInfo: { hasNextPage: false, endCursor: null } } } });
+    }));
+    const result = await listLinearIssues({ assignee: 'created' });
     expect(result.issues).toHaveLength(1);
   });
 
@@ -372,6 +386,60 @@ describe('Linear issue list/get', () => {
       createdAt: '2026-08-24T10:00:00.000Z',
       user: { name: 'Ada', displayName: null, avatarUrl: 'https://linear.app/avatar/ada.png' },
     }]);
+  });
+
+  it('reads the parent and how many sub-issues a listed issue has finished', async () => {
+    const child = (type) => ({ state: { type } });
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      expect(body.query).toContain('children(first: 20)');
+      return jsonResponse({
+        data: {
+          issues: {
+            nodes: [
+              {
+                ...issueNode,
+                parent: { id: 'issue-uuid-0', identifier: 'ENG-1', title: 'Login revamp', url: 'https://linear.app/openchamber/issue/ENG-1', state: { type: 'started' } },
+                children: { nodes: [child('completed'), child('canceled'), child('started')], pageInfo: { hasNextPage: true } },
+              },
+              { ...issueNode, id: 'issue-uuid-2', identifier: 'ENG-13', parent: null, children: { nodes: [], pageInfo: { hasNextPage: false } } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    }));
+
+    const result = await listLinearIssues();
+    expect(result.issues?.[0]?.parent).toMatchObject({ id: 'issue-uuid-0', identifier: 'ENG-1', title: 'Login revamp' });
+    expect(result.issues?.[0]?.parent?.labels).toBeUndefined();
+    expect(result.issues?.[0]?.subIssueProgress).toEqual({ total: 3, done: 2, more: true });
+    expect(result.issues?.[1]?.parent).toBeNull();
+    expect(result.issues?.[1]?.subIssueProgress).toBeNull();
+  });
+
+  it('loads one issue with its sub-issues in Linear order', async () => {
+    const sub = (identifier, order) => ({
+      id: `uuid-${identifier}`,
+      identifier,
+      title: `Part ${identifier}`,
+      url: `https://linear.app/openchamber/issue/${identifier}`,
+      state: { id: 's', name: 'Todo', type: 'unstarted' },
+      subIssueSortOrder: order,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: {
+        issue: {
+          ...issueNode,
+          subIssues: { nodes: [sub('ENG-21', 2), sub('ENG-20', -1), { id: '', identifier: 'X' }], pageInfo: { hasNextPage: false } },
+          comments: { nodes: [] },
+        },
+      },
+    })));
+
+    const result = await getLinearIssue('ENG-12');
+    expect(result.issue?.subIssues?.map((issue) => issue.identifier)).toEqual(['ENG-20', 'ENG-21']);
+    expect(result.issue?.subIssuesMore).toBe(false);
   });
 
   it('creates a comment on the resolved issue UUID', async () => {

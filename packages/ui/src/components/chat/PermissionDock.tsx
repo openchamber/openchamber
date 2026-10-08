@@ -1,4 +1,5 @@
 import React from 'react';
+import { AnimatePresence } from 'motion/react';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
@@ -32,8 +33,11 @@ interface PermissionDockProps {
 
 export const PermissionDock: React.FC<PermissionDockProps> = ({ sessionId, directory, hidden }) => {
     const permissions = useScopedBlockingPermissions(sessionId, directory);
-    if (hidden || permissions.length === 0) return null;
-    return <PermissionDockPanel permissions={permissions} />;
+    return (
+        <AnimatePresence>
+            {hidden || permissions.length === 0 ? null : <PermissionDockPanel key="permissions" permissions={permissions} />}
+        </AnimatePresence>
+    );
 };
 
 const PermissionDockPanel: React.FC<{ permissions: PermissionRequest[] }> = ({ permissions }) => {

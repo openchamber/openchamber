@@ -21,18 +21,13 @@
  * so nothing is lost if a migration turns out wrong.
  */
 
+import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
 import { createOpenCodeClient as createOpenCodeClientDefault } from './opencode-client.js';
 
 const LEGACY_FILE_NAME = 'sessions-metadata.json';
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 

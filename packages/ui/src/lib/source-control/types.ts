@@ -201,7 +201,7 @@ export interface SourceControlUser extends SourceControlIdentity {
   email?: string;
 }
 
-export type SourceControlAuthError = {
+type SourceControlAuthError = {
   status: 'error';
   code: 'access-denied' | 'expired' | 'network' | 'provider-error';
   message: string;
@@ -412,6 +412,23 @@ export interface PageResult<TItem> {
   incompleteProjectIds?: string[];
 }
 
+/** A commit of a change request, as a timeline shows it. */
+export interface ChangeRequestCommit {
+  sha: string;
+  headline: string;
+  authorName: string | null;
+  committedAt: string | null;
+  url: string | null;
+}
+
+/** A review verdict on a change request: an approval or a request for changes. */
+export interface ChangeRequestVerdict {
+  state: 'approved' | 'changes_requested';
+  author?: SourceControlUser;
+  createdAt: string | null;
+  url: string;
+}
+
 export interface ChangeRequestContext {
   identity: SourceControlIdentity;
   fetchedAt?: number;
@@ -422,6 +439,14 @@ export interface ChangeRequestContext {
   files: ChangeRequestFile[];
   diff?: string;
   ci?: CI | null;
+  /** With `includeTimeline`: the newest commits, oldest first. */
+  commits?: ChangeRequestCommit[];
+  /** False when `commits` holds only the newest ones. */
+  commitsComplete?: boolean;
+  /** With `includeTimeline`: the verdicts reviewers gave, as the host recorded them. */
+  verdicts?: ChangeRequestVerdict[];
+  /** With `includeTimeline`: who is asked to review. */
+  reviewers?: SourceControlUser[];
 }
 
 export interface ChangeRequestStatus {
@@ -517,6 +542,13 @@ export interface SourceControlMergeMutationResult {
 export interface SourceControlReadyMutationResult {
   ready: boolean;
 }
+export interface SourceControlStateMutationResult {
+  state: 'open' | 'closed';
+}
+export interface SourceControlReviewMutationResult {
+  /** The review's text was posted with it; false when it had none or the text failed to post after the verdict. */
+  commented: boolean;
+}
 
 export interface CreateChangeRequestInput extends SourceControlMutationContext<SourceControlCreateMutationTarget> {
   title: string;
@@ -536,3 +568,31 @@ export interface MergeChangeRequestInput extends SourceControlMutationContext<So
 }
 
 export type ReadyChangeRequestInput = SourceControlMutationContext<SourceControlExistingMutationTarget>;
+
+/** A comment on a change request, or on an issue (the target names its number). */
+export interface CommentInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  body: string;
+}
+
+export type ReviewVerdict = 'approve' | 'request-changes';
+
+/** The whole label set of a change request or an issue; an empty one clears it. */
+export interface SetLabelsInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  labels: string[];
+}
+
+/** The whole set of people asked to review, by the host's user id (a login on GitHub). */
+export interface SetReviewersInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  reviewers: string[];
+}
+
+/** Close (`closed`) or reopen (`open`) a change request or an issue. */
+export interface SetStateInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  state: 'open' | 'closed';
+}
+
+/** The target's `headSha` is the commit the verdict is for; a push past it refuses the review. */
+export interface ReviewChangeRequestInput extends SourceControlMutationContext<SourceControlExistingMutationTarget> {
+  verdict: ReviewVerdict;
+  body?: string;
+}

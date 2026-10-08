@@ -1,4 +1,4 @@
-export interface ParsedModelIdentifier {
+interface ParsedModelIdentifier {
   providerId: string;
   modelId: string;
 }
@@ -25,7 +25,7 @@ export const parseModelIdentifier = (value: string | undefined): ParsedModelIden
  * `parseModelSelection`/`formatModelSelection` in the server's `config-v2.js`
  * so the Settings UI and the config writer agree on one spelling.
  */
-export interface ModelSelection {
+interface ModelSelection {
   providerID: string;
   modelID: string;
   variant?: string;

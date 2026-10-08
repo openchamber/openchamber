@@ -22,7 +22,7 @@ const ensureSurfaceRoot = (): HTMLElement | null => {
   return root;
 };
 
-export type MobileFullscreenSurfaceProps = {
+type MobileFullscreenSurfaceProps = {
   open: boolean;
   onClose: () => void;
   title?: React.ReactNode;

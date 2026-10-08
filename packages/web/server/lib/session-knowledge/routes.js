@@ -13,9 +13,9 @@
 
 import express from 'express';
 
-const parseJsonBody = express.json({ limit: '1mb' });
+import { isRecord } from '../shared/guards.js';
 
-const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const parseJsonBody = express.json({ limit: '1mb' });
 
 const asNonEmptyString = (value) => (
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : ''

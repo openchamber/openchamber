@@ -40,18 +40,6 @@ export const invokeDesktopCommand = async <TValue = unknown>(
   return invokeDesktop<TValue>(command, args) as Promise<TValue>;
 };
 
-export const startDesktopWindowDrag = async (): Promise<void> => {
-  if (!isDesktopShell()) {
-    return;
-  }
-
-  try {
-    await invokeDesktopCommand('desktop_start_window_drag');
-  } catch {
-    // ignore
-  }
-};
-
 export const setDesktopWindowTitle = async (title: string): Promise<void> => {
   if (!isDesktopShell()) {
     return;
@@ -64,7 +52,7 @@ export const setDesktopWindowTitle = async (title: string): Promise<void> => {
   }
 };
 
-export type DesktopSplashColors = {
+type DesktopSplashColors = {
   bgLight: string;
   fgLight: string;
   bgDark: string;

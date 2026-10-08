@@ -90,9 +90,11 @@ async function copyDirectoryNoSymlinks(srcDir, dstDir) {
   await walk(srcDir, dstDir);
 }
 
-async function cloneRepo({ cloneUrl, identity, tempDir }) {
-  const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', cloneUrl, tempDir];
-  const fallback = ['clone', '--depth', '1', '--no-checkout', cloneUrl, tempDir];
+async function cloneRepo({ cloneUrl, identity, tempDir, ref = null }) {
+  // A `#ref` on the source picks the branch or tag; otherwise the default branch.
+  const branch = ref ? ['--branch', ref] : [];
+  const preferred = ['clone', '--depth', '1', '--filter=blob:none', '--no-checkout', ...branch, cloneUrl, tempDir];
+  const fallback = ['clone', '--depth', '1', '--no-checkout', ...branch, cloneUrl, tempDir];
 
   const result = await runGit(preferred, { identity, timeoutMs: 90_000 });
   if (result.ok) return { ok: true };
@@ -217,7 +219,7 @@ export async function installSkillsFromRepository({
   const tempBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openchamber-skills-install-'));
 
   try {
-    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase });
+    const cloned = await cloneRepo({ cloneUrl, identity, tempDir: tempBase, ref: parsed.ref });
     if (!cloned.ok) {
       const msg = `${cloned.error?.stderr || ''}\n${cloned.error?.message || ''}`.trim();
       if (looksLikeAuthError(msg)) {

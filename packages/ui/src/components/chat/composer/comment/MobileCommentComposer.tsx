@@ -9,11 +9,13 @@
 
 import React from 'react';
 
+import { useCommentSnippetPicker } from '@/components/comments/useCommentSnippetPicker';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useSnippetsStore } from '@/stores/useSnippetsStore';
 import type { Theme } from '@/types/theme';
 import { composerAutoCorrect } from '../editor/autocorrect';
 import { ComposerEditor, type ComposerEditorHandle } from '../editor/ComposerEditor';
@@ -22,15 +24,18 @@ import { mobileCommentQuotePreview, type MobileCommentDraft } from './mobileComm
 
 const EMPTY_NAMES: ReadonlySet<string> = new Set();
 
-/** Comments are plain prose: nothing in the prompt language resolves here. */
-const COMMENT_LANGUAGE_CONTEXT: ComposerLanguageContext = {
+/**
+ * Comments are prose with one exception: `#snippet` references, which expand
+ * when the message is sent. Agents, commands and files do not resolve here.
+ */
+const commentLanguageContext = (knownSnippetTriggers: ReadonlySet<string>): ComposerLanguageContext => ({
     inputMode: 'normal',
     knownAgentNames: EMPTY_NAMES,
     confirmedMentions: EMPTY_NAMES,
     knownSlashNames: EMPTY_NAMES,
-    knownSnippetTriggers: EMPTY_NAMES,
+    knownSnippetTriggers,
     attachmentFilenames: [],
-};
+});
 
 const MOBILE_COMMENT_RADIUS = '1.5rem';
 const MOBILE_COMMENT_MAX_LINES = 6;
@@ -67,6 +72,21 @@ export interface MobileCommentComposerProps {
 export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: MobileCommentComposerProps) {
     const { t } = useI18n();
     const editorRef = React.useRef<ComposerEditorHandle>(null);
+    const snippets = useSnippetsStore((state) => state.snippets);
+    const languageContext = React.useMemo(() => {
+        const triggers = new Set<string>();
+        for (const snippet of snippets) {
+            triggers.add(snippet.name.toLowerCase());
+            for (const alias of snippet.aliases ?? []) triggers.add(alias.toLowerCase());
+        }
+        return commentLanguageContext(triggers);
+    }, [snippets]);
+    const getCaret = React.useCallback(() => editorRef.current?.getSelection().start ?? 0, []);
+    const replaceRange = React.useCallback((from: number, to: number, insert: string) => {
+        editorRef.current?.replaceRange(from, to, insert);
+        editorRef.current?.focus();
+    }, []);
+    const snippetPicker = useCommentSnippetPicker({ text: draft.text, getCaret, replaceRange });
 
     // The opening tap flushes the controller update through React before it
     // returns, so this focus still runs inside the gesture's call stack — the
@@ -103,14 +123,20 @@ export function MobileCommentComposer({ draft, theme: currentTheme, handlers }: 
                     <Icon name="close" className={cn(ICON_SIZE_CLASS, 'text-current')} />
                 </Button>
             </div>
-            <div className="flex items-end gap-1 pb-1 pl-1 pr-1.5">
+            <div className="relative flex items-end gap-1 pb-1 pl-1 pr-1.5">
+                {snippetPicker.picker}
                 <ComposerEditor
                     ref={editorRef}
                     data-testid="mobile-comment-input"
                     dataChatInput="comment"
                     value={draft.text}
-                    languageContext={COMMENT_LANGUAGE_CONTEXT}
-                    onChange={(change) => handlers.onTextChange(change.value)}
+                    languageContext={languageContext}
+                    onChange={(change) => {
+                        handlers.onTextChange(change.value);
+                        snippetPicker.sync(change.value, change.selection.start);
+                    }}
+                    onSelectionChange={(selection) => snippetPicker.sync(editorRef.current?.getValue() ?? draft.text, selection.start)}
+                    onKeyDown={snippetPicker.handleKeyDown}
                     onFocus={handlers.onEditorFocus}
                     onBlur={handlers.onEditorBlur}
                     placeholder={t('chat.textSelection.comment.placeholder')}

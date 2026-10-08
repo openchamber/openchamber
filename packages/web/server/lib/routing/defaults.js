@@ -79,11 +79,20 @@ export const JEV_TIMEOUT_MS = 4000;
  * request refers to, and that finished work carries no weight, put them at
  * 97% and ~75% trivial while "ok, do it" after a plan stayed implement and a
  * regression report stayed hard (jev-router lab, test/follow-up-instructions.js).
+ *
+ * The fourth line covers a bare approval, which the third would otherwise
+ * read as trivial: "go" after a plan carries no work of its own, so it takes
+ * the category of the work it approves (the #4374 author measured this on
+ * their own prompts; not yet replayed in the jev-router lab).
+ * It does not let finished work raise a follow-up; a follow-up that only
+ * looks cheap because it reuses a warm context is the router's concern, not
+ * the classifier's.
  */
 export const ROUTING_INSTRUCTIONS = [
   'Pick the task category that best describes this coding request, judging the reasoning it demands rather than the length of the reply it asks for.',
   'A request that wants a one-line answer to a hard debugging or design question is still hard; a long but mechanical edit is still trivial.',
   'The thing to classify is `request`, the latest user message. Read `history` (earlier conversation, oldest first) only to understand what `request` refers to, then judge the reasoning `request` itself demands. Do not let the difficulty of work already done in `history` raise or lower the category.',
+  'A bare approval such as "go", "yes", "approve", or "do it" authorises the work just described in history: classify it as the category that work demands, not as trivial.',
 ];
 
 /**

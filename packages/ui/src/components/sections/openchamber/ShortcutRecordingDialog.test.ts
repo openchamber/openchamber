@@ -74,4 +74,30 @@ describe('ShortcutRecordingDialog recording state', () => {
     const next = updateShortcutRecordingState(settled, keyEvent('k', { ctrlKey: true }), 'keydown', 1);
     expect(next).toEqual({ chords: ['mod+k'], livePreview: null, settled: true });
   });
+
+  test('on macOS records Control and Command as separate modifiers', () => {
+    const mac = { macModifiers: true };
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { ctrlKey: true }), 'keydown', 1, mac).chords).toEqual(['ctrl+n']);
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { metaKey: true }), 'keydown', 1, mac).chords).toEqual(['mod+n']);
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { ctrlKey: true, metaKey: true }), 'keydown', 1, mac).chords).toEqual(['mod+ctrl+n']);
+    // Elsewhere Control is the primary modifier and Meta is the Super key.
+    const other = { macModifiers: false, maxKeys: 5 };
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { ctrlKey: true }), 'keydown', 1, other).chords).toEqual(['mod+n']);
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { metaKey: true }), 'keydown', 1, other).chords).toEqual(['super+n']);
+    expect(updateShortcutRecordingState(emptyState, keyEvent('n', { ctrlKey: true, metaKey: true, shiftKey: true }), 'keydown', 1, other).chords).toEqual(['mod+super+shift+n']);
+  });
+
+  test('with maxKeys=5 records three modifiers and the hyper combination', () => {
+    const global = { macModifiers: true, maxKeys: 5 };
+    expect(updateShortcutRecordingState(
+      emptyState, keyEvent('n', { shiftKey: true, altKey: true, metaKey: true }), 'keydown', 1, global,
+    ).chords).toEqual(['mod+shift+alt+n']);
+    expect(updateShortcutRecordingState(
+      emptyState, keyEvent('n', { ctrlKey: true, shiftKey: true, altKey: true, metaKey: true }), 'keydown', 1, global,
+    ).chords).toEqual(['mod+ctrl+shift+alt+n']);
+    // In-app shortcuts keep their three-key limit.
+    expect(updateShortcutRecordingState(
+      emptyState, keyEvent('n', { shiftKey: true, altKey: true, metaKey: true }), 'keydown', 1, { macModifiers: true },
+    ).chords).toEqual([]);
+  });
 });

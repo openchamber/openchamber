@@ -45,6 +45,8 @@ import { usePullRequestComparison } from '@/hooks/usePullRequestComparison';
 import { PullRequestComparisonSelector } from '@/components/views/git/PullRequestComparisonSelector';
 import { useGitComparison, type GitComparisonFile, type GitComparisonSource } from '@/hooks/useGitComparison';
 import { useGitBaseBranchStore } from '@/stores/useGitBaseBranchStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { cn } from '@/lib/utils';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { fileDiffFromPatch, isBinaryPatch } from '@/lib/diff/patchFileDiff';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
@@ -137,7 +139,7 @@ type MobileChangesSurfaceProps = {
 
 export const MobileChangesSurface: React.FC<MobileChangesSurfaceProps> = (props) => {
   const rootDirectory = normalizePath(useEffectiveDirectory() ?? null) ?? '';
-  const repository = useNestedGitDirectory(rootDirectory || null, { enabled: props.visible ?? true });
+  const repository = useNestedGitDirectory(rootDirectory || null, { enabled: props.visible ?? true, recheckOnOpen: true });
   return <MobileChangesPane {...props} rootDirectory={rootDirectory} repository={repository} />;
 };
 
@@ -1301,6 +1303,9 @@ const MobileDiffDetail: React.FC<{
 }> = ({ path, subtitle, diff, staged = false, fileExists, unavailableReason = null, error, onBack, onRetry, onExpandContextRequest, pendingContextExpansion, contextLoading }) => {
   const { t } = useI18n();
   const language = React.useMemo(() => getLanguageFromExtension(path) || 'text', [path]);
+  const hideWhitespace = useUIStore((state) => state.diffHideWhitespace);
+  const setHideWhitespace = useUIStore((state) => state.setDiffHideWhitespace);
+  const whitespaceLabel = hideWhitespace ? t('diffView.actions.showWhitespace') : t('diffView.actions.hideWhitespace');
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
@@ -1317,6 +1322,19 @@ const MobileDiffDetail: React.FC<{
           <h2 className="truncate typography-ui-header text-foreground">{path}</h2>
           {subtitle && <p className="truncate typography-meta text-muted-foreground">{subtitle}</p>}
         </div>
+        <button
+          type="button"
+          className={cn(
+            'flex size-9 shrink-0 items-center justify-center rounded-lg hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            hideWhitespace ? 'text-foreground' : 'text-muted-foreground',
+          )}
+          aria-label={whitespaceLabel}
+          aria-pressed={hideWhitespace}
+          title={whitespaceLabel}
+          onClick={() => setHideWhitespace(!hideWhitespace)}
+        >
+          <Icon name="space" className="size-5" />
+        </button>
       </header>
       <div className="min-h-0 flex-1 overflow-hidden">
         {!fileExists ? (
@@ -1355,6 +1373,7 @@ const MobileDiffDetail: React.FC<{
               fileName={path}
               renderSideBySide={false}
               wrapLines={true}
+              hideWhitespace={hideWhitespace}
               layout="inline"
               onExpandContextRequest={onExpandContextRequest}
               pendingContextExpansion={pendingContextExpansion}

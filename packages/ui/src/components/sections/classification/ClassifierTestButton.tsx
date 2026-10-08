@@ -25,7 +25,7 @@ export const ClassifierTestButton: React.FC<{
   const { t } = useI18n();
   const [state, setState] = React.useState<TestState>({ kind: 'idle' });
   const result = state.kind === 'done' ? state.result : null;
-  const providerName = useClassifierSourceName(result && 'source' in result ? result.source : null) ?? '';
+  const providerName = useClassifierSourceName(result?.source ?? null) ?? '';
 
   const run = async () => {
     const custom = draft ? draft() : undefined;

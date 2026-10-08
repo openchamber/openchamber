@@ -1,0 +1,74 @@
+---
+title: Issues en PR's
+description: Blader door de issues en pull requests van een project, of uw Linear-issues, en begin vanuit een ervan aan het werk.
+---
+
+# Issues en PR's
+
+Het bord **Issues and PRs** is een volledige pagina met de GitHub- of GitLab-issues en pull requests van een project (op GitLab merge requests), of uw Linear-issues. Kies een item en de voorvertoning opent naast de lijst. Als u hier een ander project bekijkt, verandert het project van de rest van de app niet mee.
+
+## Het bord openen
+
+- Klik op het pull-request-pictogram in de kop van de zijbalk, naast geplande taken en het archief.
+- Kies **Issues and PRs** in het opdrachtenpalet.
+- Druk op <kbd>⌘K</kbd> en daarna <kbd>B</kbd> (<kbd>Ctrl+K</kbd> en daarna <kbd>B</kbd> op Windows en Linux). Met dezelfde toetsen sluit u het weer.
+
+Tik op een telefoon op de pull-request-knop onderaan het sessiemenu. In de VS Code-extensie is het bord er niet.
+
+Het bord opent weer op het project, het tabblad en het team waar u het achterliet.
+
+## Items vinden
+
+Alles staat in één rij van de werkbalk. Links staat de projectkiezer, met projectpictogrammen en een zoekveld. Daarnaast wisselt u tussen **Issues**, **Pull requests** en **Linear**. Issues en pull requests komen van de eigen host van het project, GitHub of GitLab. Een project zonder zo'n remote toont alleen **Linear**.
+
+Op **Linear** wordt de projectkiezer een teamkiezer: kies **All teams** of één team. Hebt u meer dan één Linear-werkruimte verbonden, dan wisselt u van werkruimte in hetzelfde menu. Hoe u Linear verbindt, staat bij [Integraties](/nl/integrations/).
+
+Zoeken werkt met een titel, een nummer of een geplakte link. Het filtermenu blijft open terwijl u kiest, zodat u filters kunt combineren.
+
+Voor GitHub en GitLab:
+
+- Status: **Open**, **Closed**, **All**, en **Merged** voor pull requests
+- Personen: **Anyone**, **Assigned to me**, **Created by me**, en **Review requested** voor pull requests
+
+Voor Linear:
+
+- Status: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Personen: **Anyone**, **Assigned to me**, **Created by me**
+- Prioriteit: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Een item lezen
+
+De voorvertoning toont de beschrijving, labels en reacties. Klik bij een Linear-issue op het statuslabel om het naar een andere status van het team te zetten.
+
+De rij **Labels** heeft een potloodknop die een doorzoekbare lijst met de labels van de repository opent. Vink ze aan of uit. De wijziging wordt opgeslagen als u de lijst sluit, dus meerdere klikken tellen als één wijziging. Een open pull request (op GitLab een merge request) heeft ook een rij **Reviewers** die op dezelfde manier werkt, met de mensen die in de repository kunnen reviewen. Op GitHub wordt de auteur van de pull request niet aangeboden. Linear-issues hebben geen van beide rijen.
+
+## Reageren en reviewen
+
+Onder de activiteit van een issue of pull request staat een reactieveld. **Comment** plaatst uw tekst op GitHub of GitLab, net als <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> op Windows en Linux). De tekst blijft in het veld tot hij geplaatst is, dus bij een mislukte poging raakt u niets kwijt. Wisselt u naar een ander item, dan wordt het veld leeggemaakt. Linear-issues hebben geen reactieveld.
+
+Een open pull request (op GitLab een merge request) heeft ook **Approve** en **Request changes**, en de tekst in het veld gaat mee met de review. **Request changes** vraagt om tekst die zegt wat er moet veranderen. De review geldt voor de commits die de voorvertoning toont. Heeft iemand sindsdien gepusht, dan wordt de review geweigerd en ververst de voorvertoning, zodat u opnieuw kunt kijken. Op GitLab werkt **Request changes** als u reviewer van de merge request bent, en de reviewtekst wordt als aparte reactie geplaatst. Mislukt alleen die reactie, dan telt de review toch en blijft uw tekst in het veld.
+
+## Aan het werk
+
+De acties staan onderaan de voorvertoning.
+
+- **New session** opent een nieuwe sessie in het project, met het item toegevoegd aan het berichtveld. Het eerste bericht schrijft u zelf.
+- **Start in worktree…** bij een issue, of **Check out in worktree…** bij een pull request, opent het venster New Worktree met het item al gekozen. Een pull request checkt zijn eigen branch uit. Zie [Worktree-sessies](/nl/worktrees/).
+
+Bij een Linear-issue toont **Start in** het project waarin de sessie start. Dat is het project dat op de Linear-kaart bij [Integraties](/nl/integrations/) aan het team van het issue is gekoppeld. Zonder teamkoppeling is het het standaardproject, en zonder dat het project dat het bord als laatste toonde. Daar kunt u voor dit issue een ander project kiezen.
+
+## Pull requests
+
+De voorvertoning van een pull request toont ook de branch, de omvang (toegevoegde en verwijderde regels, en gewijzigde bestanden), de checks en de review. De feed **Activity** zet reacties, reviewoordelen en de nieuwste commits in de volgorde waarin ze gebeurden. Commits die na elkaar kwamen, worden gegroepeerd, zodat u ziet op welke commits een review reageerde.
+
+Naast de omvang staan twee knoppen. **Changes** opent de diff van de pull request in het zijpaneel, en **Walkthrough** opent de [rondleiding door wijzigingen](/nl/walkthrough/). Staat de app op een ander project, dan schakelt ze eerst naar het project van de PR. Beide zijn er alleen op desktop en web.
+
+Onderaan vraagt **Merge** eerst om bevestiging en gebruikt het uw gebruikelijke mergemethode. Een concept krijgt ook **Ready for review**.
+
+Een open issue of pull request heeft onderaan ook **Close issue** of **Close pull request** (op GitLab **Close merge request**), en een gesloten item **Reopen issue** of **Reopen pull request** (**Reopen merge request**). Daar wordt niet om bevestiging gevraagd, want u kunt het terugdraaien. Een gemergde pull request kunt u niet sluiten of heropenen. Op GitHub wordt een issue gesloten als voltooid.
+
+## Zie ook
+
+- [GitHub-issues en PR's](/nl/github/) om GitHub te verbinden en issues aan berichten toe te voegen
+- [Worktree-sessies](/nl/worktrees/) voor waar worktree-sessies starten
+- [Integraties](/nl/integrations/) om Linear te verbinden en teams aan projecten te koppelen

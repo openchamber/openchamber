@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useSession } from '@/sync/sync-context';
-import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, canOpenLinearIssueInContextPanel, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange } from '@/lib/linkedIssues';
+import { getDistinctLinkedIssues, getLinkedGitHubPullRequests, getLinkedGitLabThreads, getLinkedSidebarIssues, getGitHubThreadRef, getGitLabThreadRef, isLinkedChange } from '@/lib/linkedIssues';
 import type { PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
 import { useTrackedItems } from '@/lib/trackedItems/interest';
@@ -18,15 +18,14 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useMobileAppActions } from '@/apps/mobileAppContext';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusValue } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
 import { resolveDraftPinnedKnowledge } from './draftKnowledge';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { refTintStyle } from '@/lib/source-control/prVisualState';
+import { cn } from '@/lib/utils';
 
 
 type Props = {
@@ -45,11 +44,6 @@ type Props = {
  */
 export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory }) => {
   const { t } = useI18n();
-  const { linear } = useRuntimeAPIs();
-  const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
-  const mobileActions = useMobileAppActions();
-  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
-  const setLinearIssueFocus = useUIStore((state) => state.setLinearIssueFocus);
 
   const session = useSession(sessionId ?? '', directory ?? undefined);
   const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
@@ -253,23 +247,7 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
     });
     return looks;
   }, [gitlabChangeSummaries, gitlabIssueStates, linkedGitLabChanges, linkedGitLabIssues, linkedIssueRefs, linkedIssueStates, linkedLinearIdentifiers, linkedLinearStates, linkedPrSummaries, t]);
-  const openLinkedIssue = React.useCallback((entry: (typeof linked)[number]) => {
-    if (
-      entry.kind === 'linear'
-      && directory
-      && canOpenLinearIssueInContextPanel({
-        linearAvailable: Boolean(linear),
-        linearConnected,
-        inDedicatedMobileShell: mobileActions != null,
-        directory,
-      })
-    ) {
-      setLinearIssueFocus(entry.identifier);
-      openContextPanelTab(directory, { mode: 'linear' });
-      return;
-    }
-    window.open(entry.url, '_blank', 'noopener,noreferrer');
-  }, [directory, linear, linearConnected, mobileActions, openContextPanelTab, setLinearIssueFocus]);
+  const openOnBoard = useOpenOnBoard();
   // Connected servers only. A disabled server contributes nothing to the
   // context, so counting it here contradicts the MCP section right above,
   // which shows the same servers switched off.
@@ -347,12 +325,26 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       : gitlab ? `${gitlab.thread === 'pull' ? '!' : '#'}${gitlab.number}`
         : entry.kind === 'linear' || entry.kind === 'guest' || entry.kind === 'external' ? entry.identifier : `#${entry.number}`;
   };
+  // The kind, never the author: an agent's link has no avatar, and a mix of
+  // faces and icons hid which row was a PR. An issue reads as an issue
+  // wherever it lives (GitHub, GitLab, an agent's or an extension's link) and
+  // wears its state's colour, muted, as on a sidebar row.
+  const renderLinkedIcon = (entry: (typeof linked)[number]) => {
+    const color = liveLookOf(entry)?.color;
+    return (
+      <Icon
+        name={isLinkedChange(entry) ? 'git-pull-request' : entry.kind === 'linear' ? 'linear' : 'record-circle'}
+        className={cn('size-4 shrink-0', color ? 'oc-ref-tint' : 'text-muted-foreground')}
+        style={color ? refTintStyle(color) : undefined}
+      />
+    );
+  };
   const renderLinkedLabel = (entry: (typeof linked)[number]) => {
     const look = liveLookOf(entry);
     const identifier = renderedIdentifier(entry);
     return (
       <>
-        <span className="tabular-nums" style={look ? { color: look.color } : undefined}>{look ? look.text : identifier}</span>
+        <span className={cn('tabular-nums', look && 'oc-ref-tint')} style={look ? refTintStyle(look.color) : undefined}>{look ? look.text : identifier}</span>
         {entry.title ? <> · {entry.title}</> : null}
       </>
     );
@@ -370,22 +362,12 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
       {linked.map((entry) => (
         <WorkStatusRow
           key={entry.id}
-          // The kind, never the author: an agent's link has no avatar, and a
-          // mix of faces and icons hid which row was a PR.
-          // An issue reads as an issue wherever it lives — GitHub, GitLab, an
-          // agent's or an extension's link — as on a sidebar row.
-          icon={isLinkedChange(entry)
-            ? 'git-pull-request'
-            : entry.kind === 'linear'
-              ? 'linear'
-              : 'record-circle'}
-          // The state's colour on the icon too, as on a sidebar row.
-          iconColor={liveLookOf(entry)?.color}
+          leading={renderLinkedIcon(entry)}
           label={renderLinkedLabel(entry)}
           muted
-          // GitHub threads still live on github.com. A Linear issue opens in
-          // the right-hand panel when that rail exists; otherwise the Linear URL.
-          onClick={() => openLinkedIssue(entry)}
+          // On the board, selected, in this session's project; Cmd or Ctrl,
+          // and anything the board does not list, opens the link.
+          onClick={(event) => openOnBoard(entry.url, directory, event)}
           ariaLabel={entry.kind === 'linear'
             ? t('chat.workStatus.linkedIssues.openLinear', { identifier: entry.identifier })
             : entry.kind === 'guest' || entry.kind === 'external'

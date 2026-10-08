@@ -19,6 +19,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     getAgentSources,
     getAgentConfig,
     getAgentPermissions,
+    listDisabledAgents,
     createAgent,
     updateAgent,
     deleteAgent,
@@ -56,6 +57,21 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       return res.status(400).json({ error: 'Invalid name' });
     }
     return next();
+  });
+
+  // Its own path: under /api/config/agents/ it would shadow an agent named
+  // "disabled".
+  app.get('/api/config/disabled-agents', async (req, res) => {
+    try {
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json({ agents: listDisabledAgents(directory) });
+    } catch (error) {
+      console.error('Failed to list disabled agents:', error);
+      res.status(500).json({ error: 'Failed to list disabled agents' });
+    }
   });
 
   app.get('/api/config/agents/:name', async (req, res) => {

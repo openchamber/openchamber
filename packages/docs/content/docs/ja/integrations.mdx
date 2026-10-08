@@ -22,21 +22,20 @@ description: OpenChamber と連携するサービスやサブスクリプショ�
 
 ### Issue を閲覧する
 
-ワークスペースを接続すると、右側のコンテキストレールに **Linear** パネルが現れます。現在のワークスペースの Issue を一覧し、次の操作ができます。
+Linear の Issue は **Issues and PRs** ボードにあります。サイドバーのヘッダーにあるプルリクエストアイコンから開くか、<kbd>⌘K</kbd> に続けて <kbd>B</kbd> を押し（Windows と Linux では <kbd>Ctrl+K</kbd> に続けて <kbd>B</kbd>）、上部で **Linear** を選びます。ボードには現在のワークスペースの Issue が一覧され、次の操作ができます。
 
-- ステータス（**Backlog**、**To Do**、**In Progress**、**In Review**、**Done**、**Canceled**、**Duplicate**）、担当者（**Anyone** または **Assigned to me**）、チーム、優先度で絞り込む
-- タイトル、識別子、Linear の URL で検索する
-- Issue を開いて説明、コメント、ラベル、優先度を読む
-- **Status** を変更する、または **Close issue** を選ぶ
-- 現在の **Workspace** を切り替える
+- 1 つのチームか **All teams** を表示する
+- 複数のワークスペースを接続している場合、現在のワークスペースを切り替える
+- ステータス、誰の Issue か（**Assigned to me** または **Created by me**）、優先度を組み合わせて絞り込み、タイトルや識別子で検索する
+- 一覧の横で Issue の説明、コメント、ラベル、優先度を読む
+- **Status** を変更する
 
 ### Issue からセッションを開始する
 
-- Linear パネルで Issue を開き、**Start session** を選びます。ボタンは Issue をスクロールしてもフッターに残ります。
-- チャットで **New Session From Linear Issue** を選ぶと一覧から選べます。新しいブランチが欲しければ **Create in worktree** を使います。
-- **New Worktree** ダイアログで Linear の Issue を選びます。新しいセッションは Issue がメッセージ欄に添付された状態で開き、最初のメッセージは自分で書きます。
+- ボードで Issue を選び、新しいブランチで作業するなら **Start in worktree…**、プロジェクトをそのまま使うなら **New session** を選びます。
+- **New Worktree** ダイアログで Linear の Issue を選びます。
 
-Linear パネルとチャットから始めた場合、セッションは Issue のチームに対応付けられたプロジェクトで開き、Issue が最初のプロンプトになります。チームの対応付けは Linear カードで行います。**Default project** が全チームに適用され、**Team projects** でチームごとに上書きできます。対応付けのないチームでは、先に対応付けを求められます。最初のメッセージは Magic Prompt の **Issue Review** から作られ、**設定 → Magic Prompts → Linear** で編集できます。
+どちらの場合も、セッションは Issue がメッセージ欄に添付された状態で開き、最初のメッセージは自分で書きます。ボードは Issue のチームに対応付けられたプロジェクトでセッションを開始します。そのプロジェクトは **Start in** の横に表示され、必要ならそこで別のプロジェクトを選べます。チームの対応付けは Linear カードで行います。**Default project** が全チームに適用され、**Team projects** でチームごとに上書きできます。対応付けがない場合、ボードは最後に表示していたプロジェクトを使います。
 
 ### Issue をメッセージに添付する
 
@@ -84,4 +83,3 @@ Excalidraw を使うと、`.excalidraw` ファイルや Obsidian の `.excalidra
 
 - [GitHub Issues と PR](/ja/github/) — OpenChamber で GitHub にできること
 - [ワークツリーセッション](/ja/worktrees/) — Issue からのセッションを開始できる場所
-- [Magic Prompts](/ja/magic-prompts/) — Linear セッションの最初のプロンプトを編集する

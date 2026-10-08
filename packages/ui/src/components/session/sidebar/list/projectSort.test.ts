@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { sortProjectsByOrder } from './projectSort';
+import { holdOrder, rankByLatestActivity, sortProjectsByOrder } from './projectSort';
 
 const projects = [
   { id: 'beta', label: 'Beta', path: '/repos/beta', addedAt: 300, lastOpenedAt: 100 },
@@ -37,5 +37,28 @@ describe('sortProjectsByOrder', () => {
   test('treats a missing timestamp as the oldest', () => {
     const withoutStamps = [{ id: 'none', path: '/repos/none' }, ...projects];
     expect(ids(sortProjectsByOrder(withoutStamps, 'recent', []))).toEqual(['alpha', 'gamma', 'beta', 'none']);
+  });
+});
+
+describe('rankByLatestActivity', () => {
+  const sessions = new Map([
+    ['a', [{ time: { updated: 10 } }, { time: { updated: 40 } }]],
+    ['b', [{ time: { updated: 30 } }]],
+  ]);
+  const projects = [{ id: 'c' }, { id: 'a' }, { id: 'd' }, { id: 'b' }];
+
+  test('puts the project with the newest session first, idle ones after in incoming order', () => {
+    expect(rankByLatestActivity(projects, 'recent', (p) => p.id, sessions).map((p) => p.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  test('leaves every other sort alone', () => {
+    expect(rankByLatestActivity(projects, 'a-z', (p) => p.id, sessions)).toBe(projects);
+  });
+});
+
+describe('holdOrder', () => {
+  test('keeps the shown order and appends projects that appeared since', () => {
+    const live = [{ id: 'b' }, { id: 'new' }, { id: 'a' }, { id: 'c' }];
+    expect(holdOrder(live, ['a', 'b', 'c', 'gone'], (p) => p.id).map((p) => p.id)).toEqual(['a', 'b', 'c', 'new']);
   });
 });

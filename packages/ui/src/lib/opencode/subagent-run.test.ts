@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test"
 
 import type { AssistantMessage, Session, SyntheticMessage, ToolPart } from "./model"
 import {
+  findSubagentCancellation,
   findSubagentRun,
   isRunningSubagentRunMessage,
   readBackgroundSubagentChildID,
   readSubagentRun,
   runningSubagentRunMessage,
   keepCommandSubagentReports,
+  subagentCancellationNote,
 } from "./subagent-run"
 
 const report = (overrides: Partial<SyntheticMessage> = {}): SyntheticMessage => ({
@@ -111,4 +113,31 @@ describe("subagent calls that went to the background", () => {
     const records = [{ info: report(), parts: [] }]
     expect(keepCommandSubagentReports(records, () => 20)).toBe(records)
 })
+})
+
+describe("stopping a subagent", () => {
+  const note = subagentCancellationNote({ childSessionID: "ses_child", description: "review changes" })
+
+  test("the note explains the cancellation instead of forbidding the work", () => {
+    expect(note.text).toContain('"review changes"')
+    expect(note.text).toContain("ses_child")
+    expect(note.text).toContain("the user cancelled it")
+    expect(note.text).toContain("fine to delegate later")
+    expect(/\bnever\b/i.test(note.text)).toBe(false)
+  })
+
+  test("the note is recognised by its metadata and found per child", () => {
+    const message: SyntheticMessage = {
+      id: "msg_note",
+      sessionID: "ses_parent",
+      role: "synthetic",
+      time: { created: 30 },
+      text: note.text,
+      description: note.description,
+      metadata: note.metadata,
+    }
+    expect(findSubagentCancellation([report(), message], "ses_child")).toBe(true)
+    expect(findSubagentCancellation([message], "ses_other")).toBe(false)
+    expect(findSubagentCancellation([report()], "ses_child")).toBe(false)
+  })
 })

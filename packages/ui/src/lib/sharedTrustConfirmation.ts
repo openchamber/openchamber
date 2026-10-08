@@ -17,9 +17,9 @@ import { getProjectSetup, updateProjectSetup, type ProjectRef, type ProjectSetup
 export type SharedTrustChoice = 'trust' | 'skip';
 
 /** Where the commands would run: on this machine, or inside an isolated space. The prompt says which. */
-export type SharedTrustRunsIn = 'machine' | 'space';
+type SharedTrustRunsIn = 'machine' | 'space';
 
-export type PendingSharedTrustRequest = {
+type PendingSharedTrustRequest = {
   project: ProjectRef;
   sharedPath: string;
   runsIn: SharedTrustRunsIn;

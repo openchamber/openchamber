@@ -1,8 +1,9 @@
+import { isString } from '../shared/guards.js';
+
 const DEFAULT_MAX_CHARS = 8_192;
 const REDACTED = '[redacted]';
 const SENSITIVE_QUERY_KEYS = /^(?:access_token|auth|authorization|credential|key|oauth_token|password|private_token|secret|token)$/i;
 const URL_PATTERN = /[a-z][a-z0-9+.-]*:\/\/[^\s<>"']+/gi;
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
 
 const stringValue = (value) => {
   if (value instanceof Error) {

@@ -11,16 +11,11 @@
  * does not mention keeps whatever OpenCode says.
  */
 
+import { asNonEmptyString } from '../shared/guards.js';
 import fsDefault from 'node:fs';
 import pathDefault from 'node:path';
 
 const ARCHIVE_FILE_NAME = 'sessions-archive.json';
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
 
 const asTimestamp = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 

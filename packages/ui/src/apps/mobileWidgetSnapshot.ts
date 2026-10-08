@@ -19,7 +19,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
  *   needsAttention = unseenCount > 0 && (!isSubtask || notifyOnSubtasks)
  */
 
-export interface MobileWidgetSession {
+interface MobileWidgetSession {
   id: string;
   title: string;
   /** True when the session needs attention (unread + honouring the subtask setting). */
@@ -28,7 +28,7 @@ export interface MobileWidgetSession {
   project: string;
 }
 
-export interface MobileWidgetSnapshot {
+interface MobileWidgetSnapshot {
   /** Runtime instance that owns all session IDs and paths in this snapshot. */
   runtimeKey: string;
   /** Count of sessions needing attention — same signal that drives the app-icon badge. */

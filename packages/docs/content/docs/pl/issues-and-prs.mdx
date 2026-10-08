@@ -1,0 +1,74 @@
+---
+title: Issues i PR-y
+description: Przeglądaj issues i pull requesty projektu albo swoje issues z Linear i zaczynaj od nich pracę.
+---
+
+# Issues i PR-y
+
+Tablica **Issues and PRs** to osobna strona z listą issues i pull requestów projektu z GitHuba albo GitLaba (na GitLabie merge requestów) albo twoich issues z Linear. Wybierz element, a jego podgląd otworzy się obok listy. Oglądanie tu innego projektu nie zmienia projektu, na którym jest reszta aplikacji.
+
+## Otwórz tablicę
+
+- Kliknij ikonę pull requesta w nagłówku paska bocznego, obok zaplanowanych zadań i archiwum.
+- Wybierz **Issues and PRs** w palecie poleceń.
+- Naciśnij <kbd>⌘K</kbd>, a potem <kbd>B</kbd> (<kbd>Ctrl+K</kbd>, a potem <kbd>B</kbd> w Windows i Linuksie). Te same klawisze ją zamykają.
+
+Na telefonie stuknij przycisk pull requesta na dole menu sesji. W rozszerzeniu VS Code tablicy nie ma.
+
+Tablica otwiera się ponownie na projekcie, karcie i zespole, na których ją zostawiłeś.
+
+## Znajdź elementy
+
+Wszystko mieści się w jednym wierszu paska narzędzi. Po lewej jest wybór projektu z ikonami projektów i wyszukiwaniem. Obok przełączasz między **Issues**, **Pull requests** i **Linear**. Issues i pull requesty pochodzą z hostingu samego projektu, GitHuba albo GitLaba. Projekt bez takiego remote'a pokazuje tylko **Linear**.
+
+W **Linear** wybór projektu zamienia się w wybór zespołu: wybierz **All teams** albo jeden zespół. Jeśli masz połączoną więcej niż jedną przestrzeń roboczą Linear, przełączasz ją w tym samym menu. Jak połączyć Linear, opisują [Integracje](/pl/integrations/).
+
+Wyszukiwanie przyjmuje tytuł, numer albo wklejony link. Menu filtrów zostaje otwarte, gdy wybierasz, więc możesz łączyć filtry.
+
+Dla GitHuba i GitLaba:
+
+- Status: **Open**, **Closed**, **All**, a dla pull requestów także **Merged**
+- Osoby: **Anyone**, **Assigned to me**, **Created by me**, a dla pull requestów także **Review requested**
+
+Dla Linear:
+
+- Status: **Open**, **All**, **Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**
+- Osoby: **Anyone**, **Assigned to me**, **Created by me**
+- Priorytet: **All priorities**, **Urgent**, **High**, **Medium**, **Low**, **No priority**
+
+## Przeczytaj element
+
+Podgląd pokazuje opis, etykiety i komentarze. W issue z Linear kliknij znacznik statusu, aby przenieść je do innego stanu zespołu.
+
+Wiersz **Labels** ma przycisk z ołówkiem, który otwiera listę etykiet repozytorium z wyszukiwaniem. Zaznacz je albo odznacz. Zmiana zapisuje się, gdy zamkniesz listę, więc kilka kliknięć liczy się jako jedna zmiana. Otwarty pull request (na GitLabie merge request) ma też wiersz **Reviewers**, który działa tak samo, z osobami, które mogą robić review w repozytorium. Na GitHubie autor pull requesta nie jest proponowany. Issues z Linear nie mają żadnego z tych wierszy.
+
+## Skomentuj i zrób review
+
+Pod aktywnością issue albo pull requesta jest pole komentarza. **Comment** publikuje twój tekst na GitHubie albo GitLabie, tak samo jak <kbd>⌘</kbd>+<kbd>Enter</kbd> (<kbd>Ctrl</kbd>+<kbd>Enter</kbd> w Windows i Linuksie). Tekst zostaje w polu, dopóki nie zostanie opublikowany, więc przy nieudanej próbie nic nie przepada. Przejście do innego elementu czyści pole. Issues z Linear nie mają tego pola.
+
+Otwarty pull request (na GitLabie merge request) ma też **Approve** i **Request changes**, a tekst z pola idzie razem z review. **Request changes** wymaga tekstu, który mówi, co zmienić. Review dotyczy commitów pokazanych w podglądzie. Jeśli ktoś od tego czasu zrobił push, review zostaje odrzucone, a podgląd się odświeża, żebyś mógł spojrzeć jeszcze raz. Na GitLabie **Request changes** działa, gdy jesteś reviewerem merge requesta, a tekst review jest publikowany jako osobny komentarz. Jeśli nie uda się tylko ten komentarz, review i tak się liczy, a twój tekst zostaje w polu.
+
+## Zacznij pracę
+
+Akcje są na dole podglądu.
+
+- **New session** otwiera nową sesję w projekcie z elementem dołączonym do pola wiadomości. Pierwszą wiadomość piszesz sam.
+- **Start in worktree…** przy issue albo **Check out in worktree…** przy pull requeście otwiera okno New Worktree z już wybranym elementem. Pull request wyewidencjonowuje własną gałąź. Zobacz [Sesje worktree](/pl/worktrees/).
+
+Przy issue z Linear **Start in** pokazuje projekt, w którym wystartuje sesja. To projekt zmapowany do zespołu issue na karcie Linear w [Integracjach](/pl/integrations/). Bez mapowania zespołu jest to projekt domyślny, a bez niego projekt, który tablica pokazywała ostatnio. Możesz tam wybrać inny projekt dla tego issue.
+
+## Pull requesty
+
+Podgląd pull requesta pokazuje też jego gałąź, rozmiar (dodane i usunięte linie oraz zmienione pliki), checki i review. Kanał **Activity** układa komentarze, werdykty review i najnowsze commity w kolejności, w jakiej się pojawiły. Commity, które przyszły jeden po drugim, są zgrupowane, więc widać, na które commity odpowiadało review.
+
+Obok rozmiaru są dwa przyciski. **Changes** otwiera diff pull requesta w panelu bocznym, a **Walkthrough** otwiera jego [przewodnik po zmianach](/pl/walkthrough/). Jeśli aplikacja jest na innym projekcie, najpierw przełącza się na projekt PR-a. Oba są dostępne tylko na desktopie i w webie.
+
+Na dole **Merge** pyta przed scaleniem i używa twojej zwykłej metody scalania. Szkic ma też **Ready for review**.
+
+Otwarte issue albo pull request ma na dole też **Close issue** lub **Close pull request** (na GitLabie **Close merge request**), a zamknięte **Reopen issue** lub **Reopen pull request** (**Reopen merge request**). Nie ma pytania o potwierdzenie, bo to da się cofnąć. Scalonego pull requesta nie da się zamknąć ani ponownie otworzyć. Na GitHubie issue zamyka się jako ukończone.
+
+## Powiązane
+
+- [Zgłoszenia i PR-y GitHub](/pl/github/): połącz GitHuba i dołączaj issues do wiadomości
+- [Sesje worktree](/pl/worktrees/): skąd startują sesje worktree
+- [Integracje](/pl/integrations/): połącz Linear i zmapuj zespoły na projekty

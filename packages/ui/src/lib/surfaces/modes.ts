@@ -8,12 +8,11 @@ const BUILT_IN_CONTEXT_PANEL_MODES = [
   'browser',
   'git',
   'pr',
-  'linear',
   'notes',
   'terminal',
 ] as const;
 
-export type BuiltInContextPanelMode = (typeof BUILT_IN_CONTEXT_PANEL_MODES)[number];
+type BuiltInContextPanelMode = (typeof BUILT_IN_CONTEXT_PANEL_MODES)[number];
 export type PluginContextPanelMode = `plugin:${string}`;
 export type ContextPanelMode = BuiltInContextPanelMode | PluginContextPanelMode;
 

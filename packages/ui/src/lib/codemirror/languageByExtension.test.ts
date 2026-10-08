@@ -4,7 +4,7 @@ import { ensureSyntaxTree, highlightingFor } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { highlightTree, tags } from '@lezer/highlight';
 
-import { languageByExtension } from './languageByExtension';
+import { languageByExtension, loadLanguageByExtension } from './languageByExtension';
 
 function markdownState(doc: string) {
   const extension = languageByExtension('test.md');
@@ -55,4 +55,17 @@ describe('Markdown code backgrounds', () => {
       expect(state.doc.toString()).toBe(doc);
     });
   }
+});
+
+describe('loadLanguageByExtension', () => {
+  test('resolves extensions the CodeMirror catalog lacks through the shared extension map', async () => {
+    expect(await loadLanguageByExtension('views/page.tpl')).not.toBeNull();
+    expect(await loadLanguageByExtension('logs/events.jsonl')).not.toBeNull();
+    expect(await loadLanguageByExtension('src/App.svelte')).not.toBeNull();
+  });
+
+  test('keeps plain text and unknown extensions unhighlighted', async () => {
+    expect(await loadLanguageByExtension('notes/readme.txt')).toBeNull();
+    expect(await loadLanguageByExtension('data/blob.zzqx')).toBeNull();
+  });
 });

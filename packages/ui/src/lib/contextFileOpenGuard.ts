@@ -9,13 +9,13 @@ import { isBinaryFile, isImageFile, isPdfFile, looksLikeBinaryText } from '@/lib
 const t = (key: Parameters<typeof formatMessage>[1], params?: Parameters<typeof formatMessage>[2]) =>
   formatMessage(useI18nStore.getState().dictionary, key, params);
 
-export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable' | 'binary';
+type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable' | 'binary';
 
-export type ContextFileOpenValidationResult =
+type ContextFileOpenValidationResult =
   | { ok: true }
   | { ok: false; reason: ContextFileOpenFailureReason };
 
-export type ContextFileOpenOptions = {
+type ContextFileOpenOptions = {
   directory?: string;
 };
 

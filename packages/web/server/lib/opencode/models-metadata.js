@@ -57,5 +57,3 @@ export async function getModelsMetadata({
     throw error;
   }
 }
-
-export { MODELS_DEV_API_URL };

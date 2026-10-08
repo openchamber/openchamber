@@ -18,6 +18,7 @@ const {
   getFreshestActiveSourceControlStatusForBranch,
   getFreshestSourceControlStatusForBranch,
   getGitHubPrStatusKey,
+  getLinkedChangeRequestVisualSummary,
   getSourceControlStatusKey,
   useGitHubPrStatusStore,
 } = await import("./useGitHubPrStatusStore")
@@ -1325,5 +1326,71 @@ describe("branch PR live state pushed by the server", () => {
     const linked = { provider: "github" as const, kind: "pull" as const, owner: "acme", repo: "app", number: 7 }
     useGitHubPrStatusStore.getState().applyTrackedPulls([{ key: trackedItemKey(linked), record: { type: "pull", item: linked, state: liveSummary({ state: "merged" }), fetchedAt: 100 } }])
     expect(useGitHubPrStatusStore.getState().entries[key]?.status?.pr?.state).toBe("open")
+  })
+})
+
+describe("linked change request summary URL canonicalization (#4541)", () => {
+  const identity = { provider: "github" as const, instance: "github.com" }
+  const link = { owner: "acme", repo: "app", number: 7, url: "https://github.com/acme/app/pull/7", title: "feature" }
+  const state: GitHubPullRequestLiveSummary = {
+    owner: "acme",
+    repo: "app",
+    number: 7,
+    state: "open",
+    draft: false,
+    title: "feature",
+    mergeable: true,
+    mergeableState: "clean",
+    checks: { state: "success", total: 2, success: 2, failure: 0, pending: 0 },
+  }
+
+  test("fragment and query spellings of one PR share a stable summary reference", () => {
+    const key = "runtime-a|github|pull|acme/app#7"
+    const canonical = getLinkedChangeRequestVisualSummary(key, link, state, identity)
+    const anchored = getLinkedChangeRequestVisualSummary(
+      key,
+      { ...link, url: `${link.url}#pullrequestreview-1` },
+      state,
+      identity,
+    )
+    const queried = getLinkedChangeRequestVisualSummary(
+      key,
+      { ...link, url: `${link.url}#pullrequestreview-1?notification_referrer_id=1` },
+      state,
+      identity,
+    )
+    const again = getLinkedChangeRequestVisualSummary(key, link, state, identity)
+    expect(canonical).not.toBeNull()
+    // Alternating URL spellings must not flip the shared cache entry: a new
+    // reference per read loops useSyncExternalStore until React throws #185.
+    expect(anchored).toBe(canonical)
+    expect(queried).toBe(canonical)
+    expect(again).toBe(canonical)
+    expect(anchored?.url).toBe(link.url)
+  })
+
+  test("canonical URLs keep a self-managed GitHub instance host", () => {
+    const gheIdentity = { provider: "github" as const, instance: "https://ghe.acme.example" }
+    const summary = getLinkedChangeRequestVisualSummary(
+      "runtime-a|github|ghe|acme/app#7",
+      { ...link, url: "https://ghe.acme.example/acme/app/pull/7#discussion" },
+      state,
+      gheIdentity,
+    )
+    expect(summary?.url).toBe("https://ghe.acme.example/acme/app/pull/7")
+  })
+
+  test("query and fragment spellings of one GitLab merge request share a stable summary reference", () => {
+    const gitlabIdentity = { provider: "gitlab" as const, instance: "https://gitlab.example.com" }
+    const mrUrl = "https://gitlab.example.com/team/repo/-/merge_requests/12"
+    const mr = { ...link, owner: "team", repo: "repo", number: 12, url: mrUrl }
+    const key = "runtime-a|gitlab|mr|team/repo#12"
+    const plain = getLinkedChangeRequestVisualSummary(key, mr, state, gitlabIdentity)
+    const queried = getLinkedChangeRequestVisualSummary(key, { ...mr, url: `${mrUrl}?a=1#note_5` }, state, gitlabIdentity)
+    const again = getLinkedChangeRequestVisualSummary(key, mr, state, gitlabIdentity)
+    expect(plain).not.toBeNull()
+    expect(queried).toBe(plain)
+    expect(again).toBe(plain)
+    expect(queried?.url).toBe(mrUrl)
   })
 })

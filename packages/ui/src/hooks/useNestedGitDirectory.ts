@@ -14,6 +14,12 @@ import {
 type UseNestedGitDirectoryOptions = {
   /** False defers all probing/discovery work while the surface is hidden. */
   enabled?: boolean;
+  /**
+   * Re-probe a cached "not a repository" root each time the surface becomes
+   * enabled. For surfaces the user opens to look at git (Changes, Git), not
+   * for ones that render alongside every session.
+   */
+  recheckOnOpen?: boolean;
 };
 
 /**
@@ -29,7 +35,7 @@ export const useNestedGitDirectory = (
   root: string | null,
   options: UseNestedGitDirectoryOptions = {},
 ) => {
-  const { enabled = true } = options;
+  const { enabled = true, recheckOnOpen = false } = options;
   const { git } = useRuntimeAPIs();
 
   const rootIsGitRepo = useIsGitRepo(root);
@@ -44,9 +50,10 @@ export const useNestedGitDirectory = (
     gitDirectory && gitDirectory !== root ? gitDirectory : null,
   );
 
-  const { ensureStatus, ensureNestedRepos, selectNestedRepo, clearNestedRepoSelection } = useGitStore(
+  const { ensureStatus, recheckRepository, ensureNestedRepos, selectNestedRepo, clearNestedRepoSelection } = useGitStore(
     useShallow((state) => ({
       ensureStatus: state.ensureStatus,
+      recheckRepository: state.recheckRepository,
       ensureNestedRepos: state.ensureNestedRepos,
       selectNestedRepo: state.selectNestedRepo,
       clearNestedRepoSelection: state.clearNestedRepoSelection,
@@ -60,6 +67,15 @@ export const useNestedGitDirectory = (
     if (rootIsGitRepo !== null) return;
     void ensureStatus(root, git);
   }, [enabled, ensureStatus, git, root, rootIsGitRepo]);
+
+  // A cached "not a repository" answer may be stale: `git init` in a terminal
+  // or by an agent leaves no event behind. Opening the surface checks again,
+  // once per opening, so it never needs to poll.
+  React.useEffect(() => {
+    if (!recheckOnOpen || !enabled || !root) return;
+    if (useGitStore.getState().directories.get(root)?.isGitRepo !== false) return;
+    void recheckRepository(root, git);
+  }, [enabled, git, recheckOnOpen, recheckRepository, root]);
 
   // Discover nested repositories once the root probe confirms it is not one.
   React.useEffect(() => {

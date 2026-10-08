@@ -2,7 +2,7 @@ const CORE_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
 /** `1.22.0` or `>=1.22.0`. Ranges beyond a floor are not accepted. */
 export const OPENCHAMBER_ENGINE_PATTERN = /^(>=)?\d+\.\d+\.\d+$/;
 
-export type OpenChamberVersionParts = {
+type OpenChamberVersionParts = {
   major: number;
   minor: number;
   patch: number;

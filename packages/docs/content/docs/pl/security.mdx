@@ -104,6 +104,19 @@ Jeśli na Twoich maszynach OpenCode jest już zainstalowany i OpenChamber ma uż
 - CLI musi być OpenCode 2.x, co najmniej w wersji, której wymaga OpenChamber. Przy starszej OpenChamber zatrzyma się na ekranie „zaktualizuj OpenCode”.
 - Można też podać folder, jeśli zawiera `opencode` (`opencode.exe` w Windows). Nie ma do tego zmiennej środowiskowej, bo użytkownik może ustawić ją sam.
 
+
+### Ukryj wbudowane katalogi skilli
+
+OpenChamber ma kilka publicznych katalogów skilli (Anthropic, OpenAI, Cursor, Matt Pocock). Jeśli Twoja organizacja prowadzi własny, dodaj go jako katalog niestandardowy i ukryj wbudowane w pliku zasad. Działa to z trybem enterprise i bez niego.
+
+```json
+{
+  "hideBuiltinSkillCatalogs": true
+}
+```
+
+Ustawienia pokażą wtedy tylko katalogi dodane przez użytkowników, a OpenChamber nie wczyta wbudowanego nawet na bezpośrednie żądanie. Nie ma do tego zmiennej środowiskowej, bo użytkownik może je ustawić sam.
+
 ### Przykłady
 
 Aby umieścić plik polityki na Macu, uruchom w Terminalu jako administrator:

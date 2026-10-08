@@ -52,7 +52,7 @@ export const SessionDoneHintRow: React.FC<SessionDoneHintRowProps> = React.memo(
         disabled={pending}
         onClick={() => { void handleMarkDone(); }}
         onMouseDown={(event) => event.preventDefault()}
-        className="shrink-0 text-status-success"
+        className="shrink-0 text-status-success/80 hover:bg-transparent hover:text-status-success"
       >
         {t('chat.work.doneHint.action')}
       </Button>

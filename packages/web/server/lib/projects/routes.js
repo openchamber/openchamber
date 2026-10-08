@@ -11,12 +11,11 @@
  * `req.body` is parsed here without a per-route parser.
  */
 
+import { isRecord as isObjectRecord } from '../shared/guards.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { createProjectIdFromPath } from './project-id.js';
 import { isProjectSetupValidationError } from './project-setup.js';
-
-const isObjectRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 const directoryRequestSchema = z.object({
   path: z.string().trim().catch(''),

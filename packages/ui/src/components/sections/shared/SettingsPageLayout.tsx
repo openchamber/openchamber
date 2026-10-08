@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
+import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
 import {
   SETTINGS_DESCRIPTION_CLASS,
   SETTINGS_PAGE_TITLE_CLASS,
@@ -51,6 +52,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   showSaveStatus = false,
   onBlurCapture,
 }) => {
+  const scrollbarTopClearance = React.useContext(SettingsScrollbarTopClearanceContext);
   const hasHeader = title != null || description != null || headerEnd != null || showSaveStatus;
   const isPlainTitle = typeof title === 'string' || typeof title === 'number';
   const hasTitleChrome = titleLeading != null || titleAccessory != null;
@@ -59,6 +61,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
     <ScrollableOverlay
       outerClassName={cn('h-full overlay-scrollbar-wrapper--stable-gutter', outerClassName)}
       className="w-full @container"
+      verticalTrackStart={scrollbarTopClearance}
     >
       <div
         className={cn(

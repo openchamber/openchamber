@@ -1,11 +1,12 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
-import { GUEST_SHELLS_MAX } from '@openchamber/sdk';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { GUEST_SHELLS_MAX, HostRequestError } from '@openchamber/sdk';
+import { OpencodeApiError, opencodeClient } from '@/lib/opencode/client';
 import type { Session } from '@/lib/opencode/model';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useBackgroundShellsStore, type TrackedShell } from '@/sync/background-shells';
-import { observeGuestShells, readGuestShells } from './shells';
+import { useBackgroundShellsStore, type EndedShell, type TrackedShell } from '@/sync/background-shells';
+import { observeGuestShells, readGuestShellOutput, readGuestShells } from './shells';
 
 const session = (id: string, directory: string, projectID: string, parentID?: string): Session => ({
   id, directory, title: id, projectID, cost: 0,
@@ -16,6 +17,11 @@ const session = (id: string, directory: string, projectID: string, parentID?: st
 const shell = (id: string, sessionID: string, startedAt: number, background: boolean): TrackedShell => ({
   id, sessionID, command: `run ${id}`, startedAt, directory: '/repo', background, file: 'shell.log',
 });
+const ended = (id: string, sessionID: string, end: Pick<EndedShell, 'status' | 'exit' | 'endedAt'>): EndedShell => (
+  end.exit === undefined
+    ? { ...shell(id, sessionID, 1, true), status: end.status, endedAt: end.endedAt }
+    : { ...shell(id, sessionID, 1, true), status: end.status, exit: end.exit, endedAt: end.endedAt }
+);
 
 beforeEach(() => {
   useProjectsStore.setState({ hasServerSnapshot: true, serverSnapshotFailed: false, projects: [{ id: 'path_/repo', path: '/repo', label: 'Repo', addedAt: 1 }] });
@@ -23,6 +29,7 @@ beforeEach(() => {
   useGlobalSessionsStore.getState().applySnapshot([
     session('root', '/repo', 'opencode-app'),
     session('child', '/repo', 'opencode-app', 'root'),
+    session('grandchild', '/repo', 'opencode-app', 'child'),
     session('tree', '/repo-tree', 'opencode-app'),
     session('other', '/other', 'opencode-other'),
   ], [], 'ready');
@@ -36,6 +43,76 @@ beforeEach(() => {
       ['sh_6', shell('sh_6', 'tree', 6, true)],
     ]),
     sessionIds: new Set(['root', 'child', 'tree', 'other', 'ghost']),
+    ended: new Map([
+      ['sh_done', ended('sh_done', 'grandchild', { status: 'exited', exit: 1, endedAt: 20 })],
+      ['sh_stopped', ended('sh_stopped', 'root', { status: 'stopped', endedAt: 10 })],
+      ['sh_elsewhere', ended('sh_elsewhere', 'other', { status: 'timeout', endedAt: 30 })],
+    ]),
+  });
+});
+
+describe('ended shells in the projection', () => {
+  test('a session scope lists its tree\'s ended shells oldest end first, with exit codes', () => {
+    const snapshot = readGuestShells({ kind: 'session', sessionId: 'root' });
+    expect(snapshot.ended).toEqual([
+      { id: 'sh_stopped', sessionID: 'root', command: 'run sh_stopped', startedAt: 1, background: true, status: 'stopped', endedAt: 10 },
+      { id: 'sh_done', sessionID: 'grandchild', command: 'run sh_done', startedAt: 1, background: true, status: 'exited', exit: 1, endedAt: 20 },
+    ]);
+  });
+
+  test('keeps the newest ends at the documented bound', () => {
+    const many = new Map<string, EndedShell>();
+    for (let index = 0; index < GUEST_SHELLS_MAX + 10; index += 1) {
+      many.set(`sh_${index}`, ended(`sh_${index}`, 'root', { status: 'exited', endedAt: index }));
+    }
+    useBackgroundShellsStore.setState({ ended: many });
+    const snapshot = readGuestShells({ kind: 'global' });
+    expect(snapshot.ended).toHaveLength(GUEST_SHELLS_MAX);
+    expect(snapshot.ended[0]?.id).toBe('sh_10');
+  });
+});
+
+/** The host error code a read failed with, or the error's name for any other failure. */
+const failureOf = async (read: Promise<unknown>): Promise<string> => {
+  try {
+    await read;
+    return 'resolved';
+  } catch (error) {
+    if (error instanceof HostRequestError) return error.code;
+    return error instanceof Error ? error.name : 'non-error';
+  }
+};
+
+describe('extension shell output', () => {
+  test('reads a running or ended shell in the directory it ran in', async () => {
+    const read = spyOn(opencodeClient, 'readShellOutput').mockResolvedValue({ output: 'ok', cursor: 2, skipped: false });
+    try {
+      expect(await readGuestShellOutput('sh_done', undefined, 100)).toEqual({ output: 'ok', cursor: 2, skipped: false });
+      expect(read.mock.calls[0]).toEqual(['sh_done', '/repo', undefined, 100]);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test('an unseen shell, a stopped one, and output OpenCode dropped are NOT_FOUND', async () => {
+    const read = spyOn(opencodeClient, 'readShellOutput').mockRejectedValue(new OpencodeApiError('shell.output', 'gone', { status: 404 }));
+    try {
+      expect(await failureOf(readGuestShellOutput('sh_nope'))).toBe('NOT_FOUND');
+      expect(await failureOf(readGuestShellOutput('sh_stopped'))).toBe('NOT_FOUND');
+      expect(await failureOf(readGuestShellOutput('sh_done'))).toBe('NOT_FOUND');
+      expect(read.mock.calls).toHaveLength(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test('any other failure is passed on, not reported as missing', async () => {
+    const read = spyOn(opencodeClient, 'readShellOutput').mockRejectedValue(new OpencodeApiError('shell.output', 'boom', { status: 500 }));
+    try {
+      expect(await failureOf(readGuestShellOutput('sh_1'))).toBe('OpencodeApiError');
+    } finally {
+      read.mockRestore();
+    }
   });
 });
 

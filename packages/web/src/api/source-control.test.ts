@@ -38,6 +38,8 @@ interface MutationTestResult {
   merged?: boolean | string;
   message?: string;
   ready?: boolean;
+  commented?: boolean | string;
+  state?: string;
   unexpected?: boolean;
 }
 
@@ -851,6 +853,65 @@ describe('createWebSourceControlAPI', () => {
     }));
     expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/pr/ready', expect.objectContaining({
       body: JSON.stringify(authority),
+    }));
+  });
+
+  it("posts comments and reviews to their routes and reads whether a review's text posted", async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ commented: false })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ commented: 'yes' })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ state: 'closed' })))
+      .mockResolvedValueOnce(Response.json(mutationReceipt({ state: 'merged' })));
+
+    await expect(api.changeRequestComment({ ...mutationContext, body: 'Looks good' })).resolves.toMatchObject({ result: {} });
+    await expect(api.changeRequestReview({ ...mutationContext, verdict: 'approve', body: 'Nice' }))
+      .resolves.toMatchObject({ result: { commented: false } });
+    await api.issueComment({ ...mutationContext, body: 'On it' });
+    await expect(api.changeRequestReview({ ...mutationContext, verdict: 'approve' })).rejects.toThrow('invalid review result');
+    await expect(api.issueSetState({ ...mutationContext, state: 'closed' })).resolves.toMatchObject({ result: { state: 'closed' } });
+    await expect(api.changeRequestSetState({ ...mutationContext, state: 'open' })).rejects.toThrow('invalid state result');
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/pr/comment', expect.objectContaining({
+      body: expect.stringContaining('"body":"Looks good"'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/pr/review', expect.objectContaining({
+      body: expect.stringContaining('"verdict":"approve","body":"Nice"'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(3, '/api/source-control/github/issues/comment', expect.anything());
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(5, '/api/source-control/github/issues/state', expect.objectContaining({
+      body: expect.stringContaining('"state":"closed"'),
+    }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(6, '/api/source-control/github/pr/state', expect.anything());
+  });
+
+  it("sets labels and reviewers, and reads the pickers' choices as checked lists", async () => {
+    const api = createWebSourceControlAPI({ fetch: runtimeFetchMock });
+    runtimeFetchMock
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json(mutationReceipt()))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }] }))
+      .mockResolvedValueOnce(Response.json({ connected: false }))
+      .mockResolvedValueOnce(Response.json({ connected: true, items: [{ id: 'octo', login: 'octo', avatarUrl: 'javascript:alert(1)' }] }));
+    const project = { owner: 'openchamber', repo: 'openchamber' };
+
+    await api.changeRequestSetLabels({ ...mutationContext, labels: ['bug'] });
+    await api.issueSetLabels({ ...mutationContext, labels: [] });
+    await api.changeRequestSetReviewers({ ...mutationContext, reviewers: ['octo'] });
+    await expect(api.referenceLabels(readContext, project)).resolves.toEqual([{ name: 'bug', color: 'd73a4a' }, { name: 'docs' }]);
+    await expect(api.referenceReviewers(readContext, project)).resolves.toEqual([{ id: 'octo', login: 'octo', avatarUrl: 'https://avatars/octo' }]);
+    await expect(api.referenceLabels(readContext, project)).rejects.toThrow('not connected');
+    await expect(api.referenceReviewers(readContext, project)).rejects.toThrow('invalid user');
+
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(1, '/api/source-control/github/pr/labels', expect.objectContaining({ body: expect.stringContaining('"labels":["bug"]') }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(2, '/api/source-control/github/issues/labels', expect.anything());
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(3, '/api/source-control/github/pr/reviewers', expect.objectContaining({ body: expect.stringContaining('"reviewers":["octo"]') }));
+    expect(runtimeFetchMock).toHaveBeenNthCalledWith(4, '/api/source-control/github/references/labels', expect.objectContaining({
+      query: expect.objectContaining({ toString: expect.any(Function) }),
     }));
   });
 

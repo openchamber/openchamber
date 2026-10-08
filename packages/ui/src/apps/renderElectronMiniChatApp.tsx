@@ -8,35 +8,12 @@ import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
-import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
-import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
-import { initializeLocale, I18nProvider } from '@/lib/i18n';
-import { initializeAppearancePreferences, syncDesktopSettings } from '@/lib/persistence';
-import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
-import { startTypographyWatcher } from '@/lib/typographyWatcher';
+import { I18nProvider } from '@/lib/i18n';
 import { ElectronMiniChatApp } from './ElectronMiniChatApp';
-
-const initializeSharedPreferences = () => {
-  initializeLocale();
-
-  void initializeAppearancePreferences().then(() => {
-    void Promise.all([
-      syncDesktopSettings(),
-      applyPersistedDirectoryPreferences(),
-    ]).catch((err) => {
-      console.error('[mini-chat-main] settings init failed:', err);
-    });
-
-    startAppearanceAutoSave();
-    startModelPrefsAutoSave();
-    startTypographyWatcher();
-  }).catch((err) => {
-    console.error('[mini-chat-main] appearance init failed:', err);
-  });
-};
+import { initializeSharedPreferences } from './initializeSharedPreferences';
 
 export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
-  initializeSharedPreferences();
+  initializeSharedPreferences({ logLabel: '[mini-chat-main]' });
 
   const rootElement = document.getElementById('root');
   if (!rootElement) {

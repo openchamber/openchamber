@@ -11,7 +11,7 @@ type WorktreeSortOrder = 'recent' | 'manual' | 'a-z';
 // 'projects' is the grouped sidebar: project zones with worktree sub-headers,
 // optional Recent. 'timeline' is one recency-ordered list of root sessions
 // across every project, with three-line rows carrying project and branch.
-type SidebarViewMode = 'projects' | 'timeline';
+export type SidebarViewMode = 'projects' | 'timeline';
 type ProjectDisplayMode = 'all' | 'single';
 
 // The phone starts on the timeline: its sheet has no room for nested project
@@ -31,6 +31,8 @@ type SessionDisplayStore = {
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
   showRecentSection: boolean;
+  /** The managed Chats block in the sidebar (web and desktop). */
+  showChatsSection: boolean;
   // VS Code only: the compact webview keeps archived buckets inline because it
   // has no room for the full Archive page. Web/desktop ignore this flag and
   // always route archived sessions to the Archive page instead.
@@ -38,6 +40,7 @@ type SessionDisplayStore = {
   projectSortOrder: ProjectSortOrder;
   worktreeSortOrder: WorktreeSortOrder;
   setShowRecentSection: (show: boolean) => void;
+  setShowChatsSection: (show: boolean) => void;
   setShowArchivedSessions: (show: boolean) => void;
   toggleRecentSection: () => void;
   toggleArchivedSessions: () => void;
@@ -104,6 +107,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // Off by default since the timeline view took over cross-project recency;
       // the toggle stays for people who want it inside the grouped view.
       showRecentSection: false,
+      showChatsSection: true,
       // Default to HIDDEN so the pre-hydration state matches the quiet/safe
       // option: archived sessions must never flash visible on startup and then
       // disappear once the persisted preference rehydrates.
@@ -111,6 +115,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       projectSortOrder: 'manual',
       worktreeSortOrder: 'manual',
       setShowRecentSection: (show) => set({ showRecentSection: show }),
+      setShowChatsSection: (show) => set({ showChatsSection: show }),
       setShowArchivedSessions: (show) => set({ showArchivedSessions: show }),
       toggleRecentSection: () => set((state) => ({ showRecentSection: !state.showRecentSection })),
       toggleArchivedSessions: () => set((state) => ({ showArchivedSessions: !state.showArchivedSessions })),
@@ -133,4 +138,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
   ),
 );
 
-export type { ProjectDisplayMode, ProjectSortOrder, SidebarViewMode, WorktreeSortOrder };
+export type {
+  ProjectSortOrder,
+  WorktreeSortOrder
+};

@@ -1,3 +1,4 @@
+import { asNonEmptyString } from '../shared/guards.js';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
@@ -72,6 +73,7 @@ const ALL_PARAMETER_PROPERTIES = {
     additionalProperties: false,
   },
   taskId: { type: 'string' },
+  targetSessionId: { type: 'string', description: 'Scheduled task target; omit for a new session, empty on update clears it' },
   title: { type: 'string' },
   prompt: { type: 'string' },
   model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model' },
@@ -168,12 +170,6 @@ const agentOnlyUsageError = (action, input) => {
     return 'lastAssistant belongs to session.messages. To get a dispatched session\'s answer when it finishes, set returnResult';
   }
   return null;
-};
-
-const asNonEmptyString = (value) => {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 };
 
 const createResult = ({ ok, action, data, error, exitCode }) => ({

@@ -11,7 +11,7 @@ interface ParsedAgentMention {
   source?: AgentMentionSource;
 }
 
-export interface ParsedAgentResult {
+interface ParsedAgentResult {
   sanitizedText: string;
   mention: ParsedAgentMention | null;
 }

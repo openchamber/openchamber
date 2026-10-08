@@ -1,4 +1,5 @@
-const isString = (value) => Object.prototype.toString.call(value) === '[object String]';
+import { isString } from '../shared/guards.js';
+
 const text = (value) => (isString(value) ? value.trim() : '');
 
 const sameAccount = (left, right) => Boolean(left) && Boolean(right)

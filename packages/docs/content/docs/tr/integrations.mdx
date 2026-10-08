@@ -22,21 +22,20 @@ Başka bir Linear organizasyonunu **Add workspace** ile bağlayın. Aynı anda t
 
 ### Issue’lara göz atın
 
-Bir çalışma alanı bağlandığında sağdaki bağlam çubuğunda **Linear** paneli belirir. Geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
+Linear issue’ları **Issues and PRs** panosunda bulunur. Panoyu kenar çubuğu başlığındaki pull request simgesiyle açın ya da <kbd>⌘K</kbd> ve ardından <kbd>B</kbd> tuşlarına basın (Windows ve Linux’ta <kbd>Ctrl+K</kbd> ve ardından <kbd>B</kbd>), sonra üstten **Linear** seçin. Pano geçerli çalışma alanının issue’larını listeler ve şunları yapmanızı sağlar:
 
-- duruma (**Backlog**, **To Do**, **In Progress**, **In Review**, **Done**, **Canceled**, **Duplicate**), atanan kişiye (**Anyone** ya da **Assigned to me**), takıma ve önceliğe göre filtreleme
-- başlık, tanımlayıcı ya da Linear URL’siyle arama
-- bir issue’yu açıp açıklamasını, yorumlarını, etiketlerini ve önceliğini okuma
-- **Status** değiştirme ya da **Close issue** seçme
-- geçerli **Workspace**’i değiştirme
+- tek bir takımı ya da **All teams** gösterme
+- birden fazla çalışma alanı bağlıysa geçerli olanı değiştirme
+- durum, kime ait olduğu (**Assigned to me** ya da **Created by me**) ve öncelik ile birlikte filtreleme, başlık ya da tanımlayıcıyla arama
+- bir issue’nun açıklamasını, yorumlarını, etiketlerini ve önceliğini listenin yanında okuma
+- **Status** değiştirme
 
 ### Bir issue’dan oturum başlatın
 
-- Linear panelinde bir issue açın ve **Start session** seçin. Issue kaydırılırken düğme alt kısımda kalır.
-- Sohbette listeden seçmek için **New Session From Linear Issue** seçin; yeni bir dal istiyorsanız **Create in worktree** kullanın.
-- **New Worktree** iletişim kutusunda bir Linear issue’su seçin. Yeni oturum, issue mesaj kutusuna eklenmiş halde açılır ve ilk mesajı kendiniz yazarsınız.
+- Panoda bir issue seçin; yeni bir dal için **Start in worktree…**, projede olduğu gibi çalışmak için **New session** seçin.
+- **New Worktree** iletişim kutusunda bir Linear issue’su seçin.
 
-Linear panelinden ve sohbetten başlatıldığında oturum, issue’nun takımına eşlenen projede açılır ve issue ilk istem olur. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşlenmemiş bir takım için önce eşleme yapmanız istenir. İlk mesaj **Issue Review** magic prompt’undan oluşturulur; bunu **Settings → Magic Prompts → Linear** altında düzenleyebilirsiniz.
+Her iki durumda da oturum, issue mesaj kutusuna eklenmiş halde açılır ve ilk mesajı kendiniz yazarsınız. Pano oturumu issue’nun takımına eşlenen projede başlatır; bu proje **Start in** yanında görünür ve gerekirse orada başka bir proje seçebilirsiniz. Takımları Linear kartında eşleyin: **Default project** tüm takımları kapsar, **Team projects** takım bazında bunu geçersiz kılar. Eşleme yoksa pano en son gösterdiği projeyi kullanır.
 
 ### Bir issue’yu mesaja bağlayın
 
@@ -84,4 +83,3 @@ Kart, yeni bir sürüm çıktığında uzantıyı günceller, duraklattıysanız
 
 - [GitHub Issues & PRs](/tr/github/) — GitHub’ın OpenChamber’da yapabildiği her şey
 - [Worktree oturumları](/tr/worktrees/) — issue oturumlarının başlayabileceği yer
-- [Magic Prompts](/tr/magic-prompts/) — bir Linear oturumunun başladığı istemi düzenleyin

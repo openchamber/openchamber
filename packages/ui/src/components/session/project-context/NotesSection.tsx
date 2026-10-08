@@ -4,6 +4,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
 import { Textarea } from '@/components/ui/textarea';
+import { InlineDictationButton } from '@/components/dictation/InlineDictationButton';
 import { KnowledgeCard } from './KnowledgeCard';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_NOTE_BODY_MAX_LENGTH, type ProjectNote, type ProjectRef } from '@/lib/projectContextApi';
@@ -27,7 +28,7 @@ const NoteRow: React.FC<{
   pinned: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
-  onSaveBody: (body: string) => void;
+  onSaveBody: (noteId: string, body: string) => void;
   onTogglePinned: () => void;
   onDelete: () => void;
 }> = ({ note, pinned, expanded, onToggleExpanded, onSaveBody, onTogglePinned, onDelete }) => {
@@ -66,11 +67,11 @@ const NoteRow: React.FC<{
         return;
       }
       lastSavedRef.current = draft;
-      onSaveBody(draft);
+      onSaveBody(note.id, draft);
     }, NOTE_SAVE_DEBOUNCE_MS);
 
     return cancelDebounce;
-  }, [cancelDebounce, draft, onSaveBody]);
+  }, [cancelDebounce, draft, note.id, onSaveBody]);
 
   React.useEffect(() => cancelDebounce, [cancelDebounce]);
 
@@ -85,8 +86,8 @@ const NoteRow: React.FC<{
       return;
     }
     lastSavedRef.current = draft;
-    onSaveBody(draft);
-  }, [cancelDebounce, draft, onSaveBody]);
+    onSaveBody(note.id, draft);
+  }, [cancelDebounce, draft, note.id, onSaveBody]);
 
   const sourceLabel = note.source === 'selection'
     ? t('rightSidebar.contextNotesTodo.notes.source.selection')
@@ -204,6 +205,14 @@ export const NotesSection: React.FC<{
     setComposerText('');
   }, [composerText, createNote, projectRef, reportFailure, t]);
 
+  // Dictated text continues the draft at its end; the cap still applies.
+  const handleDictated = React.useCallback((text: string) => {
+    setComposerText((current) => {
+      const joined = current.trim() ? `${current.trimEnd()} ${text}` : text;
+      return joined.slice(0, PROJECT_NOTE_BODY_MAX_LENGTH);
+    });
+  }, []);
+
   const handleDelete = React.useCallback(
     async (noteId: string) => {
       const ok = await deleteNote(projectRef, noteId);
@@ -249,11 +258,19 @@ export const NotesSection: React.FC<{
         useScrollShadow
         scrollShadowSize={24}
         disabled={disabled}
+        // The footer row carries counter, mic, add and resize; the default
+        // bottom padding left it pressed against the rounded border.
+        outerClassName="pb-3.5"
         endSlot={(
           <>
             <span className="typography-meta text-muted-foreground">
               {composerText.length}/{PROJECT_NOTE_BODY_MAX_LENGTH}
             </span>
+            <InlineDictationButton
+              onTranscript={handleDictated}
+              disabled={disabled}
+              buttonClassName="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            />
             <button
               type="button"
               onClick={() => void handleAdd()}
@@ -286,7 +303,7 @@ export const NotesSection: React.FC<{
                 pinned={pinnedNoteIds.has(note.id)}
                 expanded={expandedNoteId === note.id}
                 onToggleExpanded={() => setExpandedNoteId((current) => (current === note.id ? null : note.id))}
-                onSaveBody={(body) => handleSaveBody(note.id, body)}
+                onSaveBody={handleSaveBody}
                 onTogglePinned={() => void handleTogglePinned(note.id, !pinnedNoteIds.has(note.id))}
                 onDelete={() => void handleDelete(note.id)}
               />

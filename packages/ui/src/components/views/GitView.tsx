@@ -318,7 +318,7 @@ export const GitView: React.FC<GitViewProps> = ({ isActive }) => {
   // stale-selection recovery; data fetching below keys off its result.
   const { rootIsGitRepo, gitDirectory, nestedRepos } = useNestedGitDirectory(
     currentDirectory ?? null,
-    { enabled: isActive },
+    { enabled: isActive, recheckOnOpen: true },
   );
   const isGitRepo = useIsGitRepo(gitDirectory ?? null);
   const status = useGitStatus(gitDirectory ?? null);

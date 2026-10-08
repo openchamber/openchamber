@@ -35,6 +35,7 @@ import {
   macosMajorVersion,
   readLoginItemSettings,
   readSettingsRoot,
+  readPreferredLocale,
   readThemeSource,
   resolveMainWindowBounds,
   resolvePreloadPath,
@@ -52,6 +53,8 @@ import {
 } from './early-startup.mjs';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
+import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
+import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -1139,15 +1142,6 @@ const registerPackagedUiProtocol = () => {
   });
 };
 
-const normalizeNotificationInput = (raw) => {
-  if (!raw || typeof raw !== 'object') return {};
-  // UI IPC path wraps in { payload: {...} }; sidecar stdout path is flat.
-  if (raw.payload && typeof raw.payload === 'object') {
-    return { ...raw, ...raw.payload };
-  }
-  return raw;
-};
-
 const isAnyWindowFocused = () =>
   BrowserWindow.getAllWindows().some(
     (window) => !window.isDestroyed() && window.isFocused(),
@@ -1233,6 +1227,7 @@ const maybeShowNativeNotification = (rawInput) => {
   const directory = typeof payload.directory === 'string' && payload.directory.trim()
     ? payload.directory.trim()
     : null;
+  const runtimeKey = readTrimmedString(payload.runtimeKey) || null;
 
   const notification = new Notification({
     title,
@@ -1247,7 +1242,12 @@ const maybeShowNativeNotification = (rawInput) => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToPrimaryWindow('openchamber:open-session', { sessionId, directory });
+      // Name the runtime that owns the session so the receiving window can
+      // tell a session of its own instance from one of another, and route
+      // cross-instance clicks to the owning instance's window.
+      const openSessionPayload = { sessionId, directory };
+      if (runtimeKey) openSessionPayload.runtimeKey = runtimeKey;
+      emitToPrimaryWindow('openchamber:open-session', openSessionPayload);
     }
     release();
   });
@@ -1383,7 +1383,8 @@ const spawnLocalServer = async () => {
     builtInExtensionsDir: app.isPackaged
       ? path.join(app.getAppPath().endsWith('.asar') ? `${app.getAppPath()}.unpacked` : app.getAppPath(), 'node_modules/@openchamber/web/server/built-in-extensions')
       : undefined,
-    onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
+    // The in-process server's notifications belong to the local instance.
+    onDesktopNotification: (payload) => maybeShowNativeNotification({ ...payload, runtimeKey: 'local' }),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl: state.apiBaseUrl || '',
@@ -2957,6 +2958,38 @@ const resolveMiniChatRuntimeConfig = (browserWindow, args = {}) => {
   };
 };
 
+// A line of text under the splash logo, for a startup step the user waits
+// on (the default remote or SSH instance). The splash is a plain document
+// owned by main, so the text is added from here; the app replaces the page.
+const showSplashStatus = (text) => {
+  const mainWindow = state.mainWindow;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  // Development shows the splash as a data: URL, packaged builds as /__splash.
+  const url = mainWindow.webContents.getURL();
+  if (!url.startsWith('data:') && !url.endsWith('/__splash')) return;
+  const script = `(() => {
+    const show = () => {
+    const stack = document.querySelector('.stack');
+    if (!stack) return;
+    let line = document.getElementById('oc-splash-status');
+    if (!line) {
+      line = document.createElement('div');
+      line.id = 'oc-splash-status';
+      line.style.cssText = 'margin-top:16px;font-size:13px;opacity:0.7;max-width:80vw;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      stack.appendChild(line);
+    }
+    line.textContent = ${JSON.stringify(text)};
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show, { once: true });
+    else show();
+  })();`;
+  mainWindow.webContents.executeJavaScript(script).catch(() => {});
+};
+
+const showSplashConnecting = (hostLabel) => {
+  showSplashStatus(menuLabel(normalizeMenuLocale(readPreferredLocale()), 'splash.connectingTo').replace('{host}', hostLabel));
+};
+
 const resolveInitialUrl = async () => {
   const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
@@ -3003,13 +3036,32 @@ const resolveInitialUrl = async () => {
   let remoteProbe = null;
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
-  const config = readDesktopHostsConfig();
+  let config = readDesktopHostsConfig();
+  // A default SSH instance is reachable only through its tunnel: open it
+  // before the probe, and boot Local when it cannot be opened.
+  let sshStartupFallbackHostId = null;
+  const defaultSshInstanceId = envTarget
+    ? null
+    : resolveDefaultSshInstanceId(config.defaultHostId, sshManager.readInstances().instances);
+  if (defaultSshInstanceId) {
+    const sshHostLabel = config.hosts.find((entry) => entry.id === defaultSshInstanceId)?.label
+      || sshManager.readInstances().instances.find((entry) => entry?.id === defaultSshInstanceId)?.nickname
+      || defaultSshInstanceId;
+    showSplashConnecting(sshHostLabel);
+    const connected = await connectDefaultSshInstanceAtStartup({ sshManager, instanceId: defaultSshInstanceId });
+    if (connected.ok) {
+      config = readDesktopHostsConfig();
+    } else if (localAvailable) {
+      console.warn(`[startup] default SSH instance did not connect (${connected.reason}); opening Local`);
+      sshStartupFallbackHostId = defaultSshInstanceId;
+    }
+  }
   if (envTarget) {
     apiBaseUrl = envTarget;
     clientToken = '';
     requestHeaders = {};
     initialUrl = usePackagedUi ? localUiUrl : envTarget;
-  } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
+  } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID && !sshStartupFallbackHostId) {
     const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
     if (host?.url) {
       apiBaseUrl = host.apiUrl || host.url;
@@ -3025,6 +3077,17 @@ const resolveInitialUrl = async () => {
     && sanitizeHostRelayForStorage(config.hosts.find((entry) => entry.id === config.defaultHostId)?.relay),
   );
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
+    // The probe can take up to twelve seconds against a slow or absent host.
+    const remoteLabel = envTarget
+      ? null
+      : config.hosts.find((entry) => entry.id === config.defaultHostId)?.label;
+    let remoteHostName = '';
+    try {
+      remoteHostName = new URL(apiBaseUrl).host;
+    } catch {
+      // A malformed stored URL fails the probe below; the label is cosmetic.
+    }
+    showSplashConnecting(remoteLabel || remoteHostName || apiBaseUrl);
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
     if (remoteProbe.status === 'unreachable' && !defaultHostRelayCapable) {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
@@ -3054,12 +3117,14 @@ const resolveInitialUrl = async () => {
     );
   }
 
-  const bootOutcome = computeBootOutcome({
-    envTargetUrl: envTarget || null,
-    probe: remoteProbe,
-    config,
-    localAvailable,
-  });
+  const bootOutcome = sshStartupFallbackHostId
+    ? { target: 'local', status: 'ok', localAvailable, sshStartupFallbackHostId }
+    : computeBootOutcome({
+      envTargetUrl: envTarget || null,
+      probe: remoteProbe,
+      config,
+      localAvailable,
+    });
 
   return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
 };
@@ -4246,9 +4311,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { mime, base64: bytes.toString('base64'), size: bytes.length };
     }
 
-    case 'desktop_notify':
-      maybeShowNativeNotification(args);
+    case 'desktop_notify': {
+      // Stamp the forwarding window's own host identity: the renderer of a
+      // direct host window cannot name its host (it sees only the API URL).
+      const senderHostId = browserWindow && !browserWindow.isDestroyed()
+        ? readTrimmedString(browserWindow.__ocHostWindowId) || null
+        : null;
+      maybeShowNativeNotification(stampForwardedNotification(args, senderHostId));
       return null;
+    }
 
     case 'desktop_tray_update':
       if (state.trayController) {
@@ -4782,6 +4853,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return takePendingSessionDeepLinks();
+
+    case 'desktop_open_host_session': {
+      const runtimeKey = readTrimmedString(args.runtimeKey);
+      const sessionId = readTrimmedString(args.sessionId);
+      if (!runtimeKey || !sessionId) throw new Error('runtimeKey and sessionId are required');
+      // The session belongs to another instance than the one the calling
+      // window shows: open it in a window for that instance instead.
+      const host = resolveHostEntryForRuntimeKey(runtimeKey, {
+        hosts: readDesktopHostsConfig()?.hosts || [],
+        localUrl: state.sidecarUrl || null,
+        localClientToken: readDesktopLocalClientToken(),
+      });
+      if (!host) {
+        log.warn('[electron] open-host-session: no host for runtime key', { runtimeKey });
+        return { opened: false };
+      }
+      await openHostWindow(host, parseSessionRoute(sessionId, null), { reuseOpenWindow: true });
+      return { opened: true };
+    }
 
     case 'desktop_focus_main_window': {
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';

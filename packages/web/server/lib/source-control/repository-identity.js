@@ -66,7 +66,7 @@ const resolveIdentity = async (directory, {
   return identity;
 };
 
-export function createRepositoryIdentityResolver({
+function createRepositoryIdentityResolver({
   fsImpl = fs,
   resolveGitPaths = resolveRepositoryGitPaths,
   getRepositoryRemotes = getRepositoryRemoteUrls,

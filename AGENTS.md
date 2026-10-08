@@ -11,14 +11,15 @@ This file contains only always-on repository rules and routing. Detailed workflo
 These steps are mandatory. Before editing, you **MUST**:
 
 1. Follow this root guide.
-2. Load every matching project skill and every task-required reference from
-   those skills.
-3. Read the nearest `DOCUMENTATION.md` and package `README.md` when present.
+2. Load every project skill whose `description` matches the change, and every
+   reference those skills require. Any source change starts with
+   `openchamber-change-discipline`.
+3. Read the nearest `DOCUMENTATION.md` (under `packages/**`) for each module you
+   change, and the package `README.md` for package-level work.
 4. Follow local code and test precedent.
 
 If these sources materially conflict, stop and resolve the conflict instead of silently choosing one.
-Do not start editing when a matching skill or required reference has not been
-read. Skill loading is a required part of the task, not optional guidance.
+Do not start editing before every matching skill and required reference is read.
 
 ## Runtime Boundaries
 
@@ -44,7 +45,7 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 - Do not add dependencies unless explicitly requested.
 - Never add or log secrets, bearer tokens, pairing credentials, or sensitive user data.
 - Keep changes minimal and preserve unrelated worktree changes.
-- Release notes are the maintainer's release-time work: they get written once, as one story, in `changelog/unreleased.md` when the maintainer asks to update the changelog. Until that request, treat `changelog/` as read-only — a fix, feature, or merged PR lands without a changelog line. `packages/vscode/CHANGELOG.md` and `changelog/index.json` are generated from `changelog/*.md` by `oc-dev create-release`, and `CHANGELOG.md` is a legacy copy for older installs: never edit or regenerate any of them; an agent's only changelog output is `changelog/unreleased.md`.
+- `changelog/` is read-only, and a fix, feature, or merged PR lands without a changelog line. Release notes are written only when the maintainer asks to update the changelog, through the `update-changelog` skill.
 - Enforce security and correctness in core/runtime logic, not only UI visibility or prompts.
 - Keep entrypoints and bridges thin; place domain logic in focused owning modules.
 - Update owning documentation when module ownership, contracts, or invariants change.
@@ -61,90 +62,21 @@ Shared contracts must define intentional behavior for every applicable runtime: 
 
 ## Communication
 
-You and the maintainer are two people solving a problem together — talk like a trusted colleague, not a report generator. Plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is something read in minutes, not a separate reading task: put the conclusion first and stand behind it. Answer in the language the maintainer addressed you in; code, comments, and docs stay in English.
+You and the person you work with are two people solving a problem together. Talk like a trusted colleague: plain words, short sentences, mechanisms explained through what the user experiences. Warm and direct, never familiar. A reply is read in minutes, so the conclusion comes first and you stand behind it. Answer in the language you were addressed in; code, comments, and docs stay in English.
 
-When writing or editing user-facing text — docs, UI copy, PR/issue comments, READMEs — load `.agents/skills/communication-style/SKILL.md` and apply its checklist.
-
-## Documentation Discovery
-
-Before changing a module, search for the nearest `DOCUMENTATION.md`; before package-level work, read its `README.md`. Discover docs dynamically under `packages/**/DOCUMENTATION.md` rather than relying on a static exhaustive map.
-
-High-value anchors:
-
-- Sync: `packages/ui/src/sync/DOCUMENTATION.md`
-- Stores: `packages/ui/src/stores/DOCUMENTATION.md`
-- CLI: `packages/web/bin/lib/DOCUMENTATION.md`
-- Performance measurement tooling: `scripts/perf/DOCUMENTATION.md`
-- VS Code runtime: `packages/vscode/src/DOCUMENTATION.md`
-- Electron: `packages/electron/README.md`
-- Mobile: `packages/mobile/README.md`
-- SDK: `packages/sdk/DOCUMENTATION.md`
+Load the `communication-style` skill once, at the start of the session, before your first reply. It stays in context for the rest of the session: every reply, in any language, and every text people read follows it. Later turns use it as loaded; they do not load it again.
 
 ## Project Skills
 
-Project skills live under `.agents/skills/*/SKILL.md`. You **MUST** load every
-skill matching the character of the change before editing; multiple skills may
-apply, including companion skills required by another skill. Read every
-task-required reference named by those skills. Skills are canonical for their
-detailed workflows and checklists. Treating this table as optional advice is a
-process violation.
-
-
-| Trigger | Required skill |
-|---|---|
-| Source/dependency changes, exports or package contracts, build/generated assets, or module ownership | `openchamber-change-discipline` |
-| CLI commands, prompts, terminal output, non-TTY, `--quiet`, or `--json` behavior | `clack-cli-patterns` |
-| Shared UI data access, OpenCode SDK or server routes, `RuntimeAPIs`, runtime auth/URLs, bridges, or runtime switching | `ui-api-decoupling` |
-| Electron main/preload, IPC, native UI, updater, deep links, SSH/tunnels, packaging, or child processes | `desktop-shell` |
-| Session sync, bootstrap/reconnect, reducers, polling, optimistic state, queues, live status, reconciliation, or directory-scoped caches | `sync-state-invariants` |
-| Isolated-space trust boundaries: hardening, networks and gatekeeper policy, exec and lifecycle, grants and credentials, code transfer and apply, dispatcher isolation, preview content, or protection tests | `isolated-space-boundary` |
-| Conversation content leaving for a destination other than the session's provider, a new way into this machine (listener, tunnel, relay, pairing, share link), provider/key/endpoint entry, usage reporting, or enterprise mode and its policy file | `enterprise-boundary` |
-| Render/store/event hot paths, large lists, caches/indexes, or reported lag, freezes, CPU/memory, startup, or performance regressions | `performance-engineering` |
-| WebSocket, SSE, streaming transport, runtime transport internals, or private relay | `relay-transport` |
-| UI components, styling, colors, buttons, or icons | `theme-system` |
-| User-facing or accessible UI text, labels, aria, toasts, dialogs, or navigation copy | `locale-ui-patterns` |
-| Settings UI, settings dialogs, configuration surfaces, or settings search | `settings-ui-patterns` |
-| Sortable or drag-to-reorder behavior, especially `@dnd-kit` and touch/wrapping layouts | `drag-to-reorder` |
-| iOS Simulator build, launch, preview, gestures, or `serve-sim` control | `serve-sim` |
-| The maintainer explicitly asks to update the changelog (main app or VS Code extension) — the only time `changelog/unreleased.md` is edited | `update-changelog` |
-| Creating or editing skills, `AGENTS.md`, or docs reached through agent instructions/context pointers | `writing-for-agents` |
-| OpenCode routes, events, message/session shapes, plugins, the pinned OpenCode version, "what's new in OpenCode 2.0.x", or a bug that looks like OpenCode behaving unexpectedly | `opencode-v2` |
-| Reviewing a single pull request or drafting a PR verdict/close/review comment | `pr-review` |
-| Triaging, cleaning up, or batch-processing the open PR queue | `triage-prs` |
-| Triaging, cleaning up, or batch-processing the issue backlog | `triage-issues` |
-
-Pure code-reading or explanation does not require implementation skills unless needed to interpret a specialized subsystem.
-
-### Skill Ownership
-
-Keep each cross-cutting rule with one canonical owner; companion skills add only domain-specific consequences and a pointer to that owner.
-
-| Concern | Canonical skill |
-|---|---|
-| Change scope, abstraction discipline, and validation risk | `openchamber-change-discipline` |
-| State authority, reconciliation, optimistic state, and lifecycle correctness | `sync-state-invariants` |
-| Isolated-space trust boundaries and the evidence that each one holds | `isolated-space-boundary` |
-| Enterprise mode: what counts as egress or exposure, how it is gated, and administrator knobs | `enterprise-boundary` |
-| Measurement, hot-path cost, caching performance, and optimization evidence | `performance-engineering` |
-| Shared UI API and runtime boundaries | `ui-api-decoupling` |
-| WebSocket/SSE and private relay mechanics | `relay-transport` |
-| Electron native ownership and privilege boundary | `desktop-shell` |
-| UI tokens, primitives, icons, and animation styling | `theme-system` |
-| Settings composition and search behavior | `settings-ui-patterns` |
-| User-facing text and localization | `locale-ui-patterns` |
-| Agent-facing document structure and context pointers | `writing-for-agents` |
-
-Before adding guidance to a skill, identify its canonical owner. If another skill owns the rule, add a precise companion pointer and only the local consequence; do not copy the rule.
+Project skills live in `.agents/skills/*/SKILL.md`, and each skill's `description`
+says when it applies. If your tool does not list skill descriptions, read them in
+those files before you start. Pure code-reading or explanation needs no
+implementation skills unless a specialized subsystem has to be interpreted.
 
 ## Validation
 
-- Use `package.json` scripts as the command source of truth.
-- Prefer focused tests and package-scoped type-check/lint for executable source changes.
-- Use workspace-wide checks for cross-workspace contracts, root tooling, dependencies, or shared generated assets.
-- Run `bun run dead-code` when source files are added/deleted/renamed or exports, types, entrypoints, or import shape change; inspect its report because it is non-blocking.
-- Run `bunx oxlint <changed-paths>` on TypeScript/JavaScript files you created or substantially rewrote. This runs the vendored `anti-slop` plugin, which rejects low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, and module mocking. Fix findings in code you authored. Pre-existing findings elsewhere are a known backlog: do not mass-fix them, and never silence a rule, weaken severity, or launder types to make the check pass.
-- Do not assume TypeScript/lint covers server JS, CLI JS, Electron helpers, or native behavior; run focused tests, syntax checks, builds, or runtime validation for the touched surface.
-- For docs-only or isolated config changes, run the narrowest relevant validation.
+- Use `package.json` scripts as the command source of truth. Which checks a change needs is in `openchamber-change-discipline`.
+- Before every commit of source changes, `bun run check:changed` passes. It runs type-check, lint, and dead code (Knip, kept at zero findings), then an anti-slop ratchet: the vendored `anti-slop` oxlint plugin (low-evidence typing: unjustified type assertions, `unknown`/`object`/`Record<string, unknown>` contracts, ad hoc `typeof` narrowing, module mocking) may report no more findings per rule across the changed files than at the base. Fix the new findings; the pre-existing backlog stays out of scope unless the task is that cleanup. Never silence a rule, weaken severity, or launder types to make a check pass.
 - Report exactly what was and was not validated. Static checks alone do not prove runtime, relay, performance, or platform correctness.
 
 ## Pull Request Handoff
