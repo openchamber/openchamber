@@ -9,13 +9,21 @@
 // and by the space's project directory. Without an answer from the host nothing is refused, and
 // neither is a provider the grant dialog cannot give a key for, a browser login or OpenCode's own
 // among them: the dialog would be a dead end, and such a model may work inside all the same.
+// One exception: OpenCode's own provider reaches opencode.ai, which a space that allows only
+// chosen addresses blocks unless that name is on its list, so the message would fail inside
+// with a bare 403; it stays in the composer with the name to allow instead.
 
 import { SPACE_MODEL_PROVIDERS } from './model-access';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
 import type { SpaceEntry } from './spaces-api';
 
-type SpaceModelRefusal = { spaceId: string; providerId: string; reason: 'not_granted' | 'needs_again' };
+type SpaceModelRefusal =
+  | { spaceId: string; providerId: string; reason: 'not_granted' | 'needs_again' }
+  | { spaceId: string; providerId: string; reason: 'domain_blocked'; domain: string };
+
+/** The address a provider the dialog cannot grant talks to, for the providers whose address is known. */
+const UNGRANTABLE_PROVIDER_DOMAINS = new Map([['opencode', 'opencode.ai']]);
 
 const chosenByDirectory = new Map<string, ReadonlySet<string>>();
 const directoryByRequest = new Map<string, string>();
@@ -46,12 +54,19 @@ const refusalFromList = (entry: SpaceEntry, providerId: string): SpaceModelRefus
  * its directory; a session by its directory.
  */
 export const spaceModelRefusal = (target: { requestId: string | null; directory: string | null }, providerId: string): SpaceModelRefusal | null => {
-  if (!SPACE_MODEL_PROVIDERS.some((provider) => provider.id === providerId)) return null;
+  const grantable = SPACE_MODEL_PROVIDERS.some((provider) => provider.id === providerId);
+  const domain = UNGRANTABLE_PROVIDER_DOMAINS.get(providerId);
+  if (!grantable && !domain) return null;
   const directory = (target.requestId ? directoryByRequest.get(target.requestId) : undefined) ?? target.directory;
   const spaceId = spaceIdOfDirectory(directory);
   if (!spaceId || !directory) return null;
   const { journey, creationAccess } = useSpacesStore.getState();
   const entry = journey?.get(spaceId);
+  if (!grantable && domain !== undefined) {
+    // A space that is not listed yet, or whose network the host could not read, refuses nothing.
+    if (entry?.network?.mode !== 'allowlist' || entry.network.domains.includes(domain)) return null;
+    return { spaceId, providerId, reason: 'domain_blocked', domain };
+  }
   if (entry?.state === 'running' && creationAccess.get(spaceId)?.kind !== 'giving') return refusalFromList(entry, providerId);
   const chosen = chosenByDirectory.get(directory);
   if (chosen && !chosen.has(providerId)) return { spaceId, providerId, reason: 'not_granted' };

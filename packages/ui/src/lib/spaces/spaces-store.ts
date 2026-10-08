@@ -85,8 +85,9 @@ type SpacesState = {
    */
   noteGrantGiven: (spaceId: string, grant: SpaceGrant) => void;
   /** The grant dialog, open on one space and, when opened for a missing key, on its provider. */
-  accessDialog: { spaceId: string; providerId: string | null } | null;
-  openAccessDialog: (spaceId: string, providerId?: string | null) => void;
+  /** `domain` is a name to offer in the network field, from a refusal that named it. */
+  accessDialog: { spaceId: string; providerId: string | null; domain?: string } | null;
+  openAccessDialog: (spaceId: string, providerId?: string | null, domain?: string) => void;
   closeAccessDialog: () => void;
   /** The action under way or failed per space, in this window, for the group's status line and menu. */
   actions: ReadonlyMap<string, SpaceActionState>;
@@ -191,7 +192,7 @@ export const useSpacesStore = create<SpacesState>((set, get) => ({
     return { journey, progressRevision };
   }),
   accessDialog: null,
-  openAccessDialog: (spaceId, providerId = null) => set({ accessDialog: { spaceId, providerId } }),
+  openAccessDialog: (spaceId, providerId = null, domain) => set({ accessDialog: domain === undefined ? { spaceId, providerId } : { spaceId, providerId, domain } }),
   closeAccessDialog: () => set({ accessDialog: null }),
   actions: new Map(),
   noteAction: (spaceId, state) => set((current) => {

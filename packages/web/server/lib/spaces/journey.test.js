@@ -688,6 +688,62 @@ describe('the journey: grants', () => {
     expect((await refusing.journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'needs_access', needsAccess: ['openai'] });
   });
 
+  it('says the grants a running gatekeeper lost again when the host starts: an environment key and a domain, never a typed key', async () => {
+    const { journey, calls, gatekeeper, id, changes } = await ready({ hostEnvironment: { OPENAI_API_KEY: ENV_KEY } });
+    await journey.grantAccess(id, anthropic);
+    await journey.grantAccess(id, openai);
+    const opened = await journey.grantAccess(id, registry);
+    // The gatekeeper lost everything, as after a start the previous host did not live to finish; the space runs on.
+    gatekeeper.forget(id);
+    expect((await journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'needs_access', needsAccess: ['anthropic', 'openai', opened.grant.id] });
+    calls.splice(0);
+    const before = changes.count;
+
+    await journey.restoreLostGrants();
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([
+      ['addGrant', id, { id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: ENV_KEY }],
+      ['addGrant', id, { id: opened.grant.id, upstream: 'https://registry.example.com/npm/', header: null, secret: null }],
+    ]);
+    expect(JSON.stringify(calls)).not.toContain(KEY);
+    expect(changes.count).toBe(before + 1);
+    // Only the typed key still needs the user.
+    expect((await journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'needs_access', needsAccess: ['anthropic'] });
+
+    // A gatekeeper that holds its grants is asked and told nothing.
+    calls.splice(0);
+    await journey.restoreLostGrants();
+    expect(calls.map(([name]) => name)).toEqual(['readPolicy']);
+  });
+
+  it('leaves a stopped space, a space without grants and a gatekeeper that does not answer alone when the host starts', async () => {
+    const { journey, calls, gatekeeper, id, manager, place } = await ready({ hostEnvironment: { OPENAI_API_KEY: ENV_KEY } });
+    await journey.grantAccess(id, openai);
+    const empty = await manager.createSpace({ placeId: 'memory', projectDirectory: PROJECT, name: 'No grants' });
+    gatekeeper.forget(id);
+    gatekeeper.readPolicy = async () => { throw new SpaceError('gatekeeper_unreachable', 'the gatekeeper did not answer'); };
+    calls.splice(0);
+    await journey.restoreLostGrants();
+    expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
+
+    await place.stop(id);
+    await place.stop(empty.id);
+    calls.splice(0);
+    await journey.restoreLostGrants();
+    expect(calls).toEqual([]);
+  });
+
+  it('leaves a space with an action under way to that action when the host starts', async () => {
+    const { journey, calls, gatekeeper, id, releaseCodeOut } = await ready({ hostEnvironment: { OPENAI_API_KEY: ENV_KEY }, holdCodeOut: true });
+    await journey.grantAccess(id, openai);
+    gatekeeper.forget(id);
+    const preview = journey.previewApply(id);
+    calls.splice(0);
+    await journey.restoreLostGrants();
+    expect(calls.filter(([name]) => name === 'readPolicy' || name === 'addGrant')).toEqual([]);
+    releaseCodeOut();
+    await preview;
+  });
+
   it('asks the gatekeeper only where there is something to ask, and never calls a failed read "granted"', async () => {
     const { journey, calls, id, manager, place } = await ready();
     const empty = await manager.createSpace({ placeId: 'memory', projectDirectory: PROJECT, name: 'No grants' });

@@ -383,6 +383,45 @@ export function createSpaceJourney({
   };
 
   /**
+   * The grants of every running space that its gatekeeper does not hold, said again from the
+   * record, at the host's start: a start the previous host did not live to finish leaves them
+   * unsaid, and the user would otherwise be asked for a key the record already names. Only what
+   * the host can say on its own goes: an environment key read now, and an opened domain; a typed
+   * key stays with the user. A space with an action under way is left to that action, and a
+   * gatekeeper that cannot be asked is left alone and logged. Nothing here fails the start.
+   */
+  const restoreLostGrants = async () => {
+    let spaces;
+    try {
+      spaces = await manager.listSpaces({ placeId: place.id });
+    } catch (error) {
+      logger.warn?.(`[spaces] could not list the spaces to say their grants again: ${error?.code ?? error?.message ?? error}`);
+      return;
+    }
+    for (const space of spaces) {
+      if (space.state !== 'running' || busy.has(space.id)) continue;
+      const grants = (records.read(space.id).record?.grants ?? []).filter((grant) => grant.kind !== 'model' || grant.source.kind === 'env');
+      if (grants.length === 0) continue;
+      let held;
+      try {
+        held = new Set((await gatekeeper.readPolicy(space.id)).grants);
+      } catch (error) {
+        logger.warn?.(`[spaces] the gatekeeper of space ${space.id} did not say what it holds: ${error?.code ?? error?.message ?? error}`);
+        continue;
+      }
+      const lost = grants.filter((grant) => !held.has(grant.id));
+      if (lost.length === 0) continue;
+      try {
+        const { restored } = await exclusive(space.id, () => restoreGrants(space.id, lost));
+        if (restored.length > 0) logger.info?.(`[spaces] said the grants ${restored.join(', ')} of space ${space.id} again`);
+      } catch (error) {
+        logger.warn?.(`[spaces] the grants of space ${space.id} were not said again: ${error?.code ?? error?.message ?? error}`);
+      }
+    }
+    onSpacesChanged();
+  };
+
+  /**
    * Which grants of the record a running gatekeeper holds now, read from the gatekeeper itself:
    * after a machine restart it holds none, and the space "needs access" (DESIGN.md, Gatekeeper).
    * A gatekeeper that cannot be asked leaves the answer unknown, never "granted".
@@ -899,5 +938,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
 }

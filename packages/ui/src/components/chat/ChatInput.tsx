@@ -1657,10 +1657,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 : null;
         if (spaceRefusal) {
             const provider = useConfigStore.getState().providers.find((entry) => entry.id === spaceRefusal.providerId)?.name ?? spaceRefusal.providerId;
-            toast.error(spaceRefusal.reason === 'needs_again'
-                ? t('spaces.draft.modelNeedsKeyAgain', { provider })
-                : t('spaces.draft.modelNotGranted', { provider }), {
-                action: { label: t('spaces.group.access.give'), onClick: () => useSpacesStore.getState().openAccessDialog(spaceRefusal.spaceId, spaceRefusal.providerId) },
+            toast.error(spaceRefusal.reason === 'domain_blocked'
+                ? t('spaces.draft.modelDomainBlocked', { domain: spaceRefusal.domain })
+                : spaceRefusal.reason === 'needs_again'
+                    ? t('spaces.draft.modelNeedsKeyAgain', { provider })
+                    : t('spaces.draft.modelNotGranted', { provider }), {
+                action: {
+                    label: t('spaces.group.access.give'),
+                    onClick: () => useSpacesStore.getState().openAccessDialog(spaceRefusal.spaceId, spaceRefusal.providerId, spaceRefusal.reason === 'domain_blocked' ? spaceRefusal.domain : undefined),
+                },
             });
             return;
         }

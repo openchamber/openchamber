@@ -347,6 +347,8 @@ export function createSpacesHost({
       unsubscribeHostEvents = globalEventHub.subscribeEvent((event) => { if (event.spaceId === null) index.observeHostEvent(event.payload); });
       followTimer = setTimer(() => { void follow(); }, FOLLOW_INTERVAL_MS);
       followTimer?.unref?.();
+      // A running space whose gatekeeper lost its grants, from a start cut short, gets them again.
+      void journey.restoreLostGrants();
       return follow();
     },
     /** For the proxy: the merged session list, or the host's own when no space exists. */
