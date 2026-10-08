@@ -230,7 +230,7 @@ Environment:
 | `PATH` with `/opt/openchamber-tools/node_modules/.bin` last | The server refuses to start without `opencode` on PATH. The image has no `openchamber` and no `opencode`, so both are found there. The image's own directories come first, so a transitive npm package that ships a bin named `node` or `sh` never shadows the image's program. |
 | `HTTPS_PROXY`, `https_proxy`, `HTTP_PROXY`, `http_proxy`, all four `http://gatekeeper:3128` | The corridor. curl 7.88.1, the version in this image, ignores an uppercase `HTTP_PROXY` on purpose, the httpoxy protection, and honours the lowercase one. Without the lowercase spelling, plain-HTTP traffic from curl and from everything that uses libcurl never reaches the corridor. |
 | `NO_PROXY`, `no_proxy`, both `gatekeeper,localhost,127.0.0.1` | Window traffic skips the corridor, and so does the space's own loopback. Measured: with `http_proxy` set, curl sends even a request to 127.0.0.1 to the corridor, and Node with `NODE_USE_ENV_PROXY=1` proxies loopback too. curl reads both spellings. |
-| `NODE_USE_ENV_PROXY=1` | Node 22 ignores proxy variables without it. Measured: `EAI_AGAIN` for every fetch, and with it Node honours the uppercase spelling. |
+| `NODE_USE_ENV_PROXY=1` | Node ignores proxy variables without it, on 22 and still on 24. Measured: `EAI_AGAIN` for every fetch, and with it Node honours the uppercase spelling. |
 | `OPENCODE_DISABLE_MODELS_FETCH=1`, `OPENCODE_DISABLE_AUTOUPDATE=1` | The catalog and the update check would spend corridor attempts on downloads a space does not need. Measured with OpenCode 2.0.15: without `OPENCODE_DISABLE_MODELS_FETCH` the journal shows `models.opencode.ai:443 deny:not-on-allowlist`, and with it the journal stays empty. The 2.0.15 binary does read `OPENCODE_DISABLE_AUTOUPDATE`, `1` or `true`, and then logs that it skipped the update check. What it changes in a space was not seen: `opencode serve` made no update attempt with it or without it. It stays because the binary honours it and it costs nothing. |
 | `OPENCHAMBER_RELAY_HOST=off` | The server inside a space must never host the relay passively. It has a way out now, and paired devices must not land on a space. `server/index.js` reads this variable when it computes `allowPassiveHost`. |
 | `OPENCHAMBER_SPACE_IDLE_STOP_FILE=/home/space/.openchamber-space/idle-stop.json` | Since 5d-3: where the server inside reads the idle stop's setting. Only a space has it, so the idle timer runs nowhere else. See "Idle stop" under "The journey". |
@@ -1155,15 +1155,15 @@ Not verified with OpenCode 2.0.15: the rewritten credential test and the rewritt
 
 ## Base image
 
-`SPACE_BASE_IMAGE` in `places/docker.js` is `node:22-bookworm` pinned as `node@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844`.
+`SPACE_BASE_IMAGE` in `places/docker.js` is `node:24-bookworm` pinned as `node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0`.
 
-It must be the multi-arch index digest, or spaces break on the other CPU architecture. Verified on 2026-09-19:
+It must be the multi-arch index digest, or spaces break on the other CPU architecture. Verified on 2026-10-08:
 
 ```
-docker manifest inspect node@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844
+docker manifest inspect node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0
 ```
 
-The answer has `mediaType: application/vnd.oci.image.index.v1+json` and lists manifests for `linux/amd64`, `linux/arm`, `linux/arm64`, and `linux/ppc64le`. An arch-specific digest answers with `application/vnd.oci.image.manifest.v1+json` and no platform list. `docker images --digests node` showed the same digest for the `22-bookworm` tag. Repeat both commands when you bump the digest. `docker buildx imagetools inspect` gives the same facts where buildx is installed.
+The answer has `mediaType: application/vnd.oci.image.index.v1+json` and lists manifests for `linux/amd64`, `linux/arm64`, and `linux/ppc64le`, plus attestation entries with platform `unknown/unknown`. Node 24 dropped 32-bit `linux/arm`. An arch-specific digest answers with `application/vnd.oci.image.manifest.v1+json` and no platform list. `docker images --digests node` showed the same digest for the `24-bookworm` tag. Repeat both commands when you bump the digest. `docker buildx imagetools inspect` gives the same facts where buildx is installed.
 
 ## Tests
 

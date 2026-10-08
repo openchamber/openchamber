@@ -142,7 +142,7 @@ export const SPACE_ENVIRONMENT = Object.freeze({
   // NODE_USE_ENV_PROXY=1 proxies loopback too. Both spellings, because curl reads both.
   NO_PROXY: `${GATEKEEPER_ALIAS},localhost,127.0.0.1`,
   no_proxy: `${GATEKEEPER_ALIAS},localhost,127.0.0.1`,
-  // Node 22 ignores proxy variables without this. Measured: EAI_AGAIN for every fetch.
+  // Node ignores proxy variables without this. Measured on 22 and 24: EAI_AGAIN for every fetch.
   NODE_USE_ENV_PROXY: '1',
   // OpenCode's catalog and update downloads would only spend corridor attempts.
   OPENCODE_DISABLE_MODELS_FETCH: '1',

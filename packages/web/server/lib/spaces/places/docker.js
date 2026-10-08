@@ -36,8 +36,8 @@ import { createDockerTools } from './docker-tools.js';
 
 const DOCKER_PLACE_ID = 'docker';
 
-// node:22-bookworm as a multi-arch index digest. DOCUMENTATION.md says how it was verified.
-export const SPACE_BASE_IMAGE = 'node@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844';
+// node:24-bookworm as a multi-arch index digest. DOCUMENTATION.md says how it was verified.
+export const SPACE_BASE_IMAGE = 'node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0';
 
 const CHECK_TIMEOUT_MS = 10_000;
 const PULL_TIMEOUT_MS = 20 * 60_000;
