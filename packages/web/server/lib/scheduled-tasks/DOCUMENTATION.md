@@ -242,7 +242,16 @@ project write lock on every `syncProject` when the project path is known:
   name, schedule and execution. Enabling a loop in the UI (the loop-file
   endpoint) records that approval; disabling withdraws it. A pull that changes
   what a loop runs or when changes its fingerprint, and the loop waits for a
-  new approval. User-scope loops (`~/.agents/loops`) need none.
+  new approval. User-scope loops (`~/.agents/loops`) need none. A task the
+  gate holds back is returned with `loopApproval`: `required` (never enabled
+  here) or `outdated` (enabled, then the file changed); the UI explains the
+  pause from it. The field is never stored.
+- **Agent tool and CLI.** `setEnabled` (behind `schedule.toggle` and
+  `openchamber schedule enable|disable`) changes a loop task the way the
+  Scheduled tasks checkbox does, through the loop file. It refuses (409) to
+  enable a paused project-scope loop: the approval is the user's decision in
+  Scheduled tasks, never an agent's or a script's. Disabling works for every
+  loop.
 - **Loop-file mutations.** The loop file remains authoritative. The scheduled-
   tasks UI opens it in the built-in file editor, updates its `enabled`
   frontmatter through the loop-file endpoint, and deletes the file through the

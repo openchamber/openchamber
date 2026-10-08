@@ -452,6 +452,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': '由循环文件 {file} 管理',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': '启用状态由循环文件控制；请在 Markdown frontmatter 中设置 enabled',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': '循环任务在其 .agents/loops Markdown 文件中配置',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': '来自此仓库。启用后才会在这台电脑上运行。',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': '启用后已更改。重新启用后才会运行。',
   'sessions.scheduledTasks.editor.title.edit': '编辑计划任务',
   'sessions.scheduledTasks.editor.title.new': '新建计划任务',
   'sessions.scheduledTasks.editor.description': '为新会话或现有会话安排提示词。',

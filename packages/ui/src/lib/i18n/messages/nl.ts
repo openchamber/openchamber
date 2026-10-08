@@ -451,6 +451,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Beheerd door loopbestand {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Ingeschakeld wordt geregeld door het loopbestand; stel enabled in de markdown-frontmatter in',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Looptaken worden geconfigureerd in het markdown-bestand .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'Uit deze repository. Schakel in om het op deze computer uit te voeren.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Gewijzigd sinds je het inschakelde. Schakel opnieuw in om het uit te voeren.',
   'sessions.scheduledTasks.editor.title.edit': 'Geplande taak bewerken',
   'sessions.scheduledTasks.editor.title.new': 'Nieuwe geplande taak',
   'sessions.scheduledTasks.editor.description': 'Plan een prompt voor een nieuwe of bestaande sessie.',

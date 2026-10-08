@@ -452,6 +452,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': '루프 파일에서 관리됨: {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': '활성화 여부는 루프 파일이 제어합니다. Markdown frontmatter에서 enabled를 설정하세요',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': '루프 작업은 .agents/loops Markdown 파일에서 구성합니다',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': '이 저장소의 루프입니다. 이 컴퓨터에서 실행하려면 활성화하세요.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': '활성화한 뒤 변경되었습니다. 실행하려면 다시 활성화하세요.',
   'sessions.scheduledTasks.editor.title.edit': '예약 작업 편집',
   'sessions.scheduledTasks.editor.title.new': '새 예약 작업',
   'sessions.scheduledTasks.editor.description': '새 세션이나 기존 세션에 보낼 프롬프트를 예약합니다.',

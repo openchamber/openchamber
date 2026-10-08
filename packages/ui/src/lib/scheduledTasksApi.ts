@@ -11,6 +11,10 @@ export type ScheduledTask = {
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */
   loopFile?: string;
+  /** Why a repository loop whose file says `enabled: true` is paused here:
+   *  never enabled on this machine (`required`), or changed since it was
+   *  (`outdated`). Absent when nothing holds the loop back. */
+  loopApproval?: 'required' | 'outdated';
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];

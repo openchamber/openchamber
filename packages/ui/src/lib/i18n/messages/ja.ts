@@ -452,6 +452,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'ループファイル {file} によって管理',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': '有効状態はループファイルが制御します。Markdown フロントマターで enabled を設定してください',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'ループタスクは .agents/loops の Markdown ファイルで設定します',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'このリポジトリのループです。このコンピューターで実行するには有効にしてください。',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': '有効にした後に変更されました。実行するには再度有効にしてください。',
   'sessions.scheduledTasks.editor.title.edit': 'スケジュールタスクを編集',
   'sessions.scheduledTasks.editor.title.new': '新しいスケジュールタスク',
   'sessions.scheduledTasks.editor.description': '新規または既存のセッションへのプロンプトを予約します。',

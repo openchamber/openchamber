@@ -406,6 +406,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Von Loop-Datei verwaltet {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Aktiviert wird durch die Loop-Datei gesteuert; setze enabled im Markdown-Frontmatter',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Loop-Aufgaben werden in ihrer .agents/loops-Markdown-Datei konfiguriert',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'Aus diesem Repository. Aktiviere es, damit es auf diesem Computer läuft.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Seit dem Aktivieren geändert. Aktiviere es erneut, damit es läuft.',
   'sessions.scheduledTasks.editor.title.edit': 'Geplante Aufgabe bearbeiten',
   'sessions.scheduledTasks.editor.title.new': 'Neue geplante Aufgabe',
   'sessions.scheduledTasks.editor.description': 'Planen Sie einen Prompt für eine neue oder bestehende Sitzung.',

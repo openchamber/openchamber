@@ -162,6 +162,15 @@ describe('OpenChamber control service', () => {
     expect(scheduledTaskService.setEnabled).toHaveBeenCalledWith('project-1', 'task-1', false);
   });
 
+  it('reports the enabled state that was saved, not the one requested', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.setEnabled.mockResolvedValue({ id: 'task-1', enabled: false });
+    await expect(service.execute('schedule.toggle', { taskId: 'task-1', disabled: false }, '/repo')).resolves.toEqual({
+      task: { id: 'task-1', enabled: false },
+      enabled: false,
+    });
+  });
+
   it('returns an actionable taskId error before resolving schedule scope', async () => {
     const { service, scheduledTaskService } = createService();
     await expect(service.execute('schedule.run', {}, '/repo')).rejects.toThrow('taskId is required');

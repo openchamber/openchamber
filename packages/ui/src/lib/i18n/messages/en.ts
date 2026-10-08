@@ -451,6 +451,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Managed by loop file {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Enabled is controlled by the loop file; set enabled in the markdown frontmatter',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Loop tasks are configured in their .agents/loops markdown file',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'From this repository. Enable to run it on this computer.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Changed since you enabled it. Enable again to run it.',
   'sessions.scheduledTasks.editor.title.edit': 'Edit scheduled task',
   'sessions.scheduledTasks.editor.title.new': 'New scheduled task',
   'sessions.scheduledTasks.editor.description': 'Schedule a prompt for a new or existing session.',

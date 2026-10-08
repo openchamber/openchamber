@@ -461,6 +461,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Gerenciada pelo arquivo de loop {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'A ativação é controlada pelo arquivo de loop; defina enabled no frontmatter Markdown',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Tarefas de loop são configuradas no arquivo Markdown .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'Deste repositório. Ative para executar neste computador.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Alterado desde que você ativou. Ative de novo para executar.',
   "sessions.scheduledTasks.editor.title.edit": "Editar tarefa agendada",
   "sessions.scheduledTasks.editor.title.new": "Nova tarefa agendada",
   "sessions.scheduledTasks.editor.description": "Agende um prompt para uma sessão nova ou existente.",

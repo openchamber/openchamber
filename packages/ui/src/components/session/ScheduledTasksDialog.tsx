@@ -205,6 +205,20 @@ const TaskTargetLine: React.FC<{ sessionId: string }> = ({ sessionId }) => {
   return <p className="truncate typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.targetSession')}: {session?.title || sessionId}</p>;
 };
 
+// Next to "Paused" on a repository loop that waits for the user: the icon
+// says why, the sentence is its title. A loop the user paused has none.
+const LoopApprovalMark: React.FC<{ reason: NonNullable<ScheduledTask['loopApproval']> }> = ({ reason }) => {
+  const { t } = useI18n();
+  const label = reason === 'outdated'
+    ? t('sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled')
+    : t('sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer');
+  return (
+    <span role="img" aria-label={label} title={label} className="inline-flex text-muted-foreground/70">
+      <Icon name={reason === 'outdated' ? 'file-edit' : 'git-branch'} className="h-3.5 w-3.5" />
+    </span>
+  );
+};
+
 const toneStyle = (tone: StatusTone): React.CSSProperties => {
   if (tone === 'muted') {
     return {};
@@ -368,7 +382,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
       return;
     }
     setMutatingTaskID(task.id);
-    setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled } : item)));
+    // The reload brings the reason back if the server keeps the loop paused.
+    setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled, loopApproval: undefined } : item)));
     try {
       if (task.loopFile) {
         await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled);
@@ -666,23 +681,26 @@ export function ScheduledTasksView({ layout, onLeave }: {
                 ) : null}
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <label
-                    className={cn(
-                      'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
-                      task.enabled ? 'text-foreground' : 'text-muted-foreground',
-                      isBusy && 'cursor-not-allowed opacity-50',
-                    )}
-                  >
-                    <Checkbox
-                      checked={task.enabled}
-                      onChange={(enabled) => void handleToggleEnabled(task, enabled)}
-                      ariaLabel={task.enabled
-                        ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
-                        : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
-                      disabled={isBusy}
-                    />
-                    {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
-                  </label>
+                  <div className="inline-flex items-center gap-1">
+                    <label
+                      className={cn(
+                        'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
+                        task.enabled ? 'text-foreground' : 'text-muted-foreground',
+                        isBusy && 'cursor-not-allowed opacity-50',
+                      )}
+                    >
+                      <Checkbox
+                        checked={task.enabled}
+                        onChange={(enabled) => void handleToggleEnabled(task, enabled)}
+                        ariaLabel={task.enabled
+                          ? t('sessions.scheduledTasks.dialog.taskToggle.pauseAria', { taskName: task.name })
+                          : t('sessions.scheduledTasks.dialog.taskToggle.enableAria', { taskName: task.name })}
+                        disabled={isBusy}
+                      />
+                      {task.enabled ? t('sessions.scheduledTasks.dialog.taskToggle.enabled') : t('sessions.scheduledTasks.dialog.taskToggle.paused')}
+                    </label>
+                    {task.loopApproval ? <LoopApprovalMark reason={task.loopApproval} /> : null}
+                  </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     {task.state?.lastSessionId ? (

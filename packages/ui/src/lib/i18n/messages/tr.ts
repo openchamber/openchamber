@@ -375,6 +375,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.loopFile.note': '{file} loop dosyası tarafından yönetiliyor',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Etkin olma durumu loop dosyası tarafından kontrol edilir; markdown frontmatter içinde etkinleştirin',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Loop görevleri kendi .agents/loops markdown dosyalarında yapılandırılır',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'Bu depodan geliyor. Bu bilgisayarda çalışması için etkinleştirin.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Etkinleştirdiğinizden beri değişti. Çalışması için yeniden etkinleştirin.',
   'sessions.scheduledTasks.editor.title.edit': 'Zamanlanmış görevi düzenle',
   'sessions.scheduledTasks.editor.title.new': 'Yeni zamanlanmış görev',
   'sessions.scheduledTasks.editor.description': 'Yeni veya mevcut bir oturum için istem zamanlayın.',

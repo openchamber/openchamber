@@ -473,6 +473,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': '由迴圈檔案 {file} 管理',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': '啟用狀態由迴圈檔案控制；請在 Markdown frontmatter 中設定 enabled',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': '迴圈任務在其 .agents/loops Markdown 檔案中設定',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': '來自此存放庫。啟用後才會在這台電腦上執行。',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': '啟用後已變更。重新啟用後才會執行。',
   'sessions.scheduledTasks.editor.title.edit': '編輯排程任務',
   'sessions.scheduledTasks.editor.title.new': '新增排程任務',
   'sessions.scheduledTasks.editor.description': '為新會話或現有會話排程提示詞。',

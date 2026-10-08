@@ -461,6 +461,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Керується файлом циклу {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Активність контролюється файлом циклу; встановіть enabled у frontmatter Markdown',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Завдання циклів налаштовуються у файлі Markdown .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': "З цього репозиторію. Увімкніть, щоб запускати на цьому комп'ютері.",
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Змінено після ввімкнення. Увімкніть знову, щоб запускати.',
   "sessions.scheduledTasks.editor.title.edit": "Редагувати заплановане завдання",
   "sessions.scheduledTasks.editor.title.new": "Нове заплановане завдання",
   "sessions.scheduledTasks.editor.description": "Заплануйте запит для нової або наявної сесії.",

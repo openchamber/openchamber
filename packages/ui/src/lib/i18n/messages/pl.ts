@@ -624,6 +624,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Zarządzane przez plik pętli {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'Włączenie jest kontrolowane przez plik pętli; ustaw enabled w frontmatterze Markdown',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Zadania pętli są konfigurowane w pliku Markdown .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'Z tego repozytorium. Włącz, aby uruchamiać na tym komputerze.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Zmienione od włączenia. Włącz ponownie, aby uruchamiać.',
   'sessions.scheduledTasks.editor.title.edit': 'Edytuj zaplanowane zadanie',
   'sessions.scheduledTasks.editor.title.new': 'Nowe zaplanowane zadanie',
   'sessions.scheduledTasks.editor.description': 'Zaplanuj prompt dla nowej lub istniejącej sesji.',

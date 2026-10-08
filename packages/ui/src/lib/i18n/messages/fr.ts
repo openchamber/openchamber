@@ -276,6 +276,8 @@ export const dict = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Gérée par le fichier de boucle {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': "L'activation est contrôlée par le fichier de boucle ; définissez enabled dans le frontmatter Markdown",
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Les tâches de boucle sont configurées dans leur fichier Markdown .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': "Provient de ce dépôt. Activez-la pour l'exécuter sur cet ordinateur.",
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': "Modifiée depuis son activation. Réactivez-la pour l'exécuter.",
   'sessions.scheduledTasks.editor.title.edit': 'Modifier une tâche planifiée',
   'sessions.scheduledTasks.editor.title.new': 'Nouvelle tâche planifiée',
   'sessions.scheduledTasks.editor.description': 'Planifiez un prompt pour une session nouvelle ou existante.',

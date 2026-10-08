@@ -461,6 +461,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.loopFile.note': 'Gestionada por el archivo de bucle {file}',
   'sessions.scheduledTasks.dialog.loopFile.toggleDisabled': 'La activación la controla el archivo de bucle; establece enabled en el frontmatter de Markdown',
   'sessions.scheduledTasks.dialog.loopFile.actionsDisabled': 'Las tareas de bucle se configuran en su archivo Markdown .agents/loops',
+  'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer': 'De este repositorio. Habilítalo para ejecutarlo en este equipo.',
+  'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled': 'Cambió desde que lo habilitaste. Habilítalo de nuevo para ejecutarlo.',
   "sessions.scheduledTasks.editor.title.edit": "Editar tarea programada",
   "sessions.scheduledTasks.editor.title.new": "Nueva tarea programada",
   "sessions.scheduledTasks.editor.description": "Programa un prompt para una sesión nueva o existente.",

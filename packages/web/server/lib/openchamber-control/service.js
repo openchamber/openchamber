@@ -722,8 +722,9 @@ export const createOpenChamberControlService = (dependencies) => {
             if (typeof input.disabled !== 'boolean') {
               throw new OpenChamberControlError('disabled is required for schedule.toggle', 400);
             }
-            const enabled = input.disabled === false;
-            return { task: await scheduledTaskService.setEnabled(projectID, taskID, enabled), enabled };
+            const task = await scheduledTaskService.setEnabled(projectID, taskID, input.disabled === false);
+            // What was saved, which is what the scheduler acts on.
+            return { task, enabled: task?.enabled === true };
           }
         }
       }
