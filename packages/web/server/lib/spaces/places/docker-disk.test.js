@@ -166,8 +166,11 @@ describe('clean-up of the Docker place', () => {
       expect(outcome.kept).toEqual([expect.objectContaining({ kind: 'image', name: RETIRED, reason: 'in_use' })]);
       expect(fake.retiredImagePresent(RETIRED)).toBe(true);
 
-      const afterRemoval = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES }], resources: [toolsVolume(OWNER, KEY)] });
-      expect((await makePlace(afterRemoval).cleanUpDisk()).freedBytes).toBe(RETIRED_BYTES);
+      // The old space is deleted, which takes its gatekeeper with it.
+      expect((await fake.runCommand('/usr/bin/docker', ['rm', oldGatekeeper.name], {})).code).toBe(0);
+      expect((await place.readDisk()).freeBytes).toBe(RETIRED_BYTES);
+      expect((await place.cleanUpDisk()).freedBytes).toBe(RETIRED_BYTES);
+      expect(fake.retiredImagePresent(RETIRED)).toBe(false);
     });
 
     it('is left alone, uncounted and never asked to go, when it carries a tag of its own', async () => {
