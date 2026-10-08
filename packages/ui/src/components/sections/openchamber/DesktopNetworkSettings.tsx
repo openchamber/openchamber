@@ -30,7 +30,9 @@ import {
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { useUIStore } from '@/stores/useUIStore';
 
+import { DesktopQuakeModeSettings } from './DesktopQuakeModeSettings';
 import { ShortcutRecordingDialog } from './ShortcutRecordingDialog';
+import { useDesktopQuakeMode } from './useDesktopQuakeMode';
 
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
@@ -77,6 +79,14 @@ export const DesktopNetworkSettings: React.FC = () => {
     [],
   );
   const [error, setError] = React.useState<string | null>(null);
+  const quake = useDesktopQuakeMode(isLocalDesktop, setError);
+  const { release: releaseQuakeShortcut } = quake;
+  // Recording the Quake combo offers a replace instead of a silent collision
+  // the main process would then refuse to register.
+  const miniChatRecorderOverrides = React.useMemo(
+    () => (quake.combo ? { ...shortcutOverrides, quake_mode_global: quake.combo } : shortcutOverrides),
+    [quake.combo, shortcutOverrides],
+  );
   const [lanAddress, setLanAddress] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -392,10 +402,22 @@ export const DesktopNetworkSettings: React.FC = () => {
   ) => {
     void handleMiniChatGlobalShortcutSave(combo).then((saved) => {
       if (!saved || !replaceActionId) return;
+      if (replaceActionId === 'quake_mode_global') {
+        releaseQuakeShortcut();
+        return;
+      }
       setShortcutOverride(replaceActionId, UNASSIGNED_SHORTCUT);
       void updateDesktopSettings({ shortcutOverrides: { ...shortcutOverrides, [replaceActionId]: UNASSIGNED_SHORTCUT } });
     });
-  }, [handleMiniChatGlobalShortcutSave, setShortcutOverride, shortcutOverrides]);
+  }, [handleMiniChatGlobalShortcutSave, releaseQuakeShortcut, setShortcutOverride, shortcutOverrides]);
+
+  const releaseMiniChatGlobalShortcut = React.useCallback(() => {
+    void setDesktopMiniChatGlobalShortcut(null).then((status) => {
+      if (!status) return;
+      setMiniChatGlobalShortcutCombo(status.combo ?? null);
+      setMiniChatGlobalShortcutActive(status.active === true);
+    });
+  }, []);
 
   const handleSaveAndRestart = React.useCallback(async () => {
     if (!isDirty) {
@@ -446,7 +468,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
       <div className="space-y-3">
-        {(launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported) ? (
+        {(launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported || quake.supported) ? (
           <div className={SETTINGS_OPTION_STACK_CLASS}>
             {launchAtLoginSupported ? (
               <SettingsCheckboxRow
@@ -557,6 +579,12 @@ export const DesktopNetworkSettings: React.FC = () => {
                 ) : null}
               </SettingsFieldRow>
             ) : null}
+
+            <DesktopQuakeModeSettings
+              quake={quake}
+              miniChatCombo={miniChatGlobalShortcutCombo}
+              onReleaseMiniChatShortcut={releaseMiniChatGlobalShortcut}
+            />
           </div>
         ) : null}
 
@@ -649,7 +677,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       </div>
       <ShortcutRecordingDialog
         action={editingMiniChatGlobalShortcut ? miniChatGlobalShortcutAction : null}
-        overrides={shortcutOverrides}
+        overrides={miniChatRecorderOverrides}
         onSave={handleMiniChatGlobalRecorderSave}
         onOpenChange={(open) => {
           if (!open) {

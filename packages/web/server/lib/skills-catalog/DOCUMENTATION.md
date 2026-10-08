@@ -38,17 +38,17 @@ The following functions are exported and used by the web server:
 - `parseSkillRepoSource(source, { subpath })`: Parse git repository source string into structured object with SSH/HTTPS clone URLs, normalized repo, and effective subpath. Supports SSH URLs, HTTPS URLs, and shorthand `owner/repo[/subpath]` format.
 
 ### Git Repository Scanning (`scan.js`)
-- `scanSkillsRepository({ source, subpath, defaultSubpath, identity })`: Scan git repository for skills by cloning and analyzing SKILL.md files. Returns array of skill items with metadata.
+- `scanSkillsRepository({ source, subpath, defaultSubpath, identity, credentialResolver })`: Scan a Git repository for skills by cloning it and reading its `SKILL.md` files. Account identities use their connected HTTPS credential, SSH identities use their managed key, anonymous identities use credential-free HTTPS, and no identity (labelled "This machine" in the catalog dialog) uses the server's own Git configuration and credential helpers.
 
 ### Git Repository Installation (`install.js`)
-- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install skills from git repository. Supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout for efficiency.
+- `installSkillsFromRepository({ source, subpath, defaultSubpath, identity, credentialResolver, scope, targetSource, workingDirectory, userSkillDir, selections, conflictPolicy, conflictDecisions })`: Install selected skills from a Git repository. It uses the same identity transports as scanning and supports user/project scopes, opencode/agents targets, conflict resolution (prompt/skipAll/overwriteAll), and sparse checkout.
 
 ## Internal Helpers
 
 The following functions are internal helpers used by exported functions:
 
 ### Git Helpers (`git.js`)
-- `runGit(args, options)`: Execute git command with optional SSH identity, timeout, and max buffer. Returns `{ ok, stdout, stderr, message, code, signal }`.
+- `runGit(args, options)`: Execute a Git command with optional managed identity, credential resolver, timeout, and max buffer. HTTPS tokens go through the one-use local credential broker and never enter Git's arguments. Returns `{ ok, stdout, stderr, message, code, signal }`.
 - `looksLikeAuthError(message)`: Detect if error message indicates authentication failure (permission denied, publickey, etc.).
 - `assertGitAvailable()`: Check if git is available in PATH.
 
@@ -62,7 +62,7 @@ The following functions are internal helpers used by exported functions:
 - `normalizeUserSkillDir(userSkillDir)`: Normalize the user skill directory path (handles the legacy `skill` directory in the XDG config location, or `~/.config/opencode/skill` when XDG is unset, by selecting the plural `skills` directory when appropriate).
 
 ### Git Clone Helpers (`install.js`, `scan.js`)
-- `cloneRepo({ cloneUrl, identity, tempDir })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback. Uses non-interactive mode.
+- `cloneRepo({ cloneUrl, identity, credentialResolver, tempDir, ref })`: Clone git repository with preferred partial clone (`--filter=blob:none`) and fallback, on `ref` when the source names one. Uses non-interactive mode.
 
 ### SKILL.md Parsing (`scan.js`)
 - `parseSkillMd(content)`: Parse YAML frontmatter from SKILL.md content. Returns `{ ok, frontmatter, warnings }`.
@@ -111,11 +111,14 @@ The following functions are internal helpers used by exported functions:
 - Skill names are derived from directory basenames for git repos.
 - Invalid names result in non-installable skills with appropriate warnings.
 
-### Git Cloning Strategy
-- Use sparse checkout to minimize clone size: `sparse-checkout init`, `sparse-checkout set`, `checkout HEAD`.
+### Git cloning strategy
+- Use sparse checkout to minimize checkout size: `sparse-checkout init`, `sparse-checkout set`, `checkout HEAD`.
+- Keep managed credentials scoped to the selected provider endpoint. Do not fall back to System Git after a selected identity fails, and refuse a selected identity that names no credential.
+- Only commands that reach the remote resolve the identity: the clone, the `checkout`, and the `show` fallback in `scan.js`, which fetch blobs lazily from the partial clone. Local commands (`sparse-checkout`, `ls-files`, `ls-tree`) run without it.
+- Managed HTTPS and anonymous runs point `HOME`, `USERPROFILE`, and `XDG_CONFIG_HOME` at the null device, so an ambient `~/.netrc` cannot sign in as another account. SSH runs keep `HOME` for `known_hosts`.
 - Preferred clone uses `--depth=1 --filter=blob:none` for partial clone with fallback to `--depth=1`.
 - Always use non-interactive mode (`GIT_TERMINAL_PROMPT=0`) to avoid hangs.
-- SSH keys are injected via `core.sshCommand` in git config.
+- Managed SSH keys are injected as `-c core.sshCommand=<wrapper>` through the shared SSH wrapper; the operation's key copy is removed after the run.
 
 ### Conflict Resolution
 - Installation checks for existing skills before downloading/cloning.
@@ -133,7 +136,6 @@ The following functions are internal helpers used by exported functions:
 ### Security Considerations
 - Path traversal protection in `copyDirectoryNoSymlinks`: resolves real paths and checks containment.
 - Symlinks are explicitly rejected to prevent escape from skill directory.
-- SSH key paths are trimmed but not escaped in `git.js` (assumes safe input from profiles).
 - Temporary directories are cleaned up in `finally` blocks.
 
 ### Error Handling

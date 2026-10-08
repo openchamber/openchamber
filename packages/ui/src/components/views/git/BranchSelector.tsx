@@ -22,6 +22,7 @@ import { useI18n } from '@/lib/i18n';
 import { useDeviceInfo } from '@/lib/device';
 import { getGitUnpushedBranchCounts } from '@/lib/gitApi';
 import { getRecentBranches, rememberRecentBranch } from './recentBranches';
+import { sanitizeBranchNameInput } from './branchName';
 
 interface BranchInfo {
   ahead?: number;
@@ -45,19 +46,6 @@ interface BranchSelectorProps {
    */
   switchBlockedNotice?: string | null;
 }
-
-const sanitizeBranchNameInput = (value: string): string => {
-  return value
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^A-Za-z0-9._/-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/\/{2,}/g, '/')
-    .replace(/\/-+/g, '/')
-    .replace(/-+\//g, '/')
-    .replace(/^[-/]+/, '')
-    .replace(/[-/]+$/, '');
-};
 
 export const BranchSelector: React.FC<BranchSelectorProps> = ({
   currentBranch,

@@ -28,6 +28,7 @@ const uiState = { isMobile: false };
 const gitState = { fetchBranches: async () => undefined };
 let worktreeCreations = 0;
 let lastSetupCommands: string[] | undefined;
+let lastCreateNames: { branchName?: string; worktreeName?: string } | undefined;
 
 const selectProjectState = <T,>(selector: (state: typeof projectStoreState) => T): T => selector(projectStoreState);
 const selectSourceControlAuthEntry = () => githubAuthState;
@@ -151,9 +152,10 @@ mock.module('@/lib/worktrees/worktreeManager', () => ({
   ...actualWorktreeManager,
   validateWorktreeCreate: async () => ({ ok: true, errors: [] }),
 }));
-mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[] }) => {
+mock.module('@/lib/worktrees/worktreeCreate', () => ({ createWorktreeWithDefaults: async (_project: { id: string; path: string }, args: { setupCommands?: string[]; branchName?: string; worktreeName?: string }) => {
   worktreeCreations += 1;
   lastSetupCommands = args.setupCommands;
+  lastCreateNames = { branchName: args.branchName, worktreeName: args.worktreeName };
   return null;
 } }));
 mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeBootstrap: async () => undefined }));
@@ -448,6 +450,42 @@ describe('NewWorktreeDialog behavior', () => {
       expect(dom.container.querySelector('textarea')).toBeNull();
       await act(async () => { branchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
       expect(lastSetupCommands).toEqual(['trusted-from-project']);
+    } finally {
+      await act(async () => root.unmount());
+      dom.restore();
+    }
+  });
+
+  test('a branch name without Latin letters keeps the random folder name and stays creatable', async () => {
+    const dom = installDom();
+    const root = createRoot(dom.container);
+    lastCreateNames = undefined;
+    try {
+      await act(async () => root.render(<I18nProvider><NewWorktreeDialog open onOpenChange={() => undefined} /></I18nProvider>));
+      const branchInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="feature/my-awesome-feature"]');
+      const folderInput = dom.container.querySelector<HTMLInputElement>('input[placeholder="my-worktree-directory"]');
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!branchInput || !folderInput || !setValue) throw new Error('Missing worktree form fields');
+      await act(async () => {
+        setValue.call(branchInput, '测试分支');
+        branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(folderInput.value).toBe('draft-name');
+      const createButton = [...dom.container.querySelectorAll('button')].find((button) => button.textContent === 'Create worktree');
+      expect(createButton?.disabled).toBe(false);
+
+      await act(async () => {
+        setValue.call(branchInput, 'feature/测试');
+        branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(folderInput.value).toBe('feature');
+
+      await act(async () => {
+        setValue.call(branchInput, '测试分支');
+        branchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { branchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+      expect(lastCreateNames).toEqual({ branchName: '测试分支', worktreeName: 'draft-name' });
     } finally {
       await act(async () => root.unmount());
       dom.restore();

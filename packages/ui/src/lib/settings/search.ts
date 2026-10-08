@@ -660,6 +660,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
+    id: 'sessions.desktop-quake-mode',
+    page: 'general',
+    titleKey: 'settings.openchamber.desktopNetwork.field.quakeMode',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.quakeModeDescription',
+    keywords: ['desktop', 'quake', 'dropdown', 'hotkey', 'shortcut', 'height', 'global', 'background', 'tray', 'terminal'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+
+
+  {
     id: 'sessions.desktop-ui-password',
     page: 'general',
     titleKey: 'settings.openchamber.desktopPassword.field.password',

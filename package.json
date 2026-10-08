@@ -10,7 +10,7 @@
     "packages/sdk/examples/*"
   ],
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.14.0"
   },
   "keywords": [
     "opencode",

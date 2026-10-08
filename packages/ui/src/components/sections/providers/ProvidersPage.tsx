@@ -32,6 +32,7 @@ import {
   shouldShowModelsSection,
   findIntegrationForProvider,
   getCredentialConnections,
+  getKeyMethod,
   getOAuthMethods,
   getProviderConnections,
   getSignInIntegrationId,
@@ -46,6 +47,7 @@ import { ProviderAccounts } from './ProviderAccounts';
 import { CustomProviderForm } from './CustomProviderForm';
 
 import { ProviderOAuthMethods } from './ProviderOAuthMethods';
+import { ProviderApiKeyForm, type IntegrationKeyRequest } from './ProviderApiKeyForm';
 import {
   buildIntegrationKeyRequest,
   buildProviderUpsertRequest,
@@ -70,6 +72,12 @@ const formatTokens = (value?: number | null) => {
   }
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
+};
+
+// OpenCode owns the credential and announces the catalog change itself
+// (`credential.updated` → catalog refresh); nothing to reload after it.
+const connectIntegrationKey = async (request: IntegrationKeyRequest): Promise<void> => {
+  await opencodeClient.getSdkClient().integration.connect.key(request);
 };
 
 const ADD_PROVIDER_ID = '__add_provider__';
@@ -166,7 +174,6 @@ export const ProvidersPage: React.FC = () => {
   // Only the first read blocks the credential forms; a re-read keeps showing
   // the methods already known.
   const authLoading = catalog === null && !integrationsLoadFailed;
-  const [apiKeyInputs, setApiKeyInputs] = React.useState<Record<string, string>>({});
   const [authBusyKey, setAuthBusyKey] = React.useState<string | null>(null);
   const [accountBusyId, setAccountBusyId] = React.useState<string | null>(null);
   const [modelQuery, setModelQuery] = React.useState('');
@@ -386,35 +393,6 @@ export const ProvidersPage: React.FC = () => {
 
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedSources = selectedProviderId ? providerSources[selectedProviderId] : undefined;
-
-  const handleSaveApiKey = async (providerId: string) => {
-    const apiKey = apiKeyInputs[providerId]?.trim() ?? '';
-    if (!apiKey) {
-      toast.error(t('settings.providers.page.toast.apiKeyRequired'));
-      return;
-    }
-
-    const busyKey = `api:${providerId}`;
-    setAuthBusyKey(busyKey);
-
-    try {
-      await opencodeClient.getSdkClient().integration.connect.key({
-        integrationID: providerId,
-        key: apiKey,
-      });
-
-      toast.success(t('settings.providers.page.toast.apiKeySaved'));
-      setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
-      // OpenCode owns the credential and announces the catalog change itself
-      // (`credential.updated` → catalog refresh); nothing to reload here.
-      markAuthWriteSucceeded(providerId);
-    } catch (error) {
-      console.error('Failed to save API key:', error);
-      toast.error(t('settings.providers.page.toast.apiKeySaveFailed'));
-    } finally {
-      setAuthBusyKey(null);
-    }
-  };
 
   const handleSaveCustomProvider = async (plan: CustomProviderPersistPlan) => {
     const busyKey = `custom:${plan.providerID}`;
@@ -680,34 +658,13 @@ export const ProvidersPage: React.FC = () => {
                     return (
                       <>
                         {showApiKey ? (
-                          <div className="py-1.5">
-                            <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                              {t('settings.providers.page.auth.apiKeyLabel')}
-                              <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-                            </label>
-                            <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-                              <Input
-                                type="password"
-                                value={apiKeyInputs[candidateProviderId] ?? ''}
-                                onChange={(event) =>
-                                  setApiKeyInputs((prev) => ({
-                                    ...prev,
-                                    [candidateProviderId]: event.target.value,
-                                  }))
-                                }
-                                placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                                className="flex-1 font-mono text-xs"
-                              />
-                              <Button
-                                size="xs"
-                                className="!font-normal shrink-0"
-                                onClick={() => handleSaveApiKey(candidateProviderId)}
-                                disabled={authBusyKey === `api:${candidateProviderId}`}
-                              >
-                                {authBusyKey === `api:${candidateProviderId}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                              </Button>
-                            </div>
-                          </div>
+                          <ProviderApiKeyForm
+                            key={candidateProviderId}
+                            integrationId={candidateProviderId}
+                            keyMethod={getKeyMethod(candidateIntegration)}
+                            connectKey={connectIntegrationKey}
+                            onSaved={() => markAuthWriteSucceeded(candidateProviderId)}
+                          />
                         ) : null}
 
                         {candidateOAuthMethods.length > 0 ? (
@@ -938,34 +895,13 @@ export const ProvidersPage: React.FC = () => {
             )}
           >
             {showApiKeyAuth ? (
-              <div className="py-1.5">
-                <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                  {t('settings.providers.page.auth.apiKeyLabel')}
-                  <SettingsInfoHint>{t('settings.providers.page.auth.apiKeyTooltip')}</SettingsInfoHint>
-                </label>
-                <div className="flex flex-col @xl:flex-row @xl:items-center gap-2 mt-1.5">
-                  <Input
-                    type="password"
-                    value={apiKeyInputs[selectedProvider.id] ?? ''}
-                    onChange={(event) =>
-                      setApiKeyInputs((prev) => ({
-                        ...prev,
-                        [selectedProvider.id]: event.target.value,
-                      }))
-                    }
-                    placeholder={t('settings.providers.page.auth.apiKeyPlaceholder')}
-                    className="flex-1 font-mono text-xs"
-                  />
-                  <Button
-                    size="xs"
-                    className="!font-normal shrink-0"
-                    onClick={() => handleSaveApiKey(selectedProvider.id)}
-                    disabled={authBusyKey === `api:${selectedProvider.id}`}
-                  >
-                    {authBusyKey === `api:${selectedProvider.id}` ? t('settings.providers.page.actions.saving') : t('settings.providers.page.actions.saveKey')}
-                  </Button>
-                </div>
-              </div>
+              <ProviderApiKeyForm
+                key={selectedProvider.id}
+                integrationId={selectedProvider.id}
+                keyMethod={getKeyMethod(selectedIntegration)}
+                connectKey={connectIntegrationKey}
+                onSaved={() => markAuthWriteSucceeded(selectedProvider.id)}
+              />
             ) : null}
 
             {oauthAuthMethods.length > 0 && (

@@ -288,6 +288,51 @@ export const setDesktopMiniChatGlobalShortcut = async (combo: string | null): Pr
   }
 };
 
+const quakeModeStatusSchema = z.object({
+  supported: z.boolean(),
+  enabled: z.boolean(),
+  /** Effective combo: the stored one, or the default while Quake is enabled. */
+  combo: z.string().nullable(),
+  /** The stored value before the enabled-default applies: a combo, the unassigned sentinel, or null when nothing is stored. */
+  storedCombo: z.string().nullable(),
+  active: z.boolean(),
+  heightFraction: z.number(),
+  // Set when a shortcut save was refused; the stored combo is unchanged.
+  error: z.literal('unsupported-combo').optional(),
+});
+
+export type QuakeModeStatus = z.infer<typeof quakeModeStatusSchema>;
+
+const invokeQuakeMode = async (
+  command: string,
+  args: Record<string, string | number | boolean | null>,
+  failureMessage: string,
+): Promise<QuakeModeStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const result = quakeModeStatusSchema.safeParse(await invokeDesktop(command, args));
+    return result.success ? result.data : null;
+  } catch (error) {
+    console.warn(failureMessage, error);
+    return null;
+  }
+};
+
+export const getDesktopQuakeMode = (): Promise<QuakeModeStatus | null> =>
+  invokeQuakeMode('desktop_get_quake_mode', {}, 'Failed to get Quake Mode status');
+
+export const setDesktopQuakeModeEnabled = (enabled: boolean): Promise<QuakeModeStatus | null> =>
+  invokeQuakeMode('desktop_set_quake_mode_enabled', { enabled }, 'Failed to set Quake Mode');
+
+export const setDesktopQuakeModeShortcut = (combo: string | null): Promise<QuakeModeStatus | null> =>
+  invokeQuakeMode('desktop_set_quake_mode_shortcut', { combo }, 'Failed to set Quake Mode shortcut');
+
+export const setDesktopQuakeModeHeight = (heightFraction: number): Promise<QuakeModeStatus | null> =>
+  invokeQuakeMode('desktop_set_quake_mode_height', { heightFraction }, 'Failed to set Quake Mode height');
+
 export const getDesktopKeepAwake = async (): Promise<KeepAwakeStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;

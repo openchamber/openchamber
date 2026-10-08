@@ -76,6 +76,12 @@ refetches its own provider sources and integrations and lets the catalog
 events refresh the stores. (The old "nudge" went through `/api/config/reload`,
 which restarts a managed OpenCode and showed the reload overlay.)
 
+An integration method can declare a `form` (an Azure resource name, a
+Cloudflare account id). OAuth and API key methods render it through the same
+`ProviderFormFields`, check required fields with the helpers in
+`provider-oauth.ts`, and send the answers with the connect call. OpenCode
+rejects a key whose required fields are missing.
+
 The custom-provider form can discover models before save through
 `POST /api/provider/discover-models`. Discovery is a one-time prefill the user
 starts with "Find models": they pick which returned models to add, the review

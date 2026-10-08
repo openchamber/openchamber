@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSpaceLabels, buildToolsLabels, hashProjectDirectory } from '../labels.js';
 import { createRegistryToolsSource, toolsContentKey } from '../tools.js';
 import { parseDockerSize } from './docker-disk.js';
-import { SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
+import { RETIRED_SPACE_BASE_IMAGES, SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
 import { createFakeDocker, hardenedContainerEntry } from './fake-docker.js';
 
 const OWNER = 'install-a';
@@ -140,6 +140,55 @@ describe('clean-up of the Docker place', () => {
     const fake = createFakeDocker({ resources: [toolsVolume(OWNER, KEY), strangerContainer(SPACE_BASE_IMAGE)] });
     expect((await makePlace(fake).cleanUpDisk()).kept).toEqual([expect.objectContaining({ kind: 'image', reason: 'in_use' })]);
     expect(fake.imagePresent()).toBe(true);
+  });
+
+  describe('a retired space image', () => {
+    const RETIRED = RETIRED_SPACE_BASE_IMAGES[0];
+    const RETIRED_BYTES = 1_600_000_000;
+    // The gatekeeper of a space created before the bump, still on the image it was made from.
+    const oldGatekeeper = { kind: 'container', name: `openchamber-space-${ID}-gatekeeper`, entry: hardenedContainerEntry({ name: `openchamber-space-${ID}-gatekeeper`, labels: spaceLabels('gatekeeper'), network: `openchamber-space-${ID}-network`, mounts: [], running: false, image: RETIRED }) };
+
+    it('is counted in what a clean-up frees and nowhere else, and removed without force', async () => {
+      const fake = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES }], resources: [toolsVolume(OWNER, KEY)] });
+      const place = makePlace(fake);
+      expect(await place.readDisk()).toEqual({ imageBytes: null, toolsBytes: 0, spacesBytes: 0, freeBytes: RETIRED_BYTES, freesImage: false });
+      expect(await place.cleanUpDisk()).toEqual({ freedBytes: RETIRED_BYTES, kept: [], machine: { state: 'skipped' } });
+      expect(fake.retiredImagePresent(RETIRED)).toBe(false);
+      expect(removals(fake).some((args) => args.includes('--force'))).toBe(false);
+    });
+
+    it('stays while a container made from it exists, and goes once that container is gone', async () => {
+      const fake = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES }], resources: [toolsVolume(OWNER, KEY), oldGatekeeper] });
+      const place = makePlace(fake);
+      expect((await place.readDisk()).freeBytes).toBe(0);
+      const outcome = await place.cleanUpDisk();
+      expect(outcome.freedBytes).toBe(0);
+      expect(outcome.kept).toEqual([expect.objectContaining({ kind: 'image', name: RETIRED, reason: 'in_use' })]);
+      expect(fake.retiredImagePresent(RETIRED)).toBe(true);
+
+      // The old space is deleted, which takes its gatekeeper with it.
+      expect((await fake.runCommand('/usr/bin/docker', ['rm', oldGatekeeper.name], {})).code).toBe(0);
+      expect((await place.readDisk()).freeBytes).toBe(RETIRED_BYTES);
+      expect((await place.cleanUpDisk()).freedBytes).toBe(RETIRED_BYTES);
+      expect(fake.retiredImagePresent(RETIRED)).toBe(false);
+    });
+
+    it('is left alone, uncounted and never asked to go, when it carries a tag of its own', async () => {
+      const fake = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES, tags: [RETIRED, 'node:22-bookworm'] }], resources: [toolsVolume(OWNER, KEY)] });
+      const place = makePlace(fake);
+      expect((await place.readDisk()).freeBytes).toBe(0);
+      expect(await place.cleanUpDisk()).toEqual({ freedBytes: 0, kept: [], machine: { state: 'skipped' } });
+      expect(fake.retiredImagePresent(RETIRED)).toBe(true);
+      expect(removals(fake)).toEqual([]);
+    });
+
+    it('is counted as gone when it is not there', async () => {
+      const fake = createFakeDocker({ imagePresent: false, resources: [toolsVolume(OWNER, KEY)] });
+      const place = makePlace(fake);
+      expect((await place.readDisk()).freeBytes).toBe(0);
+      expect(await place.cleanUpDisk()).toEqual({ freedBytes: 0, kept: [], machine: { state: 'skipped' } });
+      expect(removals(fake)).toEqual([]);
+    });
   });
 
   it('on Colima asks the machine to trim its disks after something went, and on any other engine does not', async () => {

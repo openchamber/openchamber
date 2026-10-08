@@ -48,7 +48,71 @@ export const registerSkillRoutes = (app, dependencies) => {
     fetchGitHubRepoMetas,
     getProfiles,
     getProfile,
+    createHttpsCredentialReference,
+    resolveSourceControlAccount,
+    credentialResolver,
   } = dependencies;
+
+  const resolveCatalogGitIdentity = async (identityId, source) => {
+    if (!identityId || identityId === 'global') return { ok: true, identity: null };
+
+    const profile = getProfile(identityId);
+    if (!profile) {
+      return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+    }
+
+    const transport = profile.transport ?? 'system';
+    if (transport === 'system') return { ok: true, identity: null };
+    if (transport === 'anonymous') return { ok: true, identity: { anonymous: true, transport } };
+
+    const parsed = parseSkillRepoSource(source);
+    if (!parsed.ok) return { ok: true, identity: null };
+
+    if (transport === 'ssh') {
+      return {
+        ok: true,
+        identity: {
+          transport,
+          credentialId: profile.sshCredentialId,
+          endpoint: parsed.cloneUrlSsh,
+        },
+      };
+    }
+
+    if (transport === 'account' && profile.account && resolveSourceControlAccount && createHttpsCredentialReference) {
+      const account = await resolveSourceControlAccount(profile.account);
+      if (account?.credentialId !== profile.account.accountId
+        || account.status !== 'valid'
+        || !Number.isSafeInteger(account.credentialRevision)
+        || account.credentialRevision < 1) {
+        return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+      }
+
+      let credentialId;
+      try {
+        credentialId = createHttpsCredentialReference({
+          provider: profile.account.provider,
+          instance: profile.account.instance,
+          credentialId: account.credentialId,
+          credentialRevision: account.credentialRevision,
+          providerUserId: account.providerUserId,
+        });
+      } catch {
+        return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+      }
+
+      return {
+        ok: true,
+        identity: {
+          transport: 'https',
+          credentialId,
+          endpoint: parsed.cloneUrlHttps,
+        },
+      };
+    }
+
+    return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+  };
 
   const findWorktreeRootForSkills = (workingDirectory) => {
     if (!workingDirectory) return null;
@@ -203,22 +267,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     } catch {
       return [];
     }
-  };
-
-  const resolveGitIdentity = (profileId) => {
-    if (!profileId) {
-      return null;
-    }
-    try {
-      const profile = getProfile(profileId);
-      const sshKey = profile?.sshKey;
-      if (typeof sshKey === 'string' && sshKey.trim()) {
-        return { sshKey: sshKey.trim() };
-      }
-    } catch {
-      // ignore
-    }
-    return null;
   };
 
   // Prefer an explicit request directory, then soft-fallback to the active
@@ -399,6 +447,13 @@ export const registerSkillRoutes = (app, dependencies) => {
         subpath: effectiveSubpath || '',
         identityId: src.gitIdentityId || '',
       });
+      const resolvedIdentity = await resolveCatalogGitIdentity(src.gitIdentityId, src.source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const scanResult = await scanWithCache(
         cacheKey,
@@ -406,12 +461,19 @@ export const registerSkillRoutes = (app, dependencies) => {
           source: src.source,
           subpath: src.defaultSubpath,
           defaultSubpath: src.defaultSubpath,
-          identity: resolveGitIdentity(src.gitIdentityId),
+          identity: resolvedIdentity.identity,
+          credentialResolver,
         }),
         { refresh },
       );
 
       if (!scanResult.ok) {
+        if (scanResult.error?.kind === 'authRequired') {
+          return res.status(401).json({
+            ok: false,
+            error: { ...scanResult.error, identities: listGitIdentitiesForResponse() },
+          });
+        }
         return res.status(500).json({ ok: false, error: scanResult.error });
       }
 
@@ -441,12 +503,19 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.post('/api/config/skills/scan', async (req, res) => {
     try {
       const { source, subpath, gitIdentityId } = req.body || {};
-      const identity = resolveGitIdentity(gitIdentityId);
+      const resolvedIdentity = await resolveCatalogGitIdentity(gitIdentityId, source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const result = await scanSkillsRepository({
         source,
         subpath,
-        identity,
+        identity: resolvedIdentity.identity,
+        credentialResolver,
       });
 
       if (!result.ok) {
@@ -495,12 +564,19 @@ export const registerSkillRoutes = (app, dependencies) => {
         workingDirectory = resolved.directory;
       }
 
-      const identity = resolveGitIdentity(gitIdentityId);
+      const resolvedIdentity = await resolveCatalogGitIdentity(gitIdentityId, source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const result = await installSkillsFromRepository({
         source,
         subpath,
-        identity,
+        identity: resolvedIdentity.identity,
+        credentialResolver,
         scope,
         targetSource,
         workingDirectory,

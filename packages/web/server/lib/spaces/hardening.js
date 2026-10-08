@@ -51,9 +51,9 @@ const FILLER_TMPFS_OPTIONS = 'rw,exec,nosuid,size=1g';
 // named on its own as well, so its message stays specific.
 const FORBIDDEN_ENVIRONMENT = ['OPENCHAMBER_UI_PASSWORD'];
 // The variables the pinned base image sets itself. Docker copies them into every container made
-// from it. Read on 2026-09-24 with
+// from it. Read on 2026-10-08 with
 // `docker image inspect <SPACE_BASE_IMAGE> --format '{{json .Config.Env}}'`, which answered
-// PATH, NODE_VERSION=22.23.2 and YARN_VERSION=1.22.22. Read them again when the digest changes.
+// PATH, NODE_VERSION=24.21.0 and YARN_VERSION=1.22.22. Read them again when the digest changes.
 const BASE_IMAGE_ENVIRONMENT_NAMES = ['PATH', 'NODE_VERSION', 'YARN_VERSION'];
 const SPACE_ENVIRONMENT_NAMES = new Set([...Object.keys(SPACE_ENVIRONMENT), ...BASE_IMAGE_ENVIRONMENT_NAMES]);
 const GATEKEEPER_ENVIRONMENT_NAMES = new Set([...Object.keys(GATEKEEPER_ENVIRONMENT), ...BASE_IMAGE_ENVIRONMENT_NAMES]);

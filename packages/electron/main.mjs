@@ -1,5 +1,5 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
@@ -18,6 +18,7 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { clearAppCache } from './app-cache.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -63,6 +64,16 @@ import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
+import {
+  computeQuakeBounds,
+  parseQuakeHeightFraction,
+  QUAKE_MODE_ENABLED_KEY,
+  QUAKE_MODE_HEIGHT_KEY,
+  QUAKE_MODE_SHORTCUT_KEY,
+  QUAKE_MODE_UNASSIGNED,
+  readQuakeModeSettings,
+  selectQuakeToggleAction,
+} from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import {
@@ -276,6 +287,12 @@ const state = {
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
+  // Quake Mode: the main window's normal geometry while it is showing the
+  // top-attached dropdown instead. Restored when Quake hides for good or is
+  // disabled; never persisted (writeWindowState skips Quake bounds).
+  quakeActive: false,
+  quakeNormalBounds: null,
+  quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
   windowGeometryRevisions: new Map(),
   windowGeometryTimers: new Map(),
@@ -814,6 +831,9 @@ const writeDesktopHostsConfig = async (config) => {
 const writeWindowState = async (browserWindow) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
+  // Quake geometry is transient: persisting it would overwrite the user's
+  // normal window bounds with the dropdown size.
+  if (state.quakeActive) return;
 
   const bounds = browserWindow.getBounds();
   await mutateSettingsRoot((root) => {
@@ -2336,6 +2356,10 @@ const applyDesktopMiniChatGlobalShortcut = () => {
     log.warn('[electron] mini chat global shortcut: unsupported combo', { combo });
     return;
   }
+  if (registeredQuakeModeAccelerator !== null && accelerator === registeredQuakeModeAccelerator) {
+    log.warn('[electron] mini chat global shortcut: combo collides with Quake Mode', { combo, accelerator });
+    return;
+  }
   try {
     globalShortcut.register(accelerator, handleMiniChatGlobalShortcut);
     if (globalShortcut.isRegistered(accelerator)) {
@@ -2346,6 +2370,189 @@ const applyDesktopMiniChatGlobalShortcut = () => {
     }
   } catch (error) {
     log.warn('[electron] mini chat global shortcut: registration failed', error);
+  }
+};
+
+// Quake Mode: one global hotkey toggles the existing main window between
+// hidden (process keeps running, renderer untouched) and a top-attached
+// dropdown. The combo is stored in settings.json under
+// desktopQuakeModeShortcut using the in-app shortcut syntax; when Quake is
+// enabled but nothing was stored, the default applies (Ctrl+`, deliberately
+// without the Win key so it never fires Windows Terminal's own dropdown), and
+// an explicitly unassigned one registers nothing. A stored combo that fails to
+// convert, is taken by another app, or collides with the Mini Chat shortcut
+// stays configured but inactive, and the settings row surfaces that state.
+let registeredQuakeModeAccelerator = null;
+
+const readDesktopQuakeModeStatus = () => {
+  const { enabled, storedCombo, combo, heightFraction } = readQuakeModeSettings(readSettingsRoot());
+  return {
+    supported: true,
+    enabled,
+    combo,
+    storedCombo,
+    active: registeredQuakeModeAccelerator !== null,
+    heightFraction,
+  };
+};
+
+// Close-to-quake gate. Quake Mode is itself a background lifecycle (like the
+// tray): closing the window hides it so the hotkey can bring it back, instead
+// of quitting the app out from under the user. Without a registered hotkey
+// (unassigned, taken by another app, unsupported on Wayland) nothing could
+// bring the window back, so close behaves as if Quake were off.
+const shouldHideMainWindowToQuake = (browserWindow) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (browserWindow.__ocMiniChat === true) return false;
+  if (registeredQuakeModeAccelerator === null) return false;
+  return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
+};
+
+// The display the Quake window opens on: the one holding the cursor (like
+// Windows Terminal), falling back to the primary display.
+const getQuakeDisplayBounds = () => {
+  try {
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    if (display?.bounds) return display.bounds;
+  } catch {
+    // A cursor that cannot be read (locked screen, RDP edge) falls through.
+  }
+  try {
+    const primary = screen.getPrimaryDisplay();
+    if (primary?.bounds) return primary.bounds;
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+// Shows the existing main window as the Quake dropdown WITHOUT navigating or
+// reloading it, then focuses it so the user can type immediately. The window
+// stays an ordinary window (taskbar entry, Alt+Tab, minimize/maximize all work
+// as usual); only its geometry and the hotkey toggle are Quake Mode behavior.
+const showQuakeWindow = (browserWindow, heightFraction) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (!state.quakeActive) {
+    try {
+      state.quakeNormalBounds = browserWindow.getBounds();
+    } catch {
+      state.quakeNormalBounds = null;
+    }
+    state.quakeNormalMaximized = (() => {
+      try {
+        return browserWindow.isMaximized();
+      } catch {
+        return false;
+      }
+    })();
+  }
+  try {
+    // macOS: a hotkey pressed from another app leaves OpenChamber in the
+    // background, where show/focus alone do not bring it forward.
+    if (process.platform === 'darwin') app.focus({ steal: true });
+    if (browserWindow.isMinimized()) browserWindow.restore();
+    if (state.quakeNormalMaximized) browserWindow.unmaximize();
+    const displayBounds = getQuakeDisplayBounds();
+    if (displayBounds) {
+      browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
+    }
+    if (!browserWindow.isVisible()) browserWindow.show();
+    browserWindow.focus();
+    browserWindow.moveTop();
+    state.quakeActive = true;
+    return true;
+  } catch (error) {
+    log.warn('[electron] quake mode: show failed', error);
+    return false;
+  }
+};
+
+const hideQuakeWindow = (browserWindow) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    debounceWindowStatePersist(browserWindow, true);
+  } catch {
+    // Persist is best-effort; hiding must not fail because of it.
+  }
+  browserWindow.hide();
+};
+
+// Leaves the dropdown and puts the normal window back: the bounds and the
+// maximized state captured before Quake reshaped the window.
+const restoreNormalWindowFromQuake = () => {
+  const target = state.mainWindow;
+  if (!state.quakeActive) return target;
+  state.quakeActive = false;
+  if (!target || target.isDestroyed()) return target;
+  try {
+    if (state.quakeNormalBounds) {
+      target.setBounds(state.quakeNormalBounds);
+    }
+    if (state.quakeNormalMaximized) target.maximize();
+  } catch (error) {
+    log.warn('[electron] quake mode: restore failed', error);
+  }
+  state.quakeNormalBounds = null;
+  state.quakeNormalMaximized = false;
+  return target;
+};
+
+const handleQuakeModeGlobalShortcut = () => {
+  const { heightFraction } = readQuakeModeSettings(readSettingsRoot());
+  const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
+  const action = selectQuakeToggleAction({
+    windowExists: mainWindow !== null,
+    isVisible: mainWindow?.isVisible() === true,
+    isMinimized: mainWindow?.isMinimized() === true,
+    isFocused: mainWindow?.isFocused() === true,
+  });
+  if (action === 'hide' && mainWindow) {
+    hideQuakeWindow(mainWindow);
+    return;
+  }
+  if (mainWindow) {
+    showQuakeWindow(mainWindow, heightFraction);
+    return;
+  }
+  // Windowless background start (or a truly closed window): create the main
+  // window, then shape it into the dropdown once it exists.
+  void openMainWindow().then((created) => {
+    const target = created && !created.isDestroyed() ? created : state.mainWindow;
+    if (target && !target.isDestroyed()) showQuakeWindow(target, heightFraction);
+  }).catch((error) => {
+    log.warn('[electron] quake mode: open failed', error);
+  });
+};
+
+const applyDesktopQuakeModeShortcut = () => {
+  if (registeredQuakeModeAccelerator !== null) {
+    try {
+      globalShortcut.unregister(registeredQuakeModeAccelerator);
+    } catch {
+    }
+    registeredQuakeModeAccelerator = null;
+  }
+  const { enabled, combo } = readDesktopQuakeModeStatus();
+  if (!enabled || !combo) return;
+  const accelerator = convertShortcutComboToAccelerator(combo);
+  if (!accelerator) {
+    log.warn('[electron] quake mode: unsupported combo', { combo });
+    return;
+  }
+  if (accelerator === registeredMiniChatGlobalShortcutAccelerator) {
+    log.warn('[electron] quake mode: combo collides with the Mini Chat shortcut', { combo, accelerator });
+    return;
+  }
+  try {
+    globalShortcut.register(accelerator, handleQuakeModeGlobalShortcut);
+    if (globalShortcut.isRegistered(accelerator)) {
+      registeredQuakeModeAccelerator = accelerator;
+    } else {
+      log.warn('[electron] quake mode: combo is taken by another app', { combo, accelerator });
+    }
+  } catch (error) {
+    log.warn('[electron] quake mode: registration failed', error);
   }
 };
 
@@ -2476,6 +2683,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
       browserWindow.hide();
+      return;
+    }
+
+    if (!state.quitRequested && shouldHideMainWindowToQuake(browserWindow)) {
+      event.preventDefault();
+      hideQuakeWindow(browserWindow);
       return;
     }
 
@@ -4191,7 +4404,59 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         else root[MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY] = combo;
       });
       applyDesktopMiniChatGlobalShortcut();
+      // A combo Mini Chat just released may be the one Quake was waiting for.
+      applyDesktopQuakeModeShortcut();
       return readDesktopMiniChatGlobalShortcutStatus();
+    }
+
+    case 'desktop_get_quake_mode': {
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_enabled': {
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root[QUAKE_MODE_ENABLED_KEY] = enabled;
+      });
+      if (!enabled) restoreNormalWindowFromQuake();
+      applyDesktopQuakeModeShortcut();
+      applyDesktopMiniChatGlobalShortcut();
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_shortcut': {
+      // Unassigned is stored as such, so the default does not come back and
+      // collide with whatever the combo was given to.
+      if (args.combo === QUAKE_MODE_UNASSIGNED) {
+        await mutateSettingsRoot((root) => {
+          root[QUAKE_MODE_SHORTCUT_KEY] = QUAKE_MODE_UNASSIGNED;
+        });
+        applyDesktopQuakeModeShortcut();
+        applyDesktopMiniChatGlobalShortcut();
+        return readDesktopQuakeModeStatus();
+      }
+      const combo = normalizeStoredShortcutCombo(args.combo);
+      // A combo the OS cannot grab leaves the stored setting untouched and
+      // says why, so the settings row can explain instead of failing generically.
+      if (combo !== null && convertShortcutComboToAccelerator(combo) === null) {
+        return { ...readDesktopQuakeModeStatus(), error: 'unsupported-combo' };
+      }
+      await mutateSettingsRoot((root) => {
+        if (combo === null) delete root[QUAKE_MODE_SHORTCUT_KEY];
+        else root[QUAKE_MODE_SHORTCUT_KEY] = combo;
+      });
+      // Quake first, so a combo it releases is free when Mini Chat re-applies.
+      applyDesktopQuakeModeShortcut();
+      applyDesktopMiniChatGlobalShortcut();
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_height': {
+      const heightFraction = parseQuakeHeightFraction(args.heightFraction);
+      await mutateSettingsRoot((root) => {
+        root[QUAKE_MODE_HEIGHT_KEY] = heightFraction;
+      });
+      return readDesktopQuakeModeStatus();
     }
 
     // Dev-server tunnels: bind a loopback port here and pipe it to a dev server
@@ -4503,10 +4768,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
 
     case 'desktop_clear_cache':
-      await session.defaultSession.clearStorageData();
-      for (const browserWindow of BrowserWindow.getAllWindows()) {
-        browserWindow.webContents.reload();
-      }
+      await clearAppCache({ session: session.defaultSession, windows: BrowserWindow.getAllWindows() });
       return null;
 
     case 'desktop_open_path': {
@@ -5894,6 +6156,7 @@ app.whenReady().then(async () => {
   }
   setupTray();
   applyDesktopMiniChatGlobalShortcut();
+  applyDesktopQuakeModeShortcut();
 
   if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;

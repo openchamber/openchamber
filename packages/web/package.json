@@ -11,6 +11,9 @@
   "publishConfig": {
     "access": "public"
   },
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "bun run build:watch",
     "dev:server": "bun ../../scripts/build-builtin-extensions.mjs && OPENCHAMBER_RELAY_HOST=${OPENCHAMBER_RELAY_HOST:-off} OPENCHAMBER_ALLOW_DEV_ORIGINS=1 bun server/index.js --port ${OPENCHAMBER_PORT:-3001}",
