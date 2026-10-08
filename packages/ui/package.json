@@ -46,7 +46,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@legendapp/list": "3.6.0",
     "@lezer/highlight": "^1.2.3",
-    "@opencode/client": "2.0.23",
+    "@opencode/client": "2.0.24",
     "@opencode/schema": "2.0.23",
     "@pierre/diffs": "1.5.1",
     "@replit/codemirror-vim": "^6.4.0",

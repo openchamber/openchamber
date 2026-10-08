@@ -124,7 +124,7 @@
     "@heroui/theme": "^2.4.23",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode/client": "2.0.23",
+    "@opencode/client": "2.0.24",
     "@opencode/schema": "2.0.23",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",

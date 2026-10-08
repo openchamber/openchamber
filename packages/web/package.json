@@ -31,7 +31,7 @@
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.0.23",
+    "@opencode/client": "2.0.24",
     "@opencode/schema": "2.0.23",
     "@simplewebauthn/server": "13.3.3",
     "bun-pty": "^0.4.5",
