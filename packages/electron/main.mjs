@@ -4910,6 +4910,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_set_locale': {
       if (typeof args.locale === 'string') {
         setContextMenuLocale(args.locale);
+        if (state.trayController) {
+          try {
+            state.trayController.setLocale(args.locale);
+          } catch (error) {
+            log.warn('[electron] failed to update tray locale', error);
+          }
+        }
         if (process.platform === 'darwin') {
           Menu.setApplicationMenu(buildMacMenu(normalizeMenuLocale(args.locale)));
         }
@@ -5444,6 +5451,7 @@ const setupTray = () => {
   try {
     state.trayController = createTrayController({
       ...assets,
+      locale: readPreferredLocale(),
       onAction: (action) => { void dispatchTrayAction(action); },
     });
     // Seed an empty snapshot so the icon appears immediately; the renderer
