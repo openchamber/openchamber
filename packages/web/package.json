@@ -29,7 +29,7 @@
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
     "@opencode/client": "2.0.23",
-    "@opencode/schema": "2.0.23",
+    "@opencode/schema": "2.0.24",
     "@simplewebauthn/server": "13.3.3",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",

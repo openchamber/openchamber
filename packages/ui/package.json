@@ -47,7 +47,7 @@
     "@legendapp/list": "3.6.0",
     "@lezer/highlight": "^1.2.3",
     "@opencode/client": "2.0.23",
-    "@opencode/schema": "2.0.23",
+    "@opencode/schema": "2.0.24",
     "@pierre/diffs": "1.5.1",
     "@replit/codemirror-vim": "^6.4.0",
     "@simplewebauthn/browser": "13.3.0",

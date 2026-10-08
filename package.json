@@ -125,7 +125,7 @@
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
     "@opencode/client": "2.0.23",
-    "@opencode/schema": "2.0.23",
+    "@opencode/schema": "2.0.24",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
