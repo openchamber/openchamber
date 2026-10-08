@@ -74,6 +74,7 @@ import { useTabletLayout } from '@/lib/device';
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { isCapacitorApp } from '@/lib/platform';
 import { isIMECompositionEvent } from '@/lib/ime';
+import { setNativeImagePasteEnabled, subscribeToNativeImagePastes } from '@/lib/nativeImagePaste';
 import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -2971,6 +2972,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         e.preventDefault();
         await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
     }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, isMobile, largeTextPasteBehavior, largeTextPasteGesture, readLargeTextPasteSnapshot, markFileMentionPasteSuppression, message, mobileShell, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+
+    // Android commits an image through the IME instead of the page (see nativeImagePaste).
+    React.useEffect(() => {
+        setNativeImagePasteEnabled(mobileShell.focused);
+    }, [mobileShell.focused]);
+
+    // A composer unmounted while focused must not leave image commits enabled
+    // for whatever field gets the keyboard next.
+    React.useEffect(() => () => setNativeImagePasteEnabled(false), []);
+
+    React.useEffect(() => subscribeToNativeImagePastes((paste) => {
+        // Backstop for the window around the shell re-reading the declaration.
+        if (!mobileShell.focused) return;
+        if (!paste.ok) {
+            toast.error(t('chat.chatInput.toast.clipboardAttachFailed'));
+            return;
+        }
+        if (!currentSessionId && !newSessionDraftOpen) return;
+        void attachFilesWithCitation([paste.file]);
+    }), [attachFilesWithCitation, currentSessionId, mobileShell.focused, newSessionDraftOpen, t]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 

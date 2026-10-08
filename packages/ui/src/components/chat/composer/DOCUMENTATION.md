@@ -203,6 +203,18 @@ share `attachFilesWithCitation`: every file attaches and is cited in the draft
 as `[name]`; images get a generated unique name first, other files keep their
 own name and are cited only after they attached. A copied file's filename text
 is suppressed so only the citation lands in the draft.
+An Android image paste arrives from the input method rather than from a paste event, because
+a WebView declares no content types on its `EditorInfo` and the IME refuses the paste before
+the page can hear about it. The Capacitor Android shell declares image content on the editor
+it exposes and sends what the IME commits to `lib/nativeImagePaste.ts`, which hands the
+composer the same file a pasted image would be, and the composer runs it through
+`attachFilesWithCitation` like any other. The declaration belongs to the composer alone: the
+WebView is one input connection for every editable element in the app, so the composer
+reports its focus to the shell and drops the declaration on blur, and the shell asks the IME
+to read the declaration again when the composer takes focus, since the IME reads it when an
+element takes focus and that can be before the report arrives. The paste handler re-checks
+focus as a backstop for that window. Every other runtime pastes images through `handlePaste` unchanged, and an IME
+without content insertion keeps refusing.
 Large pastes (about 2,000 characters or 25 lines) follow the composer setting
 `largeTextPasteBehavior` (`ask` / `attach` / `inline` / `inline-double-paste`). Attaching creates an
 in-memory `text/plain` file named `pasted-context-N.txt`, inserts a bracket
