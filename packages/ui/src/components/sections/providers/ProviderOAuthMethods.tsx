@@ -2,13 +2,8 @@ import React from 'react';
 import type { FormField, FormValue, IntegrationOAuthMethod } from '@opencode/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/ui';
 import { Icon } from '@/components/icon/Icon';
-import {
-  SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
-} from '@/components/sections/shared/SettingsSection';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -23,9 +18,9 @@ import {
   firstUnansweredField,
   isAnswerableField,
   shouldOpenAuthorizationUrl,
-  visibleFields,
   type OAuthAttempt,
 } from './provider-oauth';
+import { ProviderFormFields } from './ProviderFormFields';
 
 interface ProviderOAuthMethodsProps {
   /** The integration that owns these methods; it shares the provider's id. */
@@ -248,70 +243,6 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
     setFlow(IDLE);
   };
 
-  const renderField = (field: FormField) => {
-    if (field.type === 'external') {
-      return (
-        <div key={field.key} className="space-y-1.5">
-          <label className="typography-ui-label text-foreground">{fieldLabel(field)}</label>
-          <Button
-            variant="outline"
-            size="xs"
-            className="!font-normal"
-            onClick={() => void openExternalUrl(field.url)}
-          >
-            {t('settings.providers.page.actions.open')}
-          </Button>
-        </div>
-      );
-    }
-
-    const raw = fieldValues[field.key];
-    const value = typeof raw === 'string' ? raw : '';
-    const setValue = (next: FormValue) =>
-      setFieldValues((prev) => ({ ...prev, [field.key]: next }));
-
-    const options = field.type === 'string' || field.type === 'multiselect' ? field.options ?? [] : [];
-
-    return (
-      <div key={field.key} className="space-y-1.5">
-        <label className="typography-ui-label text-foreground">{fieldLabel(field)}</label>
-        {field.description && (
-          <p className="typography-meta text-muted-foreground">{field.description}</p>
-        )}
-        {options.length > 0 ? (
-          <Select value={value} onValueChange={setValue}>
-            <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
-              <SelectValue>
-                {(current) => options.find((option) => option.value === current)?.label ?? null}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.description ? `${option.label} · ${option.description}` : option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : field.type === 'boolean' ? (
-          <input
-            type="checkbox"
-            checked={raw === true}
-            onChange={(event) => setValue(event.target.checked)}
-            aria-label={fieldLabel(field)}
-          />
-        ) : (
-          <Input
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            placeholder={field.type === 'string' ? field.placeholder : undefined}
-            className="max-w-[24rem] text-xs"
-          />
-        )}
-      </div>
-    );
-  };
-
   const renderAttemptDetails = (attempt: OAuthAttempt) => {
     const userCode = extractUserCode(attempt.instructions);
     return (
@@ -403,7 +334,11 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
             {isActive && flow.phase === 'prompting' && (
               <div className="space-y-3">
-                {visibleFields(flow.fields, fieldValues).map(renderField)}
+                <ProviderFormFields
+                  fields={flow.fields}
+                  values={fieldValues}
+                  onChange={(key, value) => setFieldValues((prev) => ({ ...prev, [key]: value }))}
+                />
                 {flow.error && (
                   <p className="typography-meta text-[var(--status-error)]">{flow.error}</p>
                 )}
