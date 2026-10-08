@@ -1027,6 +1027,8 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.field.enabled": "Показувати сесії в роботі",
   "settings.openchamber.sessionWork.field.autoOpen": "Автоматично переносити сесії в роботу",
   "settings.openchamber.sessionWork.field.autoOpenInfo": "Jev читає кожне ваше повідомлення й переносить сесію в роботу, коли ви просите зміну, повідомляєте про баг або обговорюєте конкретну зміну. Питання й дослідження не рахуються. Jev ніколи не позначає роботу готовою: коли хід схожий на завершення роботи, сесія показує сіру галочку, а вирішуєте ви.",
+  "settings.openchamber.sessionWork.field.keepInGroup": "Залишати сесії в роботі в їхній групі проєкту",
+  "settings.openchamber.sessionWork.field.keepInGroupInfo": "Сесія в роботі також залишається у списку під групою свого проєкту та в теках. «Останні» й часова шкала, як і раніше, показують її один раз, у блоці роботи. Пошук завжди показує її один раз.",
   "settings.openchamber.sessionRetention.field.onlyArchived": "Лише архівні сесії",
   "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Використовує видалення та рахує період зберігання від архівації. Неархівовані сесії зберігаються.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Видаляє архівні сесії після завершення періоду зберігання. Зберігає 5 останніх архівованих сесій, відкриту сесію, сесії в роботі та сесії з публічним посиланням. Батьківська сесія залишається, якщо її видалення зачепить захищену дочірню.",

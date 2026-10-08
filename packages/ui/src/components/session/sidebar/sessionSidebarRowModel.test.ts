@@ -101,6 +101,62 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.selectionEntries.filter((entry) => entry.id === 'working')).toHaveLength(1);
   });
 
+  test('keepWorkInGroup keeps a session in work in its project group too', () => {
+    const working = node('working');
+    const other = node('other');
+    const input = args([project([group([working, other])])]);
+    input.workItems = [timelineItem('working')];
+    input.workSessionIds = new Set(['working']);
+    input.keepWorkInGroup = true;
+
+    const model = buildSessionSidebarRowModel(input);
+    const sessionRows = model.rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : []));
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'work' });
+    expect(sessionRows).toEqual(['recent:working', 'project:other', 'project:working']);
+    expect(model.selectionEntries.filter((entry) => entry.id === 'working')).toHaveLength(2);
+    expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+  });
+
+  test('keepWorkInGroup leaves a tracked session in its folder', () => {
+    const input = args([project([group([node('in-folder'), node('top-level')])])]);
+    input.foldersMap = { '/repo': [{ id: 'outer', name: 'Outer', createdAt: 1, sessionIds: ['in-folder'] }] };
+    input.workItems = [timelineItem('in-folder')];
+    input.workSessionIds = new Set(['in-folder']);
+    input.keepWorkInGroup = true;
+
+    const rows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'folder-header' || row.kind === 'session');
+
+    expect(rows.map((row) => (row.kind === 'session' ? `${row.renderContext}:${row.node.session.id}` : row.displayName))).toEqual([
+      'recent:in-folder', 'Outer', 'project:in-folder', 'project:top-level',
+    ]);
+  });
+
+  test('keepWorkInGroup leaves search single-placement and counts the tree once', () => {
+    const parent = node('ses_parent', [node('ses_child'), node('ses_other')]);
+    const main = group([parent]);
+    const input = args([project([main])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'ses_child';
+    input.keepWorkInGroup = true;
+    input.groupSearchDataByGroup.set(main, {
+      filteredNodes: [parent],
+      matchedSessionCount: countSessionSearchMatches([parent], 'ses_child'),
+      folderNameMatchCount: 0,
+      groupMatches: false,
+      hasMatch: true,
+    });
+    input.workItems = [{ ...timelineItem('ses_parent'), node: parent }];
+    input.workSessionIds = new Set(['ses_parent']);
+
+    const model = buildSessionSidebarRowModel(input);
+    const rows = model.rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+
+    expect(model.searchMatchCount).toBe(1);
+    expect(rows).toEqual(['ses_parent', 'ses_child', 'ses_other']);
+    expect(model.selectionEntries.filter((entry) => entry.id === 'ses_parent')).toHaveLength(1);
+  });
+
   test('timeline keeps work sessions out of the flat list and renders them as timeline rows', () => {
     const input = args([]);
     input.viewMode = 'timeline';

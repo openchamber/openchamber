@@ -1027,6 +1027,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': '작업 중인 세션 표시',
   'settings.openchamber.sessionWork.field.autoOpen': '세션을 자동으로 작업 중으로 이동',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev는 보내는 메시지를 읽고 변경을 요청하거나 버그를 보고하거나 구체적인 변경을 논의할 때 세션을 작업 중으로 옮깁니다. 질문과 조사는 포함되지 않습니다. Jev는 작업을 완료로 표시하지 않습니다. 턴이 작업의 끝처럼 보이면 세션에 회색 체크가 표시되고 결정은 사용자가 합니다.',
+  'settings.openchamber.sessionWork.field.keepInGroup': '작업 중 세션을 프로젝트 그룹에 유지',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': '작업 중인 세션은 프로젝트 그룹과 폴더 아래에도 계속 표시됩니다. 최근 및 타임라인에서는 작업 블록에 한 번만 표시됩니다. 검색은 항상 한 번만 표시합니다.',
   'settings.openchamber.sessionRetention.field.onlyArchived': '보관된 세션만',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '삭제를 사용하며 보관 시점부터 보존 기간을 계산합니다. 보관되지 않은 세션은 유지됩니다.',
   'settings.openchamber.sessionRetention.archivedTooltip': '보존 기간이 지난 보관된 세션을 삭제합니다. 가장 최근에 보관된 세션 5개, 열려 있는 세션, 실행 중인 세션과 공유된 세션은 유지됩니다. 상위 세션을 삭제하면 보호된 하위 세션도 삭제되는 경우 상위 세션을 유지합니다.',

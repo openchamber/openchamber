@@ -1027,6 +1027,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': '显示进行中的会话',
   'settings.openchamber.sessionWork.field.autoOpen': '自动将会话移入进行中',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev 会阅读你发送的每条消息，当你请求修改、报告缺陷或讨论具体改动时，把会话移入进行中。提问和调研不算。Jev 从不把工作标记为完成：当某一轮看起来像工作的结尾时，会话会显示一个灰色对勾，由你决定。',
+  'settings.openchamber.sessionWork.field.keepInGroup': '将进行中的会话保留在其项目分组中',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': '进行中的会话也会继续列在其项目分组和文件夹下。「最近」和时间线仍只在工作区块中显示一次。搜索始终只显示一次。',
   'settings.openchamber.sessionRetention.field.onlyArchived': '仅已归档的会话',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '使用删除操作，并从归档时开始计算保留期限。未归档的会话会保留。',
   'settings.openchamber.sessionRetention.archivedTooltip': '删除超过保留期限的已归档会话。保留最近归档的 5 个会话、当前打开的会话、运行中的会话和已分享的会话。如果删除父会话会同时删除受保护的子会话，则保留父会话。',

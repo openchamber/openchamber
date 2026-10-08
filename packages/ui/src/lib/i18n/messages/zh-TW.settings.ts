@@ -1024,6 +1024,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': '顯示進行中的工作階段',
   'settings.openchamber.sessionWork.field.autoOpen': '自動將工作階段移入進行中',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev 會閱讀你送出的每則訊息，當你要求修改、回報錯誤或討論具體改動時，把工作階段移入進行中。提問和研究不算。Jev 從不把工作標記為完成：當某一輪看起來像工作的結尾時，工作階段會顯示灰色勾號，由你決定。',
+  'settings.openchamber.sessionWork.field.keepInGroup': '將進行中的工作階段保留在專案群組中',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': '進行中的工作階段也會繼續列在其專案群組與資料夾下。「最近」與時間軸仍只在工作區塊中顯示一次。搜尋一律只顯示一次。',
   'settings.openchamber.sessionRetention.field.onlyArchived': '僅已封存的工作階段',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '使用刪除操作，並從封存時開始計算保留期限。未封存的工作階段會保留。',
   'settings.openchamber.sessionRetention.archivedTooltip': '刪除超過保留期限的已封存工作階段。保留最近封存的 5 個工作階段、目前開啟的工作階段、執行中的工作階段及已分享的工作階段。如果刪除父工作階段會同時刪除受保護的子工作階段，則保留父工作階段。',

@@ -110,8 +110,11 @@ the wording or thresholds without re-running this measurement.
 - `sessionReviewOfferEnabled`: the review offer, default off (Settings → Chat →
   Session Assistance); not offered in VS Code, inert without a classification
   provider, independent of the other two.
+- `sessionWorkKeepInGroup`: a tracked session also stays under its project
+  group and folders, default off; Recent, Timeline, and Chats still place it
+  once.
 
-All three are read at every use.
+All four are read at every use.
 
 ## Runtime parity
 

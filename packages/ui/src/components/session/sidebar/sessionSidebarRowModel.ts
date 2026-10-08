@@ -103,10 +103,16 @@ export type SessionSidebarRowModelArgs = {
    * Sessions in work, already ordered and search-filtered. They render in
    * their own block at the top and move out of every other projection
    * (Recent, Timeline, project groups, folders, Chats): a session appears
-   * once.
+   * once. `keepWorkInGroup` keeps them under their project group and folders
+   * as well, while Recent, Timeline, and Chats still place them once.
    */
   workItems?: readonly SessionSidebarActivityItem[];
   workSessionIds?: ReadonlySet<string>;
+  /**
+   * Keep a session in work listed under its project group and folders too.
+   * Search is unaffected: it still lists the session once, in the work block.
+   */
+  keepWorkInGroup?: boolean;
   showRecentSection: boolean;
   foldersMap: SessionFoldersMap;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -435,8 +441,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       if (matches === 0) return;
       searchMatchCount += matches;
     }
+    // With `keepWorkInGroup` a tracked session stays in its group and folders.
+    // Search stays single-placement so its count and rows agree with the work
+    // block, which counts the same trees.
+    const excludeWork = !(args.keepWorkInGroup === true && !search);
     const sourceNodes = (search ? searchData?.filteredNodes ?? [] : group.sessions)
-      .filter((node) => !inWork.has(node.session.id))
+      .filter((node) => !excludeWork || !inWork.has(node.session.id))
       .sort((left, right) => compareNodes(left, right, pinned, args.sessionOrderIndex));
     const indexed = indexNodes(sourceNodes);
     const selectionPoolOffset = selectionDescendantIds.length;

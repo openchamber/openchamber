@@ -543,6 +543,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'sessions.work-keep-in-group',
+    page: 'sessions',
+    titleKey: 'settings.openchamber.sessionWork.field.keepInGroup',
+    descriptionKey: 'settings.openchamber.sessionWork.field.keepInGroupInfo',
+    keywords: ['in work', 'track', 'project group', 'folder', 'sidebar', 'keep'],
+  },
+  {
     id: 'sessions.small-model',
     page: 'sessions',
     titleKey: 'settings.openchamber.defaults.smallModel.title',

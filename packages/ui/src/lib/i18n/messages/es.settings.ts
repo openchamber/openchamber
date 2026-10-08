@@ -1027,6 +1027,8 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sesiones en curso",
   "settings.openchamber.sessionWork.field.autoOpen": "Mover sesiones a en curso automáticamente",
   "settings.openchamber.sessionWork.field.autoOpenInfo": "Jev lee cada mensaje que envías y mueve la sesión a en curso cuando pides un cambio, informas de un error o hablas de un cambio concreto. Las preguntas y la investigación no cuentan. Jev nunca marca el trabajo como hecho: cuando un turno parece el final del trabajo, la sesión muestra una marca gris y tú decides.",
+  "settings.openchamber.sessionWork.field.keepInGroup": "Mantener las sesiones en curso en su grupo de proyecto",
+  "settings.openchamber.sessionWork.field.keepInGroupInfo": "Una sesión en curso también sigue apareciendo en su grupo de proyecto y sus carpetas. Recientes y la cronología siguen mostrándola una sola vez, en el bloque de trabajo. La búsqueda siempre la muestra una vez.",
   "settings.openchamber.sessionRetention.field.onlyArchived": "Solo sesiones archivadas",
   "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Usa Eliminar y cuenta el periodo de retención desde el archivado. Las sesiones no archivadas se conservan.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Elimina sesiones archivadas cuyo periodo de retención ha vencido. Conserva las 5 sesiones archivadas más recientemente, la sesión abierta, las sesiones en ejecución y las compartidas. Una sesión principal se conserva si eliminarla también eliminaría una sesión secundaria protegida.",

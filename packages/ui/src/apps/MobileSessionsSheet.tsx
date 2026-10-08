@@ -1023,6 +1023,10 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => (workSessionIds.size > 0 ? chatSessions.filter((session) => !workSessionIds.has(session.id)) : chatSessions),
     [chatSessions, workSessionIds],
   );
+  // `sessionWorkKeepInGroup` keeps a session in work under its project group too.
+  // Recent and Timeline below still take `sectionProjectSessions` (single placement).
+  const sessionWorkKeepInGroup = useUIStore((state) => state.sessionWorkKeepInGroup);
+  const projectTreeSessions = sessionWorkKeepInGroup ? projectSessions : sectionProjectSessions;
   const spaceList = useSidebarSpaces();
   const spaces = React.useMemo(() => new Map(spaceList.map((space) => [space.id, space])), [spaceList]);
   const spaceLabelById = React.useMemo(
@@ -1202,7 +1206,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       }
     }
 
-    for (const session of sectionProjectSessions) {
+    for (const session of projectTreeSessions) {
       const owner = sessionOwnership.bySessionId.get(session.id);
       if (!owner) continue;
       const node = nodes.find((entry) => entry.project.id === owner.projectId);
@@ -1225,7 +1229,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
 
     return nodes;
-  }, [activeProjectId, pinnedSessionIds, projectSortOrder, projectsMeta, runIndex, sectionProjectSessions, sessionOrderRanks, sessionOwnership, spaceList, spaces, t]);
+  }, [activeProjectId, pinnedSessionIds, projectSortOrder, projectsMeta, runIndex, projectTreeSessions, sessionOrderRanks, sessionOwnership, spaceList, spaces, t]);
 
   const normalizedDirectory = normalizePath(currentDirectory);
 

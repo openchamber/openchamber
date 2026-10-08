@@ -1028,6 +1028,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Pokazuj sesje w toku',
   'settings.openchamber.sessionWork.field.autoOpen': 'Automatycznie przenoś sesje do toku',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev czyta każdą wysłaną wiadomość i przenosi sesję do toku, gdy prosisz o zmianę, zgłaszasz błąd lub omawiasz konkretną zmianę. Pytania i research się nie liczą. Jev nigdy nie oznacza pracy jako gotowej: gdy tura wygląda na koniec pracy, sesja pokazuje szary znacznik, a decyzja należy do ciebie.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Zostaw śledzone sesje w ich grupie projektu',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'Sesja w toku pozostaje też na liście w grupie swojego projektu i w folderach. Sekcje Ostatnie i os czasu nadal pokazują ją raz, w bloku pracy. Wyszukiwanie zawsze pokazuje ją raz.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Tylko zarchiwizowane sesje',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Używa opcji Usuń i liczy okres przechowywania od archiwizacji. Niezarchiwizowane sesje pozostają zachowane.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Usuwa zarchiwizowane sesje po upływie okresu przechowywania. Zachowuje 5 ostatnio zarchiwizowanych sesji, otwartą sesję oraz sesje działające i udostępnione. Sesja nadrzędna pozostaje, jeśli jej usunięcie usunęłoby też chronioną sesję podrzędną.',

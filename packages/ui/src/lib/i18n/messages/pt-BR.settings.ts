@@ -1027,6 +1027,8 @@ export const settingsDict = {
   "settings.openchamber.sessionWork.field.enabled": "Mostrar sessões em andamento",
   "settings.openchamber.sessionWork.field.autoOpen": "Mover sessões para em andamento automaticamente",
   "settings.openchamber.sessionWork.field.autoOpenInfo": "O Jev lê cada mensagem que você envia e move a sessão para em andamento quando você pede uma mudança, relata um bug ou discute uma mudança concreta. Perguntas e pesquisa não contam. O Jev nunca marca o trabalho como concluído: quando um turno parece o fim do trabalho, a sessão mostra um check cinza e você decide.",
+  "settings.openchamber.sessionWork.field.keepInGroup": "Manter sessões em andamento no grupo do projeto",
+  "settings.openchamber.sessionWork.field.keepInGroupInfo": "Uma sessão em andamento também continua listada sob o grupo do projeto e as pastas. Recentes e a linha do tempo ainda a mostram uma vez, no bloco de trabalho. A busca sempre a mostra uma vez.",
   "settings.openchamber.sessionRetention.field.onlyArchived": "Somente sessões arquivadas",
   "settings.openchamber.sessionRetention.field.onlyArchivedDescription": "Usa Excluir e conta o período de retenção a partir do arquivamento. As sessões não arquivadas são mantidas.",
   "settings.openchamber.sessionRetention.archivedTooltip": "Exclui sessões arquivadas cujo período de retenção terminou. Mantém as 5 sessões arquivadas mais recentemente, a sessão aberta, as sessões em execução e as compartilhadas. Uma sessão principal é mantida se sua exclusão também excluir uma sessão filha protegida.",
