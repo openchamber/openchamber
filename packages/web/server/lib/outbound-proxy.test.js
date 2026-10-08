@@ -32,12 +32,7 @@ describe('applyOutboundProxyFromEnv', () => {
     expect(setGlobalProxyFromEnv).toHaveBeenCalledWith({ HTTP_PROXY: 'http://proxy:3128', NO_PROXY: 'localhost,127.0.0.1,::1' });
   });
 
-  // Only Node versions with http.setGlobalProxyFromEnv route fetch through a
-  // proxy this way; on older ones (CI runs Node 22) the module is a no-op.
-  const nodeCanProxy = spawnSync('node', ['-p', "typeof require('node:http').setGlobalProxyFromEnv"], { encoding: 'utf8', windowsHide: true })
-    .stdout?.trim() === 'function';
-
-  it.runIf(nodeCanProxy)('sends fetch through the proxy and keeps loopback direct in a real Node process', () => {
+  it('sends fetch through the proxy and keeps loopback direct in a real Node process', () => {
     const moduleUrl = new URL('./outbound-proxy.js', import.meta.url).href;
     const result = spawnSync('node', ['--input-type=module', '--eval', `
       import http from 'node:http';
