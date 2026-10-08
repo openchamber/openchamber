@@ -48,7 +48,7 @@ describe('skills', () => {
         'utf8',
       );
 
-      const discovered = discoverSkills(tempRoot);
+      const discovered = await discoverSkills(tempRoot);
       const match = discovered.find((skill) => skill.name === 'repo-local-skill');
 
       expect(match).toEqual({
@@ -63,8 +63,112 @@ describe('skills', () => {
     }
   });
 
-  it('resolves built-in OpenCode skill content without parsing virtual locations as files', () => {
-    const sources = getSkillSources(
+  describe('discovery over a tree with nested skills and links', () => {
+    // Expected values were recorded from the synchronous discovery on main
+    // before it became async; they must not move.
+    const buildTree = async () => {
+      const root = await fsPromises.realpath(await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skill-equiv-')));
+      const write = async (relative, frontmatter) => {
+        const file = path.join(root, relative);
+        await fsPromises.mkdir(path.dirname(file), { recursive: true });
+        await fsPromises.writeFile(file, `---\n${frontmatter}\n---\nBody\n`, 'utf8');
+      };
+      const skill = (relative, name) => write(relative, `name: ${name}\ndescription: ${name} description`);
+      // A junction needs no elevation on Windows; the type is ignored on POSIX.
+      const link = async (target, relative) => {
+        await fsPromises.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+        await fsPromises.symlink(path.join(root, target), path.join(root, relative), process.platform === 'win32' ? 'junction' : 'dir');
+      };
+      await skill('home/.agents/skills/alpha/SKILL.md', 'alpha');
+      await skill('home/.agents/skills/alpha/nested/inner/SKILL.md', 'alpha-inner');
+      await skill('home/.agents/skills/group/beta/SKILL.md', 'beta');
+      await write('home/.agents/skills/broken/SKILL.md', 'description: no name');
+      await skill('outside/gamma/SKILL.md', 'gamma');
+      await link('outside/gamma', 'home/.agents/skills/linked-gamma');
+      await link('home/.agents/skills', 'home/.agents/skills/loop/back');
+      await link('home/.agents/skills/alpha', 'home/.claude/skills/alpha');
+      await skill('home/.claude/skills/delta/SKILL.md', 'delta');
+      await skill('home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', 'venv-skill');
+      await fsPromises.mkdir(path.join(root, 'home/work/project/.git'), { recursive: true });
+      await skill('home/work/project/.agents/skills/proj/SKILL.md', 'proj');
+      await skill('home/work/project/.opencode/skills/oc/SKILL.md', 'oc');
+      await skill('home/work/project/.claude/skills/delta/SKILL.md', 'delta');
+      return root;
+    };
+
+    const withHome = async (home, run) => {
+      const previous = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+      process.env.HOME = home;
+      process.env.USERPROFILE = home;
+      try {
+        return await run();
+      } finally {
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    };
+
+    // Skills of the machine running the tests (global config, caches) are
+    // outside the tree and left out.
+    const discoveredIn = async (root, directory) => (await discoverSkills(directory))
+      .filter((skill) => skill.path.startsWith(root))
+      .map((skill) => [skill.name, path.relative(root, skill.path).split(path.sep).join('/'), skill.scope, skill.source])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+
+    const userSkills = (scope) => [
+      ['alpha', 'home/.agents/skills/alpha/SKILL.md', scope, 'agents'],
+      ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', scope, 'agents'],
+      ['beta', 'home/.agents/skills/group/beta/SKILL.md', scope, 'agents'],
+      ['delta', 'home/.claude/skills/delta/SKILL.md', scope, 'claude'],
+      ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', scope, 'agents'],
+      ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', scope, 'claude'],
+    ];
+
+    it('finds the same skills as before for a project, a home-directory project and no project', async () => {
+      const root = await buildTree();
+      const home = path.join(root, 'home');
+      try {
+        await withHome(home, async () => {
+          expect(await discoveredIn(root, path.join(home, 'work', 'project'))).toEqual([
+            ['alpha', 'home/.agents/skills/alpha/SKILL.md', 'user', 'agents'],
+            ['alpha-inner', 'home/.agents/skills/alpha/nested/inner/SKILL.md', 'user', 'agents'],
+            ['beta', 'home/.agents/skills/group/beta/SKILL.md', 'user', 'agents'],
+            ['delta', 'home/work/project/.claude/skills/delta/SKILL.md', 'project', 'claude'],
+            ['gamma', 'home/.agents/skills/linked-gamma/SKILL.md', 'user', 'agents'],
+            ['oc', 'home/work/project/.opencode/skills/oc/SKILL.md', 'project', 'opencode'],
+            ['proj', 'home/work/project/.agents/skills/proj/SKILL.md', 'project', 'agents'],
+            ['venv-skill', 'home/.claude/skills/delta/.venv/lib/pkg/SKILL.md', 'user', 'claude'],
+          ]);
+          // The home directory's own skill roots are read once but still
+          // land as project skills, the way the second pass always left them.
+          expect(await discoveredIn(root, home)).toEqual(userSkills('project'));
+          expect(await discoveredIn(root, null)).toEqual(userSkills('user'));
+        });
+      } finally {
+        await fsPromises.rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('lets other work run while it reads the tree', async () => {
+      const root = await buildTree();
+      const events = [];
+      try {
+        await withHome(path.join(root, 'home'), async () => {
+          const discovery = discoverSkills(path.join(root, 'home', 'work', 'project')).then(() => events.push('discovered'));
+          setImmediate(() => events.push('other work'));
+          await discovery;
+        });
+        expect(events).toEqual(['other work', 'discovered']);
+      } finally {
+        await fsPromises.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it('resolves built-in OpenCode skill content without parsing virtual locations as files', async () => {
+    const sources = await getSkillSources(
       'customize-opencode',
       '/tmp/openchamber-skills-test-missing-project',
       {
@@ -87,9 +191,9 @@ describe('skills', () => {
     expect(sources.md.fields).toEqual(['description', 'instructions']);
   });
 
-  it('clears file metadata when a discovered skill path is unreadable', () => {
+  it('clears file metadata when a discovered skill path is unreadable', async () => {
     const missingPath = path.join(os.tmpdir(), 'openchamber-skills-test-missing-file', 'SKILL.md');
-    const sources = getSkillSources(
+    const sources = await getSkillSources(
       'missing-agent-skill',
       '/tmp/openchamber-skills-test-missing-project',
       {
@@ -131,7 +235,7 @@ describe('skills', () => {
         'utf8',
       );
 
-      const sources = getSkillSources('example-skill', tempRoot, {
+      const sources = await getSkillSources('example-skill', tempRoot, {
         name: 'example-skill',
         path: skillPath,
         scope: 'user',
@@ -167,24 +271,24 @@ describe('skills', () => {
         ['---', 'name: manual-skill', 'description: Manual', 'metadata:', '  team: core', '---', '', 'Body.', ''].join('\n'),
         'utf8',
       );
-      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(false);
+      expect((await getSkillSources('manual-skill', tempRoot, discovered)).md.disableModelInvocation).toBe(false);
 
-      updateSkill('manual-skill', { disableModelInvocation: true }, tempRoot, skillPath);
+      await updateSkill('manual-skill', { disableModelInvocation: true }, tempRoot, skillPath);
       expect(await readFrontmatter()).toEqual({
         name: 'manual-skill',
         description: 'Manual',
         metadata: { team: 'core', 'opencode/autoinvoke': false },
         'disable-model-invocation': true,
       });
-      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(true);
+      expect((await getSkillSources('manual-skill', tempRoot, discovered)).md.disableModelInvocation).toBe(true);
 
-      updateSkill('manual-skill', { disableModelInvocation: false }, tempRoot, skillPath);
+      await updateSkill('manual-skill', { disableModelInvocation: false }, tempRoot, skillPath);
       expect(await readFrontmatter()).toEqual({
         name: 'manual-skill',
         description: 'Manual',
         metadata: { team: 'core' },
       });
-      expect(getSkillSources('manual-skill', tempRoot, discovered).md.disableModelInvocation).toBe(false);
+      expect((await getSkillSources('manual-skill', tempRoot, discovered)).md.disableModelInvocation).toBe(false);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
     }
@@ -201,7 +305,7 @@ describe('skills', () => {
         ['---', 'name: read-skill', 'description: Read', ...frontmatterLines, '---', '', 'Body.', ''].join('\n'),
         'utf8',
       );
-      return getSkillSources('read-skill', tempRoot, discovered).md.disableModelInvocation;
+      return (await getSkillSources('read-skill', tempRoot, discovered)).md.disableModelInvocation;
     };
 
     try {
@@ -249,7 +353,7 @@ describe('skills', () => {
       );
       await fsPromises.writeFile(supportPath, 'supporting file contents\n', 'utf8');
 
-      renameSkill('original-skill', 'renamed-skill', projectRoot);
+      await renameSkill('original-skill', 'renamed-skill', projectRoot);
 
       const renamedDir = path.join(projectRoot, '.opencode', 'skills', 'renamed-skill');
       const renamedPath = path.join(renamedDir, 'SKILL.md');
@@ -259,7 +363,7 @@ describe('skills', () => {
       expect(fs.existsSync(renamedPath)).toBe(true);
       expect(fs.existsSync(renamedSupportPath)).toBe(true);
 
-      const sources = getSkillSources('renamed-skill', projectRoot, {
+      const sources = await getSkillSources('renamed-skill', projectRoot, {
         name: 'renamed-skill',
         path: renamedPath,
         scope: 'project',
@@ -305,7 +409,7 @@ describe('skills', () => {
       );
       await fsPromises.chmod(skillPath, 0o444);
 
-      expect(() => renameSkill('rollback-skill', 'rollback-skill-renamed', projectRoot)).toThrow();
+      await expect(renameSkill('rollback-skill', 'rollback-skill-renamed', projectRoot)).rejects.toThrow();
 
       expect(fs.existsSync(skillDir)).toBe(true);
       expect(fs.existsSync(path.join(projectRoot, '.opencode', 'skills', 'rollback-skill-renamed'))).toBe(false);
@@ -390,11 +494,11 @@ describe('skills', () => {
         'utf8',
       );
 
-      expect(() => renameSkill('managed-skill', 'Invalid_Name', projectRoot)).toThrow(/Invalid skill name/);
-      expect(() => renameSkill('missing-skill', 'new-skill', projectRoot)).toThrow(/not found/);
-      expect(() => renameSkill('managed-skill', 'taken-name', projectRoot)).toThrow(/already exists/);
-      expect(() => renameSkill('folder-name', 'renamed-mismatch', projectRoot)).toThrow(/does not match/);
-      expect(() => renameSkill('cache-skill', 'cache-skill-renamed', projectRoot)).toThrow(/managed skill directories/);
+      await expect(renameSkill('managed-skill', 'Invalid_Name', projectRoot)).rejects.toThrow(/Invalid skill name/);
+      await expect(renameSkill('missing-skill', 'new-skill', projectRoot)).rejects.toThrow(/not found/);
+      await expect(renameSkill('managed-skill', 'taken-name', projectRoot)).rejects.toThrow(/already exists/);
+      await expect(renameSkill('folder-name', 'renamed-mismatch', projectRoot)).rejects.toThrow(/does not match/);
+      await expect(renameSkill('cache-skill', 'cache-skill-renamed', projectRoot)).rejects.toThrow(/managed skill directories/);
 
       expect(fs.existsSync(managedDir)).toBe(true);
       expect(fs.existsSync(cacheDir)).toBe(true);

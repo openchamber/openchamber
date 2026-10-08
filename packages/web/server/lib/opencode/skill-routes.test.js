@@ -315,6 +315,32 @@ describe('skill-routes directory soft fallback', () => {
     expect(catalogPayload.sources[0]).not.toHaveProperty('excludedSkills');
   });
 
+  it('leaves supporting files out of the list and keeps them in the skill detail', async () => {
+    projectRoot = createTempProject();
+    const skillDir = path.join(projectRoot, '.agents', 'skills', 'files-skill');
+    fs.mkdirSync(path.join(skillDir, 'references'), { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      '---\nname: files-skill\ndescription: Has files\n---\nBody\n',
+    );
+    fs.writeFileSync(path.join(skillDir, 'references', 'guide.md'), '# Guide\n');
+
+    appHandle = startSkillsApp({ projectRoot });
+    const query = `?directory=${encodeURIComponent(projectRoot)}`;
+
+    const list = await (await fetch(`${appHandle.baseUrl}/api/config/skills${query}`)).json();
+    const listed = list.skills.find((skill) => skill.name === 'files-skill');
+    expect(listed.sources.md.description).toBe('Has files');
+    expect(listed.sources.md).not.toHaveProperty('supportingFiles');
+
+    const detail = await (await fetch(`${appHandle.baseUrl}/api/config/skills/files-skill${query}`)).json();
+    expect(detail.sources.md.supportingFiles).toEqual([{
+      name: 'guide.md',
+      path: path.join('references', 'guide.md'),
+      fullPath: path.join(skillDir, 'references', 'guide.md'),
+    }]);
+  });
+
   it('flags the list as partial when OpenCode skill list fails, and not when it succeeds', async () => {
     projectRoot = createTempProject();
     fs.mkdirSync(path.join(projectRoot, '.agents', 'skills', 'disk-skill'), { recursive: true });
