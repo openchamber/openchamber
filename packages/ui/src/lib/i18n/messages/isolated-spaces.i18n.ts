@@ -1,6 +1,10 @@
 /** Isolated spaces: the create dialog, the group status line, the draft picker entry and the switch. Merged into each locale's main dictionary. */
 export const isolatedSpacesI18n = {
   en: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} runs inside the isolated space, and the connection to it could not be opened. Nothing from your own machine is shown here.',
+    'contextPanel.browser.spaceAddress': 'Inside the isolated space',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Opens in the desktop app',
+    'contextPanel.browser.spaceLoopback.title': '{url} runs inside the isolated space',
     'spaces.picker.new': '+ New isolated space',
     'spaces.draft.preparing': 'Preparing isolated space…',
     'spaces.draft.queued': 'Your message will send when the space is ready.',
@@ -267,6 +271,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Could not stop "{name}": {reason}',
   },
   nl: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} draait in de geïsoleerde ruimte en de verbinding ermee kon niet worden geopend. Hier wordt niets van je eigen computer getoond.',
+    'contextPanel.browser.spaceAddress': 'In de geïsoleerde ruimte',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Opent in de desktop-app',
+    'contextPanel.browser.spaceLoopback.title': '{url} draait in de geïsoleerde ruimte',
     'spaces.picker.new': '+ Nieuwe geïsoleerde ruimte',
     'spaces.draft.preparing': 'Geïsoleerde ruimte voorbereiden…',
     'spaces.draft.queued': 'Uw bericht wordt verstuurd zodra de ruimte klaar is.',
@@ -533,6 +541,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Kan "{name}" niet stoppen: {reason}',
   },
   de: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} läuft im isolierten Bereich, und die Verbindung dorthin konnte nicht geöffnet werden. Nichts von deinem eigenen Rechner wird hier gezeigt.',
+    'contextPanel.browser.spaceAddress': 'Im isolierten Bereich',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Öffnet sich in der Desktop-App',
+    'contextPanel.browser.spaceLoopback.title': '{url} läuft im isolierten Bereich',
     'spaces.picker.new': '+ Neuer isolierter Bereich',
     'spaces.draft.preparing': 'Isolierter Bereich wird vorbereitet…',
     'spaces.draft.queued': 'Ihre Nachricht wird gesendet, sobald der Bereich bereit ist.',
@@ -799,6 +811,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': '„{name}“ konnte nicht angehalten werden: {reason}',
   },
   fr: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} tourne dans l’espace isolé et la connexion n’a pas pu être ouverte. Rien de votre propre machine n’est affiché ici.',
+    'contextPanel.browser.spaceAddress': 'Dans l’espace isolé',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'S’ouvre dans l’app de bureau',
+    'contextPanel.browser.spaceLoopback.title': '{url} tourne dans l’espace isolé',
     'spaces.picker.new': '+ Nouvel espace isolé',
     'spaces.draft.preparing': 'Préparation de l’espace isolé…',
     'spaces.draft.queued': 'Votre message sera envoyé dès que l’espace sera prêt.',
@@ -1065,6 +1081,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Impossible d’arrêter « {name} » : {reason}',
   },
   es: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} se ejecuta dentro del espacio aislado y no se pudo abrir la conexión. Aquí no se muestra nada de tu propia máquina.',
+    'contextPanel.browser.spaceAddress': 'Dentro del espacio aislado',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Se abre en la app de escritorio',
+    'contextPanel.browser.spaceLoopback.title': '{url} se ejecuta dentro del espacio aislado',
     'spaces.picker.new': '+ Nuevo espacio aislado',
     'spaces.draft.preparing': 'Preparando el espacio aislado…',
     'spaces.draft.queued': 'Tu mensaje se enviará cuando el espacio esté listo.',
@@ -1331,6 +1351,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'No se pudo detener "{name}": {reason}',
   },
   ja: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} は隔離スペースの中で動作しており、接続を開けませんでした。ここにはこのマシンのものは表示されません。',
+    'contextPanel.browser.spaceAddress': '隔離スペースの中',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'デスクトップアプリで開きます',
+    'contextPanel.browser.spaceLoopback.title': '{url} は隔離スペースの中で動作しています',
     'spaces.picker.new': '+ 新しい隔離スペース',
     'spaces.draft.preparing': '隔離スペースを準備しています…',
     'spaces.draft.queued': 'スペースの準備ができるとメッセージが送信されます。',
@@ -1597,6 +1621,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': '「{name}」を停止できませんでした: {reason}',
   },
   'pt-BR': {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} roda dentro do espaço isolado e a conexão com ele não pôde ser aberta. Nada da sua própria máquina é mostrado aqui.',
+    'contextPanel.browser.spaceAddress': 'Dentro do espaço isolado',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Abre no app para desktop',
+    'contextPanel.browser.spaceLoopback.title': '{url} roda dentro do espaço isolado',
     'spaces.picker.new': '+ Novo espaço isolado',
     'spaces.draft.preparing': 'Preparando o espaço isolado…',
     'spaces.draft.queued': 'Sua mensagem será enviada quando o espaço estiver pronto.',
@@ -1863,6 +1891,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Não foi possível parar "{name}": {reason}',
   },
   uk: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} працює всередині ізольованого простору, і з\'єднання з ним не вдалося відкрити. Нічого з вашого комп\'ютера тут не показується.',
+    'contextPanel.browser.spaceAddress': 'Усередині ізольованого простору',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Відкривається в десктопному застосунку',
+    'contextPanel.browser.spaceLoopback.title': '{url} працює всередині ізольованого простору',
     'spaces.picker.new': '+ Новий ізольований простір',
     'spaces.draft.preparing': 'Готуємо ізольований простір…',
     'spaces.draft.queued': 'Ваше повідомлення надішлеться, коли простір буде готовий.',
@@ -2129,6 +2161,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Не вдалося зупинити «{name}»: {reason}',
   },
   ko: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url}은(는) 격리 공간 안에서 실행 중이며 연결을 열 수 없었습니다. 여기에는 내 컴퓨터의 내용이 표시되지 않습니다.',
+    'contextPanel.browser.spaceAddress': '격리 공간 안',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': '데스크톱 앱에서 열립니다',
+    'contextPanel.browser.spaceLoopback.title': '{url}은(는) 격리 공간 안에서 실행 중입니다',
     'spaces.picker.new': '+ 새 격리 공간',
     'spaces.draft.preparing': '격리 공간 준비 중…',
     'spaces.draft.queued': '공간이 준비되면 메시지가 전송됩니다.',
@@ -2395,6 +2431,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': '"{name}"을(를) 중지하지 못했습니다: {reason}',
   },
   pl: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} działa w izolowanej przestrzeni, a połączenia z nim nie udało się otworzyć. Nic z Twojego komputera nie jest tu pokazywane.',
+    'contextPanel.browser.spaceAddress': 'W izolowanej przestrzeni',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Otwiera się w aplikacji desktopowej',
+    'contextPanel.browser.spaceLoopback.title': '{url} działa w izolowanej przestrzeni',
     'spaces.picker.new': '+ Nowa izolowana przestrzeń',
     'spaces.draft.preparing': 'Przygotowywanie izolowanej przestrzeni…',
     'spaces.draft.queued': 'Twoja wiadomość zostanie wysłana, gdy przestrzeń będzie gotowa.',
@@ -2661,6 +2701,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': 'Nie udało się zatrzymać „{name}”: {reason}',
   },
   'zh-CN': {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} 运行在隔离空间内，无法建立到它的连接。这里不会显示你自己机器上的任何内容。',
+    'contextPanel.browser.spaceAddress': '在隔离空间内',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': '在桌面应用中打开',
+    'contextPanel.browser.spaceLoopback.title': '{url} 运行在隔离空间内',
     'spaces.picker.new': '+ 新建隔离空间',
     'spaces.draft.preparing': '正在准备隔离空间…',
     'spaces.draft.queued': '空间就绪后，您的消息会自动发送。',
@@ -2927,6 +2971,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': '无法停止“{name}”：{reason}',
   },
   'zh-TW': {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} 執行在隔離空間內，無法建立到它的連線。這裡不會顯示你自己機器上的任何內容。',
+    'contextPanel.browser.spaceAddress': '在隔離空間內',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': '在桌面應用程式中開啟',
+    'contextPanel.browser.spaceLoopback.title': '{url} 執行在隔離空間內',
     'spaces.picker.new': '+ 新增隔離空間',
     'spaces.draft.preparing': '正在準備隔離空間…',
     'spaces.draft.queued': '空間就緒後，您的訊息會自動送出。',
@@ -3193,6 +3241,10 @@ export const isolatedSpacesI18n = {
     'spaces.close.stopFailed': '無法停止「{name}」：{reason}',
   },
   tr: {
+    'contextPanel.browser.spaceTunnelFailedHint': '{url} yalıtılmış alanın içinde çalışıyor ve bağlantı açılamadı. Burada kendi makinenizden hiçbir şey gösterilmez.',
+    'contextPanel.browser.spaceAddress': 'Yalıtılmış alanın içinde',
+    'contextPanel.browser.devServers.spaceOnlyDesktop': 'Masaüstü uygulamasında açılır',
+    'contextPanel.browser.spaceLoopback.title': '{url} yalıtılmış alanın içinde çalışıyor',
     'spaces.picker.new': '+ Yeni yalıtılmış alan',
     'spaces.draft.preparing': 'Yalıtılmış alan hazırlanıyor…',
     'spaces.draft.queued': 'Mesajınız alan hazır olduğunda gönderilecek.',

@@ -1270,7 +1270,12 @@ export const ContextPanel: React.FC = () => {
         ) : null}
         {loadedBrowserTabs.map((tab) => (
           <div
-            key={tab.id}
+            // Keyed by the directory as well: a tab of the next directory with the
+            // same id is another tab, with its own view and its own session. Kept
+            // on the same instance, the view went on showing the previous
+            // directory's page, and a space's page would run in the host's
+            // session instead of the space's own.
+            key={`${directoryKey}\u0000${tab.id}`}
             // Invisible rather than display:none, so a background tab the agent
             // is working keeps its layout and its snapshots read a real page.
             className={cn(

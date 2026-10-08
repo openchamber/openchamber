@@ -4,7 +4,7 @@ import { spacesToStopOnClose } from './space-close';
 import type { SpaceEntry } from './spaces-api';
 
 const space = (id: string, change: Partial<SpaceEntry> = {}): SpaceEntry => ({
-  id, name: id, projectDirectory: '/home/me/app', directory: `/spaces/${id}/app`, projectFolder: { path: '/home/me/app', found: true },
+  id, name: id, placeId: 'docker', projectDirectory: '/home/me/app', directory: `/spaces/${id}/app`, projectFolder: { path: '/home/me/app', found: true },
   state: 'running', stoppedIdle: false, step: null, failure: null, network: null, grants: [], access: null, needsAccess: [], damage: null, setup: null,
   ...change,
 });

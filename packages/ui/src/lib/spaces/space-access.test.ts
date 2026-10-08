@@ -10,6 +10,7 @@ const registry = { kind: 'domain' as const, id: 'open-0123456789ab', upstream: '
 const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: 'a1b2c3d4e5f6',
   name: 'Fix login',
+  placeId: 'docker',
   projectDirectory: '/home/me/app',
   projectFolder: { path: '/home/me/app', found: true },
   directory: '/spaces/a1b2c3d4e5f6/app',

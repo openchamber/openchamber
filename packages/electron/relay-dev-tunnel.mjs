@@ -1,6 +1,7 @@
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 
+const SPACE_ID = /^[0-9a-f]{12}$/;
 const CONNECTION_READY_TIMEOUT_MS = 15_000;
 
 const listen = (server) => new Promise((resolve, reject) => {
@@ -22,7 +23,7 @@ const messageData = (event) => {
   return event?.data ?? null;
 };
 
-export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = console } = {}) => {
+export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = console, onClosed = null } = {}) => {
   const tunnels = new Map();
 
   const closeTunnel = (key) => {
@@ -31,17 +32,20 @@ export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = cons
     tunnels.delete(key);
     for (const connection of tunnel.connections.values()) connection.close();
     try { tunnel.server.close(); } catch { /* already closing */ }
+    onClosed?.({ spaceId: tunnel.spaceId, localPort: tunnel.localPort });
     return true;
   };
 
   return {
-    async open({ targetKey, remotePort, webContents }) {
+    async open({ targetKey, remotePort, spaceId = null, webContents }) {
       const port = Number.parseInt(String(remotePort), 10);
       if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('A valid remote port is required');
       if (!targetKey) throw new Error('A relay target key is required');
+      if (spaceId !== null && !SPACE_ID.test(String(spaceId))) throw new Error('A valid space id is required');
       if (!webContents || webContents.isDestroyed?.()) throw new Error('The desktop window is unavailable');
 
-      const key = `${webContents.id}|${targetKey}|${port}`;
+      // A space's port is the space's, so its tunnel is its own even on the same remote port.
+      const key = `${webContents.id}|${targetKey}|${spaceId ?? ''}|${port}`;
       const existing = tunnels.get(key);
       if (existing) return { localPort: existing.localPort, reused: true };
 
@@ -90,7 +94,7 @@ export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = cons
         socket.on('close', close);
 
         try {
-          webContents.postMessage('openchamber:relay-dev-tunnel-connect', { connectionId, remotePort: port }, [port2]);
+          webContents.postMessage('openchamber:relay-dev-tunnel-connect', { connectionId, remotePort: port, spaceId }, [port2]);
         } catch (error) {
           logger.warn?.(`[dev-tunnel] failed to hand relay connection to renderer: ${error?.message || error}`);
           close();
@@ -99,7 +103,7 @@ export const createRelayDevTunnelBridge = ({ createMessageChannel, logger = cons
 
       const localPort = await listen(server);
       server.on('error', (error) => logger.warn?.(`[dev-tunnel] relay listener failed: ${error?.message || error}`));
-      tunnels.set(key, { server, connections, localPort });
+      tunnels.set(key, { server, connections, localPort, spaceId });
       webContents.once?.('destroyed', () => closeTunnel(key));
       return { localPort, reused: false };
     },

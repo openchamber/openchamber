@@ -5,6 +5,7 @@ import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
@@ -82,6 +83,7 @@ import {
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
+import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
@@ -1038,24 +1040,24 @@ const resolveBrowserPanelContents = (rawId) => {
   if (id === null || id < 0) throw new Error('webContentsId is required');
   const target = webContents.fromId(id);
   if (!target || target.isDestroyed()) throw new Error('WebContents not found');
-  if (target.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+  if (!isPanelSession(target.session)) {
     throw new Error('That view is not a browser panel page');
   }
   return target;
 };
 
-const hardenBrowserPanelSession = () => {
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
+/**
+ * The sessions of the browser panel: the user's persistent one, and one per
+ * isolated space whose pages are shown. Membership is what the panel commands
+ * check, so a space's view answers to annotation and capture like any other.
+ */
+const panelSessions = new Set();
+const isPanelSession = (candidate) => panelSessions.has(candidate);
 
-  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
-    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
-      event.preventDefault();
-      callback(true);
-      return;
-    }
-    callback(false);
-  });
+const hardenPanelSession = (panelSession) => {
+  if (panelSessions.has(panelSession)) return;
+  panelSessions.add(panelSession);
+  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
 
   panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const allowed = shouldAllowBrowserPanelPermission({
@@ -1086,6 +1088,124 @@ const hardenBrowserPanelSession = () => {
 
   // Serial, HID and USB device pickers.
   panelSession.setDevicePermissionHandler(() => false);
+};
+
+const hardenBrowserPanelSession = () => {
+  hardenPanelSession(session.fromPartition(BROWSER_PANEL_PARTITION));
+
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (isPanelSession(contents.session) && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+};
+
+/**
+ * Pages from an isolated space, shown in the panel through a tunnel into the
+ * space. Each space gets a session of its own, routed through a proxy that
+ * answers nothing and bypassed only for that space's own tunnel ports, so the
+ * page reaches the space and nothing else from this machine: not the local
+ * API, not the user's own dev servers, not the internet. The rules are in
+ * space-preview.mjs; the dead proxy is a listener of this process that drops
+ * every connection, so a request sent there is refused at once.
+ *
+ * The proxy is applied before a tunnel's port is handed to the renderer, and
+ * again, with no port, the moment a view with a space partition is attached,
+ * so no page of a space ever loads on a session without it.
+ */
+const spacePreviews = new Map();
+let deadProxyPortPromise = null;
+const getDeadProxyPort = () => {
+  if (!deadProxyPortPromise) {
+    deadProxyPortPromise = new Promise((resolve, reject) => {
+      const server = net.createServer((socket) => socket.destroy());
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const port = server.address()?.port;
+        if (!port) {
+          reject(new Error('Failed to bind the dead proxy'));
+          return;
+        }
+        server.unref();
+        resolve(port);
+      });
+    }).catch((error) => {
+      deadProxyPortPromise = null;
+      throw error;
+    });
+  }
+  return deadProxyPortPromise;
+};
+
+const spacePreviewOf = (spaceId) => {
+  let entry = spacePreviews.get(spaceId);
+  if (!entry) {
+    entry = { ports: new Set(), chain: Promise.resolve() };
+    spacePreviews.set(spaceId, entry);
+  }
+  return entry;
+};
+
+/** Writes the space's current port set into its session, one write after another. */
+const applySpacePreviewProxy = (spaceId) => {
+  const entry = spacePreviewOf(spaceId);
+  entry.chain = entry.chain.catch(() => {}).then(async () => {
+    const panelSession = session.fromPartition(spacePreviewPartition(spaceId));
+    hardenPanelSession(panelSession);
+    const deadProxyPort = await getDeadProxyPort();
+    await panelSession.setProxy(spacePreviewProxyConfig({ deadProxyPort, localPorts: [...entry.ports] }));
+  });
+  return entry.chain;
+};
+
+const openSpacePreviewPort = (spaceId, localPort) => {
+  spacePreviewOf(spaceId).ports.add(localPort);
+  return applySpacePreviewProxy(spaceId);
+};
+
+const closeSpacePreviewPort = (spaceId, localPort) => {
+  const entry = spacePreviews.get(spaceId);
+  if (!entry || !entry.ports.delete(localPort)) return Promise.resolve();
+  return applySpacePreviewProxy(spaceId);
+};
+
+const closeAllSpacePreviewPorts = () => {
+  for (const [spaceId, entry] of spacePreviews) {
+    if (entry.ports.size === 0) continue;
+    entry.ports.clear();
+    applySpacePreviewProxy(spaceId).catch((error) => {
+      log.warn(`[electron] could not reset the preview proxy of space ${spaceId}: ${error?.message || error}`);
+    });
+  }
+};
+
+/**
+ * Every view the page attaches runs in a panel session, and nothing else: the
+ * user's panel partition, or a space's partition, whose proxy the renderer asks
+ * for before it attaches the view and which is applied here again as a backstop. A view that names no partition would share the app's own
+ * session, cookies and all, with whatever page it loads.
+ */
+const guardAttachedWebviews = (contents) => {
+  contents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    delete webPreferences.preloadURL;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    const partition = String(webPreferences.partition || params?.partition || '');
+    if (partition === BROWSER_PANEL_PARTITION) return;
+    const spaceId = spaceIdOfPreviewPartition(partition);
+    if (spaceId) {
+      applySpacePreviewProxy(spaceId).catch((error) => {
+        log.warn(`[electron] could not apply the preview proxy of space ${spaceId}: ${error?.message || error}`);
+      });
+      return;
+    }
+    log.warn('[electron] refused a webview outside the browser panel sessions');
+    event.preventDefault();
+  });
 };
 
 const registerPackagedUiProtocol = () => {
@@ -3899,7 +4019,18 @@ const runSpecChain = (specs, appName) => {
 // The tunnel client lives in the web package (it already has a WebSocket
 // client) and is loaded only if the user actually previews a remote dev server.
 let devTunnelClientPromise = null;
-const relayDevTunnelBridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannelMain(), logger: log });
+const relayDevTunnelBridge = createRelayDevTunnelBridge({
+  createMessageChannel: () => new MessageChannelMain(),
+  logger: log,
+  // A relay tunnel of a space that closes for any reason, the window going among them, takes
+  // its port out of the space's session; a stale port would be a hole in the list.
+  onClosed: ({ spaceId, localPort }) => {
+    if (!spaceId) return;
+    closeSpacePreviewPort(spaceId, localPort).catch((error) => {
+      log.warn(`[electron] could not drop a preview port of space ${spaceId}: ${error?.message || error}`);
+    });
+  },
+});
 const getDevTunnelClient = async () => {
   if (!devTunnelClientPromise) {
     devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
@@ -3914,6 +4045,7 @@ const getDevTunnelClient = async () => {
 
 const closeAllDevTunnels = () => {
   relayDevTunnelBridge.closeAll();
+  closeAllSpacePreviewPorts();
   if (!devTunnelClientPromise) return;
   const pending = devTunnelClientPromise;
   devTunnelClientPromise = null;
@@ -4066,15 +4198,22 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     // on the remote OpenChamber host, so the browser panel loads a real origin
     // instead of a rewritten page. Deliberately absent from
     // COMMANDS_SAFE_FOR_REMOTE — a remote page must never open local listeners.
+    // A space's dev server comes through the same tunnel, under the space's
+    // prefix on the host, and its local port goes into the space's session
+    // before the renderer learns it, so the page loads behind the proxy.
     case 'desktop_dev_tunnel_open': {
       const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
       const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
       if (!baseUrl) throw new Error('baseUrl is required');
       if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
+      const spaceId = args.spaceId ?? null;
+      if (spaceId !== null && !isSpaceId(spaceId)) throw new Error('A valid space id is required');
 
       if (args.relay === true) {
         const targetKey = typeof args.targetKey === 'string' ? args.targetKey.trim() : '';
-        return relayDevTunnelBridge.open({ targetKey, remotePort: port, webContents: browserWindow?.webContents });
+        const opened = await relayDevTunnelBridge.open({ targetKey, remotePort: port, spaceId, webContents: browserWindow?.webContents });
+        if (spaceId) await openSpacePreviewPort(spaceId, opened.localPort);
+        return opened;
       }
 
       const headers = {};
@@ -4087,7 +4226,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       const client = await getDevTunnelClient();
-      const result = await client.open({ baseUrl, port, headers });
+      const result = await client.open({ baseUrl, port, headers, spaceId });
+      if (spaceId) await openSpacePreviewPort(spaceId, result.localPort);
       return { localPort: result.localPort, reused: result.reused, url: `http://openchamber-preview.localhost:${result.localPort}/` };
     }
 
@@ -4095,12 +4235,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
       const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
       if (!baseUrl || !(port > 0)) return { closed: false };
+      const spaceId = isSpaceId(args.spaceId) ? args.spaceId : null;
       const client = await getDevTunnelClient();
-      return { closed: client.close({ baseUrl, port }) };
+      const tunnel = client.list().find((entry) => entry.baseUrl === baseUrl && entry.remotePort === port && entry.spaceId === spaceId);
+      const closed = client.close({ baseUrl, port, spaceId });
+      if (closed && spaceId && tunnel) await closeSpacePreviewPort(spaceId, tunnel.localPort);
+      return { closed };
     }
 
     case 'desktop_relay_dev_tunnel_close_all':
+      // The bridge reports each closed tunnel, and its port leaves the space's session with it.
       return { closed: relayDevTunnelBridge.closeForWebContents(browserWindow?.webContents.id) };
+
+    // A space's view is attached only after its session has the proxy, so no
+    // page of the space, a saved public address included, loads before it.
+    case 'desktop_space_preview_prepare': {
+      if (!isSpaceId(args.spaceId)) throw new Error('A valid space id is required');
+      await applySpacePreviewProxy(args.spaceId);
+      return { ready: true };
+    }
 
     /**
      * Forces prefers-color-scheme for one previewed page.
@@ -4144,6 +4297,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      * data URL so nothing else has to fetch anything.
      */
     case 'desktop_browser_fetch_favicon': {
+      // Only the user's own panel session may have an icon fetched for it. A space's view has a
+      // session of its own, so its page, whose icon URL the agent chose, gets none: the fetch is
+      // the shell's own request and must reach nothing of the user's on the space's behalf.
+      const view = resolveBrowserPanelContents(args.webContentsId);
+      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+        throw new Error('A space page has no favicon to fetch');
+      }
       const target = typeof args.url === 'string' ? args.url.trim() : '';
       let parsed;
       try {
@@ -4175,11 +4335,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     // Scoped to the browser panel's own partition, so clearing it can never
     // touch OpenChamber's session or any other window's storage.
     case 'desktop_browser_clear_data': {
-      // Exact match, not a prefix: a prefix would also accept a partition that
-      // merely starts with this name, which is not what the comment above
-      // promises and would quietly stop being true if one were ever added.
+      // Exact names only: the panel's own partition, or a space's, whose shape
+      // is checked whole. A prefix would also accept a partition that merely
+      // starts with one of these names.
       const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
-      if (partition !== BROWSER_PANEL_PARTITION) {
+      if (partition !== BROWSER_PANEL_PARTITION && spaceIdOfPreviewPartition(partition) === null) {
         throw new Error('Unsupported browser partition');
       }
       const storages = [];
@@ -5249,6 +5409,10 @@ const loadUrlInsideWebContents = (contents, rawUrl) => {
 };
 
 app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() === 'window') {
+    guardAttachedWebviews(contents);
+    return;
+  }
   if (contents.getType() !== 'webview') return;
 
   contents.setWindowOpenHandler(({ url }) => {

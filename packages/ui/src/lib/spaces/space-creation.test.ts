@@ -15,6 +15,7 @@ const originalFetch = globalThis.fetch;
 const entry: SpaceEntry = {
   id: ID,
   name: 'Fix login',
+  placeId: 'docker',
   projectDirectory: PROJECT,
   projectFolder: { path: PROJECT, found: null },
   directory: DIRECTORY,

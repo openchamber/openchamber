@@ -153,7 +153,11 @@ export const useWebviewNavigation = (
       const detail = readEventPayload<{ favicons?: string[] }>(event);
       const icon = Array.isArray(detail.favicons) ? detail.favicons.find(Boolean) : '';
       const page = readCurrentUrl();
-      if (icon && page) useBrowserFaviconStore.getState().resolve(page, icon);
+      if (!icon || !page) return;
+      let webContentsId = -1;
+      try { webContentsId = webview.getWebContentsId(); } catch { return; }
+      if (!Number.isFinite(webContentsId) || webContentsId < 0) return;
+      useBrowserFaviconStore.getState().resolve(page, icon, webContentsId);
     };
 
     const onTitleUpdated = (event: Event) => {

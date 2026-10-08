@@ -175,6 +175,40 @@ describe('dev tunnel end to end', () => {
     expect(second.reused).toBe(true);
   });
 
+  test('a space tunnel dials the space prefix on the host, and is a tunnel of its own', async () => {
+    // The host forwards `/api/spaces/<id>/dev-tunnel` into the space; what matters
+    // here is that the client asks for exactly that path, under its own key.
+    const paths = [];
+    const server = http.createServer((_req, res) => res.end('host'));
+    const sockets = trackSockets(server);
+    server.on('upgrade', (req, socket) => {
+      paths.push(req.url);
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+    });
+    const hostPort = await listen(server);
+    started.push(stopServer(server, sockets));
+    const baseUrl = `http://127.0.0.1:${hostPort}`;
+
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    started.push(() => client.closeAll());
+    const space = await client.open({ baseUrl, port: 4321, spaceId: '84369ed6edda' });
+    const host = await client.open({ baseUrl, port: 4321 });
+    expect(space.localPort).not.toBe(host.localPort);
+    expect(client.list()).toEqual([
+      { localPort: space.localPort, remotePort: 4321, baseUrl, spaceId: '84369ed6edda' },
+      { localPort: host.localPort, remotePort: 4321, baseUrl, spaceId: null },
+    ]);
+
+    await expect(httpGet(space.localPort, '/')).rejects.toThrow();
+    await expect(httpGet(host.localPort, '/')).rejects.toThrow();
+    expect(paths).toEqual(['/api/spaces/84369ed6edda/dev-tunnel?port=4321', '/api/dev-tunnel?port=4321']);
+
+    expect(client.close({ baseUrl, port: 4321, spaceId: '84369ed6edda' })).toBe(true);
+    expect(client.list()).toEqual([{ localPort: host.localPort, remotePort: 4321, baseUrl, spaceId: null }]);
+    await expect(client.open({ baseUrl, port: 4321, spaceId: '../etc' })).rejects.toThrow(/space id/);
+  });
+
   test('refuses a port discovery does not report, so it is not a loopback proxy', async () => {
     const secret = await startDevServer((_req, res) => res.end('secret service'));
     const host = await startHost({ allowedPorts: [] });

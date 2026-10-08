@@ -17,18 +17,24 @@ import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import type { RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { DEV_TUNNEL_HOSTNAME, isLoopbackUrl } from './url';
 
 type TunnelResult = { localPort: number };
 
-/** Keyed by `${baseUrl}|${port}`; the shell owns the real lifetime. */
+/** Keyed by `${baseUrl}|${spaceId}|${port}`; the shell owns the real lifetime. */
 const localPortByTarget = new Map<string, number>();
 /** Reverse map, so a tunnel port never leaks into the address bar or storage. */
 const originByLocalPort = new Map<number, string>();
 const relaySockets = new Map<string, RelayTunnelWebSocket>();
 const pendingRelayConnections = new Set<string>();
 
-const openRelayConnection = async (connectionId: string, remotePort: number): Promise<void> => {
+/** The host's tunnel, or the one the host forwards into an isolated space. */
+const tunnelPath = (spaceId: string | null): string => (
+  spaceId ? `/api/spaces/${spaceId}/dev-tunnel` : '/api/dev-tunnel'
+);
+
+const openRelayConnection = async (connectionId: string, remotePort: number, spaceId: string | null): Promise<void> => {
   if (!getActiveRelayTunnel()) {
     pendingRelayConnections.delete(connectionId);
     postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
@@ -36,7 +42,7 @@ const openRelayConnection = async (connectionId: string, remotePort: number): Pr
   }
   await refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl());
   if (!pendingRelayConnections.has(connectionId) || !getActiveRelayTunnel()) return;
-  const url = getRuntimeUrlResolver().websocket(`/api/dev-tunnel?port=${remotePort}`);
+  const url = getRuntimeUrlResolver().websocket(`${tunnelPath(spaceId)}?port=${remotePort}`);
   const socket = openRuntimeWebSocket(url);
   relaySockets.set(connectionId, socket);
   socket.binaryType = 'arraybuffer';
@@ -50,7 +56,7 @@ const openRelayConnection = async (connectionId: string, remotePort: number): Pr
   };
 };
 
-listenForDesktopRelayDevTunnels(({ connectionId, remotePort, message }) => {
+listenForDesktopRelayDevTunnels(({ connectionId, remotePort, spaceId, message }) => {
   switch (message.type) {
     case 'data': {
       const socket = relaySockets.get(connectionId);
@@ -64,7 +70,7 @@ listenForDesktopRelayDevTunnels(({ connectionId, remotePort, message }) => {
       return;
     case 'connect':
       pendingRelayConnections.add(connectionId);
-      void openRelayConnection(connectionId, remotePort).catch(() => {
+      void openRelayConnection(connectionId, remotePort, spaceId).catch(() => {
         pendingRelayConnections.delete(connectionId);
         postDesktopRelayDevTunnelMessage(connectionId, { type: 'close' });
       });
@@ -74,6 +80,9 @@ listenForDesktopRelayDevTunnels(({ connectionId, remotePort, message }) => {
 const isDesktopRuntime = (): boolean => (
   typeof window !== 'undefined' && Boolean(window.__OPENCHAMBER_ELECTRON__)
 );
+
+/** The local server's origin, as the desktop shell injected it; '' outside the shell. */
+const localOrigin = (): string => globalThis.window?.__OPENCHAMBER_LOCAL_ORIGIN__ ?? '';
 
 /**
  * True when the app is talking to an OpenChamber on another machine. A local
@@ -92,13 +101,24 @@ const isRemoteRuntime = (baseUrl: string): boolean => {
   }
 };
 
-export const isRemoteWebLoopbackUrl = (url: string): boolean => {
+/**
+ * True when a loopback URL of this directory cannot be reached from a browser
+ * tab: it is on the OpenChamber machine, or inside an isolated space, whose
+ * ports only the desktop's tunnel reaches. A tab's `localhost` is its own.
+ */
+export const isRemoteWebLoopbackUrl = (url: string, directory?: string | null): boolean => {
   if (!url || isDesktopRuntime() || !isLoopbackUrl(url) || !globalThis.window) return false;
+  if (spaceIdOfDirectory(directory) !== null) return true;
   return isRemoteRuntime(getRuntimeApiBaseUrl() || globalThis.window.location.href);
 };
 
-export const resolveIframeBrowserUrl = (url: string): string => (
-  isRemoteWebLoopbackUrl(url) ? '' : url
+/** True when the directory is an isolated space and this client has no tunnel into it. */
+export const isSpaceUnreachableFromHere = (directory: string | null | undefined): boolean => (
+  spaceIdOfDirectory(directory) !== null && !isDesktopRuntime()
+);
+
+export const resolveIframeBrowserUrl = (url: string, directory?: string | null): string => (
+  isRemoteWebLoopbackUrl(url, directory) ? '' : url
 );
 
 /**
@@ -164,16 +184,21 @@ export class DevTunnelUnavailableError extends Error {
  * often authoritative, too: discovery unavailable, port not offered,
  * authentication rejected. None of that should look like a page.
  */
-export const resolveBrowsableUrl = async (url: string): Promise<string> => {
+export const resolveBrowsableUrl = async (url: string, directory?: string | null): Promise<string> => {
   if (!url || !isDesktopRuntime() || !isLoopbackUrl(url)) return url;
 
-  const baseUrl = getRuntimeApiBaseUrl();
-  if (!isRemoteRuntime(baseUrl)) return url;
+  // A space's loopback is the space's, on a local instance as on a remote one:
+  // the port is inside the container, and only the tunnel reaches it. On the
+  // local instance the runtime base URL is empty, and the shell dials the
+  // local server's own origin, the one it injected.
+  const spaceId = spaceIdOfDirectory(directory);
+  const baseUrl = getRuntimeApiBaseUrl() || (spaceId !== null ? localOrigin() : '');
+  if (spaceId === null && !isRemoteRuntime(baseUrl)) return url;
 
   const port = loopbackPort(url);
   if (!port) return url;
 
-  const key = `${baseUrl}|${port}`;
+  const key = `${baseUrl}|${spaceId ?? ''}|${port}`;
   const cached = localPortByTarget.get(key);
   if (cached) {
     rememberOriginalOrigin(url, cached);
@@ -184,6 +209,7 @@ export const resolveBrowsableUrl = async (url: string): Promise<string> => {
     const result = await invokeDesktopCommand<TunnelResult>('desktop_dev_tunnel_open', {
       baseUrl,
       port,
+      spaceId,
       relay: isRelayModeActive(),
       targetKey: getRuntimeKey(),
       clientToken: getRuntimeBearerTokenSync(),
@@ -214,9 +240,9 @@ export const resolveBrowsableUrl = async (url: string): Promise<string> => {
  * A URL already pointing at a tunnel's local port is not retargeted; that one
  * is this machine, deliberately.
  */
-export const shouldTunnelLoopbackUrl = (url: string): boolean => {
+export const shouldTunnelLoopbackUrl = (url: string, directory?: string | null): boolean => {
   if (!url || !isDesktopRuntime() || !isLoopbackUrl(url)) return false;
-  if (!isRemoteRuntime(getRuntimeApiBaseUrl())) return false;
+  if (spaceIdOfDirectory(directory) === null && !isRemoteRuntime(getRuntimeApiBaseUrl())) return false;
   const port = loopbackPort(url);
   return port > 0 && !originByLocalPort.has(port);
 };
