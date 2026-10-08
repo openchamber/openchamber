@@ -173,7 +173,7 @@ jobs:
           done
 
       - name: Upload macOS installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-macos-${{ matrix.arch }}
           path: |
@@ -268,7 +268,7 @@ jobs:
           bun run verify:opencode-cli:packaged
 
       - name: Upload Windows installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-windows-${{ matrix.arch }}
           path: |
@@ -371,7 +371,7 @@ jobs:
           node ./scripts/verify-update-manifest.mjs "dist/${MANIFEST}" "$APPIMAGE" "$VERSION"
 
       - name: Upload Linux installable artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-release-smoke-linux-${{ matrix.arch }}
           path: |
