@@ -943,6 +943,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Afficher les sessions en cours',
   'settings.openchamber.sessionWork.field.autoOpen': 'Placer automatiquement les sessions en cours',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev lit chaque message que vous envoyez et place la session en cours lorsque vous demandez une modification, signalez un bug ou discutez d\'un changement concret. Les questions et la recherche ne comptent pas. Jev ne marque jamais le travail comme terminé : quand un tour ressemble à la fin du travail, la session affiche une coche grise et c\'est vous qui décidez.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Garder les sessions en cours dans leur groupe de projet',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'Une session en cours reste aussi listée sous son groupe de projet et ses dossiers. Récent et la chronologie ne l’affichent toujours qu’une fois, dans le bloc de travail. La recherche l’affiche toujours une seule fois.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Uniquement les sessions archivées',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Utilise Supprimer et compte la période de conservation depuis l\'archivage. Les sessions non archivées sont conservées.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Supprime les sessions archivées dont la période de conservation a expiré. Conserve les 5 sessions archivées le plus récemment, la session ouverte, les sessions en cours et les sessions partagées. Une session parente est conservée si sa suppression supprimerait aussi une session enfant protégée.',

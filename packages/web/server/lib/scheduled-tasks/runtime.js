@@ -5,6 +5,7 @@ import { expandSnippets } from '../opencode/snippets.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
+import { createExistingSessionTasks } from './existing-session.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -265,6 +266,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // The session defaults a task with `useDefaults` runs on:
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
+    messageQueueRuntime,
+    resolvePrimaryWorktreeRoot,
+    isSessionArchived,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -286,6 +290,11 @@ export const createScheduledTasksRuntime = (deps) => {
       return response;
     },
   });
+
+  const existingSessionTasks = messageQueueRuntime ? createExistingSessionTasks({
+    projectConfigRuntime, messageQueueRuntime, createClient: createScopedClient,
+    listProjects, chatsScope, resolvePrimaryWorktreeRoot, isSessionArchived, emitTaskRunEvent,
+  }) : null;
 
   // A pinned task runs on what it stores; one that follows the session
   // defaults reads them now, so changing a default reaches it on its next run.
@@ -768,6 +777,27 @@ export const createScheduledTasksRuntime = (deps) => {
       return { ok: false, skipped: true };
     }
 
+    if (task.targetSessionId) {
+      if (!existingSessionTasks) return { ok: false, error: 'Existing-session scheduling is unavailable', statusCode: 503 };
+      const nextRunAt = computeNextRunAt(task, Math.max(Date.now(), (scheduledFor ?? 0) + 1));
+      const result = await existingSessionTasks.run(projectID, task, reason, scheduledFor, nextRunAt);
+      if (reason === 'scheduled') {
+        if (task.schedule.kind === 'once' && result.task && !result.skipped) {
+          try {
+            const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, { ...result.task, enabled: false });
+            updateInMemoryTask(projectID, consumed.task);
+          } catch (consumeError) {
+            logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
+              projectID,
+              taskID,
+              error: safeErrorMessage(consumeError),
+            });
+          }
+        } else scheduleFutureRun(projectID, taskID, nextRunAt);
+      }
+      return result;
+    }
+
     const taskKey = buildTaskKey(projectID, taskID);
     if (runningTaskKeys.has(taskKey)) {
       return { ok: false, running: true };
@@ -1231,5 +1261,9 @@ export const createScheduledTasksRuntime = (deps) => {
     syncProject,
     runNow,
     getStatus,
+    validateTarget: (projectID, sessionID) => existingSessionTasks.validateTarget(projectID, sessionID),
+    beforeScheduledTaskSend: (sessionID, directory, item) => existingSessionTasks.beforeSend(sessionID, directory, item),
+    onScheduledTaskResult: (provenance, status, error) => existingSessionTasks.result(provenance, status, error),
+    cancelWaitingPrompt: (projectID, taskID) => existingSessionTasks?.cancel(projectID, taskID),
   };
 };

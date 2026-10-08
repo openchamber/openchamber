@@ -635,6 +635,10 @@ const projectContextRuntime = createProjectContextRuntime({
   path,
   projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
   resolveSharedPlansDir: (projectId) => projectConfigRuntime.resolveSharedPlansDir(projectId),
+  onChanged: (projectId) => broadcastOpenChamberUiEvent({
+    type: 'openchamber:project-context-changed',
+    properties: { projectId },
+  }),
 });
 
 const agentMemoryRuntime = createAgentMemoryRuntime({
@@ -1093,6 +1097,9 @@ const messageQueueRuntime = createMessageQueueRuntime({
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   resolveAutoSelection: (send) => routingRuntime.resolveAutoSelection(send),
   onPromptSent: (sessionId) => sessionRuntime.markUserMessageSent(sessionId),
+  beforeScheduledTaskSend: (...args) => scheduledTasksRuntime.beforeScheduledTaskSend(...args),
+  validateScheduledTaskTarget: (...args) => scheduledTasksRuntime.validateTarget(...args),
+  onScheduledTaskResult: (...args) => scheduledTasksRuntime.onScheduledTaskResult(...args),
   dataDir: OPENCHAMBER_DATA_DIR,
 });
 messageQueueRuntime.start();
@@ -1550,6 +1557,9 @@ const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
 const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
+  messageQueueRuntime,
+  resolvePrimaryWorktreeRoot,
+  isSessionArchived: (sessionID) => openChamberSessionService.archiveStore.isArchived(sessionID),
   readSessionDefaults: async (projectID) => {
     const settings = await readSettingsFromDiskMigrated();
     const project = sanitizeProjects(settings?.projects || []).find((entry) => entry.id === projectID) ?? null;

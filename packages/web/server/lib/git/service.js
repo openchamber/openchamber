@@ -878,6 +878,14 @@ const parseWorktreePorcelain = (raw) => {
       continue;
     }
 
+    // A bare repository lists itself as a worktree with a `bare` attribute
+    // and no HEAD or branch; without a working tree it is not a checkout a
+    // session can run in.
+    if (line === 'bare') {
+      current.bare = true;
+      continue;
+    }
+
     // git marks a worktree whose directory is gone (deleted outside git) as
     // prunable; it stays registered until `git worktree prune`. The sidebar
     // needs that distinction: the directory is missing, but the sessions that
@@ -1465,12 +1473,15 @@ export async function resolveRepositoryGitPaths(directory) {
  * `git remote get-url [--push]` reports them: the first URL of several, and a
  * remote with no URL read as a URL equal to its name, as Git does. Lines may
  * end in CRLF (Git for Windows); a kept `\r` would match no line and read
- * every remote as URL-less.
+ * every remote as URL-less. Anything after the URL-kind marker — Git 2.54+
+ * appends the partial-clone filter there as `[blob:none]` — is decoration
+ * about the remote, never part of the URL, and is ignored whether or not its
+ * shape is recognized.
  */
 export function parseRemoteListing(names, listing) {
   const urls = new Map();
   for (const line of String(listing || '').split(/\r?\n/)) {
-    const match = line.match(/^([^\t]+)\t(.*) \((fetch|push)\)$/);
+    const match = line.match(/^([^\t]+)\t(.*) \((fetch|push)\)/);
     if (!match) continue;
     const entry = urls.get(match[1]) ?? {};
     if (entry[match[3]] === undefined) entry[match[3]] = match[2];
@@ -1913,12 +1924,13 @@ const resolveWorktreeProjectContext = async (directory, options = {}) => {
     throw new Error('Directory is required');
   }
 
-  const topResult = await runGitCommandOrThrow(
-    directoryPath,
-    ['rev-parse', '--show-toplevel'],
-    'Failed to resolve git top-level directory'
-  );
-  const sandbox = path.resolve(directoryPath, normalizeGitOutputPath(topResult.stdout.trim()));
+  const topResult = await runGitCommand(directoryPath, ['rev-parse', '--show-toplevel']);
+  // A bare repository has no work tree, so `--show-toplevel` fails there; the
+  // bare directory itself still answers the object-level commands worktree
+  // creation runs against it.
+  const sandbox = topResult.success
+    ? path.resolve(directoryPath, normalizeGitOutputPath(topResult.stdout.trim()))
+    : directoryPath;
 
   const commonResult = await runGitCommandOrThrow(
     sandbox,
@@ -1926,7 +1938,10 @@ const resolveWorktreeProjectContext = async (directory, options = {}) => {
     'Failed to resolve git common directory'
   );
   const commonDir = path.resolve(sandbox, normalizeGitOutputPath(commonResult.stdout.trim()));
-  const primaryWorktree = path.dirname(commonDir);
+  // `<root>/.git` resolves to the primary checkout; any other layout (a bare
+  // repository, a separate git dir) has no primary worktree, and the sandbox
+  // directory is the closest thing to one.
+  const primaryWorktree = derivePrimaryWorktreeRootFromGitDir(commonDir) || sandbox;
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
   // linked worktree still sees the project's saved configuration. When unset,
@@ -4631,26 +4646,46 @@ export async function resetToCommit(directory, hash, mode, force = false) {
   }
 }
 
+// `git worktree list` answers from any directory of a repository, but the
+// repository root resolution behind it (`--show-toplevel`) has no answer in a
+// bare repository: "this operation must be run in a work tree". A bare
+// checkout used as the project directory would otherwise read as a failure
+// and show no worktrees at all, so fall back to listing from the directory
+// itself when it is still a git directory.
+const resolveWorktreeListingDirectory = async (directoryPath) => {
+  try {
+    const directoryGit = await createGit(directoryPath);
+    return await resolveGitRepositoryRoot(directoryPath, directoryGit);
+  } catch (error) {
+    const probe = await runGitCommand(directoryPath, ['rev-parse', '--git-dir']);
+    if (probe.success) {
+      return directoryPath;
+    }
+    throw error;
+  }
+};
+
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
   if (!directoryPath || !fs.existsSync(directoryPath)) {
     return [];
   }
   try {
-    const directoryGit = await createGit(directoryPath);
-    const repoRoot = await resolveGitRepositoryRoot(directoryPath, directoryGit);
+    const listingDirectory = await resolveWorktreeListingDirectory(directoryPath);
     const result = await runGitCommandOrThrow(
-      repoRoot,
+      listingDirectory,
       ['worktree', 'list', '--porcelain'],
       'Failed to list git worktrees'
     );
-    return parseWorktreePorcelain(result.stdout).map((entry) => ({
-      head: entry.head || '',
-      name: path.basename(entry.worktree || ''),
-      branch: entry.branch || '',
-      path: entry.worktree,
-      prunable: entry.prunable === true,
-    }));
+    return parseWorktreePorcelain(result.stdout)
+      .filter((entry) => entry.bare !== true)
+      .map((entry) => ({
+        head: entry.head || '',
+        name: path.basename(entry.worktree || ''),
+        branch: entry.branch || '',
+        path: entry.worktree,
+        prunable: entry.prunable === true,
+      }));
   } catch (error) {
     // Worktrees are an optional feature. When the caller passes a directory
     // that is not inside any git repository (for example, the managed

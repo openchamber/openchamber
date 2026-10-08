@@ -1060,6 +1060,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Sessies in uitvoering tonen',
   'settings.openchamber.sessionWork.field.autoOpen': 'Sessies automatisch naar in uitvoering verplaatsen',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev leest elk bericht dat u stuurt en verplaatst de sessie naar in uitvoering wanneer u om een wijziging vraagt, een bug meldt of een concrete wijziging bespreekt. Vragen en onderzoek tellen niet mee. Jev markeert werk nooit als afgerond: als een beurt op het einde van het werk lijkt, toont de sessie een grijs vinkje en beslist u.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Sessies in uitvoering in hun projectgroep houden',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'Een sessie in uitvoering blijft ook vermeld onder de projectgroep en mappen. Recent en de tijdlijn tonen die nog steeds één keer, in het werkblok. Zoeken toont die altijd één keer.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Alleen gearchiveerde sessies',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Gebruikt Verwijderen en telt de bewaartermijn vanaf het archiveren. Niet-gearchiveerde sessies blijven behouden.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Verwijdert verlopen gearchiveerde sessies. Behoudt de 5 meest recent gearchiveerde sessies, de geopende sessie, lopende sessies en gedeelde sessies. Een bovenliggende sessie blijft behouden als verwijderen daarvan ook een beschermde subsessie zou verwijderen.',

@@ -438,6 +438,22 @@ export const focusDesktopWindow = async (): Promise<boolean> => {
   }
 };
 
+/**
+ * Opens a session owned by another instance ('local' or 'host:<id>') in a
+ * window for that instance. Valid from any app window, including one that
+ * currently shows a remote instance — the main process gates the command
+ * by sender. Returns false when the desktop bridge is not available, so the
+ * caller can fall back to opening it on the current one.
+ */
+export const openHostSession = (runtimeKey: string, sessionId: string): boolean => {
+  if (!canUseElectronDesktopIPC()) return false;
+  void invokeDesktop<{ opened: boolean }>('desktop_open_host_session', { runtimeKey, sessionId })
+    .catch((error) => {
+      console.warn('[desktop] failed to open host session', error);
+    });
+  return true;
+};
+
 export const canRequestNativeDirectoryAccess = (): boolean => (
   isDesktopShell() && hasDesktopInvoke() && isDesktopLocalOriginActive()
 );

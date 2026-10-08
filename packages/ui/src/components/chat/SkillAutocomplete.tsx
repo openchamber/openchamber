@@ -1,11 +1,12 @@
 import React from 'react';
-import { cn, fuzzyMatch } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
+import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
 
 interface SkillInfo {
   name: string;
@@ -51,19 +52,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   }, [effectiveDirectory, loadSkills]);
 
   React.useEffect(() => {
-    const normalizedQuery = searchQuery.trim();
-    const matches = normalizedQuery.length
-      ? skills.filter((skill) => fuzzyMatch(skill.name, normalizedQuery))
-      : skills;
-
-    const sorted = [...matches].sort((a, b) => {
-      // Sort by project scope first, then name
-      if (a.scope === 'project' && b.scope !== 'project') return -1;
-      if (a.scope !== 'project' && b.scope === 'project') return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    setFilteredSkills(sorted);
+    setFilteredSkills(rankSkillAutocompleteItems(skills, searchQuery));
     setSelectedIndex(0);
   }, [skills, searchQuery]);
 

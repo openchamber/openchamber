@@ -160,10 +160,16 @@ export function createContributorProvenanceStore({
     return enqueue(async () => {
       const [state, identities] = await Promise.all([
         readState(),
-        Promise.all(directories.map(resolveIdentity)),
+        // A listing entry whose git directory no longer resolves (a worktree
+        // deleted outside git, a bare repository root, a broken .git link)
+        // has no identity to look up. It reads as no provenance rather than
+        // failing the whole listing; action-time reads stay strict.
+        Promise.all(directories.map((directory) => resolveIdentity(directory).catch(() => null))),
       ]);
       const recordsByWorktree = new Map(state.records.map((record) => [record.worktreeId, record]));
-      return identities.map((identity) => recordForIdentity(recordsByWorktree.get(identity.worktreeId), identity));
+      return identities.map((identity) => (identity
+        ? recordForIdentity(recordsByWorktree.get(identity.worktreeId), identity)
+        : { revision: 0, provenance: null }));
     });
   };
   const compareAndSwap = (directory, expectedRevision, provenance) => {

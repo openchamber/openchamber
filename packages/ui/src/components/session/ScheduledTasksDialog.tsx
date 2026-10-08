@@ -11,7 +11,7 @@ import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -186,18 +186,23 @@ const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI
 
 type StatusTone = 'success' | 'error' | 'warning' | 'muted';
 
-const STATUS_META: Record<
-  ScheduledTaskStatus,
-  {
-    tone: StatusTone;
-    Icon: IconName;
-    spin?: boolean;
-  }
-> = {
+type TaskStatusMeta = { tone: StatusTone; Icon: IconName; spin?: boolean };
+const STATUS_META = {
   success: { tone: 'success', Icon: 'checkbox-circle' },
   error: { tone: 'error', Icon: 'error-warning' },
   running: { tone: 'warning', Icon: 'loader-4', spin: true },
   idle: { tone: 'muted', Icon: 'pulse' },
+  queued: { tone: 'warning', Icon: 'pulse' },
+  sent: { tone: 'success', Icon: 'checkbox-circle' },
+  skipped: { tone: 'muted', Icon: 'pulse' },
+  failed: { tone: 'error', Icon: 'error-warning' },
+  cancelled: { tone: 'muted', Icon: 'pulse' },
+} satisfies Record<ScheduledTaskStatus, TaskStatusMeta>;
+
+const TaskTargetLine: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+  const { t } = useI18n();
+  const session = useGlobalSessionsStore((state) => state.entityById.get(sessionId));
+  return <p className="truncate typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.targetSession')}: {session?.title || sessionId}</p>;
 };
 
 const toneStyle = (tone: StatusTone): React.CSSProperties => {
@@ -560,9 +565,14 @@ export function ScheduledTasksView({ layout, onLeave }: {
         <div className="space-y-2.5">
           {tasks.map((task) => {
             const isBusy = mutatingTaskID === task.id;
-            const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
-            const meta = STATUS_META[status];
-            const statusLabel = status === 'success'
+            const status = task.state?.lastStatus || 'idle';
+            const meta: TaskStatusMeta = STATUS_META[status];
+            const statusLabel = status === 'queued' ? t('sessions.scheduledTasks.dialog.status.queued')
+              : status === 'sent' ? t('sessions.scheduledTasks.dialog.status.sent')
+              : status === 'skipped' ? t('sessions.scheduledTasks.dialog.status.skipped')
+              : status === 'failed' ? t('sessions.scheduledTasks.dialog.status.error')
+              : status === 'cancelled' ? t('sessions.scheduledTasks.dialog.status.cancelled')
+              : status === 'success'
               ? t('sessions.scheduledTasks.dialog.status.success')
               : status === 'error'
                 ? t('sessions.scheduledTasks.dialog.status.error')
@@ -589,6 +599,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground/70" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
                     <TaskModelLine task={task} />
                   </div>
+                  {task.targetSessionId ? <TaskTargetLine sessionId={task.targetSessionId} /> : null}
                   {task.loopFile ? (
                     <div
                       className="typography-micro truncate text-muted-foreground/70"
@@ -779,6 +790,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       <ScheduledTaskEditorDialog
         open={editorOpen}
         task={editorTask}
+        projectId={selectedProjectID}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
       />

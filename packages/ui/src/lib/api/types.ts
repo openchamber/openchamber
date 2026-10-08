@@ -1326,6 +1326,10 @@ export interface NotificationPayload {
   kind?: string;
   sessionId?: string;
   directory?: string;
+  // Runtime key of the instance that owns the session ('local' or 'host:<id>').
+  // The desktop shell uses it to route a notification click to the owning
+  // instance instead of the currently active one.
+  runtimeKey?: string;
   requireHidden?: boolean;
   showWhenFocused?: boolean;
 }

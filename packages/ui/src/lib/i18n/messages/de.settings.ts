@@ -1009,6 +1009,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Sitzungen in Arbeit anzeigen',
   'settings.openchamber.sessionWork.field.autoOpen': 'Sitzungen automatisch in Arbeit verschieben',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev liest jede Nachricht, die Sie senden, und verschiebt die Sitzung in Arbeit, wenn Sie eine Änderung wünschen, einen Fehler melden oder eine konkrete Änderung besprechen. Fragen und Recherche zählen nicht. Jev markiert Arbeit nie als erledigt: Sieht ein Durchgang nach dem Ende der Arbeit aus, zeigt die Sitzung einen grauen Haken, und Sie entscheiden.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Sitzungen in Arbeit in ihrer Projektgruppe behalten',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'Eine Sitzung in Arbeit bleibt auch unter ihrer Projektgruppe und ihren Ordnern aufgeführt. Zuletzt und die Zeitleiste zeigen sie weiterhin einmal, im Arbeitsbereich. Die Suche zeigt sie immer nur einmal.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Nur archivierte Sitzungen',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Verwendet Löschen und zählt die Aufbewahrungsdauer ab der Archivierung. Nicht archivierte Sitzungen bleiben erhalten.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Löscht archivierte Sitzungen nach Ablauf der Aufbewahrungsdauer. Behält die 5 zuletzt archivierten Sitzungen, die geöffnete Sitzung sowie laufende und geteilte Sitzungen. Eine übergeordnete Sitzung bleibt erhalten, wenn ihre Löschung auch eine geschützte untergeordnete Sitzung löschen würde.',

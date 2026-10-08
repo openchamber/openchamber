@@ -73,6 +73,7 @@ const ALL_PARAMETER_PROPERTIES = {
     additionalProperties: false,
   },
   taskId: { type: 'string' },
+  targetSessionId: { type: 'string', description: 'Scheduled task target; omit for a new session, empty on update clears it' },
   title: { type: 'string' },
   prompt: { type: 'string' },
   model: { type: 'string', description: 'Model in provider/model format. When the user names no model: for session.create pick a suitable one from models.list favorites or recents (omit if there are none); for send and fork omit it — the session reuses its previous model' },

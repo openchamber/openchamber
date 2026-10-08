@@ -1060,6 +1060,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': '作業中のセッションを表示',
   'settings.openchamber.sessionWork.field.autoOpen': 'セッションを自動的に作業中にする',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev は送信したメッセージを読み、変更を依頼したとき、バグを報告したとき、具体的な変更を話し合っているときにセッションを作業中にします。質問や調査は対象外です。Jev が作業を完了にすることはありません。ターンが作業の終わりに見えるとセッションに灰色のチェックが表示され、判断はあなたに委ねられます。',
+  'settings.openchamber.sessionWork.field.keepInGroup': '作業中セッションをプロジェクトグループに残す',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': '作業中のセッションは、プロジェクトグループとフォルダーの下にも表示されます。「最近」とタイムラインでは引き続き作業ブロックに一度だけ表示されます。検索では常に一度だけ表示されます。',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'アーカイブ済みのセッションのみ',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': '削除を選択し、アーカイブ時点から保持期間を数えます。未アーカイブのセッションは保持されます。',
   'settings.openchamber.sessionRetention.archivedTooltip': '保持期間を過ぎたアーカイブ済みのセッションを削除します。最後にアーカイブされた5件、開いているセッション、実行中および共有中のセッションは保持されます。保護された子セッションまで削除される場合、親セッションは削除されません。',

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fsPromises from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -286,6 +287,55 @@ describe('todos', () => {
   test('clamps oversized todo text', async () => {
     await runtime.saveTodos(PROJECT_ID, [{ id: 't1', text: 'z'.repeat(1500), createdAt: 1 }]);
     expect((await runtime.readContext(PROJECT_ID)).todos[0].text).toHaveLength(1000);
+  });
+});
+
+describe('committed changes', () => {
+  test('announces the owner only after note and todo changes reach disk', async () => {
+    const changes = [];
+    const announcing = createProjectContextRuntime({
+      fsPromises,
+      path,
+      projectsDirPath,
+      createId: () => `note-${++idCounter}`,
+      onChanged: (projectId) => {
+        changes.push({ projectId, context: JSON.parse(readFileSync(announcing.contextPathFor(projectId), 'utf8')) });
+      },
+    });
+    await announcing.readContext(PROJECT_ID);
+    expect(changes).toEqual([]);
+    const { note } = await announcing.createNote(PROJECT_ID, { body: 'peer note' });
+    expect(changes.map(change => change.projectId)).toEqual([PROJECT_ID]);
+    expect(changes[0].context.notes[0].body).toBe('peer note');
+
+    await announcing.updateNote(PROJECT_ID, note.id, { body: 'peer edit' });
+    await announcing.saveTodos(PROJECT_ID, [{ id: 't1', text: 'peer todo', completed: true, createdAt: 1 }]);
+    expect(changes.map(change => change.projectId)).toEqual([PROJECT_ID, PROJECT_ID, PROJECT_ID]);
+    expect(changes[1].context.notes[0].body).toBe('peer edit');
+    expect(changes[2].context.todos[0].completed).toBe(true);
+
+    await announcing.deleteNote(PROJECT_ID, note.id);
+    expect(changes.at(-1).context.notes).toEqual([]);
+    const count = changes.length;
+    await announcing.deleteNote(PROJECT_ID, 'missing');
+    await expect(announcing.createNote(PROJECT_ID, { body: ' ' })).rejects.toThrow('body is required');
+    expect(changes).toHaveLength(count);
+  });
+
+  test('a failed atomic write does not announce or replace the last committed context', async () => {
+    await runtime.createNote(PROJECT_ID, { body: 'kept' });
+    const changes = [];
+    const failing = createProjectContextRuntime({
+      fsPromises: { ...fsPromises, rename: async () => { throw new Error('disk full'); } },
+      path,
+      projectsDirPath,
+      onChanged: (projectId) => changes.push(projectId),
+    });
+    await expect(failing.saveTodos(PROJECT_ID, [{ id: 't1', text: 'not saved' }])).rejects.toThrow('disk full');
+    expect(changes).toEqual([]);
+    const context = await runtime.readContext(PROJECT_ID);
+    expect(context.notes[0].body).toBe('kept');
+    expect(context.todos).toEqual([]);
   });
 });
 
@@ -593,6 +643,29 @@ describe('shared plans', () => {
     expect(deleted.deleted).toBe(true);
     await expect(fsPromises.access(path.join(sharedDir, 'a.md'))).rejects.toThrow();
     expect((await sharedRuntime.deletePlan(PROJECT_ID, 'shared:a.md')).deleted).toBe(false);
+  });
+
+  test('announces shared plan updates and deletes, and stays quiet for missing files', async () => {
+    const changes = [];
+    const notifyingRuntime = createProjectContextRuntime({
+      fsPromises,
+      path,
+      projectsDirPath,
+      createId: () => `plan-${++idCounter}`,
+      resolveSharedPlansDir: async () => sharedDir,
+      onChanged: (projectId) => changes.push(projectId),
+    });
+    await fsPromises.mkdir(sharedDir, { recursive: true });
+    await fsPromises.writeFile(path.join(sharedDir, 'a.md'), '# A\n');
+
+    await notifyingRuntime.updatePlan(PROJECT_ID, 'shared:a.md', { raw: '# Renamed\n' });
+    expect(changes).toEqual([PROJECT_ID]);
+    await notifyingRuntime.deletePlan(PROJECT_ID, 'shared:a.md');
+    expect(changes).toEqual([PROJECT_ID, PROJECT_ID]);
+
+    await notifyingRuntime.updatePlan(PROJECT_ID, 'shared:a.md', { raw: 'x' });
+    await notifyingRuntime.deletePlan(PROJECT_ID, 'shared:a.md');
+    expect(changes).toEqual([PROJECT_ID, PROJECT_ID]);
   });
 
   test('share moves a personal plan into the shared folder and unshare brings it back, avoiding name collisions', async () => {

@@ -9,7 +9,7 @@ import {
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { OPENCODE_CONFIG_DIR, readConfigLayers } from './shared.js';
 import { settingsSurfaceOf } from './settings-files.js';
-import { parseWebSearchSelection } from './config-v2.js';
+import { parseWebSearchSelection, readSectionEntry, toProviderEntity } from './config-v2.js';
 import { getWebSearchSource, setWarmingEnabled, setWebSearchSelection } from './websearch-config.js';
 import {
   CREDENTIAL_LIST_ERROR,
@@ -429,7 +429,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
           const { getProviderAuth } = await getAuthLibrary();
           const storedAuth = await getProviderAuth(providerID);
           storedApiKey = storedAuth?.type === 'api' && typeof storedAuth.key === 'string' ? storedAuth.key : null;
-          storedBaseURL = readConfigLayers().mergedConfig?.provider?.[providerID]?.options?.baseURL;
+          const { value: rawProvider } = readSectionEntry(readConfigLayers().mergedConfig, 'providers', providerID);
+          const providerEntity = rawProvider ? toProviderEntity(rawProvider) : null;
+          storedBaseURL = providerEntity?.settings?.baseURL;
+          if (!storedApiKey) {
+            // OpenCode tries each `env` name in order, so pick the first one
+            // that is set; when none is, keep the first so discovery can name
+            // it in the error instead of failing as an anonymous 401. This
+            // reads the server's environment: a variable that exists only in
+            // the managed OpenCode launch environment (Settings user env) is
+            // not visible here.
+            const envName = providerEntity?.env?.find((name) => process.env[name]) ?? providerEntity?.env?.[0];
+            storedApiKey = providerEntity?.settings?.apiKey || (envName ? `{env:${envName}}` : null);
+          }
         } catch {
           storedApiKey = null;
         }

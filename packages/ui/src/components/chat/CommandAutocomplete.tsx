@@ -10,7 +10,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { commandMatchesSearch, mergeCommandAutocompleteItems } from './commandAutocompleteItems';
+import { mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
@@ -221,19 +221,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
           ...extensionCommands,
         ];
 
-        const filtered = searchQuery
-          ? allCommands.filter(cmd => commandMatchesSearch(cmd, searchQuery))
-          : allCommands;
-
-        filtered.sort((a, b) => {
-          const aStartsWith = a.name.toLowerCase().startsWith(searchQuery.toLowerCase());
-          const bStartsWith = b.name.toLowerCase().startsWith(searchQuery.toLowerCase());
-          if (aStartsWith && !bStartsWith) return -1;
-          if (!aStartsWith && bStartsWith) return 1;
-          return a.name.localeCompare(b.name);
-        });
-
-        setCommands(filtered);
+        setCommands(rankCommandAutocompleteItems(allCommands, searchQuery));
       } catch {
 
         const builtInCommands: CommandInfo[] = [

@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
+import net from 'node:net';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,6 +9,24 @@ import { WebSocket } from 'ws';
 
 import { createTerminalRuntime } from './runtime.js';
 import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
+
+// Drives the raw upgrade handler by hand. A `ws` client hides the HTTP response
+// once the 101 lands, and a real client cannot be made to upgrade one socket
+// twice, so the test emits the `upgrade` event directly on a real socket.
+function manualUpgradeRequest(port) {
+  const key = crypto.randomBytes(16).toString('base64');
+  return {
+    url: '/api/terminal/ws',
+    method: 'GET',
+    headers: {
+      host: `127.0.0.1:${port}`,
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': key,
+      'sec-websocket-version': '13',
+    },
+  };
+}
 
 function createResponse() {
   return {
@@ -759,6 +779,52 @@ describe('terminal runtime', () => {
       // Native clients send no Origin and keep working without a password.
       expect(await handshake({})).toBe('open');
     } finally {
+      await runtime.shutdown();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('does not write an HTTP rejection onto a socket that already completed its upgrade', async () => {
+    const server = http.createServer();
+    const refused = [];
+    const logged = [];
+    const runtime = createRuntime(server, {
+      logger: { warn: (...args) => logged.push(args.join(' ')) },
+      rejectWebSocketUpgrade(socket, status, reason) {
+        refused.push({ status, reason });
+        if (!socket || socket.destroyed) return;
+        // Mirrors the real helper: it writes an HTTP status line, which is only
+        // valid before the handshake switches protocols.
+        try { socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`); } catch { /* closed */ }
+        try { socket.destroy(); } catch { /* closed */ }
+      },
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    const socket = net.connect(port, '127.0.0.1');
+    await new Promise((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('error', reject);
+    });
+    let bytes = '';
+    socket.on('data', (chunk) => { bytes += chunk.toString('latin1'); });
+    try {
+      // First upgrade completes and writes the 101. The second one hits ws's
+      // "called more than once" throw, which used to land in the bare catch and
+      // append a 500 status line to a connection that is no longer HTTP.
+      const req = manualUpgradeRequest(port);
+      server.emit('upgrade', req, socket, Buffer.alloc(0));
+      server.emit('upgrade', req, socket, Buffer.alloc(0));
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // The socket was destroyed by the failure path, and no HTTP rejection was
+      // written for a connection that had already switched protocols.
+      expect(refused).toEqual([]);
+      expect(bytes).not.toContain('500');
+      // The upgrade error was not swallowed: it reached the logger.
+      expect(logged.some((line) => /terminal/i.test(line) && /upgrade/i.test(line))).toBe(true);
+    } finally {
+      socket.destroy();
       await runtime.shutdown();
       await new Promise((resolve) => server.close(resolve));
     }

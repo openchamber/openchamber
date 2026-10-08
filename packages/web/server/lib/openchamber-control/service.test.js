@@ -55,6 +55,16 @@ const createService = (overrides = {}) => {
 };
 
 describe('OpenChamber control service', () => {
+  it('creates a target task with inherited selection and accepts retargeting on update', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
+    const created = await service.execute('schedule.create', { name: 'Reuse', prompt: 'Continue', daily: '09:00', targetSessionId: 'ses_target' }, '/repo');
+    expect(created.task).toMatchObject({ targetSessionId: 'ses_target', execution: { useDefaults: true } });
+    scheduledTaskService.list.mockResolvedValue([{ ...created.task, id: 'task-1' }]);
+    await service.execute('schedule.update', { taskId: 'task-1', targetSessionId: 'ses_second', agent: 'plan' }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[1][1]).toMatchObject({ targetSessionId: 'ses_second', execution: { agent: 'plan' } });
+    expect(scheduledTaskService.upsert.mock.calls[1][1].execution.useDefaults).toBeUndefined();
+  });
   it('serves project and model projections without an HTTP or CLI round trip', async () => {
     const { service } = createService();
     await expect(service.execute('projects.list')).resolves.toEqual({

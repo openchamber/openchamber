@@ -1059,6 +1059,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Show sessions in work',
   'settings.openchamber.sessionWork.field.autoOpen': 'Move sessions into work automatically',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev reads each message you send and moves the session into work when you ask for a change, report a bug, or discuss a concrete change. Questions and research don\'t count. Jev never marks work done: when a turn looks like the end of the work, the session shows a grey check and you decide.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Keep tracked sessions in their project group',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'A session in work also stays listed under its project group and folders. Recent and the timeline still show it once, in the work block. Search always lists it once.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Only archived sessions',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Uses Delete and counts the retention period from archiving. Unarchived sessions are kept.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Deletes expired archived sessions. Keeps the 5 most recently archived sessions, the open session, running sessions and shared sessions. A parent is kept if deleting it would also delete a protected child.',

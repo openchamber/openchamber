@@ -120,7 +120,10 @@ gap.
 ## Sources of truth
 
 - Reference checkout `~/projects/opencode`, branch `origin/v2` and its
-  `v2.x.y` tags (`git fetch origin --tags` there; never edit it). Server
+  `v2.x.y` tags (`git fetch origin --tags` there; never edit it). Maintainer
+  machine only: where the path is absent — CI, a fresh sandbox — report the
+  reference checkout as unavailable and answer what you can from the pins
+  below. Server
   behaviour: `packages/core/src`, HTTP surface: `packages/server/src/handlers/*`,
   wire types: `packages/schema/src`, `packages/protocol/src/groups`.
 - Minimum supported version: `MINIMUM_OPENCODE_VERSION` in

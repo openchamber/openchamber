@@ -69,12 +69,21 @@ export const shouldBlockGuestFrameNavigation = ({ isMainFrame, frameOrigin, fram
   // Another page of an extension on this app's server, which the same CSP governs.
   if (target.pathname.startsWith(GUEST_PATH_PREFIX)) return false;
 
+  if (!frame || !mainFrame) return true;
+  const currentUrl = frameUrlOf(frame);
+  if (currentUrl === null) return true;
+  // A new PDF iframe also starts with an opaque origin in the packaged UI.
+  // Only the app may load the raw-file route into its empty direct child;
+  // loaded extensions, HTML previews and nested frames never qualify.
+  const apiIndex = target.pathname.indexOf('/api/');
+  if ((target.protocol === 'http:' || target.protocol === 'https:')
+    && target.pathname.slice(apiIndex) === '/api/fs/raw'
+    && currentUrl === '' && initiator === mainFrame && frameParentOf(frame) === mainFrame) return false;
+
   // HTML previews: the sandboxed page is untrusted, so the grant in its path is
   // what bounds it.
   const targetGrant = previewGrantOf(url);
-  if (!targetGrant || !frame || !mainFrame) return true;
-  const currentUrl = frameUrlOf(frame);
-  if (currentUrl === null) return true;
+  if (!targetGrant) return true;
   const currentGrant = currentUrl ? previewGrantOf(currentUrl) : null;
   // The app loads a preview into its own direct child frame: the first load
   // into an empty frame, or a new grant after the file is saved. An extension

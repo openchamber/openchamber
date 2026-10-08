@@ -116,7 +116,8 @@ const buildScheduledTask = (input) => {
   const prompt = asNonEmptyString(input.prompt);
   if (!name) throw new OpenChamberControlError('name is required', 400);
   if (!prompt) throw new OpenChamberControlError('prompt is required', 400);
-  const model = parseModel(input.model);
+  const targetSessionId = asNonEmptyString(input.targetSessionId);
+  const model = targetSessionId && input.model === undefined ? { useDefaults: !asNonEmptyString(input.agent) } : parseModel(input.model);
   const goalTokenBudget = input.goalTokenBudget;
   if (goalTokenBudget !== undefined && input.goal !== true) {
     throw new OpenChamberControlError('goalTokenBudget requires goal', 400);
@@ -124,7 +125,7 @@ const buildScheduledTask = (input) => {
   if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
     throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
   }
-  return {
+  const task = {
     name,
     enabled: input.disabled !== true,
     schedule: buildSchedule(input),
@@ -137,6 +138,8 @@ const buildScheduledTask = (input) => {
       ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
     },
   };
+  if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
+  return task;
 };
 
 /**
@@ -165,6 +168,7 @@ const patchScheduledTask = (existing, input) => {
     const value = asNonEmptyString(input[field]);
     if (value) execution[field] = value;
     else delete execution[field];
+    if (field === 'agent' && value && (input.targetSessionId || existing.targetSessionId)) delete execution.useDefaults;
   }
   if (typeof input.goal === 'boolean') {
     if (input.goal) execution.goalEnabled = true;
@@ -192,6 +196,7 @@ const patchScheduledTask = (existing, input) => {
     : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
   return {
     id: existing.id,
+    targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
     name,
     enabled: typeof input.disabled === 'boolean' ? !input.disabled : existing.enabled,
     schedule,

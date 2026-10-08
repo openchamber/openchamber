@@ -42,6 +42,7 @@ const createOpenCode = () => {
     sent: [],
     switched: [],
     failNext: null,
+    failStatus: 500,
     htmlNext: null,
   };
   // v2 wraps `/api/*` payloads in `{ location, data }`; a message page is
@@ -52,7 +53,7 @@ const createOpenCode = () => {
     const method = init.method ?? 'GET';
     if (state.failNext && state.failNext.test(pathname)) {
       state.failNext = null;
-      return new Response('boom', { status: 500 });
+      return new Response('boom', { status: state.failStatus });
     }
     if (method === 'POST' && state.htmlNext?.test(pathname)) {
       state.htmlNext = null;
@@ -80,7 +81,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -99,6 +100,8 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     fetchImpl: openCode.fetchImpl,
     dispatchQuietMs: 0,
     abortHoldMs: 50,
+    beforeScheduledTaskSend,
+    onScheduledTaskResult,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
@@ -119,6 +122,173 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+describe('scheduled task items', () => {
+  const scheduled = (projectId = 'project-1', overrides = {}) => item({
+    scheduledTask: { projectId, taskId: 'task-1' }, sendConfig: {}, ...overrides,
+  });
+
+  it('deduplicates project and task across sessions, but not across projects', async () => {
+    const { runtime, openCode } = createRuntime();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    await expect(runtime.enqueue('ses_other', DIRECTORY, scheduled())).rejects.toMatchObject({ status: 409 });
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-2'));
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('inherits without a model POST and reports sent without waiting for completion', async () => {
+    const results = [];
+    const { runtime, openCode } = createRuntime({ onScheduledTaskResult: (task, status) => results.push({ task, status }) });
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    await settle();
+    expect(openCode.state.switched).toEqual([]);
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(openCode.state.sent[0].body).toEqual({ text: 'follow up' });
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    expect(results).toEqual([{ task: { projectId: 'project-1', taskId: 'task-1' }, status: 'sent' }]);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('applies explicit selection and keeps the existing directory query', async () => {
+    const { runtime, openCode } = createRuntime();
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { sendConfig: { providerID: 'openai', modelID: 'chosen', agent: 'plan' } }));
+    await settle();
+    expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ model: { providerID: 'openai', id: 'chosen' } }, { agent: 'plan' }]);
+    const promptCall = openCode.fetchImpl.mock.calls.find(([url]) => new URL(url).pathname.endsWith('/prompt'));
+    expect(new URL(promptCall[0]).searchParams.get('directory')).toBe(DIRECTORY);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('supports an agent override without switching the target model', async () => {
+    const { runtime, openCode } = createRuntime();
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { sendConfig: { agent: 'plan' } }));
+    await settle();
+    expect(openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('keeps an agent-only override across persistence and restart', async () => {
+    const first = createRuntime();
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    await first.runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { sendConfig: { agent: 'plan' } }));
+    first.runtime.stop();
+    await first.runtime.flush();
+    const second = createRuntime({ dataDir: first.dataDir });
+    await second.runtime.load();
+    expect(second.runtime.sessionSnapshot(SESSION).items[0].sendConfig).toEqual({ agent: 'plan' });
+    second.runtime.start();
+    await settle();
+    expect(second.openCode.state.switched.map((entry) => entry.body)).toEqual([{ agent: 'plan' }]);
+    expect(second.openCode.state.sent).toHaveLength(1);
+    second.runtime.stop();
+    await second.runtime.flush();
+  });
+
+  it.each([404, 409])('drops a target refusal %s without holding ordinary items behind it', async (statusCode) => {
+    const results = [];
+    const { runtime, openCode } = createRuntime({
+      beforeScheduledTaskSend: async () => { throw Object.assign(new Error('Scheduled target is unavailable'), { statusCode }); },
+      onScheduledTaskResult: (_task, status) => results.push(status),
+    });
+    await runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'ordinary' }));
+    await settle();
+    expect(results).toEqual(['failed']);
+    expect(openCode.state.sent[0].body.text).toBe('ordinary');
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it.each([
+    { operation: 'prompt', status: 500 },
+    { operation: 'model', status: 500 },
+    { operation: 'model', status: 404 },
+    { operation: 'model', status: 409 },
+    { operation: 'target lookup', status: 503 },
+  ])('uses the ordinary retry policy for scheduled $operation failure $status', async ({ operation, status }) => {
+    const results = [];
+    let checks = 0;
+    const { runtime, openCode, emit } = createRuntime({
+      retryDelayMs: () => 100,
+      beforeScheduledTaskSend: async () => {
+        checks += 1;
+        if (operation === 'target lookup' && checks === 1) throw Object.assign(new Error('upstream unavailable'), { statusCode: 503 });
+      },
+      onScheduledTaskResult: (_task, status) => results.push(status),
+    });
+    runtime.start();
+    openCode.state.failStatus = status;
+    if (operation === 'prompt') openCode.state.failNext = /\/prompt$/;
+    if (operation === 'model') openCode.state.failNext = /\/model$/;
+    await runtime.enqueue(SESSION, DIRECTORY, operation === 'model'
+      ? scheduled('project-1', { sendConfig: { providerID: 'openai', modelID: 'chosen' } })
+      : scheduled());
+    await runtime.enqueue(SESSION, DIRECTORY, item({ text: 'ordinary' }));
+    await settle();
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
+    expect(results).toEqual([]);
+    expect(openCode.state.sent).toEqual([]);
+    await expect(runtime.enqueue(SESSION, DIRECTORY, scheduled())).rejects.toMatchObject({ status: 409 });
+    await settle(130);
+    expect(checks).toBe(2);
+    expect(results).toEqual(['sent']);
+    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up']);
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['follow up', 'ordinary']);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('rejects scheduled takes, leaves them in bulk take, and allows reorder and remove', async () => {
+    const results = [];
+    const { runtime, openCode } = createRuntime({ onScheduledTaskResult: (task, status) => results.push({ task, status }) });
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    const first = await runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    const ordinary = await runtime.enqueue(SESSION, DIRECTORY, item());
+    const second = await runtime.enqueue(SESSION, DIRECTORY, scheduled('project-1', { scheduledTask: { projectId: 'project-1', taskId: 'task-2' } }));
+    await runtime.reorder(SESSION, [second.itemId, ordinary.itemId, first.itemId]);
+    await expect(runtime.take(SESSION, first.itemId)).rejects.toMatchObject({ status: 409 });
+    expect((await runtime.takeAll(SESSION)).items.map((entry) => entry.id)).toEqual([ordinary.itemId]);
+    expect(runtime.sessionSnapshot(SESSION).items.map((entry) => entry.id)).toEqual([second.itemId, first.itemId]);
+    expect(results).toEqual([]);
+    await runtime.remove(SESSION, second.itemId);
+    expect(results).toEqual([{ task: { projectId: 'project-1', taskId: 'task-2' }, status: 'cancelled' }]);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('ignores creation-only policy fields on stored scheduled provenance', () => {
+    const parsed = parseQueuedItemInput(scheduled('project-1', {
+      scheduledTask: { projectId: 'project-1', taskId: 'task-1', goalEnabled: true, goalTokenBudget: 5000, permissionAutoAccept: true },
+    }));
+    expect(parsed.scheduledTask).toEqual({ projectId: 'project-1', taskId: 'task-1' });
+  });
+
+  it('cancels only the requested task and survives a restart with provenance', async () => {
+    const results = [];
+    const first = createRuntime({ onScheduledTaskResult: (_task, status) => results.push(status) });
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    await first.runtime.enqueue(SESSION, DIRECTORY, scheduled());
+    await first.runtime.enqueue(SESSION, DIRECTORY, item());
+    first.runtime.stop();
+    await first.runtime.flush();
+    const second = createRuntime({ dataDir: first.dataDir, onScheduledTaskResult: (_task, status) => results.push(status) });
+    await second.runtime.load();
+    expect(second.runtime.sessionSnapshot(SESSION).items[0].scheduledTask).toEqual({ projectId: 'project-1', taskId: 'task-1' });
+    await second.runtime.cancelScheduledTask('project-1', 'task-1');
+    expect(second.runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    expect(results).toEqual(['cancelled']);
+    second.runtime.stop();
+    await second.runtime.flush();
+  });
+});
 
 describe('auto routing', () => {
   it('switches a queued prompt and a queued command onto the routed model and agent', async () => {

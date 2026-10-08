@@ -106,12 +106,19 @@ export const createScheduledTaskService = (dependencies) => {
       throw new OpenChamberControlError('task payload is required', 400);
     }
     let upserted;
+    const previous = taskInput.id ? (await projectConfigRuntime.listScheduledTasks(id)).find((task) => task.id === taskInput.id) : null;
+    if (taskInput.targetSessionId && (taskInput.enabled !== false || previous?.targetSessionId !== taskInput.targetSessionId)) {
+      await scheduledTasksRuntime.validateTarget(id, taskInput.targetSessionId);
+    }
     try {
       upserted = await projectConfigRuntime.upsertScheduledTask(id, taskInput);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
       const invalid = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid');
       throw new OpenChamberControlError(message, invalid ? 400 : 500);
+    }
+    if (previous?.targetSessionId && ((previous.enabled && upserted.task.enabled === false) || previous.targetSessionId !== upserted.task.targetSessionId)) {
+      await scheduledTasksRuntime.cancelWaitingPrompt(id, taskInput.id);
     }
     await scheduledTasksRuntime.syncProject(id);
     const tasks = await projectConfigRuntime.listScheduledTasks(id);
@@ -141,6 +148,7 @@ export const createScheduledTaskService = (dependencies) => {
     }
     const result = await projectConfigRuntime.deleteScheduledTask(id, normalizedTaskID);
     if (!result.deleted) throw new OpenChamberControlError('Task not found', 404);
+    await scheduledTasksRuntime.cancelWaitingPrompt?.(id, normalizedTaskID);
     await scheduledTasksRuntime.syncProject(id);
     return projectConfigRuntime.listScheduledTasks(id);
   };
@@ -155,7 +163,7 @@ export const createScheduledTaskService = (dependencies) => {
     }
     if (result.skipped) throw new OpenChamberControlError('Task not found or disabled', 404);
     if (!result.ok) {
-      throw new OpenChamberControlError(result.error || 'Task run failed', 500, { task: result.task });
+      throw new OpenChamberControlError(result.error || 'Task run failed', result.statusCode || 500, { task: result.task });
     }
     const response = {
       task: result.task,

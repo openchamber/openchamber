@@ -82,6 +82,7 @@ import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { WorktreeMetadata } from '@/types/worktree';
 import {
   getSessionWorktreeMenuState,
@@ -1484,11 +1485,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           disabled={!sessionDirectory}
           onClick={() => {
             if (!sessionDirectory) return;
-            openContextPanelTab(sessionDirectory, {
+            // The tab lives under the main chat's directory, which is the one
+            // the panel reads; the session's own directory rides along so a
+            // chat from another project (or Chat) still resolves itself.
+            const panelDirectory = resolveEffectiveDirectory() ?? sessionDirectory;
+            openContextPanelTab(panelDirectory, {
               mode: 'chat',
               dedupeKey: `session:${session.id}`,
               label: sessionTitle,
               sessionTitleFallback: sessionTitle,
+              targetDirectory: sessionDirectory,
             });
           }}
           className="[&>svg]:mr-1"

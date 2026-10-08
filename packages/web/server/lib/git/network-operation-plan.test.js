@@ -590,6 +590,41 @@ describe('Git network operation planner', () => {
       .rejects.toMatchObject({ code: 'GIT_NETWORK_OPERATION_AUTHORITY_CHANGED', status: 409 });
   });
 
+  // A sha256/base64url digest can legitimately start with '-' (~1 in 64). These
+  // are opaque values the server generated and the client echoes back, never CLI
+  // arguments, so the leading-dash injection guard must not reject them.
+  const DASH_DIGEST = '-GtzS0gxC9C70rmAQhz4wNDSF-h_ePs0Ztxk1GUtHns';
+
+  it('accepts a configRevision that begins with a dash', async () => {
+    const plans = await makePlanner().planNetworkOperation(existingInput('fetch', {
+      configRevision: DASH_DIGEST,
+    }));
+    expect(plans.publicPlan.target.configRevision).toBe(DASH_DIGEST);
+  });
+
+  it('accepts endpoint and transport digests that begin with a dash', async () => {
+    const endpoint = 'https://example.com/owner/repository.git';
+    const planner = makePlanner({
+      validateGitTransportContext: vi.fn(async () => ({
+        ...authority,
+        endpoint,
+        endpointFingerprint: DASH_DIGEST,
+        transportRevision: DASH_DIGEST,
+      })),
+    });
+    const plans = await planner.planNetworkOperation(existingInput('fetch', {
+      remote: { name: 'upstream', endpoint: { displayUrl: endpoint, fingerprint: DASH_DIGEST } },
+    }));
+    expect(plans.publicPlan.target.remote.endpoint.fingerprint).toBe(DASH_DIGEST);
+    expect(plans.internalPlan.transportRevision).toBe(DASH_DIGEST);
+  });
+
+  it('still rejects a digest carrying control characters', async () => {
+    await expect(makePlanner().planNetworkOperation(existingInput('fetch', {
+      configRevision: 'cfg\nbad',
+    }))).rejects.toMatchObject({ code: 'INVALID_GIT_NETWORK_OPERATION' });
+  });
+
   it('plans clone into a deterministic operation-owned sibling', async () => {
     const stat = vi.fn(async () => { const error = new Error('missing'); error.code = 'ENOENT'; throw error; });
     const plans = await makePlanner({ fsImpl: { stat } }).planNetworkOperation({

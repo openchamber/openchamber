@@ -58,6 +58,23 @@ describe('createWebFilesAPI', () => {
     });
   });
 
+  it('forwards respectGitignore only when the caller asks for it', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace', entries: [] }));
+    await api.listDirectory('/workspace', { respectGitignore: true });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/list', expect.objectContaining({
+      query: new URLSearchParams({ path: '/workspace', respectGitignore: 'true' }),
+    }));
+
+    runtimeFetchMock.mockResolvedValueOnce(Response.json({ path: '/workspace', entries: [] }));
+    await api.listDirectory('/workspace');
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/list', expect.objectContaining({
+      query: new URLSearchParams({ path: '/workspace' }),
+    }));
+  });
+
   it('uses per-call workspace directory for stat and read requests', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/stale-workspace' });

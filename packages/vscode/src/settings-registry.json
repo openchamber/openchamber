@@ -572,6 +572,9 @@
         "mobile"
       ]
     },
+    "sessionWorkKeepInGroup": {
+      "scope": "profile"
+    },
     "sessionGoalEnabled": {
       "scope": "profile"
     },

@@ -1035,6 +1035,8 @@ export const settingsDict = {
   'settings.openchamber.sessionWork.field.enabled': 'Devam eden oturumları göster',
   'settings.openchamber.sessionWork.field.autoOpen': 'Oturumları otomatik olarak devam edenlere taşı',
   'settings.openchamber.sessionWork.field.autoOpenInfo': 'Jev gönderdiğiniz her mesajı okur ve bir değişiklik istediğinizde, bir hata bildirdiğinizde ya da somut bir değişikliği tartıştığınızda oturumu devam edenlere taşır. Sorular ve araştırma sayılmaz. Jev işi asla tamamlandı olarak işaretlemez: bir tur işin sonu gibi göründüğünde oturumda gri bir onay işareti görünür ve kararı siz verirsiniz.',
+  'settings.openchamber.sessionWork.field.keepInGroup': 'Devam eden oturumları proje grubunda tut',
+  'settings.openchamber.sessionWork.field.keepInGroupInfo': 'Devam eden bir oturum, proje grubunun ve klasörlerinin altında da listelenmeye devam eder. Son ve zaman çizelgesi onu yine çalışma bloğunda bir kez gösterir. Arama her zaman bir kez gösterir.',
   'settings.openchamber.sessionRetention.field.onlyArchived': 'Yalnızca arşivlenmiş oturumlar',
   'settings.openchamber.sessionRetention.field.onlyArchivedDescription': 'Sil seçeneğini kullanır ve saklama süresini arşivleme tarihinden itibaren sayar. Arşivlenmemiş oturumlar korunur.',
   'settings.openchamber.sessionRetention.archivedTooltip': 'Saklama süresi dolan arşivlenmiş oturumları siler. En son arşivlenen 5 oturumu, açık oturumu, çalışan ve paylaşılan oturumları korur. Bir üst oturumun silinmesi korunan bir alt oturumu da silecekse üst oturum korunur.',

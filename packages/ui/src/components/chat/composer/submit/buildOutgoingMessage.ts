@@ -17,7 +17,7 @@ import type { JsonValue } from '@openchamber/sdk';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import type { SourceControlProvider } from '@/lib/api/types';
 import type { InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
-import type { QueuedContextPart } from '@/stores/messageQueueStore';
+import type { QueuedContextPart, QueuedMessage } from '@/stores/messageQueueStore';
 import { contextPayloadFromDraft, createContextPart, type ContextPartMetadata, type ContextPartPayload } from '@/lib/messages/contextParts';
 
 export interface OutgoingPart {
@@ -56,6 +56,11 @@ export interface QueuedInput {
     attachments?: AttachedFile[];
     context?: readonly QueuedContextPart[];
 }
+
+export const selectComposerQueue = (messages: readonly QueuedMessage[]): readonly QueuedMessage[] =>
+    messages.some((message) => message.scheduledTask)
+        ? messages.filter((message) => !message.scheduledTask)
+        : messages;
 
 /** An issue, PR or tracker item attached to the composer, as it is sent. */
 export type ComposerContextReference =

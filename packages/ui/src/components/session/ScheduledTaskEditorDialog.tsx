@@ -26,6 +26,12 @@ import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { useAllLiveSessions } from '@/sync/sync-context';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { CHAT_DRAFT_PROJECT_ID, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -458,6 +464,8 @@ const isSameCalendarDay = (a: Date, b: Date) => (
 
 type ScheduledTaskDraft = {
   id?: string;
+  sessionMode: 'new' | 'existing';
+  targetSessionId: string;
   name: string;
   enabled: boolean;
   schedule: {
@@ -513,6 +521,8 @@ const toDraft = (
   if (!task) {
     return {
       name: '',
+      sessionMode: 'new',
+      targetSessionId: '',
       enabled: true,
       schedule: {
         kind: 'daily',
@@ -539,6 +549,8 @@ const toDraft = (
 
   return {
     id: task.id,
+    sessionMode: task.targetSessionId ? 'existing' : 'new',
+    targetSessionId: task.targetSessionId || '',
     name: task.name,
     enabled: task.enabled,
     schedule: {
@@ -580,6 +592,7 @@ const toDraft = (
 };
 
 const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>['t']): string | null => {
+  if (draft.sessionMode === 'existing' && !draft.targetSessionId) return t('sessions.scheduledTasks.editor.targetRequired');
   if (!draft.name.trim()) {
     return t('sessions.scheduledTasks.editor.validation.taskNameRequired');
   }
@@ -733,11 +746,29 @@ const CronScheduleSection: React.FC<{
 export function ScheduledTaskEditorDialog(props: {
   open: boolean;
   task: ScheduledTask | null;
+  projectId: string;
   onOpenChange: (open: boolean) => void;
   onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
 }) {
   const { open, task, onOpenChange, onSave } = props;
   const { t, locale } = useI18n();
+  const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const liveSessions = useAllLiveSessions();
+  const projects = useProjectsStore((state) => state.projects);
+  const worktrees = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const sessions = React.useMemo(() => {
+    const merged = new Map(globalSessions.map((session) => [session.id, session]));
+    for (const session of liveSessions) merged.set(session.id, session);
+    const project = projects.find((entry) => entry.id === props.projectId);
+    const roots = [project?.path, ...(worktrees.get(props.projectId) ?? []).map((tree) => tree.path)].filter((root) => root !== undefined);
+    return [...merged.values()].filter((session) => !session.time?.archived && (
+      props.projectId === CHAT_DRAFT_PROJECT_ID ? isChatDirectoryPath(session.directory)
+        : roots.some((root) => session.directory === root || session.directory.startsWith(`${root}/`))
+    ));
+  }, [globalSessions, liveSessions, projects, worktrees, props.projectId]);
+  React.useEffect(() => {
+    if (open) void refreshGlobalSessions().catch(() => undefined);
+  }, [open]);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const providers = useConfigStore((state) => state.providers);
@@ -1157,6 +1188,7 @@ export function ScheduledTaskEditorDialog(props: {
     const payload: Partial<ScheduledTask> = {
       ...(draft.id ? { id: draft.id } : {}),
       name: draft.name.trim(),
+      targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
       enabled: draft.enabled,
       schedule: {
         kind: draft.schedule.kind,
@@ -1186,8 +1218,8 @@ export function ScheduledTaskEditorDialog(props: {
           ? { goalTokenBudget: draft.execution.goalTokenBudget }
           : {}),
       },
-      ...(draft.state ? { state: draft.state } : {}),
     };
+    if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
 
     setSaving(true);
     try {
@@ -1215,6 +1247,29 @@ export function ScheduledTaskEditorDialog(props: {
 
   const formBody = (
     <div className="flex flex-col gap-5">
+      <SettingsStackedField label={t('sessions.scheduledTasks.editor.sessionMode')}>
+        <Select value={draft.sessionMode} onValueChange={(value: 'new' | 'existing') => setDraft((prev) => ({
+          ...prev, sessionMode: value,
+        }))}>
+          <SelectTrigger size="settings"><SelectValue>{draft.sessionMode === 'existing' ? t('sessions.scheduledTasks.editor.existingSession') : t('sessions.scheduledTasks.editor.newSession')}</SelectValue></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="new">{t('sessions.scheduledTasks.editor.newSession')}</SelectItem>
+            <SelectItem value="existing">{t('sessions.scheduledTasks.editor.existingSession')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsStackedField>
+      {draft.sessionMode === 'existing' ? (
+        <SettingsStackedField label={t('sessions.scheduledTasks.editor.targetSession')} info={t('sessions.scheduledTasks.editor.targetHint')}>
+          <Select value={draft.targetSessionId} onValueChange={(targetSessionId) => setDraft((prev) => ({ ...prev, targetSessionId }))}>
+            <SelectTrigger size="settings"><SelectValue placeholder={t('sessions.scheduledTasks.editor.targetSession')}>
+              {sessions.find((session) => session.id === draft.targetSessionId)?.title || draft.targetSessionId || undefined}
+            </SelectValue></SelectTrigger>
+            <SelectContent>
+              {sessions.map((session) => <SelectItem key={session.id} value={session.id}>{session.title || session.id}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsStackedField>
+      ) : null}
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1">
                     <FieldLabel htmlFor="sched-name" required>{t('sessions.scheduledTasks.editor.taskName.label')}</FieldLabel>
@@ -1517,7 +1572,7 @@ export function ScheduledTaskEditorDialog(props: {
           </label>
 
           {draft.execution.useDefaults ? (
-            <p className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.editor.useDefaults.hint')}</p>
+            <p className="typography-meta text-muted-foreground">{draft.sessionMode === 'existing' ? t('sessions.scheduledTasks.editor.targetHint') : t('sessions.scheduledTasks.editor.useDefaults.hint')}</p>
           ) : (
           <>
           <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -1659,7 +1714,7 @@ export function ScheduledTaskEditorDialog(props: {
             </div>
           </div>
 
-          {draft.execution.goalEnabled ? (
+          {draft.sessionMode === 'new' && draft.execution.goalEnabled ? (
           <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
               <label className="inline-flex cursor-pointer items-center gap-2">
                 <Checkbox
@@ -1705,6 +1760,7 @@ export function ScheduledTaskEditorDialog(props: {
       </label>
 
       <div className="flex items-center gap-2">
+        {draft.sessionMode === 'new' ? <>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -1747,6 +1803,7 @@ export function ScheduledTaskEditorDialog(props: {
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.goal.label')}</TooltipContent>
         </Tooltip>
+        </> : null}
         <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
           {t('sessions.scheduledTasks.editor.actions.cancel')}
         </Button>

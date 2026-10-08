@@ -95,6 +95,7 @@ export function createTerminalRuntime({
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
   loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS, shutdownProcesses = shutdownTerminalProcesses,
   environmentRuntime = null,
+  logger = console,
 }) {
   const sessions = new Map();
   const pendingSessionCreates = new Map();
@@ -407,11 +408,22 @@ export function createTerminalRuntime({
 
   const upgradeHandler = (req, socket, head) => {
     if (parseRequestPathname(req.url) !== TERMINAL_WS_PATH) return;
+    const logUpgradeFailure = (error) => {
+      logger.warn?.(`[terminal] websocket upgrade failed: ${error?.message || error}`);
+    };
     const accept = () => {
       if (!wsServer) { rejectWebSocketUpgrade(socket, 500, 'Terminal WebSocket unavailable'); return; }
       try {
         wsServer.handleUpgrade(req, socket, head, (ws) => wsServer.emit('connection', ws, req));
-      } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+      } catch (error) {
+        // handleUpgrade only throws once it has taken the socket: either the
+        // handshake already wrote its 101 (a second upgrade of the same socket,
+        // or a throw from the connection callback), so the connection is no
+        // longer HTTP. Writing a status line here would append an HTTP response
+        // to a switched-protocol socket; drop it and log why instead.
+        logUpgradeFailure(error);
+        socket.destroy();
+      }
     };
     const checkOrigin = () => {
       try {
@@ -424,15 +436,15 @@ export function createTerminalRuntime({
         void result.then((allowed) => {
           if (allowed) accept();
           else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-        }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
-      } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+        }).catch((error) => { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
+      } catch (error) { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
     };
     if (isOpaqueOriginRequest(req)) { rejectWebSocketUpgrade(socket, 403, 'Invalid origin'); return; }
     if (!uiAuthController?.enabled) {
       void isPasswordlessSocketOriginAllowed(req, isRequestOriginAllowed).then((allowed) => {
         if (allowed) accept();
         else rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-      }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
+      }).catch((error) => { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
       return;
     }
     try {
@@ -445,8 +457,8 @@ export function createTerminalRuntime({
       void result.then((sessionToken) => {
         if (sessionToken) checkOrigin();
         else rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
-      }).catch(() => rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'));
-    } catch { rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
+      }).catch((error) => { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); });
+    } catch (error) { logUpgradeFailure(error); rejectWebSocketUpgrade(socket, 500, 'Upgrade failed'); }
   };
   server.on('upgrade', upgradeHandler);
 

@@ -14,6 +14,7 @@ import { execGit as executeGit } from './bridge-git-process-runtime';
 import { readConfig } from './opencodeConfig';
 import { resolveWorktreeDirectory } from './worktree-directory';
 import { readSubmoduleState, resolveGitPathTarget, type GitPathUnavailable, type GitSubmoduleState } from './gitPathDiff';
+import { parseGitRemoteListing, type GitRemote } from './gitRemoteListing';
 import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
@@ -346,8 +347,14 @@ function extractGitNumstatDestinationPath(filePath: string): string {
  * Check if a directory is a git repository
  */
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const result = await execGit(['rev-parse', '--is-inside-work-tree'], directory);
-  return result.exitCode === 0 && result.stdout.trim() === 'true';
+  const result = await execGit(['rev-parse', '--is-inside-work-tree', '--is-bare-repository'], directory);
+  if (result.exitCode !== 0) {
+    return false;
+  }
+  // A bare repository is not inside a work tree but is still a repository:
+  // its linked worktrees are the checkouts a user works in.
+  const [insideWorkTree, bare] = result.stdout.split('\n').map((line) => line.trim());
+  return insideWorkTree === 'true' || bare === 'true';
 }
 
 /**
@@ -846,6 +853,7 @@ type WorktreeListEntry = {
   head?: string;
   branchRef?: string;
   branch?: string;
+  bare?: boolean;
 };
 
 interface GitWorktreeValidationError {
@@ -961,6 +969,14 @@ const parseWorktreePorcelain = (raw: string): WorktreeListEntry[] => {
       const branchRef = line.substring('branch '.length).trim();
       current.branchRef = branchRef;
       current.branch = cleanBranchName(branchRef);
+      continue;
+    }
+
+    // A bare repository lists itself as a worktree with a `bare` attribute
+    // and no HEAD or branch; without a working tree it is not a checkout a
+    // session can run in.
+    if (line === 'bare') {
+      current.bare = true;
     }
   }
 
@@ -1282,6 +1298,18 @@ const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string>
   return projectId;
 };
 
+/**
+ * The primary checkout of a repository from its common git dir: `<root>/.git`
+ * for the checkout itself. Null for any other layout (a bare repository, a
+ * separate git dir).
+ */
+const primaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
+  if (gitDir.replace(/\\/g, '/').endsWith('/.git')) {
+    return gitDir.slice(0, -'/.git'.length) || null;
+  }
+  return null;
+};
+
 const resolveWorktreeProjectContext = async (
   directory: string,
   options: { tolerateWorktreeRootConfigError?: boolean } = {},
@@ -1292,12 +1320,13 @@ const resolveWorktreeProjectContext = async (
     throw new Error('Directory is required');
   }
 
-  const topResult = await runGitCommandOrThrow(
-    directoryPath,
-    ['rev-parse', '--show-toplevel'],
-    'Failed to resolve git top-level directory'
-  );
-  const sandbox = path.resolve(directoryPath, topResult.stdout.trim());
+  const topResult = await runGitCommand(directoryPath, ['rev-parse', '--show-toplevel']);
+  // A bare repository has no work tree, so `--show-toplevel` fails there; the
+  // bare directory itself still answers the object-level commands worktree
+  // creation runs against it.
+  const sandbox = topResult.success
+    ? path.resolve(directoryPath, topResult.stdout.trim())
+    : directoryPath;
 
   const commonResult = await runGitCommandOrThrow(
     sandbox,
@@ -1305,7 +1334,10 @@ const resolveWorktreeProjectContext = async (
     'Failed to resolve git common directory'
   );
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
-  const primaryWorktree = path.dirname(commonDir);
+  // `<root>/.git` resolves to the primary checkout; any other layout (a bare
+  // repository, a separate git dir) has no primary worktree, and the sandbox
+  // directory is the closest thing to one.
+  const primaryWorktree = primaryWorktreeRootFromGitDir(commonDir) || sandbox;
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
   // OpenCode's `worktree.directory` is read from the canonical checkout so a
   // linked worktree still sees the project's saved configuration. When unset,
@@ -1724,18 +1756,23 @@ const applyUpstreamConfiguration = async (args: {
  */
 export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath) || !fs.existsSync(path.join(directoryPath, '.git'))) {
+  // No `.git` path check here: a bare repository's git dir is the directory
+  // itself, and git still lists its worktrees from there. A non-repository
+  // fails the git command below and reads as an empty list all the same.
+  if (!directoryPath || !fs.existsSync(directoryPath)) {
     return [];
   }
 
   try {
     const result = await runGitCommandOrThrow(directoryPath, ['worktree', 'list', '--porcelain'], 'Failed to list git worktrees');
-    return parseWorktreePorcelain(result.stdout).map((entry) => ({
-      head: entry.head || '',
-      name: path.basename(entry.worktree || ''),
-      branch: entry.branch || '',
-      path: entry.worktree,
-    }));
+    return parseWorktreePorcelain(result.stdout)
+      .filter((entry) => entry.bare !== true)
+      .map((entry) => ({
+        head: entry.head || '',
+        name: path.basename(entry.worktree || ''),
+        branch: entry.branch || '',
+        path: entry.worktree,
+      }));
   } catch (error) {
     console.warn('[GitService] Failed to list worktrees, returning empty list:', error instanceof Error ? error.message : String(error));
     return [];
@@ -3709,12 +3746,6 @@ export async function setGitIdentity(
 
 // ============== Remote Operations ==============
 
-export interface GitRemote {
-  name: string;
-  fetchUrl: string;
-  pushUrl: string;
-}
-
 /**
  * Get list of remotes
  */
@@ -3723,27 +3754,7 @@ export async function getRemotes(directory: string): Promise<GitRemote[]> {
   if (result.exitCode !== 0) {
     return [];
   }
-
-  const remoteMap = new Map<string, GitRemote>();
-  const lines = result.stdout.split('\n').filter(Boolean);
-
-  for (const line of lines) {
-    const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
-    if (match) {
-      const [, name, url, type] = match;
-      if (!remoteMap.has(name)) {
-        remoteMap.set(name, { name, fetchUrl: '', pushUrl: '' });
-      }
-      const remote = remoteMap.get(name)!;
-      if (type === 'fetch') {
-        remote.fetchUrl = url;
-      } else {
-        remote.pushUrl = url;
-      }
-    }
-  }
-
-  return Array.from(remoteMap.values());
+  return parseGitRemoteListing(result.stdout);
 }
 
 export async function removeRemote(directory: string, remote: string): Promise<{ success: boolean }> {

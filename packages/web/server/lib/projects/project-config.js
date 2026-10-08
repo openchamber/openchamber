@@ -38,7 +38,7 @@ const clampLength = (value, maxLength) => {
 };
 
 const normalizeStatus = (value) => {
-  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle') {
+  if (value === 'running' || value === 'success' || value === 'error' || value === 'idle' || value === 'queued' || value === 'sent' || value === 'skipped' || value === 'failed' || value === 'cancelled') {
     return value;
   }
   return 'idle';
@@ -218,7 +218,7 @@ const normalizeSchedule = (value, existingSchedule) => {
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value) => {
+const normalizeExecution = (value, targetSessionId) => {
   if (!value || typeof value !== 'object') {
     throw new Error('execution is required');
   }
@@ -242,12 +242,13 @@ const normalizeExecution = (value) => {
   if (!prompt) {
     throw new Error('execution.prompt is required');
   }
-  if (!useDefaults && !providerID) {
+  if (!useDefaults && !targetSessionId && !providerID) {
     throw new Error('execution.providerID is required');
   }
-  if (!useDefaults && !modelID) {
+  if (!useDefaults && !targetSessionId && !modelID) {
     throw new Error('execution.modelID is required');
   }
+  if (targetSessionId && Boolean(providerID) !== Boolean(modelID)) throw new Error('execution providerID and modelID are required together');
 
   return {
     prompt,
@@ -336,7 +337,10 @@ const normalizeTaskForStorage = (value, options) => {
     : (existingTask?.enabled ?? true);
 
   const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
-  const execution = normalizeExecution(value.execution);
+  const targetSessionId = asNonEmptyString(value.targetSessionId);
+  if (value.targetSessionId != null && value.targetSessionId !== '' && !targetSessionId) throw new Error('targetSessionId is invalid');
+  if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
+  const execution = normalizeExecution(value.execution, targetSessionId);
 
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
@@ -351,7 +355,7 @@ const normalizeTaskForStorage = (value, options) => {
     updatedAt: refreshUpdatedAt ? nowMs : baseState.updatedAt ?? nowMs,
   };
 
-  return {
+  const storedTask = {
     id,
     name,
     enabled,
@@ -360,6 +364,8 @@ const normalizeTaskForStorage = (value, options) => {
     state,
     ...(loopFile ? { loopFile } : {}),
   };
+  if (targetSessionId) storedTask.targetSessionId = targetSessionId;
+  return storedTask;
 };
 
 // `loopApprovals`: loop file path -> fingerprint of the version the user

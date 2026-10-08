@@ -103,6 +103,68 @@ describe('Kimi for Coding quota provider', () => {
     expect(result.error).toBe('API error: 401');
   });
 
+  it('shows the pay-as-you-go balance when the Kimi Code address refuses a platform key', async () => {
+    const urls = [];
+    const fetchImpl = async (url, init) => {
+      urls.push({ url, authorization: init.headers.Authorization });
+      return url === 'https://api.moonshot.ai/v1/users/me/balance'
+        ? Response.json({ code: 0, data: { available_balance: 12.345 }, status: true })
+        : new Response('{}', { status: 401 });
+    };
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(urls.map((call) => call.url)).toEqual([
+      'https://api.kimi.com/coding/v1/usages',
+      'https://api.moonshot.ai/v1/users/me/balance',
+    ]);
+    expect(urls[1].authorization).toBe('Bearer test-token');
+    expect(result.ok).toBe(true);
+    expect(result.providerId).toBe('kimi-for-coding');
+    expect(result.providerName).toBe('Kimi for Coding');
+    expect(result.usage.windows.credits_balance.valueLabel).toBe('$12.35');
+  });
+
+  it('keeps the original 401 when the balance read fails too', async () => {
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      return new Response('{}', { status: 401 });
+    };
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(urls).toEqual(['https://api.kimi.com/coding/v1/usages', 'https://api.moonshot.ai/v1/users/me/balance']);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('API error: 401');
+  });
+
+  it('treats a 403 from the Kimi Code address like a 401', async () => {
+    const fetchImpl = async (url) => (
+      url === 'https://api.moonshot.ai/v1/users/me/balance'
+        ? Response.json({ data: { available_balance: 5 } })
+        : new Response('{}', { status: 403 })
+    );
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(result.ok).toBe(true);
+    expect(result.usage.windows.credits_balance.valueLabel).toBe('$5.00');
+  });
+
+  it('does not try the balance address for errors other than authorisation', async () => {
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      return new Response('{}', { status: 500 });
+    };
+
+    const result = await fetchQuota({ readAuth, fetchImpl });
+
+    expect(urls).toEqual(['https://api.kimi.com/coding/v1/usages']);
+    expect(result.error).toBe('API error: 500');
+  });
+
   describe('credential lookup', () => {
     const sentKey = async (auth) => {
       let authorization;

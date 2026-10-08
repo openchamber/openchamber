@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import express from 'express';
 import request from 'supertest';
 import { registerOpenCodeRoutes } from './routes.js';
@@ -165,9 +168,10 @@ describe('POST /api/provider/discover-models', () => {
       getProviderSources: vi.fn(),
     });
 
-    // The route's auth module reads the real OpenCode credential store. This
-    // fixture cannot inject that private module, so the module-level fallback
-    // is covered in model-discovery.test.js and this keeps the route contract:
+    // With no credential source configured the route's credential-store read
+    // fails and discovery falls back to the key in the form; the stored-config
+    // fallback has its own describe below, and env resolution in stored keys
+    // is covered in model-discovery.test.js. This keeps the route contract:
     // provider id enters, no credential leaves in the response.
     const response = await request(app)
       .post('/api/provider/discover-models')
@@ -178,6 +182,100 @@ describe('POST /api/provider/discover-models', () => {
       enrichment: { requested: false, available: false },
     });
     expect(JSON.stringify(response.body)).not.toContain('replacement-secret');
+  });
+});
+
+describe('POST /api/provider/discover-models stored-config fallback', () => {
+  // The route reads the stored entry from the merged config layers. Point
+  // OPENCODE_CONFIG (resolved on every read) at a temp fixture so the entry
+  // is exactly what a provider form save writes: the v2 `providers` shape.
+  let root;
+  let previousOpenCodeConfig;
+
+  const serveModels = () => {
+    const requests = [];
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      requests.push(init.headers.Authorization);
+      return new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 200 });
+    });
+    return requests;
+  };
+
+  const writeStoredProvider = (providerID, entry) => {
+    const configPath = path.join(root, 'opencode.json');
+    fs.writeFileSync(configPath, JSON.stringify({ providers: { [providerID]: entry } }), 'utf8');
+    process.env.OPENCODE_CONFIG = configPath;
+  };
+
+  const discover = (body) => {
+    const app = express();
+    app.use(express.json());
+    registerOpenCodeRoutes(app, {
+      resolveProjectDirectory: vi.fn(async () => ({ directory: '/projects/app' })),
+      getProviderSources: vi.fn(),
+    });
+    return request(app).post('/api/provider/discover-models').send(body);
+  };
+
+  beforeEach(() => {
+    // The credential store is reachable but empty: the fallback must come
+    // from the stored config entry.
+    configureOpenCodeCredentials({ list: async () => [] });
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-discovery-'));
+    previousOpenCodeConfig = process.env.OPENCODE_CONFIG;
+  });
+
+  afterEach(() => {
+    configureOpenCodeCredentials(null);
+    if (previousOpenCodeConfig === undefined) delete process.env.OPENCODE_CONFIG;
+    else process.env.OPENCODE_CONFIG = previousOpenCodeConfig;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('sends the first env variable that is set, not just the first name', async () => {
+    const providerID = `env-order-${Date.now()}`;
+    process.env.OPENCHAMBER_DISCOVERY_SECOND = 'second-secret';
+    delete process.env.OPENCHAMBER_DISCOVERY_FIRST;
+    writeStoredProvider(providerID, {
+      package: 'aisdk:@ai-sdk/openai-compatible',
+      env: ['OPENCHAMBER_DISCOVERY_FIRST', 'OPENCHAMBER_DISCOVERY_SECOND'],
+      settings: { baseURL: 'https://stored.test/v1' },
+    });
+    const requests = serveModels();
+    try {
+      const response = await discover({ providerID, baseURL: 'https://stored.test/v1', enrich: false }).expect(200);
+      expect(requests).toEqual(['Bearer second-secret']);
+      expect(JSON.stringify(response.body)).not.toContain('second-secret');
+    } finally {
+      delete process.env.OPENCHAMBER_DISCOVERY_SECOND;
+    }
+  });
+
+  it('falls back to settings.apiKey when the credential store has none', async () => {
+    const providerID = `settings-key-${Date.now()}`;
+    writeStoredProvider(providerID, { settings: { baseURL: 'https://stored.test/v1', apiKey: 'config-secret' } });
+    const requests = serveModels();
+    const response = await discover({ providerID, baseURL: 'https://stored.test/v1', enrich: false }).expect(200);
+    expect(requests).toEqual(['Bearer config-secret']);
+    expect(JSON.stringify(response.body)).not.toContain('config-secret');
+  });
+
+  it('prefers the credential store key and keeps the stored base URL guard', async () => {
+    const providerID = `store-wins-${Date.now()}`;
+    configureOpenCodeCredentials({
+      list: async () => [{ integrationID: providerID, active: true, value: { type: 'key', key: 'store-secret' } }],
+    });
+    writeStoredProvider(providerID, { settings: { baseURL: 'https://stored.test/v1', apiKey: 'config-secret' } });
+    const requests = serveModels();
+    // Before the v2 config read, storedBaseURL was always undefined and the
+    // endpoint guard discarded even the credential-store key.
+    await discover({ providerID, baseURL: 'https://stored.test/v1', enrich: false }).expect(200);
+    expect(requests).toEqual(['Bearer store-secret']);
+
+    // A form base URL that moved away from the stored one receives no key.
+    requests.length = 0;
+    await discover({ providerID, baseURL: 'https://moved.test/v1', enrich: false }).expect(200);
+    expect(requests).toEqual([undefined]);
   });
 });
 

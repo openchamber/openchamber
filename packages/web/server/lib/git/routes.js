@@ -1441,8 +1441,9 @@ export function registerGitRoutes(app, {
           }
         }
       }
-      // A repository always lists at least its primary worktree; an empty
-      // list means "not a repository" and has no topology to track.
+      // An empty list means "not a repository", or a bare repository with no
+      // linked worktree yet; neither has topology to track. A worktree created
+      // from the terminal in such a repository shows up on the next list call.
       if (worktrees.length > 0) {
         void observeWorktreeTopology(directory);
       }

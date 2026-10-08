@@ -71,24 +71,28 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                     <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
                 )}
             </span>
-            <Button
-                type="button"
-                variant="secondary"
-                size="xs"
-                onClick={() => onEdit(message)}
-            >
-                <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
-                {t('chat.queuedMessage.edit')}
-            </Button>
-            <Button
-                type="button"
-                variant="secondary"
-                size="xs"
-                onClick={() => onSend(message)}
-            >
-                <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
-                {t('chat.queuedMessage.send')}
-            </Button>
+            {!message.scheduledTask ? (
+                <>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => onEdit(message)}
+                    >
+                        <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
+                        {t('chat.queuedMessage.edit')}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        size="xs"
+                        onClick={() => onSend(message)}
+                    >
+                        <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
+                        {t('chat.queuedMessage.send')}
+                    </Button>
+                </>
+            ) : null}
             <button
                 type="button"
                 onClick={() => removeFromQueue(target, message.id)}

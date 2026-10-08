@@ -29,6 +29,12 @@ describe('rankByQuery', () => {
     expect(rank(items, 'sonnet5')).toEqual(['claude-sonnet-5']);
   });
 
+  test('punctuation-only tokens match nothing instead of everything', () => {
+    const items = ['alpha', 'beta'];
+    expect(rankByQuery(items, '...', (item) => [item], { fuzzy: false })).toEqual([]);
+    expect(rank(items, '--')).toEqual([]);
+  });
+
   test('single-token queries tolerate typos via fuzzy fallback', () => {
     const items = ['workspace-rail-layout', 'unrelated'];
     expect(rank(items, 'worskpace')).toEqual(['workspace-rail-layout']);
@@ -64,5 +70,10 @@ describe('matchesRankQuery', () => {
   test('is punctuation-insensitive and skips empty fields', () => {
     expect(matchesRankQuery([null, 'claude-sonnet-5', undefined], 'sonnet5')).toBe(true);
     expect(matchesRankQuery([''], 'a')).toBe(false);
+  });
+
+  test('rejects a punctuation-only query instead of matching everything', () => {
+    expect(matchesRankQuery(['alpha'], '...')).toBe(false);
+    expect(matchesRankQuery(['alpha'], '... alpha')).toBe(false);
   });
 });

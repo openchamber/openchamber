@@ -190,7 +190,7 @@ const createEmptyContext = () => ({
 const SHARED_PLAN_ID_PREFIX = 'shared:';
 
 export const createProjectContextRuntime = (deps) => {
-  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir } = deps;
+  const { fsPromises, path, projectsDirPath, createId, resolveSharedPlansDir, onChanged } = deps;
   // The team's shared plans folder for a project (absolute path) or null; the
   // project config runtime owns that answer (`plansDir` in the shared file).
   const sharedPlansDirFor = typeof resolveSharedPlansDir === 'function'
@@ -466,6 +466,7 @@ export const createProjectContextRuntime = (deps) => {
       todos: context.todos,
       plans: context.plans,
     });
+    onChanged?.(sanitizeProjectId(projectId));
   };
 
   const saveTodos = async (projectId, todos) => {
@@ -647,6 +648,7 @@ export const createProjectContextRuntime = (deps) => {
           throw error;
         }
         await fsPromises.writeFile(filePath, raw, 'utf8');
+        onChanged?.(sanitizeProjectId(projectId));
         const parsed = parsePlanMarkdown(raw);
         const context = await readContext(projectId);
         const plan = context.plans.find((entry) => entry.id === id) ?? { id, file: sharedFile, title: parsed.title, createdAt: Date.now(), pinned: false, source: 'shared' };
@@ -766,6 +768,7 @@ export const createProjectContextRuntime = (deps) => {
         const exists = filePath ? await fsPromises.access(filePath).then(() => true, () => false) : false;
         if (!exists) return { deleted: false, context: await readContext(projectId) };
         await fsPromises.rm(filePath, { force: true });
+        onChanged?.(sanitizeProjectId(projectId));
         return { deleted: true, context: await readContext(projectId) };
       });
     }

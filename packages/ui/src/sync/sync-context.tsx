@@ -640,6 +640,7 @@ const handleUiNotificationEvent = (notification: OpenchamberNotification, fallba
     kind,
     sessionId,
     directory: directory || undefined,
+    runtimeKey: getRuntimeKey(),
     requireHidden: notification.kind === "plugin" ? true : notification.requireHidden === true,
   }).catch((error) => {
     console.warn("[notifications] failed to dispatch UI notification", error)

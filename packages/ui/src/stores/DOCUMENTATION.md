@@ -197,7 +197,9 @@ Examples:
 
 These stores coordinate persistent project/session metadata across multiple views.
 
-`useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load that resolves while a write is in flight keeps the local value for that field group only, so a slow snapshot cannot undo newer typing while still delivering the plan list it fetched. A failed load sets `error` and preserves the cached snapshot — an unreachable server must never render as "this project has no notes". Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
+`useProjectContextStore.ts` caches server-owned project notes, todos, and plan links, keyed by the path-derived project id. It replaced a pair of `window` CustomEvents that made every mounted notes panel re-read the whole project config. Writes are optimistic and roll back on failure; they are serialized per project, because the server's own store does a read-modify-write and two concurrent saves would otherwise race it. A load captures per-field mutation revisions and preserves fields changed by a newer write, even when that write finishes before the response arrives. A failed load sets `error` and preserves the cached snapshot. Note and plan creation are deliberately not optimistic, since ids and timestamps are assigned by the server. Notes, todos, and plans are written through separate routes and tracked by separate in-flight flags, so a todo toggle cannot clobber a note edit in the same window. Pinned notes and plans are assembled into a synthetic context part by `lib/projectContextPinning.ts` at send time; that module tracks per-session what it already sent so an unchanged pinned set is not re-sent every turn.
+
+Ordinary loads still reuse a loaded entry. Visible-owner synchronization is owned by `lib/projectContextSync.ts`, as described in the panel's `DOCUMENTATION.md`. Forced loads wait for admitted local writes, so a notification sent before this client's save response cannot lose a peer change behind an in-flight flag. A write still pending when a forced read returns earns another read after it settles, including after rollback. Only a resolved write advances its field revision; a rejected attempt cannot hide authoritative peer data. Concurrent loads share one promise; refresh demand received during a read earns one trailing authoritative read. Runtime reset retires those promises and their generation, so an older success or failure cannot populate or alter a same-id entry on the new host.
 
 `useRoutingStore.ts` projects the server's Jev routing state (whether the Auto
 model may be offered, the config Settings → Routing edits, the last decision
@@ -208,6 +210,10 @@ failed read keeps what was known and records `loadError` instead of reading as
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.
+Scheduled queue items also retain their `scheduledTask` provenance. An inherited
+scheduled item has no pinned send config; ordinary items keep their captured
+provider and model. Both appear in the same queue. Scheduled items allow reorder
+and removal, but not editing or manual send. Bulk take leaves them queued.
 `sync/message-queue-sync.ts` receives queue events through the shared control SSE
 stream at `/api/openchamber/events`, including while OpenCode uses SSE fallback.
 It adds no poller or per-session connection. Either stream reconnecting requests

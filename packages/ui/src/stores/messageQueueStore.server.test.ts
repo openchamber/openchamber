@@ -56,7 +56,8 @@ const deferredResponse = () => {
 const target = createMessageQueueTarget("session-1", "/repo", "runtime-a")!
 const key = getMessageQueueKey(target)
 
-const serverItem = (id: string, content: string, extra: Partial<ServerItem> = {}): ServerItem => ({
+type OrdinaryServerItem = Extract<ServerItem, { sendConfig: { providerID: string; modelID: string } }>;
+const serverItem = (id: string, content: string, extra: Partial<OrdinaryServerItem> = {}): OrdinaryServerItem => ({
   id,
   createdAt: 1,
   content,
@@ -131,6 +132,19 @@ describe("server-owned message queue", () => {
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /api/message-queue"])
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.content)).toEqual(["hello"])
     expect(useMessageQueueStore.getState().sendingIds[key]).toEqual(["q1"])
+  })
+
+  test("hydrate keeps inherited scheduled items beside ordinary items", async () => {
+    const scheduledTask = { projectId: "project-1", taskId: "task-1" }
+    respond = () => json({ revision: 3, sessions: [session([
+      { id: "scheduled-1", createdAt: 1, content: "Continue", text: "Continue", attachments: [], sendConfig: {}, scheduledTask },
+      serverItem("ordinary-1", "Hello"),
+    ])] })
+    await useMessageQueueStore.getState().hydrate()
+    const messages = useMessageQueueStore.getState().queuedMessages[key]
+    expect(messages?.[0]?.scheduledTask).toEqual(scheduledTask)
+    expect(messages?.[0]?.sendConfig).toBeUndefined()
+    expect(messages?.[1]?.sendConfig).toEqual({ providerID: "p", modelID: "m" })
   })
 
   test("hydrate keeps a queue newer than its snapshot", async () => {
@@ -410,6 +424,17 @@ describe("server-owned message queue", () => {
     expect(calls[0]?.method).toBe("POST")
     expect(taken.map((m) => m.content)).toEqual(["second"])
     expect(useMessageQueueStore.getState().queuedMessages[key]?.map((m) => m.id)).toEqual(["q1"])
+  })
+
+  test("bulk take leaves scheduled items in the projection", async () => {
+    const scheduled: ServerItem = {
+      id: "scheduled-1", createdAt: 1, content: "Continue", text: "Continue", attachments: [], sendConfig: {},
+      scheduledTask: { projectId: "project-1", taskId: "task-1" },
+    }
+    respond = () => json({ revision: 8, session: session([scheduled]), items: [serverItem("ordinary-1", "Hello")] })
+    const taken = await useMessageQueueStore.getState().takeForSend(target)
+    expect(taken.map((message) => message.id)).toEqual(["ordinary-1"])
+    expect(useMessageQueueStore.getState().queuedMessages[key]?.[0]?.scheduledTask).toEqual(scheduled.scheduledTask)
   })
 
   test("a failed take re-reads the server so a stale projection is cleared", async () => {

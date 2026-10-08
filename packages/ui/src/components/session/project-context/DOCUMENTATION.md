@@ -8,7 +8,7 @@ drawer.
 
 | File | Owns |
 |---|---|
-| `ProjectNotesTodoPanel.tsx` | container: store subscription, load, failure toast, section sidebar, search query, the todo write |
+| `ProjectNotesTodoPanel.tsx` | container: store subscription, visible-owner observation, failure toast, section sidebar, search query, the todo write |
 | `NotesSection.tsx` | note composer, note list, per-note edit/pin/delete |
 | `TodosSection.tsx` | todo list, add/toggle/delete/clear, drag reorder, list resize |
 | `PlansSection.tsx` | plan list, import, pin, delete, open |
@@ -157,6 +157,10 @@ There is deliberately no cross-panel event. An earlier version broadcast
 window and every mounted panel re-read the whole config in response. Writers now
 mutate the store and readers re-render from it.
 
+Changes from another client reach the panel through `lib/projectContextSync.ts`. It listens on the existing control stream for the panel's owner only and requests an authoritative store refresh. Reopening the panel, returning to the foreground or online, and reconnecting the stream also refresh that owner. Bursts coalesce, with one trailing refresh when a change arrives during a read. Hidden or offline documents admit no new reads.
+
+The desktop context panel and the mobile keep-alive drawer pass `visible` through `ProjectContextPanel`. Passing `visible: false` stops observation without unmounting the panel's local note drafts. A dirty note row still keeps its own body when a fresh server snapshot arrives.
+
 ## Where writes live
 
 Notes, todos, and plans each have their own routes, so each section owns its
@@ -209,6 +213,7 @@ matched the old project would silently hide everything in the new one.
 - **Each note row keeps a local, debounced draft.** Writing on every keystroke
   would put a request behind every character, and re-reading the store each
   render would fight the caret.
+  The body-save callback stays stable across owner refreshes, so peer updates cannot restart the pending autosave timer.
 - **An external note change is adopted only while that row is untouched** since
   its last save. "Add to notes" from a chat selection must reach an open panel,
   but must never overwrite what the user is typing.

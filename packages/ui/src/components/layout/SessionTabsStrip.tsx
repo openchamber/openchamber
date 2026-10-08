@@ -144,7 +144,7 @@ const SessionTabItem: React.FC<{
     <div
       ref={setNodeRef}
       style={{ transform: DndCSS.Translate.toString(transform), transition }}
-      className={cn('session-tab-slot flex h-7 w-44 shrink-0 touch-none', isDragging && 'z-10 opacity-60')}
+      className={cn('app-region-no-drag session-tab-slot flex h-7 w-44 shrink-0 touch-none', isDragging && 'z-10 opacity-60')}
       data-active={isActive ? 'true' : 'false'}
       {...(isActive ? { 'data-active-session-tab': true } : {})}
       {...attributes}
@@ -406,7 +406,7 @@ export const SessionTabsStrip: React.FC<{
   const showDraftPill = !currentSessionId || !tabs.some((tab) => tab.id === currentSessionId);
 
   return (
-    <div className="app-region-no-drag flex h-full min-w-0 flex-1 items-center" role="tablist" aria-label={t('header.sessionTabs.stripAria')}>
+    <div className="flex h-full min-w-0 flex-1 items-center" role="tablist" aria-label={t('header.sessionTabs.stripAria')}>
       <div
         ref={scrollRef}
         onScroll={updateEdges}
@@ -442,7 +442,7 @@ export const SessionTabsStrip: React.FC<{
           <div
             role="tab"
             aria-selected
-            className="session-tab-slot flex h-7 w-44 shrink-0 items-center rounded-md bg-interactive-selection px-2"
+            className="app-region-no-drag session-tab-slot flex h-7 w-44 shrink-0 items-center rounded-md bg-interactive-selection px-2"
             data-active="true"
           >
             <div className="min-w-0 flex-1">{children}</div>

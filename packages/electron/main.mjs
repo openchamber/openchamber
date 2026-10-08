@@ -54,6 +54,7 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
+import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -1141,15 +1142,6 @@ const registerPackagedUiProtocol = () => {
   });
 };
 
-const normalizeNotificationInput = (raw) => {
-  if (!raw || typeof raw !== 'object') return {};
-  // UI IPC path wraps in { payload: {...} }; sidecar stdout path is flat.
-  if (raw.payload && typeof raw.payload === 'object') {
-    return { ...raw, ...raw.payload };
-  }
-  return raw;
-};
-
 const isAnyWindowFocused = () =>
   BrowserWindow.getAllWindows().some(
     (window) => !window.isDestroyed() && window.isFocused(),
@@ -1235,6 +1227,7 @@ const maybeShowNativeNotification = (rawInput) => {
   const directory = typeof payload.directory === 'string' && payload.directory.trim()
     ? payload.directory.trim()
     : null;
+  const runtimeKey = readTrimmedString(payload.runtimeKey) || null;
 
   const notification = new Notification({
     title,
@@ -1249,7 +1242,12 @@ const maybeShowNativeNotification = (rawInput) => {
   notification.on('click', () => {
     focusForegroundWindow();
     if (sessionId) {
-      emitToPrimaryWindow('openchamber:open-session', { sessionId, directory });
+      // Name the runtime that owns the session so the receiving window can
+      // tell a session of its own instance from one of another, and route
+      // cross-instance clicks to the owning instance's window.
+      const openSessionPayload = { sessionId, directory };
+      if (runtimeKey) openSessionPayload.runtimeKey = runtimeKey;
+      emitToPrimaryWindow('openchamber:open-session', openSessionPayload);
     }
     release();
   });
@@ -1385,7 +1383,8 @@ const spawnLocalServer = async () => {
     builtInExtensionsDir: app.isPackaged
       ? path.join(app.getAppPath().endsWith('.asar') ? `${app.getAppPath()}.unpacked` : app.getAppPath(), 'node_modules/@openchamber/web/server/built-in-extensions')
       : undefined,
-    onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
+    // The in-process server's notifications belong to the local instance.
+    onDesktopNotification: (payload) => maybeShowNativeNotification({ ...payload, runtimeKey: 'local' }),
     getIsWindowFocused: isAnyWindowFocused,
     getDesktopRuntimeConfig: () => ({
       apiBaseUrl: state.apiBaseUrl || '',
@@ -4312,9 +4311,15 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return { mime, base64: bytes.toString('base64'), size: bytes.length };
     }
 
-    case 'desktop_notify':
-      maybeShowNativeNotification(args);
+    case 'desktop_notify': {
+      // Stamp the forwarding window's own host identity: the renderer of a
+      // direct host window cannot name its host (it sees only the API URL).
+      const senderHostId = browserWindow && !browserWindow.isDestroyed()
+        ? readTrimmedString(browserWindow.__ocHostWindowId) || null
+        : null;
+      maybeShowNativeNotification(stampForwardedNotification(args, senderHostId));
       return null;
+    }
 
     case 'desktop_tray_update':
       if (state.trayController) {
@@ -4848,6 +4853,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       // Session links open in the main window only.
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return takePendingSessionDeepLinks();
+
+    case 'desktop_open_host_session': {
+      const runtimeKey = readTrimmedString(args.runtimeKey);
+      const sessionId = readTrimmedString(args.sessionId);
+      if (!runtimeKey || !sessionId) throw new Error('runtimeKey and sessionId are required');
+      // The session belongs to another instance than the one the calling
+      // window shows: open it in a window for that instance instead.
+      const host = resolveHostEntryForRuntimeKey(runtimeKey, {
+        hosts: readDesktopHostsConfig()?.hosts || [],
+        localUrl: state.sidecarUrl || null,
+        localClientToken: readDesktopLocalClientToken(),
+      });
+      if (!host) {
+        log.warn('[electron] open-host-session: no host for runtime key', { runtimeKey });
+        return { opened: false };
+      }
+      await openHostWindow(host, parseSessionRoute(sessionId, null), { reuseOpenWindow: true });
+      return { opened: true };
+    }
 
     case 'desktop_focus_main_window': {
       const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : '';

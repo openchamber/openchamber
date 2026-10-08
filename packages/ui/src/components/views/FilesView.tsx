@@ -1348,9 +1348,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return directoryRequests.run(normalizedDir, async (ownsRequest) => {
       const isCurrentRequest = () => ownsRequest() && treeScopeRef.current === scope && getRuntimeKey() === requestRuntime;
       try {
+        const respectGitignore = !showGitignored;
         const entries = files.listDirectory
-          ? (await files.listDirectory(normalizedDir)).entries
-          : await opencodeClient.listLocalDirectory(normalizedDir);
+          ? (await files.listDirectory(normalizedDir, { respectGitignore })).entries
+          : await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore });
         if (!isCurrentRequest()) return;
         const mapped = mapDirectoryEntries(normalizedDir, entries);
         loadedDirsRef.current = new Set(loadedDirsRef.current);
@@ -1383,7 +1384,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         }));
       }
     }, force);
-  }, [directoryRequests, files, mapDirectoryEntries, removeExpandedPathsByPrefix, root, treeActive]);
+  }, [directoryRequests, files, mapDirectoryEntries, removeExpandedPathsByPrefix, root, showGitignored, treeActive]);
 
   const refreshRoot = React.useCallback(async () => {
     if (!root) {

@@ -271,7 +271,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('notes') ? (
           <div className={cn('h-full', tab !== 'notes' && 'hidden')}>
             <ErrorBoundary>
-              <ProjectContextPanel onActionComplete={onClose} onOpenPlan={onOpenPlan} />
+              <ProjectContextPanel visible={open && tab === 'notes'} onActionComplete={onClose} onOpenPlan={onOpenPlan} />
             </ErrorBoundary>
           </div>
         ) : null}

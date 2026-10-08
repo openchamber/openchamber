@@ -28,7 +28,7 @@ const NoteRow: React.FC<{
   pinned: boolean;
   expanded: boolean;
   onToggleExpanded: () => void;
-  onSaveBody: (body: string) => void;
+  onSaveBody: (noteId: string, body: string) => void;
   onTogglePinned: () => void;
   onDelete: () => void;
 }> = ({ note, pinned, expanded, onToggleExpanded, onSaveBody, onTogglePinned, onDelete }) => {
@@ -67,11 +67,11 @@ const NoteRow: React.FC<{
         return;
       }
       lastSavedRef.current = draft;
-      onSaveBody(draft);
+      onSaveBody(note.id, draft);
     }, NOTE_SAVE_DEBOUNCE_MS);
 
     return cancelDebounce;
-  }, [cancelDebounce, draft, onSaveBody]);
+  }, [cancelDebounce, draft, note.id, onSaveBody]);
 
   React.useEffect(() => cancelDebounce, [cancelDebounce]);
 
@@ -86,8 +86,8 @@ const NoteRow: React.FC<{
       return;
     }
     lastSavedRef.current = draft;
-    onSaveBody(draft);
-  }, [cancelDebounce, draft, onSaveBody]);
+    onSaveBody(note.id, draft);
+  }, [cancelDebounce, draft, note.id, onSaveBody]);
 
   const sourceLabel = note.source === 'selection'
     ? t('rightSidebar.contextNotesTodo.notes.source.selection')
@@ -303,7 +303,7 @@ export const NotesSection: React.FC<{
                 pinned={pinnedNoteIds.has(note.id)}
                 expanded={expandedNoteId === note.id}
                 onToggleExpanded={() => setExpandedNoteId((current) => (current === note.id ? null : note.id))}
-                onSaveBody={(body) => handleSaveBody(note.id, body)}
+                onSaveBody={handleSaveBody}
                 onTogglePinned={() => void handleTogglePinned(note.id, !pinnedNoteIds.has(note.id))}
                 onDelete={() => void handleDelete(note.id)}
               />

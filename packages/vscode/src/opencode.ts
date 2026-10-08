@@ -16,6 +16,7 @@ import { isSameOpenCodeServer } from './opencodeServiceUrl';
 import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade.js';
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
 import { readEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
+import { isExecutable, isKnownOpenCodeDesktopAppPath, isMacOpenCodeAppBundlePath, resolveDetectedOpencodeCliPath } from './opencodeCliDiscovery';
 
 const t = vscode.l10n.t;
 
@@ -31,11 +32,6 @@ function getManagerOutputChannel(): vscode.OutputChannel {
   }
   return managerOutputChannel;
 }
-const WINDOWS_EXECUTABLE_EXTENSIONS = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
-  .split(';')
-  .map((ext) => ext.trim().toLowerCase())
-  .filter(Boolean)
-  .map((ext) => (ext.startsWith('.') ? ext : `.${ext}`));
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 type OpenCodeDebugInfo = {
@@ -132,24 +128,6 @@ function resolvePortFromUrl(url: string): number | null {
   }
 }
 
-function isExecutable(filePath: string): boolean {
-  if (!filePath) return false;
-  try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) return false;
-    // Windows executability is extension-based.
-    if (process.platform === 'win32') {
-      const ext = path.extname(filePath).toLowerCase();
-      if (!ext) return true;
-      return ['.exe', '.cmd', '.bat', '.com'].includes(ext);
-    }
-    fs.accessSync(filePath, fs.constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // Windows launch spec: .cmd/.bat shims (and bare names, which resolve to .cmd
 // shims via PATHEXT) must run under cmd.exe. Spawn cmd.exe DIRECTLY with the
 // shim path as its own argv element (shell:false) — `shell: true` builds an
@@ -195,37 +173,6 @@ function appendToPath(dir: string) {
   process.env.PATH = [trimmed, ...parts].join(path.delimiter);
 }
 
-function findExecutableInPath(binaryName: string): string | null {
-  const trimmed = (binaryName || '').trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const current = process.env.PATH || '';
-  if (!current) {
-    return null;
-  }
-
-  const extensions = process.platform === 'win32' ? WINDOWS_EXECUTABLE_EXTENSIONS : [''];
-  for (const segment of current.split(path.delimiter)) {
-    const dir = segment.trim();
-    if (!dir) {
-      continue;
-    }
-
-    for (const ext of extensions) {
-      const candidate = path.join(dir, process.platform === 'win32' ? `${trimmed}${ext}` : trimmed);
-      if (isExecutable(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
-}
-
-let cachedDetectedOpencodeCliPath: string | undefined;
-
 function normalizeConfiguredOpencodeBinary(raw: unknown): string | null {
   if (typeof raw !== 'string') {
     return null;
@@ -243,29 +190,6 @@ function normalizeConfiguredOpencodeBinary(raw: unknown): string | null {
     // Keep the explicit path so strict startup validation can report it.
   }
   return trimmed;
-}
-
-function isMacOpenCodeAppBundlePath(candidate: string): boolean {
-  return process.platform === 'darwin' && /\/OpenCode(?: Dev| Beta)?\.app\/Contents\/MacOS\/(?:OpenCode(?: Dev| Beta)?|opencode-cli)$/i.test(candidate);
-}
-
-function isWindowsOpenCodeDesktopAppPath(candidate: string): boolean {
-  if (process.platform !== 'win32' || typeof candidate !== 'string') {
-    return false;
-  }
-  const localAppData = typeof process.env.LOCALAPPDATA === 'string' && process.env.LOCALAPPDATA.trim()
-    ? path.resolve(process.env.LOCALAPPDATA).toLowerCase()
-    : '';
-  if (!localAppData) {
-    return false;
-  }
-  const normalized = path.resolve(candidate).toLowerCase();
-  return normalized.startsWith(`${localAppData}${path.sep}`)
-    && normalized.endsWith(`${path.sep}programs${path.sep}opencode${path.sep}opencode.exe`);
-}
-
-function isKnownOpenCodeDesktopAppPath(candidate: string): boolean {
-  return isMacOpenCodeAppBundlePath(candidate) || isWindowsOpenCodeDesktopAppPath(candidate);
 }
 
 function createConfiguredOpencodeBinaryError(raw: string, normalized: string): Error {
@@ -412,96 +336,7 @@ function resolveOpencodeCliPath(): string | null {
     }
   }
 
-  if (cachedDetectedOpencodeCliPath) {
-    if (isExecutable(cachedDetectedOpencodeCliPath) && !isKnownOpenCodeDesktopAppPath(cachedDetectedOpencodeCliPath)) {
-      return cachedDetectedOpencodeCliPath;
-    }
-    cachedDetectedOpencodeCliPath = undefined;
-  }
-
-  const home = os.homedir();
-  const unixFallbacks = [
-    path.join(home, '.opencode', 'bin', 'opencode'),
-    path.join(home, '.bun', 'bin', 'opencode'),
-    path.join(home, '.local', 'bin', 'opencode'),
-    '/usr/local/bin/opencode',
-    '/opt/homebrew/bin/opencode',
-    path.join(home, 'bin', 'opencode'),
-  ];
-
-  const winFallbacks = (() => {
-    const userProfile = process.env.USERPROFILE || home;
-    const appData = process.env.APPDATA || path.join(userProfile, 'AppData', 'Roaming');
-    const programData = process.env.ProgramData || 'C:\\ProgramData';
-    const npmDir = path.join(appData, 'npm');
-
-    return [
-      path.join(userProfile, '.opencode', 'bin', 'opencode.exe'),
-      path.join(userProfile, '.opencode', 'bin', 'opencode.cmd'),
-      path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
-      path.join(npmDir, 'opencode.exe'),
-      path.join(npmDir, 'opencode.cmd'),
-      path.join(npmDir, 'opencode.bat'),
-      // System-wide Node installer keeps the global npm prefix here
-      // (npm i -g opencode-ai → opencode.cmd shim).
-      path.join(process.env.ProgramFiles || 'C:\\Program Files', 'nodejs', 'opencode.cmd'),
-      path.join(userProfile, 'scoop', 'shims', 'opencode.exe'),
-      path.join(userProfile, 'scoop', 'shims', 'opencode.cmd'),
-      path.join(programData, 'chocolatey', 'bin', 'opencode.exe'),
-      path.join(programData, 'chocolatey', 'bin', 'opencode.cmd'),
-      // Bun global install
-      path.join(userProfile, '.bun', 'bin', 'opencode.exe'),
-      path.join(userProfile, '.bun', 'bin', 'opencode.cmd'),
-    ].filter(Boolean);
-  })();
-
-  if (process.platform !== 'win32') {
-    const fromPath = findExecutableInPath('opencode');
-    if (fromPath && !isKnownOpenCodeDesktopAppPath(fromPath)) {
-      cachedDetectedOpencodeCliPath = fromPath;
-      return fromPath;
-    }
-  }
-
-  const fallbacks = process.platform === 'win32' ? winFallbacks : unixFallbacks;
-  for (const candidate of fallbacks) {
-    if (isExecutable(candidate) && !isKnownOpenCodeDesktopAppPath(candidate)) {
-      cachedDetectedOpencodeCliPath = candidate;
-      return candidate;
-    }
-  }
-
-  if (process.platform === 'win32') {
-    const fromPath = findExecutableInPath('opencode');
-    if (fromPath && !isKnownOpenCodeDesktopAppPath(fromPath)) {
-      cachedDetectedOpencodeCliPath = fromPath;
-      return fromPath;
-    }
-
-    try {
-      const result = spawnSync('where', ['opencode'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-        timeout: 10_000,
-      });
-      if (result.status === 0) {
-        const lines = (result.stdout || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean);
-        const found = lines.find((line) => isExecutable(line) && !isKnownOpenCodeDesktopAppPath(line));
-        if (found) {
-          cachedDetectedOpencodeCliPath = found;
-          return found;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return null;
+  return resolveDetectedOpencodeCliPath();
 }
 
 type ReadyResult =
@@ -1178,7 +1013,9 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
         const previousVersion = previousBinary
           ? await readOpenCodeCliVersion(resolveWindowsLaunchSpec(previousBinary, []), { env: process.env })
           : null;
-        if (!previousVersion?.startsWith('1.')) throw new Error('OpenCode v1 is not installed.');
+        if (!describeOpenCodeCompatibility(previousVersion, 'managed', true).canInstall) {
+          throw new Error('Automatic OpenCode v2 installation is unavailable for this runtime.');
+        }
         const binary = await installOpenCodeV2();
         if (revision !== lifecycleRevision) throw new Error('OpenCode installation was cancelled.');
         const config = vscode.workspace.getConfiguration('openchamber');

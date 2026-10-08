@@ -3,7 +3,7 @@ import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { fetchOpenCodeGoUsage } from './opencodeGoQuota';
+import { fetchOpenCodeGoUsage, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
 import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
@@ -418,6 +418,23 @@ const toTimestamp = (value: unknown): number | null => {
   return null;
 };
 
+// OpenCode Console signs in through the shared `opencode` integration and
+// records the Console server and selected organization on the credential. Only
+// a Console sign-in counts: its OAuth access token is not interchangeable with
+// an `opencode-go` service key. Credentials are global and OpenCode marks one
+// active per integration, so this is the selected account and organization.
+const CONSOLE_SERVER = 'https://opencode.ai/console';
+const CONSOLE_ORGANIZATION_ID_PATTERN = /^org_[A-Za-z0-9]+$/;
+const openCodeGoConsoleCredential = (auth: AuthFile): OpenCodeGoConsoleCredential | null => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode']));
+  if (!entry || entry.type !== 'oauth') return null;
+  const accessToken = asNonEmptyString(entry.access);
+  const orgID = asNonEmptyString(entry.orgID);
+  if (!accessToken || entry.server !== CONSOLE_SERVER || !orgID || !CONSOLE_ORGANIZATION_ID_PATTERN.test(orgID)) return null;
+  const expires = toNumber(entry.expires);
+  return { accessToken, orgID, expires };
+};
+
 const formatResetTime = (timestamp: number) => {
   try {
     const resetDate = new Date(timestamp);
@@ -779,6 +796,7 @@ export const listConfiguredQuotaProviders = async () => {
   const configured = new Set<string>();
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
+  if (openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
   if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
@@ -1659,6 +1677,41 @@ type KimiQuotaDependencies = {
   fetchImpl?: (url: string, options: RequestInit) => Promise<Response>;
 };
 
+const MOONSHOT_BALANCE_URL = 'https://api.moonshot.ai/v1/users/me/balance';
+
+type MoonshotBalancePayload = {
+  data?: { available_balance?: number };
+};
+
+// Mirrors packages/web/server/lib/quota/providers/kimi.js: a pay-as-you-go Moonshot
+// platform key is refused by the Kimi Code usage address, so its balance is read instead.
+// Returns the credits_balance windows, or null when they cannot be read.
+const fetchMoonshotBalanceWindows = async (
+  apiKey: string,
+  fetchImpl: (url: string, options: RequestInit) => Promise<Response>,
+): Promise<Record<string, UsageWindow> | null> => {
+  try {
+    const response = await fetchImpl(MOONSHOT_BALANCE_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    const balance = (await response.json() as MoonshotBalancePayload)?.data?.available_balance;
+    if (typeof balance !== 'number' || !Number.isFinite(balance)) return null;
+    return {
+      credits_balance: toUsageWindow({
+        usedPercent: null,
+        windowSeconds: null,
+        resetAt: null,
+        valueLabel: `$${formatMoney(balance)}`,
+      }),
+    };
+  } catch {
+    return null;
+  }
+};
+
 export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl = fetch }: KimiQuotaDependencies = {}): Promise<ProviderResult> => {
   const apiKey = getKimiApiKey(await readAuth());
 
@@ -1682,6 +1735,18 @@ export const fetchKimiQuota = async ({ readAuth = readOpenCodeCredentials, fetch
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        const balanceWindows = await fetchMoonshotBalanceWindows(apiKey, fetchImpl);
+        if (balanceWindows) {
+          return buildResult({
+            providerId: 'kimi-for-coding',
+            providerName: 'Kimi for Coding',
+            ok: true,
+            configured: true,
+            usage: { windows: balanceWindows },
+          });
+        }
+      }
       return buildResult({
         providerId: 'kimi-for-coding',
         providerName: 'Kimi for Coding',
@@ -3731,8 +3796,21 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
     case 'opencode-go': {
       try {
         deleteLegacyOpenCodeGoCredential();
-        const entry = normalizeAuthEntry(getAuthEntry(await readOpenCodeCredentials(), ['opencode-go']));
+        const auth = await readOpenCodeCredentials();
+        // A Console sign-in serves OpenCode Go once it exists; the
+        // `opencode-go` service key is the fallback for accounts without one,
+        // and for a Console read that fails (no Go in that org, an endpoint
+        // change, a hiccup).
+        const consoleCredential = openCodeGoConsoleCredential(auth);
+        const entry = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
         const apiKey = typeof entry?.key === 'string' ? entry.key : typeof entry?.token === 'string' ? entry.token : null;
+        if (consoleCredential) {
+          try {
+            return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage(consoleCredential) } });
+          } catch (consoleError) {
+            if (!apiKey) throw consoleError;
+          }
+        }
         if (!apiKey) return buildResult({ providerId, providerName: 'OpenCode Go', ok: false, configured: false, error: 'Not configured' });
         return buildResult({ providerId, providerName: 'OpenCode Go', ok: true, configured: true, usage: { windows: await fetchOpenCodeGoUsage({ apiKey }) } });
       } catch (error) {

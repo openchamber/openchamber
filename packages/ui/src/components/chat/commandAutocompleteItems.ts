@@ -1,4 +1,5 @@
 import { fuzzyMatch } from '@/lib/utils';
+import { rankByQuery } from '@/lib/search/fuzzySearch';
 
 export interface CommandAutocompleteSearchItem {
   name: string;
@@ -64,4 +65,20 @@ export function commandMatchesSearch(command: CommandAutocompleteSearchItem, que
   return fuzzyMatch(command.name, query)
     || Boolean(command.description && fuzzyMatch(command.description, query))
     || Boolean(command.searchAliases?.some((alias) => fuzzyMatch(alias, query)));
+}
+
+export function rankCommandAutocompleteItems<T extends CommandAutocompleteSearchItem>(
+  commands: T[],
+  query: string,
+): T[] {
+  const filtered = query
+    ? commands.filter((command) => commandMatchesSearch(command, query))
+    : [...commands];
+
+  filtered.sort((a, b) => a.name.localeCompare(b.name));
+  if (!query) return filtered;
+
+  const rankedByName = rankByQuery(filtered, query, (command) => [command.name]);
+  const matchedNames = new Set(rankedByName);
+  return [...rankedByName, ...filtered.filter((command) => !matchedNames.has(command))];
 }

@@ -1627,7 +1627,7 @@ export const Header: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div className="app-region-no-drag flex h-full min-w-0 flex-1 items-center gap-0.5 text-left">
+          <div className="flex h-full min-w-0 flex-1 items-center gap-0.5 text-left">
             {!isSidebarOpen ? (
               <SessionSwitcherDropdown align="start">
                 <button

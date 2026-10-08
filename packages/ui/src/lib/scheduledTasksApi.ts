@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
 
-export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error';
+export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 
 export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  targetSessionId?: string;
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */
   loopFile?: string;
@@ -182,7 +183,8 @@ export const runScheduledTaskNow = async (
     const body = await response.json().catch(() => null);
     const busy = BusyResponseSchema.safeParse(body);
     if (busy.success) throw new ScheduledTaskBusyError(busy.data.busy, 'Scheduled task is already running');
-    throw new Error('Failed to run scheduled task');
+    const refusal = z.object({ error: z.string().min(1) }).safeParse(body);
+    throw new Error(refusal.success ? refusal.data.error : 'Failed to run scheduled task');
   }
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to run scheduled task'));

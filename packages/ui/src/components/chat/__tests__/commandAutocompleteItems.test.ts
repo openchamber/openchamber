@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { commandMatchesSearch, mergeCommandAutocompleteItems } from '../commandAutocompleteItems';
+import { commandMatchesSearch, mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from '../commandAutocompleteItems';
 
 interface Item {
   name: string;
@@ -82,5 +82,39 @@ describe('mergeCommandAutocompleteItems', () => {
 
   test('handles empty inputs', () => {
     expect(mergeCommandAutocompleteItems([], [])).toEqual([]);
+  });
+});
+
+describe('rankCommandAutocompleteItems', () => {
+  test('places /apply name matches before fuzzy, description, and alias matches', () => {
+    const commands: Item[] = [
+      { name: 'apple-design', source: 'opencode', description: 'Apply a design' },
+      { name: 'review', source: 'opencode', searchAliases: ['apply changes'] },
+      { name: 'openspec-apply-change', source: 'opencode' },
+      { name: 'opsx-apply', source: 'opencode' },
+      { name: 'apply', source: 'opencode' },
+      { name: 'draft-notes', source: 'opencode', description: 'Apply notes' },
+      { name: 'zebra', source: 'opencode' },
+    ];
+
+    expect(rankCommandAutocompleteItems(commands, 'apply').map((command) => command.name)).toEqual([
+      'apply',
+      'opsx-apply',
+      'openspec-apply-change',
+      'apple-design',
+      'draft-notes',
+      'review',
+    ]);
+  });
+
+  test('keeps alphabetical order when the query is empty', () => {
+    const commands: Item[] = [
+      { name: 'opsx-apply', source: 'opencode' },
+      { name: 'apple-design', source: 'opencode' },
+    ];
+
+    expect(rankCommandAutocompleteItems(commands, '').map((command) => command.name)).toEqual([
+      'apple-design', 'opsx-apply',
+    ]);
   });
 });

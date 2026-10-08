@@ -840,7 +840,7 @@ describe('settings registry gate', () => {
     walkthroughModelOverride: 'anthropic/claude', zenModel: 'zen/model',
     favoriteModels: [{ providerID: 'anthropic', modelID: 'claude' }], hiddenModels: [{ providerID: 'openai', modelID: 'gpt' }], collapsedModelProviders: ['openai'],
     recentModels: [{ providerID: 'anthropic', modelID: 'claude' }], lastSelectedModel: 'anthropic/claude', recentAgents: ['build'], favoriteAgents: ['build'], recentEfforts: { 'anthropic/claude': ['high'] }, providerOrder: ['anthropic'],
-    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkAutoOpen: true, sessionReviewOfferEnabled: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
+    sessionRecapEnabled: true, sessionSuggestionEnabled: true, sessionWorkEnabled: true, sessionWorkAutoOpen: true, sessionReviewOfferEnabled: true, sessionWorkKeepInGroup: true, sessionGoalEnabled: true, sessionGoalChecker: 'small-model', sessionGoalMaxAutoTurns: 50, sessionGoalDefaultBudgetEnabled: true, sessionGoalDefaultBudget: 5,
     summarizeLastMessage: true, summaryThreshold: 100, summaryLength: 50, maxLastMessageLength: 200, showDeletionDialog: true,
     nativeNotificationsEnabled: true, notificationMode: 'always', notifyOnSubtasks: true, notifyOnCompletion: true, notifyOnError: true, notifyOnQuestion: true,
     notificationTemplates: { completion: { title: 't', message: 'm' } }, showOpenCodeUpdateNotifications: true, reportUsage: true,

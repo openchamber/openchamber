@@ -356,6 +356,74 @@ describe('useUIStore context panel tabs', () => {
     expect(terminalTab?.targetDirectory).toBe(null);
   });
 
+  test('a chat tab keeps its own session directory under the host directory', () => {
+    useUIStore.getState().openContextPanelTab('/repo', {
+      mode: 'chat',
+      dedupeKey: 'session:ses_1',
+      targetDirectory: '/other-project/',
+    });
+
+    const chatTab = getContextPanelTabs('/repo').find((tab) => tab.mode === 'chat');
+    expect(chatTab?.targetDirectory).toBe('/other-project');
+    expect(useUIStore.getState().contextPanelByDirectory['/other-project']).toBe(undefined);
+
+    // A chat tab opened without a directory carries none, and a mode that is
+    // neither terminal nor chat never does.
+    useUIStore.getState().openContextPanelTab('/repo', { mode: 'chat', dedupeKey: 'session:ses_2' });
+    useUIStore.getState().openContextPanelTab('/repo', { mode: 'diff', targetDirectory: '/other-project' });
+
+    const tabs = getContextPanelTabs('/repo');
+    expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_2')?.targetDirectory).toBe(null);
+    expect(tabs.find((tab) => tab.mode === 'diff')?.targetDirectory).toBe(null);
+  });
+
+  test('persisted chat tabs keep a normalized session directory through rehydration', async () => {
+    const persistedTab = {
+      targetPath: null,
+      label: null,
+      sessionTitleFallback: null,
+      readOnly: false,
+      stagedDiff: false,
+      diffScope: null,
+      touchedAt: 1,
+    };
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => ({
+        version: 20,
+        state: {
+          contextPanelByDirectory: {
+            '/repo': {
+              isOpen: true,
+              expanded: false,
+              widthByMode: {},
+              touchedAt: 1,
+              activeTabId: 'chat:session:ses_1',
+              tabs: [
+                { ...persistedTab, id: 'chat:session:ses_1', mode: 'chat', dedupeKey: 'session:ses_1', targetDirectory: '/other-project/' },
+                { ...persistedTab, id: 'chat:session:ses_2', mode: 'chat', dedupeKey: 'session:ses_2', targetDirectory: 42 },
+                { ...persistedTab, id: 'diff', mode: 'diff', dedupeKey: 'diff', diffScope: 'working', targetDirectory: '/other-project' },
+              ],
+            },
+          },
+        },
+      }),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    } });
+
+    try {
+      useUIStore.setState(useUIStore.getInitialState(), true);
+      await useUIStore.persist.rehydrate();
+
+      const tabs = getContextPanelTabs('/repo');
+      expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_1')?.targetDirectory).toBe('/other-project');
+      expect(tabs.find((tab) => tab.dedupeKey === 'session:ses_2')?.targetDirectory).toBe(null);
+      expect(tabs.find((tab) => tab.mode === 'diff')?.targetDirectory).toBe(null);
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
+
   test('reopening a terminal tab with null clears a previous target directory', () => {
     useUIStore.getState().openContextPanelTab('/repo-worktree', {
       mode: 'terminal',

@@ -229,6 +229,13 @@ const normalizeContextTargetDirectory = (value: string | null | undefined): stri
   return normalizeContextPanelDirectoryKey(normalizedPath) || null;
 };
 
+// A terminal may run in another directory than the panel it lives in, and a
+// chat tab may show a session from another project (or Chat) next to the
+// main chat; every other mode works in the panel's own directory.
+const contextPanelModeKeepsTargetDirectory = (mode: ContextPanelMode): boolean => {
+  return mode === 'terminal' || mode === 'chat';
+};
+
 const normalizeContextTabLabel = (value: string | null | undefined): string | null => {
   if (typeof value !== 'string') {
     return null;
@@ -297,7 +304,7 @@ const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): stri
 
 const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPanelTab => {
   const normalizedTargetPath = normalizeContextTargetPath(descriptor.targetPath);
-  const normalizedTargetDirectory = descriptor.mode === 'terminal'
+  const normalizedTargetDirectory = contextPanelModeKeepsTargetDirectory(descriptor.mode)
     ? normalizeContextTargetDirectory(descriptor.targetDirectory)
     : null;
   const dedupeKey = normalizeContextPanelTabDedupeKey(
@@ -401,7 +408,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
-    const targetDirectory = candidate.mode === 'terminal'
+    const targetDirectory = contextPanelModeKeepsTargetDirectory(candidate.mode)
       ? normalizeContextTargetDirectory(candidate.targetDirectory)
       : null;
     const projectPlanId = typeof candidate.projectPlanId === 'string' && candidate.projectPlanId.trim()
@@ -880,6 +887,8 @@ interface UIStore {
   sessionWorkAutoOpen: boolean;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
+  /** Keep a session in work listed under its project group and folders too. */
+  sessionWorkKeepInGroup: boolean;
   sessionGoalEnabled: boolean;
   /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
@@ -1134,6 +1143,7 @@ interface UIStore {
   setSessionWorkEnabled: (value: boolean) => void;
   setSessionWorkAutoOpen: (value: boolean) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
+  setSessionWorkKeepInGroup: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
   setSessionGoalMaxAutoTurns: (value: number) => void;
@@ -1346,6 +1356,7 @@ export const useUIStore = create<UIStore>()(
         sessionWorkEnabled: true,
         sessionWorkAutoOpen: true,
         sessionReviewOfferEnabled: false,
+        sessionWorkKeepInGroup: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
@@ -2279,6 +2290,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionReviewOfferEnabled: (value) => {
           set({ sessionReviewOfferEnabled: value });
+        },
+
+        setSessionWorkKeepInGroup: (value) => {
+          set({ sessionWorkKeepInGroup: value });
         },
 
         setSessionGoalEnabled: (value) => {
@@ -3304,6 +3319,7 @@ export const useUIStore = create<UIStore>()(
           sessionWorkEnabled: state.sessionWorkEnabled,
           sessionWorkAutoOpen: state.sessionWorkAutoOpen,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
+          sessionWorkKeepInGroup: state.sessionWorkKeepInGroup,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,

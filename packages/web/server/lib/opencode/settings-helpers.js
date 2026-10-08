@@ -497,6 +497,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
       result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
     }
+    if (typeof candidate.sessionWorkKeepInGroup === 'boolean') {
+      result.sessionWorkKeepInGroup = candidate.sessionWorkKeepInGroup;
+    }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
     }

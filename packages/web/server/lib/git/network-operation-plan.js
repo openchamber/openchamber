@@ -36,13 +36,24 @@ const requiredString = (value, name) => {
   if (result.startsWith('-') || /[\0\r\n]/.test(result)) throw planError(`${name} is invalid`);
   return result;
 };
+// A server-generated digest the client echoes back (configRevision, endpoint
+// fingerprint, transportRevision): an opaque sha256/base64url value, never a CLI
+// argument. Base64url may legitimately start with '-', so the leading-dash
+// injection guard in `requiredString` must not apply; only real control
+// characters are rejected.
+const parseDigest = (value, name) => {
+  if (!isString(value) || !value.trim()) throw planError(`${name} is required`);
+  const result = value.trim();
+  if (/[\0\r\n]/.test(result)) throw planError(`${name} is invalid`);
+  return result;
+};
 const parseSha = (value, name) => {
   const sha = requiredString(value, name);
   if (!SHA_PATTERN.test(sha)) throw planError(`${name} is invalid`);
   return sha.toLowerCase();
 };
 const parseFingerprint = (value, name) => {
-  const fingerprint = requiredString(value, name);
+  const fingerprint = parseDigest(value, name);
   if (!/^[A-Za-z0-9_-]{43}$/.test(fingerprint)) throw planError(`${name} is invalid`);
   return fingerprint;
 };
@@ -57,7 +68,7 @@ const parseRemote = (value) => {
     name: requiredString(value.name, 'remote name'),
     endpoint: {
       displayUrl: requiredString(value.endpoint.displayUrl, 'remote displayUrl'),
-      fingerprint: requiredString(value.endpoint.fingerprint, 'remote fingerprint'),
+      fingerprint: parseDigest(value.endpoint.fingerprint, 'remote fingerprint'),
     },
   };
 };
@@ -373,7 +384,7 @@ export function createNetworkOperationPlanner({
       throw contributorError('DESTINATION_SELECTION_REQUIRED', 'Contributor push destination selection is required');
     }
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
-    const configRevision = requiredString(input.configRevision, 'configRevision');
+    const configRevision = parseDigest(input.configRevision, 'configRevision');
     if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
       throw planError('bindingRevision is required');
     }
@@ -422,7 +433,7 @@ export function createNetworkOperationPlanner({
     const fetchAuthority = await validateGitTransportContext(authorityInput(fetchRemote, 'fetch'));
     const pushAuthority = await validateGitTransportContext(authorityInput(pushRemote, 'push'));
     const validateAuthority = (authority, remote, transportMode) => {
-      const transportRevision = requiredString(authority.transportRevision, 'transportRevision');
+      const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
       assertSafeExistingEndpoint(authority.endpoint);
       if (transportMode === 'anonymous' && (authority.credentialId !== undefined
         || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
@@ -528,7 +539,7 @@ export function createNetworkOperationPlanner({
     const directory = requiredString(input.directory, 'directory');
     const contributor = await readContributor(directory);
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
-    const configRevision = requiredString(input.configRevision, 'configRevision');
+    const configRevision = parseDigest(input.configRevision, 'configRevision');
     const remote = parseRemote(input.remote);
     const sourceNamespaces = ['refs/heads/', 'refs/tags/'];
     const destinationNamespaces = operation === 'fetch'
@@ -577,7 +588,7 @@ export function createNetworkOperationPlanner({
       remote: remote.name,
       endpointKind,
     });
-    const transportRevision = requiredString(authority.transportRevision, 'transportRevision');
+    const transportRevision = parseDigest(authority.transportRevision, 'transportRevision');
     assertSafeExistingEndpoint(authority.endpoint);
     if (transportMode === 'anonymous' && (authority.credentialId !== undefined
       || normalizeGitRemoteEndpoint(authority.endpoint).protocol !== 'https')) {
@@ -780,7 +791,7 @@ export function createNetworkOperationPlanner({
     }
     const directory = requiredString(input.directory, 'directory');
     const repositoryId = requiredString(input.repositoryId, 'repositoryId');
-    const configRevision = requiredString(input.configRevision, 'configRevision');
+    const configRevision = parseDigest(input.configRevision, 'configRevision');
     if (!Number.isSafeInteger(input.bindingRevision) || input.bindingRevision < 0) {
       throw planError('bindingRevision is required');
     }
@@ -828,7 +839,7 @@ export function createNetworkOperationPlanner({
       directory,
       endpointKind: 'fetch',
       transportMode: authority.transportMode,
-      transportRevision: requiredString(authority.transportRevision, 'transportRevision'),
+      transportRevision: parseDigest(authority.transportRevision, 'transportRevision'),
       expectedHeadSha,
       plannedRequirements: requirements,
       plannedTransfers,
@@ -886,7 +897,7 @@ export function createNetworkOperationPlanner({
       directory,
       repositoryId: requiredString(input.repositoryId, 'repositoryId'),
       bindingRevision: input.bindingRevision,
-      configRevision: requiredString(input.configRevision, 'configRevision'),
+      configRevision: parseDigest(input.configRevision, 'configRevision'),
       remote: remote.name,
       endpointKind: 'push',
     });

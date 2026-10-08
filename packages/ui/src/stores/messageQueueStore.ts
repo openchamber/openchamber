@@ -108,6 +108,7 @@ export interface QueuedMessage {
     createdAt: number;
     /** Send config captured at queue time — used as-is when auto-sending */
     sendConfig?: QueuedMessageSendConfig;
+    scheduledTask?: z.infer<typeof scheduledTaskSchema>;
 }
 
 interface QueuedMessageInput {
@@ -180,7 +181,7 @@ const serverContextPartSchema = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('synthetic'), text: z.string() }),
 ]);
 
-const serverItemSchema = z.object({
+const serverItemBaseSchema = z.object({
     id: z.string().min(1),
     createdAt: z.number(),
     content: z.string(),
@@ -192,6 +193,14 @@ const serverItemSchema = z.object({
     contextPreview: z.string().optional(),
     sendConfig: serverSendConfigSchema,
 });
+
+const scheduledTaskSchema = z.object({
+    projectId: z.string().min(1), taskId: z.string().min(1),
+});
+const serverItemSchema = z.union([
+    serverItemBaseSchema.extend({ scheduledTask: scheduledTaskSchema, sendConfig: serverSendConfigSchema.partial() }),
+    serverItemBaseSchema,
+]);
 
 const serverSessionSchema = z.object({
     sessionId: z.string().min(1),
@@ -262,8 +271,10 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
         content: item.content,
         text: item.text,
         createdAt: item.createdAt,
-        sendConfig: { ...item.sendConfig },
     };
+    const selection = serverSendConfigSchema.safeParse(item.sendConfig);
+    if (selection.success) message.sendConfig = selection.data;
+    if ('scheduledTask' in item) message.scheduledTask = item.scheduledTask;
     if (item.agentMention) message.agentMention = item.agentMention;
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;

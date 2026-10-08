@@ -29,7 +29,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, openHostSession, takePendingDesktopSessionLinks } from '@/lib/desktop';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -496,12 +496,19 @@ function App({ apis }: AppProps) {
     if (typeof window === 'undefined') return;
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string }>).detail;
+      const detail = (event as CustomEvent<{ sessionId?: string; directory?: string; messageId?: string; runtimeKey?: string }>).detail;
       const sessionId = typeof detail?.sessionId === 'string' ? detail.sessionId.trim() : '';
       if (!sessionId) return;
       const directory = typeof detail?.directory === 'string' && detail.directory.trim().length > 0
         ? detail.directory.trim()
         : null;
+      // A notification click names the runtime that owns the session. When
+      // this window is on another instance, the desktop shell opens the
+      // session in a window for the owning one.
+      const runtimeKey = String(detail?.runtimeKey ?? '').trim();
+      if (runtimeKey && runtimeKey !== getRuntimeKey() && openHostSession(runtimeKey, sessionId)) {
+        return;
+      }
       // A link (a desktop deep link, a link to this window's instance) carries
       // no directory; the route opener resolves it from the global session
       // list, as for a web link.

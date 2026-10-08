@@ -449,7 +449,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // Sessions in work: top-level, unarchived project sessions (Chats are plain
   // conversations and never in work), in the shared lifecycle order.
   // They leave every other projection, so the row model gets the id set too.
+  // `sessionWorkKeepInGroup` keeps them under their project group and folders.
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const sessionWorkKeepInGroup = useUIStore((state) => state.sessionWorkKeepInGroup);
   const workSessions = React.useMemo(() => {
     if (!sessionWorkEnabled) return EMPTY_WORK_SESSIONS;
     const sessions = collection.orderedSessions.filter((session) => !session.parentID && !session.time?.archived && !isChatDirectoryPath(session.directory) && isSessionInWork(session));
@@ -876,6 +878,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     timelineItems,
     workItems,
     workSessionIds,
+    keepWorkInGroup: sessionWorkKeepInGroup,
     showRecentSection: showRecentSection && !singleProjectMode && !timelineMode,
     foldersMap,
     groupSearchDataByGroup,
@@ -897,7 +900,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     hideDirectoryControls: view.hideDirectoryControls,
     sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     runIndex,
-  }), [runIndex, chatGroup, showChatsSection, collapsedActivityKeys, timelineItems, timelineMode, workItems, workSessionIds, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, recentActivitySections, selectedSingleProjectId, sessionOrderIndex, showRecentSection, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [runIndex, chatGroup, showChatsSection, collapsedActivityKeys, timelineItems, timelineMode, workItems, workSessionIds, sessionWorkKeepInGroup, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, recentActivitySections, selectedSingleProjectId, sessionOrderIndex, showRecentSection, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);

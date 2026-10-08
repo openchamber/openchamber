@@ -177,10 +177,12 @@ Sessions in work (`metadata.openchamber.work.state === 'open'`, see
 `work` activity zone under Chats and above Recent / the timeline, in both view
 modes, while `sessionWorkEnabled` is on. `list/SessionProjectCollection.tsx`
 selects them from the ordered collection (top-level, unarchived, not managed
-Chats, shared lifecycle order) and
-passes `workItems` plus `workSessionIds` to the row model. A session in work
-MOVES: the row model drops it from Recent, the Timeline list, project groups,
-and folders, so it appears once. Chats are never in work and offer no Track
+Chats, shared lifecycle order) and passes `workItems`, `workSessionIds`, and
+`keepWorkInGroup` (from `sessionWorkKeepInGroup`) to the row model. A session
+in work MOVES: the row model drops it from Recent, the Timeline list, and
+Chats, so it appears once there. By default it also leaves its project group
+and folders; with `keepWorkInGroup` on it stays in its project group and
+folders as well, so it appears in two places. Chats are never in work and offer no Track
 action. An empty zone is not rendered. Rows use
 `renderContext: 'timeline'` in the timeline view and `recent` (project and
 branch shown) in the projects view. Search in the projects view keeps a tree

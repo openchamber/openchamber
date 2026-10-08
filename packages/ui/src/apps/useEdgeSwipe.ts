@@ -10,8 +10,11 @@ import React from 'react';
  *
  * Touch listeners are passive to preserve native scrolling and text selection.
  * A selection cancels the pending swipe, even if it clears before touchend.
- * A swipe that starts on content still able to scroll the way the finger
- * moves (a wide table, a code block) belongs to that content, not the drawer.
+ * A swipe that starts on content still able to scroll the way the finger moves
+ * (a wide table, a code block) belongs to that content, not the drawer. Once
+ * that content sits at the end of that direction the drawer can still be
+ * reached, but only by a long, clearly horizontal swipe, so a scroll that has
+ * simply run out of room is not mistaken for intent.
  */
 
 const EDGE_ZONE = 32; // px from a side where the swipe must begin
@@ -21,6 +24,11 @@ const EDGE_ZONE = 32; // px from a side where the swipe must begin
 const ANDROID_EDGE_ZONE = 80;
 const MIN_DISTANCE = 64; // px of horizontal travel required to commit
 const MAX_OFF_AXIS_RATIO = 0.7; // |dy| must stay below |dx| * this (keep it horizontal)
+// A gesture that starts on content already at the end of a direction may still
+// reach the drawer, but only as a deliberate swipe: longer and flatter than an
+// ordinary one, so a scroll that ran out of room is not read as intent.
+const STRICT_MIN_DISTANCE = 140;
+const STRICT_MAX_OFF_AXIS_RATIO = 0.4;
 
 interface EdgeSwipeOptions {
   /** Swipe that started at the left edge and travelled right. */
@@ -32,13 +40,18 @@ interface EdgeSwipeOptions {
   enabled?: boolean;
 }
 
-// Whether anything between `target` and `container` can still scroll
-// horizontally toward the content the finger would pull into view: a swipe
-// from the left edge reveals content on the left, one from the right edge
-// content on the right. RTL scrollers run scrollLeft from -range up to 0.
-const canScrollAlongSwipe = (target: EventTarget | null, container: HTMLElement, fromLeftEdge: boolean): boolean => {
+// Who owns a horizontal gesture that started here: the content under the finger
+// while it can still scroll that way ('content'), the same content once it sits
+// at the end of that direction ('content-end'), or the drawer when there is no
+// horizontally scrollable content at all ('drawer'). A swipe from the left edge
+// reveals content on the left, one from the right edge content on the right.
+// RTL scrollers run scrollLeft from -range up to 0.
+type GestureOwner = 'drawer' | 'content' | 'content-end';
+
+const resolveGestureOwner = (target: EventTarget | null, container: HTMLElement, fromLeftEdge: boolean): GestureOwner => {
   const view = container.ownerDocument.defaultView;
-  if (!view) return false;
+  if (!view) return 'drawer';
+  let contentEnd = false;
   for (let node = target instanceof view.Element ? target : null; node && node !== container; node = node.parentElement) {
     const range = node.scrollWidth - node.clientWidth;
     if (range <= 1) continue;
@@ -46,9 +59,10 @@ const canScrollAlongSwipe = (target: EventTarget | null, container: HTMLElement,
     if (style.overflowX !== 'auto' && style.overflowX !== 'scroll') continue;
     const min = style.direction === 'rtl' ? -range : 0;
     const max = min + range;
-    if (fromLeftEdge ? node.scrollLeft > min + 1 : node.scrollLeft < max - 1) return true;
+    if (fromLeftEdge ? node.scrollLeft > min + 1 : node.scrollLeft < max - 1) return 'content';
+    contentEnd = true;
   }
-  return false;
+  return contentEnd ? 'content-end' : 'drawer';
 };
 
 export const useEdgeSwipe = (
@@ -72,6 +86,7 @@ export const useEdgeSwipe = (
 
     let tracking = false;
     let fromLeftEdge = false;
+    let owner: GestureOwner = 'drawer';
     let startX = 0;
     let startY = 0;
 
@@ -93,7 +108,8 @@ export const useEdgeSwipe = (
       const nearLeft = touch.clientX <= edgeZone;
       const nearRight = touch.clientX >= width - edgeZone;
       fromLeftEdge = nearLeft;
-      tracking = (nearLeft || nearRight) && !canScrollAlongSwipe(event.target, element, fromLeftEdge);
+      owner = (nearLeft || nearRight) ? resolveGestureOwner(event.target, element, fromLeftEdge) : 'drawer';
+      tracking = (nearLeft || nearRight) && owner !== 'content';
       startX = touch.clientX;
       startY = touch.clientY;
     };
@@ -107,8 +123,12 @@ export const useEdgeSwipe = (
 
       const dx = touch.clientX - startX;
       const dy = touch.clientY - startY;
-      if (Math.abs(dx) < MIN_DISTANCE) return;
-      if (Math.abs(dy) > Math.abs(dx) * MAX_OFF_AXIS_RATIO) return;
+      // Content sitting at its end hands the gesture to the drawer only for a
+      // long, clearly horizontal swipe.
+      const minDistance = owner === 'content-end' ? STRICT_MIN_DISTANCE : MIN_DISTANCE;
+      const maxOffAxisRatio = owner === 'content-end' ? STRICT_MAX_OFF_AXIS_RATIO : MAX_OFF_AXIS_RATIO;
+      if (Math.abs(dx) < minDistance) return;
+      if (Math.abs(dy) > Math.abs(dx) * maxOffAxisRatio) return;
       // Must travel toward the centre: left edge → rightward, right edge → leftward.
       if (fromLeftEdge && dx <= 0) return;
       if (!fromLeftEdge && dx >= 0) return;

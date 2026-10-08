@@ -121,6 +121,9 @@ const buildRankFields = (texts: ReadonlyArray<string | null | undefined>): RankF
  * callers should order `getTexts` by importance (name before path/description).
  */
 const scoreRankToken = (token: string, { fields, compact }: RankFields): number => {
+  // A token with no alphanumerics compacts to '', and every field contains ''.
+  // Without this guard a "..." query would score a hit on every item.
+  const compactToken = compactText(token);
   let best = RANK_TOKEN_MISS;
   for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
     const field = fields[fieldIndex];
@@ -132,8 +135,8 @@ const scoreRankToken = (token: string, { fields, compact }: RankFields): number 
     } else if (idx > 0) {
       const boundary = !/[a-z0-9]/.test(field[idx - 1]);
       score = (boundary ? 0.1 : 0.2) + idx / 1000 + fieldPenalty;
-    } else {
-      const compactIdx = compact[fieldIndex].indexOf(compactText(token));
+    } else if (compactToken.length > 0) {
+      const compactIdx = compact[fieldIndex].indexOf(compactToken);
       if (compactIdx >= 0 && token.length > 1) {
         score = 0.4 + compactIdx / 1000 + fieldPenalty;
       }
