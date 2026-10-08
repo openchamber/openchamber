@@ -86,6 +86,7 @@ IPC results if its endpoint changes while the read is pending.
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
+| `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |

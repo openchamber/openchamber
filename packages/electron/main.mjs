@@ -17,6 +17,7 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { clearAppCache } from './app-cache.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -4343,10 +4344,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
 
     case 'desktop_clear_cache':
-      await session.defaultSession.clearStorageData();
-      for (const browserWindow of BrowserWindow.getAllWindows()) {
-        browserWindow.webContents.reload();
-      }
+      await clearAppCache({ session: session.defaultSession, windows: BrowserWindow.getAllWindows() });
       return null;
 
     case 'desktop_open_path': {
