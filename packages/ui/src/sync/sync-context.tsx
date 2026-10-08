@@ -110,6 +110,7 @@ import {
   type SessionMaterializationRequest,
 } from "./materialization"
 import { openSessionFromToast } from "./session-navigation"
+import { revealRequest } from "./request-reveal"
 import { getPermissionToastKey, showPermissionNeededToast } from "./permission-toast"
 import { getRuntimeLiveStatusSeed, LIVE_STATUS_TTL_MS } from "./runtime-live-memory"
 import { getRuntimeKey } from "@/lib/runtime-switch"
@@ -556,11 +557,17 @@ const getFormToastKey = (sessionID?: string, requestID?: string) => {
 /** A pending form has no question text on the wire — only the form's title. */
 const FORM_TOAST_DESCRIPTION = "Agent is waiting for your input"
 
+/** "Open session" on a question or permission toast also brings that request into view. */
+const openRequestFromToast = (sessionID: string, directory: string, requestID: string) => {
+  openSessionFromToast(sessionID, directory)
+  revealRequest(requestID)
+}
+
 /** A location-scoped form names no session to open; the toast then only announces it. */
-const formToastAction = (sessionID: string, directory: string) => (
+const formToastAction = (sessionID: string, directory: string, formID: string) => (
   sessionID === LOCATION_SCOPED_FORM_SESSION_ID
     ? undefined
-    : { label: "Open session", onClick: () => openSessionFromToast(sessionID, directory) }
+    : { label: "Open session", onClick: () => openRequestFromToast(sessionID, directory, formID) }
 )
 
 /** Blank server strings mean "absent" here, not "empty title". */
@@ -1366,7 +1373,7 @@ export async function resyncBlockingRequestsForDirectory(
         toast.info(form.title, {
           id: `form-${toastKey}`,
           description: FORM_TOAST_DESCRIPTION,
-          action: formToastAction(sessionId, directory),
+          action: formToastAction(sessionId, directory, form.id),
         })
       }
     }
@@ -1441,7 +1448,7 @@ export async function resyncBlockingRequestsForDirectory(
           isViewed,
           pendingIds: pendingPermissionToastIds,
           show: (title, options) => toast.info(title, options),
-          openSession: openSessionFromToast,
+          openSession: openRequestFromToast,
         })
       }
     }
@@ -1673,7 +1680,7 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
     isViewed: isViewedInCurrentSession(directory, permission.sessionID),
     pendingIds: pendingPermissionToastIds,
     show: (title, options) => toast.info(title, options),
-    openSession: openSessionFromToast,
+    openSession: openRequestFromToast,
   })
 }
 
@@ -1751,7 +1758,7 @@ const notifyFormCreated = (form: FormRequest, directory: string): void => {
   toast.info(form.title, {
     id: `form-${toastKey}`,
     description: FORM_TOAST_DESCRIPTION,
-    action: formToastAction(sessionID, directory),
+    action: formToastAction(sessionID, directory, form.id),
   })
 }
 

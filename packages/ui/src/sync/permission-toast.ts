@@ -10,7 +10,7 @@ type PermissionToastOptions = {
     description: string;
     action: { label: string; onClick: () => void };
   }) => void;
-  openSession: (sessionId: string, directory: string) => void;
+  openSession: (sessionId: string, directory: string, requestId: string) => void;
 };
 
 export const getPermissionToastKey = (sessionId?: string, requestId?: string) => {
@@ -38,7 +38,7 @@ export const showPermissionNeededToast = ({
     description,
     action: {
       label: 'Open session',
-      onClick: () => openSession(permission.sessionID, directory),
+      onClick: () => openSession(permission.sessionID, directory, permission.id),
     },
   });
   return true;
