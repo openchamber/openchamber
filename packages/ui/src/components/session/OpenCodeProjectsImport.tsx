@@ -233,7 +233,13 @@ export const OpenCodeProjectsImport = ({ mobile = false }: Props) => {
           <TooltipContent side="bottom" sideOffset={4}><p>{label}</p></TooltipContent>
         </Tooltip>
       )}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen, details) => {
+          if (nextOpen || details.reason === 'close-press' || details.reason === 'escape-key') setOpen(nextOpen);
+        }}
+        disablePointerDismissal
+      >
         <DialogContent className="max-w-xl">
           <DialogHeader className="text-left">
             <DialogTitle>{t('sessions.sidebar.projectImport.title')}</DialogTitle>

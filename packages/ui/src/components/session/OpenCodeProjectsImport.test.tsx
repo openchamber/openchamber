@@ -17,6 +17,7 @@ for (const [key, value] of Object.entries({
   document: browser.document,
   navigator: browser.navigator,
   localStorage: browser.localStorage,
+  KeyboardEvent: browser.KeyboardEvent,
   Element: browser.Element,
   HTMLElement: browser.HTMLElement,
   Node: browser.Node,
@@ -76,7 +77,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-test('does not reopen the automatic prompt when project changes recheck candidates', async () => {
+test('ignores outside clicks, closes on Escape, and does not reopen after project changes', async () => {
   const apis = createWebAPIs();
   apis.openCodeProjectImportPrompt = {
     claim: async () => {
@@ -98,6 +99,21 @@ test('does not reopen the automatic prompt when project changes recheck candidat
   await act(async () => new Promise((resolve) => setTimeout(resolve, 2100)));
   expect(document.querySelector('[data-slot="dialog-content"]')?.textContent).toContain('Import projects from OpenCode');
   expect(claimCount).toBe(1);
+
+  const backdrop = document.querySelector<HTMLElement>('[data-slot="dialog-overlay"]');
+  if (!backdrop) throw new Error('Prompt backdrop was not rendered');
+  await act(async () => backdrop.click());
+  expect(document.querySelector('[data-slot="dialog-content"]')).not.toBeNull();
+
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull();
+
+  const importButton = document.querySelector<HTMLButtonElement>('button[aria-label="Import projects from OpenCode"]');
+  if (!importButton) throw new Error('Manual project import button was not rendered');
+  await act(async () => importButton.click());
+  expect(document.querySelector('[data-slot="dialog-content"]')).not.toBeNull();
 
   const cancelButton = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Cancel');
   if (!cancelButton) throw new Error('Prompt cancel button was not rendered');
