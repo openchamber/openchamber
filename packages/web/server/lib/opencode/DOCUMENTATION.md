@@ -138,7 +138,10 @@ exists in OpenCode's store.
 - `readOpenCodeCredentials()`: each integration's active credential, keyed by
   integration id (the provider id for providers), in the legacy `auth.json`
   entry shape (`{ type: 'api', key }` /
-  `{ type: 'oauth', access, refresh, expires, accountId?, enterpriseUrl? }`).
+  `{ type: 'oauth', access, refresh, expires, accountId?, enterpriseUrl?, server?, orgID? }`).
+  The OAuth projection keeps only `server` and `orgID` from OpenCode Console
+  credential metadata, so quota providers can identify a Console sign-in
+  without carrying account names or emails.
 - `getProviderAuth(providerId)`: that map's entry for one provider, or null.
 - `projectCredentialEntries(entries)`: the wire-to-legacy projection.
 - `projectEnvironmentKeys(integrations, environment)`: variable values for the env connections OpenCode reports, by integration id.

@@ -2,7 +2,7 @@ import type { CredentialEntry, IntegrationInfo, JsonValue } from '@opencode/clie
 
 export type LegacyAuthEntry =
   | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
-  | { type: 'oauth'; access: string; refresh: string; expires: number; accountId?: string; enterpriseUrl?: string };
+  | { type: 'oauth'; access: string; refresh: string; expires: number; accountId?: string; enterpriseUrl?: string; server?: string; orgID?: string };
 export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 
 /** Where credentials come from: the running OpenCode in production, a fixture in tests. */
