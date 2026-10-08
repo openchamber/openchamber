@@ -1176,6 +1176,7 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.authorizationRequired': 'OpenChamber がリポジトリかそのサブモジュールに届きません。「リポジトリを設定」でアクセスを設定してから再試行してください。',
   'worktree.bootstrap.toast.lfsClientMissing': 'サーバーに Git LFS をインストールしてから、ワークツリーのセットアップを再試行してください。',
   'worktree.bootstrap.toast.invalidConfiguration': 'リポジトリのサブモジュールと Git LFS の設定を確認してから、再試行してください。',
+  'worktree.bootstrap.toast.repositoryTooManyFiles': 'リポジトリのファイルが多すぎます。',
   'worktree.bootstrap.toast.cancelled': 'ワークツリーのセットアップはキャンセルされました。準備ができたら再試行してください。',
   'worktree.bootstrap.toast.transportFailed': 'リポジトリへのアクセスとネットワーク接続を確認してから、再試行してください。',
   'worktree.bootstrap.toast.timeoutDescription': 'ワークツリーは作成されましたが、バックグラウンドセットアップがタイムアウトしました。',

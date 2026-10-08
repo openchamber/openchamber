@@ -361,6 +361,7 @@ const operationErrorCodeSchema = z.enum([
     'OUTCOME_UNKNOWN',
     'RUNTIME_UNSUPPORTED',
     'GIT_LFS_CLIENT_MISSING',
+    'CHECKOUT_TOO_LARGE',
     'UNKNOWN',
   ]);
 const operationErrorSchema = <const Code extends readonly [string, ...string[]]>(codes: Code) => z.object({
@@ -444,7 +445,7 @@ export const gitNetworkOperationSchema = z.discriminatedUnion('state', [
     state: z.literal('partial'),
     error: operationErrorSchema([
       'INVALID_REQUEST', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
-      'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'UNKNOWN',
+      'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'CHECKOUT_TOO_LARGE', 'UNKNOWN',
     ]),
   }).strict(),
   z.object({
@@ -457,6 +458,7 @@ export const gitNetworkOperationSchema = z.discriminatedUnion('state', [
       'TRANSPORT_FAILED',
       'RUNTIME_UNSUPPORTED',
       'GIT_LFS_CLIENT_MISSING',
+      'CHECKOUT_TOO_LARGE',
       'UNKNOWN',
     ]),
   }).strict(),

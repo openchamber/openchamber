@@ -796,6 +796,12 @@ export function createNetworkOperations({
     if (error?.code === 'GIT_AUXILIARY_AUTHORIZATION_REQUIRED') {
       return { status: 'authorization-required', error: publicError('AUTHENTICATION_REQUIRED', 'This checkout endpoint requires an explicit credential grant') };
     }
+    // An LFS discovery bound trips on the number of tracked files. It gets its
+    // own code so the message names that; the configuration message sent
+    // people to fix settings that were fine.
+    if (error?.code === 'LFS_DISCOVERY_LIMIT_EXCEEDED') {
+      return { status: 'invalid', error: publicError('CHECKOUT_TOO_LARGE', 'Checkout has too many files to inspect') };
+    }
     if (String(error?.code || '').includes('INVALID') || String(error?.code || '').includes('LIMIT_EXCEEDED')
       || error?.code === 'UNSAFE_LFS_EXECUTABLE_CONFIG') {
       return { status: 'invalid', error: publicError('INVALID_REQUEST', 'Checkout hydration configuration is invalid') };
@@ -1979,8 +1985,9 @@ export function createNetworkOperations({
               await controls.markStepCompleted('updated-local-repository');
               if (['succeeded', 'not-needed'].includes(hydration.status)) result = { state: 'succeeded', hydration };
               else {
-                const unsupported = [...hydration.submodules, ...hydration.lfs].find((entry) => entry.error?.code === 'RUNTIME_UNSUPPORTED');
-                const failure = unsupported?.error ?? (hydration.status === 'client-missing'
+                const specific = [...hydration.submodules, ...hydration.lfs]
+                  .find((entry) => ['RUNTIME_UNSUPPORTED', 'CHECKOUT_TOO_LARGE'].includes(entry.error?.code));
+                const failure = specific?.error ?? (hydration.status === 'client-missing'
                   ? publicError('GIT_LFS_CLIENT_MISSING', 'Git LFS is required for this checkout; install git-lfs and retry')
                   : hydration.status === 'authorization-required'
                     ? publicError('AUTHENTICATION_REQUIRED', 'Checkout hydration requires an explicit endpoint grant')
@@ -2099,7 +2106,8 @@ export function createNetworkOperations({
       return { state: 'failed', error: publicError('AUTHENTICATION_REQUIRED', 'Checkout hydration requires an explicit endpoint grant'), hydration };
     }
     if (hydration.status === 'invalid') {
-      return { state: 'failed', error: publicError('INVALID_REQUEST', 'Checkout hydration configuration is invalid'), hydration };
+      const tooLarge = [...hydration.submodules, ...hydration.lfs].find((entry) => entry.error?.code === 'CHECKOUT_TOO_LARGE');
+      return { state: 'failed', error: tooLarge?.error ?? publicError('INVALID_REQUEST', 'Checkout hydration configuration is invalid'), hydration };
     }
     const unsupported = [...hydration.submodules, ...hydration.lfs].find((entry) => entry.error?.code === 'RUNTIME_UNSUPPORTED');
     return { state: 'failed', error: unsupported?.error ?? publicError('TRANSPORT_FAILED', 'Checkout hydration failed'), hydration };

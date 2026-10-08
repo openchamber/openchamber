@@ -215,12 +215,15 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
     expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description: 'setup failed' }]);
   });
 
-  test('background watcher uses actionable copy for a structured hydration failure', async () => {
+  for (const [code, status, description] of [
+    ['GIT_LFS_CLIENT_MISSING', 'client-missing', 'worktree.bootstrap.toast.lfsClientMissing'],
+    ['CHECKOUT_TOO_LARGE', 'invalid', 'worktree.bootstrap.toast.repositoryTooManyFiles'],
+  ] as const) test(`background watcher uses actionable copy for a structured ${code} hydration failure`, async () => {
     bootstrapStatusResult = {
-      status: 'failed', error: 'generic server text', errorCode: 'GIT_LFS_CLIENT_MISSING', updatedAt: 2,
+      status: 'failed', error: 'generic server text', errorCode: code, updatedAt: 2,
       hydration: {
-        status: 'client-missing', submodules: [],
-        lfs: [{ path: '.', status: 'client-missing', error: { code: 'GIT_LFS_CLIENT_MISSING', message: 'generic server text' } }],
+        status, submodules: [],
+        lfs: [{ path: '.', status, error: { code, message: 'generic server text' } }],
       },
     };
     markWorktreeBootstrapPending('/repo-wt');
@@ -229,10 +232,7 @@ describe('worktreeBootstrap.waitForWorktreeBootstrap', () => {
 
     await waitFor(() => toastErrors.length === 1);
     expect(getWorktreeBootstrapState('/repo-wt')).toEqual(bootstrapStatusResult);
-    expect(toastErrors).toEqual([{
-      title: 'worktree.bootstrap.toast.failed',
-      description: 'worktree.bootstrap.toast.lfsClientMissing',
-    }]);
+    expect(toastErrors).toEqual([{ title: 'worktree.bootstrap.toast.failed', description }]);
   });
 
   test('background watcher marks failed and toasts when bootstrap times out', async () => {

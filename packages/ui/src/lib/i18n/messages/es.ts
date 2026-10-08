@@ -1171,6 +1171,7 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.authorizationRequired': 'OpenChamber no llega al repositorio o a sus submódulos. Configura el acceso en Configurar repositorio y vuelve a intentarlo.',
   "worktree.bootstrap.toast.lfsClientMissing": "Instala Git LFS en el servidor y vuelve a configurar el worktree.",
   "worktree.bootstrap.toast.invalidConfiguration": "Revisa la configuración de submódulos y Git LFS del repositorio, y vuelve a intentarlo.",
+  "worktree.bootstrap.toast.repositoryTooManyFiles": "El repositorio tiene demasiados archivos.",
   "worktree.bootstrap.toast.cancelled": "La configuración del worktree se canceló. Vuelve a intentarlo cuando quieras.",
   "worktree.bootstrap.toast.transportFailed": "Comprueba el acceso al repositorio y la conexión de red, y vuelve a intentarlo.",
   "worktree.bootstrap.toast.timeoutDescription": "El worktree se creó, pero la configuración en segundo plano agotó el tiempo de espera.",

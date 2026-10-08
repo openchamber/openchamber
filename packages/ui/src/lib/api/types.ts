@@ -663,6 +663,7 @@ export type GitNetworkOperationErrorCode =
   | 'OUTCOME_UNKNOWN'
   | 'RUNTIME_UNSUPPORTED'
   | 'GIT_LFS_CLIENT_MISSING'
+  | 'CHECKOUT_TOO_LARGE'
   | 'UNKNOWN';
 
 export interface GitNetworkOperationError<Code extends GitNetworkOperationErrorCode = GitNetworkOperationErrorCode> {
@@ -736,6 +737,7 @@ export type GitNetworkOperation =
         | 'TRANSPORT_FAILED'
         | 'RUNTIME_UNSUPPORTED'
         | 'GIT_LFS_CLIENT_MISSING'
+        | 'CHECKOUT_TOO_LARGE'
         | 'UNKNOWN'
       >;
     })
@@ -748,6 +750,7 @@ export type GitNetworkOperation =
         | 'TRANSPORT_FAILED'
         | 'RUNTIME_UNSUPPORTED'
         | 'GIT_LFS_CLIENT_MISSING'
+        | 'CHECKOUT_TOO_LARGE'
         | 'UNKNOWN'
       >;
     })

@@ -1171,6 +1171,7 @@ export const dict = {
   'worktree.bootstrap.toast.authorizationRequired': 'OpenChamber bereikt de repository of zijn submodules niet. Stel de toegang in bij Repository configureren en probeer het opnieuw.',
   'worktree.bootstrap.toast.lfsClientMissing': 'Installeer Git LFS op de server en probeer de worktree-installatie opnieuw.',
   'worktree.bootstrap.toast.invalidConfiguration': 'Controleer de configuratie van de submodules en Git LFS van de repository en probeer het opnieuw.',
+  'worktree.bootstrap.toast.repositoryTooManyFiles': 'De repository bevat te veel bestanden.',
   'worktree.bootstrap.toast.cancelled': 'De worktree-installatie is geannuleerd. Probeer het opnieuw wanneer je klaar bent.',
   'worktree.bootstrap.toast.transportFailed': 'Controleer de toegang tot de repository en de netwerkverbinding en probeer het opnieuw.',
   'worktree.bootstrap.toast.timeoutDescription': 'De worktree is aangemaakt, maar de achtergrondinrichting heeft een time-out gehad.',

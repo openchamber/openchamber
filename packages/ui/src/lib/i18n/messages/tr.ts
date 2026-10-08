@@ -3512,6 +3512,7 @@ export const dict = {
   'worktree.bootstrap.toast.authorizationRequired': 'OpenChamber repository\'ye veya submodule\'lerine ulaşamıyor. Erişimi Repository\'yi yapılandır\'da ayarlayıp tekrar deneyin.',
   'worktree.bootstrap.toast.lfsClientMissing': 'Sunucuya Git LFS kurun, ardından worktree kurulumunu yeniden deneyin.',
   'worktree.bootstrap.toast.invalidConfiguration': 'Repository submodule ve Git LFS yapılandırmasını gözden geçirin, ardından yeniden deneyin.',
+  'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repository\'de çok fazla dosya var.',
   'worktree.bootstrap.toast.cancelled': 'Worktree kurulumu iptal edildi. Hazır olduğunuzda yeniden deneyin.',
   'worktree.bootstrap.toast.transportFailed': 'Repository erişimini ve ağ bağlantısını kontrol edin, ardından yeniden deneyin.',
   'gitView.pr.actions.openOnProvider': '{provider} üzerinde aç',

@@ -2417,6 +2417,7 @@ export const dict: Record<I18nKey, string> = {
   'worktree.bootstrap.toast.authorizationRequired': 'OpenChamber nie sięga do repozytorium lub jego submodułów. Skonfiguruj dostęp w „Skonfiguruj repozytorium” i spróbuj ponownie.',
   'worktree.bootstrap.toast.lfsClientMissing': 'Zainstaluj Git LFS na serwerze, a następnie ponów konfigurację drzewa pracy.',
   'worktree.bootstrap.toast.invalidConfiguration': 'Sprawdź konfigurację podmodułów i Git LFS w repozytorium, a następnie spróbuj ponownie.',
+  'worktree.bootstrap.toast.repositoryTooManyFiles': 'Repozytorium zawiera zbyt wiele plików.',
   'worktree.bootstrap.toast.cancelled': 'Konfiguracja drzewa pracy została anulowana. Spróbuj ponownie, gdy będziesz gotowy.',
   'worktree.bootstrap.toast.transportFailed': 'Sprawdź dostęp do repozytorium i połączenie sieciowe, a następnie spróbuj ponownie.',
   'worktree.bootstrap.toast.timeoutDescription': 'Drzewo pracy zostało utworzone, ale konfiguracja w tle przekroczyła limit czasu.',

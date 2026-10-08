@@ -168,6 +168,8 @@ const bootstrapFailureDescription = (status: GitWorktreeBootstrapStatus): string
       return t('worktree.bootstrap.toast.lfsClientMissing');
     case 'INVALID_REQUEST':
       return t('worktree.bootstrap.toast.invalidConfiguration');
+    case 'CHECKOUT_TOO_LARGE':
+      return t('worktree.bootstrap.toast.repositoryTooManyFiles');
     case 'CANCELLED':
       return t('worktree.bootstrap.toast.cancelled');
     case 'TIMEOUT':

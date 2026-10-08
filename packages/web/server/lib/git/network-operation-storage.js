@@ -21,11 +21,11 @@ const ERROR_CODES = new Set([
   'INVALID_REQUEST', 'NOT_FOUND', 'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG',
   'REMOTE_CHANGED', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
   'CONFLICT', 'CANCELLED', 'TIMEOUT', 'OUTCOME_UNKNOWN', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
-  'GIT_LFS_CLIENT_MISSING',
+  'GIT_LFS_CLIENT_MISSING', 'CHECKOUT_TOO_LARGE',
 ]);
 const FAILURE_ERROR_CODES = new Set([
   'INVALID_REQUEST', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
-  'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'UNKNOWN',
+  'RUNTIME_UNSUPPORTED', 'GIT_LFS_CLIENT_MISSING', 'CHECKOUT_TOO_LARGE', 'UNKNOWN',
 ]);
 const STATE_ERROR_CODES = Object.freeze({
   partial: FAILURE_ERROR_CODES,
@@ -55,6 +55,7 @@ const SAFE_ERROR_MESSAGES = Object.freeze({
   RUNTIME_UNSUPPORTED: 'Git operation is unsupported by this runtime',
   UNKNOWN: 'Git operation failed; inspect repository state before retrying',
   GIT_LFS_CLIENT_MISSING: 'Git LFS is required but unavailable',
+  CHECKOUT_TOO_LARGE: 'Checkout has too many files to inspect',
 });
 
 const exactKeys = (value, required, optional = []) => {
