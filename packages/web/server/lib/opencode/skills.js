@@ -490,7 +490,21 @@ function assertValidSkillName(skillName) {
   }
 }
 
-async function createSkill(skillName, config, workingDirectory, scope) {
+// Create, edit and rename check the disk, wait on discovery, then write. Run
+// one at a time per process, the way they did while discovery was
+// synchronous, so a check cannot go stale before its own write.
+let skillWriteQueue = Promise.resolve();
+function serializeSkillWrite(write) {
+  const run = skillWriteQueue.then(write, write);
+  skillWriteQueue = run.catch(() => {});
+  return run;
+}
+
+function createSkill(skillName, config, workingDirectory, scope) {
+  return serializeSkillWrite(() => createSkillNow(skillName, config, workingDirectory, scope));
+}
+
+async function createSkillNow(skillName, config, workingDirectory, scope) {
   ensureDirs();
   assertValidSkillName(skillName);
 
@@ -550,7 +564,16 @@ async function createSkill(skillName, config, workingDirectory, scope) {
     applyModelInvocation(frontmatter, true);
   }
 
-  writeMdFile(targetPath, frontmatter, instructions || '');
+  // `wx` fails if SKILL.md appeared since the check above, from another
+  // process or a client racing this one, instead of overwriting it.
+  try {
+    writeMdFile(targetPath, frontmatter, instructions || '', { flag: 'wx' });
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      throw new Error(`Skill ${skillName} already exists at ${targetPath}`);
+    }
+    throw error;
+  }
   
   if (supportingFiles && Array.isArray(supportingFiles)) {
     for (const file of supportingFiles) {
@@ -563,7 +586,11 @@ async function createSkill(skillName, config, workingDirectory, scope) {
   console.log(`Created new skill: ${skillName} (scope: ${targetScope}, path: ${targetPath})`);
 }
 
-async function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
+function updateSkill(skillName, updates, workingDirectory, targetPath = null) {
+  return serializeSkillWrite(() => updateSkillNow(skillName, updates, workingDirectory, targetPath));
+}
+
+async function updateSkillNow(skillName, updates, workingDirectory, targetPath = null) {
   ensureDirs();
 
   const requestedPath = typeof targetPath === 'string' && targetPath.trim()
@@ -739,7 +766,11 @@ function isManagedSkillPath(skillMdPath, workingDirectory) {
   return getManagedSkillRoots(workingDirectory).some((root) => isPathInside(skillDir, root));
 }
 
-async function renameSkill(oldName, newName, workingDirectory) {
+function renameSkill(oldName, newName, workingDirectory) {
+  return serializeSkillWrite(() => renameSkillNow(oldName, newName, workingDirectory));
+}
+
+async function renameSkillNow(oldName, newName, workingDirectory) {
   ensureDirs();
   assertValidSkillName(newName);
 

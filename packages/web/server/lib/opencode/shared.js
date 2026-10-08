@@ -126,16 +126,19 @@ function parseMdContent(rawContent, filePath) {
   return { frontmatter, body };
 }
 
-function writeMdFile(filePath, frontmatter, body) {
+// `flag: 'wx'` creates the file and fails with EEXIST when it is already
+// there; that error is passed on as is so a caller can tell it apart.
+function writeMdFile(filePath, frontmatter, body, { flag = 'w' } = {}) {
   try {
     const cleanedFrontmatter = Object.fromEntries(
       Object.entries(frontmatter).filter(([, value]) => value != null)
     );
     const yamlStr = yaml.stringify(cleanedFrontmatter);
     const content = `---\n${yamlStr}---\n\n${body}`;
-    fs.writeFileSync(filePath, content, 'utf8');
+    fs.writeFileSync(filePath, content, { encoding: 'utf8', flag });
     console.log(`Successfully wrote markdown file: ${filePath}`);
   } catch (error) {
+    if (error?.code === 'EEXIST') throw error;
     console.error(`Failed to write markdown file ${filePath}:`, error);
     throw new Error('Failed to write agent markdown file');
   }

@@ -887,6 +887,7 @@ within a ten-minute overall deadline.
   - Skill list responses include authoritative `renamable` derived from the same managed-root policy used by rename
   - `GET /api/config/skills` leaves `sources.md.supportingFiles` out: listing every file of every skill cost seconds when a skill bundles a `.venv` or `node_modules`, and no list consumer reads it. `GET /api/config/skills/:name` still returns it
   - Discovery and skill reads are async (`fs.promises`), and the list enriches one skill at a time, so a large skills tree no longer stalls other requests on the server's event loop
+  - Create, edit and rename run one at a time per process, so an existence check cannot go stale before its own write; create also writes `SKILL.md` with `wx` and reports an existing file as "already exists" instead of overwriting it
   - `disableModelInvocation` (detail `sources.md`, create/update body) is "run only when called": it writes both `disable-model-invocation: true` and `metadata.opencode/autoinvoke: false` so every supported OpenCode 2.x and Claude Code honour it, reads back the way OpenCode resolves the pair (`opencode/autoinvoke` wins), and clearing it removes both keys while keeping other `metadata`. The VS Code runtime mirrors this in `opencodeConfig.ts`
   - Skills catalog listing/source pagination, scan, and install routes
   - Supporting skill file read/write/delete routes

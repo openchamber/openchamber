@@ -4,7 +4,7 @@ import fsPromises from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import yaml from 'yaml';
-import { discoverSkills, getSkillSources, mergeDiscoveredSkills, renameSkill, updateSkill } from './skills.js';
+import { createSkill, discoverSkills, getSkillSources, mergeDiscoveredSkills, renameSkill, updateSkill } from './skills.js';
 
 describe('skills', () => {
   it('merges locally discovered skills missing from OpenCode live discovery', () => {
@@ -163,6 +163,57 @@ describe('skills', () => {
         expect(events).toEqual(['other work', 'discovered']);
       } finally {
         await fsPromises.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('writes that race each other', () => {
+    const makeProject = async () => {
+      const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-skills-race-'));
+      const projectRoot = path.join(tempRoot, 'project');
+      await fsPromises.mkdir(path.join(projectRoot, '.git'), { recursive: true });
+      return { tempRoot, projectRoot };
+    };
+    const skillPath = (projectRoot, name) => path.join(projectRoot, '.opencode', 'skills', name, 'SKILL.md');
+    // `.agents` project skills: the existence check only finds them through
+    // discovery, so two creates both pass it unless the write itself refuses.
+    const agentsSkillPath = (projectRoot, name) => path.join(projectRoot, '.agents', 'skills', name, 'SKILL.md');
+
+    it('lets exactly one of two simultaneous creates of the same name succeed', async () => {
+      const { tempRoot, projectRoot } = await makeProject();
+      try {
+        const results = await Promise.allSettled([
+          createSkill('race-skill', { description: 'First', source: 'agents' }, projectRoot, 'project'),
+          createSkill('race-skill', { description: 'Second', source: 'agents' }, projectRoot, 'project'),
+        ]);
+
+        expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+        expect(results.find((result) => result.status === 'rejected').reason.message).toMatch(/already exists/);
+        const written = await fsPromises.readFile(agentsSkillPath(projectRoot, 'race-skill'), 'utf8');
+        expect(written).toContain(`description: ${results[0].status === 'fulfilled' ? 'First' : 'Second'}`);
+      } finally {
+        await fsPromises.rm(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('does not write an edit into the folder of a skill renamed meanwhile', async () => {
+      const { tempRoot, projectRoot } = await makeProject();
+      const oldDir = path.dirname(skillPath(projectRoot, 'moving-skill'));
+      try {
+        await createSkill('moving-skill', { description: 'Before' }, projectRoot, 'project');
+
+        const [renamed, edited] = await Promise.allSettled([
+          renameSkill('moving-skill', 'moved-skill', projectRoot),
+          updateSkill('moving-skill', { description: 'Edited' }, projectRoot),
+        ]);
+
+        expect(renamed.status).toBe('fulfilled');
+        expect(edited.status).toBe('rejected');
+        expect(edited.reason.message).toMatch(/not found/);
+        expect(fs.existsSync(oldDir)).toBe(false);
+        expect(await fsPromises.readFile(skillPath(projectRoot, 'moved-skill'), 'utf8')).toContain('description: Before');
+      } finally {
+        await fsPromises.rm(tempRoot, { recursive: true, force: true });
       }
     });
   });
