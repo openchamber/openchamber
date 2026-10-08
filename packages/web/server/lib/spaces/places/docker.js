@@ -38,6 +38,9 @@ const DOCKER_PLACE_ID = 'docker';
 
 // node:24-bookworm as a multi-arch index digest. DOCUMENTATION.md says how it was verified.
 export const SPACE_BASE_IMAGE = 'node@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0';
+// Base images spaces used before, which the clean-up removes like the current one. A bump adds
+// the digest it replaces here. node:22-bookworm, replaced on 2026-10-08.
+export const RETIRED_SPACE_BASE_IMAGES = ['node@sha256:dd5847a04b0deee391fa145f1f4c6d214196668b6bcc7988ebed67249f226844'];
 
 const CHECK_TIMEOUT_MS = 10_000;
 const PULL_TIMEOUT_MS = 20 * 60_000;
@@ -67,7 +70,7 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   const engine = createDockerEngine({ runCommand, dockerPath });
   const { run, docker, inspect, removeOne, removeStoppedContainer } = engine;
   const tools = createDockerTools({ engine, owner, toolsSource, image: SPACE_BASE_IMAGE, now, wait });
-  const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, tools });
+  const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, retiredImages: RETIRED_SPACE_BASE_IMAGES, tools });
 
   /** Every resource that carries our marker and this owner, optionally for one space. Found by label only. */
   const findResources = async (spaceId) => {

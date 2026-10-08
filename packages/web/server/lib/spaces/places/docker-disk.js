@@ -1,6 +1,7 @@
 // The disk that spaces take on the Docker place, and the clean-up of what OpenChamber can make
 // again by itself (DESIGN.md, journey step 9 and decision 12): this owner's tools volumes but the
-// current one, this owner's leftover one-shot containers, and the space image.
+// current one, this owner's leftover one-shot containers, the space image, and the space images
+// of before.
 //
 // Nothing here decides whether a resource is still needed. Every removal goes without force, and
 // Docker refuses a volume a container mounts, an image a container was made from, and a running
@@ -35,10 +36,11 @@ const parseJson = (text) => {
 
 /**
  * `engine` is the place's docker CLI, `tools` its tools volume with `listOurs`, `image` the pinned
- * space image. `colimaPath` is the colima CLI, or null: after a clean-up that removed anything, a
- * Docker machine that calls itself Colima is asked to hand the freed blocks back to the Mac.
+ * space image and `retiredImages` the digests it replaced. `colimaPath` is the colima CLI, or null:
+ * after a clean-up that removed anything, a Docker machine that calls itself Colima is asked to
+ * hand the freed blocks back to the Mac.
  */
-export function createDockerDisk({ engine, runCommand, colimaPath, owner, image, tools }) {
+export function createDockerDisk({ engine, runCommand, colimaPath, owner, image, retiredImages = [], tools }) {
   /**
    * Docker's own account of the disk: every volume with its size and how many containers mount it,
    * by name, and what each image alone takes, by id. `docker image inspect` is no use for the
@@ -62,14 +64,24 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     .map((entry) => String(entry.Name));
 
   /**
-   * The image with what it alone takes, or null when it is not there. In use when any container
+   * An image with what it alone takes, or null when it is not there. In use when any container
    * was made from it.
    */
-  const readImage = async (images) => {
-    const entry = await engine.inspect('image', image);
+  const readImage = async (name, images) => {
+    const entry = await engine.inspect('image', name);
     if (!entry) return null;
-    const users = await engine.docker(['ps', '--all', '--filter', `ancestor=${image}`, '--format', '{{.Names}}'], QUERY_TIMEOUT_MS);
-    return { bytes: images.get(String(entry.Id)) ?? 0, inUse: users.trim() !== '' };
+    const users = await engine.docker(['ps', '--all', '--filter', `ancestor=${name}`, '--format', '{{.Names}}'], QUERY_TIMEOUT_MS);
+    return { name, bytes: images.get(String(entry.Id)) ?? 0, inUse: users.trim() !== '', tags: entry.RepoTags ?? [] };
+  };
+
+  /**
+   * The retired images that are there and carry no tag but their own digest reference. A space
+   * pulls by digest, so another tag means someone pulled or tagged the same image for their own
+   * use, and a removal by digest would take their tag with it. Those stay.
+   */
+  const readRetiredImages = async (images) => {
+    const found = await Promise.all(retiredImages.map((name) => readImage(name, images)));
+    return found.filter((state) => state !== null && state.tags.every((tag) => tag === state.name));
   };
 
   const measure = async () => {
@@ -77,23 +89,26 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     const { volumes } = usage;
     const sizeOf = (name) => volumes.get(name)?.bytes ?? 0;
     const oldTools = ours.volumes.filter((name) => name !== ours.current);
-    return { volumes, ours, oldTools, spaces, image: await readImage(usage.images), sizeOf };
+    const [imageState, retired] = await Promise.all([readImage(image, usage.images), readRetiredImages(usage.images)]);
+    return { volumes, ours, oldTools, spaces, image: imageState, retired, sizeOf };
   };
 
   /**
    * What the page shows: the image, the tools and the spaces' own volumes in bytes, and what a
-   * clean-up would free now. `freesImage` says whether the image is part of that.
+   * clean-up would free now. `freesImage` says whether the current image is part of that. A
+   * retired image is counted only in what a clean-up frees.
    */
   const read = async () => {
-    const { volumes, ours, oldTools, spaces, image: imageState, sizeOf } = await measure();
+    const { volumes, ours, oldTools, spaces, image: imageState, retired, sizeOf } = await measure();
     const freeTools = oldTools.filter((name) => (volumes.get(name)?.links ?? 0) === 0);
     const freesImage = imageState !== null && !imageState.inUse;
+    const freeRetired = retired.filter((state) => !state.inUse).reduce((total, state) => total + state.bytes, 0);
     const sum = (names) => names.reduce((total, name) => total + sizeOf(name), 0);
     return {
       imageBytes: imageState?.bytes ?? null,
       toolsBytes: sum(ours.volumes),
       spacesBytes: sum(spaces),
-      freeBytes: sum(freeTools) + (freesImage ? imageState.bytes : 0),
+      freeBytes: sum(freeTools) + (freesImage ? imageState.bytes : 0) + freeRetired,
       freesImage,
     };
   };
@@ -121,7 +136,7 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
    * `freedBytes` counts the sizes measured just before, of what is gone afterwards.
    */
   const cleanUp = async () => {
-    const { oldTools, ours, image: imageState, sizeOf } = await measure();
+    const { oldTools, ours, image: imageState, retired, sizeOf } = await measure();
     let freedBytes = 0;
     const kept = [];
     const attempt = async (kind, name, bytes, removal) => {
@@ -143,6 +158,11 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     }
     if (imageState) {
       removedAny = (await attempt('image', image, imageState.bytes, engine.removeOne('image', image))) || removedAny;
+    }
+    // A retired image stays while a container made from it exists: the gatekeeper of a space
+    // created before the bump keeps its image until the space is removed.
+    for (const state of retired) {
+      removedAny = (await attempt('image', state.name, state.bytes, engine.removeOne('image', state.name))) || removedAny;
     }
     return { freedBytes, kept, machine: removedAny ? await trimMachine() : { state: 'skipped' } };
   };
