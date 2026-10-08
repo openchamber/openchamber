@@ -182,7 +182,7 @@ export const SourceBoardTeamPicker: React.FC<{
 }> = ({ teams, selectedTeamId, onSelectTeam, onWorkspaceSwitched }) => {
     const { t } = useI18n();
     const { linear } = useRuntimeAPIs();
-    const workspaces = useLinearAuthStore((state) => state.status?.workspaces ?? []);
+    const workspaces = useLinearAuthStore((state) => state.status?.workspaces) ?? [];
     const current = workspaces.find((workspace) => workspace.current) ?? null;
     const [switching, setSwitching] = React.useState(false);
     const workspaceName = (workspace: (typeof workspaces)[number]) => workspace.name?.trim() || workspace.urlKey?.trim() || workspace.id;

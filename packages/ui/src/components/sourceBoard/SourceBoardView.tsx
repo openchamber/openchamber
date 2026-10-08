@@ -13,6 +13,7 @@ import * as React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
@@ -75,7 +76,9 @@ export const SourceBoardView: React.FC = () => {
     if (!open) return null;
     return (
         <div className="absolute inset-0 z-10 flex flex-col bg-background">
-            <SourceBoard layout="desktop" />
+            {/* Inside the overlay, so a crash shows its fallback in the board's
+                place and closing the board clears it. */}
+            <ErrorBoundary><SourceBoard layout="desktop" /></ErrorBoundary>
         </div>
     );
 };

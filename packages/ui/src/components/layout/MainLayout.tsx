@@ -155,7 +155,7 @@ export const MainLayout: React.FC = () => {
                                                     <ErrorBoundary><UsageStatsView /></ErrorBoundary>
                                                 </div>
                                             )}
-                                            <ErrorBoundary><SourceBoardView /></ErrorBoundary>
+                                            <SourceBoardView />
                                             <ErrorBoundary><WorktreesView /></ErrorBoundary>
                                             {isSpacesPageOpen ? <ErrorBoundary><SpacesView /></ErrorBoundary> : null}
                                             {guestPage && <div className="absolute inset-0 z-10 bg-background">
