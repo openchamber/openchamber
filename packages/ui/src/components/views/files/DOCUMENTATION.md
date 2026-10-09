@@ -259,7 +259,9 @@ path becomes the new one, it adopts that path instead of re-reading the file,
 which would replace the draft. Editors stay keyed by the path the file was
 opened under, so the text editor, a canvas or a diagram is not remounted and
 keeps its edits and undo history. The draft reset that normally follows a
-change of the selected path is skipped for a moved file.
+change of the selected path is skipped for a moved file, and the open-file
+poll does not report the old path as a deleted file while the move is in
+flight or not yet adopted.
 
 ## Uploads
 

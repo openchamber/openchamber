@@ -7,6 +7,7 @@ const step = (overrides: Partial<Parameters<typeof openFilePollStep>[0]>) => ope
   showsFailure: false,
   sawMissing: false,
   hasUnsavedChanges: false,
+  moving: false,
   ...overrides,
 });
 
@@ -18,6 +19,10 @@ describe('openFilePollStep (issue 4477)', () => {
   test('a file deleted while open shows the error unless it has unsaved edits', () => {
     expect(step({ stat: 'missing' })).toBe('show-missing');
     expect(step({ stat: 'missing', hasUnsavedChanges: true })).toBe('none');
+  });
+
+  test('the old path of a file being moved is not a deleted file', () => {
+    expect(step({ stat: 'missing', moving: true })).toBe('none');
   });
 
   test('other metadata failures change nothing', () => {

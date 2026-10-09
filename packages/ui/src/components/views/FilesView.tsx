@@ -2399,7 +2399,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           }
 
           const sawMissing = missingSeenPathRef.current === selectedPath;
-          const step = openFilePollStep({ stat: 'found', showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges() });
+          const step = openFilePollStep({ stat: 'found', showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges(), moving: false });
           if (step === 'reload') {
             lastLoadedFileStatRef.current = null;
             setLoadedFilePath(null);
@@ -2443,7 +2443,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           // Unsaved edits stay on screen; saving writes the file back.
           const stat = isFileMissingError(error) ? 'missing' : 'failed';
           const sawMissing = missingSeenPathRef.current === selectedPath;
-          if (openFilePollStep({ stat, showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges() }) !== 'show-missing') {
+          const moving = isFilePathMoveInFlight(selectedPath) || pendingPathMoveRef.current !== null;
+          if (openFilePollStep({ stat, showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges(), moving }) !== 'show-missing') {
             return;
           }
           missingSeenPathRef.current = selectedPath;
