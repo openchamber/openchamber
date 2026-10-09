@@ -47,6 +47,9 @@ const statuses = new Map<string, DesktopHostStatus>();
 // its own stale "unreachable". Each host remembers which run owns its status.
 let probeRunSequence = 0;
 const owningRunByHostId = new Map<string, number>();
+// Hosts whose owning run has not answered yet: their stored status predates
+// that run and may describe a host that has since gone away.
+const pendingHostIds = new Set<string>();
 let activeProbeRuns = 0;
 let snapshot: DesktopHostStatusSnapshot = { byHostId: {}, isProbing: false };
 const listeners = new Set<() => void>();
@@ -83,8 +86,16 @@ const setStatus = (hostId: string, status: DesktopHostStatus): void => {
  */
 export const setDesktopHostStatus = (hostId: string, status: DesktopHostStatus): void => {
   owningRunByHostId.set(hostId, ++probeRunSequence);
+  pendingHostIds.delete(hostId);
   setStatus(hostId, status);
 };
+
+/**
+ * True while a probe run is still checking this host. The status on record is
+ * then older than that run: opening the switcher re-probes every host, and a
+ * host that stopped answering keeps its old "ok" until the re-probe times out.
+ */
+export const isDesktopHostStatusPending = (hostId: string): boolean => pendingHostIds.has(hostId);
 
 /**
  * Forget instances that are no longer configured. Called with the authoritative
@@ -98,6 +109,7 @@ export const pruneDesktopHostStatuses = (configuredHostIds: readonly string[]): 
     if (keep.has(hostId)) continue;
     statuses.delete(hostId);
     owningRunByHostId.delete(hostId);
+    pendingHostIds.delete(hostId);
     changed = true;
   }
   if (changed) publishSnapshot();
@@ -148,7 +160,10 @@ const probeHost = async (host: DesktopHost, localClientToken: string): Promise<D
 export const probeDesktopHosts = async (hosts: readonly DesktopHost[]): Promise<void> => {
   if (!isDesktopShell()) return;
   const run = ++probeRunSequence;
-  for (const host of hosts) owningRunByHostId.set(host.id, run);
+  for (const host of hosts) {
+    owningRunByHostId.set(host.id, run);
+    pendingHostIds.add(host.id);
+  }
   activeProbeRuns += 1;
   publishSnapshot();
   try {
@@ -157,9 +172,13 @@ export const probeDesktopHosts = async (hosts: readonly DesktopHost[]): Promise<
       const status = await probeHost(host, localClientToken);
       // A newer run (or a switch) claimed this host while we were probing.
       if (owningRunByHostId.get(host.id) !== run) return;
+      pendingHostIds.delete(host.id);
       setStatus(host.id, status);
     }));
   } finally {
+    for (const host of hosts) {
+      if (owningRunByHostId.get(host.id) === run) pendingHostIds.delete(host.id);
+    }
     activeProbeRuns -= 1;
     publishSnapshot();
   }

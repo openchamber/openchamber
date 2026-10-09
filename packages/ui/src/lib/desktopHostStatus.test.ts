@@ -25,6 +25,7 @@ mock.module('@/lib/desktop', () => ({
 
 const {
   getDesktopHostStatusSnapshot,
+  isDesktopHostStatusPending,
   probeDesktopHosts,
   pruneDesktopHostStatuses,
   setDesktopHostStatus,
@@ -134,5 +135,63 @@ describe('desktop host statuses', () => {
     await slowRun;
 
     expect(getDesktopHostStatusSnapshot().byHostId.remote?.status).toBe('ok');
+  });
+
+  test('an earlier "ok" counts as pending while a re-probe of that host is still running', async () => {
+    // Issue 3852: the host answered at startup and has since stopped. Opening
+    // the switcher re-probes it; until that probe times out the row still says
+    // "ok", and the switch must not take that for a live answer.
+    setDesktopHostStatus('remote', { status: 'ok', latencyMs: 12 });
+    expect(isDesktopHostStatusPending('remote')).toBe(false);
+
+    probeResults['https://remote.example'] = { status: 'unreachable', latencyMs: 0 };
+    let releaseProbe!: () => void;
+    probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    const run = probeDesktopHosts([host('remote', 'https://remote.example')]);
+    await Promise.resolve();
+
+    expect(getDesktopHostStatusSnapshot().byHostId.remote?.status).toBe('ok');
+    expect(isDesktopHostStatusPending('remote')).toBe(true);
+
+    releaseProbe();
+    await run;
+
+    expect(isDesktopHostStatusPending('remote')).toBe(false);
+    expect(getDesktopHostStatusSnapshot().byHostId.remote?.status).toBe('unreachable');
+  });
+
+  test('a host stays pending until the newest run that claimed it answers', async () => {
+    probeResults['https://remote.example'] = { status: 'ok', latencyMs: 30 };
+    let releaseOld!: () => void;
+    probeGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const oldRun = probeDesktopHosts([host('remote', 'https://remote.example')]);
+    await Promise.resolve();
+
+    let releaseNew!: () => void;
+    probeGate = new Promise<void>((resolve) => { releaseNew = resolve; });
+    const newRun = probeDesktopHosts([host('remote', 'https://remote.example')]);
+    await Promise.resolve();
+
+    releaseOld();
+    await oldRun;
+    expect(isDesktopHostStatusPending('remote')).toBe(true);
+
+    releaseNew();
+    await newRun;
+    expect(isDesktopHostStatusPending('remote')).toBe(false);
+  });
+
+  test('a status recorded by the switch flow ends the pending state', async () => {
+    let releaseProbe!: () => void;
+    probeGate = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    const run = probeDesktopHosts([host('remote', 'https://remote.example')]);
+    await Promise.resolve();
+    expect(isDesktopHostStatusPending('remote')).toBe(true);
+
+    setDesktopHostStatus('remote', { status: 'ok', latencyMs: 7 });
+    expect(isDesktopHostStatusPending('remote')).toBe(false);
+
+    releaseProbe();
+    await run;
   });
 });
