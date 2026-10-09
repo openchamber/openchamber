@@ -3198,10 +3198,13 @@ export function registerGitHubRoutes(app, options = {}) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
         const token = getGhCliToken();
         if (token) {
+          // Only a rejected token means "no account"; a network or server
+          // failure must not read as one, or another host's account answers.
           try {
             return githubCliAccountId((await createOctokit(token).rest.users.getAuthenticated()).data.id);
-          } catch {
-            return null;
+          } catch (error) {
+            if (error?.status === 401) return null;
+            throw error;
           }
         }
       }

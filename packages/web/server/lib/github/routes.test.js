@@ -394,6 +394,28 @@ describe('pull request head for a worktree made by number', () => {
     await expect(github.readCurrentAccountId()).resolves.toBe(accountId);
   });
 
+  // A stand-in `gh` on PATH answers `gh auth token`, as the real CLI does.
+  it.skipIf(process.platform === 'win32')('treats only a rejected gh token as no account', async () => {
+    const binDirectory = path.join(dataDir, 'bin');
+    fs.mkdirSync(binDirectory, { recursive: true });
+    fs.writeFileSync(path.join(binDirectory, 'gh'), '#!/bin/sh\necho fake-gh-token\n', { mode: 0o755 });
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDirectory}${path.delimiter}${previousPath}`;
+    const { setGhCliActive, setGhCliDisabled } = await import('./auth.js');
+    setGhCliDisabled(false);
+    setGhCliActive(true);
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => response({ message: 'Server Error' }, 500)));
+      await expect(github.readCurrentAccountId()).rejects.toMatchObject({ status: 500 });
+      vi.stubGlobal('fetch', vi.fn(async () => response({ message: 'Bad credentials' }, 401)));
+      await expect(github.readCurrentAccountId()).resolves.toBeNull();
+    } finally {
+      setGhCliActive(false);
+      setGhCliDisabled(true);
+      process.env.PATH = previousPath;
+    }
+  });
+
   it('reads the project, head and head owner from the primary remote', async () => {
     serveGitHub(() => response(forkPull()));
     await expect(github.readChangeRequestHead({ context: readContext(project), number: 42 })).resolves.toEqual({

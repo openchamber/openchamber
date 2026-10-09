@@ -1241,6 +1241,13 @@ describe('merge request head for a worktree made by number', () => {
     await expect(gitlab.readCurrentAccountId(origin)).resolves.toBeNull();
   });
 
+  it('falls back to the active account when the glab login it was switched to stopped working', async () => {
+    const store = makeStore(account);
+    await store.setCliActive(origin, true);
+    const { gitlab } = register(null, store);
+    await expect(gitlab.readCurrentAccountId(origin)).resolves.toBe(account.id);
+  });
+
   it('reads the target project and the fork head on the primary project network', async () => {
     const { gitlab, changeRequestContext } = register({
       number: 7, head: 'feature/fix', headSha: 'C'.repeat(40),

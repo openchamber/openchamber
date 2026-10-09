@@ -429,6 +429,10 @@ export const createOpenChamberControlService = (dependencies) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     assertSingleScope(input);
+    // Only a new session gets a worktree; elsewhere the number would be ignored.
+    if (input.pullRequest !== undefined && action !== 'session.create') {
+      throw new OpenChamberControlError('pullRequest applies only to session.create', 400);
+    }
     const sessionID = asNonEmptyString(input.sessionId);
     const parentSessionID = asNonEmptyString(contextSessionId);
     const returnResult = input.returnResult === true;

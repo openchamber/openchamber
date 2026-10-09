@@ -200,6 +200,13 @@ describe('OpenChamber control service', () => {
     ]);
   });
 
+  it('refuses a pull request number on a send or fork, which would ignore it', async () => {
+    const { service, sessionService } = createService();
+    await expect(service.execute('session.send', { sessionId: 'ses_1', prompt: 'Go', pullRequest: 42 }, '/repo'))
+      .rejects.toThrow('pullRequest applies only to session.create');
+    expect(sessionService.send).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['session.send', 'send'],
     ['session.fork', 'fork'],

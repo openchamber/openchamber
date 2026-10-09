@@ -1137,10 +1137,9 @@ export function registerGitLabRoutes(app, options = {}) {
      */
     readCurrentAccountId: async (origin) => {
       const instance = await store.readInstance(origin);
-      if (instance.cliActive) {
-        const cli = await getUsableGlab(origin);
-        return cli ? `${origin}#cli:${cli.user.id}` : null;
-      }
+      // A glab login that stopped working leaves the active account, as the status read does.
+      const cli = instance.cliActive ? await getUsableGlab(origin) : null;
+      if (cli) return `${origin}#cli:${cli.user.id}`;
       return instance.accounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid')?.id ?? null;
     },
     /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */
