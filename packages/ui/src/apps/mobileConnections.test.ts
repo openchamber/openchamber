@@ -1,6 +1,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-import { createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
+import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+
+import { autoConnectLastInstance, createMobilePasswordOperationTracker, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -349,6 +353,106 @@ describe('validateMobileConnectionSession', () => {
       expect(result).toBe(false);
     } finally {
       restoreGlobals();
+    }
+  });
+});
+
+// The tunnel client imports the host key before it dials, so it must be real.
+const relayHostKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+const liveRelay: MobileRelayConfig = { ...testRelay, hostEncPubJwk: await crypto.subtle.exportKey('jwk', relayHostKeys.publicKey) };
+
+describe('relay probe while the runtime is on the relay', () => {
+  const originalWebSocket = globalThis.WebSocket;
+
+  // Every relay dial from this device. The hosted relay keeps one client leg per
+  // server, so a dial here would replace the runtime's live leg.
+  const dials: string[] = [];
+  class RecordingRelaySocket {
+    binaryType = 'blob';
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((event: { code: number; reason: string }) => void) | null = null;
+    constructor(url: string) {
+      dials.push(url);
+      setTimeout(() => this.onclose?.({ code: 4002, reason: 'relay connection replaced by another client' }), 0);
+    }
+    send() {}
+    close() {}
+  }
+
+  const connectThroughRuntimeTunnel = (answer: (path: string) => Promise<Response>) => {
+    const requests: string[] = [];
+    let closed = 0;
+    const tunnel: RelayTunnelClient = {
+      fetch: (input) => {
+        requests.push(String(input));
+        return answer(String(input));
+      },
+      openWebSocket() { throw new Error('the probe opens no socket'); },
+      getStatus: () => ({ state: 'connected' }),
+      subscribeStatus: () => () => undefined,
+      close: () => { closed += 1; },
+    };
+    adoptRelayTunnel(liveRelay, tunnel);
+    switchRuntimeEndpoint({ apiBaseUrl: 'https://localhost', clientToken: null, runtimeKey: 'relay-device', relay: liveRelay });
+    return { requests, closedCount: () => closed };
+  };
+
+  const installRelayWindow = () => {
+    dials.length = 0;
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: RecordingRelaySocket });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: Object.assign(new EventTarget(), {
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        location: { protocol: 'https:', origin: 'https://localhost' },
+        Capacitor: { isNativePlatform: () => false },
+        localStorage: createLocalStorageStub(),
+      }),
+    });
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: 'relay-device', label: 'Relay', lastUsedAt: 1, candidates: [{ kind: 'relay', relay: liveRelay }] },
+    ]));
+  };
+
+  const restoreRelayGlobals = () => {
+    switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null });
+    Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: originalWebSocket });
+    restoreGlobals();
+  };
+
+  test('a background auto-connect asks through the live tunnel and leaves it open', async () => {
+    try {
+      installRelayWindow();
+      const runtime = connectThroughRuntimeTunnel(async () => Response.json({ authenticated: true, scope: 'client' }));
+
+      const outcome = await autoConnectLastInstance({ fast: false, skipIfConnected: true });
+
+      expect(outcome).toEqual({ status: 'no-candidate' });
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toEqual([]);
+      expect(runtime.closedCount()).toBe(0);
+      expect(getActiveRelayTunnel()?.getStatus().state).toBe('connected');
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a probe dials its own tunnel only when the live one gives no answer', async () => {
+    try {
+      installRelayWindow();
+      const runtime = connectThroughRuntimeTunnel(async () => { throw new Error('relay tunnel reset'); });
+
+      const outcome = await autoConnectLastInstance({ fast: true, skipIfConnected: true });
+
+      expect(outcome.status).toBe('unreachable');
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toHaveLength(1);
+      expect(runtime.closedCount()).toBe(0);
+    } finally {
+      restoreRelayGlobals();
     }
   });
 });

@@ -1,0 +1,41 @@
+# main (a6663c2b6): stand-in relay with one client leg per server
+relay status: {"enabled":true,"state":"connected","serverId":"j3trtzKyqpeL6iwdPRqqpg7KuQob9MnVnaQkgdEQvjA","connectedClients":0,"relayUrl":"ws://127.0.0.1:5226","relayUrlLocked":true,"blockedByEnterprise":false}
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
+[mobile-connect] relay:session {"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
++   33ms [phone] cold-launch auto-connect: {"status":"connected"}
++   35ms [phone] event stream opened, status 200
++ 2036ms [phone] background auto-connect retry while connected...
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
++ 2037ms [phone] runtime tunnel status: error  (terminal)
++ 2037ms [phone] event stream failed: relay tunnel reset: relay connection replaced by another client
+[mobile-connect] relay:session {"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
+[mobile-connect] auto-connect:superseded {}
++ 2038ms [phone] retry outcome: {"status":"no-candidate"}
++ 3039ms [phone] auto-connect (no skip) while connected, e.g. the cold-launch no-connection fallback...
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
+[mobile-connect] relay:session {"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
++ 3045ms [phone] runtime tunnel status: idle  
++ 3046ms [phone] outcome: {"status":"connected"}
+[mobile-connect] candidates:refresh-skip {"reason":"no-lan-reported"}
+[mobile-connect] candidates:refresh-result {"result":"skipped"}
+
+===== RESULT =====
+runtime tunnel state : idle 
+still the runtime one: false
+event stream         : failed: relay tunnel reset: relay connection replaced by another client
+request on live tunnel: failed: relay tunnel closed
+
+===== RELAY LOG (this run) =====
+15:15:33.286 [relay] client dial c9
+15:15:33.287 [relay] host-data up c9
+15:15:35.292 [relay] EVICT c9 (replaced by c10) -> 4002
+15:15:35.292 [relay] client c9 closed (4002)
+15:15:35.292 [relay] client dial c10
+15:15:35.293 [relay] host-data up c10
+15:15:35.294 [relay] client c10 closed (1000)
+15:15:36.296 [relay] client dial c11
+15:15:36.299 [relay] host-data up c11
+15:15:38.306 [relay] client c11 closed (1006)

@@ -173,9 +173,12 @@ Mobile connect flows (`packages/ui/src/apps/mobileConnections.ts`, helpers in
 `timeout`) in the connect trail. Idempotent probes (`/health`,
 `/auth/session`) wait for the tunnel's own reconnect after a dropped socket and
 ask again within their budget; pairing redeem and password login are sent once.
-Pairing or logging in again to the server the phone is already on through the
-relay rides the connected runtime tunnel and does not open a second tunnel to
-the same server.
+Pairing, logging in again, and the session probes of auto-connect and connect
+ride the connected runtime tunnel when the phone is already on that server
+through the relay, and do not open a second tunnel to the same server: the
+relay keeps one client leg per device and server, so a second dial drops the
+live session. A probe dials its own tunnel only when the live one gives no
+answer.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
