@@ -22,3 +22,12 @@ export function projectEnvironmentKeys(integrations: IntegrationInfo[], environm
 export function projectCredentialEntries(entries: CredentialEntry[]): LegacyAuthFile;
 export function readOpenCodeCredentials(): Promise<LegacyAuthFile>;
 export function getProviderAuth(providerId: string): Promise<LegacyAuthEntry | null>;
+
+/** A browser login as OpenCode stores it, read for an isolated space's gatekeeper. */
+export type StoredLogin = {
+  methodID: string;
+  access: string;
+  expires: number;
+  metadata: { [key: string]: JsonValue };
+};
+export function getStoredLogin(integrationID: string): Promise<StoredLogin | null>;

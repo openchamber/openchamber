@@ -156,7 +156,7 @@ describe('space routes', () => {
     const res = { status(code) { this.code = code; return this; }, json(body) { answers.push({ status: this.code, body }); } };
     const cases = [
       ['space_not_found', 404], ['isolated_spaces_off', 404], ['project_not_registered', 400], ['invalid_network', 400], ['space_preparing', 409], ['space_not_running', 409],
-      ['space_busy', 409], ['space_creation_failed', 409], ['invalid_grant_request', 400], ['secret_source_missing', 409], ['space_record_unreadable', 409], ['invalid_domain', 400], ['network_is_open', 409], ['too_many_domains', 409],
+      ['space_busy', 409], ['space_creation_failed', 409], ['invalid_grant_request', 400], ['secret_source_missing', 409], ['login_not_found', 409], ['login_not_supported', 409], ['login_expired', 409], ['space_record_unreadable', 409], ['invalid_domain', 400], ['network_is_open', 409], ['too_many_domains', 409],
       ['branch_exists', 409], ['changes_do_not_apply', 409], ['changes_route_closed', 409], ['nothing_to_apply', 409], ['place_cannot_restrict_network', 409],
       ['invalid_setup_commands', 400], ['space_setup_running', 409],
       ['space_remove_incomplete', 502], ['docker_command_failed', 502], ['code_out_failed', 502],
