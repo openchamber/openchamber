@@ -68,8 +68,12 @@ mock.module('@/lib/desktop', () => ({
   isVSCodeRuntime: () => false,
 }));
 
+const settingsUpdates: Array<Record<string, string>> = [];
+
 mock.module('@/lib/persistence', () => ({
-  updateDesktopSettings: async () => undefined,
+  updateDesktopSettings: async (changes: Record<string, string>) => {
+    settingsUpdates.push(changes);
+  },
 }));
 
 mock.module('@/lib/runtime-switch', () => ({
@@ -126,6 +130,12 @@ describe('home directory on a first visit to a password-protected server', () =>
     await ensureHomeDirectoryResolved();
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: HOME, isHomeReady: true });
     expect(directoriesSet.at(-1)).toBe(HOME);
+    // Falling back to the home is not opening it. A stored last directory
+    // becomes a project on the server when there is none, which put the home
+    // in the sidebar and started OpenCode there on every launch.
+    expect(storage.has('lastDirectory')).toBe(false);
+    expect(settingsUpdates.some((changes) => 'lastDirectory' in changes)).toBe(false);
+    expect(useDirectoryStore.getState().hasPersistedDirectory).toBe(false);
 
     // Once known, the home is not read again.
     const reads = homeReads;

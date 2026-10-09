@@ -411,9 +411,14 @@ export const useDirectoryStore = create<DirectoryStore>()(
           const nextDirectory = shouldReplaceCurrent ? resolvedHome : (resolvedCurrent as string);
           opencodeClient.setDirectory(nextDirectory);
           invalidateFileSearchCache();
-          safeStorage.setItem('lastDirectory', nextDirectory);
-          void updateDesktopSettings({ lastDirectory: nextDirectory });
-
+          // Falling back to the home is not the user opening it, so it is not
+          // stored as the last directory: the server turns a stored last
+          // directory into a project when there is none and warms it on every
+          // start, which put the home in the sidebar and started OpenCode there.
+          if (!shouldReplaceCurrent) {
+            safeStorage.setItem('lastDirectory', nextDirectory);
+            void updateDesktopSettings({ lastDirectory: nextDirectory });
+          }
         }
 
         void updateDesktopSettings({ homeDirectory: resolvedHome });
