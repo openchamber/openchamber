@@ -73,6 +73,23 @@ describe('useFilesViewTabsStore', () => {
     expect(state?.expandedPaths).toEqual(['/repo/src', '/repo/other']);
   });
 
+  test('keeps a missing selected file selected while pruning stale tabs (issue 4477)', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/a.ts');
+    store.addOpenPath(root, '/repo/deleted.ts');
+    store.addOpenPath(root, '/repo/gone.ts');
+    store.setSelectedPath(root, '/repo/deleted.ts');
+
+    store.removeUnselectedOpenPath(root, '/repo/deleted.ts');
+    store.removeUnselectedOpenPath(root, '/repo/gone.ts');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.selectedPath).toBe('/repo/deleted.ts');
+    expect(state?.openPaths).toEqual(['/repo/a.ts', '/repo/deleted.ts']);
+  });
+
   test('restores independent active projections across runtime switches', () => {
     useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
     useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');

@@ -75,7 +75,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     ),
   );
   const { files: filesApi } = useRuntimeAPIs();
-  const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const removeUnselectedOpenPath = useFilesViewTabsStore((state) => state.removeUnselectedOpenPath);
   const [staleRecentPaths, setStaleRecentPaths] = React.useState<ReadonlySet<string>>(() => new Set());
   const verifiedPathsRef = React.useRef<Set<string>>(new Set());
   // Subscribed, not read once: the session's directory may still be loading its agents.
@@ -180,7 +180,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
               next.add(filePath);
               return next;
             });
-            removeOpenPathsByPrefix(projectRoot, filePath);
+            removeUnselectedOpenPath(projectRoot, filePath);
           }
         } catch (error) {
           if (cancelled) return;
@@ -192,7 +192,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
               next.add(filePath);
               return next;
             });
-            removeOpenPathsByPrefix(projectRoot, filePath);
+            removeUnselectedOpenPath(projectRoot, filePath);
           }
         }
       }),
@@ -201,7 +201,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     return () => {
       cancelled = true;
     };
-  }, [filesApi, projectRoot, recentCandidatePathsKey, removeOpenPathsByPrefix]);
+  }, [filesApi, projectRoot, recentCandidatePathsKey, removeUnselectedOpenPath]);
 
   const visibleAgents = React.useMemo(
     () => normalizedSearchQuery.length > 0 ? agents : agents.slice(0, AGENTS_SHOWN_WITHOUT_QUERY),
