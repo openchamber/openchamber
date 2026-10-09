@@ -18,7 +18,7 @@ Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub prze
 4. Naciśnij **Utwórz kod QR**.
 5. Na drugim urządzeniu zeskanuj kod:
    - **aplikacja mobilna** — stuknij **Skanuj kod QR** na ekranie łączenia (lub na liście instancji)
-   - **aplikacja desktopowa** — zamiast tego skopiuj link połączenia i wklej go w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**
+   - **aplikacja desktopowa** — zamiast tego skopiuj link połączenia i otwórz go na komputerze z aplikacją desktopową, która przed połączeniem poprosi o potwierdzenie. Możesz też wkleić go w **Settings → Remote Instances → Inne serwery OpenChamber → Importuj link**
 
 Okno dialogowe zamknie się samo, gdy tylko urządzenie się połączy, a urządzenie pojawi się na liście z bieżącym statusem. To wszystko — jesteście sparowani.
 
@@ -59,6 +59,12 @@ Link `--relay` zawiera obie trasy, dokładnie jak okno dialogowe: urządzenie ł
 > Trasa bezpośrednia działa tylko wtedy, gdy serwer rzeczywiście nasłuchuje w Twojej sieci. Domyślnie OpenChamber nasłuchuje wyłącznie na samej maszynie — uruchom go z `--lan`, aby był osiągalny przez Wi-Fi. Polecenie ostrzega (`[LAN_UNREACHABLE]`), gdy trasa bezpośrednia linku nie będzie użyteczna z innych urządzeń; link `--relay` nadal wtedy działa, tyle że zawsze przez relay.
 
 Wypisany link i kod QR działają dokładnie tak samo jak te z okna ustawień — są jednorazowe, wygasają i można je unieważnić.
+
+Aby sparować aplikację desktopową, otwórz wypisany link na komputerze, na którym ta aplikacja działa. Aplikacja poprosi o potwierdzenie i się połączy. Na macOS:
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## Powiązane
 

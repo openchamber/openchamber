@@ -165,7 +165,17 @@ occur transiently in the field (a same-identity dial taking the leg, relay state
 left by a host restart), so the client keeps its wake listeners armed and the
 next `online` event or return to the foreground clears the error and makes one
 fresh attempt. There is still no background loop. Transient failures use the
-existing reconnect/backoff path.
+existing reconnect/backoff path. The client status marks such a parked error
+with `terminal: true`, so callers can tell it apart from a pending reconnect.
+
+Mobile connect flows (`packages/ui/src/apps/mobileConnections.ts`, helpers in
+`mobileRelayFetch.ts`) log the relay failure reason (close message or
+`timeout`) in the connect trail. Idempotent probes (`/health`,
+`/auth/session`) wait for the tunnel's own reconnect after a dropped socket and
+ask again within their budget; pairing redeem and password login are sent once.
+Pairing or logging in again to the server the phone is already on through the
+relay rides the connected runtime tunnel and does not open a second tunnel to
+the same server.
 
 Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 

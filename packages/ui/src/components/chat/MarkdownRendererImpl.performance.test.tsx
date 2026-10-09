@@ -64,7 +64,9 @@ let previousGlobals: Map<string, PropertyDescriptor | undefined>;
 let activeCounts: OperationCounts | null = null;
 let animationFrameQueue: FrameRequestCallback[] = [];
 let tableProbeWidths: Map<string, number> | null = null;
-let notifyResize: ((entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) | null = null;
+type ResizeNotifier = (entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void;
+let notifyResize: ResizeNotifier | null = null;
+let notifyTableResize: ResizeNotifier | null = null;
 let MarkdownRenderer: React.ComponentType<{
   content: string;
   messageId: string;
@@ -262,13 +264,22 @@ const initializePerformanceDom = async (): Promise<void> => {
     }
     return svgSetAttribute.call(this, name, value);
   } });
+  // Mermaid viewports and table containers each share one observer; observe
+  // calls and notifyResize follow the Mermaid one.
   class CountingResizeObserver {
-    constructor(callback: (entries: Array<{ target: Element; contentRect: { width: number; height: number } }>) => void) {
+    private readonly callback: ResizeNotifier;
+
+    constructor(callback: ResizeNotifier) {
       if (activeCounts) activeCounts.resizeObserverCreates += 1;
-      notifyResize = callback;
+      this.callback = callback;
     }
 
-    observe(): void {
+    observe(target: Element): void {
+      if (!target.matches('[data-markdown="mermaid-viewport"]')) {
+        notifyTableResize = this.callback;
+        return;
+      }
+      notifyResize = this.callback;
       if (activeCounts) activeCounts.resizeObserverObserveCalls += 1;
     }
 
@@ -472,6 +483,20 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
         && cell.classList.contains('[overflow-wrap:anywhere]')
       ))).toBe(true);
       expect(counts.tableProbeReads).toBe(tableProbeReads);
+
+      // A wider chat lays the table out again; a height-only change does not.
+      const markdown = host.querySelector('[data-markdown-content]');
+      if (!markdown || !notifyTableResize || !pendingScroll) throw new Error('Expected a watched table container');
+      notifyTableResize([{ target: markdown, contentRect: { width: 640, height: 200 } }]);
+      notifyTableResize([{ target: markdown, contentRect: { width: 640, height: 400 } }]);
+      await flushAnimationFrame();
+      expect(counts.tableProbeReads).toBe(tableProbeReads);
+      Object.defineProperty(pendingScroll, 'clientWidth', { configurable: true, value: 1000 });
+      notifyTableResize([{ target: markdown, contentRect: { width: 1040, height: 400 } }]);
+      await flushAnimationFrame();
+      expect(Array.from(table?.querySelectorAll<HTMLTableColElement>('colgroup[data-md-table-columns] col') ?? [])
+        .map((column) => column.style.width)).toEqual(['120px', '186px', '800px']);
+      expect(table?.style.width).toBe('1106px');
     } finally {
       tableProbeWidths = null;
       await act(async () => root.unmount());
@@ -824,7 +849,7 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     expect(metrics.tableProbeReads).toBe(fixtureWorkload.rendererCount * 2);
     expect(metrics.getBoundingClientRectCalls).toBe(metrics.mermaidRenderedCount + metrics.tableProbeReads);
     expect(metrics.viewBoxWrites).toBe(metrics.mermaidRenderedCount);
-    expect(metrics.resizeObserverCreates).toBe(1);
+    expect(metrics.resizeObserverCreates).toBe(2);
     expect(metrics.resizeObserverObserveCalls).toBe(metrics.mermaidRenderedCount);
     expect(metrics.geometrySequence.lastIndexOf('read')).toBeLessThan(metrics.geometrySequence.indexOf('write'));
 
@@ -860,8 +885,8 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     expect(six.appendCalls).toBeLessThanOrEqual(three.appendCalls * 2 + 12);
     expect(six.getBoundingClientRectCalls).toBe(three.getBoundingClientRectCalls * 2);
     expect(six.viewBoxWrites).toBe(three.viewBoxWrites * 2);
-    expect(three.resizeObserverCreates).toBe(1);
-    expect(six.resizeObserverCreates).toBe(1);
+    expect(three.resizeObserverCreates).toBe(2);
+    expect(six.resizeObserverCreates).toBe(2);
     expect(six.resizeObserverObserveCalls).toBe(three.resizeObserverObserveCalls * 2);
   });
 });

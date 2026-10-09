@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import os from 'os';
 import path from 'path';
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { createScheduledTaskService } from './service.js';
 import { registerScheduledTaskRoutes } from './routes.js';
 import { CHATS_SCOPE_PUBLIC_ID, createChatsScope } from './chats-scope.js';
+import { createScheduledTasksRuntime } from './runtime.js';
+import { createProjectConfigRuntime } from '../projects/project-config.js';
 
 const createService = (overrides = {}) => {
   const projectConfigRuntime = {
@@ -347,5 +349,129 @@ Run the digest.
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }
+  });
+});
+
+// The agent tool and the CLI enable and disable through setEnabled; these run
+// it against the real project config and scheduler, as the server does.
+describe('scheduled-task service setEnabled on loop tasks', () => {
+  const loopFileContent = (name, enabled, prompt = `Run ${name}.`) => `---
+name: ${name}
+schedule: "0 9 * * *"
+enabled: ${enabled}
+model: openai/gpt-5
+---
+${prompt}
+`;
+
+  let tempRoot;
+  let repoPath;
+  let repoLoop;
+  let userLoop;
+  let service;
+  let projectConfigRuntime;
+  const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loop-set-enabled-'));
+    // User-scope loops live under the home directory.
+    const home = path.join(tempRoot, 'home');
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    repoPath = path.join(tempRoot, 'repo');
+    await mkdir(path.join(repoPath, '.agents', 'loops'), { recursive: true });
+    await mkdir(path.join(home, '.agents', 'loops'), { recursive: true });
+    repoLoop = path.join(repoPath, '.agents', 'loops', 'repo.md');
+    userLoop = path.join(home, '.agents', 'loops', 'mine.md');
+    await writeFile(repoLoop, loopFileContent('repo-loop', true), 'utf8');
+    await writeFile(userLoop, loopFileContent('my-loop', false), 'utf8');
+
+    projectConfigRuntime = createProjectConfigRuntime({
+      fsPromises: await import('fs/promises'),
+      path,
+      projectsDirPath: path.join(tempRoot, 'config'),
+      createTaskID: () => 'task-fixed-id',
+    });
+    const listProjects = async () => [{ id: 'proj', path: repoPath }];
+    const scheduledTasksRuntime = createScheduledTasksRuntime({
+      buildOpenCodeUrl: () => 'http://localhost',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      projectConfigRuntime,
+      listProjects,
+    });
+    service = createScheduledTaskService({
+      readSettingsFromDiskMigrated: async () => ({ projects: await listProjects() }),
+      sanitizeProjects: (projects) => projects,
+      projectConfigRuntime,
+      scheduledTasksRuntime,
+    });
+  });
+
+  afterEach(async () => {
+    for (const [key, value] of Object.entries(savedHome)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  const stored = async (taskID) => (await projectConfigRuntime.listScheduledTasks('proj')).find((task) => task.id === taskID);
+  const listed = async (taskID) => (await service.list('proj')).find((task) => task.id === taskID);
+
+  it('refuses to enable a repository loop and changes nothing', async () => {
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({
+      statusCode: 409,
+      message: '"repo-loop" comes from this repository. Enable it in Scheduled tasks.',
+    });
+
+    expect((await stored('loop:project:repo-loop')).enabled).toBe(false);
+    expect(await readFile(repoLoop, 'utf8')).toBe(loopFileContent('repo-loop', true));
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+  });
+
+  it('leaves a held-back repository loop file alone when asked to disable it', async () => {
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', false)).resolves.toMatchObject({ enabled: false });
+
+    expect(await readFile(repoLoop, 'utf8')).toBe(loopFileContent('repo-loop', true));
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'required' });
+  });
+
+  it('disables a repository loop the user enabled, and it stays disabled', async () => {
+    await service.setLoopEnabled('proj', 'loop:project:repo-loop', true);
+    const enabled = await listed('loop:project:repo-loop');
+    expect(enabled.enabled).toBe(true);
+    expect(enabled.loopApproval).toBeUndefined();
+
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', false)).resolves.toMatchObject({ enabled: false });
+
+    const disabled = await listed('loop:project:repo-loop');
+    expect(disabled.enabled).toBe(false);
+    // Paused by the user: nothing to explain on the card.
+    expect(disabled.loopApproval).toBeUndefined();
+    expect(await readFile(repoLoop, 'utf8')).toContain('enabled: false');
+    // And the agent cannot turn it back on.
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('says a repository loop changed since the user enabled it', async () => {
+    await service.setLoopEnabled('proj', 'loop:project:repo-loop', true);
+    await writeFile(repoLoop, loopFileContent('repo-loop', true, 'Run something else.'), 'utf8');
+
+    expect(await listed('loop:project:repo-loop')).toMatchObject({ enabled: false, loopApproval: 'outdated' });
+    expect((await stored('loop:project:repo-loop')).loopApproval).toBeUndefined();
+    await expect(service.setEnabled('proj', 'loop:project:repo-loop', true)).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('enables and disables a loop from the user folder', async () => {
+    await expect(service.setEnabled('proj', 'loop:user:my-loop', true)).resolves.toMatchObject({ enabled: true });
+    expect((await stored('loop:user:my-loop')).enabled).toBe(true);
+    expect(await readFile(userLoop, 'utf8')).toContain('enabled: true');
+
+    await expect(service.setEnabled('proj', 'loop:user:my-loop', false)).resolves.toMatchObject({ enabled: false });
+    expect((await stored('loop:user:my-loop')).enabled).toBe(false);
+    expect(await readFile(userLoop, 'utf8')).toContain('enabled: false');
   });
 });

@@ -52,6 +52,49 @@ describe('relay dev tunnel bridge', () => {
     expect(second).toEqual({ localPort: first.localPort, reused: true });
   });
 
+  test('a space tunnel is its own listener and names the space on every connection', async () => {
+    const payloads = [];
+    const webContents = {
+      id: 10,
+      isDestroyed: () => false,
+      once: () => {},
+      postMessage: (_channel, payload, ports) => {
+        payloads.push(payload);
+        ports[0].start();
+        ports[0].postMessage({ type: 'close' });
+      },
+    };
+    const bridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannel(), logger: { warn: () => {} } });
+    bridges.push(bridge);
+    const host = await bridge.open({ targetKey: 'host:exe', remotePort: 4321, webContents });
+    const space = await bridge.open({ targetKey: 'host:exe', remotePort: 4321, spaceId: '84369ed6edda', webContents });
+    expect(space.localPort).not.toBe(host.localPort);
+    expect(await bridge.open({ targetKey: 'host:exe', remotePort: 4321, spaceId: '84369ed6edda', webContents })).toEqual({ localPort: space.localPort, reused: true });
+    await expect(bridge.open({ targetKey: 'host:exe', remotePort: 4321, spaceId: 'nope', webContents })).rejects.toThrow(/space id/);
+
+    await new Promise((resolve, reject) => {
+      const socket = net.connect({ host: '127.0.0.1', port: space.localPort });
+      socket.on('close', resolve);
+      socket.on('error', reject);
+    });
+    expect(payloads.map((payload) => [payload.remotePort, payload.spaceId])).toEqual([[4321, '84369ed6edda']]);
+  });
+
+  test('reports every closed tunnel with its space and local port, the window going among them', async () => {
+    const closed = [];
+    let onDestroyed = null;
+    const webContents = { id: 12, isDestroyed: () => false, once: (event, handler) => { if (event === 'destroyed') onDestroyed = handler; }, postMessage: () => {} };
+    const bridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannel(), onClosed: (tunnel) => closed.push(tunnel) });
+    bridges.push(bridge);
+    const host = await bridge.open({ targetKey: 'host:exe', remotePort: 4321, webContents });
+    const space = await bridge.open({ targetKey: 'host:exe', remotePort: 4321, spaceId: '84369ed6edda', webContents });
+    expect(bridge.closeForWebContents(12)).toBe(2);
+    expect(closed).toEqual([{ spaceId: null, localPort: host.localPort }, { spaceId: '84369ed6edda', localPort: space.localPort }]);
+    const again = await bridge.open({ targetKey: 'host:exe', remotePort: 4322, spaceId: '84369ed6edda', webContents });
+    onDestroyed?.();
+    expect(closed[2]).toEqual({ spaceId: '84369ed6edda', localPort: again.localPort });
+  });
+
   test('tells the renderer when the local browser connection closes', async () => {
     const rendererClosed = new Promise((resolve) => {
       const webContents = {

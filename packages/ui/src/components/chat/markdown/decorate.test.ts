@@ -84,6 +84,45 @@ describe('Markdown table actions', () => {
     }
   });
 
+  test('wrapping refits columns when the available width changes', () => {
+    const proto = win.HTMLElement.prototype;
+    const rect = Object.getOwnPropertyDescriptor(proto, 'getBoundingClientRect');
+    const clientWidth = Object.getOwnPropertyDescriptor(proto, 'clientWidth');
+    let availableWidth = 600;
+    Object.defineProperty(proto, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: HTMLElement) { return { width: (this.textContent?.length ?? 0) * 10 }; },
+    });
+    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => availableWidth });
+
+    const root = document.createElement('div');
+    root.innerHTML = `<table><thead><tr><th>A</th><th>B</th><th>C</th></tr></thead>
+      <tbody><tr><td>short</td><td>${'b'.repeat(100)}</td><td>${'c'.repeat(60)}</td></tr></tbody></table>`;
+    document.body.appendChild(root);
+    const columnWidths = () => Array.from(root.querySelectorAll<HTMLElement>('colgroup col')).map((col) => col.style.width);
+
+    try {
+      decorateMarkdown(root, context);
+      stabilizeMarkdownTableWidths(root, true);
+      expect(columnWidths()).toEqual(['120px', '240px', '240px']);
+
+      availableWidth = 1000;
+      stabilizeMarkdownTableWidths(root, true);
+      expect(columnWidths()).toEqual(['120px', '440px', '440px']);
+
+      availableWidth = 400;
+      stabilizeMarkdownTableWidths(root, true);
+      expect(columnWidths()).toEqual(['120px', '140px', '140px']);
+      expect(root.querySelector<HTMLElement>('[data-markdown="table-wrapper"]')?.style.width).toBe('');
+    } finally {
+      root.remove();
+      if (rect) Object.defineProperty(proto, 'getBoundingClientRect', rect);
+      else Reflect.deleteProperty(proto, 'getBoundingClientRect');
+      if (clientWidth) Object.defineProperty(proto, 'clientWidth', clientWidth);
+      else Reflect.deleteProperty(proto, 'clientWidth');
+    }
+  });
+
   test('copies links in Markdown, CSV, and TSV', async () => {
     const copied: string[] = [];
     Object.defineProperty(win.navigator, 'clipboard', {

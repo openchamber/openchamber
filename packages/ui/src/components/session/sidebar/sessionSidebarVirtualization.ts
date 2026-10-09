@@ -23,7 +23,27 @@ export const findFirstVisibleSessionSidebarRowIndex = (
   scrollOffset: number,
 ): number => items.find((item) => item.end > scrollOffset)?.index ?? 0;
 
-export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string | undefined => {
+const SECTION_SPACING_ESTIMATE = { 'pb-2': 8, 'pb-6': 24 } as const;
+
+type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
+
+/**
+ * Rows that share a kind, surface context and trailing section gap render at
+ * the same height, so one measured row tells the size of every unmeasured
+ * one. The virtualizer compensates the scroll position whenever a row above
+ * the viewport measures differently from its estimate, and that write lands
+ * in the middle of the user's scroll gesture.
+ */
+export const sessionSidebarRowSizeKey = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
+  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}:${sectionSpacingAfter(row, nextRow) ?? ''}`
+);
+
+export const estimateSessionSidebarRowSize = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): number => {
+  const spacing = sectionSpacingAfter(row, nextRow);
+  return row.estimateSize + (spacing ? SECTION_SPACING_ESTIMATE[spacing] : 0);
+};
+
+export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
   // The zones above the projects (Chats, In work, Recent) end with a wider
   // gap, whichever of them happens to be the last one shown.
   const endsZones = row.key.startsWith('activity:') && nextRow !== undefined && !nextRow.key.startsWith('activity:');

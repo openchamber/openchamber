@@ -99,12 +99,26 @@ describe('home directory read still in flight when the gate asks for it', () => 
       removeEventListener: () => undefined,
     });
     // A browser has no process environment to fall back on; bun test does.
-    const savedHome = process.env.HOME;
+    // Scrub every variable the store reads for the process home: HOME on
+    // POSIX, and USERPROFILE / HOMEDRIVE+HOMEPATH on Windows. Leaving the
+    // Windows pair behind makes the store bootstrap on the real Windows home.
+    const savedEnv = {
+      HOME: process.env.HOME,
+      USERPROFILE: process.env.USERPROFILE,
+      HOMEDRIVE: process.env.HOMEDRIVE,
+      HOMEPATH: process.env.HOMEPATH,
+    };
     const savedCwd = process.cwd;
     delete process.env.HOME;
+    delete process.env.USERPROFILE;
+    delete process.env.HOMEDRIVE;
+    delete process.env.HOMEPATH;
     process.cwd = () => '';
     const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore').finally(() => {
-      process.env.HOME = savedHome;
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       process.cwd = savedCwd;
     });
     expect(useDirectoryStore.getState().isHomeReady).toBe(false);

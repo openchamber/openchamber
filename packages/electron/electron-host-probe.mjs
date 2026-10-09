@@ -6,6 +6,7 @@ const versionEnvelope = z.object({
   status: z.literal('ok'),
   // Arrays historically classify as incompatible rather than wrong-service.
   compatibility: z.union([z.looseObject({}), z.array(z.unknown())]),
+  openchamberVersion: optionalIdentity,
 });
 
 const buildProbeUrl = (url, pathname) => {
@@ -18,13 +19,24 @@ const buildProbeUrl = (url, pathname) => {
   }
 };
 
+// A server before 2.0 runs OpenCode 1.x and reports the same API version and
+// capabilities as a current one; only its own version tells it apart. A
+// version that does not parse says nothing either way.
+const isServerBeforeOpenCode2 = (version) => {
+  const major = /^(\d+)\./.exec(version)?.[1];
+  return major !== undefined && Number(major) < 2;
+};
+
 const classifyVersionPayload = (payload) => {
   const parsed = versionEnvelope.safeParse(payload);
   if (!parsed.success) {
     return 'wrong-service';
   }
-  const { compatibility } = parsed.data;
+  const { compatibility, openchamberVersion } = parsed.data;
   if (!Array.isArray(compatibility.capabilities) || !compatibility.capabilities.includes('api.runtime-url.v1')) {
+    return 'incompatible';
+  }
+  if (isServerBeforeOpenCode2(openchamberVersion)) {
     return 'incompatible';
   }
   if (compatibility.apiVersion !== 1 || compatibility.minClientApiVersion > 1) {

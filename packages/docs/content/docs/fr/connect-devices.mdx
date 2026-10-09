@@ -18,7 +18,7 @@ Associez un autre appareil — l’application mobile, l’application desktop o
 4. Pressez **Créer le code QR**.
 5. Sur l’autre appareil, scannez le code :
    - **application mobile** — touchez **Scanner le code QR** sur l’écran de connexion (ou dans la liste des instances)
-   - **application desktop** — copiez plutôt le lien de connexion et collez-le dans **Paramètres → Instances distantes → Autres serveurs OpenChamber → Importer le lien**
+   - **application desktop** — copiez plutôt le lien de connexion et ouvrez-le sur la machine où tourne l'application desktop, qui demande une confirmation avant de se connecter. Vous pouvez aussi le coller dans **Paramètres → Instances distantes → Autres serveurs OpenChamber → Importer le lien**
 
 Le dialogue se ferme tout seul dès que l’appareil se connecte, et l’appareil apparaît dans la liste avec un statut en direct. C’est tout — vous êtes associé.
 
@@ -59,6 +59,12 @@ Un lien `--relay` contient les deux routes, exactement comme le dialogue : l’a
 > La route directe ne fonctionne que si le serveur écoute réellement sur votre réseau. Par défaut, OpenChamber n’écoute que sur la machine elle-même — démarrez-le avec `--lan` pour le rendre joignable en Wi-Fi. La commande vous prévient (`[LAN_UNREACHABLE]`) quand la route directe du lien ne sera pas utilisable depuis d’autres appareils ; un lien `--relay` fonctionne quand même dans ce cas, simplement toujours via le relais.
 
 Le lien et le QR code affichés fonctionnent exactement comme ceux du dialogue des paramètres — à usage unique, avec expiration, révocables.
+
+Pour associer une application desktop, ouvrez le lien affiché sur la machine où elle tourne. L'application demande une confirmation, puis se connecte. Sur macOS :
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## Pages liées
 

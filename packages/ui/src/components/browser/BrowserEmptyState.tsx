@@ -1,13 +1,16 @@
 import React from 'react';
 
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useI18n } from '@/lib/i18n';
 import { fetchDevServers, mergeDevServerCandidates, type DevServerDiscovery } from '@/lib/browser/devServers';
 import { clearAnnouncedDevServers, useAnnouncedDevServers } from '@/lib/browser/announcedServers';
 import { browserUrlLabel } from '@/lib/browser/url';
-import { isRemoteWebLoopbackUrl } from '@/lib/browser/devTunnel';
+import { isRemoteWebLoopbackUrl, isSpaceUnreachableFromHere } from '@/lib/browser/devTunnel';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
+import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
 import { hideDevServerPort, showHiddenDevServerPorts, useHiddenDevServerPorts } from '@/lib/browser/hiddenDevServers';
 
 /**
@@ -33,11 +36,12 @@ const pathLabel = (url: string): string => {
 const REFRESH_INTERVAL_MS = 2_000;
 
 /**
- * True when the listed servers are on another machine and this client has no
- * way to reach them. The desktop shell tunnels a local port for exactly this
- * case; a browser tab has no equivalent, and its `localhost` is its own.
+ * True when the listed servers are on another machine, or inside an isolated
+ * space, and this client has no way to reach them. The desktop shell tunnels a
+ * local port for exactly this case; a browser tab has no equivalent, and its
+ * `localhost` is its own.
  */
-const isUnreachableFromHere = (): boolean => isRemoteWebLoopbackUrl('http://localhost');
+const isUnreachableFromHere = (directory: string): boolean => isRemoteWebLoopbackUrl('http://localhost', directory);
 
 export const BrowserEmptyState: React.FC<{
   onOpen: (url: string) => void;
@@ -46,7 +50,12 @@ export const BrowserEmptyState: React.FC<{
   const { t } = useI18n();
   const [discovery, setDiscovery] = React.useState<DevServerDiscovery>({ kind: 'loading' });
   const announced = useAnnouncedDevServers(directory);
-  const [remoteOnly] = React.useState(isUnreachableFromHere);
+  const [remoteOnly] = React.useState(() => isUnreachableFromHere(directory));
+  const [spaceUnreachable] = React.useState(() => isSpaceUnreachableFromHere(directory));
+  // A space's servers carry the container mark the sidebar gives the space, with the space's
+  // name and place behind it.
+  const insideSpace = isSpaceDirectory(directory);
+  const spaceMark = useSpaceMarkLabel(directory);
 
   React.useEffect(() => {
     let active = true;
@@ -54,7 +63,7 @@ export const BrowserEmptyState: React.FC<{
     const controller = new AbortController();
 
     const poll = () => {
-      void fetchDevServers(controller.signal).then((result) => {
+      void fetchDevServers(controller.signal, directory).then((result) => {
         if (!active) return;
         setDiscovery(result);
         // One look is a snapshot of whichever servers happened to be up first.
@@ -68,7 +77,7 @@ export const BrowserEmptyState: React.FC<{
       if (timer) clearTimeout(timer);
       controller.abort();
     };
-  }, []);
+  }, [directory]);
 
   const candidates = React.useMemo(() => mergeDevServerCandidates({
     announced,
@@ -101,7 +110,7 @@ export const BrowserEmptyState: React.FC<{
               ? t('contextPanel.browser.devServers.justStarted')
               : t('contextPanel.browser.devServers.title')}
           </span>
-          {remoteOnly ? (
+          {remoteOnly && !spaceUnreachable ? (
             <span className="shrink-0 pb-1 text-left typography-micro text-muted-foreground">
               {t('contextPanel.browser.devServers.remoteOnly')}
             </span>
@@ -113,20 +122,45 @@ export const BrowserEmptyState: React.FC<{
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="min-w-0 flex-1 justify-start gap-2"
-                  disabled={remoteOnly}
+                  // Not `disabled`: that takes the pointer away, and with it the
+                  // tooltips of the two marks that say why the row does not open.
+                  className={cn('min-w-0 flex-1 justify-start gap-2', remoteOnly && 'cursor-default opacity-60')}
+                  aria-disabled={remoteOnly || undefined}
                   onClick={() => {
+                    if (remoteOnly) return;
                     // The offer is answered; leaving it up would keep suggesting
                     // servers behind a page the user is already looking at.
                     clearAnnouncedDevServers(directory);
                     onOpen(candidate.url);
                   }}
                 >
-                  <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />
+                  {insideSpace ? (
+                    <span
+                      className="shrink-0"
+                      role="img"
+                      aria-label={spaceMark ?? t('contextPanel.browser.spaceAddress')}
+                      title={spaceMark ?? t('contextPanel.browser.spaceAddress')}
+                    >
+                      <Icon name="box-3" className="size-3.5" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <Icon name="global" className="size-3.5 shrink-0" aria-hidden="true" />
+                  )}
                   <span className="truncate">{browserUrlLabel(candidate.url) || candidate.url}</span>
-                  <span className="ml-auto truncate typography-micro text-muted-foreground">
-                    {pathLabel(candidate.url)}
-                  </span>
+                  {spaceUnreachable ? (
+                    <span
+                      className="ml-auto shrink-0 text-muted-foreground"
+                      role="img"
+                      aria-label={t('contextPanel.browser.devServers.spaceOnlyDesktop')}
+                      title={t('contextPanel.browser.devServers.spaceOnlyDesktop')}
+                    >
+                      <Icon name="computer" className="size-3.5" aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <span className="ml-auto truncate typography-micro text-muted-foreground">
+                      {pathLabel(candidate.url)}
+                    </span>
+                  )}
                 </Button>
                 {candidate.announced ? null : (
                   <Button

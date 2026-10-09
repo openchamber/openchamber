@@ -15,8 +15,9 @@ n=$1; subject=$2; thanks=$3; body=${4:-}
 cd "$WT"
 read -r owner branch _mcm < "$STATE/cur.txt"
 author=$(git log -1 --format='%an <%ae>' "pr${n}-head")
-# Stage tracked work only: the node_modules links in the worktree stay out.
-git add -A -- . ':!node_modules' ':!packages/*/node_modules'
+# The node_modules links in the worktree are gitignored, so -A leaves them out.
+# Naming them in an exclude pathspec makes git refuse ignored paths and exit 1.
+git add -A
 git -c core.hooksPath=/dev/null commit -q --author="$author" -m "$subject"
 git push -q --force "https://github.com/$owner/openchamber.git" "HEAD:$branch"
 gh pr comment "$n" -R "$REPO" --body "$thanks" > /dev/null

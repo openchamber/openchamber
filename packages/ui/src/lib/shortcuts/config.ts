@@ -307,6 +307,12 @@ const SHORTCUT_GROUPS = {
       customizable: true,
       settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.mini_chat_global.label',
     },
+    {
+      id: 'quake_mode_global',
+      defaultBinding: UNASSIGNED_SHORTCUT,
+      customizable: true,
+      settingsLabelKey: 'settings.openchamber.keyboardShortcuts.action.quake_mode_global.label',
+    },
   ],
 } as const satisfies Record<ShortcutCategory, readonly ShortcutConfig[]>;
 

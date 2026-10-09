@@ -11,6 +11,7 @@ const anthropic = { kind: 'model' as const, id: 'anthropic', provider: 'anthropi
 const running = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: ID,
   name: 'Fix login',
+  placeId: 'docker',
   projectDirectory: '/home/me/app',
   projectFolder: { path: '/home/me/app', found: true },
   directory: DIRECTORY,

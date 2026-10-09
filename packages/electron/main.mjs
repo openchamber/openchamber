@@ -1,10 +1,11 @@
 import { canReuseManagedOpenCodePreflight } from './opencode-readiness.mjs';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, session, shell, webContents } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, MessageChannelMain, nativeTheme, net as electronNet, Notification, powerMonitor, powerSaveBlocker, protocol, screen, session, shell, webContents } from 'electron';
 import contextMenu from 'electron-context-menu';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn, spawnSync } from 'node:child_process';
@@ -17,6 +18,7 @@ import { createTrayController } from './tray.mjs';
 import { resolveManagedOpenCodeCwd } from './opencode-cwd.mjs';
 import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { resolveStartupUrlProbePlan } from './startup-url-selection.mjs';
+import { clearAppCache } from './app-cache.mjs';
 import {
   BACKGROUND_START_ARG,
   DEEP_LINK_PROTOCOL,
@@ -58,10 +60,21 @@ import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRunti
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
+import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability } from './updater-capability.mjs';
 import { checkForDesktopUpdate } from './updater-check.mjs';
 import { resolveUpdaterChannel } from './updater-channel.mjs';
 import { convertShortcutComboToAccelerator, MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY, normalizeStoredShortcutCombo, selectMiniChatGlobalShortcutAction } from './mini-chat-global-shortcut.mjs';
+import {
+  computeQuakeBounds,
+  parseQuakeHeightFraction,
+  QUAKE_MODE_ENABLED_KEY,
+  QUAKE_MODE_HEIGHT_KEY,
+  QUAKE_MODE_SHORTCUT_KEY,
+  QUAKE_MODE_UNASSIGNED,
+  readQuakeModeSettings,
+  selectQuakeToggleAction,
+} from './quake-mode.mjs';
 import { createContextMenuLabels, menuLabel, normalizeMenuLocale, roleMenuItem } from './menu-locales.mjs';
 import { resolveUpdaterFeed } from './updater-feed.mjs';
 import {
@@ -82,8 +95,10 @@ import {
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
 } from './browser-panel-security.mjs';
+import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 import { createRelayDevTunnelBridge } from './relay-dev-tunnel.mjs';
+import { parsePairingDeepLink } from './pairing-deep-link.mjs';
 import { attachRendererRecovery } from './renderer-recovery.mjs';
 import { createLoadFailureWarningFilter } from './load-failure-warnings.mjs';
 import { mintOutsideFileGrant } from '@openchamber/web/server/lib/fs/routes.js';
@@ -274,6 +289,12 @@ const state = {
   pendingUpdate: null,
   unreachableHosts: new Set(),
   windowCounter: 1,
+  // Quake Mode: the main window's normal geometry while it is showing the
+  // top-attached dropdown instead. Restored when Quake hides for good or is
+  // disabled; never persisted (writeWindowState skips Quake bounds).
+  quakeActive: false,
+  quakeNormalBounds: null,
+  quakeNormalMaximized: false,
   focusedWindowIds: new Set(),
   windowGeometryRevisions: new Map(),
   windowGeometryTimers: new Map(),
@@ -812,6 +833,9 @@ const writeDesktopHostsConfig = async (config) => {
 const writeWindowState = async (browserWindow) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
   if (!state.mainWindow || browserWindow.id !== state.mainWindow.id) return;
+  // Quake geometry is transient: persisting it would overwrite the user's
+  // normal window bounds with the dropdown size.
+  if (state.quakeActive) return;
 
   const bounds = browserWindow.getBounds();
   await mutateSettingsRoot((root) => {
@@ -1038,24 +1062,24 @@ const resolveBrowserPanelContents = (rawId) => {
   if (id === null || id < 0) throw new Error('webContentsId is required');
   const target = webContents.fromId(id);
   if (!target || target.isDestroyed()) throw new Error('WebContents not found');
-  if (target.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+  if (!isPanelSession(target.session)) {
     throw new Error('That view is not a browser panel page');
   }
   return target;
 };
 
-const hardenBrowserPanelSession = () => {
-  const panelSession = session.fromPartition(BROWSER_PANEL_PARTITION);
-  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
+/**
+ * The sessions of the browser panel: the user's persistent one, and one per
+ * isolated space whose pages are shown. Membership is what the panel commands
+ * check, so a space's view answers to annotation and capture like any other.
+ */
+const panelSessions = new Set();
+const isPanelSession = (candidate) => panelSessions.has(candidate);
 
-  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
-    if (contents.session === panelSession && shouldAllowBrowserPanelCertificateError({ url, error })) {
-      event.preventDefault();
-      callback(true);
-      return;
-    }
-    callback(false);
-  });
+const hardenPanelSession = (panelSession) => {
+  if (panelSessions.has(panelSession)) return;
+  panelSessions.add(panelSession);
+  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
 
   panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const allowed = shouldAllowBrowserPanelPermission({
@@ -1086,6 +1110,124 @@ const hardenBrowserPanelSession = () => {
 
   // Serial, HID and USB device pickers.
   panelSession.setDevicePermissionHandler(() => false);
+};
+
+const hardenBrowserPanelSession = () => {
+  hardenPanelSession(session.fromPartition(BROWSER_PANEL_PARTITION));
+
+  app.on('certificate-error', (event, contents, url, error, _certificate, callback) => {
+    if (isPanelSession(contents.session) && shouldAllowBrowserPanelCertificateError({ url, error })) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+};
+
+/**
+ * Pages from an isolated space, shown in the panel through a tunnel into the
+ * space. Each space gets a session of its own, routed through a proxy that
+ * answers nothing and bypassed only for that space's own tunnel ports, so the
+ * page reaches the space and nothing else from this machine: not the local
+ * API, not the user's own dev servers, not the internet. The rules are in
+ * space-preview.mjs; the dead proxy is a listener of this process that drops
+ * every connection, so a request sent there is refused at once.
+ *
+ * The proxy is applied before a tunnel's port is handed to the renderer, and
+ * again, with no port, the moment a view with a space partition is attached,
+ * so no page of a space ever loads on a session without it.
+ */
+const spacePreviews = new Map();
+let deadProxyPortPromise = null;
+const getDeadProxyPort = () => {
+  if (!deadProxyPortPromise) {
+    deadProxyPortPromise = new Promise((resolve, reject) => {
+      const server = net.createServer((socket) => socket.destroy());
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const port = server.address()?.port;
+        if (!port) {
+          reject(new Error('Failed to bind the dead proxy'));
+          return;
+        }
+        server.unref();
+        resolve(port);
+      });
+    }).catch((error) => {
+      deadProxyPortPromise = null;
+      throw error;
+    });
+  }
+  return deadProxyPortPromise;
+};
+
+const spacePreviewOf = (spaceId) => {
+  let entry = spacePreviews.get(spaceId);
+  if (!entry) {
+    entry = { ports: new Set(), chain: Promise.resolve() };
+    spacePreviews.set(spaceId, entry);
+  }
+  return entry;
+};
+
+/** Writes the space's current port set into its session, one write after another. */
+const applySpacePreviewProxy = (spaceId) => {
+  const entry = spacePreviewOf(spaceId);
+  entry.chain = entry.chain.catch(() => {}).then(async () => {
+    const panelSession = session.fromPartition(spacePreviewPartition(spaceId));
+    hardenPanelSession(panelSession);
+    const deadProxyPort = await getDeadProxyPort();
+    await panelSession.setProxy(spacePreviewProxyConfig({ deadProxyPort, localPorts: [...entry.ports] }));
+  });
+  return entry.chain;
+};
+
+const openSpacePreviewPort = (spaceId, localPort) => {
+  spacePreviewOf(spaceId).ports.add(localPort);
+  return applySpacePreviewProxy(spaceId);
+};
+
+const closeSpacePreviewPort = (spaceId, localPort) => {
+  const entry = spacePreviews.get(spaceId);
+  if (!entry || !entry.ports.delete(localPort)) return Promise.resolve();
+  return applySpacePreviewProxy(spaceId);
+};
+
+const closeAllSpacePreviewPorts = () => {
+  for (const [spaceId, entry] of spacePreviews) {
+    if (entry.ports.size === 0) continue;
+    entry.ports.clear();
+    applySpacePreviewProxy(spaceId).catch((error) => {
+      log.warn(`[electron] could not reset the preview proxy of space ${spaceId}: ${error?.message || error}`);
+    });
+  }
+};
+
+/**
+ * Every view the page attaches runs in a panel session, and nothing else: the
+ * user's panel partition, or a space's partition, whose proxy the renderer asks
+ * for before it attaches the view and which is applied here again as a backstop. A view that names no partition would share the app's own
+ * session, cookies and all, with whatever page it loads.
+ */
+const guardAttachedWebviews = (contents) => {
+  contents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    delete webPreferences.preloadURL;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    const partition = String(webPreferences.partition || params?.partition || '');
+    if (partition === BROWSER_PANEL_PARTITION) return;
+    const spaceId = spaceIdOfPreviewPartition(partition);
+    if (spaceId) {
+      applySpacePreviewProxy(spaceId).catch((error) => {
+        log.warn(`[electron] could not apply the preview proxy of space ${spaceId}: ${error?.message || error}`);
+      });
+      return;
+    }
+    log.warn('[electron] refused a webview outside the browser panel sessions');
+    event.preventDefault();
+  });
 };
 
 const registerPackagedUiProtocol = () => {
@@ -1782,133 +1924,17 @@ const readDeepLinkQueryParam = (raw, name) => {
   }
 };
 
-const decodeBase64UrlJson = (value) => {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const json = Buffer.from(value.trim(), 'base64url').toString('utf8');
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-};
+// Host work the main window's renderer does itself (desktop_take_pending_host_actions):
+// redeeming a pairing link the user confirmed, and activating a host with a
+// relay leg. Both need the E2EE relay client, which lives in the renderer; it
+// probes the direct address first and falls back to the tunnel, like the host
+// switcher. Pairing links carry the one-time secret: they leave this queue only
+// to that renderer and are never logged.
+const pendingHostActions = [];
 
-const parseConnectPairingDeepLinkPayload = (raw) => {
-  if (typeof raw !== 'string') return null;
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== `${DEEP_LINK_PROTOCOL}:` || url.hostname !== 'connect') return null;
-    if (url.searchParams.get('v') !== '2') return null;
-    const payload = decodeBase64UrlJson(url.searchParams.get('p') || '');
-    if (!payload || payload.v !== 2 || typeof payload !== 'object') return null;
-    const pairingId = typeof payload.pairingId === 'string' ? payload.pairingId.trim() : '';
-    const secret = typeof payload.secret === 'string' ? payload.secret.trim() : '';
-    if (!pairingId || !secret) return null;
-    const candidates = Array.isArray(payload.candidates)
-      ? payload.candidates.flatMap((candidate) => {
-        if (!candidate || typeof candidate !== 'object') return [];
-        const type = candidate.type === 'lan' || candidate.type === 'tunnel' || candidate.type === 'relay'
-          ? candidate.type
-          : null;
-        const candidateUrl = normalizeHostUrl(candidate.url || '');
-        if (!type || !candidateUrl) return [];
-        const priority = Number.isFinite(candidate.priority) ? candidate.priority : 100;
-        return [{ type, url: candidateUrl, priority }];
-      })
-      : [];
-    if (candidates.length === 0) return null;
-    const expiresAt = typeof payload.expiresAt === 'string' ? payload.expiresAt.trim() : '';
-    if (expiresAt) {
-      const expiresTime = Date.parse(expiresAt);
-      if (!Number.isFinite(expiresTime) || expiresTime <= Date.now()) return null;
-    }
-    return {
-      pairingId,
-      secret,
-      label: typeof payload.label === 'string' && payload.label.trim() ? payload.label.trim() : 'OpenChamber',
-      fingerprint: typeof payload.fingerprint === 'string' && payload.fingerprint.trim() ? payload.fingerprint.trim() : '',
-      expiresAt: expiresAt || null,
-      candidates: candidates.sort((left, right) => left.priority - right.priority),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const importConnectDeepLink = async (payload) => {
-  if (!payload?.serverUrl || !payload?.token) return null;
-  const serverUrl = normalizeHostUrl(payload.serverUrl);
-  if (!serverUrl) return null;
-  const config = readDesktopHostsConfig();
-  const existing = config.hosts.find((host) => {
-    const hostUrl = normalizeHostUrl(host?.url || '');
-    const apiUrl = normalizeHostUrl(host?.apiUrl || host?.url || '');
-    return serverUrl === hostUrl || serverUrl === apiUrl;
-  });
-
-  const id = existing?.id || `host-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const importedHost = {
-    ...(existing || {}),
-    id,
-    label: payload.label || existing?.label || serverUrl,
-    url: serverUrl,
-    apiUrl: serverUrl,
-    clientToken: payload.token,
-  };
-  const hosts = existing
-    ? config.hosts.map((host) => (host.id === existing.id ? importedHost : host))
-    : [importedHost, ...config.hosts];
-  await writeDesktopHostsConfig({
-    ...config,
-    hosts,
-    defaultHostId: config.defaultHostId || id,
-    initialHostChoiceCompleted: true,
-  });
-  return id;
-};
-
-const requestJsonWithTimeout = async (url, init = {}, timeoutMs = 8000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const data = await response.json().catch(() => null);
-    return { ok: response.ok, status: response.status, data };
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const selectPairingCandidateUrl = async (payload) => {
-  for (const candidate of payload.candidates || []) {
-    try {
-      const health = await requestJsonWithTimeout(`${candidate.url.replace(/\/+$/g, '')}/health`, { method: 'GET' }, 3500);
-      if (health.ok) return candidate.url.replace(/\/+$/g, '');
-    } catch {
-    }
-  }
-  return null;
-};
-
-const redeemConnectPairingDeepLink = async (payload, serverUrl) => {
-  const response = await requestJsonWithTimeout(`${serverUrl.replace(/\/+$/g, '')}/api/client-auth/pairing/redeem`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({
-      pairingId: payload.pairingId,
-      secret: payload.secret,
-      clientLabel: 'OpenChamber Desktop',
-      clientKind: 'desktop',
-      deviceName: 'OpenChamber Desktop',
-      ...desktopDeviceMetadata(),
-      dedupeKey: `desktop:${await getOrCreateDesktopInstallId()}`,
-    }),
-  });
-  if (!response.ok || !response.data || typeof response.data.clientToken !== 'string') return null;
-  return {
-    serverUrl,
-    token: sanitizeClientTokenForStorage(response.data.clientToken),
-    label: payload.label || response.data?.server?.label || serverUrl,
-  };
+const queueHostAction = (action) => {
+  pendingHostActions.push(action);
+  emitToWindow(state.mainWindow, 'openchamber:host-actions-ready');
 };
 
 const switchToHostById = async (rawId) => {
@@ -1928,6 +1954,13 @@ const switchToHostById = async (rawId) => {
     const host = config.hosts.find((entry) => entry.id === id);
     if (!host) {
       log.warn('[electron] deep-link host not found:', id);
+      return;
+    }
+    if (sanitizeHostRelayForStorage(host.relay)) {
+      // A fixed apiBaseUrl would strand the window when the direct address is
+      // unreachable; the renderer picks direct or relay.
+      log.info('[electron] activating relay-capable host in renderer', { id });
+      queueHostAction({ type: 'host', hostId: id });
       return;
     }
     targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
@@ -1982,33 +2015,17 @@ const dispatchDeepLink = (link) => {
   if (!link) return;
   log.info('[electron] dispatching deep-link', { type: link.type, valueLen: link.value?.length || 0 });
   if (link.type === 'connect') {
-    const pairingPayload = parseConnectPairingDeepLinkPayload(link.raw);
-    if (pairingPayload) {
-      const previewUrl = pairingPayload.candidates[0]?.url || pairingPayload.label;
+    const pairing = parsePairingDeepLink(link.raw, { protocol: DEEP_LINK_PROTOCOL });
+    if (pairing) {
       void confirmConnectDeepLink({
-        serverUrl: previewUrl,
-        token: 'pairing-v2',
-        label: pairingPayload.fingerprint ? `${pairingPayload.label} (${pairingPayload.fingerprint})` : pairingPayload.label,
-      }).then(async (confirmed) => {
+        serverUrl: pairing.target,
+        label: pairing.fingerprint ? `${pairing.label} (${pairing.fingerprint})` : pairing.label,
+      }).then((confirmed) => {
         if (!confirmed) {
           log.info('[electron] connect pairing deep-link declined by user');
           return;
         }
-        const serverUrl = await selectPairingCandidateUrl(pairingPayload);
-        if (!serverUrl) {
-          log.warn('[electron] connect pairing deep-link has no reachable candidate');
-          return;
-        }
-        const importedPayload = await redeemConnectPairingDeepLink(pairingPayload, serverUrl).catch((error) => {
-          log.warn('[electron] connect pairing redeem failed:', error);
-          return null;
-        });
-        if (!importedPayload?.token) {
-          log.warn('[electron] connect pairing redeem returned no client token');
-          return;
-        }
-        const id = await importConnectDeepLink(importedPayload);
-        if (id) void switchToHostById(id);
+        queueHostAction({ type: 'pairing', link: link.raw.trim() });
       });
       return;
     }
@@ -2216,6 +2233,10 @@ const applyDesktopMiniChatGlobalShortcut = () => {
     log.warn('[electron] mini chat global shortcut: unsupported combo', { combo });
     return;
   }
+  if (registeredQuakeModeAccelerator !== null && accelerator === registeredQuakeModeAccelerator) {
+    log.warn('[electron] mini chat global shortcut: combo collides with Quake Mode', { combo, accelerator });
+    return;
+  }
   try {
     globalShortcut.register(accelerator, handleMiniChatGlobalShortcut);
     if (globalShortcut.isRegistered(accelerator)) {
@@ -2226,6 +2247,189 @@ const applyDesktopMiniChatGlobalShortcut = () => {
     }
   } catch (error) {
     log.warn('[electron] mini chat global shortcut: registration failed', error);
+  }
+};
+
+// Quake Mode: one global hotkey toggles the existing main window between
+// hidden (process keeps running, renderer untouched) and a top-attached
+// dropdown. The combo is stored in settings.json under
+// desktopQuakeModeShortcut using the in-app shortcut syntax; when Quake is
+// enabled but nothing was stored, the default applies (Ctrl+`, deliberately
+// without the Win key so it never fires Windows Terminal's own dropdown), and
+// an explicitly unassigned one registers nothing. A stored combo that fails to
+// convert, is taken by another app, or collides with the Mini Chat shortcut
+// stays configured but inactive, and the settings row surfaces that state.
+let registeredQuakeModeAccelerator = null;
+
+const readDesktopQuakeModeStatus = () => {
+  const { enabled, storedCombo, combo, heightFraction } = readQuakeModeSettings(readSettingsRoot());
+  return {
+    supported: true,
+    enabled,
+    combo,
+    storedCombo,
+    active: registeredQuakeModeAccelerator !== null,
+    heightFraction,
+  };
+};
+
+// Close-to-quake gate. Quake Mode is itself a background lifecycle (like the
+// tray): closing the window hides it so the hotkey can bring it back, instead
+// of quitting the app out from under the user. Without a registered hotkey
+// (unassigned, taken by another app, unsupported on Wayland) nothing could
+// bring the window back, so close behaves as if Quake were off.
+const shouldHideMainWindowToQuake = (browserWindow) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (browserWindow.__ocMiniChat === true) return false;
+  if (registeredQuakeModeAccelerator === null) return false;
+  return readSettingsRoot()[QUAKE_MODE_ENABLED_KEY] === true;
+};
+
+// The display the Quake window opens on: the one holding the cursor (like
+// Windows Terminal), falling back to the primary display.
+const getQuakeDisplayBounds = () => {
+  try {
+    const cursor = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursor);
+    if (display?.bounds) return display.bounds;
+  } catch {
+    // A cursor that cannot be read (locked screen, RDP edge) falls through.
+  }
+  try {
+    const primary = screen.getPrimaryDisplay();
+    if (primary?.bounds) return primary.bounds;
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+// Shows the existing main window as the Quake dropdown WITHOUT navigating or
+// reloading it, then focuses it so the user can type immediately. The window
+// stays an ordinary window (taskbar entry, Alt+Tab, minimize/maximize all work
+// as usual); only its geometry and the hotkey toggle are Quake Mode behavior.
+const showQuakeWindow = (browserWindow, heightFraction) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return false;
+  if (!state.quakeActive) {
+    try {
+      state.quakeNormalBounds = browserWindow.getBounds();
+    } catch {
+      state.quakeNormalBounds = null;
+    }
+    state.quakeNormalMaximized = (() => {
+      try {
+        return browserWindow.isMaximized();
+      } catch {
+        return false;
+      }
+    })();
+  }
+  try {
+    // macOS: a hotkey pressed from another app leaves OpenChamber in the
+    // background, where show/focus alone do not bring it forward.
+    if (process.platform === 'darwin') app.focus({ steal: true });
+    if (browserWindow.isMinimized()) browserWindow.restore();
+    if (state.quakeNormalMaximized) browserWindow.unmaximize();
+    const displayBounds = getQuakeDisplayBounds();
+    if (displayBounds) {
+      browserWindow.setBounds(computeQuakeBounds(displayBounds, heightFraction));
+    }
+    if (!browserWindow.isVisible()) browserWindow.show();
+    browserWindow.focus();
+    browserWindow.moveTop();
+    state.quakeActive = true;
+    return true;
+  } catch (error) {
+    log.warn('[electron] quake mode: show failed', error);
+    return false;
+  }
+};
+
+const hideQuakeWindow = (browserWindow) => {
+  if (!browserWindow || browserWindow.isDestroyed()) return;
+  try {
+    debounceWindowStatePersist(browserWindow, true);
+  } catch {
+    // Persist is best-effort; hiding must not fail because of it.
+  }
+  browserWindow.hide();
+};
+
+// Leaves the dropdown and puts the normal window back: the bounds and the
+// maximized state captured before Quake reshaped the window.
+const restoreNormalWindowFromQuake = () => {
+  const target = state.mainWindow;
+  if (!state.quakeActive) return target;
+  state.quakeActive = false;
+  if (!target || target.isDestroyed()) return target;
+  try {
+    if (state.quakeNormalBounds) {
+      target.setBounds(state.quakeNormalBounds);
+    }
+    if (state.quakeNormalMaximized) target.maximize();
+  } catch (error) {
+    log.warn('[electron] quake mode: restore failed', error);
+  }
+  state.quakeNormalBounds = null;
+  state.quakeNormalMaximized = false;
+  return target;
+};
+
+const handleQuakeModeGlobalShortcut = () => {
+  const { heightFraction } = readQuakeModeSettings(readSettingsRoot());
+  const mainWindow = state.mainWindow && !state.mainWindow.isDestroyed() ? state.mainWindow : null;
+  const action = selectQuakeToggleAction({
+    windowExists: mainWindow !== null,
+    isVisible: mainWindow?.isVisible() === true,
+    isMinimized: mainWindow?.isMinimized() === true,
+    isFocused: mainWindow?.isFocused() === true,
+  });
+  if (action === 'hide' && mainWindow) {
+    hideQuakeWindow(mainWindow);
+    return;
+  }
+  if (mainWindow) {
+    showQuakeWindow(mainWindow, heightFraction);
+    return;
+  }
+  // Windowless background start (or a truly closed window): create the main
+  // window, then shape it into the dropdown once it exists.
+  void openMainWindow().then((created) => {
+    const target = created && !created.isDestroyed() ? created : state.mainWindow;
+    if (target && !target.isDestroyed()) showQuakeWindow(target, heightFraction);
+  }).catch((error) => {
+    log.warn('[electron] quake mode: open failed', error);
+  });
+};
+
+const applyDesktopQuakeModeShortcut = () => {
+  if (registeredQuakeModeAccelerator !== null) {
+    try {
+      globalShortcut.unregister(registeredQuakeModeAccelerator);
+    } catch {
+    }
+    registeredQuakeModeAccelerator = null;
+  }
+  const { enabled, combo } = readDesktopQuakeModeStatus();
+  if (!enabled || !combo) return;
+  const accelerator = convertShortcutComboToAccelerator(combo);
+  if (!accelerator) {
+    log.warn('[electron] quake mode: unsupported combo', { combo });
+    return;
+  }
+  if (accelerator === registeredMiniChatGlobalShortcutAccelerator) {
+    log.warn('[electron] quake mode: combo collides with the Mini Chat shortcut', { combo, accelerator });
+    return;
+  }
+  try {
+    globalShortcut.register(accelerator, handleQuakeModeGlobalShortcut);
+    if (globalShortcut.isRegistered(accelerator)) {
+      registeredQuakeModeAccelerator = accelerator;
+    } else {
+      log.warn('[electron] quake mode: combo is taken by another app', { combo, accelerator });
+    }
+  } catch (error) {
+    log.warn('[electron] quake mode: registration failed', error);
   }
 };
 
@@ -2356,6 +2560,12 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       debounceWindowStatePersist(browserWindow, true);
       event.preventDefault();
       browserWindow.hide();
+      return;
+    }
+
+    if (!state.quitRequested && shouldHideMainWindowToQuake(browserWindow)) {
+      event.preventDefault();
+      hideQuakeWindow(browserWindow);
       return;
     }
 
@@ -3899,7 +4109,18 @@ const runSpecChain = (specs, appName) => {
 // The tunnel client lives in the web package (it already has a WebSocket
 // client) and is loaded only if the user actually previews a remote dev server.
 let devTunnelClientPromise = null;
-const relayDevTunnelBridge = createRelayDevTunnelBridge({ createMessageChannel: () => new MessageChannelMain(), logger: log });
+const relayDevTunnelBridge = createRelayDevTunnelBridge({
+  createMessageChannel: () => new MessageChannelMain(),
+  logger: log,
+  // A relay tunnel of a space that closes for any reason, the window going among them, takes
+  // its port out of the space's session; a stale port would be a hole in the list.
+  onClosed: ({ spaceId, localPort }) => {
+    if (!spaceId) return;
+    closeSpacePreviewPort(spaceId, localPort).catch((error) => {
+      log.warn(`[electron] could not drop a preview port of space ${spaceId}: ${error?.message || error}`);
+    });
+  },
+});
 const getDevTunnelClient = async () => {
   if (!devTunnelClientPromise) {
     devTunnelClientPromise = import('@openchamber/web/server/lib/dev-tunnel/client.js')
@@ -3914,6 +4135,7 @@ const getDevTunnelClient = async () => {
 
 const closeAllDevTunnels = () => {
   relayDevTunnelBridge.closeAll();
+  closeAllSpacePreviewPorts();
   if (!devTunnelClientPromise) return;
   const pending = devTunnelClientPromise;
   devTunnelClientPromise = null;
@@ -4059,22 +4281,81 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         else root[MINI_CHAT_GLOBAL_SHORTCUT_SETTING_KEY] = combo;
       });
       applyDesktopMiniChatGlobalShortcut();
+      // A combo Mini Chat just released may be the one Quake was waiting for.
+      applyDesktopQuakeModeShortcut();
       return readDesktopMiniChatGlobalShortcutStatus();
+    }
+
+    case 'desktop_get_quake_mode': {
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_enabled': {
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root[QUAKE_MODE_ENABLED_KEY] = enabled;
+      });
+      if (!enabled) restoreNormalWindowFromQuake();
+      applyDesktopQuakeModeShortcut();
+      applyDesktopMiniChatGlobalShortcut();
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_shortcut': {
+      // Unassigned is stored as such, so the default does not come back and
+      // collide with whatever the combo was given to.
+      if (args.combo === QUAKE_MODE_UNASSIGNED) {
+        await mutateSettingsRoot((root) => {
+          root[QUAKE_MODE_SHORTCUT_KEY] = QUAKE_MODE_UNASSIGNED;
+        });
+        applyDesktopQuakeModeShortcut();
+        applyDesktopMiniChatGlobalShortcut();
+        return readDesktopQuakeModeStatus();
+      }
+      const combo = normalizeStoredShortcutCombo(args.combo);
+      // A combo the OS cannot grab leaves the stored setting untouched and
+      // says why, so the settings row can explain instead of failing generically.
+      if (combo !== null && convertShortcutComboToAccelerator(combo) === null) {
+        return { ...readDesktopQuakeModeStatus(), error: 'unsupported-combo' };
+      }
+      await mutateSettingsRoot((root) => {
+        if (combo === null) delete root[QUAKE_MODE_SHORTCUT_KEY];
+        else root[QUAKE_MODE_SHORTCUT_KEY] = combo;
+      });
+      // Quake first, so a combo it releases is free when Mini Chat re-applies.
+      applyDesktopQuakeModeShortcut();
+      applyDesktopMiniChatGlobalShortcut();
+      return readDesktopQuakeModeStatus();
+    }
+
+    case 'desktop_set_quake_mode_height': {
+      const heightFraction = parseQuakeHeightFraction(args.heightFraction);
+      await mutateSettingsRoot((root) => {
+        root[QUAKE_MODE_HEIGHT_KEY] = heightFraction;
+      });
+      return readDesktopQuakeModeStatus();
     }
 
     // Dev-server tunnels: bind a loopback port here and pipe it to a dev server
     // on the remote OpenChamber host, so the browser panel loads a real origin
     // instead of a rewritten page. Deliberately absent from
     // COMMANDS_SAFE_FOR_REMOTE — a remote page must never open local listeners.
+    // A space's dev server comes through the same tunnel, under the space's
+    // prefix on the host, and its local port goes into the space's session
+    // before the renderer learns it, so the page loads behind the proxy.
     case 'desktop_dev_tunnel_open': {
       const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
       const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
       if (!baseUrl) throw new Error('baseUrl is required');
       if (!(port > 0 && port <= 65535)) throw new Error('A valid port is required');
+      const spaceId = args.spaceId ?? null;
+      if (spaceId !== null && !isSpaceId(spaceId)) throw new Error('A valid space id is required');
 
       if (args.relay === true) {
         const targetKey = typeof args.targetKey === 'string' ? args.targetKey.trim() : '';
-        return relayDevTunnelBridge.open({ targetKey, remotePort: port, webContents: browserWindow?.webContents });
+        const opened = await relayDevTunnelBridge.open({ targetKey, remotePort: port, spaceId, webContents: browserWindow?.webContents });
+        if (spaceId) await openSpacePreviewPort(spaceId, opened.localPort);
+        return opened;
       }
 
       const headers = {};
@@ -4087,7 +4368,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       }
 
       const client = await getDevTunnelClient();
-      const result = await client.open({ baseUrl, port, headers });
+      const result = await client.open({ baseUrl, port, headers, spaceId });
+      if (spaceId) await openSpacePreviewPort(spaceId, result.localPort);
       return { localPort: result.localPort, reused: result.reused, url: `http://openchamber-preview.localhost:${result.localPort}/` };
     }
 
@@ -4095,12 +4377,25 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const baseUrl = typeof args.baseUrl === 'string' ? args.baseUrl.trim() : '';
       const port = Number.isFinite(args.port) ? Math.trunc(args.port) : 0;
       if (!baseUrl || !(port > 0)) return { closed: false };
+      const spaceId = isSpaceId(args.spaceId) ? args.spaceId : null;
       const client = await getDevTunnelClient();
-      return { closed: client.close({ baseUrl, port }) };
+      const tunnel = client.list().find((entry) => entry.baseUrl === baseUrl && entry.remotePort === port && entry.spaceId === spaceId);
+      const closed = client.close({ baseUrl, port, spaceId });
+      if (closed && spaceId && tunnel) await closeSpacePreviewPort(spaceId, tunnel.localPort);
+      return { closed };
     }
 
     case 'desktop_relay_dev_tunnel_close_all':
+      // The bridge reports each closed tunnel, and its port leaves the space's session with it.
       return { closed: relayDevTunnelBridge.closeForWebContents(browserWindow?.webContents.id) };
+
+    // A space's view is attached only after its session has the proxy, so no
+    // page of the space, a saved public address included, loads before it.
+    case 'desktop_space_preview_prepare': {
+      if (!isSpaceId(args.spaceId)) throw new Error('A valid space id is required');
+      await applySpacePreviewProxy(args.spaceId);
+      return { ready: true };
+    }
 
     /**
      * Forces prefers-color-scheme for one previewed page.
@@ -4144,6 +4439,13 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
      * data URL so nothing else has to fetch anything.
      */
     case 'desktop_browser_fetch_favicon': {
+      // Only the user's own panel session may have an icon fetched for it. A space's view has a
+      // session of its own, so its page, whose icon URL the agent chose, gets none: the fetch is
+      // the shell's own request and must reach nothing of the user's on the space's behalf.
+      const view = resolveBrowserPanelContents(args.webContentsId);
+      if (view.session !== session.fromPartition(BROWSER_PANEL_PARTITION)) {
+        throw new Error('A space page has no favicon to fetch');
+      }
       const target = typeof args.url === 'string' ? args.url.trim() : '';
       let parsed;
       try {
@@ -4175,11 +4477,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     // Scoped to the browser panel's own partition, so clearing it can never
     // touch OpenChamber's session or any other window's storage.
     case 'desktop_browser_clear_data': {
-      // Exact match, not a prefix: a prefix would also accept a partition that
-      // merely starts with this name, which is not what the comment above
-      // promises and would quietly stop being true if one were ever added.
+      // Exact names only: the panel's own partition, or a space's, whose shape
+      // is checked whole. A prefix would also accept a partition that merely
+      // starts with one of these names.
       const partition = typeof args.partition === 'string' ? args.partition.trim() : '';
-      if (partition !== BROWSER_PANEL_PARTITION) {
+      if (partition !== BROWSER_PANEL_PARTITION && spaceIdOfPreviewPartition(partition) === null) {
         throw new Error('Unsupported browser partition');
       }
       const storages = [];
@@ -4343,10 +4645,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
 
     case 'desktop_clear_cache':
-      await session.defaultSession.clearStorageData();
-      for (const browserWindow of BrowserWindow.getAllWindows()) {
-        browserWindow.webContents.reload();
-      }
+      await clearAppCache({ session: session.defaultSession, windows: BrowserWindow.getAllWindows() });
       return null;
 
     case 'desktop_open_path': {
@@ -4588,6 +4887,21 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         args.requestHeaders || {},
         String(args.expectedServerId || ''),
       ));
+
+    // A saved host only: the address and token come from the hosts file, never
+    // from the caller, so a page cannot aim the token at another server.
+    case 'desktop_host_update_server': {
+      const hostId = String(args.hostId || '');
+      const host = (readDesktopHostsConfig().hosts || []).find((entry) => entry?.id === hostId);
+      const url = normalizeHostUrl(host?.apiUrl || host?.url || '');
+      if (!host || !url) return { status: 'failed', error: null };
+      return requestRemoteHostUpdate({
+        url,
+        clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
+        requestHeaders: host.requestHeaders || {},
+        chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
+      });
+    }
 
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
@@ -4848,6 +5162,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_get_window_pinned':
       return { pinned: Boolean(browserWindow?.__ocPinned) };
+
+    case 'desktop_take_pending_host_actions':
+      // Pairing links and relay host activations run in the main window only.
+      if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
+      return pendingHostActions.splice(0, pendingHostActions.length);
 
     case 'desktop_take_pending_session_links':
       // Session links open in the main window only.
@@ -5249,6 +5568,10 @@ const loadUrlInsideWebContents = (contents, rawUrl) => {
 };
 
 app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() === 'window') {
+    guardAttachedWebviews(contents);
+    return;
+  }
   if (contents.getType() !== 'webview') return;
 
   contents.setWindowOpenHandler(({ url }) => {
@@ -5730,6 +6053,7 @@ app.whenReady().then(async () => {
   }
   setupTray();
   applyDesktopMiniChatGlobalShortcut();
+  applyDesktopQuakeModeShortcut();
 
   if ((process.platform === 'darwin' || process.platform === 'win32') && app.isPackaged) {
     const openAtLogin = loginItemSettings?.openAtLogin === true;

@@ -166,6 +166,17 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
     return clampMaxWidth(fallbackMaxWidth);
   }, [diffRootRef, fallbackMaxWidth]);
 
+  // The comment band takes the fill of the selected rows it comments on, which
+  // depends on the row type (an added row mixes the addition tint in). The
+  // computed selected-line variable leaves out the hover tint the "+" click
+  // leaves on the row.
+  const resolveSelectedLineColor = (): string | undefined => {
+    const shadowRoot = diffRootRef.current?.querySelector('diffs-container')?.shadowRoot;
+    const line = shadowRoot ? Array.from(shadowRoot.querySelectorAll('[data-line][data-selected-line]')).at(-1) : undefined;
+    if (!line) return undefined;
+    return getComputedStyle(line).getPropertyValue('--diffs-computed-selected-line-bg').trim() || undefined;
+  };
+
   void retryTick;
 
   return (
@@ -191,6 +202,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
               onSave={onSave}
               onCancel={onCancel}
               maxWidth={targetMaxWidth}
+              bandColor={resolveSelectedLineColor()}
             />,
             target,
             `draft-edit-${draft.id}`
@@ -224,6 +236,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
             onSave={onSave}
             onCancel={onCancel}
             maxWidth={targetMaxWidth}
+            bandColor={resolveSelectedLineColor()}
           />,
           target,
           selectionAnnotationId

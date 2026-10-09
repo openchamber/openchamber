@@ -174,11 +174,11 @@ function Tooltip({
   }, [clearCloseTimeout, clearLongPressTimeout])
 
   const handleOpenChange = React.useCallback((nextOpen: boolean, event: TooltipChangeEventDetails) => {
-    if (!controlled) {
+    onOpenChange?.(nextOpen, event)
+    // A caller that cancels the change keeps the tooltip as it was.
+    if (!controlled && !event.isCanceled) {
       setLongPressOpen(nextOpen)
     }
-
-    onOpenChange?.(nextOpen, event)
   }, [controlled, onOpenChange])
 
   const tooltip = (

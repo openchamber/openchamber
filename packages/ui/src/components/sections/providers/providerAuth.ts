@@ -2,14 +2,20 @@
  * Provider credential helpers.
  *
  * OpenCode v2 moved provider sign-in behind *integrations*: `GET /api/integration`
- * lists, per integration, the methods it accepts (`oauth`, `key`, `command`,
- * `env`) and the connections that are already live (a stored credential, or an
+ * lists, per integration, the methods it accepts (`oauth`, `key`, `external`,
+ * `command`, `env`) and the connections that are already live (a stored credential, or an
  * environment variable the server can see). There is no `auth.json` any more,
  * so "does this provider have credentials" is answered by its integration's
  * connections rather than by a local file.
  */
 
-import type { ConnectionInfo, IntegrationInfo, IntegrationKeyMethod, IntegrationOAuthMethod } from '@opencode/client';
+import type {
+  ConnectionInfo,
+  IntegrationExternalMethod,
+  IntegrationInfo,
+  IntegrationKeyMethod,
+  IntegrationOAuthMethod,
+} from '@opencode/client';
 import { z } from 'zod';
 import type { Provider } from '@/lib/opencode/model';
 
@@ -56,10 +62,17 @@ export const getProviderConnections = (
   return [...(own ?? []), ...(signIn ?? [])];
 };
 
-export const getOAuthMethods = (
+/**
+ * Methods that sign in with a button rather than a pasted key: OAuth, and
+ * external credentials OpenCode references outside its store (2.0.25+: an
+ * Azure CLI login, an AWS profile). Kept in the integration's declared order.
+ */
+export type SignInMethod = IntegrationOAuthMethod | IntegrationExternalMethod;
+
+export const getSignInMethods = (
   integration: IntegrationInfo | undefined,
-): IntegrationOAuthMethod[] =>
-  (integration?.methods ?? []).filter((method): method is IntegrationOAuthMethod => method.type === 'oauth');
+): SignInMethod[] =>
+  (integration?.methods ?? []).filter((method): method is SignInMethod => method.type === 'oauth' || method.type === 'external');
 
 export const getKeyMethod = (
   integration: IntegrationInfo | undefined,

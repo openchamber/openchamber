@@ -15,12 +15,20 @@ const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const COMMENT_INPUTS: Array<{ name: string; file: string; handler: string; guard: RegExp }> = [
   {
-    // Chat quote comments, diff and file comments, and editing a pending
-    // comment above the composer all type into this field.
+    // Chat quote comments and editing a pending comment above the composer
+    // type into this field.
     name: 'comment text field',
     file: 'components/comments/CommentTextEditor.tsx',
     handler: 'const handleKeyDown',
     guard: /isIMECompositionEvent\(event\)\) return false;/,
+  },
+  {
+    // Diff, file editor and file preview comments: a textarea, since the field
+    // lives inside other editors' DOM.
+    name: 'inline line comment',
+    file: 'components/comments/InlineCommentInput.tsx',
+    handler: 'const handleKeyDown',
+    guard: /isIMECompositionEvent\(event\)\) return;/,
   },
   {
     name: 'issues and PRs board reply',
@@ -63,7 +71,6 @@ describe('comment inputs ignore IME composition keystrokes', () => {
 
 describe('comment surfaces type into the guarded comment field', () => {
   for (const file of [
-    'components/comments/InlineCommentInput.tsx',
     'components/chat/message/TextSelectionMenu.tsx',
     'components/chat/composer/ui/ComposerContextChips.tsx',
   ]) {

@@ -31,16 +31,6 @@ const SESSION_SWITCH_HOLD_MS = 400;
 // End inset reserved for the status row that floats over the timeline's
 // bottom edge (its tallest resting height plus the mb-2 gap).
 const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
-/**
- * Gap between the last transcript row and the floating composer's top edge,
- * on top of the status row reserve. Generous on purpose: the recap note and
- * the rows docked above the composer (context chips, linked references, the
- * queue) land in this band, and a follow glide that trails the live edge
- * should still leave the last line clear of the glass.
- */
-const FLOATING_COMPOSER_GAP_PX = 80;
-/** Footer reserve before the floating composer slot has been measured. */
-const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 // A freshly opened timeline is shown once its content height has held still
 // for this many consecutive frames, or after the cap.
 const TIMELINE_SETTLE_STABLE_FRAMES = 2;
@@ -51,6 +41,11 @@ import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/s
 import { toast } from '@/components/ui';
 import { StatusRowContainer } from './StatusRowContainer';
 import { SessionRecapNote } from '@/components/chat/SessionRecapSpacer';
+import {
+    FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX,
+    forgetComposerSlot,
+    recordComposerSlotHeight,
+} from '@/components/chat/composer/state/composerTailInset';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
@@ -196,7 +191,7 @@ type ChatViewportProps = {
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
     /** The composer floats over the transcript and reserves its band via
-        `--chat-composer-inset` on the chat column. */
+        `--chat-composer-tail-inset` on the chat column. */
     floatingComposer: boolean;
     directory?: string;
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -380,7 +375,7 @@ const ChatViewport = React.memo(({
                 className="flex-shrink-0"
                 style={{
                     height: floatingComposer
-                        ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + var(--chat-floating-panel-clearance, 0px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                        ? `calc(var(--chat-composer-tail-inset, ${FLOATING_COMPOSER_DEFAULT_TAIL_INSET_PX}px) + var(--chat-floating-panel-clearance, 0px))`
                         : (isMobile ? '40px' : '10vh'),
                 }}
                 aria-hidden="true"
@@ -1516,21 +1511,33 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // slot and shrinks the column around it, so the slot rides along unchanged.
     const floatingComposer = !draftLayoutVisible && !isDesktopExpandedInput;
     // The slot's height is published as `--chat-composer-inset` on the chat
-    // column (the list footer's tail spacer reads it), written straight from
-    // the observer so composer growth never re-renders the timeline.
+    // column (the end fade reads it), and the list footer's tail spacer reads
+    // `--chat-composer-tail-inset` (see composerTailInset: a composer that
+    // grows takes the gap above it before it pushes the transcript). Both are
+    // written straight from the observer so composer growth never re-renders
+    // the timeline. While the composer is taller than at rest,
+    // `data-composer-grown` on the column hides the recap hint, which rides
+    // the composer's top edge and would otherwise land on the last row.
     React.useLayoutEffect(() => {
         const slot = composerSlotNode;
         const column = slot?.parentElement;
         if (!floatingComposer || !slot || !column || !globalThis.ResizeObserver) return;
         const update = () => {
-            column.style.setProperty('--chat-composer-inset', `${Math.round(slot.getBoundingClientRect().height)}px`);
+            const height = Math.round(slot.getBoundingClientRect().height);
+            const { tailInset, grown } = recordComposerSlotHeight(column, height);
+            column.style.setProperty('--chat-composer-inset', `${height}px`);
+            column.style.setProperty('--chat-composer-tail-inset', `${tailInset}px`);
+            column.toggleAttribute('data-composer-grown', grown);
         };
         const observer = new ResizeObserver(update);
         observer.observe(slot);
         update();
         return () => {
             observer.disconnect();
+            forgetComposerSlot(column);
             column.style.removeProperty('--chat-composer-inset');
+            column.style.removeProperty('--chat-composer-tail-inset');
+            column.removeAttribute('data-composer-grown');
         };
     }, [composerSlotNode, floatingComposer]);
     // The list owns the scroll element, so the shadows and the load-older
@@ -1845,7 +1852,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                         {currentSessionId ? (
                             <div
                                 className={cn(
-                                    'oc-recap-hint pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-100',
+                                    'oc-recap-hint pointer-events-none absolute bottom-full inset-x-0 mb-2 transition-opacity duration-300 ease-out',
                                     !viewportAtEnd && 'opacity-0',
                                 )}
                                 style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}

@@ -28,9 +28,14 @@ const isDiscoveredServer = (value: unknown): value is DiscoveredDevServer => {
     && typeof record.command === 'string';
 };
 
-export const fetchDevServers = async (signal?: AbortSignal): Promise<DevServerDiscovery> => {
+/**
+ * The servers listening where this directory's code runs: on the host, or
+ * inside the isolated space that owns the directory, which the request is
+ * addressed to by its directory.
+ */
+export const fetchDevServers = async (signal: AbortSignal | undefined, directory: string): Promise<DevServerDiscovery> => {
   try {
-    const response = await runtimeFetch('/api/dev-servers', { signal });
+    const response = await runtimeFetch('/api/dev-servers', { signal, directory });
     if (!response.ok) return { kind: 'unavailable' };
 
     const body: unknown = await response.json();

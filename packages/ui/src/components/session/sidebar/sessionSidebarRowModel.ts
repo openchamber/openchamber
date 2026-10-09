@@ -22,6 +22,9 @@ export type SessionSidebarActivityItem = {
 
 export type SessionSidebarActivityKey = 'work' | 'chats' | 'active-now' | 'timeline';
 
+/** Activity sections of the grouped view; the display menu's Collapse all / Expand all drive them. */
+export const GROUPED_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'work', 'active-now'];
+
 // 'timeline-chat' is a Chats row inside the timeline view: one line, no left
 // gutter, status and pin on the right like the three-line timeline rows.
 export type SessionSidebarRenderContext = 'project' | 'recent' | 'timeline' | 'timeline-chat';

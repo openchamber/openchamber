@@ -374,6 +374,16 @@ export const RoutingPage: React.FC = () => {
                   ariaLabel={t('settings.routing.auto.enable')}
                   info={t('settings.routing.auto.enableInfo')}
                 />
+                {draft.preserveCache === undefined ? null : (
+                  <SettingsCheckboxRow
+                    settingsItem="routing.preserve-cache"
+                    checked={draft.preserveCache}
+                    onChange={(checked) => update((config) => ({ ...config, preserveCache: checked }))}
+                    label={t('settings.routing.auto.preserveCache')}
+                    ariaLabel={t('settings.routing.auto.preserveCache')}
+                    info={t('settings.routing.auto.preserveCacheInfo')}
+                  />
+                )}
               </div>
               <p className={SETTINGS_HELPER_CLASS}>{readinessText}</p>
               <SettingsFieldRow

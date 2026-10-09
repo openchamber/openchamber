@@ -3,7 +3,7 @@ import { hasDesktopInvoke, invokeDesktop, isDesktopShell } from '@/lib/desktop';
 type InvokeArgs = Record<string, unknown>;
 type RelayDevTunnelData = ArrayBuffer | Uint8Array;
 type RelayDevTunnelMessage = { type: 'connect' | 'ready' | 'data' | 'close'; data?: RelayDevTunnelData };
-type RelayDevTunnelEvent = { connectionId: string; remotePort: number; message: RelayDevTunnelMessage };
+type RelayDevTunnelEvent = { connectionId: string; remotePort: number; spaceId: string | null; message: RelayDevTunnelMessage };
 type RelayDevTunnelBridge = {
   relayDevTunnelListen?: (handler: (event: RelayDevTunnelEvent) => void) => void;
   relayDevTunnelPost?: (connectionId: string, message: RelayDevTunnelMessage) => void;

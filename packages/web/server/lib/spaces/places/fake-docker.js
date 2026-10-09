@@ -160,7 +160,9 @@ const readMounts = (args) => args
  * `start` is where the clock of `now()` begins. `wait(ms)` moves that clock, so nothing here sleeps.
  * `beforeFill()` runs before a tools fill ends, so a test can hold it open.
  * For the disk: `volumeSizes` maps a volume name to its size as `docker system df` prints it,
- * `imageBytes` is the size of the space image, `engineName` what `docker info` calls the machine,
+ * `imageBytes` is the size of the space image, `retiredImages` other images that are there as
+ * `{ name, bytes, tags }`, where `tags` defaults to the digest reference alone, as a pull by digest
+ * leaves it on the containerd image store, `engineName` what `docker info` calls the machine,
  * and `colima(args)` answers a call of the colima CLI, any file whose name ends in `colima`.
  */
 export function createFakeDocker({
@@ -170,6 +172,7 @@ export function createFakeDocker({
   resources = [],
   imagePresent = true,
   imageBytes = 1_632_000_000,
+  retiredImages = [],
   volumeSizes = {},
   engineName = 'docker-desktop',
   colima = () => ok(),
@@ -181,6 +184,7 @@ export function createFakeDocker({
 } = {}) {
   let clock = start.getTime();
   let image = imagePresent;
+  const retired = new Map(retiredImages.map((entry, index) => [entry.name, { id: `sha256:4567${index}`, bytes: entry.bytes, tags: entry.tags ?? [entry.name] }]));
   const calls = [];
   const late = [];
   const state = new Map(resources.map((resource) => [`${resource.kind}:${resource.name}`, resource]));
@@ -298,7 +302,18 @@ export function createFakeDocker({
     if (fails) return failed('Error response from daemon: simulated failure');
     if (first === 'inspect') return inspect('container', args.slice(3));
     // The size here is the compressed download, as the containerd image store reports it; the place must not use it.
-    if (first === 'image' && second === 'inspect') return image ? ok(JSON.stringify([{ Id: 'sha256:0123', Size: Math.round(imageBytes / 4) }])) : failed(NOT_FOUND_TEXT.image(args[2]), '[]');
+    if (first === 'image' && second === 'inspect') {
+      const old = retired.get(args[2]);
+      if (old) return ok(JSON.stringify([{ Id: old.id, Size: Math.round(old.bytes / 4), RepoTags: old.tags }]));
+      return image && args[2] === FAKE_BASE_IMAGE ? ok(JSON.stringify([{ Id: 'sha256:0123', Size: Math.round(imageBytes / 4), RepoTags: [FAKE_BASE_IMAGE] }])) : failed(NOT_FOUND_TEXT.image(args[2]), '[]');
+    }
+    if (first === 'image' && second === 'rm' && retired.has(args[args.length - 1])) {
+      const name = args[args.length - 1];
+      const user = ofKind('container').find((resource) => resource.entry.Config?.Image === name);
+      if (user && !args.includes('--force')) return failed(`Error response from daemon: conflict: unable to delete ${retired.get(name).id} (must be forced) - image is being used by stopped container ${user.entry.Id}`);
+      retired.delete(name);
+      return ok(`Deleted: ${name}`);
+    }
     if (first === 'image' && second === 'rm') {
       if (!image || args[args.length - 1] !== FAKE_BASE_IMAGE) return failed(NOT_FOUND_TEXT.image(args[args.length - 1]));
       // Like the real engine: without --force an image that any container was made from stays.
@@ -311,7 +326,10 @@ export function createFakeDocker({
       const mountedBy = (name) => ofKind('container').filter((resource) => resource.entry.Mounts.some((mount) => mount.Name === name)).length;
       return ok(JSON.stringify({
         // Like the containerd image store: the id is the digest, and the size is what the image alone takes unpacked.
-        Images: image ? [{ ID: 'sha256:0123', Size: `${imageBytes / 1e9}GB`, UniqueSize: `${imageBytes / 1e9}GB` }] : [],
+        Images: [
+          ...(image ? [{ ID: 'sha256:0123', Size: `${imageBytes / 1e9}GB`, UniqueSize: `${imageBytes / 1e9}GB` }] : []),
+          ...Array.from(retired.values(), (old) => ({ ID: old.id, Size: `${old.bytes / 1e9}GB`, UniqueSize: `${old.bytes / 1e9}GB` })),
+        ],
         Volumes: ofKind('volume').map((resource) => ({ Name: resource.name, Size: volumeSizes[resource.name] ?? '0B', Links: String(mountedBy(resource.name)) })),
       }));
     }
@@ -406,6 +424,7 @@ export function createFakeDocker({
     calls,
     names: () => Array.from(state.keys()),
     imagePresent: () => image,
+    retiredImagePresent: (name) => retired.has(name),
     token: (container) => tokens.get(homeOf(container)),
   };
 }

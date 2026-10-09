@@ -3,12 +3,6 @@ import { isCapacitorApp } from '@/lib/platform';
 
 export type HostedSurface = 'desktop' | 'mobile';
 
-declare global {
-  interface Window {
-    __OPENCHAMBER_SURFACE__?: HostedSurface;
-  }
-}
-
 const MOBILE_SURFACE_MAX_WIDTH = 768;
 const SURFACE_SWITCH_DEBOUNCE_MS = 800;
 

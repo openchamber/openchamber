@@ -119,10 +119,19 @@ export const SpaceGroupStatus: React.FC<{ spaceId: string; className?: string }>
   const access = useSpacesStore((state) => state.creationAccess.get(spaceId));
   const catalog = useConfigStore((state) => state.providers);
   const providerName = (providerId: string) => catalog.find((provider) => provider.id === providerId)?.name ?? providerId;
-  const grantButton = (providerId: string | null = null) => (
-    <Button variant="outline" size="xs" className="self-start" onClick={() => useSpacesStore.getState().openAccessDialog(spaceId, providerId)}>
-      {t('spaces.group.access.give')}
-    </Button>
+  // The access line is the way to the grant dialog (the maintainer's call of 2026-10-08): no
+  // button under it, the line itself opens the dialog, named "Grant access" for the pointer and
+  // the screen reader.
+  const grantLine = (providerId: string | null, children: React.ReactNode) => (
+    <button
+      type="button"
+      className="-mx-1 self-start rounded px-1 text-left hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      title={t('spaces.group.access.give')}
+      aria-label={t('spaces.group.access.giveAria', { label: entry?.name ?? '' })}
+      onClick={() => useSpacesStore.getState().openAccessDialog(spaceId, providerId)}
+    >
+      <Line icon="alert" tone="warning">{children}</Line>
+    </button>
   );
   const mark = useSpacesStore((state) => state.spaces.get(spaceId));
   const action = useSpacesStore((state) => state.actions.get(spaceId));
@@ -206,11 +215,10 @@ export const SpaceGroupStatus: React.FC<{ spaceId: string; className?: string }>
       return (
         <div className="flex flex-col gap-1">
           {access.failures.map((failure) => (
-            <Line key={failure.provider} icon="alert" tone="warning">
-              {t('spaces.group.accessMissing', { provider: providerName(failure.provider), reason: spaceFailureText(t, failure) })}
-            </Line>
+            <React.Fragment key={failure.provider}>
+              {grantLine(failure.provider, t('spaces.group.accessMissing', { provider: providerName(failure.provider), reason: spaceFailureText(t, failure) }))}
+            </React.Fragment>
           ))}
-          {grantButton(access.failures[0]?.provider ?? null)}
         </div>
       );
     }
@@ -220,19 +228,15 @@ export const SpaceGroupStatus: React.FC<{ spaceId: string; className?: string }>
       return (
         <div className="flex flex-col gap-1">
           {notice.providers.map((providerId) => (
-            <Line key={providerId} icon="alert" tone="warning">{t('spaces.group.access.needsAgain', { provider: providerName(providerId) })}</Line>
+            <React.Fragment key={providerId}>
+              {grantLine(providerId, t('spaces.group.access.needsAgain', { provider: providerName(providerId) }))}
+            </React.Fragment>
           ))}
-          {grantButton(notice.providers[0])}
         </div>
       );
     }
     if (notice?.kind === 'no_model') {
-      return (
-        <div className="flex flex-col gap-1">
-          <Line icon="alert" tone="warning">{t('spaces.group.access.noModel')}</Line>
-          {grantButton()}
-        </div>
-      );
+      return <div className="flex flex-col gap-1">{grantLine(null, t('spaces.group.access.noModel'))}</div>;
     }
     if (notice?.kind === 'unknown') {
       return <div><Line icon="alert" tone="muted">{t('spaces.group.access.unknown')}</Line></div>;

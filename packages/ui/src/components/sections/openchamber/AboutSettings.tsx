@@ -14,6 +14,8 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { fetchOpenCodeUpgradeStatus, runOpenCodeUpgrade, type OpenCodeUpgradeStatus } from '@/components/update/openCodeUpgrade';
+import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
+import { getDesktopAppVersion } from '@/lib/desktopNative';
 import { InstanceServiceUrls } from './InstanceServiceUrls';
 import {
   SettingsSection,
@@ -37,10 +39,11 @@ type ConnectedServerUpdate = {
 const IDLE_SERVER_UPDATE: ConnectedServerUpdate = { info: null, checking: false, available: false, error: null };
 
 /**
- * The native app's About page is about the server it is connected to. The
- * shared update store checks the app build itself on Capacitor (store/APK),
- * so the server check lives here, in page-local state, and installs through
- * the server's own update route (the dialog's `web` flow).
+ * The server this window is connected to, when that is not the app itself:
+ * the native app's server, or a desktop app's remote host. The shared update
+ * store checks the app build, so the server check lives here, in page-local
+ * state, and installs through the server's own update route (the dialog's
+ * `web` flow).
  */
 function useConnectedServerUpdate(enabled: boolean) {
   const [state, setState] = React.useState<ConnectedServerUpdate>(IDLE_SERVER_UPDATE);
@@ -173,7 +176,26 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // Native app: updates target the connected server; the app itself updates
   // through its store, which is not actionable from here.
   const isNativeApp = React.useMemo(() => isCapacitorApp(), []);
-  const serverUpdate = useConnectedServerUpdate(isNativeApp);
+  const isDesktopRemote = useDesktopRemoteHostActive();
+  const serverUpdate = useConnectedServerUpdate(isNativeApp || isDesktopRemote);
+  // A desktop app on a remote host updates itself and its server separately.
+  const remoteHostUpdate = isDesktopRemote ? serverUpdate : null;
+  const checkRemoteHost = serverUpdate.check;
+  React.useEffect(() => {
+    if (isDesktopRemote) void checkRemoteHost();
+  }, [isDesktopRemote, checkRemoteHost]);
+  const [serverUpdateDialogOpen, setServerUpdateDialogOpen] = React.useState(false);
+  const [desktopAppVersion, setDesktopAppVersion] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!isDesktopRemote) return;
+    let cancelled = false;
+    void getDesktopAppVersion().then((version) => {
+      if (!cancelled) setDesktopAppVersion(version);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDesktopRemote]);
   const nativeAppVersion = useNativeAppVersion(isNativeApp);
   const update = isNativeApp
     ? {
@@ -194,6 +216,8 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     };
 
   const currentVersion = openChamberVersion || update.info?.currentVersion || 'unknown';
+  const appVersion = desktopAppVersion || updateStore.info?.currentVersion || 'unknown';
+  const remoteHostVersion = openChamberVersion || remoteHostUpdate?.info?.currentVersion || 'unknown';
   const openCode = useOpenCodeUpgrade(t('opencodeUpdate.toast.failed.description'));
   const openCodeVersion = openCode.status?.currentVersion ?? null;
   const openCodeUpdateVersion = openCode.phase.kind === 'installed' ? null : openCode.status?.availableVersion ?? null;
@@ -202,23 +226,31 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
   // The OpenChamber button names what it replaces. In the native app that is
   // the server the phone is connected to (or the desktop app serving it),
   // never the phone app itself, which updates through its store.
-  const openChamberUpdateLabel = (() => {
-    const version = update.info?.version || '';
-    if (!isNativeApp) return t('settings.openchamber.about.actions.updateOpenChamberToVersion', { version });
-    return update.info?.packageManager === 'electron'
+  const serverUpdateLabel = (info: UpdateInfo | null) => {
+    const version = info?.version || '';
+    return info?.packageManager === 'electron'
       ? t('settings.openchamber.about.actions.updateDesktopToVersion', { version })
       : t('settings.openchamber.about.actions.updateServerToVersion', { version });
+  };
+  const openChamberUpdateLabel = (() => {
+    const version = update.info?.version || '';
+    if (isNativeApp) return serverUpdateLabel(update.info);
+    return isDesktopRemote
+      ? t('settings.openchamber.about.actions.updateAppToVersion', { version })
+      : t('settings.openchamber.about.actions.updateOpenChamberToVersion', { version });
   })();
-  const installBlocked = update.available && update.info?.installBlocked === 'service-manager';
-  const manualUpdateCommand = update.info?.updateCommand || 'openchamber update';
+  const isInstallBlocked = (info: UpdateInfo | null) => info?.installBlocked === 'service-manager';
+  const installBlocked = update.available && isInstallBlocked(update.info);
+  const remoteHostInstallBlocked = Boolean(remoteHostUpdate?.available && isInstallBlocked(remoteHostUpdate.info));
 
   const checkAll = () => {
     void update.checkForUpdates();
+    if (remoteHostUpdate) void remoteHostUpdate.check();
     void openCode.refresh();
   };
 
-  const copyManualCommand = async () => {
-    const result = await copyTextToClipboard(manualUpdateCommand);
+  const copyManualCommand = async (command: string) => {
+    const result = await copyTextToClipboard(command);
     if (!result.ok) return;
     setCommandCopied(true);
     setTimeout(() => setCommandCopied(false), 2000);
@@ -234,24 +266,53 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     });
   };
 
-  const manualUpdateNotice = installBlocked ? (
-    <div className="space-y-2">
-      <p className="typography-meta text-muted-foreground">
-        {t('settings.openchamber.about.serviceManagerUpdate', { version: update.info?.version || '' })}
-      </p>
-      <div className="flex items-center gap-2 rounded-md border border-border bg-surface-elevated/50 p-1 pl-3">
-        <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground">{manualUpdateCommand}</code>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => void copyManualCommand()}
-          aria-label={commandCopied ? t('updateDialog.actions.copied') : t('updateDialog.actions.copyCommand')}
-        >
-          <Icon name={commandCopied ? 'check' : 'clipboard'} className="size-4" />
-        </Button>
+  const renderManualUpdateNotice = (info: UpdateInfo | null) => {
+    const command = info?.updateCommand || 'openchamber update';
+    return (
+      <div className="space-y-2">
+        <p className="typography-meta text-muted-foreground">
+          {t('settings.openchamber.about.serviceManagerUpdate', { version: info?.version || '' })}
+        </p>
+        <div className="flex items-center gap-2 rounded-md border border-border bg-surface-elevated/50 p-1 pl-3">
+          <code className="flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground">{command}</code>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => void copyManualCommand(command)}
+            aria-label={commandCopied ? t('updateDialog.actions.copied') : t('updateDialog.actions.copyCommand')}
+          >
+            <Icon name={commandCopied ? 'check' : 'clipboard'} className="size-4" />
+          </Button>
+        </div>
       </div>
-    </div>
+    );
+  };
+  const manualUpdateNotice = installBlocked ? renderManualUpdateNotice(update.info) : null;
+
+  const remoteHostUpdateControls = (() => {
+    if (!remoteHostUpdate?.available || remoteHostUpdate.checking) return null;
+    if (remoteHostInstallBlocked) return renderManualUpdateNotice(remoteHostUpdate.info);
+    return (
+      <Button type="button" size="sm" variant="outline" onClick={() => setServerUpdateDialogOpen(true)}>
+        <Icon name="download" className="size-4" />
+        {serverUpdateLabel(remoteHostUpdate.info)}
+      </Button>
+    );
+  })();
+  const remoteHostUpdateDialog = remoteHostUpdate ? (
+    <UpdateDialog
+      open={serverUpdateDialogOpen}
+      onOpenChange={setServerUpdateDialogOpen}
+      info={remoteHostUpdate.info}
+      downloading={false}
+      downloaded={false}
+      progress={null}
+      error={remoteHostUpdate.error}
+      onDownload={() => {}}
+      onRestart={() => {}}
+      runtimeType="web"
+    />
   ) : null;
 
   const openCodeUpdateControls = (() => {
@@ -321,6 +382,9 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     };
   }, []);
 
+  const remoteHostUpdateChecking = remoteHostUpdate?.checking ?? false;
+  const remoteHostUpdateAvailable = remoteHostUpdate?.available ?? false;
+
   // Track if we initiated a check to show toast on completion
   const didInitiateCheck = React.useRef(false);
 
@@ -332,8 +396,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     } else if (showChecking) {
       const timer = setTimeout(() => {
         setShowChecking(false);
-        // Show toast if check completed with no update available
-        if (didInitiateCheck.current && !update.available && !update.error) {
+        // Show toast if check completed with no update available. On a remote
+        // host "latest" would be wrong while the server still has an update.
+        const remoteHostPending = remoteHostUpdateChecking || remoteHostUpdateAvailable;
+        if (didInitiateCheck.current && !update.available && !update.error && !remoteHostPending) {
           toast.success(isNativeApp
             ? t('settings.openchamber.about.toast.serverLatestVersion')
             : t('settings.openchamber.about.toast.latestVersion'));
@@ -342,7 +408,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
       }, MIN_CHECKING_DURATION);
       return () => clearTimeout(timer);
     }
-  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error]);
+  }, [t, isNativeApp, update.checking, showChecking, update.available, update.error, remoteHostUpdateChecking, remoteHostUpdateAvailable]);
 
   const isChecking = update.checking || showChecking;
 
@@ -358,6 +424,12 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
                 <p>{t('settings.openchamber.about.native.serverOpenChamberVersion', { version: currentVersion })}</p>
                 <p>{t('settings.openchamber.about.native.serverOpenCodeVersion', { version: openCodeVersion || t('settings.openchamber.about.state.unknown') })}</p>
                 {nativeAppVersion && <p>{t('settings.openchamber.about.native.appVersion', { version: nativeAppVersion })}</p>}
+              </>
+            ) : isDesktopRemote ? (
+              <>
+                <p>{t('aboutDialog.appVersionLabel', { version: appVersion })}</p>
+                <p>{t('settings.openchamber.about.native.serverOpenChamberVersion', { version: remoteHostVersion })}</p>
+                <p>{t('settings.openchamber.about.native.serverOpenCodeVersion', { version: openCodeVersion || t('settings.openchamber.about.state.unknown') })}</p>
               </>
             ) : (
               <>
@@ -404,15 +476,19 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
 
         {manualUpdateNotice}
 
+        {remoteHostUpdateControls && (
+          <div className="flex justify-center text-center">{remoteHostUpdateControls}</div>
+        )}
+
         {openCodeUpdateControls && (
           <div className="flex justify-center text-center">{openCodeUpdateControls}</div>
         )}
 
-        {update.error && (
-          <p className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error)]">
-            {update.error}
+        {[update.error, remoteHostUpdate?.error].filter(Boolean).map((error) => (
+          <p key={error} className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-3 py-2 typography-meta text-[var(--status-error)]">
+            {error}
           </p>
-        )}
+        ))}
 
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex items-center justify-center gap-5">
@@ -465,6 +541,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           onRestart={updateStore.restartToUpdate}
           runtimeType={update.runtimeType}
         />
+        {remoteHostUpdateDialog}
       </div>
     );
   }
@@ -474,10 +551,23 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     <SettingsSection divider={false}>
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         <div className="flex flex-col @xl:flex-row @xl:items-center justify-between gap-4 px-4 py-3 border-b border-border/40">
-          <div className="flex min-w-0 flex-col">
-            <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.version')}</span>
-            <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
-          </div>
+          {isDesktopRemote ? (
+            <>
+              <div className="flex min-w-0 flex-col">
+                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.appVersion')}</span>
+                <span className="typography-meta text-muted-foreground font-mono">{appVersion}</span>
+              </div>
+              <div className="flex min-w-0 flex-col">
+                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.serverVersion')}</span>
+                <span className="typography-meta text-muted-foreground font-mono">{remoteHostVersion}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex min-w-0 flex-col">
+              <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.version')}</span>
+              <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
+            </div>
+          )}
           <div className="flex min-w-0 flex-col">
             <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.openCodeVersion')}</span>
             <span className="typography-meta text-muted-foreground font-mono">{openCodeVersion || t('settings.openchamber.about.state.unknown')}</span>
@@ -519,15 +609,19 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
           <div className="px-4 py-3 border-b border-border/40">{manualUpdateNotice}</div>
         )}
 
+        {remoteHostUpdateControls && (
+          <div className="px-4 py-3 border-b border-border/40">{remoteHostUpdateControls}</div>
+        )}
+
         {openCodeUpdateControls && (
           <div className="px-4 py-3 border-b border-border/40">{openCodeUpdateControls}</div>
         )}
 
-        {update.error && (
-          <div className="px-3 py-2 border-b border-border/40">
-            <p className="typography-meta text-[var(--status-error)]">{update.error}</p>
+        {[update.error, remoteHostUpdate?.error].filter(Boolean).map((error) => (
+          <div key={error} className="px-3 py-2 border-b border-border/40">
+            <p className="typography-meta text-[var(--status-error)]">{error}</p>
           </div>
-        )}
+        ))}
 
         <div className="flex flex-col gap-2 border-b border-border/40 px-4 py-3 @xl:flex-row @xl:items-center @xl:justify-between">
           <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.openchamber.about.field.instanceUrls')}</span>
@@ -570,6 +664,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         onRestart={updateStore.restartToUpdate}
         runtimeType={update.runtimeType}
       />
+      {remoteHostUpdateDialog}
     </SettingsSection>
   );
 };

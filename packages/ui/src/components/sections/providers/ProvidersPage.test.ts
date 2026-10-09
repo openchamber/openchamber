@@ -5,10 +5,10 @@ import {
   findIntegrationForProvider,
   getCredentialConnections,
   getKeyMethod,
-  getOAuthMethods,
   getProviderConnections,
   getProviderCardStatus,
   getSignInIntegrationId,
+  getSignInMethods,
   providerHasCredentials,
   shouldAutoOpenAuthPanel,
   shouldShowApiKeyAuth,
@@ -52,15 +52,16 @@ describe('integration method helpers', () => {
     expect(shouldShowApiKeyAuth(undefined)).toBe(true);
   });
 
-  test('getOAuthMethods keeps only oauth methods, in declared order', () => {
+  test('getSignInMethods keeps oauth and external methods, in declared order', () => {
     const methods: IntegrationInfo['methods'] = [
       { type: 'key', label: 'API Key' },
       { type: 'oauth', id: 'browser', label: 'OAuth' },
       { type: 'env', names: ['OPENAI_API_KEY'] },
+      { type: 'external', id: 'aws-profile', label: 'AWS profile' },
       { type: 'oauth', id: 'device', label: 'Device' },
     ];
-    expect(getOAuthMethods(integration({ methods })).map((method) => method.id)).toEqual(['browser', 'device']);
-    expect(getOAuthMethods(undefined)).toEqual([]);
+    expect(getSignInMethods(integration({ methods })).map((method) => method.id)).toEqual(['browser', 'aws-profile', 'device']);
+    expect(getSignInMethods(undefined)).toEqual([]);
   });
 
   test('getKeyMethod returns the key method when the integration accepts one', () => {

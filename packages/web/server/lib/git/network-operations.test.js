@@ -2336,17 +2336,27 @@ process.exit(safe ? 0 : 1);
     });
   });
 
-  it('returns the stable missing git-lfs result without starting an LFS transfer', async () => {
+  // Past the old 256-record ceiling too: a repository of thousands of LFS
+  // files reaches the same client check instead of a discovery failure.
+  it.each([1, 3_000])('returns the stable missing git-lfs result for %i LFS files without starting an LFS transfer', async (count) => {
     const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'d'.repeat(64)}\nsize 12\n`;
+    const files = Array.from({ length: count }, (_, index) => `assets/asset-${index}.bin`);
+    const batch = (child, separator) => child.stdin.read().toString().slice(0, -1).split(separator);
     const setupValue = setup({
       spawnResponder: ({ args }) => {
         const command = args.join(' ');
         if (command.includes('config --blob HEAD:.gitmodules')) return { code: 1 };
         if (command.includes('ls-tree -rz')) return { code: 0 };
-        if (command.includes('ls-files -z')) return { code: 0, stdout: 'asset.bin\0' };
-        if (command.includes('check-attr')) return { code: 0, stdout: 'asset.bin\0filter\0lfs\0' };
-        if (command.includes('cat-file --batch-check')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n` };
-        if (command.includes('cat-file --batch')) return { code: 0, stdout: `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n` };
+        if (command.includes('ls-files -z')) return { code: 0, stdout: `${files.join('\0')}\0` };
+        if (command.includes('check-attr')) return { onSpawn: ({ child }) => {
+          child.stdout.write(batch(child, '\0').map((file) => `${file}\0filter\0lfs\0`).join(''));
+        } };
+        if (command.includes('cat-file --batch-check')) return { onSpawn: ({ child }) => {
+          child.stdout.write(batch(child, '\n').map(() => `${SHA} blob ${Buffer.byteLength(pointer)}\n`).join(''));
+        } };
+        if (command.includes('cat-file --batch')) return { onSpawn: ({ child }) => {
+          child.stdout.write(batch(child, '\n').map(() => `${SHA} blob ${Buffer.byteLength(pointer)}\n${pointer}\n`).join(''));
+        } };
         if (command.includes('HEAD:.lfsconfig') || command.includes('config --includes')) return { code: 1 };
         if (command.includes('lfs version')) return { code: 1, stderr: 'git-lfs is not installed at /private/bin' };
         return { code: 0 };
@@ -2502,7 +2512,10 @@ process.exit(safe ? 0 : 1);
     plan = await operation.service.plan({ operation: 'clone', remoteUrl: ENDPOINT, destinationPath: destination, transportMode: 'system', unverifiedConfirmed: true });
     const result = await operation.service.execute(plan.operationId);
     expect(result).toMatchObject(interruption === 'overflow'
-      ? { state: 'partial', hydration: { status: 'invalid' } }
+      ? {
+        state: 'partial', error: { code: 'CHECKOUT_TOO_LARGE' },
+        hydration: { status: 'invalid', lfs: [{ status: 'invalid', error: { code: 'CHECKOUT_TOO_LARGE' } }] },
+      }
       : { state: 'cancelled', error: { code: interruption.startsWith('CANCELLED') ? 'CANCELLED' : interruption }, hydration: { status: 'cancelled' } });
     expect(metadataBatches).toBe(2);
     expect(operation.calls.filter((call) => call.args.includes('cat-file'))).toHaveLength(4);

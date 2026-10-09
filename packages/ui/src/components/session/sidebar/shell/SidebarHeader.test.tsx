@@ -24,8 +24,8 @@ const baseProps = {
   setSessionSearchQuery: () => undefined,
   hasSessionSearchQuery: false,
   searchMatchCount: 0,
-  collapseAllProjects: () => undefined,
-  expandAllProjects: () => undefined,
+  collapseAll: () => undefined,
+  expandAll: () => undefined,
 };
 
 function StatefulHeader({

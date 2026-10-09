@@ -222,6 +222,14 @@ export function NewWorktreeDialog({
   });
   const [isCreating, setIsCreating] = React.useState(false);
   const [validationAbortController, setValidationAbortController] = React.useState<AbortController | null>(null);
+  // The random name this open started with. Folder names stay ASCII, so a
+  // branch name without Latin letters or digits (`测试分支`) leaves no slug and
+  // the folder keeps this name instead of going empty.
+  const [fallbackFolderName, setFallbackFolderName] = React.useState('');
+  const folderNameForBranch = React.useCallback(
+    (branch: string) => slugifyWorktreeName(branch) || fallbackFolderName,
+    [fallbackFolderName],
+  );
   const initializedForCurrentOpen = React.useRef(false);
   // The item the dialog was opened with, until it is chosen.
   const pendingInitialSelection = React.useRef<ReferencePickerSelection | null>(null);
@@ -268,6 +276,7 @@ export function NewWorktreeDialog({
 
     const uniqueSlug = generateUniqueSlug();
     pendingInitialSelection.current = initialSelection ?? null;
+    setFallbackFolderName(uniqueSlug);
     setMode(initialSelection ? 'from-item' : 'new-branch');
     setNewBranch({ branchName: uniqueSlug, worktreeName: uniqueSlug, isSyncingWorktreeName: true });
     setItemBranch(EMPTY_DRAFT);
@@ -280,14 +289,14 @@ export function NewWorktreeDialog({
   // The folder follows the branch name until the user renames the folder.
   React.useEffect(() => {
     if (!newBranch.isSyncingWorktreeName) return;
-    const synced = slugifyWorktreeName(normalizeBranchName(newBranch.branchName));
+    const synced = folderNameForBranch(newBranch.branchName);
     if (synced !== newBranch.worktreeName) setNewBranch((prev) => ({ ...prev, worktreeName: synced }));
-  }, [newBranch.branchName, newBranch.isSyncingWorktreeName, newBranch.worktreeName]);
+  }, [folderNameForBranch, newBranch.branchName, newBranch.isSyncingWorktreeName, newBranch.worktreeName]);
   React.useEffect(() => {
     if (!itemBranch.isSyncingWorktreeName) return;
-    const synced = slugifyWorktreeName(normalizeBranchName(itemBranch.branchName));
+    const synced = folderNameForBranch(itemBranch.branchName);
     if (synced !== itemBranch.worktreeName) setItemBranch((prev) => ({ ...prev, worktreeName: synced }));
-  }, [itemBranch.branchName, itemBranch.isSyncingWorktreeName, itemBranch.worktreeName]);
+  }, [folderNameForBranch, itemBranch.branchName, itemBranch.isSyncingWorktreeName, itemBranch.worktreeName]);
 
   // Validation - only runs after fields are touched
   const validateInputs = React.useCallback(async () => {
@@ -497,7 +506,7 @@ export function NewWorktreeDialog({
   // A chosen item names the branch the worktree gets; a PR brings its own.
   const linkItem = (item: LinkedItem, branch: string) => {
     setLinked(item);
-    setItemBranch({ branchName: branch, worktreeName: slugifyWorktreeName(branch), isSyncingWorktreeName: true });
+    setItemBranch({ branchName: branch, worktreeName: folderNameForBranch(branch), isSyncingWorktreeName: true });
     setValidation(prev => ({ ...prev, touched: false, branchError: null, worktreeError: null }));
   };
 
@@ -725,7 +734,7 @@ export function NewWorktreeDialog({
           isLoading={isLoadingBranches}
           isMobile={isMobile}
           onSelect={(branch) => {
-            setExistingBranch({ selectedBranch: branch.value, worktreeName: slugifyWorktreeName(branch.label) });
+            setExistingBranch({ selectedBranch: branch.value, worktreeName: folderNameForBranch(branch.label) });
             setValidation(prev => ({ ...prev, touched: true }));
           }}
         />

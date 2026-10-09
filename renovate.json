@@ -12,6 +12,11 @@
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "development dependencies"
+    },
+    {
+      "description": "androidx.core 1.17+ needs compileSdk 36+ (1.19 needs 37 and AGP 9.1); lift together with the Android SDK baseline",
+      "matchPackageNames": ["androidx.core:core"],
+      "allowedVersions": "<1.17.0"
     }
   ]
 }

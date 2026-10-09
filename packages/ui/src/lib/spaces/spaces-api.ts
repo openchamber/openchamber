@@ -131,6 +131,8 @@ export type SpaceSetup = z.infer<typeof setupSchema>;
 const spaceEntrySchema = z.object({
   id: spaceIdSchema,
   name: z.string(),
+  // The place the space lives on, as the host names it; the browser panel's container mark says it.
+  placeId: z.string(),
   projectDirectory: z.string().nullable(),
   directory: z.string().nullable(),
   // The folder the space was made for, on the host, which a space whose project is no longer

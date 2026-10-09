@@ -48,7 +48,71 @@ export const registerSkillRoutes = (app, dependencies) => {
     fetchGitHubRepoMetas,
     getProfiles,
     getProfile,
+    createHttpsCredentialReference,
+    resolveSourceControlAccount,
+    credentialResolver,
   } = dependencies;
+
+  const resolveCatalogGitIdentity = async (identityId, source) => {
+    if (!identityId || identityId === 'global') return { ok: true, identity: null };
+
+    const profile = getProfile(identityId);
+    if (!profile) {
+      return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+    }
+
+    const transport = profile.transport ?? 'system';
+    if (transport === 'system') return { ok: true, identity: null };
+    if (transport === 'anonymous') return { ok: true, identity: { anonymous: true, transport } };
+
+    const parsed = parseSkillRepoSource(source);
+    if (!parsed.ok) return { ok: true, identity: null };
+
+    if (transport === 'ssh') {
+      return {
+        ok: true,
+        identity: {
+          transport,
+          credentialId: profile.sshCredentialId,
+          endpoint: parsed.cloneUrlSsh,
+        },
+      };
+    }
+
+    if (transport === 'account' && profile.account && resolveSourceControlAccount && createHttpsCredentialReference) {
+      const account = await resolveSourceControlAccount(profile.account);
+      if (account?.credentialId !== profile.account.accountId
+        || account.status !== 'valid'
+        || !Number.isSafeInteger(account.credentialRevision)
+        || account.credentialRevision < 1) {
+        return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+      }
+
+      let credentialId;
+      try {
+        credentialId = createHttpsCredentialReference({
+          provider: profile.account.provider,
+          instance: profile.account.instance,
+          credentialId: account.credentialId,
+          credentialRevision: account.credentialRevision,
+          providerUserId: account.providerUserId,
+        });
+      } catch {
+        return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+      }
+
+      return {
+        ok: true,
+        identity: {
+          transport: 'https',
+          credentialId,
+          endpoint: parsed.cloneUrlHttps,
+        },
+      };
+    }
+
+    return { ok: false, error: { kind: 'authRequired', message: 'Selected Git identity is unavailable' } };
+  };
 
   const findWorktreeRootForSkills = (workingDirectory) => {
     if (!workingDirectory) return null;
@@ -87,7 +151,10 @@ export const registerSkillRoutes = (app, dependencies) => {
     return normalizedCandidate === normalizedParent || normalizedCandidate.startsWith(`${normalizedParent}${path.sep}`);
   };
 
-  const inferSkillScopeAndSourceFromPath = (skillPath, workingDirectory) => {
+  // `projectAncestors` is `getSkillProjectAncestors(workingDirectory)`, worked
+  // out once per list: it probes the disk up to the repository root, and a
+  // list has hundreds of skills.
+  const inferSkillScopeAndSourceFromPath = (skillPath, projectAncestors) => {
     const resolvedPath = typeof skillPath === 'string' ? path.resolve(skillPath) : '';
     const home = os.homedir();
     const source = resolvedPath.includes(`${path.sep}.agents${path.sep}skills${path.sep}`)
@@ -96,7 +163,6 @@ export const registerSkillRoutes = (app, dependencies) => {
         ? 'claude'
         : 'opencode';
 
-    const projectAncestors = getSkillProjectAncestors(workingDirectory);
     const isProjectScoped = projectAncestors.some((ancestor) => {
       const candidates = [
         path.join(ancestor, '.opencode'),
@@ -151,6 +217,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         return null;
       }
 
+      const projectAncestors = getSkillProjectAncestors(workingDirectory);
       return payload
         .map((item) => {
           const name = typeof item?.name === 'string' ? item.name.trim() : '';
@@ -176,7 +243,7 @@ export const registerSkillRoutes = (app, dependencies) => {
               content,
             };
           }
-          const inferred = inferSkillScopeAndSourceFromPath(location, workingDirectory);
+          const inferred = inferSkillScopeAndSourceFromPath(location, projectAncestors);
           const skill = {
             name,
             path: location,
@@ -203,22 +270,6 @@ export const registerSkillRoutes = (app, dependencies) => {
     } catch {
       return [];
     }
-  };
-
-  const resolveGitIdentity = (profileId) => {
-    if (!profileId) {
-      return null;
-    }
-    try {
-      const profile = getProfile(profileId);
-      const sshKey = profile?.sshKey;
-      if (typeof sshKey === 'string' && sshKey.trim()) {
-        return { sshKey: sshKey.trim() };
-      }
-    } catch {
-      // ignore
-    }
-    return null;
   };
 
   // Prefer an explicit request directory, then soft-fallback to the active
@@ -252,13 +303,18 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
       const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
-      const localSkills = discoverSkills(directory);
+      const localSkills = await discoverSkills(directory);
       const skills = mergeDiscoveredSkills(openCodeSkills ?? [], localSkills);
 
-      const enrichedSkills = skills.map((skill) => {
-        const sources = getSkillSources(skill.name, directory, skill);
+      // One skill at a time: each await hands the event loop back, so other
+      // requests are served while hundreds of skills are read.
+      const enrichedSkills = [];
+      for (const skill of skills) {
+        // The list carries no supporting files; the skill page reads them
+        // from GET /api/config/skills/:name.
+        const sources = await getSkillSources(skill.name, directory, skill, { includeSupportingFiles: false });
         const skillPath = typeof skill.path === 'string' ? skill.path : null;
-        return {
+        enrichedSkills.push({
           ...skill,
           sources,
           renamable: Boolean(
@@ -266,8 +322,8 @@ export const registerSkillRoutes = (app, dependencies) => {
             && skillPath !== '<built-in>'
             && isManagedSkillPath(skillPath, directory)
           ),
-        };
-      });
+        });
+      }
 
       // OpenCode decides which external skill roots it loads from process
       // env, and the browser cannot read that. Report the flags alongside the
@@ -383,7 +439,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const resolvedDiscovered = mergeDiscoveredSkills(
         (await fetchOpenCodeDiscoveredSkills(directory)) ?? [],
-        discoverSkills(directory),
+        await discoverSkills(directory),
       );
       const installedByName = new Map(resolvedDiscovered.map((s) => [s.name, s]));
 
@@ -399,6 +455,13 @@ export const registerSkillRoutes = (app, dependencies) => {
         subpath: effectiveSubpath || '',
         identityId: src.gitIdentityId || '',
       });
+      const resolvedIdentity = await resolveCatalogGitIdentity(src.gitIdentityId, src.source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const scanResult = await scanWithCache(
         cacheKey,
@@ -406,12 +469,19 @@ export const registerSkillRoutes = (app, dependencies) => {
           source: src.source,
           subpath: src.defaultSubpath,
           defaultSubpath: src.defaultSubpath,
-          identity: resolveGitIdentity(src.gitIdentityId),
+          identity: resolvedIdentity.identity,
+          credentialResolver,
         }),
         { refresh },
       );
 
       if (!scanResult.ok) {
+        if (scanResult.error?.kind === 'authRequired') {
+          return res.status(401).json({
+            ok: false,
+            error: { ...scanResult.error, identities: listGitIdentitiesForResponse() },
+          });
+        }
         return res.status(500).json({ ok: false, error: scanResult.error });
       }
 
@@ -441,12 +511,19 @@ export const registerSkillRoutes = (app, dependencies) => {
   app.post('/api/config/skills/scan', async (req, res) => {
     try {
       const { source, subpath, gitIdentityId } = req.body || {};
-      const identity = resolveGitIdentity(gitIdentityId);
+      const resolvedIdentity = await resolveCatalogGitIdentity(gitIdentityId, source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const result = await scanSkillsRepository({
         source,
         subpath,
-        identity,
+        identity: resolvedIdentity.identity,
+        credentialResolver,
       });
 
       if (!result.ok) {
@@ -495,12 +572,19 @@ export const registerSkillRoutes = (app, dependencies) => {
         workingDirectory = resolved.directory;
       }
 
-      const identity = resolveGitIdentity(gitIdentityId);
+      const resolvedIdentity = await resolveCatalogGitIdentity(gitIdentityId, source);
+      if (!resolvedIdentity.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: { ...resolvedIdentity.error, identities: listGitIdentitiesForResponse() },
+        });
+      }
 
       const result = await installSkillsFromRepository({
         source,
         subpath,
-        identity,
+        identity: resolvedIdentity.identity,
+        credentialResolver,
         scope,
         targetSource,
         workingDirectory,
@@ -558,7 +642,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       }
       const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
         .find((skill) => skill.name === skillName) || null;
-      const sources = getSkillSources(skillName, directory, discoveredSkill);
+      const sources = await getSkillSources(skillName, directory, discoveredSkill);
 
       res.json({
         name: skillName,
@@ -587,7 +671,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
         .find((skill) => skill.name === skillName) || null;
-      const sources = getSkillSources(skillName, directory, discoveredSkill);
+      const sources = await getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }
@@ -621,7 +705,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log('[Server] Creating skill:', skillName);
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      createSkill(skillName, { ...config, source: skillSource }, directory, scope);
+      await createSkill(skillName, { ...config, source: skillSource }, directory, scope);
       res.json(buildAppliedResponse(
         `Skill ${skillName} created successfully.`,
       ));
@@ -644,7 +728,7 @@ export const registerSkillRoutes = (app, dependencies) => {
         const newName = updates.renameTo.trim();
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
-        renameSkill(skillName, newName, directory);
+        await renameSkill(skillName, newName, directory);
         // OpenCode 2 watches the skills directories: the renamed folder is
         // picked up like any other write, no restart and no client reload.
         return res.json({
@@ -656,7 +740,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
-      updateSkill(skillName, updates, directory, updates?.targetPath);
+      await updateSkill(skillName, updates, directory, updates?.targetPath);
       res.json(buildAppliedResponse(
         `Skill ${skillName} updated successfully.`,
       ));
@@ -681,7 +765,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
         .find((skill) => skill.name === skillName) || null;
-      const sources = getSkillSources(skillName, directory, discoveredSkill);
+      const sources = await getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }
@@ -715,7 +799,7 @@ export const registerSkillRoutes = (app, dependencies) => {
 
       const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
         .find((skill) => skill.name === skillName) || null;
-      const sources = getSkillSources(skillName, directory, discoveredSkill);
+      const sources = await getSkillSources(skillName, directory, discoveredSkill);
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }

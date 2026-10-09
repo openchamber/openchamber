@@ -2,7 +2,7 @@
   "name": "openchamber",
   "displayName": "OpenChamber",
   "description": "%extension.description%",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "publisher": "fedaykindev",
   "private": true,
   "repository": {
@@ -288,7 +288,7 @@
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
-    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
+    "type-check": "tsc --noEmit -p tsconfig.json && tsc -b tsconfig.webview.json",
     "lint": "bun x eslint --ext .ts,.tsx src webview",
     "test": "node ../../scripts/run-isolated-tests.mjs src webview",
     "package": "vsce package --no-dependencies"
@@ -305,7 +305,7 @@
   },
   "dependencies": {
     "@openchamber/ui": "workspace:*",
-    "@opencode/client": "2.0.23",
+    "@opencode/client": "2.0.25",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",

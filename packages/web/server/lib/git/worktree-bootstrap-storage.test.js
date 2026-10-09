@@ -88,6 +88,21 @@ describe('worktree bootstrap storage', () => {
     expect(encoded).not.toContain('process output');
   });
 
+  it('round-trips a checkout with too many files to inspect with its own public message', async () => {
+    const dataDirectory = await temporaryDirectory('worktree-bootstrap-too-large-');
+    const filePath = path.join(dataDirectory, 'bootstrap.json');
+    const failure = { code: 'CHECKOUT_TOO_LARGE', message: 'Checkout has too many files to inspect' };
+    await createWorktreeBootstrapStore({ filePath }).write('/worktrees/large', {
+      status: 'failed', phase: 'directory-created', error: failure.message, errorCode: failure.code, updatedAt: 12,
+      hydration: { status: 'invalid', submodules: [], lfs: [{ path: '.', status: 'invalid', error: failure }] },
+    });
+
+    await expect(createWorktreeBootstrapStore({ filePath }).read('/worktrees/large')).resolves.toMatchObject({
+      status: 'failed', errorCode: 'CHECKOUT_TOO_LARGE', error: 'Worktree checkout has too many files to inspect',
+      hydration: { lfs: [{ status: 'invalid', error: { code: 'CHECKOUT_TOO_LARGE' } }] },
+    });
+  });
+
   it('turns a restarted pending bootstrap into a git-ready repair blocker without resuming it', async () => {
     if (!gitAvailable()) return;
     const dataDirectory = await temporaryDirectory('worktree-bootstrap-restart-');

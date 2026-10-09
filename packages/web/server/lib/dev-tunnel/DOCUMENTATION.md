@@ -74,3 +74,11 @@ and what made it fragile per framework.
   machine answers and show local content under a remote address.
 - Closing either end closes the other. A half-open pipe would leave the page
   waiting on bytes that will never arrive.
+- A dev server inside an isolated space is reached the same way, with a space
+  id: the client dials `/api/spaces/<id>/dev-tunnel`, which the host forwards
+  to the server inside the space, and that server dials the port on its own
+  loopback against its own discovery. A space's tunnel is keyed apart from the
+  host's on the same port. What the desktop does with the page it gets, a
+  session of the space's own behind a proxy that reaches only its tunnel ports,
+  is in `packages/electron/space-preview.mjs` and the "Preview" section of
+  `packages/web/server/lib/spaces/DOCUMENTATION.md`.

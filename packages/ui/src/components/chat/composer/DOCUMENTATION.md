@@ -143,9 +143,21 @@ In a normal session view the composer slot is an absolute layer over the
 bottom of the transcript (`ChatContainer`), and the input box is glass
 (`oc-glass-composer`). The draft screen and the expanded editor keep the slot
 in flow. A `ResizeObserver` on the slot writes its height into the chat
-column's `--chat-composer-inset`; the timeline's tail spacer reads that
-variable plus a fixed gap, so the last row always ends above the composer.
-The transcript's end fade reads the same variable (plus the floating-panel
+column's `--chat-composer-inset`, and the timeline's tail spacer height into
+`--chat-composer-tail-inset`: the resting composer (the smallest height the
+slot has measured) plus an 80px gap, or the current height minus an 8px
+overlap into the gap, whichever is larger. With the last turn's own bottom
+padding the visible band at rest is about 104px. A row appearing inside the
+composer (suggestion, "looks done", background commands) or a few lines of
+text grow into the band without moving the transcript; growth past 88px
+(`FLOATING_COMPOSER_GROWTH_ALLOWANCE_PX`) pushes the transcript and keeps
+about 16px between the last row and the composer. The rule and the resting
+height per column live in `state/composerTailInset.ts`; the mobile morph uses
+the same rule to announce how far the transcript's end moves, which is less
+than the slot's height change whenever part of it is taken from the gap. While the slot is taller than at rest
+the column carries `data-composer-grown`, and the recap hint, which rides the
+composer's top edge, hides until the composer is back at rest.
+The transcript's end fade reads `--chat-composer-inset` (plus the floating-panel
 clearance) through `--scroll-shadow-end-inset` in `index.css`, so a row that
 does reach the composer, as the newest lines of a live reply do while the
 follow glide is still catching up, dissolves above the box instead of being
@@ -304,11 +316,18 @@ chip the same way; a token whose last character was just typed stays text
 until typing moves on, so a name is never chipped halfway. Commands keep
 their color only.
 
-Desktop comment fields (chat quote comments, diff and file comments, editing a
+Desktop comment fields in ordinary page DOM (chat quote comments, editing a
 pending comment above the composer) are `components/comments/CommentTextEditor`:
 this editor with comment keys (Enter submits, Escape cancels, both after an IME
 composition), the `#` snippet picker and image paste, where a pasted image's
 citation is a chip at once through `pendingAttachmentFilenames`.
+
+Diff, file editor and file preview line comments (`InlineCommentInput`) stay a
+textarea with the same keys, snippet picker and image paste, and show the
+citation as text until the comment is attached. Those fields live inside other
+editors' DOM, an annotation slot in the diff viewer's shadow tree and a block
+widget of the file editor, where this editor lost its caret and jumped to the
+start of the line while typing.
 
 The composer disables CodeMirror EditContext through `ComposerEditorView`:
 on Android Chrome with Gboard (Thai input, #3514) the EditContext path moved
@@ -661,8 +680,8 @@ shared keyboard timing (`lib/mobileKeyboardTiming.ts`) the composer slide
 also uses, and ends on `oc:keyboard-settled`; a fallback timer runs it alone
 without a keyboard. The transcript rides it through
 `lib/scroll/keyboardFollowGlide.ts` (owned by `useChatTimelineScroll`): the
-morph announces `oc:composer-morph` (`hold` with the slot's height delta,
-`glide` and `release` when it runs without a keyboard), the glide holds every
+morph announces `oc:composer-morph` (`hold` with how far the transcript's end
+moves, `glide` and `release` when it runs without a keyboard), the glide holds every
 automatic end write while a transition runs, lets the geometry land in one
 step, and drives scrollTop on the same curve. Mobile browsers, Android and
 reduced motion keep the instant swap.

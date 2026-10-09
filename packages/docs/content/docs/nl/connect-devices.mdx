@@ -18,7 +18,7 @@ Koppel een ander apparaat aan uw OpenChamber-server door een eenmalige QR-code t
 4. Klik op **QR-code maken**.
 5. Gebruik de code op het andere apparaat:
    - **mobiele app:** tik op **QR-code scannen** op het verbindingsscherm of in de instantielijst
-   - **desktopapp:** kopieer in plaats daarvan de verbindingslink en plak die bij **Instellingen → Remote-instanties → Andere OpenChamber-servers → Link importeren**
+   - **desktopapp:** kopieer in plaats daarvan de verbindingslink en open die op de computer met de desktopapp, die om bevestiging vraagt voordat hij verbindt. U kunt de link ook plakken bij **Instellingen → Remote-instanties → Andere OpenChamber-servers → Link importeren**
 
 Het venster sluit vanzelf zodra het apparaat verbindt. Het apparaat verschijnt met een actuele status in de lijst. De koppeling is klaar.
 
@@ -59,6 +59,12 @@ Een link met `--relay` bevat beide routes. Het apparaat verbindt rechtstreeks vi
 > De directe route werkt alleen als de server op uw netwerk luistert. Standaard luistert OpenChamber alleen op de eigen computer. Start met `--lan` om het via wifi bereikbaar te maken. De opdracht waarschuwt met `[LAN_UNREACHABLE]` als de directe route niet vanaf andere apparaten bruikbaar is. Een `--relay`-link werkt dan nog steeds, maar altijd via de relay.
 
 De getoonde link en QR-code werken net als die uit het instellingenvenster: eenmalig, met vervaltijd en intrekbaar.
+
+Wilt u een desktopapp koppelen, open dan de getoonde link op de computer waar die app draait. De app vraagt om bevestiging en verbindt. Op macOS:
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## Zie ook
 

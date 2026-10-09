@@ -10,11 +10,11 @@ const permission = {
 } as PermissionRequest;
 
 describe('permission needed toast', () => {
-  test('shows for an inactive session and opens that session', () => {
+  test('shows for an inactive session and opens that session on the request', () => {
     const shown: Array<{ title: string; options: Parameters<Parameters<typeof showPermissionNeededToast>[0]['show']>[1] }> = [];
-    const opened: Array<[string, string]> = [];
+    const opened: Array<[string, string, string]> = [];
     const show: Parameters<typeof showPermissionNeededToast>[0]['show'] = (title, options) => { shown.push({ title, options }); };
-    const openSession = (sessionId: string, directory: string) => { opened.push([sessionId, directory]); };
+    const openSession = (sessionId: string, directory: string, requestId: string) => { opened.push([sessionId, directory, requestId]); };
     const pendingIds = new Set<string>();
 
     expect(showPermissionNeededToast({
@@ -31,7 +31,7 @@ describe('permission needed toast', () => {
     expect(options.id).toBe('permission-inactive-session:permission-1');
     expect(options.description).toBe('bash');
     options.action.onClick();
-    expect(opened).toEqual([['inactive-session', '/project']]);
+    expect(opened).toEqual([['inactive-session', '/project', 'permission-1']]);
   });
 
   test('does not show for the viewed session or duplicate a pending toast', () => {

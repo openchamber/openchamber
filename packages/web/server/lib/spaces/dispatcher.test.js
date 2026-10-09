@@ -86,6 +86,9 @@ const startInside = async ({ password = TOKEN } = {}) => {
     res.setHeader('content-type', String(req.query.type));
     res.end('file');
   });
+  app.get('/api/slow', (_req, res) => {
+    setTimeout(() => res.json({ late: true }), 300);
+  });
   app.get('/api/page', (_req, res) => {
     res.setHeader('content-type', 'text/html; charset=utf-8');
     res.send('<script>alert(1)</script>');
@@ -420,6 +423,20 @@ describe('space dispatcher', () => {
     const page = await fetch(host.url(`/api/spaces/${ID}/page`));
     expect(page.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     expect(await page.text()).toBe('<script>alert(1)</script>');
+  });
+
+  it('survives a client that leaves between the request and the answer', async () => {
+    // The browser panel polls a space's dev servers and aborts the poll when it closes; the
+    // answer inside still arrives, and piping it into a response that is gone must not throw.
+    await start();
+    const controller = new AbortController();
+    const aborted = fetch(host.url(`/api/spaces/${ID}/slow`), { signal: controller.signal }).catch((error) => error);
+    await new Promise((resolve) => { setTimeout(resolve, 80); });
+    controller.abort();
+    expect((await aborted).name).toBe('AbortError');
+    await new Promise((resolve) => { setTimeout(resolve, 500); });
+    const next = await fetch(host.url(`/api/spaces/${ID}/echo`));
+    expect(next.status).toBe(200);
   });
 
   it('passes a 304 through: a browser revalidating its own copy is not a redirect', async () => {

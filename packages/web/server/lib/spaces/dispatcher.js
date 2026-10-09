@@ -521,6 +521,13 @@ export function createSpaceDispatcher({ transport, now = Date.now, logger = cons
     res.on('close', onClientGone);
 
     upstreamRequest.on('response', (upstream) => {
+      // The client left between the request and the answer, a list poll aborted by its panel
+      // among them: nothing to write to, and `pipeline` into a destroyed response throws.
+      if (res.destroyed) {
+        upstream.destroy();
+        finish('done');
+        return;
+      }
       if (upstream.statusCode === 401 && onUnauthorized === 'report') {
         upstream.resume();
         upstream.on('end', () => finish('unauthorized'));

@@ -499,6 +499,7 @@ describe('createRelayTunnelClient', () => {
       killWire(code);
       await wait(10);
       expect(client.getStatus().state).toBe('error');
+      expect(client.getStatus().terminal).toBe(true);
       const reason = client.getStatus().lastError;
       await expect(client.fetch('/health')).rejects.toThrow(reason);
       const socket = client.openWebSocket('/api/terminal/ws');

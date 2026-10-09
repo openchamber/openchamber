@@ -660,8 +660,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
         searchMatchCount={searchMatchCount}
-        collapseAllProjects={projectView.actions.collapseAllProjects}
-        expandAllProjects={projectView.actions.expandAllProjects}
+        collapseAll={projectView.actions.collapseAll}
+        expandAll={projectView.actions.expandAll}
       />
 
       <SessionProjectCollection

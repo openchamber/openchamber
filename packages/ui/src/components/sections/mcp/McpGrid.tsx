@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { selectMcpServersForDirectory, useMcpConfigStore, type McpDraft } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import type { McpServerStatus } from '@/lib/opencode/model';
+import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { MCP_DRAFT_OAUTH_UNSET } from './mcpDraft';
 
 const nextServerName = (existing: readonly { name: string }[]): string => {
@@ -43,8 +44,14 @@ const nextServerName = (existing: readonly { name: string }[]): string => {
   return name;
 };
 
-const StatusPill: React.FC<{ status: McpServerStatus['status']['status'] | undefined; enabled: boolean }> = ({ status, enabled }) => {
+const StatusPill: React.FC<{
+  status: McpServerStatus['status']['status'] | undefined;
+  enabled: boolean;
+  blocked: boolean;
+}> = ({ status, enabled, blocked }) => {
   const { t } = useI18n();
+  // OpenCode never loads a blocked server, so it has no status of its own to show.
+  if (blocked) return <SettingsCardPill tone="warning">{t('settings.mcp.grid.status.blockedByPolicy')}</SettingsCardPill>;
   if (!enabled) return <SettingsCardPill tone="neutral">{t('settings.mcp.grid.status.disabled')}</SettingsCardPill>;
   const pill: { tone: SettingsCardTone; label: string } | null = status === 'connected'
     ? { tone: 'success', label: t('settings.mcp.page.status.label.connected') }
@@ -72,6 +79,7 @@ export const McpGrid: React.FC = () => {
   const [isDeleting, setIsDeleting] = React.useState(false);
   const servers = useMcpConfigStore((state) => selectMcpServersForDirectory(state, settingsDirectory));
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(settingsDirectory));
+  const isBlocked = useIntegrationPolicyBlock(settingsDirectory);
   const refreshStatus = useMcpStore((state) => state.refresh);
   const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -185,6 +193,7 @@ export const McpGrid: React.FC = () => {
         )}
         {filtered.map((server) => {
           const enabled = server.disabled !== true;
+          const blocked = isBlocked(`mcp:${server.name}`);
           const target = server.type === 'local' ? server.command?.join(' ') : server.url;
           return (
             <SettingsCard
@@ -192,8 +201,10 @@ export const McpGrid: React.FC = () => {
               icon={<SettingsCardIcon name={server.type === 'local' ? 'server' : 'global'} />}
               title={server.name}
               subtitle={target || undefined}
-              badges={<StatusPill status={mcpStatus[server.name]?.status.status} enabled={enabled} />}
-              muted={!enabled}
+              badges={(
+                <StatusPill status={mcpStatus[server.name]?.status.status} enabled={enabled} blocked={blocked} />
+              )}
+              muted={!enabled || blocked}
               footer={(
                 <>
                   <span>

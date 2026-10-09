@@ -14,7 +14,7 @@ const ERROR_CODES = new Set([
   'INVALID_REQUEST', 'NOT_FOUND', 'STALE_REPOSITORY', 'STALE_BINDING', 'STALE_CONFIG',
   'REMOTE_CHANGED', 'AUTHENTICATION_REQUIRED', 'AUTHENTICATION_FAILED', 'TRANSPORT_FAILED',
   'CONFLICT', 'CANCELLED', 'TIMEOUT', 'OUTCOME_UNKNOWN', 'RUNTIME_UNSUPPORTED', 'UNKNOWN',
-  'GIT_LFS_CLIENT_MISSING', 'PATH_LENGTH_LIMIT',
+  'GIT_LFS_CLIENT_MISSING', 'PATH_LENGTH_LIMIT', 'CHECKOUT_TOO_LARGE',
 ]);
 const HYDRATION_STATUSES = new Set([
   'succeeded', 'authorization-required', 'invalid', 'client-missing', 'failed', 'cancelled', 'not-needed',
@@ -36,6 +36,7 @@ const SAFE_ERROR_MESSAGES = Object.freeze({
   RUNTIME_UNSUPPORTED: 'Worktree checkout hydration is unsupported by this runtime',
   UNKNOWN: 'Worktree bootstrap completion is unknown. Inspect the checkout and repair setup before use.',
   GIT_LFS_CLIENT_MISSING: 'Git LFS is required but unavailable',
+  CHECKOUT_TOO_LARGE: 'Worktree checkout has too many files to inspect',
   PATH_LENGTH_LIMIT: 'Git reported "File name too long". The worktree checkout path exceeds this system\'s path-length limit. Enable OS long paths or use a shorter repository path.',
 });
 

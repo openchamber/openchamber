@@ -147,6 +147,9 @@ export type RelayTunnelState = 'idle' | 'connecting' | 'connected' | 'reconnecti
 export interface RelayTunnelStatus {
   state: RelayTunnelState;
   lastError?: string;
+  /** Set on an `error` the tunnel will not retry on a timer (auth failed,
+   * duplicate client, limit exceeded); only an `online`/foreground wake retries. */
+  terminal?: boolean;
 }
 
 interface RelayTunnelClientOptions {
@@ -252,7 +255,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
   let wakeListenersInstalled = false;
 
   const setStatus = (next: RelayTunnelStatus): void => {
-    if (status.state === next.state && status.lastError === next.lastError) return;
+    if (status.state === next.state && status.lastError === next.lastError && status.terminal === next.terminal) return;
     status = next;
     for (const listener of statusListeners) {
       try {
@@ -464,7 +467,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
       // fresh attempt instead of looping forever in the background.
       if (terminal) {
         addWakeListeners();
-        setStatus({ state: 'error', lastError: error.message });
+        setStatus({ state: 'error', lastError: error.message, terminal: true });
         return;
       }
       setStatus({ state: asErrorState ? 'error' : 'reconnecting', lastError: error.message });

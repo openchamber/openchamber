@@ -39,7 +39,11 @@ Auto. There is no env gate — the feature shipped dark behind
 - `history.js` — the last three settled turns through session assist's
   `loadAssistContext` (text parts only, attached quotes included, no files or
   tool payloads), each user message cut to its head and each answer to head
-  plus tail. The new request is never cut.
+  plus tail. The new request is never cut. Also the model that wrote the last
+  settled answer and when it finished (`lastAnswer`), for `cache.js`.
+- `cache.js` — "Try to preserve cache usage": which category a send stays on
+  while the current model's prompt cache is likely warm (`cacheHoldCategory`),
+  and how long that is given OpenCode's `warming` config (`warmWindowMs`).
 - `runtime.js` — `createRoutingRuntime`: `describe`, `classifierEndpoint` (the
   endpoint a Jev request goes to now, or null; also used by
   `../session-work` and `../session-goal`), `noteModelSelection`,
@@ -91,6 +95,21 @@ Auto. There is no env gate — the feature shipped dark behind
   switch, so the reply runs on the model's default thinking instead of OpenCode
   refusing it (Settings from before #4133 saved list positions like `"2"`).
   An unreadable catalog, or one that does not know the model yet, keeps it.
+- A provider's prompt cache belongs to one model, so a model switch makes the
+  new model read the whole context uncached. With `preserveCache` on (the
+  default; a config without the key reads as on), a send Jev routes to a
+  built-in category below the one the session is on runs as that one instead,
+  while the cache is likely warm. "Below" is the built-in order trivial <
+  research < implement < hard; the session is on the highest enabled built-in
+  category whose model wrote the last settled answer. Moving up is never held,
+  and neither is a send routed to a user category, a fallback for low
+  confidence or an error, or a hold that would change the agent (another
+  agent is another system prompt, which misses the cache anyway). Warm means
+  within 5 minutes of the last answer finishing, or, when OpenCode's `warming`
+  is on for the directory, within its `duration` (30 minutes for `true`) plus
+  5 minutes. The config is read only after the first 5 minutes; an unreadable
+  one counts as warming off. The decision event names the category the send
+  ran as and carries `cacheHold.requested`, the one Jev chose.
 - Auto is offered (`autoReady`) with a usable classification provider
   (`jevAvailable`), `enabled`, a fallback model and at least two enabled
   categories.
@@ -223,9 +242,10 @@ features that need Jev.
 
 ## Tests
 
-`store.test.js` (defaults, deviation round-trip, deleted built-ins, malformed
+`store.test.js` (defaults, deviation round-trip, the cache setting's default,
+deleted built-ins, malformed
 file, token file mode, classifier pick, custom endpoint file), `runtime.test.js` (request text,
-excerpts, decisions, endpoints, custom URL normalization and setter,
+excerpts, decisions, cache holds and the warm window, endpoints, custom URL normalization and setter,
 classifier fallback, rewrite and fallback
 paths, safety net accept/hold/skip/unavailable), `routes.http.test.js`
 (sentinel dropped from a create and swallowed on the model switch, routed send

@@ -19,7 +19,7 @@
  *
  * Event contract:
  *  - `oc:composer-morph` (mobileComposerMorph): `hold` at the swap with the
- *    box's height delta; `glide` when the morph runs without a keyboard;
+ *    tail inset's delta; `glide` when the morph runs without a keyboard;
  *    `release` when such a morph ends.
  *  - `oc:keyboard-anim` / `oc:keyboard-settled` (useNativeMobileChrome):
  *    start the glide for a keyboard leg and release the hold when it lands.
@@ -30,7 +30,7 @@ import { keyboardEase } from '@/lib/mobileKeyboardTiming';
 export interface ComposerMorphEventDetail {
     phase: 'hold' | 'glide' | 'release';
     direction: 'expand' | 'collapse';
-    /** Height the box gains (expand) or loses (collapse), in px. */
+    /** How far the transcript's end moves: the change of the composer's tail inset, in px. */
     delta: number;
     durationMs: number;
 }

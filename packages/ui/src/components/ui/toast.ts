@@ -45,7 +45,18 @@ const getToastCopyText = (message: string | React.ReactNode, data?: ExternalToas
 }
 
 // Wrapper to automatically add OK button to success and info toasts, Copy button to error and warning toasts
-export const toast = {
+type ToastWithAction = (message: string | React.ReactNode, data?: ExternalToast) => string | number
+
+// Spelled out so emitted declarations name sonner's own types instead of
+// expanding ones sonner does not export.
+type AppToast = Omit<typeof sonnerToast, 'success' | 'info' | 'error' | 'warning'> & {
+  success: ToastWithAction
+  info: ToastWithAction
+  error: ToastWithAction
+  warning: ToastWithAction
+}
+
+export const toast: AppToast = {
   ...sonnerToast,
   success: (message: string | React.ReactNode, data?: ExternalToast) => {
     return sonnerToast.success(message, {

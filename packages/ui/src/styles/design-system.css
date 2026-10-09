@@ -413,6 +413,13 @@
   opacity: 0;
 }
 
+/* The same goes for a composer taller than at rest (a top row, more lines of
+   text): the hint rides its top edge and would land on the transcript.
+   See the composer slot observer in ChatContainer. */
+[data-composer-bound][data-composer-grown] .oc-recap-hint {
+  opacity: 0;
+}
+
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,

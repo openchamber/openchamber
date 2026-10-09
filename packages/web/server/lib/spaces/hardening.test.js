@@ -150,7 +150,7 @@ describe('findHardeningViolations', () => {
   it('accepts exactly the variables a space gets and the base image sets', () => {
     const full = withEnv([
       ...Object.entries(SPACE_ENVIRONMENT).map(([name, value]) => `${name}=${value}`),
-      'NODE_VERSION=22.23.2',
+      'NODE_VERSION=24.21.0',
       'YARN_VERSION=1.22.22',
     ]);
     expect(checksFor({ container: full })).toEqual([]);

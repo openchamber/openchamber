@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "..",
+    "outDir": "./.tsbuild",
+    "tsBuildInfoFile": "./.tsbuild/build.tsbuildinfo"
+  },
+  "include": [
+    "src",
+    "src/**/*.json",
+    "../sdk/src",
+    "package.json"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/__tests__/**/*",
+    "src/**/*.fixture.ts",
+    "src/**/*.fixture.tsx",
+    "src/**/*.vitest.ts",
+    "src/**/*.vitest.tsx",
+    "../sdk/src/**/*.test.ts",
+    "../sdk/src/**/*.test.tsx"
+  ]
+}

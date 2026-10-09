@@ -368,34 +368,24 @@ const syncRequest: GitNetworkOperationRequest = {
 };
 
 describe('gitApiHttp worktree bootstrap', () => {
-  test('preserves structured hydration failures', async () => {
+  for (const [code, status] of [
+    ['GIT_LFS_CLIENT_MISSING', 'client-missing'],
+    ['CHECKOUT_TOO_LARGE', 'invalid'],
+  ] as const) test(`preserves structured ${code} hydration failures`, async () => {
     installWindowMock();
     try {
+      const failure = {
+        status: 'failed', phase: 'directory-created', error: 'Worktree setup failed',
+        errorCode: code, updatedAt: 12,
+        hydration: {
+          status, submodules: [{ path: 'vendor/ready', status: 'succeeded' }],
+          lfs: [{ path: '.', status, error: { code, message: 'Worktree setup failed' } }],
+        },
+      };
       // SAFETY: This test double accepts every fetch call and always returns a Response.
-      globalThis.fetch = (async () => Response.json({
-        status: 'failed', phase: 'directory-created', error: 'Git LFS is required',
-        errorCode: 'GIT_LFS_CLIENT_MISSING', updatedAt: 12,
-        hydration: {
-          status: 'client-missing', submodules: [{ path: 'vendor/ready', status: 'succeeded' }],
-          lfs: [{
-            path: '.', status: 'client-missing',
-            error: { code: 'GIT_LFS_CLIENT_MISSING', message: 'Git LFS is required' },
-          }],
-        },
-      })) as typeof fetch;
+      globalThis.fetch = (async () => Response.json(failure)) as typeof fetch;
 
-      expect(await getGitWorktreeBootstrapStatus('/repository')).toEqual({
-        status: 'failed', phase: 'directory-created', error: 'Git LFS is required',
-        errorCode: 'GIT_LFS_CLIENT_MISSING', updatedAt: 12,
-        hydration: {
-          status: 'client-missing',
-          submodules: [{ path: 'vendor/ready', status: 'succeeded' }],
-          lfs: [{
-            path: '.', status: 'client-missing',
-            error: { code: 'GIT_LFS_CLIENT_MISSING', message: 'Git LFS is required' },
-          }],
-        },
-      });
+      expect(await getGitWorktreeBootstrapStatus('/repository')).toEqual(failure);
     } finally {
       restoreMocks();
     }

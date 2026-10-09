@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -13,14 +17,36 @@
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",
-    "types": ["vite/client", "@types/dom-speech-recognition"],
+    "types": [
+      "vite/client",
+      "@types/dom-speech-recognition",
+      "node"
+    ],
     "paths": {
-      "@openchamber/sdk": ["../sdk/src/index.ts"],
-      "@openchamber/sdk/schemas": ["../sdk/src/schemas.ts"],
-      "@/*": ["../ui/src/*"],
-      "@vscode/*": ["./webview/*"],
-      "@openchamber/ui/*": ["../ui/src/*"]
+      "@openchamber/sdk": [
+        "../sdk/src/index.ts"
+      ],
+      "@openchamber/sdk/schemas": [
+        "../sdk/src/schemas.ts"
+      ],
+      "@/*": [
+        "../ui/src/*"
+      ],
+      "@vscode/*": [
+        "./webview/*"
+      ],
+      "@openchamber/ui/*": [
+        "../ui/src/*"
+      ]
     }
   },
-  "include": ["webview/**/*", "../ui/src/**/*"]
+  "include": [
+    "webview/**/*",
+    "../ui/src/**/*.d.ts"
+  ],
+  "references": [
+    {
+      "path": "../ui/tsconfig.build.json"
+    }
+  ]
 }

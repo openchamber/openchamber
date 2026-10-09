@@ -121,6 +121,7 @@ export function createGitRepositoryCredentialRuntime({
   getActivePort,
   getActiveHost = () => null,
   helperPath = HELPER_PATH,
+  helperLaunch,
   randomBytes = crypto.randomBytes,
 }) {
   if (!(readBinding instanceof Function) || !credentialResolver || !isString(dataDir)
@@ -204,7 +205,9 @@ export function createGitRepositoryCredentialRuntime({
       activeSecret = randomBytes(32).toString('base64url');
       const url = `http://${callbackHost()}:${port}/api/git/repository-credential`;
       await writePrivate(endpointFilePath, `${JSON.stringify({ version: 1, url, secret: activeSecret })}\n`, 0o600);
-      const script = `#!/bin/sh\nexec ${helperShellCommand(path.resolve(helperPath), [endpointFilePath])} "$@"\n`;
+      // No `exec`: under Electron the command starts with a variable
+      // assignment, which `exec` would take for the program to run.
+      const script = `#!/bin/sh\n${helperShellCommand(path.resolve(helperPath), [endpointFilePath], helperLaunch)} "$@"\n`;
       await writePrivate(launcherPath, script, 0o700);
     },
     registerRoutes: (app) => {

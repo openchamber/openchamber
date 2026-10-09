@@ -1,6 +1,8 @@
 /**
- * The text field of every desktop comment surface: chat quote comments, diff
- * and file comments, and editing a pending comment above the composer.
+ * The text field of desktop comment surfaces in ordinary page DOM: chat quote
+ * comments and editing a pending comment above the composer. Line comments
+ * inside the diff viewer and the file editor use `InlineCommentInput`'s
+ * textarea instead (see the composer DOCUMENTATION.md).
  *
  * It is the composer's own editor with comment policy on top, so a comment
  * reads like the prompt it ends up in: pasted images show as file chips,

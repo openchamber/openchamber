@@ -44,6 +44,7 @@ import {
   type MermaidRender,
 } from './markdown/decorate';
 import type { RenderedCopyFormat } from './markdown/selectionMarkdown';
+import { observeMarkdownTableWidth } from './markdown/tableWidthObserver';
 import { findTextPosition } from './markdown/textPosition';
 import { createMermaidViewerRegistry, MERMAID_BLOCK_SELECTOR, shouldRefreshMermaidViewers } from './markdown/mermaidViewer';
 import {
@@ -135,7 +136,7 @@ const stripLeadingFrontmatter = (markdown: string): string => {
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
-interface MarkdownRendererProps {
+export interface MarkdownRendererProps {
   content: string;
   part?: Part;
   messageId: string;
@@ -923,6 +924,7 @@ const useMorphdomMarkdown = ({
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const renderRevisionRef = React.useRef(0);
   const tableLayoutFrameRef = React.useRef<number | null>(null);
+  const stopTableWidthWatchRef = React.useRef<(() => void) | null>(null);
   // A provisional first paint (blocks not in the settled cache) holds the
   // timeline reveal until the async render lands, so the session opens with
   // final code highlighting instead of a visible restyle.
@@ -965,12 +967,24 @@ const useMorphdomMarkdown = ({
       if (renderRevisionRef.current !== renderRevision) return;
       const container = containerRef.current;
       const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-      if (target) stabilizeMarkdownTableWidths(target, tableCellWrap);
+      if (!target) return;
+      stabilizeMarkdownTableWidths(target, tableCellWrap);
+      // Column widths are fixed for the width they were laid out in, so a
+      // resized chat or document lays the tables out again.
+      if (!stopTableWidthWatchRef.current && target.querySelector('table[data-markdown="table"]')) {
+        stopTableWidthWatchRef.current = observeMarkdownTableWidth(target, () => scheduleTableLayoutRef.current());
+      }
     });
     tableLayoutFrameRef.current = frame;
   }, [containerRef, tableCellWrap, tableLayoutSettled]);
+  const scheduleTableLayoutRef = React.useRef(scheduleTableLayout);
+  React.useEffect(() => {
+    scheduleTableLayoutRef.current = scheduleTableLayout;
+  }, [scheduleTableLayout]);
 
   React.useEffect(() => () => {
+    stopTableWidthWatchRef.current?.();
+    stopTableWidthWatchRef.current = null;
     const frame = tableLayoutFrameRef.current;
     if (frame === null) return;
     window.cancelAnimationFrame(frame);

@@ -277,7 +277,7 @@ const ImagePreviewDialog: React.FC<{
     }, [popup.image]);
 
     const [currentIndex, setCurrentIndex] = React.useState(0);
-    const [imageNaturalSize, setImageNaturalSize] = React.useState<{ width: number; height: number } | null>(null);
+    const [imageNaturalSize, setImageNaturalSize] = React.useState<{ url: string; width: number; height: number } | null>(null);
     const { isRendered, isVisible, isTransitioning } = usePreviewOverlayState(popup.open);
     const viewport = usePreviewViewport(popup.open);
 
@@ -341,30 +341,34 @@ const ImagePreviewDialog: React.FC<{
         };
     }, [hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
 
-    React.useEffect(() => {
-        setImageNaturalSize(null);
-    }, [currentImage?.url]);
+    // The measured size belongs to one URL. Resetting it in an effect on URL
+    // change raced the load event of an already-cached image, which left the
+    // viewer stuck at its maximum box with wide dead margins around the image.
+    const currentImageUrl = currentImage?.url;
+    const currentNaturalSize = imageNaturalSize && imageNaturalSize.url === currentImageUrl
+        ? imageNaturalSize
+        : null;
 
     const imageDisplaySize = React.useMemo(() => {
         const maxWidth = Math.max(160, viewport.width * (isMobile ? 0.86 : 0.75));
         const maxHeight = Math.max(160, viewport.height * (isMobile ? 0.72 : 0.75));
 
-        if (!imageNaturalSize) {
+        if (!currentNaturalSize) {
             return {
                 width: Math.round(maxWidth),
                 height: Math.round(maxHeight),
             };
         }
 
-        const widthScale = maxWidth / imageNaturalSize.width;
-        const heightScale = maxHeight / imageNaturalSize.height;
+        const widthScale = maxWidth / currentNaturalSize.width;
+        const heightScale = maxHeight / currentNaturalSize.height;
         const scale = Math.min(widthScale, heightScale);
 
         return {
-            width: Math.max(1, Math.round(imageNaturalSize.width * scale)),
-            height: Math.max(1, Math.round(imageNaturalSize.height * scale)),
+            width: Math.max(1, Math.round(currentNaturalSize.width * scale)),
+            height: Math.max(1, Math.round(currentNaturalSize.height * scale)),
         };
-    }, [imageNaturalSize, isMobile, viewport.height, viewport.width]);
+    }, [currentNaturalSize, isMobile, viewport.height, viewport.width]);
 
     if (!isRendered || !currentImage || typeof document === 'undefined') {
         return null;
@@ -445,12 +449,13 @@ const ImagePreviewDialog: React.FC<{
                             const element = event.currentTarget;
                             const width = element.naturalWidth;
                             const height = element.naturalHeight;
+                            const url = element.getAttribute('src') ?? '';
                             if (width > 0 && height > 0) {
                                 setImageNaturalSize((previous) => {
-                                    if (previous && previous.width === width && previous.height === height) {
+                                    if (previous && previous.url === url && previous.width === width && previous.height === height) {
                                         return previous;
                                     }
-                                    return { width, height };
+                                    return { url, width, height };
                                 });
                             }
                         }}

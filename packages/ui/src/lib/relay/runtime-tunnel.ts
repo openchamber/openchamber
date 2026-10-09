@@ -55,7 +55,13 @@ export const activateRelayTunnel = (descriptor: RelayRuntimeDescriptor): RelayTu
  * second WebSocket connect + E2EE handshake. Replaces any previous tunnel.
  */
 export const adoptRelayTunnel = (descriptor: RelayRuntimeDescriptor, client: RelayTunnelClient): void => {
-  if (activeTunnel === client) return;
+  if (activeTunnel === client) {
+    // Re-adopting the live runtime tunnel (a pairing redeemed through it):
+    // keep the client, record the new descriptor so the following activate
+    // call matches it.
+    activeDescriptor = descriptor;
+    return;
+  }
   activeTunnel?.close();
   activeDescriptor = descriptor;
   activeTunnel = client;

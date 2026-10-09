@@ -13,7 +13,10 @@ other.
   scheduled-task action allowlist. `actions.js` marks CLI-only actions with
   `agentExposed: false` (currently `schedule.status`); the agent tool consumes
   the filtered `OPENCHAMBER_AGENT_TOOL_*` exports. `schedule.toggle` requires
-  the `disabled` boolean and replaces separate enable/disable actions;
+  the `disabled` boolean and replaces separate enable/disable actions; its
+  `enabled` is the saved state, never the requested one. Loop tasks and the
+  refusal to enable a repository loop are the scheduled-task service's rules
+  (`../scheduled-tasks/DOCUMENTATION.md`, *Local approval*).
   `schedule.list` also returns scheduler status as `scheduler`.
   `schedule.update` patches a task in place: only the fields the call names
   change, the id and run state stay, and a task driven by a loop file is

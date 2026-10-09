@@ -23,6 +23,7 @@ import {
 import { useMcpStore } from '@/stores/useMcpStore';
 import { McpOAuthSignIn } from './McpOAuthSignIn';
 import { MCP_DRAFT_OAUTH_UNSET, readCarriedOAuth, type McpOAuthCarried } from './mcpDraft';
+import { useIntegrationPolicyBlock } from '@/components/sections/shared/useIntegrationPolicyBlock';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { cn } from '@/lib/utils';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -476,6 +477,7 @@ const StatusBadge: React.FC<{
     connected: { text: 'text-[var(--status-success)]', bg: 'bg-[var(--status-success)]/10' },
     failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
     needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
+    blocked: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
   };
 
   const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
@@ -509,6 +511,8 @@ const getStatusDescription = (
       return error?.trim() || t('settings.mcp.page.status.description.needsAuth');
     case 'disabled':
       return t('settings.mcp.page.status.description.disabled');
+    case 'blocked':
+      return t('settings.mcp.page.status.description.blockedByPolicy');
     default:
       return t('settings.mcp.page.status.description.default');
   }
@@ -519,6 +523,7 @@ const statusCardClass = (status: string | undefined): string => {
     case 'failed':
       return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
     case 'needs_auth':
+    case 'blocked':
       return 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)]';
     default:
       return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
@@ -528,7 +533,7 @@ const statusCardClass = (status: string | undefined): string => {
 // Only error/warning states get the full card; a healthy server needs no
 // explanation beyond the badge next to its name.
 const shouldShowFullStatusCard = (status: string | undefined): boolean =>
-  status === 'failed' || status === 'needs_auth';
+  status === 'failed' || status === 'needs_auth' || status === 'blocked';
 
 const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
@@ -569,6 +574,7 @@ export const McpPage: React.FC = () => {
   // Settings browses whichever project its own selector points at; the app
   // stays where it is.
   const currentDirectory = useSettingsDirectory();
+  const isBlocked = useIntegrationPolicyBlock(currentDirectory);
 
   // The page opens on the server grid. A selection made before it mounts (the
   // settings search, the mobile "add server" shortcut) still opens that server;
@@ -1127,7 +1133,12 @@ export const McpPage: React.FC = () => {
   const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
   // The runtime's own report wins; the store's diagnostic is the fallback for a
   // server OpenCode never reported on.
-  const effectiveStatusName = runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
+  // A server a policy blocks never reaches OpenCode's list, so any status it
+  // had is stale; `blocked` is this page's own state for it.
+  const blocked = selectedMcpName ? isBlocked(`mcp:${selectedMcpName}`) : false;
+  const effectiveStatusName = blocked
+    ? 'blocked'
+    : runtimeStatus ? readMcpStatusName(runtimeStatus) : runtimeDiagnostic?.status;
   const effectiveStatusError = runtimeStatus ? readMcpStatusError(runtimeStatus) : runtimeDiagnostic?.error;
   const isConnected = readMcpStatusName(runtimeStatus) === 'connected';
 
@@ -1140,6 +1151,8 @@ export const McpPage: React.FC = () => {
         return t('settings.mcp.page.status.label.failed');
       case 'needs_auth':
         return t('settings.mcp.page.status.label.needsAuth');
+      case 'blocked':
+        return t('settings.mcp.grid.status.blockedByPolicy');
       default:
         return status;
     }
@@ -1176,7 +1189,7 @@ export const McpPage: React.FC = () => {
             size="xs"
             className="!font-normal"
             onClick={handleToggleConnect}
-            disabled={isConnecting || !enabled}
+            disabled={isConnecting || !enabled || blocked}
           >
             {isConnecting ? t('settings.mcp.page.actions.working') : isConnected ? t('settings.mcp.page.actions.disconnect') : t('settings.mcp.page.actions.connect')}
           </Button>
@@ -1235,7 +1248,7 @@ export const McpPage: React.FC = () => {
                       size="xs"
                       className="!font-normal"
                       onClick={() => void handleTestConnection()}
-                      disabled={isTestingConnection || !enabled}
+                      disabled={isTestingConnection || !enabled || blocked}
                     >
                       {isTestingConnection ? t('settings.mcp.page.actions.testing') : t('settings.mcp.page.actions.testConnection')}
                     </Button>

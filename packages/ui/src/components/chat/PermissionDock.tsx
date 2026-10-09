@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { PermissionRequest } from '@/types/permission';
 import { useScopedBlockingPermissions } from '@/sync/sync-context';
+import { useRequestReveal } from '@/sync/request-reveal';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import {
     PermissionActions,
@@ -45,6 +46,13 @@ const PermissionDockPanel: React.FC<{ permissions: PermissionRequest[] }> = ({ p
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [collapsed, setCollapsed] = React.useState(false);
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
+
+    // "Open session" on a request's toast expands the dock on that request.
+    const permissionIds = React.useMemo(() => permissions.map((permission) => permission.id), [permissions]);
+    useRequestReveal(permissionIds, React.useCallback((id: string) => {
+        setSelectedId(id);
+        setCollapsed(false);
+    }, []));
 
     // The chosen request stays current while it is pending; a request that
     // was answered elsewhere (another client, auto-accept) falls back to the

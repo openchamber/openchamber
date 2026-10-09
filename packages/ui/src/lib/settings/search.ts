@@ -667,6 +667,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
+    id: 'sessions.desktop-quake-mode',
+    page: 'general',
+    titleKey: 'settings.openchamber.desktopNetwork.field.quakeMode',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.quakeModeDescription',
+    keywords: ['desktop', 'quake', 'dropdown', 'hotkey', 'shortcut', 'height', 'global', 'background', 'tray', 'terminal'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
+  },
+
+
+  {
     id: 'sessions.desktop-ui-password',
     page: 'general',
     titleKey: 'settings.openchamber.desktopPassword.field.password',
@@ -809,6 +819,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.routing.auto.enable',
     descriptionKey: 'settings.routing.auto.enableInfo',
     keywords: ['auto', 'routing', 'model', 'jev', 'automatic'],
+    isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
+  },
+  {
+    id: 'routing.preserve-cache',
+    page: 'routing',
+    titleKey: 'settings.routing.auto.preserveCache',
+    descriptionKey: 'settings.routing.auto.preserveCacheInfo',
+    keywords: ['cache', 'prompt cache', 'auto', 'routing', 'switch', 'model', 'cost'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable && !ctx.jevBlockedByEnterprise,
   },
   {

@@ -508,6 +508,42 @@ export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
     && (entry.info.experimental?.policies ?? []).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
 }
 
+/** One `integration.use` statement: `resource` is `mcp:<server>` or `skill:<id>`, with `*` and `?` wildcards. */
+export type IntegrationPolicy = { resource: string; effect: "allow" | "deny" }
+
+/**
+ * The `integration.use` statements of every config document, in the order
+ * OpenCode decides by (`ManagedPolicy.statements` upstream): documents
+ * reversed, so the last matching statement wins. Statements from a connected
+ * OpenCode Console workspace are not part of `/api/config`.
+ */
+export function readIntegrationPolicies(entries: readonly ConfigEntry[]): IntegrationPolicy[] {
+  return entries
+    .filter(isDocument)
+    .reverse()
+    .flatMap((entry) => entry.info.experimental?.policies ?? [])
+    .flatMap((policy) => (policy.action === "integration.use" ? [{ resource: policy.resource, effect: policy.effect }] : []))
+}
+
+/** OpenCode's `Wildcard.match`: `*` is any run, `?` one character, a trailing ` *` also matches nothing. */
+function matchesWildcard(input: string, pattern: string): boolean {
+  let escaped = pattern
+    .replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".")
+  if (escaped.endsWith(" .*")) escaped = `${escaped.slice(0, -3)}( .*)?`
+  return new RegExp(`^${escaped}$`, "s").test(input.replaceAll("\\", "/"))
+}
+
+/** Whether OpenCode drops this MCP server (`mcp:<name>`) or skill (`skill:<id>`) by policy. */
+export function isIntegrationDenied(policies: readonly IntegrationPolicy[], resource: string): boolean {
+  for (let index = policies.length - 1; index >= 0; index -= 1) {
+    if (matchesWildcard(resource, policies[index].resource)) return policies[index].effect === "deny"
+  }
+  return false
+}
+
 function isPlainRecord(value: Config[keyof Config]): value is Record<string, JsonValue> {
   return Object.prototype.toString.call(value) === "[object Object]"
 }

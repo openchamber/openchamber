@@ -65,9 +65,9 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 
 | Change | Minimum validation |
 |---|---|
-| Executable source | Focused tests for the changed behavior; type-check and lint run in `bun run check:changed`. TypeScript and lint do not cover server JS, CLI JS, Electron helpers, or native code: run `node --check`, focused tests, or the build for those |
+| Executable source | Focused tests for the changed behavior; type-check and lint come from the pre-commit gate. TypeScript and lint do not cover server JS, CLI JS, Electron helpers, or native code: run `node --check`, focused tests, or the build for those |
 | Cross-workspace/shared contract | Workspace-wide type-check and lint plus affected builds/tests |
-| Added/deleted/renamed source file, export/type/entrypoint/import shape | `bun run check:changed` (covers dead code) in addition to relevant checks |
+| Added/deleted/renamed source file, export/type/entrypoint/import shape | Relevant checks; dead code comes from the pre-commit gate |
 | Persisted or external contract | Compatibility and round-trip tests plus the applicable failure/ordering cases: missing-versus-empty, malformed data, stale reads versus newer mutations, out-of-order writes, lifecycle handling for debounced writes, conversion, and failed-write/migration rollback |
 | Dependency or lockfile | Workspace-wide checks and affected builds |
 | Added, renamed, or removed `packages/*` workspace | Mirror it in the Dockerfile `deps` stage, which copies those manifests by name, then run `docker build .`: a `COPY` of a missing workspace fails the build, and a workspace another one depends on fails the frozen install when absent. CI does not build the image. |
@@ -75,6 +75,8 @@ Do not hide a required architectural migration behind a local heuristic. Do not 
 | Docs-only or isolated config | Narrow syntax/schema/link validation; do not run unrelated full suites |
 | Platform/runtime behavior | Relevant runtime build or manual/integration check; static checks are insufficient |
 | Desktop update or quit/install sequence | A real update run; read `references/updater-testing.md` first, because a run done the obvious way completes the update and reports success while testing nothing |
+
+`bun run check:changed` is the pre-commit gate: run it once, right before a commit, on the finished diff. While iterating, run only the focused tests for the behavior you just changed; an edit to docs, comments, or strings needs no check at all.
 
 Use a sufficiently long timeout for broad checks. Report exactly what ran and what did not.
 
@@ -96,4 +98,5 @@ For type-only shared contracts, validate compile-time consumers. Add runtime ser
 - Run focused regression tests for the changed contract; when no test can cover it, say so in the report.
 - Preserve unrelated changes encountered in shared files.
 - Re-read the owning docs and update them when the implementation changed their truth.
-- Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent. Then `bun run check:changed` passes.
+- Perform a final simplification pass over your own diff, hardest after a rework or a removal: every branch, condition, prop, parameter, export, key, and helper the change made unreachable, always-true, or single-valued is gone, along with speculative branches, shallow wrappers, stale compatibility, and names that do not clarify intent.
+- Before a commit, the pre-commit gate passes.

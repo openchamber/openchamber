@@ -26,6 +26,8 @@ const routingConfigSchema = z.object({
   enabled: z.boolean(),
   fallback: z.object({ model: modelRefSchema, variant: z.string().nullable() }).nullable(),
   minConfidence: z.number(),
+  // Absent from servers before "Try to preserve cache usage", which reject it in a save.
+  preserveCache: z.boolean().optional(),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number() }),
   categories: z.array(routingCategorySchema),
 });

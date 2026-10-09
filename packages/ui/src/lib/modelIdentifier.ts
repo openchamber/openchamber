@@ -1,4 +1,4 @@
-interface ParsedModelIdentifier {
+export interface ParsedModelIdentifier {
   providerId: string;
   modelId: string;
 }

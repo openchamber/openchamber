@@ -25,8 +25,17 @@ const MAX_PENDING_BYTES = 256 * 1024;
 /** A handshake that has not completed by now is not going to. */
 const HANDSHAKE_TIMEOUT_MS = 15_000;
 
-const toWebSocketUrl = (baseUrl, port) => {
-  const parsed = new URL('/api/dev-tunnel', baseUrl);
+const SPACE_ID = /^[0-9a-f]{12}$/;
+
+/**
+ * The host's own tunnel, or the one of an isolated space on that host: the
+ * host forwards `/api/spaces/<id>/dev-tunnel` to the server inside the space,
+ * which dials the port on its own loopback, the space's.
+ */
+const tunnelPath = (spaceId) => (spaceId ? `/api/spaces/${spaceId}/dev-tunnel` : '/api/dev-tunnel');
+
+const toWebSocketUrl = (baseUrl, port, spaceId) => {
+  const parsed = new URL(tunnelPath(spaceId), baseUrl);
   // WHATWG URL silently ignores a protocol assignment that crosses from a
   // non-special scheme (custom app protocols, relay-virtual URLs) to `ws:`.
   // Without this check the stale scheme survives into `new WebSocket(...)`,
@@ -45,8 +54,9 @@ export const createDevTunnelClient = ({
   handshakeTimeoutMs = HANDSHAKE_TIMEOUT_MS,
   maxPendingBytes = MAX_PENDING_BYTES,
 } = {}) => {
-  /** Keyed by `${baseUrl}|${remotePort}` so repeat opens reuse one listener. */
+  /** Keyed by base URL, space and remote port, so repeat opens reuse one listener. */
   const tunnels = new Map();
+  const tunnelKey = (baseUrl, remotePort, spaceId) => `${baseUrl}|${spaceId ?? ''}|${remotePort}`;
 
   const closeTunnel = (key) => {
     const tunnel = tunnels.get(key);
@@ -65,19 +75,20 @@ export const createDevTunnelClient = ({
      * Rejects if the listener cannot bind; per-connection failures close only
      * that connection, so one failed request cannot take the tunnel down.
      */
-    async open({ baseUrl, port, headers = {} }) {
+    async open({ baseUrl, port, headers = {}, spaceId = null }) {
       const remotePort = Number.parseInt(String(port), 10);
       if (!Number.isInteger(remotePort) || remotePort <= 0 || remotePort > 65535) {
         throw new Error('A valid remote port is required');
       }
       const base = String(baseUrl || '').trim();
       if (!base) throw new Error('A remote base URL is required');
+      if (spaceId !== null && !SPACE_ID.test(String(spaceId))) throw new Error('A valid space id is required');
 
-      const key = `${base}|${remotePort}`;
+      const key = tunnelKey(base, remotePort, spaceId);
       const existing = tunnels.get(key);
       if (existing) return { localPort: existing.localPort, reused: true };
 
-      const target = toWebSocketUrl(base, remotePort);
+      const target = toWebSocketUrl(base, remotePort, spaceId);
       const sockets = new Set();
 
       const server = net.createServer((socket) => {
@@ -173,12 +184,12 @@ export const createDevTunnelClient = ({
         logger.warn?.(`[dev-tunnel] listener error for port ${remotePort}: ${error?.message || error}`);
       });
 
-      tunnels.set(key, { server, sockets, localPort, remotePort, baseUrl: base });
+      tunnels.set(key, { server, sockets, localPort, remotePort, baseUrl: base, spaceId });
       return { localPort, reused: false };
     },
 
-    close({ baseUrl, port }) {
-      return closeTunnel(`${String(baseUrl || '').trim()}|${Number.parseInt(String(port), 10)}`);
+    close({ baseUrl, port, spaceId = null }) {
+      return closeTunnel(tunnelKey(String(baseUrl || '').trim(), Number.parseInt(String(port), 10), spaceId));
     },
 
     /** Closes every tunnel; used when the desktop switches runtime or quits. */
@@ -187,7 +198,7 @@ export const createDevTunnelClient = ({
     },
 
     list() {
-      return [...tunnels.values()].map(({ localPort, remotePort, baseUrl }) => ({ localPort, remotePort, baseUrl }));
+      return [...tunnels.values()].map(({ localPort, remotePort, baseUrl, spaceId }) => ({ localPort, remotePort, baseUrl, spaceId }));
     },
   };
 };

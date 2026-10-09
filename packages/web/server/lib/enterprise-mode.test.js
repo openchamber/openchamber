@@ -277,6 +277,7 @@ describe('enterprise policy', () => {
       '/api/integration/anthropic/connect/oauth',
       '/api/integration/anthropic/connect/oauth/att_1/complete',
       '/api/integration/github-copilot/connect/command',
+      '/api/integration/amazon-bedrock/connect/external',
       '/api/experimental/integration/wellknown',
       '/api/integration/openai/connect',
       '/api/integration/openai/connect/key/',

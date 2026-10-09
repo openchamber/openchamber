@@ -105,10 +105,14 @@ describe('useSessionProjectViewState', () => {
 
       await act(async () => initialActions.toggleProject('project-a'));
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a']));
-      await act(async () => initialActions.collapseAllProjects());
+      // The timeline zone is not on the grouped view, so Collapse all / Expand all leave it alone.
+      await act(async () => initialActions.setCollapsedActivities(new Set(['timeline'])));
+      await act(async () => initialActions.collapseAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set(['project-a', 'project-b']));
-      await act(async () => initialActions.expandAllProjects());
+      expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline', 'chats', 'work', 'active-now']));
+      await act(async () => initialActions.expandAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set());
+      expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline']));
 
       await act(async () => initialActions.toggleGroup('project-a:group-a'));
       expect(capture.state?.collapsedGroups).toEqual(new Set(['project-a:group-a']));

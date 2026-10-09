@@ -1,6 +1,6 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { parseModelIdentifier, type ParsedModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@/lib/api/types';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -160,7 +160,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     };
   }, [clearPendingUploadIcon]);
 
-  const parsedDefaultModel = React.useMemo(() => {
+  const parsedDefaultModel = React.useMemo((): ParsedModelIdentifier => {
     const parsed = parseModelIdentifier(defaultModel);
     return parsed ?? { providerId: '', modelId: '' };
   }, [defaultModel]);

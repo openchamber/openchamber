@@ -18,7 +18,7 @@ Vincula otro dispositivo —la app móvil, la app de escritorio o un navegador e
 4. Pulsa **Crear código QR**.
 5. En el otro dispositivo, escanea el código:
    - **app móvil** — toca **Escanear código QR** en la pantalla de conexión (o en la lista de instancias)
-   - **app de escritorio** — copia el enlace de conexión y pégalo en **Settings → Remote Instances → Otros servidores de OpenChamber → Importar enlace**
+   - **app de escritorio** — copia el enlace de conexión y ábrelo en la máquina con la app de escritorio, que te pide confirmación antes de conectar. También puedes pegarlo en **Settings → Remote Instances → Otros servidores de OpenChamber → Importar enlace**
 
 El diálogo se cierra solo en cuanto el dispositivo se conecta, y el dispositivo aparece en la lista con su estado en vivo. Eso es todo: ya están vinculados.
 
@@ -59,6 +59,12 @@ Un enlace `--relay` lleva ambas rutas, igual que el diálogo: el dispositivo se 
 > La ruta directa solo funciona si el servidor realmente escucha en tu red. De forma predeterminada, OpenChamber solo escucha en la propia máquina; inícialo con `--lan` para que sea accesible por Wi-Fi. El comando te avisa (`[LAN_UNREACHABLE]`) cuando la ruta directa del enlace no será utilizable desde otros dispositivos; un enlace `--relay` sigue funcionando en ese caso, solo que siempre a través del relay.
 
 El enlace y el código QR impresos funcionan exactamente igual que los del diálogo de ajustes: de un solo uso, con caducidad y revocables.
+
+Para vincular una app de escritorio, abre el enlace impreso en la máquina donde se ejecuta esa app. La app te pide confirmación y se conecta. En macOS:
+
+```bash
+open 'openchamber://connect?v=2&p=...'
+```
 
 ## Relacionado
 

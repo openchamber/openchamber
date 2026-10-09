@@ -2,7 +2,12 @@ import { asNonEmptyString } from '../shared/guards.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
-import { loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
+import { discoverLoopFiles, loopFingerprint, parseLoopDefinition, setLoopFileEnabled } from './loops.js';
+
+// Same scope rule the scheduler applies: a file under the project's own
+// `.agents/loops` is a repository loop, even where it is also the user folder.
+const isRepositoryLoop = (projectPath, loopFile) => discoverLoopFiles(projectPath)
+  .some((entry) => entry.scope === 'project' && entry.filePath === loopFile);
 
 export const createScheduledTaskService = (dependencies) => {
   const {
@@ -176,12 +181,26 @@ export const createScheduledTaskService = (dependencies) => {
     return response;
   };
 
+  // The agent tool and the CLI. A loop task follows its file, so it changes
+  // the way the Scheduled tasks checkbox does. A repository loop is the
+  // exception for enabling: that is the user's own decision on this machine,
+  // made in Scheduled tasks, never by an agent or a script on their behalf.
   const setEnabled = async (projectID, taskID, enabled) => {
-    const tasks = await list(projectID);
+    const project = await findProjectByID(projectID);
+    const tasks = await scheduledTasksRuntime.syncProject(project.id);
     const task = tasks.find((entry) => entry?.id === taskID);
     if (!task) throw new OpenChamberControlError('Task not found', 404);
-    const result = await upsert(projectID, { ...task, enabled });
-    return result.task;
+    if (!task.loopFile) {
+      const result = await upsert(project.id, { ...task, enabled });
+      return result.task;
+    }
+    // Nothing to change: the loop file, which may be tracked in the
+    // repository, and the approval stay untouched.
+    if (enabled === task.enabled) return task;
+    if (enabled && isRepositoryLoop(project.path, task.loopFile)) {
+      throw new OpenChamberControlError(`"${task.name}" comes from this repository. Enable it in Scheduled tasks.`, 409);
+    }
+    return setLoopEnabled(project.id, task.id, enabled);
   };
 
   const status = async () => {

@@ -63,7 +63,17 @@ import { ascendingId } from "./ids"
 import { runningShellFromWire, shellCancellationNote, type RunningShell } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
-import { deniesAnyProvider, mergeConfigDocuments, projectAgent, projectMessages, projectProject, projectSession, projectVcs } from "./projection"
+import {
+  deniesAnyProvider,
+  mergeConfigDocuments,
+  projectAgent,
+  projectMessages,
+  projectProject,
+  projectSession,
+  projectVcs,
+  readIntegrationPolicies,
+  type IntegrationPolicy,
+} from "./projection"
 
 export type { OpenCodeClient }
 
@@ -1654,6 +1664,12 @@ class OpencodeService {
   async configDeniesAnyProvider(directory?: string | null): Promise<boolean> {
     const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
     return deniesAnyProvider(entries)
+  }
+
+  /** The `integration.use` statements OpenCode's config applies to MCP servers and skills in a directory. */
+  async getIntegrationPolicies(directory?: string | null): Promise<IntegrationPolicy[]> {
+    const entries = await call("config.get", () => this.clientFor(this.resolveDirectory(directory)).config.get())
+    return readIntegrationPolicies(entries)
   }
 
   /** Effective configuration for a directory: every discovered document folded, highest priority last. */

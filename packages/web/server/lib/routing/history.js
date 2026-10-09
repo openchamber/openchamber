@@ -23,12 +23,20 @@ export const turnsToHistory = (turns, limits = HISTORY_LIMITS) => {
   return history;
 };
 
+/** The model that wrote a settled answer and when it finished, or null when the record lacks either. */
+const answeredBy = (message) => (message?.providerID && message.modelID && message.completed
+  ? { providerID: message.providerID, modelID: message.modelID, completed: message.completed }
+  : null);
+
 /**
- * Empty when the session has no settled answer yet (a new session, or one
- * interrupted mid-turn) — routing then judges the request on its own. A read
- * failure is thrown so the caller can decide; it is not an empty history.
+ * `history` is empty and `lastAnswer` null when the session has no settled
+ * answer yet (a new session, or one interrupted mid-turn): routing then judges
+ * the request on its own and has no cache to preserve. A read failure is
+ * thrown so the caller can decide; it is not an empty history.
  */
 export const loadRoutingHistory = async ({ readPage, signal }) => {
   const context = await loadAssistContext({ readPage, signal });
-  return context ? turnsToHistory(context.turns) : [];
+  return context
+    ? { history: turnsToHistory(context.turns), lastAnswer: answeredBy(context.last) }
+    : { history: [], lastAnswer: null };
 };

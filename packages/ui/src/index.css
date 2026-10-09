@@ -168,6 +168,12 @@ button,
   color: var(--primary-foreground);
 }
 
+/* The inline comment editor sits in a band tinted like the selected lines it
+   comments on. A diff passes its selected row's own fill instead. */
+.oc-inline-comment-band {
+  background-color: var(--interactive-selection);
+}
+
 .pierre-diff-wrapper {
   --diffs-bg-selection-override: var(--interactive-selection);
   --diffs-bg-selection-background-override: var(--interactive-selection);

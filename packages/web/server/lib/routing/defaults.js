@@ -148,4 +148,6 @@ export const BUILTIN_CATEGORIES = [
 ];
 
 export const DEFAULT_MIN_CONFIDENCE = 0.6;
+/** "Try to preserve cache usage" (`cache.js`) is on unless the user turned it off. */
+export const DEFAULT_PRESERVE_CACHE = true;
 export const DEFAULT_SAFETY_THRESHOLD = 0.6;

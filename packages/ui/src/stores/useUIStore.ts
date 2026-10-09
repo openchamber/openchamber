@@ -1497,7 +1497,7 @@ export const useUIStore = create<UIStore>()(
         enterToSendConfigured: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
-        tableCellWrap: false,
+        tableCellWrap: true,
         copyMessagesAsPlainText: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
@@ -3101,12 +3101,19 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createDeferredSafeJSONStorage(),
-        version: 22,
+        version: 23,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
           }
           const state = persistedState as Record<string, unknown>;
+
+          // v22 -> v23: table cell wrap is on by default. The local copy only
+          // ever held the old default; a choice the user made is restored from
+          // the synced settings after hydration.
+          if (version < 23) {
+            state.tableCellWrap = true;
+          }
 
           // v20 -> v21: enable telemetry by default; preserve explicit choices.
           if (version < 21 && state.workStatusHiddenSectionsExplicit !== true) {

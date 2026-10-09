@@ -18,7 +18,7 @@ mock.module('@/lib/relay/tunnel-client', () => ({
   },
 }));
 
-const { desktopHostProbe, desktopHostsGet, desktopHostsSet, importDesktopHostPairing, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl } = await import('./desktopHosts');
+const { desktopHostProbe, desktopHostsGet, desktopHostsSet, desktopHostUpdateServer, importDesktopHostPairing, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, waitForDesktopHostUpdated } = await import('./desktopHosts');
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -138,6 +138,56 @@ describe('desktop host runtime headers', () => {
         requestHeaders: { 'CF-Access-Client-Id': 'client-id' },
       },
     });
+  });
+});
+
+describe('remote host update', () => {
+  test('asks the shell to update a saved host by id only', async () => {
+    const calls: Array<{ cmd: string; args: unknown }> = [];
+    const result = await withDesktopBridge(async (cmd, args) => {
+      calls.push({ cmd, args });
+      return { status: 'failed', error: 'Run openchamber update on the server.' };
+    }, () => desktopHostUpdateServer('remote-1'));
+
+    expect(calls).toEqual([{ cmd: 'desktop_host_update_server', args: { hostId: 'remote-1' } }]);
+    expect(result).toEqual({ status: 'failed', error: 'Run openchamber update on the server.' });
+  });
+
+  test('reads an unexpected or failed shell answer as a failure without a reason', async () => {
+    expect(await withDesktopBridge(async () => ({ status: 'done' }), () => desktopHostUpdateServer('remote-1')))
+      .toEqual({ status: 'failed', error: null });
+    expect(await withDesktopBridge(async () => { throw new Error('ipc'); }, () => desktopHostUpdateServer('remote-1')))
+      .toEqual({ status: 'failed', error: null });
+  });
+
+  const host = { id: 'remote-1', label: 'Remote', url: 'https://remote.example', clientToken: 'token' };
+  const readHosts = async () => ({ hosts: [host], defaultHostId: 'remote-1', initialHostChoiceCompleted: true });
+
+  test('waits through the old version and the restart until the host answers compatible', async () => {
+    const answers = ['incompatible', 'unreachable', 'ok'] as const;
+    const probed: Array<{ url: string; clientToken?: string | null }> = [];
+    const outcome = await waitForDesktopHostUpdated('remote-1', {
+      intervalMs: 0,
+      readHosts,
+      probe: async (url, options) => {
+        probed.push({ url, clientToken: options?.clientToken });
+        return { status: answers[probed.length - 1] ?? 'ok', latencyMs: 1 };
+      },
+    });
+
+    expect(outcome).toBe('updated');
+    expect(probed).toHaveLength(3);
+    expect(probed[0]).toEqual({ url: 'https://remote.example', clientToken: 'token' });
+  });
+
+  test('gives up when the host never comes back compatible', async () => {
+    const outcome = await waitForDesktopHostUpdated('remote-1', {
+      maxWaitMs: 20,
+      intervalMs: 5,
+      readHosts,
+      probe: async () => ({ status: 'incompatible', latencyMs: 1 }),
+    });
+    expect(outcome).toBe('timeout');
   });
 });
 

@@ -475,12 +475,19 @@ class CommandStream extends Duplex {
     callback(error);
   }
 
-  /** Emits `timeout` after `milliseconds` without a byte in either direction. Zero cancels it. */
+  /**
+   * Emits `timeout` after `milliseconds` without a byte in either direction. Zero cancels it, and
+   * takes the callback off again, as `net.Socket` does: the http client sets a timeout with its
+   * listener on every request a pooled stream carries, and cancels it with the same listener.
+   */
   setTimeout(milliseconds, callback) {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.timeout = milliseconds;
-    if (callback) this.once('timeout', callback);
+    if (callback) {
+      if (milliseconds > 0) this.once('timeout', callback);
+      else this.removeListener('timeout', callback);
+    }
     if (milliseconds > 0) {
       this.#timer = setTimeout(() => { this.#timer = null; this.emit('timeout'); }, milliseconds);
       this.#timer.unref?.();

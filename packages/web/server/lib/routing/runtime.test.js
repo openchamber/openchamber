@@ -19,7 +19,10 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true, enterprise = false, pinned = null, catalog = [], answers, askError } = {}) => {
+const makeRuntime = ({
+  config = readyConfig(), token = 'key', classifierSource = null, customEndpoint = null, providerKeys = {}, zenPromotionActive = true,
+  enterprise = false, pinned = null, catalog = [], answers, askError, lastAnswer = null, configEntries = [], nowMs = 1_000_000_000,
+} = {}) => {
   const events = [];
   const store = {
     readConfig: vi.fn(async () => config),
@@ -34,6 +37,10 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource =
     clearCustomEndpoint: vi.fn(async () => undefined),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
+  const readConfigEntries = vi.fn(async () => {
+    if (configEntries instanceof Error) throw configEntries;
+    return configEntries;
+  });
   const runtime = createRoutingRuntime({
     dataDir: '/unused',
     buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
@@ -49,8 +56,11 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', classifierSource =
       if (catalog instanceof Error) throw catalog;
       return catalog;
     },
+    readSessionHistory: async () => ({ history: [], lastAnswer }),
+    readConfigEntries,
+    now: () => nowMs,
   });
-  return { runtime, store, jev, events };
+  return { runtime, store, jev, events, readConfigEntries };
 };
 
 describe('requestTextOf', () => {
@@ -170,6 +180,75 @@ describe('resolveAutoSelection', () => {
 
     const unreachable = makeRuntime({ catalog: new Error('OpenCode down'), answers: { category: { choice: 'trivial', confidence: 0.99 } } });
     expect((await unreachable.runtime.resolveAutoSelection(send())).model.variant).toBe('medium');
+  });
+});
+
+describe('preserving the prompt cache', () => {
+  const NOW = 1_000_000_000;
+  const MINUTE = 60_000;
+  const HARD = { providerID: 'openai', modelID: 'gpt-6-astra' };
+  // Hard on its own model and the composer's agent, so only the model differs.
+  const cacheConfig = () => {
+    const config = readyConfig();
+    config.categories = config.categories.map((c) => (c.id === 'hard' ? { ...c, agent: null } : c));
+    return config;
+  };
+  const answeredBy = (model, minutesAgo) => ({ ...model, completed: NOW - minutesAgo * MINUTE });
+  const route = async ({ choice, config = cacheConfig(), lastAnswer, configEntries, agent = 'build' }) => {
+    const made = makeRuntime({ config, lastAnswer, configEntries, nowMs: NOW, answers: { category: { choice, confidence: 0.95 } } });
+    const resolved = await made.runtime.resolveAutoSelection({ sessionId: 's1', model: AUTO, agent, requestText: 'push it' });
+    return { ...made, resolved };
+  };
+
+  it('stays on the warm model instead of moving down, and records what Jev asked for', async () => {
+    const { resolved, readConfigEntries } = await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 2) });
+    expect(resolved.model).toEqual({ providerID: 'openai', id: 'gpt-6-astra', variant: 'high' });
+    expect(resolved.agent).toBe('build');
+    expect(resolved.decision).toMatchObject({ category: 'hard', reason: 'routed', cacheHold: { requested: 'trivial' } });
+    expect(readConfigEntries).not.toHaveBeenCalled();
+  });
+
+  it('moves down once the cache has expired, and moves up at any time', async () => {
+    const cold = await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 6) });
+    expect(cold.resolved.model).toMatchObject({ providerID: 'anthropic', id: 'claude-sonnet-5' });
+    expect(cold.resolved.decision.cacheHold).toBeUndefined();
+
+    const up = await route({ choice: 'hard', lastAnswer: answeredBy(FALLBACK.model, 1) });
+    expect(up.resolved.model).toMatchObject({ providerID: 'openai', id: 'gpt-6-astra' });
+  });
+
+  it("counts OpenCode's session warming: its duration plus one cache lifetime", async () => {
+    const warming = [{ info: { model: 'anthropic/claude-sonnet-5' } }, { info: { warming: true } }];
+    expect((await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 20), configEntries: warming })).resolved.decision.category).toBe('hard');
+    expect((await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 36), configEntries: warming })).resolved.decision.category).toBe('trivial');
+
+    const hour = [{ info: { warming: { duration: '3600000 millis' } } }];
+    expect((await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 50), configEntries: hour })).resolved.decision.category).toBe('hard');
+
+    const turnedOff = [{ info: { warming: true } }, { info: { warming: false } }];
+    expect((await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 20), configEntries: turnedOff })).resolved.decision.category).toBe('trivial');
+  });
+
+  it('treats the cache as cold when the OpenCode config cannot be read', async () => {
+    const { resolved } = await route({ choice: 'trivial', lastAnswer: answeredBy(HARD, 20), configEntries: new Error('OpenCode down') });
+    expect(resolved.decision.category).toBe('trivial');
+  });
+
+  it('switches as before with the setting off, for a category of the user, or when the agent would change', async () => {
+    const off = cacheConfig();
+    off.preserveCache = false;
+    expect((await route({ choice: 'trivial', config: off, lastAnswer: answeredBy(HARD, 1) })).resolved.decision.category).toBe('trivial');
+
+    const own = cacheConfig();
+    own.categories.push({ id: 'docs', builtin: false, enabled: true, name: 'Docs', description: 'Docs', model: null, variant: null, agent: null });
+    expect((await route({ choice: 'docs', config: own, lastAnswer: answeredBy(HARD, 1) })).resolved.decision.category).toBe('docs');
+
+    // readyConfig's hard category runs the plan agent.
+    expect((await route({ choice: 'trivial', config: readyConfig(), lastAnswer: answeredBy(HARD, 1) })).resolved.decision.category).toBe('trivial');
+  });
+
+  it('switches when the session has no settled answer to have warmed a cache', async () => {
+    expect((await route({ choice: 'trivial', lastAnswer: null })).resolved.decision.category).toBe('trivial');
   });
 });
 

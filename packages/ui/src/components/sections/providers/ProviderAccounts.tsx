@@ -155,11 +155,15 @@ export const ProviderAccounts: React.FC<ProviderAccountsProps> = ({
         const busy = busyId !== null;
         const methodLabel = connection.method === 'oauth'
           ? (unused ? t('settings.providers.accounts.method.oauthUnused') : t('settings.providers.accounts.method.oauth'))
-          : (unused ? t('settings.providers.accounts.method.keyUnused') : t('settings.providers.accounts.method.key'));
+          : connection.method === 'external'
+            ? (unused ? t('settings.providers.accounts.method.externalUnused') : t('settings.providers.accounts.method.external'))
+            : (unused ? t('settings.providers.accounts.method.keyUnused') : t('settings.providers.accounts.method.key'));
+        // An external credential (a cloud CLI login or profile) lives outside OpenCode's store.
+        const methodIcon = connection.method === 'oauth' ? 'user-3' : connection.method === 'external' ? 'terminal-box' : 'key';
 
         return (
           <div key={connection.id} className={cn('flex min-w-0 items-center gap-3 py-2.5', unused && 'opacity-60')}>
-            <AccountTile icon={connection.method === 'oauth' ? 'user-3' : 'key'} />
+            <AccountTile icon={methodIcon} />
             {renamingId === connection.id ? (
               <RenameField
                 initial={connection.label}

@@ -317,7 +317,7 @@ const isMcpSignIn = (integrationId, rest) => (
 /**
  * Whether a request to OpenCode would add a way to reach a model provider:
  * every POST under `/api/integration/:id/connect` (key, oauth start and
- * complete, command), storing a key with `POST /api/credential`, and adding a
+ * complete, command, external since 2.0.25), storing a key with `POST /api/credential`, and adding a
  * well-known integration. Signing in to a
  * remote MCP server goes through the same routes and stays allowed. Reads,
  * cancelling an attempt and removing or switching an existing account stay

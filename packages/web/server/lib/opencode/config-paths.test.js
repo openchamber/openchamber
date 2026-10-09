@@ -61,7 +61,7 @@ describe('OpenCode global config paths', () => {
     const [, agents, commands, skills, snippets, plugins] = await loadOpenCodeModules();
     agents.createAgent('global-agent', { description: 'Global', prompt: 'Global prompt' }, projectDir, 'user');
     commands.createCommand('global-command', { description: 'Global', template: 'Global template' }, projectDir, 'user');
-    skills.createSkill('global-skill', { description: 'Global', instructions: 'Global instructions' }, projectDir, 'user');
+    await skills.createSkill('global-skill', { description: 'Global', instructions: 'Global instructions' }, projectDir, 'user');
     snippets.createSnippet('global-snippet', { content: 'Global snippet' }, projectDir, 'global');
     plugins.createPluginEntry({ spec: 'global-plugin', scope: 'user' }, projectDir);
 
@@ -74,7 +74,7 @@ describe('OpenCode global config paths', () => {
 
     agents.createAgent('project-agent', { description: 'Project', prompt: 'Project prompt' }, projectDir, 'project');
     commands.createCommand('project-command', { description: 'Project', template: 'Project template' }, projectDir, 'project');
-    skills.createSkill('project-skill', { description: 'Project', instructions: 'Project instructions' }, projectDir, 'project');
+    await skills.createSkill('project-skill', { description: 'Project', instructions: 'Project instructions' }, projectDir, 'project');
 
     expect(fs.existsSync(path.join(projectDir, '.opencode', 'agents', 'project-agent.md'))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, '.opencode', 'commands', 'project-command.md'))).toBe(true);

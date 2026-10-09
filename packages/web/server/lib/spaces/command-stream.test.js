@@ -96,6 +96,21 @@ describe('openCommandStream', () => {
     expect(stream.timeout).toBe(150);
   });
 
+  it('takes a timeout listener off again when the timeout is cancelled with it, as a socket does', async () => {
+    // The http client sets and cancels a timeout with its listener on every request a pooled
+    // stream carries; left on, the listeners pile up across the stream's life.
+    const stream = open(node, ['-e', ECHO]);
+    stream.resume();
+    const listener = () => {};
+    for (let round = 0; round < 12; round += 1) {
+      stream.setTimeout(1_000, listener);
+      stream.setTimeout(0, listener);
+    }
+    expect(stream.listenerCount('timeout')).toBe(0);
+    stream.setTimeout(1_000, listener);
+    expect(stream.listenerCount('timeout')).toBe(1);
+  });
+
   it('answers a command that cannot start with an error, not an exception', async () => {
     const stream = open('/nonexistent/program/of-ours', []);
     stream.resume();

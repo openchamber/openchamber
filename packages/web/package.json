@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/web",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "private": false,
   "type": "module",
   "main": "./server/index.js",
@@ -21,7 +21,7 @@
     "build": "bun ../../scripts/build-builtin-extensions.mjs && NODE_OPTIONS=--max-old-space-size=6144 vite build",
     "build:watch": "bun ../../scripts/build-builtin-extensions.mjs && vite build --watch",
     "prepack": "bun ../../scripts/build-builtin-extensions.mjs",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc -b",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js",
     "test": "vitest run",
     "start": "node bin/cli.js serve"
@@ -31,8 +31,8 @@
     "@gitbeaker/rest": "43.8.0",
     "@octokit/rest": "^22.0.1",
     "@openchamber/sdk": "workspace:*",
-    "@opencode/client": "2.0.23",
-    "@opencode/schema": "2.0.23",
+    "@opencode/client": "2.0.25",
+    "@opencode/schema": "2.0.25",
     "@simplewebauthn/server": "13.3.3",
     "bun-pty": "^0.4.5",
     "compression": "^1.8.1",

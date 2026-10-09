@@ -173,8 +173,14 @@ async function scheduleCommand(options = {}, action = 'help') {
 
   if (action === 'enable' || action === 'disable') {
     const taskID = assertRequired(options.task, '--task');
-    const enabled = action === 'enable';
-    const { task } = await requestControlAction(port, 'schedule.toggle', { ...target, taskId: taskID, disabled: !enabled }, options);
+    const requested = action === 'enable';
+    const body = await requestControlAction(port, 'schedule.toggle', { ...target, taskId: taskID, disabled: !requested }, options);
+    // Report what the server saved, never what was asked for.
+    const task = body?.task;
+    const enabled = body?.enabled === true;
+    if (enabled !== requested) {
+      throw new TunnelCliError(`${task?.name || taskID} is still ${enabled ? 'enabled' : 'disabled'}.`, EXIT_CODE.GENERAL_ERROR);
+    }
     if (isJsonMode(options)) {
       printJson({ task, enabled });
       return;

@@ -874,12 +874,16 @@ export const createProjectConfigRuntime = (deps) => {
       // A project loop comes with the repository: `enabled: true` in its file
       // is the author's suggestion. It runs here only once the user enabled
       // this version of it on this machine (see setLoopApproval); a change to
-      // what it runs or when needs a new approval.
-      loops = loops.map((loop) => (
-        loop?.scope === 'project' && loop.definition?.enabled === true && approvals[loop.filePath] !== loop.fingerprint
-          ? { ...loop, definition: { ...loop.definition, enabled: false } }
-          : loop
-      ));
+      // what it runs or when needs a new approval. The returned task says
+      // which of the two held it back (`loopApproval`); it is never stored.
+      const heldBack = new Map();
+      loops = loops.map((loop) => {
+        if (loop?.scope !== 'project' || loop.definition?.enabled !== true || approvals[loop.filePath] === loop.fingerprint) {
+          return loop;
+        }
+        heldBack.set(loop.filePath, approvals[loop.filePath] ? 'outdated' : 'required');
+        return { ...loop, definition: { ...loop.definition, enabled: false } };
+      });
 
       const activeLoopFilePaths = new Set();
       const pendingLoops = new Map();
@@ -976,7 +980,9 @@ export const createProjectConfigRuntime = (deps) => {
         scheduledTasks: toStoredTasks(current, nextTasks, { replacedIDs }),
       });
 
-      return nextTasks;
+      return nextTasks.map((task) => (
+        task.loopFile && heldBack.has(task.loopFile) ? { ...task, loopApproval: heldBack.get(task.loopFile) } : task
+      ));
     });
   };
 

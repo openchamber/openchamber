@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  estimateSessionSidebarRowSize,
   findFirstVisibleSessionSidebarRowIndex,
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
   sectionSpacingAfter,
+  sessionSidebarRowSizeKey,
 } from './sessionSidebarVirtualization';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from './types';
@@ -66,5 +68,16 @@ describe('SessionSidebarRows section spacing', () => {
   test('In work keeps the wide gap above the projects while Recent is hidden', () => {
     const rows = buildSessionSidebarRowModel(input(false)).rows;
     expect(spacingBefore(rows, 'project-header')).toBe('pb-6');
+  });
+
+  test('a row that ends a zone is sized apart from its siblings and estimated with its gap', () => {
+    const rows = buildSessionSidebarRowModel(input(true)).rows;
+    const lastBeforeProjects = rows.findIndex((row) => row.kind === 'project-header') - 1;
+    const sibling = rows.findIndex((row) => row.kind === 'session');
+    const last = rows[lastBeforeProjects];
+    expect(last.kind).toBe('session');
+    expect(sessionSidebarRowSizeKey(last, rows[lastBeforeProjects + 1]))
+      .not.toBe(sessionSidebarRowSizeKey(rows[sibling], rows[sibling + 1]));
+    expect(estimateSessionSidebarRowSize(last, rows[lastBeforeProjects + 1])).toBe(last.estimateSize + 24);
   });
 });

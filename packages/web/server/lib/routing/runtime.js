@@ -26,6 +26,7 @@ import {
   resolveClassifier,
 } from './classifier.js';
 import { loadRoutingHistory } from './history.js';
+import { PROMPT_CACHE_TTL_MS, cacheHoldCategory, warmWindowMs } from './cache.js';
 import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
@@ -122,6 +123,8 @@ export function createRoutingRuntime({
   enterpriseMode = isEnterpriseMode,
   readPinnedEndpoint = readPinnedCustomEndpoint,
   listCatalogModels = null,
+  readSessionHistory = null,
+  readConfigEntries = null,
   now = Date.now,
 }) {
   const permissionDecisions = new Map();
@@ -220,7 +223,7 @@ export function createRoutingRuntime({
     return OpenCode.make({ baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''), headers });
   };
 
-  const readHistory = async ({ sessionId, directory }) => {
+  const readHistory = readSessionHistory ?? (async ({ sessionId, directory }) => {
     const client = openCodeClient(directory);
     const signal = AbortSignal.timeout(HISTORY_TIMEOUT_MS);
     return loadRoutingHistory({
@@ -231,6 +234,31 @@ export function createRoutingRuntime({
         { signal },
       ),
     });
+  });
+
+  // v2 answers the effective config as its documents, lowest priority first.
+  const readConfig = readConfigEntries ?? ((directory) => openCodeClient(directory).config.get());
+
+  /**
+   * "Try to preserve cache usage": the category to stay on instead of a lower
+   * one while the model that wrote the last answer likely still holds a warm
+   * prompt cache, or null to switch as Jev said (`cache.js`). OpenCode's
+   * warming config is read only once the plain cache lifetime has passed.
+   */
+  const cacheHold = async ({ config, chosen, composerAgent, lastAnswer, directory }) => {
+    if (!config.preserveCache || !lastAnswer) return null;
+    const held = cacheHoldCategory({
+      categories: enabledCategories(config), fallback: config.fallback, composerAgent, chosen, current: lastAnswer,
+    });
+    if (!held) return null;
+    const idle = now() - lastAnswer.completed;
+    if (idle < PROMPT_CACHE_TTL_MS) return held;
+    try {
+      return idle < warmWindowMs(await readConfig(directory)) ? held : null;
+    } catch (error) {
+      console.warn('[routing] OpenCode config unavailable, treating the prompt cache as cold:', errorMessage(error));
+      return null;
+    }
   };
 
   // A category without a model of its own means "the fallback pair"; a variant
@@ -300,8 +328,9 @@ export function createRoutingRuntime({
     let selection;
     if (state.autoReady) {
       let history = [];
+      let lastAnswer = null;
       try {
-        history = await readHistory({ sessionId, directory });
+        ({ history, lastAnswer } = await readHistory({ sessionId, directory }));
       } catch (error) {
         console.warn('[routing] history unavailable, routing on the request alone:', errorMessage(error));
       }
@@ -315,7 +344,14 @@ export function createRoutingRuntime({
         decision.confidence = result.confidence;
         decision.reason = result.reason;
         decision.ms = ms;
-        selection = chooseSelection(config, result.category, agent);
+        const held = await cacheHold({ config, chosen: result.category, composerAgent: agent, lastAnswer, directory });
+        if (held) {
+          // The send runs as the category the session is already on;
+          // `cacheHold.requested` keeps what Jev asked for.
+          decision.category = held.id;
+          decision.cacheHold = { requested: result.category.id };
+        }
+        selection = chooseSelection(config, held ?? result.category, agent);
       } catch (error) {
         decision.reason = 'error';
         decision.error = errorMessage(error);

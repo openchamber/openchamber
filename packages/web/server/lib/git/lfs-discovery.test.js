@@ -190,12 +190,22 @@ describe('incremental LFS file discovery', () => {
     await expect(fixture.run()).rejects.toThrow();
   });
 
-  it('keeps pointer and attribute public limits across batches', async () => {
-    for (const attributes of [false, true]) {
-      const fixture = scanFixture(Array.from({ length: 257 }, (_, index) => ({ path: `file-${index}`, content: attributes ? 'ordinary' : pointer() })),
-        { attribute: () => attributes ? 'lfs' : 'unspecified' });
-      await expect(fixture.run()).rejects.toMatchObject({ code: 'LFS_DISCOVERY_LIMIT_EXCEEDED' });
-    }
+  it.each([257, 3_000])('accepts %i LFS files with long paths and keeps bounded evidence', async (count) => {
+    const directory = `assets/${'deeply-nested-directory/'.repeat(8)}`;
+    const files = Array.from({ length: count }, (_, index) => ({ path: `${directory}file-${index}.bin`, content: pointer() }));
+    const fixture = scanFixture(files, { attribute: () => 'lfs' });
+    const scan = await fixture.run();
+    expect(scan.pointerSamples).toHaveLength(LFS_DISCOVERY_LIMITS.maxPointerSamples);
+    expect(Buffer.byteLength(scan.attributesOutput)).toBeLessThanOrEqual(LFS_DISCOVERY_LIMITS.maxAttributesBytes);
+    const result = discoverLfs(input(scan));
+    expect(result.needed).toBe(true);
+    expect(result.attributePaths).toHaveLength(LFS_DISCOVERY_LIMITS.maxPublicRecords);
+  });
+
+  it('validates every pointer, including those past the kept samples', async () => {
+    const files = Array.from({ length: 1_500 }, (_, index) => ({ path: `file-${index}`, content: pointer() }));
+    files.push({ path: 'late-broken', content: pointer().replace('size 42', 'size forty-two') });
+    await expect(scanFixture(files).run()).rejects.toMatchObject({ code: 'INVALID_LFS_DISCOVERY_INPUT' });
   });
 
   it('does not query unsafe or incomplete paths and enforces the listing byte bound', async () => {

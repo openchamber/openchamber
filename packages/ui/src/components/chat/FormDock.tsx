@@ -13,6 +13,7 @@ import type { FormRequest } from '@/lib/opencode/model';
 import { readWebSearchConsent } from '@/lib/opencode/websearch';
 import { useUIStore } from '@/stores/useUIStore';
 import { useScopedBlockingForms, useSessions } from '@/sync/sync-context';
+import { useRequestReveal } from '@/sync/request-reveal';
 import { useChatSessionSelection } from './chatColumnSession';
 import * as sessionActions from '@/sync/session-actions';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
@@ -69,7 +70,7 @@ export const FormDock: React.FC<FormDockProps> = ({ sessionId, directory, hidden
         <AnimatePresence>
             {hidden || !form ? null : webSearchConsent
                 ? <WebSearchConsentDock key={form.id} form={form} consent={webSearchConsent} />
-                : <FormDockPanel key={form.id} form={form} waiting={forms.length - 1} />}
+                : <FormDockPanel key={form.id} form={form} forms={forms} />}
         </AnimatePresence>
     );
 };
@@ -98,7 +99,7 @@ const isStepAnswered = (field: FormField, values: FormValues): boolean => {
     return !(Array.isArray(answer) && answer.length === 0);
 };
 
-const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form, waiting }) => {
+const FormDockPanel: React.FC<{ form: FormRequest; forms: FormRequest[] }> = ({ form, forms }) => {
     const { t } = useI18n();
     const isMobile = useUIStore((state) => state.isMobile);
     // The sessions of the chat this dock belongs to, which may be a chat of
@@ -119,6 +120,11 @@ const FormDockPanel: React.FC<{ form: FormRequest; waiting: number }> = ({ form,
     const [collapsed, setCollapsed] = React.useState(false);
     const [isResponding, setIsResponding] = React.useState(false);
     const [showErrors, setShowErrors] = React.useState(false);
+    const waiting = forms.length - 1;
+    // "Open session" on a question's toast expands the dock, including for a
+    // question queued behind the one shown.
+    const formIds = React.useMemo(() => forms.map((item) => item.id), [forms]);
+    useRequestReveal(formIds, React.useCallback(() => setCollapsed(false), []));
 
     const appliedSignatureRef = React.useRef(fieldsSignature);
     React.useEffect(() => {

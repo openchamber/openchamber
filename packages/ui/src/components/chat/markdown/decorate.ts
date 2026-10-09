@@ -420,8 +420,9 @@ const buildTableMenu = (action: string, items: Array<{ key: string; label: strin
 const TABLE_COLUMN_MIN_WIDTH = 120;
 const TABLE_COLUMN_FALLBACK_MAX_WIDTH = 320;
 const TABLE_LAYOUT_ATTR = 'data-md-table-layout';
-// The wrap mode the fixed column widths were computed for.
+// The wrap mode and available width the fixed column widths were computed for.
 const TABLE_WRAP_ATTR = 'data-md-table-wrap';
+const TABLE_WIDTH_ATTR = 'data-md-table-width';
 
 const applyTableWrapState = (wrapper: Element, enabled: boolean, labels: DecorateLabels): void => {
   const button = wrapper.querySelector<HTMLButtonElement>('[data-md-action="toggle-table-wrap"]');
@@ -523,12 +524,31 @@ const fitColumnWidths = (naturalWidths: number[], availableWidth: number): numbe
   return widths;
 };
 
+// The table wrapper hugs its table, so a fixed-width table would report its own
+// width back. Stretching the wrappers for one read gives the width the table
+// may use, which grows and shrinks with the chat.
+const measureAvailableWidths = (tables: HTMLTableElement[]): number[] => {
+  const wrappers = tables.map((table) => table.closest<HTMLElement>('[data-markdown="table-wrapper"]'));
+  for (const wrapper of wrappers) wrapper?.style.setProperty('width', '100%');
+  const widths = tables.map((table) => table.parentElement?.clientWidth ?? 0);
+  for (const wrapper of wrappers) wrapper?.style.removeProperty('width');
+  return widths;
+};
+
 export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boolean): void => {
   const wrapMode = String(wrapCells);
-  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(
-    `table[data-markdown="table"]:not([${TABLE_LAYOUT_ATTR}="fixed"][${TABLE_WRAP_ATTR}="${wrapMode}"])`,
-  ));
-  if (tables.length === 0 || !root.isConnected) return;
+  const allTables = Array.from(root.querySelectorAll<HTMLTableElement>('table[data-markdown="table"]'));
+  if (allTables.length === 0 || !root.isConnected) return;
+  const allAvailableWidths = measureAvailableWidths(allTables);
+  const stale = allTables
+    .map((table, index) => ({ table, availableWidth: allAvailableWidths[index] ?? 0 }))
+    .filter(({ table, availableWidth }) => (
+      table.getAttribute(TABLE_LAYOUT_ATTR) !== 'fixed'
+      || table.getAttribute(TABLE_WRAP_ATTR) !== wrapMode
+      || table.getAttribute(TABLE_WIDTH_ATTR) !== String(availableWidth)
+    ));
+  if (stale.length === 0) return;
+  const tables = stale.map(({ table }) => table);
 
   const measurementRoot = root.ownerDocument.createElement('div');
   measurementRoot.setAttribute('aria-hidden', 'true');
@@ -587,8 +607,8 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boole
   });
 
   root.appendChild(measurementRoot);
-  const plans = probes.map(({ table, columnProbes }) => {
-    const availableWidth = table.parentElement?.clientWidth ?? 0;
+  const plans = probes.map(({ table, columnProbes }, index) => {
+    const availableWidth = stale[index]?.availableWidth ?? 0;
     // Without layout (for example, a hidden chat), retain the former limit.
     const maxColumnWidth = Math.max(TABLE_COLUMN_MIN_WIDTH, availableWidth || TABLE_COLUMN_FALLBACK_MAX_WIDTH);
     const naturalWidths = columnProbes.map((probe) => Math.ceil(probe.getBoundingClientRect().width));
@@ -597,13 +617,14 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boole
     const widths = wrapCells && availableWidth > 0 ? fitColumnWidths(cappedWidths, availableWidth) : cappedWidths;
     return {
       table,
+      availableWidth,
       widths,
-      cappedColumns: naturalWidths.map((width, index) => width > (widths[index] ?? 0)),
+      cappedColumns: naturalWidths.map((width, columnIndex) => width > (widths[columnIndex] ?? 0)),
     };
   });
   measurementRoot.remove();
 
-  for (const { table, widths, cappedColumns } of plans) {
+  for (const { table, availableWidth, widths, cappedColumns } of plans) {
     // Identifiers stay on one line only while the column can hold them; in a
     // column capped at the available width they wrap instead of overflowing
     // into the neighbouring cell.
@@ -637,6 +658,7 @@ export const stabilizeMarkdownTableWidths = (root: HTMLElement, wrapCells: boole
     table.style.width = `${widths.reduce((total, width) => total + width, 0)}px`;
     table.setAttribute(TABLE_LAYOUT_ATTR, 'fixed');
     table.setAttribute(TABLE_WRAP_ATTR, wrapMode);
+    table.setAttribute(TABLE_WIDTH_ATTR, String(availableWidth));
   }
 };
 

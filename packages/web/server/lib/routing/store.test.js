@@ -11,6 +11,7 @@ const sampleConfig = (patch = {}) => ({
   enabled: true,
   fallback: { model: { providerID: 'anthropic', modelID: 'claude-sonnet-5' }, variant: 'medium' },
   minConfidence: 0.6,
+  preserveCache: true,
   safetyNet: { enabled: true, threshold: 0.6 },
   categories: resolveEffectiveConfig(null).categories,
   ...patch,
@@ -42,6 +43,18 @@ describe('routing store', () => {
       'my-refactors': { builtin: false, name: 'My refactors', description: 'Refactors across modules.' },
     });
     expect(await store.readConfig()).toEqual(config);
+  });
+
+  it('keeps the cache setting on until it is turned off, also for clients that do not send it', async () => {
+    expect(resolveEffectiveConfig(null).preserveCache).toBe(true);
+    expect(resolveEffectiveConfig({ version: 1, enabled: true }).preserveCache).toBe(true);
+
+    const store = createRoutingStore({ dataDir: await tempDir() });
+    await store.writeConfig(sampleConfig({ preserveCache: false }));
+    expect((await store.readConfig()).preserveCache).toBe(false);
+
+    const { preserveCache: _omitted, ...older } = sampleConfig();
+    expect(parseEffectiveConfig(older).preserveCache).toBe(true);
   });
 
   it('records a removed built-in as deleted and keeps the others', async () => {

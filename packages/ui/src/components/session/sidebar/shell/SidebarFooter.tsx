@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 
 type Props = {
   onOpenSettings: () => void;
@@ -26,6 +27,8 @@ export function SidebarFooter({
   showUpdateButton = true,
 }: Props): React.ReactNode {
   const { t } = useI18n();
+  // On a remote host the button updates this app, not the server it shows.
+  const isDesktopRemote = useDesktopRemoteHostActive();
 
   if (!showRuntimeButtons && !showUpdateButton) {
     return null;
@@ -77,7 +80,7 @@ export function SidebarFooter({
           className="ml-auto border-[var(--status-info-border)] bg-[var(--status-info-background)] text-[var(--status-info)] hover:bg-[var(--status-info-background)]/80 hover:text-[var(--status-info)] dark:border-[var(--status-info-border)] dark:bg-[var(--status-info-background)] dark:hover:bg-[var(--status-info-background)]/80"
           onClick={onOpenUpdate}
         >
-          {t('sessions.sidebar.footer.actions.update')}
+          {isDesktopRemote ? t('sessions.sidebar.footer.actions.updateApp') : t('sessions.sidebar.footer.actions.update')}
         </Button>
       ) : null}
     </div>

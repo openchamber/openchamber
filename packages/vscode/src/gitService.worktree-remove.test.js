@@ -112,7 +112,12 @@ describe('VS Code worktree removal instance disposal', () => {
         expect(disposeInstance).toHaveBeenCalledTimes(1);
         expect(fs.existsSync(worktreePath)).toBe(false);
         expect(warnSpy).toHaveBeenCalledTimes(1);
-        expect(String(warnSpy.mock.calls[0][0])).toContain(worktreePath);
+        // The warn message carries the path git reported in `worktree list
+        // --porcelain`, which uses forward slashes on Windows while
+        // `worktreePath` is built with `path.join` (backslashes there). Compare
+        // separator-insensitively so the assertion holds on both platforms.
+        const warnMessage = String(warnSpy.mock.calls[0][0]).replaceAll('\\', '/');
+        expect(warnMessage).toContain(worktreePath.replaceAll('\\', '/'));
         expect(warnSpy.mock.calls[0][1]).toBe('OpenCode API URL is not available');
       } finally {
         warnSpy.mockRestore();

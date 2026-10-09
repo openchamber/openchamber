@@ -36,6 +36,9 @@ import {
   shouldTunnelLoopbackUrl,
   toDisplayUrl,
 } from '@/lib/browser/devTunnel';
+import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
+import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
+import { Icon } from '@/components/icon/Icon';
 import {
   buildClickScript,
   buildInspectScript,
@@ -79,6 +82,25 @@ const ZOOM_STEP = 0.5;
 const ZOOM_MIN = -3;
 const ZOOM_MAX = 4;
 const BROWSER_PARTITION = 'persist:openchamber-browser';
+/**
+ * A page from an isolated space gets a session of its own, in memory: the
+ * desktop shell routes that session through a proxy that reaches only the
+ * space's own tunnel ports, so the page sees neither the app's cookies nor
+ * anything else on this machine. The name is what the shell checks, so it is
+ * built here the way the shell builds it.
+ */
+/**
+ * The mark before the address of a space's tab while it shows a loopback page:
+ * `localhost` there means the space, and the sidebar's container icon says so.
+ */
+const addressMarkOf = (directory: string, address: string, label: string): { icon: 'box-3'; label: string } | undefined => (
+  spaceIdOfDirectory(directory) !== null && isLoopbackUrl(address) ? { icon: 'box-3', label } : undefined
+);
+
+const browserPartitionOf = (directory: string): string => {
+  const spaceId = spaceIdOfDirectory(directory);
+  return spaceId ? `openchamber-space-preview:${spaceId}` : BROWSER_PARTITION;
+};
 /** Kept small: this rides along with every snapshot. */
 const CONSOLE_PROBLEM_LIMIT = 20;
 const DEV_SERVER_RETRY_DELAY_MS = 600;
@@ -139,6 +161,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   // exists is not reliably honoured either — both leave a panel that never
   // loads. `null` means "still resolving", and the view is not rendered yet.
   const [initialSrc, setInitialSrc] = React.useState<string | null>(startUrl ? null : BLANK_URL);
+  const spaceMark = useSpaceMarkLabel(directory);
 
   const [address, setAddress] = React.useState(startUrl);
   const [isAnnotating, setIsAnnotating] = React.useState(false);
@@ -193,6 +216,19 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
   /** Set when a remote dev server could not be reached from this machine. */
   const [tunnelFailedUrl, setTunnelFailedUrl] = React.useState<string | null>(null);
+  // A space's view is attached only once the shell has put the proxy on the
+  // space's session, so not even a saved public address loads before it.
+  const [sessionReady, setSessionReady] = React.useState(spaceIdOfDirectory(directory) === null);
+  React.useEffect(() => {
+    const spaceId = spaceIdOfDirectory(directory);
+    if (spaceId === null) { setSessionReady(true); return; }
+    let active = true;
+    setSessionReady(false);
+    void invokeDesktopCommand('desktop_space_preview_prepare', { spaceId })
+      .then(() => { if (active) setSessionReady(true); })
+      .catch(() => { if (active) setTunnelFailedUrl(startUrl || 'http://localhost/'); });
+    return () => { active = false; };
+  }, [directory, startUrl]);
   const attachAnnotation = useAnnotationAttach(directory);
   const overlayLabels = useAnnotationOverlayLabels();
   const isLoading = navigation.status.kind === 'loading';
@@ -224,7 +260,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     // confusing and useless to copy.
     setAddress(next);
     setTunnelFailedUrl(null);
-    void resolveBrowsableUrl(next).then((target) => {
+    void resolveBrowsableUrl(next, directory).then((target) => {
       const webview = webviewRef.current;
       if (!webview) {
         setInitialSrc(target);
@@ -242,14 +278,14 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       // showing the remote one's address. Say what happened instead.
       if (error instanceof DevTunnelUnavailableError) setTunnelFailedUrl(next);
     });
-  }, []);
+  }, [directory]);
 
   // Resolving through the tunnel is what lets a persisted loopback URL reach a
   // dev server on a remote host; locally it returns the URL unchanged.
   React.useEffect(() => {
     if (!startUrl) return;
     let active = true;
-    void resolveBrowsableUrl(startUrl)
+    void resolveBrowsableUrl(startUrl, directory)
       .then((target) => { if (active) setInitialSrc(target); })
       .catch((error: unknown) => {
         if (!active) return;
@@ -638,7 +674,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     const onWillNavigate = (event: Event) => {
       const detail = readEventPayload<{ url?: string }>(event);
       const target = typeof detail.url === 'string' ? detail.url : '';
-      if (!target || !shouldTunnelLoopbackUrl(target)) return;
+      if (!target || !shouldTunnelLoopbackUrl(target, directory)) return;
       event.preventDefault();
       loadUrl(target);
     };
@@ -653,7 +689,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       // Superseded navigations are not failures.
       if (detail.errorCode === -3) return;
       const target = typeof detail.validatedURL === 'string' ? detail.validatedURL : '';
-      if (!target || !shouldTunnelLoopbackUrl(target)) return;
+      if (!target || !shouldTunnelLoopbackUrl(target, directory)) return;
       if (retunneledUrlsRef.current.has(target)) return;
       retunneledUrlsRef.current.add(target);
       loadUrl(target);
@@ -665,7 +701,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       webviewElement.removeEventListener('will-navigate', onWillNavigate);
       webviewElement.removeEventListener('did-fail-load', onFailLoad);
     };
-  }, [loadUrl, webviewElement]);
+  }, [directory, loadUrl, webviewElement]);
 
   // Popups open in place; a detached window would escape the panel entirely.
   React.useEffect(() => {
@@ -706,7 +742,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
   const clearBrowsingData = React.useCallback((what: 'cookies' | 'cache') => {
     void invokeDesktopCommand('desktop_browser_clear_data', {
-      partition: BROWSER_PARTITION,
+      partition: browserPartitionOf(directory),
       cookies: what === 'cookies',
       cache: what === 'cache',
     })
@@ -718,7 +754,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         try { webviewRef.current?.reloadIgnoringCache(); } catch { /* not attached */ }
       })
       .catch(() => toast.error(t('contextPanel.browser.clearFailed')));
-  }, [t]);
+  }, [directory, t]);
 
   // The stage is measured rather than assumed: the panel is resizable, and a
   // viewport that fitted a moment ago may not fit now.
@@ -818,8 +854,10 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
     // Probe the address on the host, not the local tunnel port: the check runs
     // on the server, where our ephemeral port means nothing. Asking about it
     // failed every time, which read as "settled" and left the page on the error
-    // until a manual reload.
-    void probeLoopbackStatus(toDisplayUrl(status.url)).then((httpStatus) => {
+    // until a manual reload. A space's address is not on the host either, and
+    // the host does not probe into a space, so a space's page counts as served.
+    const probe = spaceIdOfDirectory(directory) ? Promise.resolve(null) : probeLoopbackStatus(toDisplayUrl(status.url));
+    void probe.then((httpStatus) => {
       if (cancelled) return;
       if (httpStatus === null || httpStatus < 500) {
         servedOkRef.current = true;
@@ -832,7 +870,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       cancelled = true;
       cancelReload?.();
     };
-  }, [status]);
+  }, [directory, status]);
 
   const failed = navigation.status.kind === 'failed' && !isWaitingForServer ? navigation.status : null;
   const layout = fitViewport(viewport, stageSize);
@@ -849,6 +887,10 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         onForward={() => { try { webviewRef.current?.goForward(); } catch { /* not attached */ } }}
         onReload={handleReload}
         onOpenExternal={() => void openExternalUrl(navigation.url || address)}
+        addressMark={addressMarkOf(directory, address, spaceMark ?? t('contextPanel.browser.spaceAddress'))}
+        // The system browser has no proxy of this space's: a page opened there
+        // could reach everything on this machine.
+        canOpenExternal={spaceIdOfDirectory(directory) === null}
         canGoBack={navigation.canGoBack}
         canGoForward={navigation.canGoForward}
         isLoading={isLoading}
@@ -883,11 +925,11 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
           layout && 'flex items-center justify-center overflow-hidden bg-[var(--surface-muted)]',
         )}
       >
-        {initialSrc !== null ? (
+        {initialSrc !== null && sessionReady ? (
           <webview
             ref={attachWebview}
             src={initialSrc}
-            partition="persist:openchamber-browser"
+            partition={browserPartitionOf(directory)}
             allowpopups
             style={layout
               ? {
@@ -914,9 +956,14 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
         ) : null}
         {tunnelFailedUrl ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            {spaceIdOfDirectory(directory) !== null ? (
+              <Icon name="box-3" className="size-8 text-muted-foreground opacity-70" aria-hidden="true" />
+            ) : null}
             <span className="typography-ui-header text-foreground">{t('contextPanel.browser.tunnelFailed')}</span>
             <span className="typography-micro text-muted-foreground">
-              {t('contextPanel.browser.tunnelFailedHint', { url: tunnelFailedUrl })}
+              {t(spaceIdOfDirectory(directory) !== null
+                ? 'contextPanel.browser.spaceTunnelFailedHint'
+                : 'contextPanel.browser.tunnelFailedHint', { url: tunnelFailedUrl })}
             </span>
           </div>
         ) : null}
@@ -954,8 +1001,10 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
   const startUrl = normalized !== BLANK_URL ? normalized : '';
 
   const [address, setAddress] = React.useState(startUrl);
-  const [loadedUrl, setLoadedUrl] = React.useState(resolveIframeBrowserUrl(startUrl));
-  const [unreachableUrl, setUnreachableUrl] = React.useState(isRemoteWebLoopbackUrl(startUrl) ? startUrl : '');
+  const [loadedUrl, setLoadedUrl] = React.useState(resolveIframeBrowserUrl(startUrl, directory));
+  const [unreachableUrl, setUnreachableUrl] = React.useState(isRemoteWebLoopbackUrl(startUrl, directory) ? startUrl : '');
+  const insideSpace = spaceIdOfDirectory(directory) !== null;
+  const spaceMark = useSpaceMarkLabel(directory);
   const [history, setHistory] = React.useState<string[]>(startUrl ? [startUrl] : []);
   const [historyIndex, setHistoryIndex] = React.useState(startUrl ? 0 : -1);
   const [reloadNonce, bumpReload] = React.useReducer((value: number) => value + 1, 0);
@@ -982,7 +1031,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
     const next = normalizeBrowserUrl(value);
     if (next === BLANK_URL) return;
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next);
+    const iframeUrl = resolveIframeBrowserUrl(next, directory);
     setLoadedUrl(iframeUrl);
     setUnreachableUrl(iframeUrl ? '' : next);
     persistUrl(next);
@@ -1005,11 +1054,11 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
     if (!next) return;
     setHistoryIndex(index);
     setAddress(next);
-    const iframeUrl = resolveIframeBrowserUrl(next);
+    const iframeUrl = resolveIframeBrowserUrl(next, directory);
     setLoadedUrl(iframeUrl);
     setUnreachableUrl(iframeUrl ? '' : next);
     persistUrl(next);
-  }, [history, persistUrl]);
+  }, [directory, history, persistUrl]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-background">
@@ -1023,6 +1072,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
         onForward={() => goTo(historyIndex + 1)}
         onReload={bumpReload}
         onOpenExternal={() => void openExternalUrl(loadedUrl || address)}
+        addressMark={addressMarkOf(directory, address, spaceMark ?? t('contextPanel.browser.spaceAddress'))}
         canOpenExternal={!unreachableUrl}
         canGoBack={historyIndex > 0}
         canGoForward={historyIndex >= 0 && historyIndex < history.length - 1}
@@ -1031,8 +1081,11 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
       <div className="relative min-h-0 flex-1 bg-background">
         {unreachableUrl ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
+            {insideSpace ? (
+              <Icon name="box-3" className="size-8 text-muted-foreground opacity-70" aria-hidden="true" />
+            ) : null}
             <span className="typography-ui-header text-foreground">
-              {t('contextPanel.browser.remoteLoopback.title', { url: browserUrlLabel(unreachableUrl) })}
+              {t(insideSpace ? 'contextPanel.browser.spaceLoopback.title' : 'contextPanel.browser.remoteLoopback.title', { url: browserUrlLabel(unreachableUrl) })}
             </span>
             <span className="typography-micro text-muted-foreground">
               {t('contextPanel.browser.remoteLoopback.hint')}

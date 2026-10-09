@@ -40,7 +40,14 @@ test('a release bump packs workspace dependencies at the new version after a fro
   for (const [workspace, dependency] of [['web', 'sdk'], ['electron', 'web']]) {
     const archive = path.join(root, `${workspace}.tgz`);
     runBun(['pm', 'pack', '--ignore-scripts', '--filename', archive], path.join(root, 'packages', workspace));
-    const packed = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], { encoding: 'utf8' }));
+    // Address the archive relative to its directory: under Git Bash on Windows
+    // `tar` is GNU tar, which reads an absolute `C:\...` path as a remote host
+    // ("Cannot connect to C:"). Windows bsdtar accepts the absolute form, which
+    // is why this looked like a flake.
+    const packed = JSON.parse(execFileSync('tar', ['-xOf', path.basename(archive), 'package/package.json'], {
+      cwd: path.dirname(archive),
+      encoding: 'utf8',
+    }));
     expect(packed.version).toBe('1.24.0');
     expect(packed.dependencies[`@openchamber/${dependency}`]).toBe('1.24.0');
   }

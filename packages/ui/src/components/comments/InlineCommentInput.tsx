@@ -3,9 +3,10 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
+import { isIMECompositionEvent } from '@/lib/ime';
 import { formatShortcutForDisplay } from '@/lib/shortcuts';
-import { CommentTextEditor } from './CommentTextEditor';
 import { useCommentImagePaste } from './useCommentImagePaste';
+import { useCommentSnippetPicker } from './useCommentSnippetPicker';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -17,14 +18,23 @@ export interface InlineCommentInputProps {
   isEditing?: boolean;
   className?: string;
   maxWidth?: number;
+  /** Fill of the selected lines the comment belongs to, when the host knows it. */
+  bandColor?: string;
 }
 
+const MAX_FIELD_HEIGHT_PX = 120;
+
 /**
- * The comment editor shown under selected diff/editor lines. Styled as the
- * same pill used by chat quote comments and browser annotations: a rounded
- * auto-growing field with a round attach button, and a muted context line
- * above naming the file and range. Keys, image paste and snippets live in
- * `CommentTextEditor`.
+ * The comment editor shown under selected diff, editor and preview lines. It
+ * sits in a band tinted like the selected lines it comments on (the editor's
+ * selected-line fill, or `bandColor` from a diff), with the field and a round
+ * attach button inside.
+ *
+ * The field is a plain textarea because it lives inside other editors' DOM: an
+ * annotation slot of the diff viewer's shadow tree and a block widget of the
+ * file editor. The composer's CodeMirror editor there lost its caret and
+ * jumped to the start of the line while typing; a textarea owns its caret and
+ * selection and is not affected by the host editor's DOM.
  */
 export function InlineCommentInput({
   initialText = '',
@@ -36,18 +46,28 @@ export function InlineCommentInput({
   isEditing = false,
   className,
   maxWidth,
+  bandColor,
 }: InlineCommentInputProps) {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const [text, setText] = React.useState(initialText);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveShortcut = formatShortcutForDisplay('enter');
   void isEditing;
+
+  const resizeTextarea = () => {
+    const element = textareaRef.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(element.scrollHeight, MAX_FIELD_HEIGHT_PX)}px`;
+  };
 
   const handleTextChange = (value: string) => {
     setText(value);
     onTextChange?.(value);
   };
+
+  React.useLayoutEffect(resizeTextarea, [text]);
 
   // Stable range snapshot to prevent race with selection clearing
   const stableRangeRef = useRef(lineRange);
@@ -65,19 +85,74 @@ export function InlineCommentInput({
   };
 
   const displayRange = normalizeRange(lineRange);
+  const ariaLabel = [
+    fileLabel,
+    displayRange ? t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end }) : null,
+  ].filter(Boolean).join(' • ') || t('inlineComment.actions.comment');
 
-  // The field focuses itself without scrolling; on mobile bring the card
-  // into view above the keyboard.
+  // Opens ready to type, caret after any text the comment started with. The
+  // field focuses without scrolling; on mobile the band comes into view above
+  // the keyboard.
   useEffect(() => {
-    if (isMobile) rootRef.current?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.focus({ preventScroll: true });
+    const end = textarea.value.length;
+    textarea.setSelectionRange(end, end);
+    if (isMobile) textarea.scrollIntoView({ behavior: 'auto', block: 'nearest' });
   }, [isMobile]);
 
+  // A pasted image becomes a citation in the text; the caret lands after it
+  // once the new text renders. Snippets chosen from the picker do the same.
   const imagePaste = useCommentImagePaste();
+  const pendingCaretRef = useRef<number | null>(null);
+  React.useLayoutEffect(() => {
+    const caret = pendingCaretRef.current;
+    if (caret === null) return;
+    pendingCaretRef.current = null;
+    textareaRef.current?.setSelectionRange(caret, caret);
+  }, [text]);
+
+  const replaceRange = (from: number, to: number, insert: string) => {
+    const current = textareaRef.current?.value ?? text;
+    pendingCaretRef.current = from + insert.length;
+    handleTextChange(`${current.slice(0, from)}${insert}${current.slice(to)}`);
+    textareaRef.current?.focus();
+  };
+
+  // `#` opens the composer's snippet picker; references expand on send.
+  const getCaret = React.useCallback(() => textareaRef.current?.selectionStart ?? 0, []);
+  const snippetPicker = useCommentSnippetPicker({ text, getCaret, replaceRange });
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const field = event.currentTarget;
+    const pasted = imagePaste.takePastedImages(event.clipboardData, field.value, {
+      start: field.selectionStart,
+      end: field.selectionEnd,
+    });
+    if (!pasted) return;
+    event.preventDefault();
+    replaceRange(pasted.from, pasted.to, pasted.insertion);
+  };
 
   const save = () => {
     if (text.trim()) {
       onSave(text, normalizeRange(stableRangeRef.current));
       void imagePaste.attachCitedImages(text);
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isIMECompositionEvent(event)) return;
+    if (snippetPicker.handleKeyDown(event)) return;
+    // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
+    // Cmd/Ctrl+Enter stays available for hardware keyboards on mobile.
+    if (event.key === 'Enter' && !event.shiftKey && (!isMobile || event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      save();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
     }
   };
 
@@ -90,43 +165,40 @@ export function InlineCommentInput({
   return (
     <div
       className={cn(
-        'w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] animate-in fade-in zoom-in-95 duration-200',
-        // The glass card's shadow lives here, off its backdrop-filter element.
-        'rounded-xl shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
+        'oc-inline-comment-band w-full max-w-[min(100%,calc(var(--oc-context-panel-width,100vw)-var(--oc-editor-gutter-width,0px)))] px-3 py-2 font-sans',
         className
       )}
       style={{
         maxWidth: maxWidth ? `${Math.max(200, Math.floor(maxWidth))}px` : undefined,
+        backgroundColor: bandColor,
       }}
-      ref={rootRef}
       data-comment-input="true"
       onPointerDown={(e) => e.stopPropagation()}
       onTouchStart={(e) => e.stopPropagation()}
     >
-      <div className="oc-glass-popover rounded-xl border border-[var(--interactive-border)]">
-        {(fileLabel || displayRange) ? (
-          <div className="flex items-center gap-2 px-3 pt-2 text-xs font-medium text-muted-foreground opacity-60">
-            {fileLabel ? <span className="max-w-[200px] truncate">{fileLabel}</span> : null}
-            {fileLabel && displayRange ? <span>•</span> : null}
-            {displayRange ? (
-              <span>{t('inlineComment.range.lines', { start: displayRange.start, end: displayRange.end })}</span>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="relative flex items-end gap-2 py-1 pl-3 pr-1">
-        <CommentTextEditor
+      <div className="relative flex items-end gap-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] py-1 pl-3 pr-1 text-foreground focus-within:ring-1 focus-within:ring-ring">
+        {snippetPicker.picker}
+        <textarea
+          ref={textareaRef}
+          rows={1}
           value={text}
-          onChange={handleTextChange}
-          onSubmit={save}
-          onCancel={onCancel}
-          // Desktop Enter attaches; Shift+Enter and mobile Enter break the line.
-          // Cmd/Ctrl+Enter stays available for hardware keyboards on mobile.
-          enterSubmits={!isMobile}
-          imagePaste={imagePaste}
+          onChange={(event) => {
+            handleTextChange(event.target.value);
+            snippetPicker.sync(event.target.value, event.target.selectionStart);
+          }}
+          onSelect={(event) => snippetPicker.sync(event.currentTarget.value, event.currentTarget.selectionStart)}
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={isMobile
             ? t('inlineComment.input.placeholderShort')
             : t('inlineComment.input.placeholder', { shortcut: saveShortcut })}
-          className={cn('py-1.5 text-sm leading-5 text-foreground', isMobile && 'text-base leading-6')}
+          aria-label={ariaLabel}
+          spellCheck
+          className={cn(
+            'min-w-0 flex-1 resize-none bg-transparent py-1.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground',
+            isMobile && 'text-base leading-6'
+          )}
+          style={{ minHeight: 0 }}
         />
         <button
           type="button"
@@ -143,7 +215,6 @@ export function InlineCommentInput({
         >
           <Icon name="attachment-2" className="h-4 w-4" />
         </button>
-        </div>
       </div>
     </div>
   );

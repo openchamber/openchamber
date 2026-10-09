@@ -63,7 +63,7 @@ jobs:
           bun run test:updater
 
   # Catches what type-check cannot: bundling, Vite-only syntax, the web
-  # build's memory ceiling. The packages whose `build` is only `tsc --noEmit`
+  # build's memory ceiling. The packages whose `build` is only a type-check (`tsc -b`)
   # (ui) or a no-op (electron) are covered by the type-check job.
   build:
     runs-on: blacksmith-4vcpu-ubuntu-2404

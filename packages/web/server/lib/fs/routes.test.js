@@ -316,10 +316,42 @@ const callRead = async (handler, query) => {
   return res;
 };
 
+const createStreamingResponse = () => {
+  const chunks = [];
+  const headers = new Map();
+  let statusCode = 200;
+  const res = new Writable({
+    write(chunk, _encoding, callback) {
+      chunks.push(Buffer.from(chunk));
+      callback();
+    },
+  });
+  Object.assign(res, {
+    status(code) { statusCode = code; return res; },
+    json(payload) { chunks.push(Buffer.from(JSON.stringify(payload))); return res; },
+    type() { return res; },
+    send(payload) { chunks.push(Buffer.from(payload)); return res; },
+    setHeader(name, value) { headers.set(name.toLowerCase(), value); return res; },
+    getHeader(name) { return headers.get(name.toLowerCase()); },
+  });
+  return {
+    res,
+    finished: new Promise((resolve) => res.on('finish', resolve)),
+    get statusCode() { return statusCode; },
+    get body() { return Buffer.concat(chunks).toString('utf8'); },
+  };
+};
+
+// File bytes as `fs/promises` hands them to the raw route: an open handle that streams a span.
+const openBytes = (bytes) => vi.fn(async () => ({
+  createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
+}));
+
 const callRaw = async (handler, query) => {
-  const res = createMockResponse();
-  await handler({ query }, res);
-  return res;
+  const response = createStreamingResponse();
+  await handler({ query }, response.res);
+  await response.finished;
+  return response;
 };
 
 const callMkdir = async (handler, body) => {
@@ -575,6 +607,82 @@ describe('fs write', () => {
   });
 });
 
+describe('fs rename', () => {
+  const registerRename = (fsPromises) => {
+    const { app, getRoute } = createRouteRegistry();
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: {
+        realpath: async (targetPath) => targetPath,
+        ...fsPromises,
+      },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    return getRoute('POST', '/api/fs/rename');
+  };
+  const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
+
+  it('renames when the destination is free', async () => {
+    const fsPromises = {
+      lstat: vi.fn(async (targetPath) => {
+        if (targetPath === '/repo/a.txt') return { dev: 1, ino: 10 };
+        throw missing();
+      }),
+      rename: vi.fn(async () => undefined),
+    };
+    const res = createMockResponse();
+    await registerRename(fsPromises)({ body: { oldPath: '/repo/a.txt', newPath: '/repo/b.txt' } }, res);
+
+    expect(res.body).toEqual({ success: true, path: '/repo/b.txt' });
+    expect(fsPromises.rename).toHaveBeenCalledWith('/repo/a.txt', '/repo/b.txt');
+  });
+
+  it('returns a conflict instead of replacing an existing destination', async () => {
+    const fsPromises = {
+      lstat: vi.fn(async (targetPath) => (targetPath === '/repo/a.txt' ? { dev: 1, ino: 10 } : { dev: 1, ino: 20 })),
+      rename: vi.fn(async () => undefined),
+    };
+    const res = createMockResponse();
+    await registerRename(fsPromises)({ body: { oldPath: '/repo/a.txt', newPath: '/repo/b.txt' } }, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({ error: 'Destination path already exists', reason: 'already-exists' });
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+
+  it('allows a case-only rename that resolves to the source itself', async () => {
+    const fsPromises = {
+      lstat: vi.fn(async () => ({ dev: 1, ino: 10 })),
+      rename: vi.fn(async () => undefined),
+    };
+    const res = createMockResponse();
+    await registerRename(fsPromises)({ body: { oldPath: '/repo/Readme.md', newPath: '/repo/README.md' } }, res);
+
+    expect(res.body).toEqual({ success: true, path: '/repo/README.md' });
+    expect(fsPromises.rename).toHaveBeenCalledWith('/repo/Readme.md', '/repo/README.md');
+  });
+
+  it('reports a missing source as not found', async () => {
+    const fsPromises = {
+      lstat: vi.fn(async () => { throw missing(); }),
+      rename: vi.fn(async () => undefined),
+    };
+    const res = createMockResponse();
+    await registerRename(fsPromises)({ body: { oldPath: '/repo/a.txt', newPath: '/repo/b.txt' } }, res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.reason).toBe('not-found');
+    expect(fsPromises.rename).not.toHaveBeenCalled();
+  });
+});
+
 describe('fs upload', () => {
   it('streams a binary file to temp storage before committing it without overwrite', async () => {
     const write = vi.fn(async (_buffer, _offset, length) => ({ bytesWritten: length }));
@@ -736,7 +844,7 @@ describe('fs upload', () => {
   });
 });
 
-describe('fs rename', () => {
+describe('fs rename on a real disk', () => {
   let repo;
   let rename;
   beforeEach(async () => {
@@ -782,7 +890,7 @@ describe('fs rename', () => {
     const res = await rename('src/a.ts', 'lib/a.ts');
 
     expect(res.statusCode).toBe(409);
-    expect(res.body).toEqual({ error: 'Destination already exists', reason: 'already-exists' });
+    expect(res.body).toEqual({ error: 'Destination path already exists', reason: 'already-exists' });
     expect(await nativeFs.readFile(path.join(repo, 'lib/a.ts'), 'utf8')).toBe('keep me');
     expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
   });
@@ -797,26 +905,12 @@ describe('fs rename', () => {
     expect((await nativeFs.stat(path.join(repo, 'src/nested'))).isDirectory()).toBe(true);
   });
 
-  it('allows a rename that only changes letter case', async () => {
-    const res = await rename('src/a.ts', 'src/A.ts');
-
-    expect(res.body).toEqual({ success: true, path: path.join(repo, 'src/A.ts') });
-    expect(await nativeFs.readdir(path.join(repo, 'src'))).toContain('A.ts');
-  });
-
   it('refuses to move a folder into its own subfolder', async () => {
     const res = await rename('src', 'src/nested/src');
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: 'Cannot move a folder into itself' });
     expect(await nativeFs.readFile(path.join(repo, 'src/a.ts'), 'utf8')).toBe('source');
-  });
-
-  it('reports a missing source as not found', async () => {
-    const res = await rename('src/missing.ts', 'lib/missing.ts');
-
-    expect(res.statusCode).toBe(404);
-    expect(res.body).toEqual({ error: 'Source path not found', reason: 'not-found' });
   });
 });
 
@@ -904,7 +998,7 @@ describe('fs read', () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
       stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => Buffer.from('secret')),
+      open: openBytes(Buffer.from('secret')),
     };
     const handler = registerRaw(fsPromises);
 
@@ -914,7 +1008,7 @@ describe('fs read', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.getHeader('referrer-policy')).toBe('no-referrer');
+    expect(res.res.getHeader('referrer-policy')).toBe('no-referrer');
   });
 
   it('stats outside files without a grant', async () => {
@@ -1301,36 +1395,8 @@ describe('fs exec git-read cache', () => {
 });
 
 describe('fs raw byte ranges', () => {
-  const createStreamingResponse = () => {
-    const chunks = [];
-    const headers = new Map();
-    let statusCode = 200;
-    const res = new Writable({
-      write(chunk, _encoding, callback) {
-        chunks.push(Buffer.from(chunk));
-        callback();
-      },
-    });
-    Object.assign(res, {
-      status(code) { statusCode = code; return res; },
-      json(payload) { chunks.push(Buffer.from(JSON.stringify(payload))); return res; },
-      type() { return res; },
-      send(payload) { chunks.push(Buffer.from(payload)); return res; },
-      setHeader(name, value) { headers.set(name.toLowerCase(), value); return res; },
-      getHeader(name) { return headers.get(name.toLowerCase()); },
-    });
-    return {
-      res,
-      finished: new Promise((resolve) => res.on('finish', resolve)),
-      get statusCode() { return statusCode; },
-      get body() { return Buffer.concat(chunks).toString('utf8'); },
-    };
-  };
-
   const registerRawWithFile = (bytes) => {
-    const open = vi.fn(async () => ({
-      createReadStream: ({ start, end }) => Readable.from([bytes.subarray(start, end + 1)]),
-    }));
+    const open = openBytes(bytes);
     const readFile = vi.fn(async () => bytes);
     const handler = registerRaw({
       stat: async () => ({ isFile: () => true, size: bytes.length }),
@@ -1348,7 +1414,7 @@ describe('fs raw byte ranges', () => {
     await response.finished;
 
     expect(response.statusCode).toBe(206);
-    expect(response.getHeader?.('content-range') ?? response.res.getHeader('content-range')).toBe('bytes 3-9/10');
+    expect(response.res.getHeader('content-range')).toBe('bytes 3-9/10');
     expect(response.res.getHeader('content-length')).toBe('7');
     expect(response.res.getHeader('accept-ranges')).toBe('bytes');
     expect(response.body).toBe('3456789');
@@ -1356,15 +1422,32 @@ describe('fs raw byte ranges', () => {
     expect(readFile).not.toHaveBeenCalled();
   });
 
-  it('serves the whole file, advertising ranges, when no span is asked for', async () => {
-    const { handler, open } = registerRawWithFile(Buffer.from('0123456789'));
-    const res = createMockResponse();
+  it('streams the whole file, advertising ranges, when no span is asked for', async () => {
+    const { handler, open, readFile } = registerRawWithFile(Buffer.from('0123456789'));
+    const response = createStreamingResponse();
 
-    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, res);
+    await handler({ query: { path: '/repo/clip.mp4' }, headers: {} }, response.res);
+    await response.finished;
 
-    expect(res.statusCode).toBe(200);
-    expect(res.getHeader('accept-ranges')).toBe('bytes');
-    expect(res.body.toString('utf8')).toBe('0123456789');
+    expect(response.statusCode).toBe(200);
+    expect(response.res.getHeader('accept-ranges')).toBe('bytes');
+    expect(response.res.getHeader('content-length')).toBe('10');
+    expect(response.res.getHeader('content-range')).toBeUndefined();
+    expect(response.body).toBe('0123456789');
+    expect(open).toHaveBeenCalledWith('/repo/clip.mp4', 'r');
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('answers an empty file without opening it', async () => {
+    const { handler, open } = registerRawWithFile(Buffer.alloc(0));
+    const response = createStreamingResponse();
+
+    await handler({ query: { path: '/repo/empty.txt' }, headers: {} }, response.res);
+    await response.finished;
+
+    expect(response.statusCode).toBe(200);
+    expect(response.res.getHeader('content-length')).toBe('0');
+    expect(response.body).toBe('');
     expect(open).not.toHaveBeenCalled();
   });
 
@@ -1468,8 +1551,8 @@ describe('fs raw download Content-Disposition', () => {
   it('uses RFC 5987 filename*= encoding for non-ASCII filenames on download', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
-      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => Buffer.from('content')),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 7 })),
+      open: openBytes(Buffer.from('content')),
     };
     const handler = registerRaw(fsPromises);
 
@@ -1479,7 +1562,7 @@ describe('fs raw download Content-Disposition', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const cd = res.getHeader('content-disposition');
+    const cd = res.res.getHeader('content-disposition');
     expect(cd).toContain("filename*=UTF-8''");
     expect(cd).toContain(encodeURIComponent('文件.txt'));
     // ASCII fallback strips non-ASCII chars, leaving extension
@@ -1489,15 +1572,15 @@ describe('fs raw download Content-Disposition', () => {
   it('uses plain filename for ASCII-only filenames on download', async () => {
     const fsPromises = {
       realpath: vi.fn(async (targetPath) => targetPath),
-      stat: vi.fn(async () => ({ isFile: () => true, size: 6 })),
-      readFile: vi.fn(async () => Buffer.from('content')),
+      stat: vi.fn(async () => ({ isFile: () => true, size: 7 })),
+      open: openBytes(Buffer.from('content')),
     };
     const handler = registerRaw(fsPromises);
 
     const res = await callRaw(handler, { path: '/repo/readme.txt', download: 'true' });
 
     expect(res.statusCode).toBe(200);
-    const cd = res.getHeader('content-disposition');
+    const cd = res.res.getHeader('content-disposition');
     expect(cd).toContain('filename="readme.txt"');
     expect(cd).toContain("filename*=UTF-8''readme.txt");
   });

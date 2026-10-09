@@ -157,6 +157,23 @@ const WEBKIT_SCROLL_FIX_CSS = `
     --diffs-bg-separator-override: var(--surface-elevated);
   }
 
+  /* Selected rows: Pierre mixes the selection colour in at 18-25%, and the
+     theme's selection is a soft neutral, so the selection barely showed on
+     dark themes. Half the selection colour stays readable while added and
+     deleted rows keep their tint. */
+  [data-line][data-selected-line],
+  [data-line-annotation][data-selected-line],
+  [data-no-newline][data-selected-line] {
+    --mix-selection-light: 62%;
+    --mix-selection-dark: 50%;
+  }
+
+  [data-gutter-buffer][data-selected-line],
+  [data-column-number][data-selected-line] {
+    --mix-selection-light: 55%;
+    --mix-selection-dark: 40%;
+  }
+
   [data-diff-header],
   [data-diff] {
     [data-separator] {

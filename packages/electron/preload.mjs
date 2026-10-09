@@ -167,13 +167,16 @@ ipcRenderer.on('openchamber:relay-dev-tunnel-connect', (event, payload) => {
   if (!isLocalPage || !payload || typeof payload.connectionId !== 'string' || !event.ports?.[0]) return;
   const port = event.ports[0];
   relayDevTunnelPorts.set(payload.connectionId, port);
+  // Main's own payload: the id it opened the tunnel for, or null for the host.
+  const spaceId = payload.spaceId ?? null;
   port.onmessage = (messageEvent) => relayDevTunnelHandler?.({
     connectionId: payload.connectionId,
     remotePort: payload.remotePort,
+    spaceId,
     message: messageEvent.data,
   });
   port.start();
-  relayDevTunnelHandler?.({ connectionId: payload.connectionId, remotePort: payload.remotePort, message: { type: 'connect' } });
+  relayDevTunnelHandler?.({ connectionId: payload.connectionId, remotePort: payload.remotePort, spaceId, message: { type: 'connect' } });
 });
 
 // The desktop bridge is exposed on all pages; the main-process gate in

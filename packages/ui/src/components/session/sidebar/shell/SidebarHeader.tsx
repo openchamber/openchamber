@@ -40,8 +40,8 @@ type Props = {
   setSessionSearchQuery: (value: string) => void;
   hasSessionSearchQuery: boolean;
   searchMatchCount: number;
-  collapseAllProjects: () => void;
-  expandAllProjects: () => void;
+  collapseAll: () => void;
+  expandAll: () => void;
 };
 
 /**
@@ -103,8 +103,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
     setSessionSearchQuery,
     hasSessionSearchQuery,
     searchMatchCount,
-    collapseAllProjects,
-    expandAllProjects,
+    collapseAll,
+    expandAll,
   } = props;
 
   const rowRef = React.useRef<HTMLDivElement>(null);
@@ -409,11 +409,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 {!timelineView && !isSingleProjectMode ? (
                   <>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
+                    <DropdownMenuItem onClick={collapseAll} className="flex items-center gap-2">
                       <Icon name="contract-up-down" className="h-4 w-4" />
                       <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
+                    <DropdownMenuItem onClick={expandAll} className="flex items-center gap-2">
                       <Icon name="expand-up-down" className="h-4 w-4" />
                       <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
                     </DropdownMenuItem>

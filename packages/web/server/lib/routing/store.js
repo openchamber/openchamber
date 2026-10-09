@@ -20,6 +20,7 @@ import { z } from 'zod';
 import {
   BUILTIN_CATEGORIES,
   DEFAULT_MIN_CONFIDENCE,
+  DEFAULT_PRESERVE_CACHE,
   DEFAULT_SAFETY_THRESHOLD,
   THINKING_LEVELS,
   isAutoModel,
@@ -66,6 +67,7 @@ const fileSchema = z.object({
   enabled: z.boolean().optional(),
   fallback: z.object({ model: modelSchema, variant: variantSchema.optional() }).strict().nullable().optional(),
   minConfidence: z.number().min(0).max(1).optional(),
+  preserveCache: z.boolean().optional(),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number().min(0).max(1) }).strict().optional(),
   categories: z.record(z.string().regex(CATEGORY_ID), z.discriminatedUnion('builtin', [builtinOverrideSchema, userCategorySchema])).optional(),
 }).strict();
@@ -86,6 +88,8 @@ const effectiveConfigSchema = z.object({
   enabled: z.boolean(),
   fallback: z.object({ model: modelSchema, variant: variantSchema }).strict().nullable(),
   minConfidence: z.number().min(0).max(1),
+  // Clients from before the setting send a config without it.
+  preserveCache: z.boolean().default(DEFAULT_PRESERVE_CACHE),
   safetyNet: z.object({ enabled: z.boolean(), threshold: z.number().min(0).max(1) }).strict(),
   categories: z.array(effectiveCategorySchema).max(32),
 }).strict();
@@ -178,6 +182,7 @@ export const resolveEffectiveConfig = (stored) => {
     enabled: file.enabled ?? false,
     fallback: file.fallback ? { model: file.fallback.model, variant: file.fallback.variant ?? null } : null,
     minConfidence: file.minConfidence ?? DEFAULT_MIN_CONFIDENCE,
+    preserveCache: file.preserveCache ?? DEFAULT_PRESERVE_CACHE,
     safetyNet: file.safetyNet ?? { enabled: false, threshold: DEFAULT_SAFETY_THRESHOLD },
     categories,
   };
@@ -214,7 +219,13 @@ export const toStoredConfig = (config) => {
   for (const builtin of BUILTIN_CATEGORIES) {
     if (!present.has(builtin.id)) categories[builtin.id] = { builtin: true, deleted: true };
   }
-  const stored = { version: FILE_VERSION, enabled: config.enabled, minConfidence: config.minConfidence, safetyNet: config.safetyNet };
+  const stored = {
+    version: FILE_VERSION,
+    enabled: config.enabled,
+    minConfidence: config.minConfidence,
+    preserveCache: config.preserveCache,
+    safetyNet: config.safetyNet,
+  };
   if (config.fallback) {
     stored.fallback = { model: config.fallback.model };
     if (config.fallback.variant) stored.fallback.variant = config.fallback.variant;

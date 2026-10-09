@@ -234,6 +234,12 @@ renders `projects`.
   and status icon on the right beside the time; the goal glyph and badges ride
   in the same cluster. Collapsing a zone header resets its
   Show more state.
+- Zone collapse state lives in `useSessionProjectViewState` next to project
+  collapse and lasts for the mount only. The display menu's Collapse all /
+  Expand all (grouped view only) set every project and the grouped zones
+  (`GROUPED_ACTIVITY_KEYS`: Chats, In work, Recent) together; the timeline's
+  Projects zone keeps its own state. Session folders keep their own collapse
+  state.
 - Zone headers are sticky in the projects view and never in the timeline; there
   is no user toggle. Timeline zone headers drop the leading icon and use a
   taller band.
@@ -334,6 +340,13 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   through callback-backed state so virtualization activates after every mount
   without waiting for an unrelated render. Archived groups must not add a
   nested virtualizer.
+- An unmeasured row is estimated at the measured height of a row with the same
+  kind, render context and trailing section gap (`sessionSidebarRowSizeKey`),
+  falling back to the model estimate plus that gap. The virtualizer corrects the
+  scroll position whenever a row above the viewport measures differently from
+  its estimate, and those writes land in the middle of a scroll gesture as small
+  jumps; rows of one key share a height at any interface font size, so after
+  the first rows mount the estimates are exact.
 - Sticky project/activity identity comes from model header descriptors and the
   first visible virtual index, which keeps the live current and adjacent header
   rows mounted. `CrossfadeZoneHeaders` uses their cached virtual layout offsets

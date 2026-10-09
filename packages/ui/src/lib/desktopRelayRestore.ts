@@ -111,7 +111,10 @@ export const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
  * Safe to call unconditionally; it is a no-op outside the Electron shell and when
  * the default host is local or already active.
  */
-export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise<void> => {
+export const restoreDesktopRelayRuntime = async (
+  targetHostId?: string,
+  options?: { reconnectActive?: boolean },
+): Promise<void> => {
   if (!isElectronShell()) return;
   const config = await desktopHostsGet().catch(() => null);
   if (!config) return;
@@ -123,7 +126,9 @@ export const restoreDesktopRelayRuntime = async (targetHostId?: string): Promise
   if (!host?.relay) return;
   // Must match runtimeKeyForHost() in DesktopHostSwitcher so switch/resolve agree.
   const runtimeKey = `host:${host.id}`;
-  if (getRuntimeKey() === runtimeKey) return;
+  // `reconnectActive`: the host was just paired again and carries a new token,
+  // so an already active runtime for it must switch over as well.
+  if (getRuntimeKey() === runtimeKey && !options?.reconnectActive) return;
 
   const switchToDirect = (url: string) => {
     switchRuntimeEndpoint({

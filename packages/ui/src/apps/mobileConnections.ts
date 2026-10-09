@@ -21,12 +21,13 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
-import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { adoptRelayTunnel, getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 import { recordMobileConnectDebug } from './mobileConnectionDebug';
+import { fetchThroughRelayOnce, fetchThroughRelayWithRetry } from './mobileRelayFetch';
 
 const MOBILE_CONNECTIONS_STORAGE_KEY = 'openchamber.mobile.connections.v1';
 const MOBILE_SECURE_STORAGE_PREFIX = 'openchamber.mobile.';
@@ -466,8 +467,8 @@ const probeRelaySession = async (
   };
   try {
     const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-    const session = await raceWithTimeout(timeoutMs, tunnel.fetch('/auth/session', { headers }).catch(() => null));
-    logConnect('relay:session', { ok: session?.ok === true, status: session?.status ?? null, hasToken: Boolean(token) });
+    const { response: session, failure } = await fetchThroughRelayWithRetry(tunnel, '/auth/session', { headers }, timeoutMs);
+    logConnect('relay:session', { ok: session?.ok === true, status: session?.status ?? null, hasToken: Boolean(token), error: failure });
     if (!session) return finish('unreachable');
     if (session.status === 401) return finish(token ? 'auth-failed' : 'needs-login');
     if (!session.ok && session.status !== 404) return finish('auth-failed');
@@ -972,6 +973,7 @@ const switchToTransport = (
   token: string | null,
   options?: { runtimeKey?: string; grant?: string },
 ): void => {
+  autoConnectSuppressed = false;
   if (transport.kind === 'relay') {
     switchToRelayRuntime(transport.relay, token, options?.grant, options?.runtimeKey, transport.tunnel);
   } else {
@@ -1006,7 +1008,21 @@ export type AutoConnectOutcome =
   /** The saved token was rejected (expired/revoked) — the user must sign in again. */
   | { status: 'needs-login'; label: string };
 
+// Set when the user removes the instance they were on. Until they connect
+// again themselves, nothing picks the next saved instance on its own: clearing
+// the endpoint remounts the app shell (re-running cold-launch auto-connect), and
+// resume/online would reconnect too. In memory only; a fresh launch auto-connects.
+let autoConnectSuppressed = false;
+
+export const suppressAutoConnectUntilManualConnect = (): void => {
+  autoConnectSuppressed = true;
+};
+
 export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
+  if (autoConnectSuppressed) {
+    logConnect('auto-connect:suppressed', {});
+    return { status: 'no-candidate' };
+  }
   const fast = options?.fast !== false;
   await migrateLegacyInlineTokens();
   const candidate = readConnections()[0]; // sorted most-recent-first
@@ -1081,10 +1097,32 @@ export const validateMobileConnectionSession = async (input: {
 };
 
 // A live transport a redeem/login settled on: a reachable direct URL, or an OPEN
-// relay tunnel the caller must close after use.
+// relay tunnel. A tunnel the flow opened itself (`owned`) must be closed after
+// use unless the runtime adopts it; a borrowed runtime tunnel is never closed.
 type LiveTransport =
   | { kind: 'direct'; url: string }
-  | { kind: 'relay'; relay: MobileRelayConfig; tunnel: ReturnType<typeof createRelayTunnelClient> };
+  | { kind: 'relay'; relay: MobileRelayConfig; tunnel: ReturnType<typeof createRelayTunnelClient>; owned: boolean };
+
+const releaseLiveTransport = (transport: LiveTransport | null, adopted: boolean): void => {
+  if (transport?.kind === 'relay' && transport.owned && !adopted) transport.tunnel.close();
+};
+
+const sameHostKey = (left: JsonWebKey, right: JsonWebKey): boolean =>
+  left.kty === right.kty && left.crv === right.crv && left.x === right.x && left.y === right.y;
+
+// The runtime's connected tunnel when it already leads to this relay server
+// under the same pinned host key. Pairing or logging in again to the server the
+// phone is on rides it: a second tunnel to the same server from this device has
+// been seen to fail at once on the relay.
+const connectedRuntimeTunnelFor = (relay: MobileRelayConfig): ReturnType<typeof createRelayTunnelClient> | null => {
+  const tunnel = getActiveRelayTunnel();
+  const active = getActiveRelayDescriptor();
+  if (!tunnel || !active || tunnel.getStatus().state !== 'connected') return null;
+  const sameServer = active.relayUrl === relay.relayUrl
+    && active.serverId === relay.serverId
+    && sameHostKey(active.hostEncPubJwk, relay.hostEncPubJwk);
+  return sameServer ? tunnel : null;
+};
 
 // Convert pairing-payload candidates into ordered mobile transport candidates:
 // priority number ascending, relay last on ties (relay is the fallback), invalid
@@ -1116,10 +1154,16 @@ const establishLiveTransport = async (
   const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
   for (const candidate of candidates) {
     if (candidate.kind === 'relay') {
+      const runtimeTunnel = connectedRuntimeTunnelFor(candidate.relay);
+      if (runtimeTunnel) {
+        const shared = await fetchThroughRelayOnce(runtimeTunnel, '/health', undefined, MOBILE_CONNECT_TIMEOUT_MS);
+        logConnect('establish:relay:health', { shared: true, ok: shared.response?.ok === true, status: shared.response?.status ?? null, error: shared.failure });
+        if (shared.response?.ok) return { kind: 'relay', relay: candidate.relay, tunnel: runtimeTunnel, owned: false };
+      }
       const tunnel = createRelayTunnelClient(candidate.relay);
-      const health = await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, tunnel.fetch('/health').catch(() => null));
-      logConnect('establish:relay:health', { ok: health?.ok === true, status: health?.status ?? null });
-      if (health?.ok) return { kind: 'relay', relay: candidate.relay, tunnel };
+      const { response: health, failure } = await fetchThroughRelayWithRetry(tunnel, '/health', undefined, RELAY_CONNECT_TIMEOUT_MS);
+      logConnect('establish:relay:health', { shared: false, ok: health?.ok === true, status: health?.status ?? null, error: failure });
+      if (health?.ok) return { kind: 'relay', relay: candidate.relay, tunnel, owned: true };
       tunnel.close();
       continue;
     }
@@ -1500,8 +1544,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     setError(null);
     beginBusy('pairing');
     const deviceCandidates = pairingCandidatesToMobile(payload.candidates);
-    // A chosen relay transport owns an open tunnel; close it unless the switch
-    // adopted it as the runtime tunnel.
+    // A relay tunnel this flow opened is closed unless the switch adopted it as
+    // the runtime tunnel; a borrowed runtime tunnel stays open.
     let chosen: LiveTransport | null = null;
     let adopted = false;
     try {
@@ -1530,9 +1574,11 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: redeemBody,
       } as const;
-      const response = chosen.kind === 'relay'
-        ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/api/client-auth/pairing/redeem', redeemInit).catch(() => null))
-        : await requestWithTimeout(`${chosen.url}/api/client-auth/pairing/redeem`, redeemInit);
+      const redeem = chosen.kind === 'relay'
+        ? await fetchThroughRelayOnce(chosen.tunnel, '/api/client-auth/pairing/redeem', redeemInit, RELAY_CONNECT_TIMEOUT_MS)
+        : { response: await requestWithTimeout(`${chosen.url}/api/client-auth/pairing/redeem`, redeemInit), failure: null };
+      const response = redeem.response;
+      logConnect('pairing:redeem', { transport: chosen.kind, ok: response?.ok === true, status: response?.status ?? null, error: redeem.failure });
       if (!response?.ok) {
         setError(t('mobile.connect.error.authRequired'));
         return;
@@ -1573,7 +1619,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       console.warn('[mobile-connect] pairing threw', error);
       setError(t('mobile.connect.error.authRequired'));
     } finally {
-      if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
+      releaseLiveTransport(chosen, adopted);
       endBusy('pairing');
     }
   }, [beginBusy, endBusy, onConnected, persistMetadata, t]);
@@ -1585,8 +1631,8 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     const operation = passwordOperationRef.current.begin();
     const isCurrentOperation = () => passwordOperationRef.current.isCurrent(operation);
     const { id, label, candidates } = pendingConnection;
-    // A chosen relay transport owns an open tunnel; close it unless the switch
-    // adopted it as the runtime tunnel.
+    // A relay tunnel this flow opened is closed unless the switch adopted it as
+    // the runtime tunnel; a borrowed runtime tunnel stays open.
     let chosen: LiveTransport | null = null;
     let adopted = false;
     try {
@@ -1608,11 +1654,12 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
         body: JSON.stringify({ password, trustDevice: true, issueClientToken: true, clientLabel: 'OpenChamber Mobile', clientKind: 'mobile', devicePlatform: mobileDevicePlatform(), dedupeKey: mobileClientDedupeKey() }),
       };
       logConnect('password:start', { transport: chosen.kind });
-      const response = chosen.kind === 'relay'
-        ? await raceWithTimeout(RELAY_CONNECT_TIMEOUT_MS, chosen.tunnel.fetch('/auth/session', loginInit).catch(() => null))
-        : await requestWithTimeout(`${chosen.url}/auth/session`, loginInit);
+      const login = chosen.kind === 'relay'
+        ? await fetchThroughRelayOnce(chosen.tunnel, '/auth/session', loginInit, RELAY_CONNECT_TIMEOUT_MS)
+        : { response: await requestWithTimeout(`${chosen.url}/auth/session`, loginInit), failure: null };
+      const response = login.response;
       if (!isCurrentOperation()) return;
-      logConnect('password:done', { ok: response?.ok === true, status: response?.status ?? null });
+      logConnect('password:done', { ok: response?.ok === true, status: response?.status ?? null, error: login.failure });
       if (!response?.ok) {
         setError(t('mobile.connect.error.passwordFailed'));
         return;
@@ -1661,7 +1708,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       console.warn('[mobile-connect] password threw', error);
       setError(t('mobile.connect.error.passwordFailed'));
     } finally {
-      if (!adopted && chosen?.kind === 'relay') chosen.tunnel.close();
+      releaseLiveTransport(chosen, adopted);
       if (isCurrentOperation()) endBusy('password');
     }
   }, [beginBusy, endBusy, onConnected, pendingConnection, persistMetadata, t]);

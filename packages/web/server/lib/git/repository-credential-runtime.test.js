@@ -64,6 +64,28 @@ describe('createGitRepositoryCredentialRuntime', () => {
     expect(runtime.helperCommand()).toBe(`!'${path.join(dataDir, 'bin', 'git-credential-openchamber')}'`);
   });
 
+  it.skipIf(process.platform === 'win32')('publishes a launcher that runs the helper as Node under Electron', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'openchamber-repo-credential-'));
+    roots.push(dataDir);
+    const executable = path.join(dataDir, 'electron');
+    await fs.writeFile(executable, '#!/bin/sh\nprintf "%s|%s" "$ELECTRON_RUN_AS_NODE" "$*"\n', { mode: 0o700 });
+    const runtime = createGitRepositoryCredentialRuntime({
+      readBinding: async () => read(null),
+      credentialResolver: { resolve: async () => null },
+      dataDir, fsPromises: fs,
+      getActivePort: () => 4399,
+      helperPath: '/opt/openchamber/repository-credential-helper.js',
+      helperLaunch: { execPath: executable, versions: { electron: '1.0.0' } },
+    });
+    await runtime.publish();
+
+    const launcher = path.join(dataDir, 'bin', 'git-credential-openchamber');
+    const output = await new Promise((resolve, reject) => {
+      execFile(launcher, ['get'], (error, stdout) => (error ? reject(error) : resolve(stdout)));
+    });
+    expect(output).toBe(`1|/opt/openchamber/repository-credential-helper.js ${path.join(dataDir, 'git-credential-endpoint.json')} get`);
+  });
+
   it('answers the bound account credential for the repository the helper runs in', async () => {
     const { runtime, dataDir, resolved } = await setup();
     await runtime.publish();

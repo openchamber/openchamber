@@ -49,6 +49,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
+import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
 import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
@@ -392,6 +393,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const pendingRenameSelectRef = React.useRef(false);
   const renameInputRef = React.useRef<HTMLInputElement>(null);
   const formRef = React.useRef<HTMLFormElement>(null);
+  const rowTooltip = useScrollDismissedTooltip();
 
   const session = node.session;
   const resolvedSession = session;
@@ -1763,7 +1765,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           {isTimelineRow ? null : subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
             {(
-              <Tooltip>
+              <Tooltip actionsRef={rowTooltip.actionsRef} onOpenChange={rowTooltip.onOpenChange}>
                 {/* Rows without a tooltip keep the trigger inert: an open
                     but empty row tooltip would block the PR badge's own. */}
                 <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS} disabled={isVSCode || isTimelineRow}>
