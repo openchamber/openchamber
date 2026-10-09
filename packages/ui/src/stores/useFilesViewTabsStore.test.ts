@@ -90,6 +90,19 @@ describe('useFilesViewTabsStore', () => {
     expect(state?.openPaths).toEqual(['/repo/a.ts', '/repo/deleted.ts']);
   });
 
+  test('keeps the first open path when nothing is selected, because the editor shows it', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/shown.ts');
+    store.addOpenPath(root, '/repo/other.ts');
+    store.setSelectedPath(root, null);
+
+    store.removeUnselectedOpenPath(root, '/repo/shown.ts');
+
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(['/repo/shown.ts', '/repo/other.ts']);
+  });
+
   test('restores independent active projections across runtime switches', () => {
     useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
     useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');
