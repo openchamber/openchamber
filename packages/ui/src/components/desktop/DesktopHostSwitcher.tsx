@@ -492,8 +492,10 @@ export function DesktopHostSwitcherDialog({
       // that probe is still running the result on record is older than the
       // dropdown, and switching on it blind to a host that has stopped
       // answering leaves the window on the loading screen with no way back.
-      // Local is the app's own server and needs no such check.
-      const recheck = sshJustConnected || (host.id !== LOCAL_HOST_ID && isDesktopHostStatusPending(host.id));
+      // Local is the app's own server, and the instance the app is talking to
+      // right now has just answered; neither needs such a check.
+      const answersNow = host.id === LOCAL_HOST_ID || (host.id === current.id && isRuntimeConnected);
+      const recheck = sshJustConnected || (!answersNow && isDesktopHostStatusPending(host.id));
       const cached = recheck ? undefined : statusById[host.id];
       if (cached?.status === 'ok') {
         if (cached.via === 'relay' && host.relay) {
@@ -533,6 +535,10 @@ export function DesktopHostSwitcherDialog({
       }
       let relayProbeTunnel: ReturnType<typeof createRelayTunnelClient> | undefined;
       if (!transport && host.relay) {
+        // Cancelled during the direct check: skip the relay handshake. A failed
+        // direct leg alone says nothing about the relay, so nothing is recorded
+        // and the menu's own probe keeps the row.
+        if (switchToken !== switchTokenRef.current) return;
         const probe = await probeRelayDesktopHost(host.relay, { keepTunnel: true, clientToken: clientToken || null, requestHeaders: host.requestHeaders || null })
           .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
         if (probe.status === 'ok') {
@@ -670,7 +676,7 @@ export function DesktopHostSwitcherDialog({
     } catch {
       window.location.href = target;
     }
-  }, [localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
+  }, [current.id, isRuntimeConnected, localOrigin, onHostSwitched, sshHostIds, sshStatusesById, statusById, t]);
 
   const cancelEdit = React.useCallback(() => {
     setEditingId(null);
