@@ -95,14 +95,17 @@ collision gets a numeric suffix. Sharing is refused only when the checkout canno
 | Method | Route | Notes |
 |---|---|---|
 | GET | `/api/project-context/:projectId` | full context; missing file is `200` empty |
-| PUT | `/api/project-context/:projectId/todos` | replaces the whole list; returns committed context |
+| PUT | `/api/project-context/:projectId/todos` | takes `{todos, expectedTodos?}`; replaces the whole list; returns committed context; stale expected list returns `409` |
+| POST | `/api/project-context/:projectId/todos` | takes `{text}`; server creates the id; `201` with `{todo, context}` from the same commit |
+| PATCH | `/api/project-context/:projectId/todos/:todoId` | takes `{text?, completed?}`; returns committed context; `404` when unknown |
+| DELETE | `/api/project-context/:projectId/todos/:todoId` | returns committed context; `404` when unknown |
 | POST | `/api/project-context/:projectId/notes` | `201`; takes `{body, source?, origin?}` |
-| PATCH | `/api/project-context/:projectId/notes/:noteId` | patches `body`; legacy `pinned` input is ignored by session knowledge; `404` when unknown |
+| PATCH | `/api/project-context/:projectId/notes/:noteId` | takes `{body?, pinned?, expectedBody?}`; stale expected body returns `409`; legacy `pinned` input is ignored by session knowledge; `404` when unknown |
 | DELETE | `/api/project-context/:projectId/notes/:noteId` | `404` when unknown |
 | PATCH | `/api/project-context/:projectId/plans/:planId` | legacy project pin state only; session attachment uses session knowledge; `404` when unknown |
 | GET | `/api/project-context/:projectId/plans/:planId` | `404` when the link or its markdown is gone; the answer carries `path`, the markdown's absolute path, so comments on the plan name the file to the agent (reads and writes stay id-addressed) |
 | POST | `/api/project-context/:projectId/plans` | `201`; takes `{title, body}`, never a path |
-| PUT | `/api/project-context/:projectId/plans/:planId` | takes the whole `{raw}` document; `404` when the link or its markdown is gone |
+| PUT | `/api/project-context/:projectId/plans/:planId` | takes `{raw, expectedRaw?}`; stale expected raw returns `409`; `404` when the link or its markdown is gone |
 | DELETE | `/api/project-context/:projectId/plans/:planId` | `404` when unknown |
 | POST | `/api/project-context/:projectId/plans/:planId/share` | moves the plan into the shared folder; `400` without one, `404` when unknown |
 | POST | `/api/project-context/:projectId/plans/:planId/unshare` | moves a `shared:` plan back; `404` when unknown |
@@ -126,6 +129,14 @@ After `writeContext` atomically commits `context.json`, the runtime calls its op
 Clients re-read authoritative context for the visible owner. This is a commit notification, not a filesystem watcher; direct changes to shared plan files outside the API retain their existing read-on-open behavior.
 
 ## Invariants
+
+- Todo item mutations read and write under the project lock. `createTodo(projectId, {text})`, `updateTodo(projectId, todoId, {text?, completed?})`, and `deleteTodo(projectId, todoId)` return the committed stored context. Missing items throw an error with `status: 404`. Patches preserve the id, creation time, and omitted fields. Creation refuses more than 500 items. Item text must contain 1 to 1000 characters after trimming.
+- `createTodoWithResult(projectId, {text})` is the atomic creation operation. It returns `{todo, context}` after the write commits, using the item constructed in that operation and its committed stored context. HTTP POST uses this result so clients can reconcile temporary ids even when peer items have identical text. `createTodo` delegates to this operation once and returns only `context` for existing runtime and control callers. No later read or list inference selects the created item.
+- Completing a todo moves it to the end of the stored list. Reopening or creating a todo inserts it before the first completed item, or at the end if none is completed. Text-only patches and repeated completion values keep the current order. Each mutation applies this rule to the current list under the lock.
+- `updateNote(projectId, noteId, patch, {expectedBody})` compares the exact stored body under the project lock before any write. Supply the body returned by the last read, without trimming or conversion. A mismatch throws `status: 409` without a write or change notification. The option must be a string when supplied. Missing notes retain the existing null result. Callers that omit the option retain replacement behavior. Matching bodies retain existing patch behavior, including timestamp updates and notifications for same-body writes and legacy pin-only patches.
+- `saveTodos(projectId, todos, {expectedTodos})` compares the complete expected list, including order and item fields, with the current stored list under the lock. A mismatch throws `status: 409` before any write or notification. Bulk clients supply their last confirmed list. Callers that omit the option retain legacy replacement behavior and sanitization.
+- `updatePlan(projectId, planId, {raw}, {expectedRaw})` compares the exact current markdown under the same lock before replacement. Callers that omit the option retain replacement behavior. A mismatch throws `status: 409` without writing or notifying. Read the plan first and use its returned `raw` for the precondition. This serializes API writers for one owner; external tools that write shared files do not use this lock.
+- The control service receives this runtime as `projectContextRuntime` and the panel-compatible knowledge resolver as `resolveProjectContextId`. Its rules live in `../openchamber-control/knowledge-owner.js` and that module's documentation. Configured project ids must first resolve to directories; they are not storage owner ids. The generic memory resolver and existing stored data remain unchanged.
 
 - **Missing is not malformed.** A missing `context.json` is authoritative empty
   data. Unparseable JSON is a failure that propagates as `500`, so the client
@@ -197,4 +208,4 @@ migration picks it up from the merged destination afterwards.
 ## Tests
 
 - `runtime.test.js` — storage, sanitization, migration, locking, plan lifecycle.
-- `routes.test.js` — status-code mapping, payload validation, failure surfacing.
+- `routes.http.test.js` covers JSON middleware, persisted item CRUD, precondition checks, status codes, and payload validation.

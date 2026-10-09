@@ -458,6 +458,12 @@ a tab.
 
 ## Context sources
 
+Attached project notes and plans refresh through the visible owner's existing
+control events, reconnect, focus and online recovery. Summary reads bypass the
+short cache after a change. The cache includes runtime identity. A failed read
+preserves the current summary; session or owner switches clear the old summary.
+These reads do not change the session's attachment IDs.
+
 Linked GitHub threads first, then skills and MCP counts.
 
 Agents are deliberately absent: an agent is who does the work, not material

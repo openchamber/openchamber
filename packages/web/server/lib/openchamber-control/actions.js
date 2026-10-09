@@ -10,6 +10,20 @@
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },
+  { action: 'notes.list', title: 'List project notes', description: 'List project notes; scope with projectId or directory, default current session' },
+  { action: 'notes.read', title: 'Read a project note', description: 'Read noteId from notes.list' },
+  { action: 'notes.create', title: 'Create a project note', description: 'Create a project note; requires body, at most 3000 characters; records the calling session as origin' },
+  { action: 'notes.update', title: 'Update a project note', description: 'Replace noteId body, at most 3000 characters; keeps its id and origin; read first and pass its body as expectedBody to reject stale writes' },
+  { action: 'notes.delete', title: 'Delete a project note', description: 'Delete noteId' },
+  { action: 'todos.list', title: 'List project todos', description: 'List project todos with stable ids and completed state; scope with projectId or directory, default current session' },
+  { action: 'todos.create', title: 'Create a project todo', description: 'Create a project todo; requires text, at most 1000 characters; starts incomplete' },
+  { action: 'todos.update', title: 'Update a project todo', description: 'Update todoId; supply text, completed, or both; completed false reopens it' },
+  { action: 'todos.delete', title: 'Delete a project todo', description: 'Delete todoId without changing other todos' },
+  { action: 'plans.list', title: 'List project plans', description: 'List personal and shared plans; scope with projectId or directory, default current session' },
+  { action: 'plans.read', title: 'Read a project plan', description: 'Read planId from plans.list; returns the raw markdown document' },
+  { action: 'plans.create', title: 'Create a project plan', description: 'Create a personal plan; requires title and body; returns a server-generated id' },
+  { action: 'plans.update', title: 'Update a project plan', description: 'Replace planId raw markdown, at most 200000 characters; read first and pass its raw as expectedRaw to reject stale writes' },
+  { action: 'plans.delete', title: 'Delete a project plan', description: 'Delete planId and its markdown; supports personal and shared plans' },
   { action: 'session.list', title: 'List sessions', description: 'List sessions; optional projectId or directory, limit (default 10), all, or withStatus' },
   { action: 'session.create', title: 'Create a session', description: 'Create a session in the current directory by default; prompt is optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'Send a new prompt to sessionId; scope with projectId or directory' },
@@ -96,9 +110,9 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
  * The callback needs this because models routinely drop the namespace: asked
  * for `memory.read` from a tool already called `openchamber_memory`, they send
  * `read`, since the tool's own name appears to have said "memory" already. The
- * name is unambiguous inside one tool's action set even when it is not across
- * all of them (`delete` belongs to both schedule and memory), so resolution
- * starts from the tool that asked.
+ * name can be unique inside one tool's action set even when several tools
+ * accept it, so resolution starts from the tool that asked. Knowledge CRUD
+ * shares bare names within openchamber and requires the full action name.
  */
 const ACTIONS_BY_TOOL = Object.freeze({
   openchamber: OPENCHAMBER_AGENT_TOOL_ACTIONS,

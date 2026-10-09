@@ -915,6 +915,7 @@ export const ContextPanel: React.FC = () => {
                 ? <ProjectContextPanel visible={isOpen} />
         : activeTab?.mode === 'plan'
             ? <React.Suspense fallback={null}><PlanView
+                visible={isOpen}
                 targetPath={activeTab.targetPath}
                 savedProjectPlan={activeTab.projectPlanId && activeTab.projectPlanRef
                   ? { projectRef: activeTab.projectPlanRef, planId: activeTab.projectPlanId }

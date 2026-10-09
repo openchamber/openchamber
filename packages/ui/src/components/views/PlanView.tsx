@@ -41,6 +41,9 @@ import { generateBranchName } from '@/lib/git/branchNameGenerator';
 import { fetchProjectPlan, parsePlanMarkdown, resolveProjectContextId, type SavedProjectPlanTarget } from '@/lib/projectContextApi';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { createPlanSaveQueue } from '@/lib/planSaveQueue';
+import { getSavedPlanDrafts } from '@/lib/savedPlanDrafts';
+import { observeProjectContext } from '@/lib/projectContextSync';
+import { applySavedPlanRefresh, type SavedPlanBuffer } from '@/lib/savedPlanRefresh';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
@@ -51,6 +54,7 @@ import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
 
 type PlanViewProps = {
+  visible?: boolean;
   targetPath?: string | null;
   /** Saved project plan to open, with the project that owns it. The owner is
       part of the prop so the view never guesses it from the current directory:
@@ -137,7 +141,7 @@ type SelectedLineRange = {
   end: number;
 };
 
-export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProjectPlan = null, onNavigatedToChat }) => {
+export const PlanView: React.FC<PlanViewProps> = ({ visible = true, targetPath = null, savedProjectPlan = null, onNavigatedToChat }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
@@ -406,19 +410,30 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   // revision, so a slow in-flight save can never mark newer edits as saved.
   // `key` and `runtimeKey` make every write self-identifying: content never
   // crosses documents or runtimes, no matter when a queued write settles.
-  const docRef = React.useRef<{
+  const docRef = React.useRef<SavedPlanBuffer & {
+    saveError: string | null;
     key: string | null;
     target: SavedProjectPlanTarget | { filePath: string } | null;
-    content: string;
-    editRevision: number;
-    savedRevision: number;
     runtimeKey: string;
-  }>({ key: null, target: null, content: '', editRevision: 0, savedRevision: 0, runtimeKey: '' });
-  const saveQueue = React.useState(createPlanSaveQueue)[0];
+    runtimeGeneration: number;
+  }>({ key: null, target: null, content: '', confirmedRaw: '', deleted: false, editRevision: 0, savedRevision: 0, saveError: null, runtimeKey: '', runtimeGeneration: 0 });
+  const drafts = React.useState(getSavedPlanDrafts)[0];
+  const fileSaveQueue = React.useState(createPlanSaveQueue)[0];
+  const saveQueue = savedPlanId ? drafts.queue : fileSaveQueue;
+  const runtimeGenerationRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
+  const [runtimeGeneration, setRuntimeGeneration] = React.useState(0);
+  React.useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
+    // Retire queued writes even if the user switches back to the same host
+    // before those writes reach the front of the queue.
+    runtimeGenerationRef.current += 1;
+    setRuntimeGeneration(runtimeGenerationRef.current);
+  }), []);
 
   // Filesystem writes keep the runtime adapter precedence the view always
   // used: the active RuntimeAPIs first, the registry as fallback.
-  const writeDocument = React.useCallback(async (target: NonNullable<typeof docRef.current['target']>, text: string): Promise<void> => {
+  const writeDocument = React.useCallback(async (target: NonNullable<typeof docRef.current['target']>, text: string, expectedRaw: string): Promise<void> => {
     if ('filePath' in target) {
       const files = runtimeApis.files ?? getRegisteredRuntimeAPIs()?.files;
       if (files?.writeFile) {
@@ -438,9 +453,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       }
       return;
     }
-    const saved = await useProjectContextStore.getState().savePlan(target.projectRef, target.planId, text);
+    const saved = await useProjectContextStore.getState().savePlan(target.projectRef, target.planId, text, { expectedRaw });
     if (!saved) {
-      throw new Error('Plan save rejected: the plan no longer exists');
+      throw new Error(useProjectContextStore.getState().getEntry(target.projectRef).error ?? 'Plan save rejected: the plan no longer exists');
     }
   }, [runtimeApis.files]);
   const writeDocumentRef = React.useRef(writeDocument);
@@ -453,7 +468,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   // from one host being written into another after a runtime switch.
   const scheduleSave = React.useCallback(() => {
     const doc = docRef.current;
-    if (!doc.key || !doc.target || doc.editRevision <= doc.savedRevision) {
+    if (doc.key && doc.target && 'planId' in doc.target) drafts.retain(doc.key, doc);
+    if (!doc.key || !doc.target || doc.deleted || doc.runtimeGeneration !== runtimeGenerationRef.current || doc.editRevision <= doc.savedRevision) {
       return;
     }
     const captured = {
@@ -463,32 +479,42 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       revision: doc.editRevision,
       runtimeKey: doc.runtimeKey,
       write: writeDocumentRef.current,
+      buffer: doc,
     };
-    saveQueue.schedule(captured.key, captured.revision, async () => {
-      if (getRuntimeKey() !== captured.runtimeKey) {
+    const write = async () => {
+      if (getRuntimeKey() !== captured.runtimeKey || captured.buffer.deleted || captured.buffer.runtimeGeneration !== runtimeGenerationRef.current) {
         // The runtime switched while this write waited: writing through the
         // new connection would land one host's edits on another.
         return;
       }
-      await captured.write(captured.target, captured.content);
+      await captured.write(captured.target, captured.content, captured.buffer.confirmedRaw);
+      captured.buffer.confirmedRaw = captured.content;
+      captured.buffer.savedRevision = Math.max(captured.buffer.savedRevision, captured.revision);
+      captured.buffer.saveError = null;
+      if ('planId' in captured.target) drafts.retain(captured.key, captured.buffer);
       const current = docRef.current;
-      if (current.key === captured.key) {
-        current.savedRevision = Math.max(current.savedRevision, captured.revision);
+      if (mountedRef.current && current === captured.buffer && current.runtimeGeneration === runtimeGenerationRef.current) {
         // A recovered save clears the stale failure banner.
         setSaveError(null);
       }
-    }).catch((error) => {
-      if (docRef.current.key === captured.key) {
-        setSaveError(error instanceof Error ? error.message : 'Plan save failed');
+    };
+    const pending = 'planId' in captured.target
+      ? drafts.schedule(captured.key, captured.revision, captured.buffer, write)
+      : fileSaveQueue.schedule(captured.key, captured.revision, write);
+    pending.catch((error) => {
+      captured.buffer.saveError = error instanceof Error ? error.message : 'Plan save failed';
+      if ('planId' in captured.target) drafts.retain(captured.key, captured.buffer);
+      if (mountedRef.current && docRef.current === captured.buffer && captured.buffer.runtimeGeneration === runtimeGenerationRef.current) {
+        setSaveError(captured.buffer.saveError);
       }
     });
-  }, [saveQueue]);
+  }, [drafts, fileSaveQueue]);
 
   React.useEffect(() => {
     // Saved project plans opened via context panel should work even when session plan mode is off.
     if (!planModeEnabled && !targetPath && !savedPlanId) {
       scheduleSave();
-      docRef.current = { key: null, target: null, content: '', editRevision: 0, savedRevision: 0, runtimeKey: '' };
+      docRef.current = { key: null, target: null, content: '', confirmedRaw: '', deleted: false, editRevision: 0, savedRevision: 0, saveError: null, runtimeKey: '', runtimeGeneration: runtimeGenerationRef.current };
       setResolvedPath(null);
       setLoadedProjectPlanId(null);
       setLoadedProjectPlanPath(null);
@@ -498,6 +524,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
     }
 
     let cancelled = false;
+    const currentLoad = () => !cancelled && runtimeGeneration === runtimeGenerationRef.current && activeRuntimeKey === getRuntimeKey();
 
     const readText = async (path: string): Promise<string> => {
       if (runtimeApis.files?.readFile) {
@@ -526,7 +553,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       // edits typed within the debounce window survive a plan switch. React
       // reuses this component instance across saved-plan tabs.
       scheduleSave();
-      docRef.current = { key: null, target: null, content: '', editRevision: 0, savedRevision: 0, runtimeKey: '' };
+      docRef.current = { key: null, target: null, content: '', confirmedRaw: '', deleted: false, editRevision: 0, savedRevision: 0, saveError: null, runtimeKey: '', runtimeGeneration: runtimeGenerationRef.current };
       setResolvedPath(null);
       setLoadedProjectPlanId(null);
       setLoadedProjectPlanPath(null);
@@ -536,39 +563,49 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
 
       if (savedPlanId && savedPlanProjectRef && savedPlanKey) {
         // A plan re-opened while its own flush is still writing must read the
-        // post-write state, not race it. The queue reset afterwards is safe:
-        // every write for this key has settled, and the reloaded document
-        // restarts its revision counter at zero.
+        // post-write state, not race it. Every write for this key settles
+        // before resetting the queue watermark. A retained draft keeps its
+        // revisions and confirmed precondition; a fresh buffer starts at zero.
         await saveQueue.pendingFor(savedPlanKey);
-        if (cancelled) return;
+        if (!currentLoad()) return;
         saveQueue.reset(savedPlanKey);
         setLoading(true);
         try {
           const plan = await fetchProjectPlan(savedPlanProjectRef, savedPlanId);
-          if (cancelled) return;
+          if (!currentLoad()) return;
           if (!plan) {
+            drafts.deleted(savedPlanKey);
+            docRef.current.deleted = true;
             // The plan or its markdown is gone. Leave the view empty and
             // unsaveable rather than presenting an editor that would recreate
             // a document the user deleted.
             setLoadError('Plan not found');
             return;
           }
+          const retained = drafts.restore(savedPlanKey);
           docRef.current = {
-            key: savedPlanKey,
-            target: { projectRef: savedPlanProjectRef, planId: savedPlanId },
             content: plan.raw,
+            confirmedRaw: plan.raw,
+            deleted: false,
             editRevision: 0,
             savedRevision: 0,
+            saveError: null,
+            ...retained,
+            key: savedPlanKey,
+            target: { projectRef: savedPlanProjectRef, planId: savedPlanId },
             runtimeKey: activeRuntimeKey,
+            runtimeGeneration: runtimeGenerationRef.current,
           };
-          setContent(plan.raw);
+          drafts.retain(savedPlanKey, docRef.current);
+          setContent(docRef.current.content);
+          setSaveError(docRef.current.saveError);
           setLoadedProjectPlanId(savedPlanId);
           setLoadedProjectPlanPath(plan.path ?? null);
         } catch (error) {
-          if (cancelled) return;
+          if (!currentLoad()) return;
           setLoadError(error instanceof Error ? error.message : 'Plan load failed');
         } finally {
-          if (!cancelled) setLoading(false);
+          if (currentLoad()) setLoading(false);
         }
         return;
       }
@@ -576,28 +613,32 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
       if (targetPath) {
         const fileKey = JSON.stringify(['plan-file', activeRuntimeKey, targetPath]);
         await saveQueue.pendingFor(fileKey);
-        if (cancelled) return;
+        if (!currentLoad()) return;
         saveQueue.reset(fileKey);
         setLoading(true);
         try {
           const text = await readText(targetPath);
-          if (cancelled) return;
+          if (!currentLoad()) return;
           docRef.current = {
             key: fileKey,
             target: { filePath: targetPath },
             content: text,
+            confirmedRaw: text,
+            deleted: false,
             editRevision: 0,
             savedRevision: 0,
+            saveError: null,
             runtimeKey: activeRuntimeKey,
+            runtimeGeneration: runtimeGenerationRef.current,
           };
           setResolvedPath(targetPath);
           setContent(text);
         } catch {
-          if (cancelled) return;
+          if (!currentLoad()) return;
           setResolvedPath(null);
           setContent('');
         } finally {
-          if (!cancelled) setLoading(false);
+          if (currentLoad()) setLoading(false);
         }
         return;
       }
@@ -611,16 +652,54 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
     return () => {
       cancelled = true;
     };
-  }, [activeRuntimeKey, homeDirectory, planModeEnabled, runtimeApis.files, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, scheduleSave, sessionDirectory, targetPath]);
+  }, [activeRuntimeKey, drafts, planModeEnabled, runtimeApis.files, runtimeGeneration, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, scheduleSave, targetPath]);
+
+  React.useEffect(() => {
+    if (!visible || !savedPlanProjectRef || !savedPlanId || !savedPlanKey || loadedProjectPlanId !== savedPlanId) return;
+    let stopped = false;
+    const release = observeProjectContext(savedPlanProjectRef, async () => {
+      await saveQueue.pendingFor(savedPlanKey);
+      const buffer = docRef.current;
+      if (stopped || buffer.runtimeGeneration !== runtimeGenerationRef.current || buffer.key !== savedPlanKey || buffer.runtimeKey !== getRuntimeKey()) return;
+      const revision = buffer.editRevision;
+      const confirmedRaw = buffer.confirmedRaw;
+      try {
+        const plan = await fetchProjectPlan(savedPlanProjectRef, savedPlanId);
+        if (stopped || docRef.current !== buffer || buffer.runtimeGeneration !== runtimeGenerationRef.current || buffer.runtimeKey !== getRuntimeKey()) return;
+        // A completed local save outranks a read started before that save.
+        if (plan && (buffer.editRevision !== revision || buffer.confirmedRaw !== confirmedRaw)) return;
+        const result = applySavedPlanRefresh(buffer, plan?.raw ?? null);
+        if (result === 'deleted') {
+          drafts.deleted(savedPlanKey);
+          setContent(buffer.content);
+          setLoadError('Plan not found');
+          setLoadedProjectPlanPath(null);
+        } else if (result === 'updated') {
+          setContent(buffer.content);
+          setLoadedProjectPlanPath(plan?.path ?? null);
+          setLoadError(null);
+        }
+      } catch (error) {
+        if (!stopped && docRef.current === buffer && buffer.runtimeGeneration === runtimeGenerationRef.current && buffer.runtimeKey === getRuntimeKey()) {
+          setLoadError(error instanceof Error ? error.message : 'Plan load failed');
+        }
+      }
+    });
+    return () => { stopped = true; release(); };
+  }, [drafts, loadedProjectPlanId, savedPlanId, savedPlanKey, savedPlanProjectRef, saveQueue, visible]);
 
   // Synchronous buffer tracking: if an edit and an unmount land in the same
   // batch, the passive content effect would never run and a flush would save
   // a stale buffer.
   const handleContentChange = React.useCallback((next: string) => {
-    docRef.current.content = next;
-    docRef.current.editRevision += 1;
+    const doc = docRef.current;
+    if (doc.key && doc.target && 'planId' in doc.target) drafts.edit(doc.key, doc, next);
+    else {
+      doc.content = next;
+      doc.editRevision += 1;
+    }
     setContent(next);
-  }, []);
+  }, [drafts]);
 
   // The debounced write and the close/switch flush go through the same queue
   // (scheduleSave), so two saves of one document can never complete out of
@@ -643,7 +722,9 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
   // edits: the cleanup above cancels the timer. Same for switching documents,
   // which the load effect handles before replacing the bookkeeping.
   React.useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       scheduleSave();
     };
   }, [scheduleSave]);
@@ -1000,7 +1081,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
                     <CodeMirrorEditor
                       value={content}
                       onChange={handleContentChange}
-                      readOnly={false}
+                      readOnly={docRef.current.deleted}
                       className="h-full"
                       extensions={editorExtensions}
                       onViewReady={(view) => { editorViewRef.current = view; }}

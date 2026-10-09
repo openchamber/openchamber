@@ -13,10 +13,14 @@ describe('a namespace the tool name already implies', () => {
     expect(resolveAgentToolAction('save', 'openchamber_memory')).toEqual({ action: 'memory.save' });
   });
 
-  test('resolves a bare name that is ambiguous only across tools', () => {
-    // `delete` belongs to schedule and to memory; inside one tool it is plain.
+  test('resolves unique bare names and rejects ambiguous knowledge mutations', () => {
     expect(resolveAgentToolAction('delete', 'openchamber_memory')).toEqual({ action: 'memory.delete' });
-    expect(resolveAgentToolAction('delete', 'openchamber')).toEqual({ action: 'schedule.delete' });
+    expect(resolveAgentToolAction('delete', 'openchamber').action).toBeUndefined();
+    expect(resolveAgentToolAction('update', 'openchamber').action).toBeUndefined();
+    expect(resolveAgentToolAction('read', 'openchamber').action).toBeUndefined();
+    for (const action of ['schedule.delete', 'notes.delete', 'todos.delete', 'plans.delete', 'schedule.update', 'notes.update', 'todos.update', 'plans.update']) {
+      expect(resolveAgentToolAction(action, 'openchamber')).toEqual({ action });
+    }
   });
 
   test('keeps a fully qualified action as it is', () => {

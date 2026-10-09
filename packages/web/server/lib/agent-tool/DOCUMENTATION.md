@@ -7,7 +7,8 @@ are two, because controlling sessions and driving a page are separate intents
 the user can want independently:
 
 - `openchamber` — projects, sessions, worktrees, scheduled tasks, and showing
-  a file to the user (`file.open`). Enabled while the persisted
+  a file to the user (`file.open`), plus project notes, todos, and plans.
+  Enabled while the persisted
   `agentControlToolEnabled` setting is not `false`.
 - `openchamber_web` — looking at and interacting with the page in OpenChamber's
   browser panel. Enabled while `agentWebToolEnabled` is not `false`.
@@ -147,6 +148,15 @@ both settings are `false`.
 
 ## Result contract
 
+Project knowledge CRUD uses the existing `openchamber` tool and callback.
+Its action and result contracts are defined in
+`../openchamber-control/DOCUMENTATION.md`, under Project knowledge actions.
+The callback resolves the calling directory from `sessionID` for these
+actions and takes note provenance from that same session. It ignores
+payload directory and session-context overrides. Explicit `projectId` or
+`directory` inputs still select the requested knowledge owner.
+
+
 Every completed call returns JSON:
 
 ```json
@@ -176,8 +186,10 @@ error state.
 Each generated tool sends its own name with every callback. Models routinely
 drop the namespace their tool's name appears to supply — `openchamber_memory`
 asked for `memory.read` gets called as `read` — and resolving the bare name
-inside the calling tool's action set makes that unambiguous even where it is not
-globally (`delete` belongs to both schedule and memory).
+inside the calling tool's action set accepts it when only one action matches.
+Knowledge CRUD shares bare `delete` and `update` names inside `openchamber`,
+so these aliases are ambiguous. Callers must use the full action name, such
+as `notes.delete`, `schedule.delete`, `notes.update`, or `schedule.update`.
 
 Resolution never reaches outside the tool that asked: `open` from the memory
 tool fails rather than driving the browser. An unresolvable action answers with

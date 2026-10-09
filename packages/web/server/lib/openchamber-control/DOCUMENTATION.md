@@ -9,8 +9,8 @@ other.
 
 ## Boundaries
 
-- `service.js` validates and executes the fixed project, model, session, and
-  scheduled-task action allowlist. `actions.js` marks CLI-only actions with
+- `service.js` executes the fixed action allowlist. `project-knowledge.js`
+  validates knowledge inputs and resolves the storage owner. `actions.js` marks CLI-only actions with
   `agentExposed: false` (currently `schedule.status`); the agent tool consumes
   the filtered `OPENCHAMBER_AGENT_TOOL_*` exports. `schedule.toggle` requires
   the `disabled` boolean and replaces separate enable/disable actions; its
@@ -34,7 +34,92 @@ other.
 - `../openchamber-sessions/routes.js` and `../scheduled-tasks/service.js` own
   their domain operations and are composed into this service.
 
-## Invariants
+## Project knowledge actions
+
+`notes.*`, `todos.*`, and `plans.*` use `project-knowledge.js` to call the
+injected `projectContextRuntime` directly. Storage, write locks, and change
+events remain owned by `../project-context/`. The injected
+`resolveProjectContextId(directory)` uses `knowledge-owner.js` to match the
+panel's concrete-directory owner rules in `useProjectContextOwner` and
+`projectResolution`. The generic memory resolver keeps its existing behavior.
+
+Managed Chats takes precedence, including the configured and legacy roots and
+their filesystem aliases. The storage id uses the original root path. Other
+directories use the longest registered ancestor with a directory boundary.
+An independent Git repository under a registered HOME therefore uses HOME
+until its own path is registered.
+
+Worktree lists come from the existing Git helpers. As in the UI, a project's
+own checkout is omitted from its list. Published UI topology also omits all
+registered checkout paths and assigns each repository's list to its registered
+primary checkout, or its first configured listing when the primary is not
+registered. Knowledge discovery uses that configured order and omits registered
+checkout paths. The longest matching worktree path
+selects the registered owner of its primary checkout, then the listing project
+as a fallback. This match overrides a direct registered ancestor only when the
+worktree path is strictly longer. A tie keeps the direct owner. A concrete
+directory with no registered or Chats owner fails with 404. No new path-derived
+store is created for an unregistered repository. Settings and topology failures
+propagate before storage access. Existing stored data is unchanged.
+
+The panel retains its last known topology after a failed refresh. This resolver
+has no browser topology snapshot, so a failed list rejects the action before
+storage access. It cannot treat that failure as an empty list and write to a
+registered ancestor. A successful empty list retains normal direct-owner
+resolution. The panel's primary-root read can fall back to its listing path;
+a thrown primary lookup here also rejects before storage access.
+Discovery also keeps the panel's deliberate HOME/filesystem-root Git exclusion.
+The existing `isGitRepository` helper tests the listing checkout. A supported
+linked checkout remains eligible even when its repository's primary is HOME.
+Git eligibility and root helpers retain their existing probe behavior; this
+module does not convert a thrown read into empty success. Listing runs before
+candidate eligibility here so a failed list always rejects the action.
+
+Resolution runs on each knowledge call without a new cache or polling. Chats
+and exact registered paths need no worktree lists. Other directories read each
+configured project's list once and resolve the selected listing's primary root
+once. Matching candidates are tried by decreasing path length, with configured
+order for equal lengths. Each candidate's Git eligibility is read until a
+supported listing is found. This keeps current registration and topology
+authoritative. Large project
+lists increase the number of local Git reads; no latency claim is made.
+
+Each action takes `projectId` or an absolute `directory`. Omit both to use
+the calling session directory. Configured IDs first resolve through
+`sessionService.resolveDirectory`; they are never used as storage IDs.
+Conflicting or malformed selectors fail with 400, unknown projects and
+unresolved owners with 404. Missing runtime dependencies fail with 503.
+
+Notes support list/read/create/update/delete with `noteId` and `body`.
+Create records `source: 'agent'` and the callback's calling session as
+`origin.sessionId`. Update changes only the body and keeps the original
+provenance. Model inputs cannot change provenance or attachment state.
+Read before updating and pass the returned `body` as `expectedBody`.
+`updateNote(projectId, noteId, { body }, { expectedBody })` checks that exact
+last-read text under the storage lock. A mismatch fails with 409 without a
+write or change event. Omitting `expectedBody` retains existing replacement
+behavior.
+Todos support list/create/update/delete with `todoId`, `text`, and
+`completed`. Item mutations return the committed context and preserve other
+todos. New IDs come from storage. Plans support list/read/create/update/delete
+with `planId`, including shared IDs. Create takes `title` and `body`;
+update takes the complete `raw` document. Read before updating and pass the
+returned `raw` as `expectedRaw` to reject a stale replacement with 409.
+Without that optional precondition, existing replacement behavior applies.
+
+Results include the resolved storage `projectId`. Lists return `notes`,
+`todos`, or `plans`; reads return `note` or `plan`. Note and plan mutations
+retain the runtime result, including `context`; todo mutations return
+`context`. Missing items fail with 404. Invalid text and oversized inputs
+fail with 400 before mutation. Operational errors remain failures through
+the existing control error adapter. These actions do not pin or share items.
+
+## Session and viewer invariants
+
+Bare `delete` and `update` are ambiguous in the `openchamber` tool because
+knowledge and schedule actions share these names. Use full names such as
+`notes.delete` or `schedule.update`. Unique bare names keep their existing
+resolution within the calling tool.
 
 - Session status and messages come from official directory-scoped OpenCode
   APIs. Message output includes only ordered `text` parts.

@@ -125,6 +125,17 @@ const CONTROL_PARAMETER_PROPERTIES = pickParameters(
     !WEB_PARAMETER_NAMES.includes(name) && !MEMORY_ONLY_PARAMETER_NAMES.includes(name)
   )),
 );
+Object.assign(CONTROL_PARAMETER_PROPERTIES, {
+  noteId: { type: 'string' },
+  todoId: { type: 'string' },
+  planId: { type: 'string', description: 'ID from plans.list or plans.create; shared plan IDs are accepted' },
+  body: { type: 'string', description: 'Note body, at most 3000 characters, or the body for plans.create, at most 200000 characters' },
+  expectedBody: { type: 'string', description: 'Last body returned by notes.read; notes.update fails if it changed' },
+  text: { type: 'string', description: 'Todo text, at most 1000 characters' },
+  completed: { type: 'boolean', description: 'Todo completion state; false reopens a todo' },
+  raw: { type: 'string', description: 'Whole markdown document for plans.update, at most 200000 characters' },
+  expectedRaw: { type: 'string', description: 'Last raw document returned by plans.read; plans.update fails if it changed' },
+});
 const WEB_PARAMETER_PROPERTIES = pickParameters(WEB_PARAMETER_NAMES);
 const MEMORY_PARAMETER_PROPERTIES = {
   ...pickParameters(MEMORY_PARAMETER_NAMES),
@@ -143,7 +154,7 @@ const NOTIFY_PARAMETER_PROPERTIES = {
 // agent handed an issue to investigate never opened this tool and never
 // linked it. SESSION_LINK_GUIDANCE in ../session-knowledge/runtime.js states
 // the same rule in every session's context; change both together.
-const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. The tool also runs OpenChamber projects, sessions and scheduled tasks for the user. A session you create, send to or fork belongs to the user: they follow it in OpenChamber and talk to it themselves. Dispatch one when the user asks for it, even when the work relates to your current task; any agent, optionally in a new worktree. To delegate part of your own task and get the answer yourself, use the subagent tool instead. A dispatch returns at once. Set returnResult when the user wants the outcome back or your next step needs it: the session's final answer then arrives in this session as a message when it finishes, and you continue from there. Without it, the session is the user's to follow and you move on. To see how a session went, read it with session.messages (lastAssistant for the final answer); session.send always starts a new prompt. One action per call; scope with projectId or directory, or leave both out for this session's directory. Deleting sessions and worktrees is not available.";
+const CONTROL_TOOL_DESCRIPTION = "When the user gives you an issue or a change under review (a pull or merge request) to work on, fix, investigate or review, when you open one for this work, and when the work resolves one, link it to this session with session.link as soon as you know it, so the user sees it with the session. Not one merely mentioned in passing. The tool also runs OpenChamber projects, sessions and scheduled tasks for the user. Read and manage project Notes, Todos and Plans with notes.*, todos.* and plans.* actions. A session you create, send to or fork belongs to the user: they follow it in OpenChamber and talk to it themselves. Dispatch one when the user asks for it, even when the work relates to your current task; any agent, optionally in a new worktree. To delegate part of your own task and get the answer yourself, use the subagent tool instead. A dispatch returns at once. Set returnResult when the user wants the outcome back or your next step needs it: the session's final answer then arrives in this session as a message when it finishes, and you continue from there. Without it, the session is the user's to follow and you move on. To see how a session went, read it with session.messages (lastAssistant for the final answer); session.send always starts a new prompt. One action per call; scope with projectId or directory, or leave both out for this session's directory. Deleting sessions and worktrees is not available.";
 
 const WEB_TOOL_DESCRIPTION = "Look at and interact with a web page in OpenChamber's browser panel, so you can check your own work rather than describing what you expect. Use one action per call. Open a page, snapshot it to read its text and its interactive elements, then click, type or scroll using the selectors the snapshot returned; snapshots also report any errors the page logged. Pass a selector to browser.snapshot to read one part of a long page. browser.inspect returns computed styles when the question is how something renders. Set viewport to check a layout at mobile, tablet or desktop size. The page runs with the user's real logins, so treat what you see as their live session.";
 
@@ -439,7 +450,8 @@ export const createAgentToolRuntime = (dependencies) => {
     // OpenCode 2 tools no longer receive a directory, so the plugin sends the
     // session id and the directory is resolved here. An unresolvable session
     // falls through with no directory, exactly like the old "no directory" path.
-    let contextDirectory = asNonEmptyString(payload.contextDirectory) ?? undefined;
+    const knowledgeAction = /^(notes|todos|plans)\./.test(action);
+    let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
     if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
       contextDirectory = await Promise.resolve(resolveSessionDirectory(sessionID))
@@ -448,7 +460,7 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       // The calling session scopes browser actions to that session's page.
-      const contextSessionId = asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      const contextSessionId = knowledgeAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       const data = await executeAction(action, { ...payload.input, action }, contextDirectory, contextSessionId
         ? { ...options, contextSessionId }
         : options);

@@ -16,6 +16,30 @@ consume another tab's pending navigation request.
 `WalkthroughView` gates discovery and source loading while retaining generated
 results and any explicitly started generation job.
 
+Saved project plans in `PlanView` use the owner in their target descriptor for
+reads, conditional saves and event observation. A clean buffer adopts peer raw
+markdown. A dirty buffer keeps its last confirmed raw as the save precondition.
+Deletion makes that buffer read-only and cancels queued writes. Read failure
+preserves the document. Hidden plan views stop event refreshes; file-backed
+session plans retain their existing filesystem save path.
+
+`savedPlanDrafts.ts` owns unsaved saved-plan text and save errors for the page's
+lifetime, keyed by runtime identity, project owner and plan ID. Leaving or
+unmounting the view retains the latest draft and its last confirmed raw. A
+return waits for that plan's queued writes and checks that the plan still
+exists before restoring the draft and error. Peer text does not advance a
+dirty draft's save precondition. Successful saves release clean retained
+buffers; authoritative deletion removes retained text and stops pending writes.
+Read failures preserve retained drafts. Runtime changes retire queued writes,
+including switches made while no plan view is mounted. Returning to that
+runtime can restore the draft but cannot revive retired writes.
+
+Retention has no text-discarding capacity limit. It holds only unsaved saved
+plans and releases them after successful save or confirmed deletion. Browser
+reload clears this memory. No draft is stored on disk or in browser storage.
+Web, Electron, hosted mobile and Capacitor share this lifecycle. VS Code keeps
+its existing project-context route support and failure behavior.
+
 ## Large text files
 
 The 200,000-character threshold selects an initial code preview, not read-only

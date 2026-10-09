@@ -8,6 +8,9 @@ import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAgentToolRuntime } from './runtime.js';
+import { createOpenChamberControlService } from '../openchamber-control/service.js';
+import { createProjectContextRuntime } from '../project-context/runtime.js';
+import { createProjectIdFromPath } from '../projects/project-id.js';
 import { OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, OPENCHAMBER_CONTROL_ACTION_DEFINITIONS } from '../openchamber-control/actions.js';
 
 const temporaryDirectories = [];
@@ -97,6 +100,140 @@ describe('agent tool action allowlist', () => {
 });
 
 describe('managed agent tool runtime', () => {
+  it('runs generated knowledge calls through authenticated HTTP and persistent storage', async () => {
+    const directory = '/repo';
+    const owner = createProjectIdFromPath(directory);
+    const onChanged = vi.fn();
+    const { runtime, dataDir } = await createRuntime({
+      resolveSessionDirectory: async (id) => id === 'ses_caller' ? directory : null,
+      executeAction: (...args) => service.execute(...args),
+    });
+    const projectContextRuntime = createProjectContextRuntime({
+      fsPromises: fs, path, projectsDirPath: path.join(dataDir, 'projects'),
+      createId: () => crypto.randomUUID(), onChanged,
+      resolveSharedPlansDir: async () => path.join(dataDir, 'shared-plans'),
+    });
+    const service = createOpenChamberControlService({
+      projectContextRuntime,
+      resolveProjectContextId: async (resolved) => resolved === directory ? owner : '',
+      sessionService: { resolveDirectory: async () => directory },
+    });
+    const prepared = await prepareManagedEnv(runtime, { includeWeb: false, includeMemory: false });
+    const tools = await loadTools(dataDir, 'persistent-knowledge');
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    const originalUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const originalToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const call = async (action, parameters = {}) => JSON.parse((await tools.openchamber.execute(
+      { action, parameters }, { sessionID: 'ses_caller', progress: async () => {} },
+    )).content);
+    try {
+      const created = await call('notes.create', { body: 'Agent note', source: 'manual', origin: { sessionId: 'spoof' } });
+      expect(created).toMatchObject({ ok: true, schemaVersion: 1, data: { projectId: owner, note: { body: 'Agent note', source: 'agent', origin: { sessionId: 'ses_caller' } } } });
+      const noteId = created.data.note.id;
+      const note = (await call('notes.read', { noteId })).data.note;
+      expect(note.id).toBe(noteId);
+      expect((await call('notes.update', { noteId, body: 'Edited note', expectedBody: note.body })).ok).toBe(true);
+      expect((await call('notes.list')).data.notes[0]).toMatchObject({ id: noteId, body: 'Edited note', source: 'agent' });
+      const beforeNoteConflict = onChanged.mock.calls.length;
+      const beforeNoteWrite = await fs.readFile(projectContextRuntime.contextPathFor(owner), 'utf8');
+      expect(await call('notes.update', { noteId, body: 'Stale note', expectedBody: note.body })).toMatchObject({
+        schemaVersion: 1, ok: false, action: 'notes.update', error: { kind: 'usage', message: expect.stringContaining('reload before saving') },
+      });
+      expect(onChanged).toHaveBeenCalledTimes(beforeNoteConflict);
+      expect(await fs.readFile(projectContextRuntime.contextPathFor(owner), 'utf8')).toBe(beforeNoteWrite);
+      expect((await call('notes.read', { noteId })).data.note).toMatchObject({ id: noteId, body: 'Edited note', source: 'agent', origin: { sessionId: 'ses_caller' } });
+      const first = await call('todos.create', { text: 'First' });
+      const todoId = first.data.context.todos[0].id;
+      await projectContextRuntime.createTodo(owner, { text: 'UI item' });
+      expect((await call('todos.update', { todoId, completed: true })).data.context.todos).toHaveLength(2);
+      expect((await call('todos.list')).data.todos.find((todo) => todo.id === todoId)).toMatchObject({ id: todoId, completed: true });
+      await expect(projectContextRuntime.saveTodos(owner, first.data.context.todos, { expectedTodos: first.data.context.todos })).rejects.toMatchObject({ status: 409 });
+      await call('todos.update', { todoId, completed: false });
+      expect((await call('todos.list')).data.todos.find((todo) => todo.id === todoId).completed).toBe(false);
+      const planCreated = await call('plans.create', { title: 'Agent plan', body: 'Original' });
+      const planId = planCreated.data.plan.id;
+      const plan = (await call('plans.read', { planId })).data.plan;
+      const raw = '# Updated\r\n\r\nExact raw';
+      expect((await call('plans.update', { planId, raw, expectedRaw: plan.raw })).ok).toBe(true);
+      const beforeConflict = onChanged.mock.calls.length;
+      expect(await call('plans.update', { planId, raw: '# Stale', expectedRaw: plan.raw })).toMatchObject({ ok: false, error: { kind: 'usage' } });
+      expect(onChanged).toHaveBeenCalledTimes(beforeConflict);
+      expect((await call('plans.read', { planId })).data.plan.raw).toBe(raw);
+      expect((await call('plans.list')).data.plans[0].id).toBe(planId);
+      const stored = JSON.parse(await fs.readFile(projectContextRuntime.contextPathFor(owner), 'utf8'));
+      expect(stored.notes[0]).toMatchObject({ id: noteId, body: 'Edited note', origin: { sessionId: 'ses_caller' } });
+      expect(stored.todos).toHaveLength(2);
+      expect(stored.plans[0].id).toBe(planId);
+      await fs.mkdir(path.join(dataDir, 'shared-plans'));
+      await fs.writeFile(path.join(dataDir, 'shared-plans', 'team.md'), '# Team\n');
+      const sharedId = 'shared:team.md';
+      expect((await call('plans.list')).data.plans).toContainEqual(expect.objectContaining({ id: sharedId, source: 'shared' }));
+      expect((await call('plans.read', { planId: sharedId })).data.plan.raw).toBe('# Team\n');
+      expect((await call('plans.update', { planId: sharedId, raw: '# Team edited\n', expectedRaw: '# Team\n' })).ok).toBe(true);
+      expect(await fs.readFile(path.join(dataDir, 'shared-plans', 'team.md'), 'utf8')).toBe('# Team edited\n');
+      expect((await call('plans.delete', { planId: sharedId })).ok).toBe(true);
+      expect((await call('notes.delete', { noteId })).ok).toBe(true);
+      expect((await call('todos.delete', { todoId })).data.context.todos).toHaveLength(1);
+      expect((await call('plans.delete', { planId })).ok).toBe(true);
+      expect((await call('plans.read', { planId })).ok).toBe(false);
+      expect(await projectContextRuntime.readContext(owner)).toMatchObject({ notes: [], plans: [], todos: [{ text: 'UI item' }] });
+      expect(onChanged.mock.calls.every(([projectId]) => projectId === owner)).toBe(true);
+      process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = 'wrong-token';
+      expect((await call('todos.list')).ok).toBe(false);
+    } finally {
+      if (originalUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = originalUrl;
+      if (originalToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = originalToken;
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('adds project knowledge inputs only to the existing control tool', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime);
+    const tools = await loadTools(dataDir, 'knowledge-schema');
+    expect(tools.openchamber.description).toContain('Read and manage project Notes, Todos and Plans with notes.*, todos.* and plans.* actions.');
+    const actions = tools.openchamber.input.properties.action.oneOf.map((entry) => entry.const);
+    for (const action of ['notes.list', 'notes.read', 'notes.create', 'notes.update', 'notes.delete', 'todos.list', 'todos.create', 'todos.update', 'todos.delete', 'plans.list', 'plans.read', 'plans.create', 'plans.update', 'plans.delete']) {
+      expect(actions).toContain(action);
+    }
+    const parameters = tools.openchamber.input.properties.parameters.properties;
+    for (const field of ['noteId', 'todoId', 'planId', 'body', 'expectedBody', 'text', 'raw', 'expectedRaw']) {
+      expect(parameters[field].type).toBe('string');
+    }
+    expect(parameters.completed.type).toBe('boolean');
+    expect(parameters.expectedBody.description).toContain('Last body returned by notes.read');
+    expect(tools.openchamber.input.properties.action.oneOf.find((entry) => entry.const === 'notes.update').description).toContain('pass its body as expectedBody');
+    expect(parameters).not.toHaveProperty('origin');
+    expect(parameters).not.toHaveProperty('source');
+    expect(parameters).not.toHaveProperty('pinned');
+    expect(tools.openchamber_web.input.properties.parameters.properties).not.toHaveProperty('todoId');
+    expect(tools.openchamber_web.input.properties.parameters.properties).not.toHaveProperty('expectedBody');
+    expect(tools.openchamber_memory.input.properties.parameters.properties).not.toHaveProperty('expectedRaw');
+    expect(tools.openchamber_memory.input.properties.parameters.properties).not.toHaveProperty('expectedBody');
+    await runtime.materializePlugin({ includeControl: false });
+    expect(await loadTools(dataDir, 'knowledge-disabled')).not.toHaveProperty('openchamber');
+  });
+
+  it('uses the callback session for knowledge scope and provenance', async () => {
+    const { runtime, executeAction } = await createRuntime({ resolveSessionDirectory: async (id) => id === 'ses_real' ? '/real' : null });
+    const input = { action: 'notes.create', body: 'Note', origin: { sessionId: 'spoof' }, sessionId: 'spoof' };
+    await runtime.execute({ tool: 'openchamber', input, sessionID: 'ses_real', contextDirectory: '/spoof', contextSessionId: 'spoof' });
+    expect(executeAction).toHaveBeenCalledWith('notes.create', input, '/real', { contextSessionId: 'ses_real' });
+    await runtime.execute({ tool: 'openchamber', input, sessionID: 'missing', contextDirectory: '/spoof' });
+    expect(executeAction).toHaveBeenLastCalledWith('notes.create', input, undefined, { contextSessionId: 'missing' });
+    const rejected = await runtime.execute({ tool: 'openchamber_memory', input });
+    expect(rejected.ok).toBe(false);
+    expect(executeAction).toHaveBeenCalledTimes(2);
+  });
+
   it('materializes the plugin and mints a per-child callback token', async () => {
     const { runtime, dataDir } = await createRuntime();
 
