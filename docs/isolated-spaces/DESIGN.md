@@ -26,8 +26,8 @@ The host treats everything that comes out of a space as untrusted data to displa
 - **Space manager.** New server module in `packages/web`. Creates, finds, stops, and removes spaces. Moves code in and out. Delivers grants.
 - **Dispatcher.** A thin layer in front of the existing server. It forwards requests that belong to a space to the server inside that space.
 - **Grant.** A credential or an opened domain that the user gives a space. There are two grades, shown to the user in plain words:
-  - **Uses without seeing.** The gatekeeper holds the secret and adds it to requests. Model API keys, git over https, private npm.
-  - **Handed over.** A file or variable inside the space that the agent can read. `.env`, SSH keys, cloud CLI keys, the short-lived OpenAI login token, the Copilot token.
+  - **Uses without seeing.** The gatekeeper holds the secret and adds it to requests. Model API keys, the short-lived OpenAI login token since stage 7, git over https, private npm.
+  - **Handed over.** A file or variable inside the space that the agent can read. `.env`, SSH keys, cloud CLI keys, the Copilot token.
 
 ## Product decisions
 

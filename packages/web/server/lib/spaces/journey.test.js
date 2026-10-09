@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
+const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -62,16 +62,24 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
   // `calls` so the order of the other steps reads as it did before 5d-3.
   const idle = { saved: null, writes: [], release: () => {} };
   const idleSaveHeld = new Promise((resolve) => { idle.release = resolve; });
+  // With `holdReady`, the server inside reports ready only when the test lets it, so the login
+  // row's repair after a start waits where a real server inside would still be starting.
+  let releaseReady = () => {};
+  const readyHeld = new Promise((resolve) => { releaseReady = resolve; });
   const serverInside = {
     writeToken: async (spaceId, token) => { calls.push(['writeToken', spaceId, token]); fail('writeToken'); },
     writeIdleStop: async (spaceId, setting) => { fail('writeIdleStop'); idle.writes.push([spaceId, setting]); },
-    waitUntilReady: async (spaceId) => { fail('waitUntilReady'); calls.push(['waitUntilReady', spaceId]); },
+    waitUntilReady: async (spaceId) => { fail('waitUntilReady'); if (holdReady) await readyHeld; calls.push(['waitUntilReady', spaceId]); },
   };
   const restartOpenCodeInside = async (spaceId) => { calls.push(['restartOpenCodeInside', spaceId]); fail('restartOpenCodeInside'); };
+  // With `holdLoginRow`, a write or removal of the login row inside waits until the test lets it
+  // go, so the repair after a start can be caught in the middle of its writing.
+  let releaseLoginRow = () => {};
+  const loginRowHeld = new Promise((resolve) => { releaseLoginRow = resolve; });
   const spaceOpenCode = {
     writeProviderConfig: async (spaceId, grants) => { calls.push(['writeProviderConfig', spaceId, grants]); fail('writeProviderConfig'); },
-    writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); fail('writeLogin'); },
-    removeLogin: async (spaceId) => { calls.push(['removeLogin', spaceId]); fail('removeLogin'); },
+    writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); if (holdLoginRow) await loginRowHeld; fail('writeLogin'); },
+    removeLogin: async (spaceId) => { calls.push(['removeLogin', spaceId]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
   const codeIn = {
     bringCodeIn: async (request) => {
@@ -109,7 +117,7 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
     logger,
     now: () => new Date('2026-09-26T10:00:00.000Z'),
   });
-  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, gatekeeper, dataDir, idle };
+  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle };
 };
 
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
@@ -823,6 +831,38 @@ describe('the journey: grants', () => {
       await made.journey.startSpace(made.id);
       await until(() => made.calls.some(([name]) => name === 'removeLogin'));
       expect(made.calls.filter(([name]) => name === 'writeLogin')).toEqual([]);
+
+      // A key granted while the server inside is still starting wins: the repair decides from the
+      // record as it is when the server answers, so it takes the row out and writes none back.
+      const racing = await ready({ hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY }, holdReady: true });
+      await racing.journey.grantAccess(racing.id, login);
+      await racing.journey.stopSpace(racing.id);
+      await racing.journey.startSpace(racing.id);
+      racing.calls.splice(0);
+      await racing.journey.grantAccess(racing.id, openai);
+      racing.releaseReady();
+      await until(() => racing.calls.filter(([name]) => name === 'removeLogin').length === 2);
+      expect(racing.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig', 'waitUntilReady', 'removeLogin']);
+      expect(racing.records.read(racing.id).record.grants).toEqual([expect.objectContaining({ kind: 'model', id: 'openai' })]);
+
+      // A key granted while the repair is writing the login row waits for that write and then
+      // takes the row out, so the two never cross; the space is not "busy" for it.
+      const writing = await ready({ hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY }, holdLoginRow: true });
+      const first = writing.journey.grantAccess(writing.id, login);
+      writing.releaseLoginRow();
+      await first;
+      await writing.journey.stopSpace(writing.id);
+      writing.calls.splice(0);
+      const held = journeyWith({ place: writing.place, dataDir: writing.dataDir, hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY }, holdLoginRow: true });
+      await held.journey.startSpace(writing.id);
+      await until(() => held.calls.some(([name]) => name === 'writeLogin'));
+      held.calls.splice(0);
+      const granting = held.journey.grantAccess(writing.id, openai);
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
+      expect(held.calls).toEqual([]);
+      held.releaseLoginRow();
+      await granting;
+      expect(held.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig']);
 
       const silent = await ready({ hostLogin: tokenSharing, failAt: 'waitUntilReady' });
       await silent.journey.grantAccess(silent.id, login);

@@ -106,6 +106,12 @@ const applyRequestSchema = z.discriminatedUnion('as', [
   z.object({ as: z.literal('changes'), removeAfterwards: z.boolean().default(false) }),
 ]);
 
+// How long the login row's repair waits for an action on the space to finish: a grant is a few
+// requests inside, well under this.
+const REPAIR_BUSY_ATTEMPTS = 40;
+const REPAIR_BUSY_PAUSE_MS = 250;
+const pause = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
+
 const failureOf = (error) => ({
   code: error instanceof SpaceError ? error.code : 'space_journey_failed',
   message: error?.message ?? String(error),
@@ -167,6 +173,8 @@ export function createSpaceJourney({
   let idleStopTurn = Promise.resolve();
   // Stops of a gatekeeper left beside a stopped space, under way, by space id; a start waits for one.
   const strayStops = new Map();
+  // Login rows being written again after a start, by space id; a grant waits for one, see "Grants".
+  const rowRepairs = new Map();
   // The project's setup commands inside a space, since 5d-4; each step is announced so the
   // clients read the list again.
   const setup = createSpaceSetup({
@@ -403,42 +411,64 @@ export function createSpaceJourney({
     return login;
   };
 
-  /**
-   * Every grant of the record said again after a start. Resolves the ids that went, the ids that
-   * need the user, and the host logins the login grants went with, for the rows inside.
-   */
+  /** Every grant of the record said again after a start. Resolves the ids that went and the ids that need the user. */
   const restoreGrants = async (spaceId, grants) => {
     const restored = [];
     const needsAccess = [];
-    const logins = [];
     for (const grant of grants) {
       const login = grant.kind === 'login' ? await usableHostLogin(grant) : null;
-      const delivered = await deliverGrant(spaceId, grant, login);
-      (delivered ? restored : needsAccess).push(grant.id);
-      if (delivered && login) logins.push({ provider: grant.provider, login });
+      (await deliverGrant(spaceId, grant, login) ? restored : needsAccess).push(grant.id);
     }
-    return { restored, needsAccess, logins };
+    return { restored, needsAccess };
   };
 
   /**
    * The login row inside, written again from the host's login at a start, or taken out when the
-   * record holds no login grant: it survives a stop in the home volume, but a write that failed
-   * at the grant, or a removal that failed when a key replaced a login, is repaired only here.
-   * In the background, once the server inside answers, because the start does not wait for it;
-   * the row cooperates and enforces nothing, so a failure is logged.
+   * record holds no login grant the host can say: it survives a stop in the home volume, but a
+   * write that failed at the grant, or a removal that failed when a key replaced a login, is
+   * repaired only here. In the background, once the server inside answers, because the start
+   * does not wait for it. What to write is decided then, from the record and the host's login
+   * as they are then, so a grant that came in the meantime is not undone: the repair waits for
+   * an action under way, and a grant that arrives while the repair writes waits for it, a few
+   * hundred milliseconds, rather than being refused as busy right after a start. A grant still
+   * under way after a short wait keeps its own row and the repair is skipped. The row cooperates
+   * and enforces nothing, so a failure is logged.
    */
-  const repairLoginRowInBackground = (spaceId, logins) => {
+  const repairLoginRowInBackground = (spaceId) => {
     void (async () => {
       await serverInside.waitUntilReady(spaceId);
-      if (logins.length === 0) {
-        await spaceOpenCode.removeLogin(spaceId);
-        return;
+      for (let attempt = 0; busy.has(spaceId); attempt += 1) {
+        if (attempt >= REPAIR_BUSY_ATTEMPTS) {
+          logger.info?.(`[spaces] the login row of space ${spaceId} was left to the action under way`);
+          return;
+        }
+        await pause(REPAIR_BUSY_PAUSE_MS);
       }
-      for (const { provider, login } of logins) await spaceOpenCode.writeLogin(spaceId, provider, login);
+      const writing = (async () => {
+        const { record } = records.read(spaceId);
+        if (!record) return;
+        let written = false;
+        for (const grant of record.grants) {
+          if (grant.kind !== 'login') continue;
+          const login = await usableHostLogin(grant);
+          if (!login) continue;
+          await spaceOpenCode.writeLogin(spaceId, grant.provider, login);
+          written = true;
+        }
+        if (!written) await spaceOpenCode.removeLogin(spaceId);
+      })();
+      rowRepairs.set(spaceId, writing);
+      try {
+        await writing;
+      } finally {
+        if (rowRepairs.get(spaceId) === writing) rowRepairs.delete(spaceId);
+      }
     })().catch((error) => {
       logger.warn?.(`[spaces] the login row of space ${spaceId} was not written again: ${error?.code ?? error?.message ?? error}`);
     });
   };
+  /** Waits for a login row repair that is writing now; its failure is its own and logged there. */
+  const afterRowRepair = (spaceId) => (rowRepairs.get(spaceId) ?? Promise.resolve()).catch(() => {});
 
   /**
    * The grants of every running space that its gatekeeper does not hold, said again from the
@@ -644,7 +674,7 @@ export function createSpaceJourney({
       networkRestored = true;
       grants = await restoreGrants(spaceId, record.grants);
       await rewriteProviderConfig(spaceId, record.grants);
-      if (record.grants.some((grant) => grant.kind === 'model' || grant.kind === 'login')) repairLoginRowInBackground(spaceId, grants.logins);
+      if (record.grants.some((grant) => grant.kind === 'model' || grant.kind === 'login')) repairLoginRowInBackground(spaceId);
       // A history that never arrived, or that failed, is sent again: a stop right after the
       // creation is the usual way it fails, and the space would otherwise stay shallow for good.
       if ((record.history === 'pending' || record.history === 'failed') && record.repository && record.spacePath && record.base) {
@@ -704,7 +734,11 @@ export function createSpaceJourney({
    * requests that login's upstream wants (decision 13). The host's token is given as it is: one
    * that has already ended is refused, and one that ends later ends inside the space too.
    */
-  const grantAccess = (spaceId, request) => exclusive(spaceId, async () => {
+  const grantAccess = async (spaceId, request) => {
+    await afterRowRepair(spaceId);
+    return grantUnlocked(spaceId, request);
+  };
+  const grantUnlocked = (spaceId, request) => exclusive(spaceId, async () => {
     requireNotPending(spaceId);
     const parsed = grantRequestSchema.safeParse(request ?? {});
     if (!parsed.success) throw new SpaceError('invalid_grant_request', 'A grant is a model key for a provider, typed or named by a host environment variable, the host\'s own login for a provider, or an opened domain.');
