@@ -320,10 +320,15 @@ describe('relay host-client integration', () => {
 // answered by the next entry of `outcomes` ('reject' -> 503, 'hang' -> no
 // answer, 'accept' -> 101),
 // accepting once the list runs out.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const startScriptedRelay = (outcomes) => {
   const server = http.createServer();
   const wss = new WebSocketServer({ noServer: true });
   const state = { control: null, dials: [], dataSockets: [] };
+  // Upgraded sockets leave the server's connection tracking, so a hung one
+  // would hold server.close() open: destroy them on stop.
+  const hungSockets = [];
   let notifyDial = () => {};
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://localhost');
@@ -338,6 +343,7 @@ const startScriptedRelay = (outcomes) => {
       }
       if (outcome === 'hang') {
         socket.on('error', () => {});
+        hungSockets.push(socket);
         return;
       }
     }
@@ -363,6 +369,7 @@ const startScriptedRelay = (outcomes) => {
         send: (message) => state.control.send(JSON.stringify(message)),
         stop: () => new Promise((r) => {
           for (const client of wss.clients) client.terminate();
+          for (const socket of hungSockets) socket.destroy();
           server.closeAllConnections();
           wss.close();
           server.close(() => r());
@@ -407,7 +414,7 @@ describe('relay host-client data socket retry', () => {
     // No second `connected` arrives: the host retries on its own.
     expect(await relay.waitForDials(3, 6000)).toBe(true);
     expect(relay.state.dials).toEqual(['conn-retry', 'conn-retry', 'conn-retry']);
-    await Bun.sleep(100);
+    await sleep(100);
     expect(host.getStatus().connectedClients).toBe(1);
   }, 10000);
 
@@ -416,7 +423,7 @@ describe('relay host-client data socket retry', () => {
     relay.send({ type: 'connected', connectionId: 'conn-hung' });
 
     expect(await relay.waitForDials(2, 9000)).toBe(true);
-    await Bun.sleep(100);
+    await sleep(100);
     expect(host.getStatus().connectedClients).toBe(1);
   }, 12000);
 
@@ -434,7 +441,7 @@ describe('relay host-client data socket retry', () => {
     await startHost([]);
     relay.send({ type: 'connected', connectionId: 'conn-opened' });
     expect(await relay.waitForDials(1, 2000)).toBe(true);
-    await Bun.sleep(100);
+    await sleep(100);
     relay.state.dataSockets[0].close(1012, 'gone');
 
     expect(await relay.waitForDials(2, 2500)).toBe(false);
