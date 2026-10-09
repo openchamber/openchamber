@@ -160,15 +160,30 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 
 ## Kimi for Coding field semantics
 
-`GET https://api.kimi.com/coding/v1/usages` is inconsistent about which field carries consumption:
-- The weekly `usage` block returns `used` (consumed) with no `remaining` field.
-- Each `limits[].detail` rate-limit block returns `remaining` (available) with no `used` field.
+`GET https://api.kimi.com/coding/v1/usages` has two payload shapes and the provider supports both. Which one arrives depends on whether the account's plan has been migrated; in 2026-10 Kimi moved its newer plans from a weekly allowance to a monthly one. The endpoint is not in Kimi's public Open Platform reference. Its contract is defined by Kimi's own CLI, `MoonshotAI/kimi-code`, in `packages/oauth/src/managed-usage.ts` and `apps/kimi-code/src/utils/usage/usage-format.ts`.
 
-Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai, API base `api.kimi.ai`) stays last: it is not verified that a global key works at the `api.kimi.com` usage address, so it must not outrank a working pre-split key.
+**Ratio payload.** A top-level `usages` object keyed by limit name, each entry `{ used_ratio, reset_time }`, where `used_ratio` is a 0-1 fraction and `reset_time` is RFC3339. Kimi documents its client as rendering whichever entries are served, so an absent key means the plan has no such window rather than missing data. An entry with no finite `used_ratio` is skipped instead of shown as an unknown percentage.
+
+| `usages` key | Window | Notes |
+| --- | --- | --- |
+| `limit_5h` | `5h` | Rolling five-hour frequency window |
+| `limit_7d` | `weekly` | Served only by plans that still have a weekly allowance |
+| `limit_month_total` | `monthly` | The plan's monthly allowance; `reset_time` is the subscription anchor, not a calendar month boundary |
+| `limit_month_code` | folded into `monthly` | The code-typed share of `limit_month_total`, not a second allowance |
+
+`limit_month_code` renders inside the monthly row's `valueLabel` as `26% · Code 19%`, following Kimi's own CLI, which shows three rows and treats the code figure as a breakdown of the monthly total. Two peer monthly rows would read as two independent allowances. That label is not localized: `valueLabel` reaches the UI verbatim, as with the Copilot provider's `Unlimited`.
+
+When `usages` is present the provider does not read `limits[]`. Its 300-minute entry describes the same five-hour window as `limit_5h`, carrying the same ratio rounded to a whole percentage against a fixed `limit` of `100`, and Kimi's own client ignores `limits[]` altogether.
+
+The payload may also carry `boosterWallet`, the pay-as-you-go top-up wallet that Kimi's client reads as `extraUsage`. OpenChamber does not surface it.
+
+**Counted payload.** Plans that have not migrated return a single weekly `usage` block plus `limits[]` rate-limit entries. This shape is inconsistent about which field carries consumption: the `usage` block returns `used` (consumed) with no `remaining` field, while each `limits[].detail` block returns `remaining` (available) with no `used` field. The provider computes `usedPercent` from whichever of the two is present, `used` taking precedence when both exist, rather than assuming one field name. A `limits[]` entry whose window is exactly five hours is labeled `Rate Limit (<raw duration>)` to set it apart from a plain duration.
+
+Credentials resolve in alias order, first match wins. OpenCode's China plan id `kimi-code-plan-cn` (kimi.com) comes before the pre-split `kimi-for-coding` and `kimi` ids, because a leftover pre-split key can hold a dead credential that would otherwise shadow the live China plan key and return 401. The global plan id `kimi-code-plan-global` (kimi.ai) stays last. Kimi's client uses `https://api.kimi.ai/coding/v1/usages` for global accounts, while this provider calls `api.kimi.com` for every alias, so a global-only key gets a 401 here. That gap is known and unfixed.
 
 Many Kimi users hold a pay-as-you-go Moonshot platform key (prepaid vouchers, no Kimi Code subscription) under `KIMI_API_KEY`. The Kimi Code usage address refuses such a key with 401. On a 401 or 403 the provider therefore asks `GET https://api.moonshot.ai/v1/users/me/balance` with the same key and, when that answers with a numeric `data.available_balance`, reports it as a `credits_balance` window (USD, remaining only). If the balance read also fails, the original `API error: <status>` is returned; other HTTP errors never try the balance address.
 
-The provider computes `usedPercent` from whichever of `used`/`remaining` is present (`used` takes precedence when both exist) rather than assuming one field name. Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
+Both `packages/web/server/lib/quota/providers/kimi.js` and `packages/vscode/src/quotaProviders.ts` (`fetchKimiQuota`) must stay in sync — the VS Code extension duplicates this parsing logic rather than importing it.
 
 ## Ollama Cloud settings-page shapes
 
