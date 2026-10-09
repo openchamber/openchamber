@@ -678,6 +678,7 @@ Expected model:
 - explicit Git actions refresh status/branches/log as needed
 - every status-affecting git mutation invalidates the HTTP adapter's status cache on its success path (failed mutations invalidate nothing), so the follow-up refresh is authoritative instead of the pre-mutation cache entry
 - the sync event handler issues one Git refresh hint when a live file-mutating tool first reaches `completed`; this does not depend on `ToolPart` mounting, and duplicate terminal events do not replay the hint
+- tool hints are coalesced per directory: the first completion opens a 250 ms window and every completion in that directory during it is answered by one pathless hint at its end, so a burst of parallel or back-to-back tool calls costs one status read. Direct hints (editor saves, reverts, explicit actions) are delivered at once. A runtime switch drops hints still waiting (`sessionEvents.cancelPendingGitRefreshes`)
 - every Git refresh hint invalidates the store request generation and the HTTP status cache before visible consumers request status, so they share one post-mutation read instead of accepting a cached or pre-mutation response
 - a successful dirty save from the in-app file editor issues a path-scoped Git refresh hint; clean autosave checks remain no-ops
 - refresh hints with authoritative file paths invalidate only those cached and currently rendered diffs before status refresh; pathless tools request status reconciliation without broadly remounting DiffView

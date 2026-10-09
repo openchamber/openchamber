@@ -1,0 +1,56 @@
+Git processes started during each scenario, issue #3677.
+
+Lab: a scratch OpenChamber server (dev web HMR, API 3931, UI 5211) under a scratch
+HOME, with a `git` wrapper first in its PATH and in the scratch .zshrc that logs
+every call with its parent process. Six scratch repositories r1..r6 added as
+projects (r7 added later, so the sidebar runs had 7). Headless Chrome over CDP.
+The agent turn uses a local stub model that answers with 2 steps of 3 parallel
+`write` calls each (6 files written), then "Done.". OpenCode's own git calls
+(its snapshots, parent `opencode`) are counted apart: they are the same on both
+builds and this change does not touch them.
+
+"main" = the branch base (f3a3a01e7), "fix" = this branch, same server, same
+page state, the changed files swapped in and the page reloaded between runs.
+
+Scenario                                      main                 fix
+--------------------------------------------  -------------------  -------------------
+Two collapse/expand clicks on project r3,     110 (6 projects)     0
+3 s apart, statuses older than 5 s            119, 116 (7)         0, 4 (*)
+  status requests from the page               7                    0
+
+Agent turn, 6 file writes, session open       98, 97 (37 once)     37, 18, 17
+  status requests from the page               6, 6 (2 once)        2, 1, 1
+
+New session from the CLI in r1                55                   26
+  (session-created event)                     worktree listing     worktree listing
+                                              of all 6 projects    of r1 only, plus
+                                                                   one status read of
+                                                                   the open project
+
+New session from the CLI in r1, after the     not measured         9: worktree listing
+review fix (UI not on r1)                                          of r1 only
+
+New session from the CLI in a new worktree    not measured         listed r1 twice (the
+of r1 (`--worktree wt-a`), which lives under                       server's worktree-changed
+the registered `~` folder                                          and the session event);
+                                                                   the session shows under
+                                                                   r1 > openchamber/wt-a
+
+Idle, 60 s                                    0                    0
+
+Add project r7                                not measured         status read for r7
+                                                                   only; worktree
+                                                                   listing still runs
+                                                                   for every project
+                                                                   (unchanged)
+
+Reload the page                               not measured         every project's
+                                                                   status read once
+
+(*) 4 = one `/api/git/branches` read of the open project, which also shows
+up on main (main-3 run). The branch list refreshes itself after 30 s; the
+sidebar did not start it.
+
+Per status read the server starts about 17 git processes in these repositories
+(rev-parse x7, status, diff --cached, diff-files, symbolic-ref, remote get-url,
+rev-parse MERGE_HEAD, ...).

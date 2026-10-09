@@ -1,5 +1,5 @@
 import { resetGlobalBlockingRequests, useGlobalBlockingRequestsStore } from "../global-blocking-requests"
-import { describe, expect, test, afterEach, beforeEach, mock } from "bun:test"
+import { describe, expect, test, afterEach, beforeEach, jest, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
 import type { SyncEvent, ToolTransition } from "@/lib/opencode/events"
 import type { FormRequest, PermissionRequest, ToolInput } from "@/lib/opencode/model"
@@ -355,26 +355,34 @@ describe("resyncBlockingRequestsForDirectory", () => {
       properties: { sessionID: "ses_a", messageID: "msg_assistant", partID, transition },
     }) as SyncEvent
     const send = (event: SyncEvent) => handleEvent("/repo", event, childStores, routingIndex, getRuntimeKey())
+    // Tool refreshes are delivered once their coalescing window ends.
+    const settle = () => jest.advanceTimersByTime(250)
 
+    jest.useFakeTimers()
     try {
       // Snapshot path: a completed `patch` refreshes once, a repeat and a read do not.
       send(partEvent("prt_patch", "patch", "pending"))
       send(partEvent("prt_patch", "patch", "completed"))
       send(partEvent("prt_patch", "patch", "completed"))
       send(partEvent("prt_read", "read", "completed"))
+      settle()
       expect(refreshes).toEqual([{ directory: "/repo" }])
 
       // Live path: OpenCode v2 settles a running shell call through a transition.
       send(partEvent("prt_shell", "shell", "running"))
       send(transitionEvent("prt_shell", { kind: "success", executed: true, output: "", end: 2 }))
+      settle()
       expect(refreshes).toHaveLength(2)
 
       // A failed edit may still have written the file.
       send(partEvent("prt_edit", "edit", "running"))
       send(transitionEvent("prt_edit", { kind: "failed", executed: true, error: "boom", end: 2 }))
+      settle()
       expect(refreshes).toHaveLength(3)
     } finally {
       unsubscribe()
+      sessionEvents.cancelPendingGitRefreshes()
+      jest.useRealTimers()
       childStores.disposeAll()
     }
   })
