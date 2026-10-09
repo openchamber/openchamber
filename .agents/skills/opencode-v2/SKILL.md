@@ -53,7 +53,7 @@ a directory, and only one the user is working in:
   user's home for a managed OpenCode, and starts a fleet there. The UI reads
   through `opencodeClient` with the current directory; server code with no
   directory of its own uses the lifecycle's `getDefaultOpenCodeDirectory()`,
-  the last-used directory it warmed at startup, else the managed chats root.
+  the last-used directory it warmed at startup.
 - **Fan-out is the failure:** a loop over every project, worktree or store
   directory starts one fleet each. A refresh after a catalog event re-reads
   only the directories the events named; they are already running.
