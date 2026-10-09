@@ -32,6 +32,10 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import type { SourceControlProvider } from '@/lib/source-control/types';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
+import { repositoryLinkFromRemotes } from '@/lib/source-control/repositoryUrl';
+import { getSourceControlProviderLabel } from '@/lib/source-control/identity';
+import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { openExternalUrl } from '@/lib/url';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -356,15 +360,21 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const knownIdentities = useSourceControlAuthStore((state) => state.identities);
   if (!status) {
     return null;
   }
 
   const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
 
+  const repositoryLink = repositoryLinkFromRemotes(remotes, knownIdentities);
+  const hasRepositoryViewItems = Boolean(
+    onOpenHistory || onOpenGraph || onOpenStashes || onOpenUpdateBranch || onOpenReintegrateCommits
+  );
+
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenHistory || onOpenGraph || onOpenStashes || onOpenUpdateBranch ? (
+      {hasRepositoryViewItems || repositoryLink ? (
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -411,6 +421,15 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                 <Icon name="split-cells-horizontal" className="size-4" />
                 {t('gitView.integrate.title')}
               </DropdownMenuItem>
+            ) : null}
+            {repositoryLink ? (
+              <>
+                {hasRepositoryViewItems ? <DropdownMenuSeparator /> : null}
+                <DropdownMenuItem onSelect={() => { void openExternalUrl(repositoryLink.url); }}>
+                  <Icon name={repositoryLink.provider === 'gitlab' ? 'gitlab' : 'github'} className="size-4" />
+                  {t('gitView.header.openRepository', { provider: getSourceControlProviderLabel(repositoryLink.provider) })}
+                </DropdownMenuItem>
+              </>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>

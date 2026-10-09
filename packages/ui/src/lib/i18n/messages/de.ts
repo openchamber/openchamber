@@ -3245,6 +3245,7 @@ export const dict = {
   'sessions.sidebar.session.status.movingToWorktree': 'Sitzung wird in einen neuen Worktree verschoben',
   'gitView.header.updateBranch': 'Branch aktualisieren',
   'gitView.header.openPullRequest': 'Pull Request öffnen',
+  'gitView.header.openRepository': 'Repository auf {provider} ansehen',
   'gitView.history.refresh': 'Verlauf aktualisieren',
   'gitView.operation.inProgressTitleManyConflicts': 'Operation {operation} läuft: {count} Konflikte',
   'gitView.operation.inProgressTitleOneConflict': 'Operation {operation} läuft: {count} Konflikt',

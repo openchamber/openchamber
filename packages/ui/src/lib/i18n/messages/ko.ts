@@ -1009,6 +1009,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.repositoryViews': '저장소 보기',
   'gitView.header.updateBranch': '브랜치 업데이트',
   'gitView.header.openPullRequest': '풀 리퀘스트 열기',
+  'gitView.header.openRepository': '{provider}에서 저장소 보기',
   'gitView.header.removeRemoteAria': '리모트 제거',
   'gitView.header.removeRemoteTitle': '리모트 제거',
   'gitView.header.upstreamSynced': '동기화됨',

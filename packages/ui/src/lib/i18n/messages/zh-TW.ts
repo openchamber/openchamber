@@ -1029,6 +1029,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.repositoryViews': '儲存庫檢視',
   'gitView.header.updateBranch': '更新分支',
   'gitView.header.openPullRequest': '開啟提取請求',
+  'gitView.header.openRepository': '在 {provider} 上查看儲存庫',
   'gitView.header.removeRemoteAria': '移除遠端 {name}',
   'gitView.header.removeRemoteTitle': '移除 {name}',
   'gitView.header.upstreamSynced': '已同步',

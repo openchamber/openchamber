@@ -31,6 +31,11 @@ const localeDictionaries = {
 } as const;
 
 describe('i18n dictionaries', () => {
+  test('repository links name either provider in every locale', () => {
+    for (const dictionary of Object.values(localeDictionaries)) {
+      expect(dictionary['gitView.header.openRepository']).toContain('{provider}');
+    }
+  });
   test('anonymous transport has a translated read-only label in every locale', () => {
     const key = 'settings.sourceControl.transport.anonymous';
     expect(enDict[key]).toBe('Anonymous HTTPS, read-only');

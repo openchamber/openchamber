@@ -1006,6 +1006,7 @@ export const dict: Record<I18nKey, string> = {
   'gitView.header.repositoryViews': 'リポジトリビュー',
   'gitView.header.updateBranch': 'ブランチを更新',
   'gitView.header.openPullRequest': 'プルリクエストを開く',
+  'gitView.header.openRepository': '{provider} でリポジトリを表示',
   'gitView.header.removeRemoteAria': 'リモート{name}を削除',
   'gitView.header.removeRemoteTitle': 'リモート{name}を削除',
   'gitView.header.upstreamSynced': '同期済み',

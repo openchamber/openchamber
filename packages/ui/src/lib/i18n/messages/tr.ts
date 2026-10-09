@@ -911,6 +911,7 @@ export const dict = {
   'gitView.header.repositoryViews': 'Repository görünümleri',
   'gitView.header.updateBranch': 'Branch\'i güncelle',
   'gitView.header.openPullRequest': 'Pull request aç',
+  'gitView.header.openRepository': 'Depoyu {provider} üzerinde görüntüle',
   'gitView.header.removeRemoteAria': '{name} remote\'unu kaldır',
   'gitView.header.removeRemoteTitle': '{name} remote\'unu kaldır',
   'gitView.header.upstreamSynced': 'senkronize',
