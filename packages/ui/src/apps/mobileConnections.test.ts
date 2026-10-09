@@ -361,6 +361,8 @@ describe('validateMobileConnectionSession', () => {
 const relayHostKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
 const liveRelay: MobileRelayConfig = { ...testRelay, hostEncPubJwk: await crypto.subtle.exportKey('jwk', relayHostKeys.publicKey) };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('relay probe while the runtime is on the relay', () => {
   const originalWebSocket = globalThis.WebSocket;
 
@@ -435,6 +437,43 @@ describe('relay probe while the runtime is on the relay', () => {
       expect(dials).toEqual([]);
       expect(runtime.closedCount()).toBe(0);
       expect(getActiveRelayTunnel()?.getStatus().state).toBe('connected');
+    } finally {
+      restoreRelayGlobals();
+    }
+  });
+
+  test('a late relay answer after a direct win leaves the borrowed tunnel open', async () => {
+    let relayAnswered = false;
+    try {
+      installRelayWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+        { id: 'relay-device', label: 'Relay', lastUsedAt: 1, candidates: [{ kind: 'direct', url: 'https://lan.example' }, { kind: 'relay', relay: liveRelay }] },
+      ]));
+      // Direct answers after the relay head start, the relay a moment later:
+      // the relay result arrives once the race has settled on direct.
+      Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/health')) {
+          await sleep(1_700);
+          return Response.json({ ok: true, serverId: liveRelay.serverId });
+        }
+        return Response.json({ authenticated: true, scope: 'client' });
+      } });
+      const runtime = connectThroughRuntimeTunnel(async (path) => {
+        if (path !== '/auth/session') return Response.json({});
+        await sleep(600);
+        relayAnswered = true;
+        return Response.json({ authenticated: true, scope: 'client' });
+      });
+
+      const outcome = await autoConnectLastInstance({ fast: false, skipIfConnected: true });
+      while (!relayAnswered) await sleep(20);
+      await sleep(0);
+
+      expect(outcome).toEqual({ status: 'no-candidate' });
+      expect(runtime.requests).toContain('/auth/session');
+      expect(dials).toEqual([]);
+      expect(runtime.closedCount()).toBe(0);
     } finally {
       restoreRelayGlobals();
     }
