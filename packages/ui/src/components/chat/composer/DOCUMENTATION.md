@@ -282,7 +282,9 @@ copy.
   active, with precedence `command > skill > snippet > mention`. Commands open
   only on a `/` in the first column; skills open on `$` at any word boundary,
   the start of the text included. The two never share a list: the `/` palette
-  holds commands only.
+  holds commands only. Only typing and pasting open a picker: text the app sets
+  through the editor's `value` prop (a restored draft, a git conflict prompt)
+  arrives with `ComposerChange.fromValueProp` and closes any open picker.
 - `tokenize.ts` — one pass producing every highlight range. Adding a construct
   to the language means adding it here, once.
 

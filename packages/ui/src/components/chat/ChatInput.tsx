@@ -2618,7 +2618,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }, 700);
     }, []);
 
-    const handleComposerChange = ({ value, selection, fromPaste, insertedText }: ComposerChange) => {
+    const handleComposerChange = ({ value, selection, fromPaste, insertedText, fromValueProp }: ComposerChange) => {
         if (largeTextPasteBehavior === 'inline-double-paste') {
             largeTextPasteGesture.change({
                 value, selection, fromPaste, insertedText,
@@ -2668,6 +2668,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         setMessage(value);
+        // Text the app set (a restored draft, a prepared prompt) is not a
+        // trigger being typed: a `#` line in it must not open the snippet list.
+        if (fromValueProp) {
+            closeAutocomplete();
+            return;
+        }
         updateAutocompleteState(value, selection.start, inputSource, pastedInsertedText);
     };
 
