@@ -905,6 +905,28 @@ describe('getStatus', () => {
     await expect(getStatus(repo)).resolves.toMatchObject({ current: 'main' });
   });
 
+  it('never rewrites the index, so a terminal commit does not meet its lock (#2229)', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+    runGit(repo, ['config', 'user.email', 'test@example.com']);
+    runGit(repo, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# Test\n');
+    runGit(repo, ['add', 'README.md']);
+    runGit(repo, ['commit', '-m', 'Initial commit']);
+    // Same content under an older timestamp: the index entry is stale, and a
+    // status that takes the optional lock rewrites the index to refresh it.
+    const older = new Date(Date.now() - 60_000);
+    fs.utimesSync(path.join(repo, 'README.md'), older, older);
+    const indexPath = path.join(repo, '.git', 'index');
+    const indexBefore = fs.readFileSync(indexPath);
+
+    await expect(getStatus(repo)).resolves.toMatchObject({ isClean: true });
+
+    expect(fs.readFileSync(indexPath).equals(indexBefore)).toBe(true);
+  });
+
   it('names the base an upstream-less branch was counted against, and only then', async () => {
     if (!canRunGit()) return;
 

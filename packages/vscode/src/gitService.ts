@@ -578,7 +578,9 @@ async function getGitStatusRaw(directory: string): Promise<GitStatusResult> {
   // Deliberately `-uall`: the web server lists a large untracked directory as
   // one `dir/` entry (readStatus in web/server/lib/git/service.js) and the
   // shared UI explains such an entry; this runtime has not adopted that bound.
-  const statusResult = await execGit(['status', '--porcelain=v1', '-b', '-uall'], directory);
+  // `--no-optional-locks`: a status that refreshes the index holds
+  // `.git/index.lock`, and a terminal `git commit` then fails (#2229).
+  const statusResult = await execGit(['--no-optional-locks', 'status', '--porcelain=v1', '-b', '-uall'], directory);
   
   if (statusResult.exitCode !== 0) {
     return {

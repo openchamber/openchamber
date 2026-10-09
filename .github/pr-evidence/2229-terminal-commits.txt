@@ -1,0 +1,55 @@
+Issue #2229: terminal `git commit` while OpenChamber reads Git status.
+
+Lab: a repository with 80,000 tracked files, macOS, git 2.50.1 (Apple Git-155).
+A scratch OpenChamber server (`bun server/index.js`) runs from main 74b79d41e or
+from the fix branch. While a loop requests GET /api/git/status for the repository,
+a terminal loop appends a line to one file, runs `git add` and `git commit`, and
+counts the commits that fail.
+
+Modes:
+- loop:  status requests back to back
+- poll:  one status request every 2 seconds
+- stale: back to back, and before every commit 2,000 files get a new timestamp
+         with unchanged content, as a formatter or build tool leaves them
+
+main 74b79d41e
+[main-loop]   status requests=49 failed commits=57/200
+[main-poll2s] status requests=18 failed commits=19/300
+[main-stale]  status requests=70 failed commits=61/200
+first error: fatal: Unable to create '<repo>/.git/index.lock': File exists.
+
+main + GIT_OPTIONAL_LOCKS=0 only, working stats still from `git diff --numstat`
+[flag-only-stale] status requests=78 failed commits=26/200
+first error: fatal: Unable to create '<repo>/.git/index.lock': File exists.
+
+fix branch
+[branch-loop]   status requests=64 failed commits=0/200
+[branch-poll2s] status requests=24 failed commits=0/300
+[branch-stale]  status requests=86 failed commits=0/200
+
+Plain git, same repository, a reader in a tight loop next to 100 add+commit runs:
+reader=status GIT_OPTIONAL_LOCKS=1 failed=71/100
+reader=status GIT_OPTIONAL_LOCKS=0 failed=0/100
+
+Whether a read rewrites a stale index (one file with an older timestamp):
+status --porcelain       GIT_OPTIONAL_LOCKS=1: index REWRITTEN
+status --porcelain       GIT_OPTIONAL_LOCKS=0: index unchanged
+diff --numstat           GIT_OPTIONAL_LOCKS=1: index REWRITTEN
+diff --numstat           GIT_OPTIONAL_LOCKS=0: index REWRITTEN
+diff --cached --numstat  GIT_OPTIONAL_LOCKS=1: index unchanged
+diff --cached --numstat  GIT_OPTIONAL_LOCKS=0: index unchanged
+diff-files -M --numstat  GIT_OPTIONAL_LOCKS=0: index unchanged
+
+A deleted tracked file plus an intent-to-add copy with one added line:
+status:                    R a.txt -> b.txt
+diff --numstat:          1  0  a.txt => b.txt
+diff-files --numstat:    0  8  a.txt / 9  0  b.txt
+diff-files -M --numstat: 1  0  a.txt => b.txt   (same as `git diff`)
+
+Working diff stats, fix branch server vs `git diff --numstat` on a dirty tree
+(appended lines, a partially staged file, a deleted file, a binary change):
+git diff --numstat          server diffStats.working
+2  0  src/d5/f1.txt         2  0  src/d5/f1.txt
+1  0  src/d5/f2.txt         1  0  src/d5/f2.txt
+0  1  src/d5/f3.txt         0  1  src/d5/f3.txt
+-  -  src/d5/f4.txt         0  0  src/d5/f4.txt   (binary; main also stores 0/0)

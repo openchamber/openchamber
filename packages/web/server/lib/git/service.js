@@ -461,8 +461,15 @@ const toSimpleGitEnv = (env) => {
 // Transport configuration is owned by repository bindings and the credential
 // broker, so no caller needs simple-git's unsafe SSH-command or
 // credential-helper escapes any more.
-const createGit = async (directory, { stallTimeoutMs = 0 } = {}) => {
+const createGit = async (directory, { stallTimeoutMs = 0, optionalLocks = true } = {}) => {
   const env = await buildGitEnv(directory);
+  // `git status` holds `.git/index.lock` while it refreshes the index, and a
+  // `git commit` the user runs in a terminal at that moment fails with
+  // "index.lock: File exists" (#2229). Read-only callers opt out of that
+  // refresh; commands that write the index still take the lock.
+  if (!optionalLocks) {
+    env.GIT_OPTIONAL_LOCKS = '0';
+  }
   const spawnOptions = { windowsHide: true };
   // simple-git's block timeout kills the process once it has produced no
   // output for this long. Opt-in per caller: a background read must never hold
@@ -2925,6 +2932,7 @@ async function readStatus(normalizedDirectory, lightMode) {
 
     const { directoryPath, repoRoot, git } = await createRepositoryGitContext(normalizedDirectory, {
       stallTimeoutMs: GIT_STATUS_STALL_TIMEOUT_MS,
+      optionalLocks: false,
     });
 
     // `-unormal` lists a directory with no tracked files as one `dir/` entry
@@ -2938,12 +2946,15 @@ async function readStatus(normalizedDirectory, lightMode) {
     // Light mode: skip numstat + new-file line counting for faster response.
     // Staged (`--cached`: HEAD -> index) and working (`--numstat`: index -> worktree)
     // stay in separate maps. A partially staged file has an entry in both, and the
-    // UI shows each row's own scope instead of a combined total.
+    // UI shows each row's own scope instead of a combined total. The working
+    // side uses `diff-files`: `git diff` rewrites a stale index under
+    // `index.lock` even with GIT_OPTIONAL_LOCKS=0. `-M` keeps the rename
+    // detection `git diff` does by default.
     const [stagedStatsRaw, workingStatsRaw] = lightMode
       ? ['', '']
       : await Promise.all([
           git.raw(['diff', '--cached', '--numstat']).catch(() => ''),
-          git.raw(['diff', '--numstat']).catch(() => ''),
+          git.raw(['diff-files', '-M', '--numstat']).catch(() => ''),
         ]);
 
     const stagedDiffStats = {};
