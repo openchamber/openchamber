@@ -17,10 +17,7 @@ export const shouldSubmitEnter = (input: EnterKeyPolicyInput): boolean => {
     if (!input.enterToSendConfigured) {
         return !input.shiftKey && (enterSendsByDefault || isCtrlEnter);
     }
-    const enterSends = input.enterToSend;
-    const sendsWithEnter = enterSends
-        ? !input.shiftKey
-        : input.shiftKey;
+    const sendsWithEnter = input.enterToSend && !input.shiftKey;
 
     return isCtrlEnter || sendsWithEnter;
 };
