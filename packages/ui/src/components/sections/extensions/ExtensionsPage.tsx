@@ -36,7 +36,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { GitIdentityProfile } from '@/stores/useGitIdentitiesStore';
 import { IdentityDropdown } from '@/components/views/git/GitHeader';
 import { checkGuestUpdates, updateGuest } from '@/lib/guests/updates';
-import type { GuestSource, InstalledGuest } from '@/lib/guests/types';
+import type { GuestSource, InstalledGuest, UnreadableGuest } from '@/lib/guests/types';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -393,9 +393,52 @@ const ExtensionCard: React.FC<ExtensionCardProps> = ({
   );
 };
 
+/**
+ * An installed row this build could not read: it gets its name and, when the
+ * server can identify it, a way to remove it. Its other fields are unknown.
+ */
+const UnreadableExtensionCard: React.FC<{
+  guest: UnreadableGuest;
+  busy: boolean;
+  onRemove: (id: string, name: string) => Promise<void>;
+}> = ({ guest, busy, onRemove }) => {
+  const { t } = useI18n();
+  const name = guest.name ?? guest.id ?? t('settings.extensions.unreadable.unnamed');
+  const removableId = guest.builtIn ? null : guest.id;
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-4 py-3">
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--surface-muted)]">
+        <Icon name="error-warning" className="size-5 text-[var(--status-error)]" />
+      </div>
+      <div className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{name}</div>
+      <span
+        title={t('settings.extensions.unreadable.hint')}
+        className="max-w-36 shrink-0 truncate rounded-full bg-[var(--status-error)]/15 px-2 py-0.5 text-[10px] font-medium text-[var(--status-error)]"
+      >
+        {t('settings.extensions.status.unreadable')}
+      </span>
+      {removableId ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={SETTINGS_ICON_BUTTON_CLASS}
+          disabled={busy}
+          title={t('settings.extensions.remove')}
+          aria-label={t('settings.extensions.remove.aria', { name })}
+          onClick={() => void onRemove(removableId, name)}
+        >
+          <Icon name="delete-bin" className="h-3.5 w-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  );
+};
+
 export const ExtensionsPage: React.FC = () => {
   const { t } = useI18n();
   const guests = useGuestsStore((state) => state.guests);
+  const unreadable = useGuestsStore((state) => state.unreadable);
   const status = useGuestsStore((state) => state.status);
   const catalogFailure = useGuestsStore((state) => state.failure);
   const runtimeKey = useGuestsStore((state) => state.runtimeKey);
@@ -858,7 +901,7 @@ export const ExtensionsPage: React.FC = () => {
         {unsupported ? (
           <p className="typography-meta text-muted-foreground">{t('settings.extensions.unsupported')}</p>
         ) : null}
-        {status === 'ready' && guests.length === 0 ? (
+        {status === 'ready' && guests.length === 0 && unreadable.length === 0 ? (
           <p className="typography-meta text-muted-foreground">{t('settings.extensions.empty')}</p>
         ) : null}
         {guests.map((guest) => (
@@ -870,6 +913,14 @@ export const ExtensionsPage: React.FC = () => {
             onRemove={remove}
             onSetEnabled={setEnabled}
             onUpdate={update}
+          />
+        ))}
+        {unreadable.map((guest, index) => (
+          <UnreadableExtensionCard
+            key={guest.id ?? `unreadable-${index}`}
+            guest={guest}
+            busy={busy}
+            onRemove={remove}
           />
         ))}
       </SettingsSection>
