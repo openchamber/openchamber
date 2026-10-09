@@ -461,6 +461,9 @@
     "draftStartersScheduleTaskAdded": {
       "scope": "profile"
     },
+    "addProjectDialogDismissed": {
+      "scope": "profile"
+    },
     "fontSize": {
       "scope": "profile",
       "perSurface": true

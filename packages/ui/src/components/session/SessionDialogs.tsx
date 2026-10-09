@@ -26,6 +26,8 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
+import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
+import { useFirstLaunchProjectDialog } from './useFirstLaunchProjectDialog';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -44,6 +46,10 @@ const normalizeProjectDirectory = (path: string | null | undefined): string => {
     return replaced.replace(/\/+$/, '');
 };
 
+const saveAddProjectDialogDismissed = (): void => {
+    void updateDesktopSettings({ addProjectDialogDismissed: true });
+};
+
 type DeleteDialogState = {
     sessions: Session[];
     dateLabel?: string;
@@ -54,8 +60,6 @@ type DeleteDialogState = {
 export const SessionDialogs: React.FC = () => {
     const { t } = useI18n();
     const { git, sourceControl } = useRuntimeAPIs();
-    const [isDirectoryDialogOpen, setIsDirectoryDialogOpen] = React.useState(false);
-    const [hasShownInitialDirectoryPrompt, setHasShownInitialDirectoryPrompt] = React.useState(false);
     const [deleteDialog, setDeleteDialog] = React.useState<DeleteDialogState | null>(null);
     const [deleteDialogSummaries, setDeleteDialogSummaries] = React.useState<Array<{ session: Session; metadata: WorktreeMetadata }>>([]);
     const [deleteDialogShouldRemoveRemote, setDeleteDialogShouldRemoveRemote] = React.useState(false);
@@ -79,6 +83,16 @@ export const SessionDialogs: React.FC = () => {
     const isHomeReady = useDirectoryStore((s) => s.isHomeReady);
     const projects = useProjectsStore((s) => s.projects);
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
+    const {
+        open: isDirectoryDialogOpen,
+        setOpen: setIsDirectoryDialogOpen,
+        onOpenChange: handleDirectoryDialogOpenChange,
+    } = useFirstLaunchProjectDialog({
+        ready: isHomeReady,
+        hasProjects: projects.length > 0,
+        loadSettings: loadDesktopSettings,
+        saveDismissed: saveAddProjectDialogDismissed,
+    });
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const useMobileOverlay = isMobile || isTablet || hasTouchInput;
 
@@ -121,20 +135,6 @@ export const SessionDialogs: React.FC = () => {
     const deleteLocalOptionDisabled = isProcessingDelete || !isWorktreeDelete;
 
     // Session loading is handled by sync bootstrap — no manual loadSessions needed.
-
-    React.useEffect(() => {
-        if (hasShownInitialDirectoryPrompt || !isHomeReady || projects.length > 0) {
-            return;
-        }
-
-        setHasShownInitialDirectoryPrompt(true);
-
-        setIsDirectoryDialogOpen(true);
-    }, [
-        hasShownInitialDirectoryPrompt,
-        isHomeReady,
-        projects.length,
-    ]);
 
     const openDeleteDialog = React.useCallback((payload: { sessions: Session[]; dateLabel?: string; mode?: 'session' | 'worktree'; worktree?: WorktreeMetadata | null }) => {
         setDeleteDialog({
@@ -839,7 +839,7 @@ export const SessionDialogs: React.FC = () => {
 
             <DirectoryExplorerDialog
                 open={isDirectoryDialogOpen}
-                onOpenChange={setIsDirectoryDialogOpen}
+                onOpenChange={handleDirectoryDialogOpenChange}
             />
         </>
     );

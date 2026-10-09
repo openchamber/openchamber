@@ -1473,6 +1473,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
     )));
     return existing.filter(Boolean);
   },
+  noProjectDirectory: OPENCHAMBER_CHATS_DIR,
   // A managed restart can move OpenCode to a NEW port (the old one may stay
   // occupied if killProcessOnPort/waitForPortRelease didn't free it in time,
   // on any platform). Rebind the message-stream upstream readers to the current port

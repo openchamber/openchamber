@@ -16,7 +16,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({
@@ -40,7 +40,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: null,
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({ id: 'openchamber', path: '/workspace/openchamber' });
@@ -54,7 +54,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toBeNull();
@@ -68,7 +68,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'openchamber',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toEqual({ id: 'openchamber', path: '/workspace/openchamber' });
@@ -82,7 +82,7 @@ describe('resolveProjectContextOwner', () => {
       activeProjectId: 'missing-project',
       chatDraftOpen: false,
       chatDraftTarget: 'project',
-      homeDirectory: '/Users/test',
+      chatsRoot: '/Users/test/.config/openchamber/chats',
     });
 
     expect(owner).toBeNull();

@@ -481,6 +481,8 @@ export const SETTINGS_REGISTRY = {
   draftStartersVisible: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('draftStartersVisible', (v) => useUIStore.getState().setDraftStartersVisible(v)) }),
   draftStartersCraftGoalAdded: field({ scope: 'profile', parse: parseBoolean }),
   draftStartersScheduleTaskAdded: field({ scope: 'profile', parse: parseBoolean }),
+  /** "Add project directory" opens by itself only until the user first closes it. */
+  addProjectDialogDismissed: field({ scope: 'profile', parse: parseBoolean }),
 
   // ── Typography (profile; sizes per surface) ──
   fontSize: field({ scope: 'profile', perSurface: true, parse: parseFiniteNumber, ui: uiStore('fontSize', (v) => useUIStore.getState().setFontSize(v)) }),

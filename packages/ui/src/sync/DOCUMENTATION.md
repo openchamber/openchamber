@@ -792,6 +792,13 @@ configured/legacy root as the identity for folders and scopes. Older servers
 without these fields retain exact matching against their original roots; the UI
 never guesses filesystem case sensitivity from the client's operating system.
 
+The UI never guesses the chats root from the home either. `getChatsRoot` is
+null until the home API answers, and `useChatsRoot` re-renders its readers
+(the sidebar's chats group, a chat draft's effective directory, the project
+context owner) once it does. With `OPENCHAMBER_DATA_DIR` the root is outside the
+home and the home's legacy folder does not exist, so a guessed root failed to
+initialize and the chats group said "Could not initialize workspace."
+
 Typing the first character in a managed Chat draft starts one deduplicated directory preparation for that draft. Materialization consumes the prepared directory before `createSession`, removing filesystem creation from the usual submit path. Closing the draft, changing it to a project target, or completing preparation after the runtime/draft changed deletes the unclaimed directory. A create failure also deletes the consumed directory.
 
 The global sessions store persists and hydrates one bounded, runtime-scoped startup snapshot containing only active managed chat sessions. Every global session surface, including the main sidebar and Electron Mini Chat switcher, sees that stale snapshot while the global list is unresolved or failed; the first authoritative global snapshot replaces it. Full and directory-scoped global loads resolve the active server's chats roots before fetching or classifying sessions. The store enters loading before resolving roots and hydrates its saved snapshot once roots are available, preserving any newer mutations. Root lookup failure preserves the snapshot for a later retry; a failed global request retains the hydrated sessions. Old runtime completions cannot hydrate or fetch for the destination runtime. Persistence waits for root authority; before hydration it overlays explicit mutations onto the saved seed rather than replacing it with a partial list, and the first page of a still-paginating full load is merged into the visible lists (status stays `loading`) without ever being persisted as that snapshot. Hydration happens once per runtime, so a later global load cannot undo an earlier directory refresh. Runtime reset to idle must hydrate rather than erase the destination runtime's snapshot; authoritative empty, archive, and delete updates do persist the resulting empty or reduced list.

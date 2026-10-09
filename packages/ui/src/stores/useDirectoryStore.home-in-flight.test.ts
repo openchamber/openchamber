@@ -7,6 +7,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
  */
 
 const HOME = '/home/user';
+const CHATS_ROOT = '/home/user/.config/openchamber/chats';
 
 const storage = new Map<string, string>();
 const testLocalStorage = {
@@ -62,12 +63,14 @@ mock.module('@/lib/opencode/client', () => ({
     getSystemInfo: async () => {
       throw new Error('a second source must not be asked');
     },
+    getFilesystemHomeInfo: async () => ({ home: HOME, chatsRoot: CHATS_ROOT }),
   },
 }));
 
 mock.module('@/lib/desktop', () => ({
   getDesktopHomeDirectory: async () => null,
   isVSCodeRuntime: () => false,
+  isDesktopShell: () => false,
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -127,7 +130,7 @@ describe('home directory read still in flight when the gate asks for it', () => 
     answerPageLoadRead();
     await ensured;
 
-    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: HOME, isHomeReady: true });
+    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: CHATS_ROOT, isHomeReady: true });
     expect(homeReads).toBe(1);
   });
 });

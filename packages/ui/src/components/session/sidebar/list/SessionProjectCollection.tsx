@@ -49,7 +49,8 @@ import type { SidebarViewMode } from '@/stores/useSessionDisplayStore';
 import { holdOrder, rankByLatestActivity } from './projectSort';
 import type { DeleteSessionConfirmState } from '../sessions/useSessionActions';
 import { useExpandedParents } from '../sessions/useExpandedParents';
-import { getChatsRootForHome, getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirectories';
+import { useChatsRoot } from '@/hooks/useChatsRoot';
 import { isCapacitorApp } from '@/lib/platform';
 import { deriveRecentActivitySections, deriveTimelineActivityItems, sessionTreeMatchesSidebarQuery } from '../recent/activitySections';
 import { resolveSidebarSessionLocations } from '../recent/sessionLocation';
@@ -264,12 +265,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     runKeyBySessionId,
   });
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({ ownership });
+  const knownChatsRoot = useChatsRoot();
   // Built before the sections hook runs, because that hook owns the search data
   // for every group the sidebar renders — the chats group included. A group the
   // hook never sees renders an empty list while a search is active.
   const chatGroup = React.useMemo<SessionGroup | null>(() => {
     if (topology.isVSCode) return null;
-    const chatsRoot = getChatsRootForHome(view.homeDirectory)
+    const chatsRoot = knownChatsRoot
       ?? collection.chatSessions.map((session) => getChatsRootFromDirectory(session.directory)).find(Boolean)
       ?? null;
     if (!chatsRoot) return null;
@@ -293,7 +295,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         .filter((session) => !session.time?.archived && isRootSession(session))
         .map((session) => buildActiveSessionNode(collection.childrenMap, session)),
     };
-  }, [collection.chatSessions, collection.childrenMap, topology.isVSCode, view.homeDirectory]);
+  }, [collection.chatSessions, collection.childrenMap, knownChatsRoot, topology.isVSCode]);
   const standaloneGroups = React.useMemo<SessionGroup[]>(
     () => chatGroup ? [chatGroup] : EMPTY_STANDALONE_GROUPS,
     [chatGroup],

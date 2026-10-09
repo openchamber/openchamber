@@ -429,9 +429,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     && ((!isCloneMode && selectionPaths.length > 0) || (!isAlreadyAdded && Boolean(submitTarget)));
   // Adding a directory that is already a repository: read what its own .git
   // states so the association can be offered instead of asked for. Nothing is
-  // written until the project is added with the proposal still selected.
+  // written until the project is added with the proposal still selected. A
+  // closed dialog adds nothing: its path is the home, which it would read on
+  // every launch.
   const existingRepository = useExistingRepositorySummary(targetPath, { sourceControl, git },
-    !isCloneMode && !runtime.isVSCode && !isAlreadyAdded && !shouldCreateTarget && selectionPaths.length === 0);
+    open && !isCloneMode && !runtime.isVSCode && !isAlreadyAdded && !shouldCreateTarget && selectionPaths.length === 0);
   React.useEffect(() => {
     if (existingRepository && !runtime.isVSCode) void refreshAccounts(sourceControl);
   }, [existingRepository, refreshAccounts, runtime.isVSCode, runtimeKey, sourceControl]);

@@ -7,6 +7,7 @@ export const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
 type ChatRoots = { configured: string; legacy: string; canonicalConfigured: string; canonicalLegacy: string };
 const chatsRootByRuntime = new Map<string, Promise<ChatRoots>>();
 const chatsRootCacheByRuntime = new Map<string, ChatRoots>();
+const chatsRootListeners = new Set<() => void>();
 
 const joinPath = (base: string, ...parts: string[]): string =>
   [base.replace(/[\\/]+$/, ''), ...parts].join('/');
@@ -46,8 +47,19 @@ export function isChatDirectoryForHome(directory: string | null | undefined, hom
   return Boolean(normalized && legacy && isWithinRoot(normalized, legacy));
 }
 
-export function getChatsRootForHome(home: string | null | undefined): string | null {
-  return cachedRoots()?.configured ?? legacyRootForHome(home);
+/**
+ * The chats root the server named, or null until it has. Never a guess: with
+ * OPENCHAMBER_DATA_DIR the root is outside the home, and the home's legacy
+ * folder does not exist, so a guessed root failed to open.
+ */
+export function getChatsRoot(): string | null {
+  return cachedRoots()?.configured ?? null;
+}
+
+/** Notifies once the server names a chats root for a runtime. */
+export function subscribeChatsRoot(listener: () => void): () => void {
+  chatsRootListeners.add(listener);
+  return () => chatsRootListeners.delete(listener);
 }
 
 async function getChatRoots(): Promise<ChatRoots> {
@@ -65,6 +77,7 @@ async function getChatRoots(): Promise<ChatRoots> {
       canonicalLegacy: normalizePath(canonicalLegacyChatsRoot) ?? legacy,
     };
     chatsRootCacheByRuntime.set(runtimeKey, roots);
+    for (const listener of chatsRootListeners) listener();
     return roots;
   }).catch((error) => {
     chatsRootByRuntime.delete(runtimeKey);
@@ -77,6 +90,15 @@ async function getChatRoots(): Promise<ChatRoots> {
 /** Required before a global snapshot can classify or persist managed chats. */
 export async function ensureChatsRootDirectory(): Promise<void> {
   await getChatRoots();
+}
+
+/**
+ * The chats root from the server's answer itself. The cache behind
+ * `getChatsRoot` is keyed by the runtime key at request time, which can still
+ * change while the page starts up.
+ */
+export async function resolveChatsRootDirectory(): Promise<string> {
+  return (await getChatRoots()).configured;
 }
 
 export function warmChatsRootDirectory(): Promise<void> {

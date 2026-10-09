@@ -11,7 +11,7 @@ import { persistManagedChatSessions, readManagedChatSessions } from '@/sync/pers
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { useSpacesStore, type SpaceMark } from '@/lib/spaces/spaces-store';
-import { ensureChatsRootDirectory, getChatsRootForHome } from '@/lib/chatDirectories';
+import { ensureChatsRootDirectory, getChatsRoot } from '@/lib/chatDirectories';
 import { countSyncPerformance } from '@/sync/performance-diagnostics';
 import {
   applyGlobalSessionStructureMutations,
@@ -930,7 +930,7 @@ useGlobalSessionsStore.subscribe((state, previous) => {
   countSyncPerformance('globalSessionPublications');
   if (
     !mergingSessionPage
-    && getChatsRootForHome(null) !== null
+    && getChatsRoot() !== null
     && (state.activeSessions !== previous.activeSessions
       || (!state.managedChatsHydrated && state.mutationRevision !== previous.mutationRevision)
       || (state.hasLoaded && !previous.hasLoaded))

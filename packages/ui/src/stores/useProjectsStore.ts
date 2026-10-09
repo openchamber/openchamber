@@ -757,7 +757,11 @@ export const useProjectsStore = create<ProjectsStore>()(
           useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false });
         }
       } else {
-        void useDirectoryStore.getState().goHome();
+        void useDirectoryStore.getState().goToNoProjectDirectory();
+        // Someone who had a project is past the first launch: "Add project
+        // directory" stays closed at the next start, even when it was never
+        // shown to them (projects added before it opened only once).
+        void updateDesktopSettings({ addProjectDialogDismissed: true });
       }
     },
 

@@ -143,6 +143,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     getActiveSessionCount = () => 0,
     reapManagedOrphanedProcesses = reapOrphanedProcesses,
     getWarmupDirectories = async () => [],
+    // Scopes server-side reads while no project directory is usable (the
+    // managed chats root). Without it they name no directory, and OpenCode
+    // starts a location over its own working directory, the whole home.
+    noProjectDirectory = null,
     onOpenCodeRestarted = null,
     managedStartupTimeoutMs = 30_000,
     now = Date.now,
@@ -1290,8 +1294,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         const usable = selectUsableDirectory(warmedOpenCodeDirectories);
         if (usable) defaultOpenCodeDirectory = usable;
       } catch {
-        // Best-effort: the caller falls back to OpenCode's working directory
-        // for this read and the refresh can succeed next time.
+        // Best-effort: the caller falls back to the no-project directory or
+        // OpenCode's working directory for this read, and the refresh can
+        // succeed next time.
       } finally {
         defaultDirectoryRefresh = null;
       }
@@ -1300,8 +1305,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   // The warmed directory only while it is still usable; otherwise another
-  // usable directory (from this or a refreshed pass), or null so the caller
-  // sends no directory and OpenCode uses its own working directory.
+  // usable directory (from this or a refreshed pass), else the no-project
+  // directory, else null so the caller sends no directory and OpenCode uses
+  // its own working directory.
   const getValidatedDefaultDirectory = () => {
     if (isUsableDirectory(defaultOpenCodeDirectory)) return defaultOpenCodeDirectory;
     const alternate = selectUsableDirectory(warmedOpenCodeDirectories);
@@ -1314,7 +1320,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       defaultDirectoryRefreshAt = checkedAt;
       void refreshDefaultDirectories();
     }
-    return null;
+    return isUsableDirectory(noProjectDirectory) ? noProjectDirectory : null;
   };
 
   // OpenCode initializes each project directory lazily on its first
