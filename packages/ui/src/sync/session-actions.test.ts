@@ -2931,6 +2931,7 @@ describe("dismissOpenFormsForSession", () => {
   beforeEach(() => {
     replyCalls.length = 0
     formReplyError = null
+    formCancelError = null
   })
 
   test("returns false and rejects nothing when no forms are pending", async () => {
@@ -2997,6 +2998,34 @@ describe("dismissOpenFormsForSession", () => {
     expect(cancelCalls[0].params.formID).toBe("q-stale")
     // The stale entry is cleared from the store even though the server reported not-found.
     expect(store.getState().form["session-a"]).toBe(undefined)
+  })
+
+  test("puts the forms back when the cancel fails for another reason (#2448)", async () => {
+    const rootForm = buildForm("q-root", "session-a")
+    const childForm = buildForm("q-child", "session-child")
+    const store = createStore({}, {
+      session: [sessionFixture("session-a")],
+      form: { "session-a": [rootForm] },
+    })
+    // The subagent's session lives in its own worktree store.
+    const worktreeStore = createStore({}, {
+      session: [{ ...sessionFixture("session-child"), parentID: "session-a" }],
+      form: { "session-child": [childForm] },
+    })
+    const childStores = createChildStores([["/test/project", store], ["/test/project/wt", worktreeStore]])
+    formCancelError = Object.assign(new Error("session.form.cancel failed (500): unexpected status"), { status: 500 })
+
+    const { setActionRefs, dismissOpenFormsForSession } = await import("./session-actions")
+    setActionRefs(childStores, () => "/test/project")
+
+    const dismissed = await dismissOpenFormsForSession("session-a")
+
+    expect(dismissed).toBe(true)
+    // The agent is still waiting on both forms, so each goes back to the store it came from.
+    expect(store.getState().form["session-a"]).toEqual([rootForm])
+    expect(store.getState().form["session-child"]).toBe(undefined)
+    expect(worktreeStore.getState().form["session-child"]).toEqual([childForm])
+    expect(worktreeStore.getState().form["session-a"]).toBe(undefined)
   })
 })
 
