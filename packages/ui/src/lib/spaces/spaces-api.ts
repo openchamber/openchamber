@@ -218,6 +218,9 @@ export const listSpacePlaces = async (signal?: AbortSignal): Promise<SpacePlace[
 // the spaces' own volumes, and what a clean-up would free now, the image among it or not.
 const spaceDiskSchema = z.object({
   imageBytes: z.number().min(0).nullable(),
+  // A download of the image under way on the host, and how the last one ended while the image is absent.
+  imagePulling: z.boolean().default(false),
+  imageFailure: failureSchema.nullable().default(null),
   toolsBytes: z.number().min(0),
   spacesBytes: z.number().min(0),
   freeBytes: z.number().min(0),
@@ -241,6 +244,10 @@ export const readSpaceDisk = (placeId: string, signal?: AbortSignal): Promise<Sp
 /** Removes what OpenChamber can make again on the place; Docker keeps whatever is in use. */
 export const cleanUpSpaceDisk = (placeId: string): Promise<SpaceCleanUp> =>
   request(`${SPACES_ROUTE}/places/${encodeURIComponent(placeId)}/clean-up`, spaceCleanUpSchema, { method: 'POST' });
+
+/** Starts the download of the image ahead of the first space; answers the disk with `imagePulling` set. */
+export const pullSpaceImage = (placeId: string): Promise<SpaceDisk> =>
+  request(`${SPACES_ROUTE}/places/${encodeURIComponent(placeId)}/image`, spaceDiskSchema, { method: 'POST' });
 
 export const listSpaces = async (signal?: AbortSignal): Promise<SpaceEntry[]> =>
   (await request(SPACES_ROUTE, z.object({ spaces: z.array(spaceEntrySchema) }), { signal })).spaces;

@@ -43,6 +43,7 @@ const STATUS_BY_CODE = new Map([
   ['space_preparing', 409],
   ['space_creation_failed', 409],
   ['space_busy', 409],
+  ['image_pulling', 409],
   ['isolated_spaces_off', 404],
   ['space_not_running', 409],
   ['branch_exists', 409],
@@ -204,6 +205,10 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
   }));
   app.post(`${SPACES_ROUTE}/places/:placeId/clean-up`, withJourney(async (journey, req, res) => {
     res.json(await journey.cleanUpDisk(String(req.params.placeId ?? '')));
+  }));
+  // Downloads the image ahead of the first space; answers the disk at once, the download goes on.
+  app.post(`${SPACES_ROUTE}/places/:placeId/image`, withJourney(async (journey, req, res) => {
+    res.status(202).json(await journey.pullImage(String(req.params.placeId ?? '')));
   }));
 
   app.get(SPACES_ROUTE, withJourney(async (journey, _req, res) => {

@@ -74,6 +74,8 @@ describe('the disk of the Docker place', () => {
     });
     expect(await makePlace(fake).readDisk()).toEqual({
       imageBytes: 1_632_000_000,
+      imagePulling: false,
+      imageFailure: null,
       toolsBytes: 438_000_000 + 440_000_000 + 441_000_000,
       spacesBytes: 1_500_000_000,
       // The old tools nothing mounts; the image and the tools the stopped space holds are in use.
@@ -87,6 +89,34 @@ describe('the disk of the Docker place', () => {
     expect(await makePlace(fake).readDisk()).toMatchObject({ imageBytes: 1_632_000_000, freeBytes: 1_632_000_000, freesImage: true });
     const without = createFakeDocker({ imagePresent: false, resources: [toolsVolume(OWNER, KEY)] });
     expect(await makePlace(without).readDisk()).toMatchObject({ imageBytes: null, freeBytes: 0, freesImage: false });
+  });
+
+  it('downloads the image once for everyone who asks, says so on the disk, and remembers a failed download while the image is absent', async () => {
+    const fake = createFakeDocker({ imagePresent: false, resources: [toolsVolume(OWNER, KEY)] });
+    let release = null;
+    let pulls = 0;
+    const runCommand = (file, args, options) => {
+      if (args[0] !== 'pull') return fake.runCommand(file, args, options);
+      pulls += 1;
+      return new Promise((resolve) => { release = resolve; });
+    };
+    const place = makePlace(fake, { runCommand });
+    const first = place.pullImage();
+    const second = place.pullImage();
+    expect(second).toBe(first);
+    expect(place.imagePulling()).toBe(true);
+    expect(await place.readDisk()).toMatchObject({ imageBytes: null, imagePulling: true, imageFailure: null });
+    release({ code: 1, stdout: '', stderr: 'no route to host\n' });
+    await expect(first).rejects.toMatchObject({ code: 'image_pull_failed' });
+    expect(pulls).toBe(1);
+    expect(place.imagePulling()).toBe(false);
+    expect(await place.readDisk()).toMatchObject({ imagePulling: false, imageFailure: { code: 'image_pull_failed', message: expect.stringContaining('no route to host') } });
+    // The next download is a fresh one, and its success clears the failure.
+    const third = place.pullImage();
+    release({ code: 0, stdout: '', stderr: '' });
+    await third;
+    expect(pulls).toBe(2);
+    expect(await place.readDisk()).toMatchObject({ imagePulling: false, imageFailure: null });
   });
 
   it('a failed read rejects rather than answering an empty disk', async () => {
@@ -151,7 +181,7 @@ describe('clean-up of the Docker place', () => {
     it('is counted in what a clean-up frees and nowhere else, and removed without force', async () => {
       const fake = createFakeDocker({ imagePresent: false, retiredImages: [{ name: RETIRED, bytes: RETIRED_BYTES }], resources: [toolsVolume(OWNER, KEY)] });
       const place = makePlace(fake);
-      expect(await place.readDisk()).toEqual({ imageBytes: null, toolsBytes: 0, spacesBytes: 0, freeBytes: RETIRED_BYTES, freesImage: false });
+      expect(await place.readDisk()).toEqual({ imageBytes: null, imagePulling: false, imageFailure: null, toolsBytes: 0, spacesBytes: 0, freeBytes: RETIRED_BYTES, freesImage: false });
       expect(await place.cleanUpDisk()).toEqual({ freedBytes: RETIRED_BYTES, kept: [], machine: { state: 'skipped' } });
       expect(fake.retiredImagePresent(RETIRED)).toBe(false);
       expect(removals(fake).some((args) => args.includes('--force'))).toBe(false);

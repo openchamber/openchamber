@@ -40,7 +40,7 @@ const parseJson = (text) => {
  * after a clean-up that removed anything, a Docker machine that calls itself Colima is asked to
  * hand the freed blocks back to the Mac.
  */
-export function createDockerDisk({ engine, runCommand, colimaPath, owner, image, retiredImages = [], tools }) {
+export function createDockerDisk({ engine, runCommand, colimaPath, owner, image, retiredImages = [], tools, imagePullState = () => ({ pulling: false, failure: null }) }) {
   /**
    * Docker's own account of the disk: every volume with its size and how many containers mount it,
    * by name, and what each image alone takes, by id. `docker image inspect` is no use for the
@@ -104,8 +104,12 @@ export function createDockerDisk({ engine, runCommand, colimaPath, owner, image,
     const freesImage = imageState !== null && !imageState.inUse;
     const freeRetired = retired.filter((state) => !state.inUse).reduce((total, state) => total + state.bytes, 0);
     const sum = (names) => names.reduce((total, name) => total + sizeOf(name), 0);
+    const pull = imagePullState();
     return {
       imageBytes: imageState?.bytes ?? null,
+      // A download under way on this host, and how the last one ended while the image is absent.
+      imagePulling: pull.pulling,
+      imageFailure: imageState === null && !pull.pulling ? pull.failure : null,
       toolsBytes: sum(ours.volumes),
       spacesBytes: sum(spaces),
       freeBytes: sum(freeTools) + (freesImage ? imageState.bytes : 0) + freeRetired,

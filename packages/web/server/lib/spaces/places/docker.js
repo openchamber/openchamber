@@ -70,7 +70,12 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
   const engine = createDockerEngine({ runCommand, dockerPath });
   const { run, docker, inspect, removeOne, removeStoppedContainer } = engine;
   const tools = createDockerTools({ engine, owner, toolsSource, image: SPACE_BASE_IMAGE, now, wait });
-  const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, retiredImages: RETIRED_SPACE_BASE_IMAGES, tools });
+  // The one download of the image under way, shared by a creation that needs it and the places
+  // page's button, and how the last one ended, so the page can say why the image is still absent.
+  let imagePull = null;
+  let imagePullFailure = null;
+  const imagePullState = () => ({ pulling: imagePull !== null, failure: imagePullFailure });
+  const disk = createDockerDisk({ engine, runCommand, colimaPath, owner, image: SPACE_BASE_IMAGE, retiredImages: RETIRED_SPACE_BASE_IMAGES, tools, imagePullState });
 
   /** Every resource that carries our marker and this owner, optionally for one space. Found by label only. */
   const findResources = async (spaceId) => {
@@ -162,18 +167,34 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     };
   };
 
+  /** Downloads the image once; a second call while one runs waits on the same pull. */
+  const pullImage = () => {
+    if (imagePull === null) {
+      imagePull = run(['pull', SPACE_BASE_IMAGE], PULL_TIMEOUT_MS)
+        .then((result) => {
+          if (result.code !== 0) {
+            throw new SpaceError(
+              'image_pull_failed',
+              `Could not download the base image: ${result.stderr.trim() || `exit code ${result.code}`}. Common causes: no internet access on the Docker machine, or Docker's credential helper cannot run in this session.`,
+            );
+          }
+          imagePullFailure = null;
+        })
+        .catch((error) => {
+          imagePullFailure = { code: error.code ?? 'image_pull_failed', message: error.message };
+          throw error;
+        })
+        .finally(() => { imagePull = null; });
+    }
+    return imagePull;
+  };
+
   const ensureImage = async () => {
     const present = await inspect('image', SPACE_BASE_IMAGE);
     if (present) {
       return;
     }
-    const result = await run(['pull', SPACE_BASE_IMAGE], PULL_TIMEOUT_MS);
-    if (result.code !== 0) {
-      throw new SpaceError(
-        'image_pull_failed',
-        `Could not download the base image: ${result.stderr.trim() || `exit code ${result.code}`}. Common causes: no internet access on the Docker machine, or Docker's credential helper cannot run in this session.`,
-      );
-    }
+    await pullImage();
   };
 
   const verifyContainer = async (spaceId, container) => {
@@ -627,5 +648,5 @@ export function createDockerPlace({ runCommand, openCommandStream = openCommandS
     return starting.get(spaceId);
   };
 
-  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp };
+  return { id: DOCKER_PLACE_ID, check, create, list, exec, execArgv, connect, stop, start, remove, verify, readDisk: disk.read, cleanUpDisk: disk.cleanUp, pullImage, imagePulling: () => imagePull !== null };
 }

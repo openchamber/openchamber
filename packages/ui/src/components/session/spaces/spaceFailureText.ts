@@ -26,6 +26,8 @@ const KNOWN: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
   ['space_setup_running', 'spaces.failure.setupRunning'],
   ['space_setup_no_commands', 'spaces.group.setup.noCommands'],
   ['space_setup_shared_skipped', 'spaces.group.setup.sharedSkipped'],
+  ['image_pull_failed', 'spaces.failure.imagePull'],
+  ['image_pulling', 'spaces.failure.imagePulling'],
 ]);
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
