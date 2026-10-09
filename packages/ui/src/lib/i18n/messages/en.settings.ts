@@ -2264,6 +2264,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Auto-save files',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Auto-save files',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Automatically save file edits after you stop typing. Disable to require manual save.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Confirm before moving files',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'Wide chat layout',
   'settings.openchamber.visual.field.wideChatLayout': 'Wide Chat Layout',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Wrap code block lines',

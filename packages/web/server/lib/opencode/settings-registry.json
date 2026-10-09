@@ -408,6 +408,9 @@
     "autoSaveEnabled": {
       "scope": "profile"
     },
+    "confirmFileTreeMove": {
+      "scope": "profile"
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },

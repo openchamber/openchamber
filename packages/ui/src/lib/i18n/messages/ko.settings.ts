@@ -2241,6 +2241,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': '파일 자동 저장',
   'settings.openchamber.visual.field.autoSaveEnabled': '파일 자동 저장',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': '입력을 멈춘 후 파일 편집 내용을 자동으로 저장합니다. 끄면 수동으로 저장해야 합니다.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': '파일을 이동하기 전에 확인',
   'settings.openchamber.visual.field.wideChatLayoutAria': '넓은 채팅 레이아웃',
   'settings.openchamber.visual.field.wideChatLayout': '넓은 채팅 레이아웃',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '인라인 어시스턴트 작업',

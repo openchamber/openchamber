@@ -176,6 +176,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'],
   },
   {
+    id: 'appearance.confirm-file-tree-move',
+    page: 'general',
+    titleKey: 'settings.openchamber.visual.field.confirmFileTreeMove',
+    keywords: ['files', 'tree', 'move', 'drag', 'drop', 'confirm'],
+    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+  },
+  {
     id: 'appearance.file-editor-keymap',
     page: 'general',
     titleKey: 'settings.openchamber.visual.field.fileEditorKeymap',

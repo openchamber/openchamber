@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
 import {
+  isFileTreeDragWithinClickSlop,
   recordFileTreeDragStart,
   resetFileTreeDragClickState,
   shouldTreatFileTreeDragEndAsClick,
@@ -72,5 +73,18 @@ describe('file tree drag-click fallback (#2368)', () => {
     expect(
       shouldTreatFileTreeDragEndAsClick({ clientX: 101, clientY: 201, dataTransfer: null }),
     ).toBe(true);
+  });
+});
+
+describe('file tree move drags near their origin', () => {
+  test('stay within the click slop until the pointer travels past it', () => {
+    recordFileTreeDragStart({ clientX: 100, clientY: 200 });
+
+    expect(isFileTreeDragWithinClickSlop({ clientX: 104, clientY: 207 })).toBe(true);
+    expect(isFileTreeDragWithinClickSlop({ clientX: 100, clientY: 230 })).toBe(false);
+  });
+
+  test('are never within the slop without a recorded start', () => {
+    expect(isFileTreeDragWithinClickSlop({ clientX: 100, clientY: 200 })).toBe(false);
   });
 });

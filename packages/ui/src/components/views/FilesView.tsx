@@ -61,6 +61,7 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken, subscribeRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { subscribeToFileContentInvalidation } from '@/lib/fileContentInvalidation';
+import { isFilePathMoveInFlight, rebaseMovedPath, rebaseMovedPathKeys, subscribeToFilePathMoves } from '@/lib/filePathMoves';
 import { DiagramEditor } from '@/components/diagram';
 import { EMPTY_CANVAS_READ, shouldShowFileCanvas, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
 import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
@@ -80,6 +81,7 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { DirectoryRequests } from './files/directoryRequests';
 import { useFileTreeUpload } from './files/useFileTreeUpload';
+import { moveWorkspacePath } from './files/moveWorkspacePath';
 import { areDirectoryNodesEqual, buildFileTreeStatusIndex } from './files/fileTreeStatus';
 import { BinaryArtifact } from './files/previews/BinaryArtifact';
 import { FontArtifact } from './files/previews/FontArtifact';
@@ -1027,7 +1029,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const [desktopImageSrc, setDesktopImageSrc] = React.useState<string>('');
 
   const [loadedFilePath, setLoadedFilePath] = React.useState<string | null>(null);
-  const filePositionKey = JSON.stringify([getRuntimeKey(), root, loadedFilePath]);
+  const loadedFilePathRef = React.useRef(loadedFilePath);
+  loadedFilePathRef.current = loadedFilePath;
+  // Set when a move or rename lands on the loaded file (`lib/filePathMoves.ts`):
+  // once the tabs point at `to`, the editor adopts it with its unsaved edits
+  // instead of re-reading the file.
+  const pendingPathMoveRef = React.useRef<{ from: string; to: string } | null>(null);
+  // Editors are keyed by the path the file was opened under, so adopting a
+  // moved path does not remount them and drop their undo history or edits.
+  const [documentPathAlias, setDocumentPathAlias] = React.useState<{ path: string; documentPath: string } | null>(null);
+  const editorDocumentPath = documentPathAlias && documentPathAlias.path === loadedFilePath
+    ? documentPathAlias.documentPath
+    : loadedFilePath;
+  const filePositionKey = JSON.stringify([getRuntimeKey(), root, editorDocumentPath]);
 
   const [draftContent, setDraftContent] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
@@ -1246,6 +1260,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   } = fileCommentController;
 
   React.useEffect(() => {
+    // A moved file is the same document under a new path: it keeps its draft.
+    if (pendingPathMoveRef.current?.to === selectedFile?.path) return;
     setLineSelection(null);
     reset();
     setDraftContent('');
@@ -1590,33 +1606,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       const oldPath = dialogData.path;
       const parentDir = oldPath.split('/').slice(0, -1).join('/');
       const prefix = parentDir ? `${parentDir}/` : '';
-      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
+      const newName = dialogInputValue.trim();
+      const newPath = normalizePath(`${prefix}${newName}`);
 
-      await files.rename(oldPath, newPath)
-        .then(async (result) => {
-          if (result.success) {
-            toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
-            await refreshDirectory(parentDir);
-            if (root) {
-              removeOpenPathsByPrefix(root, oldPath);
-            }
-            if (selectedFile?.path === oldPath || selectedFile?.path.startsWith(`${oldPath}/`)) {
-              if (root) {
-                setSelectedPath(root, null);
-              }
-              setFileContent('');
-              setFileError(null);
-              setDesktopImageSrc('');
-              setLoadedFilePath(null);
-              if (isMobile) {
-                setShowMobilePageContent(false);
-              }
-            }
-          }
+      // Open tabs and the editor, unsaved edits included, follow the new name.
+      try {
+        const result = await moveWorkspacePath(files, root, oldPath, newPath);
+        if (result === 'moved') {
+          toast.success(t('sidebarFilesTree.toast.renamedSuccessfully'));
+          await refreshDirectory(parentDir);
           finishDialogOperation();
-        })
-        .catch(() => failDialogOperation(t('sidebarFilesTree.toast.operationFailed')))
-        .finally(done);
+        } else if (result === 'conflict') {
+          failDialogOperation(t('sidebarFilesTree.toast.nameTaken', {
+            name: newName,
+            folder: getDisplayPath(root, parentDir) || t('sidebarFilesTree.dialog.rootFallback'),
+          }));
+        } else {
+          failDialogOperation(t('sidebarFilesTree.toast.operationFailed'));
+        }
+      } catch {
+        failDialogOperation(t('sidebarFilesTree.toast.operationFailed'));
+      } finally {
+        done();
+      }
       return;
     }
 
@@ -1838,6 +1850,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return true;
     }
 
+    // The file is moving: a write now would recreate it at the old path. Once
+    // the editor adopts the new path, autosave runs again and saves there.
+    if (pendingPathMoveRef.current || isFilePathMoveInFlight(selectedFile.path)) {
+      return false;
+    }
+
     setIsSaving(true);
 
     try {
@@ -2046,6 +2064,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return activeFileLoadIdRef.current === loadId && currentPath === node.path;
     };
 
+    pendingPathMoveRef.current = null;
+    setDocumentPathAlias(null);
     setFileError(null);
     setDesktopImageSrc('');
     setLoadedFilePath(null);
@@ -2248,7 +2268,38 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     void ensurePathVisible(selectedFile.path, false);
   }, [ensurePathVisible, selectedFile?.path]);
 
+  React.useEffect(() => subscribeToFilePathMoves(({ runtimeKey, from, to }) => {
+    if (runtimeKey !== getRuntimeKey()) return;
+    // View modes (preview or source, table or text) follow the file.
+    textViewModeByPathRef.current = rebaseMovedPathKeys(textViewModeByPathRef.current, from, to);
+    mdViewModeByPathRef.current = rebaseMovedPathKeys(mdViewModeByPathRef.current, from, to);
+    htmlViewModeByPathRef.current = rebaseMovedPathKeys(htmlViewModeByPathRef.current, from, to);
+    svgViewModeByPathRef.current = rebaseMovedPathKeys(svgViewModeByPathRef.current, from, to);
+    mermaidViewModeByPathRef.current = rebaseMovedPathKeys(mermaidViewModeByPathRef.current, from, to);
+    tableViewModeByPathRef.current = rebaseMovedPathKeys(tableViewModeByPathRef.current, from, to);
+    drawioViewModeByPathRef.current = rebaseMovedPathKeys(drawioViewModeByPathRef.current, from, to);
+    canvasViewModeByPathRef.current = rebaseMovedPathKeys(canvasViewModeByPathRef.current, from, to);
+    const pending = pendingPathMoveRef.current;
+    const heldPath = pending?.to ?? loadedFilePathRef.current;
+    const movedPath = heldPath ? rebaseMovedPath(heldPath, from, to) : null;
+    if (heldPath && movedPath) {
+      pendingPathMoveRef.current = { from: pending?.from ?? heldPath, to: movedPath };
+    }
+  }), []);
+
   React.useEffect(() => {
+    // Adopt a moved file before anything reloads it, visible or not: the
+    // draft stays, only the path the editor saves to changes.
+    const pendingMove = pendingPathMoveRef.current;
+    if (pendingMove && selectedFile?.path === pendingMove.to) {
+      pendingPathMoveRef.current = null;
+      if (loadedFilePath === pendingMove.from) {
+        setDocumentPathAlias({ path: pendingMove.to, documentPath: editorDocumentPath ?? pendingMove.from });
+        setLoadedFilePath(pendingMove.to);
+        return;
+      }
+    }
+
     if (!visible) return;
     if (!selectedFile) {
       activeFileLoadIdRef.current += 1;
@@ -2269,7 +2320,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         loadingFilePathRef.current = null;
       }
     });
-  }, [fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile, visible]);
+  }, [editorDocumentPath, fileContentRevision, loadSelectedFile, loadedFilePath, selectedFile, visible]);
 
   // Sync isDirty to a ref so the polling interval can read the latest value
   // without isDirty in its dependency array (avoids interval restart on every edit/save).
@@ -2970,6 +3021,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const saveDiagramXml = React.useCallback(async (path: string, xml: string) => {
     if (!files.writeFile || xml === diagramSavedXmlRef.current) {
+      return false;
+    }
+    if (pendingPathMoveRef.current || isFilePathMoveInFlight(path)) {
       return false;
     }
 
@@ -4423,7 +4477,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const canvasInFullscreen = mode === 'full' && isFullscreen;
   const canvasKey = selectedFile
-    ? `${selectedFile.path}:${canvasRemountNonce}:${canvasInFullscreen ? 'fullscreen' : 'docked'}`
+    ? `${editorDocumentPath ?? selectedFile.path}:${canvasRemountNonce}:${canvasInFullscreen ? 'fullscreen' : 'docked'}`
     : '';
   const canvasElement = showCanvas && selectedFile && guestFileEditor ? (
     <div ref={canvasWrapperRef} className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
@@ -4682,7 +4736,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
-                key={`${selectedFile.path}:${drawioRemountNonce}`}
+                key={`${editorDocumentPath ?? selectedFile.path}:${drawioRemountNonce}`}
                 ref={diagramEditorRef}
                 xml={diagramEditorXml}
                 onChange={handleDiagramChange}

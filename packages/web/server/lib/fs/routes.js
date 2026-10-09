@@ -1564,12 +1564,36 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'Source and destination must share the same workspace root' });
       }
 
+      if (
+        resolvedOld.resolved !== resolvedNew.resolved
+        && isPathWithinRoot(resolvedNew.resolved, resolvedOld.resolved, path, os)
+      ) {
+        return res.status(400).json({ error: 'Cannot move a folder into itself' });
+      }
+
+      // fs.rename replaces an existing destination file without asking. Node
+      // has no no-replace rename, so check first; a destination created after
+      // this check can still be replaced. The same entry under another letter
+      // case (a case-only rename on a case-insensitive disk) is not a conflict.
+      const destination = await fsPromises.lstat(resolvedNew.resolved).catch((error) => {
+        if (error?.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      });
+      if (destination) {
+        const source = await fsPromises.lstat(resolvedOld.resolved);
+        if (destination.dev !== source.dev || destination.ino !== source.ino) {
+          return res.status(409).json({ error: 'Destination already exists', reason: 'already-exists' });
+        }
+      }
+
       await fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved);
       return res.json({ success: true, path: resolvedNew.resolved });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
-        return res.status(404).json({ error: 'Source path not found' });
+        return res.status(404).json({ error: 'Source path not found', reason: 'not-found' });
       }
       if (isOsPermissionError(err)) {
         return sendOsPermissionDenied(res, 'Access denied');

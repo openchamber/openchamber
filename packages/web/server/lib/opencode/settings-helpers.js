@@ -446,6 +446,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.autoSaveEnabled === 'boolean') {
       result.autoSaveEnabled = candidate.autoSaveEnabled;
     }
+    if (candidate.confirmFileTreeMove === true || candidate.confirmFileTreeMove === false) {
+      result.confirmFileTreeMove = candidate.confirmFileTreeMove;
+    }
     if (typeof candidate.diffWrapLines === 'boolean') {
       result.diffWrapLines = candidate.diffWrapLines;
     }

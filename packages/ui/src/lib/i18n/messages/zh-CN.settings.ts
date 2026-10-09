@@ -2241,6 +2241,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': '自动保存文件',
   'settings.openchamber.visual.field.autoSaveEnabled': '自动保存文件',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': '停止输入后自动保存文件编辑内容。关闭后需手动保存。',
+  'settings.openchamber.visual.field.confirmFileTreeMove': '移动文件前确认',
   'settings.openchamber.visual.field.wideChatLayoutAria': '宽聊天布局',
   'settings.openchamber.visual.field.wideChatLayout': '宽聊天布局',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',

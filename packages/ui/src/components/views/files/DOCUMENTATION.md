@@ -220,6 +220,37 @@ matches both extensions, and `isMarkdownFile` excludes `.excalidraw.md` so an
 Obsidian drawing never takes the markdown preview path; its source view is the
 markdown document.
 
+## Moving and renaming
+
+Dropping a row of the sidebar tree on a folder moves the entry there
+(`SidebarFilesTree`, drop rules in `components/layout/fileTreeMoveDrag.ts`).
+It is the same native drag that attaches a file to the chat, so the drop
+target decides what happens. A file row stands for the folder it is in and
+the empty space below the tree for the root, as in VS Code. The entry's own
+folder, the entry itself and a folder's own subfolders refuse the drop, and a
+drop within the click slop of where the drag began stays a click (#2368).
+Touch-only devices do not move: the tree scrolls under the finger. A dialog
+asks first unless the user turned it off (`confirmFileTreeMove`, Settings >
+General). The server refuses a name that already exists in the target and the
+tree says so in a toast; nothing is replaced or renamed. VS Code has no file
+tree, so nothing moves there.
+
+A move and both rename dialogs (the sidebar tree and `FilesView`'s own tree)
+go through `moveWorkspacePath`. It renames through the runtime and then
+points the context panel file tabs and `useFilesViewTabsStore` (open, selected
+and expanded paths) at the new path with `moveContextFilePaths`. A file tab's
+id comes from its path, so the tab is rebuilt in place and stays active.
+
+The open editor keeps unsaved edits through a move (`lib/filePathMoves.ts`).
+While the rename request is in flight, `FilesView` refuses saves of paths
+under the source, so autosave cannot recreate the file at its old path. When
+the move commits, the editor notes it before the tabs move; once the selected
+path becomes the new one, it adopts that path instead of re-reading the file,
+which would replace the draft. Editors stay keyed by the path the file was
+opened under, so the text editor, a canvas or a diagram is not remounted and
+keeps its edits and undo history. The draft reset that normally follows a
+change of the selected path is skipped for a moved file.
+
 ## Uploads
 
 `useFileTreeUpload` owns uploads for every file browser: `FilesView`,

@@ -2143,6 +2143,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Enregistrement automatique des fichiers',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Enregistrement automatique des fichiers',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Enregistre automatiquement les modifications après l’arrêt de la saisie. Désactivez pour exiger un enregistrement manuel.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Confirmer avant de déplacer des fichiers',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'Large disposition de discussion',
   'settings.openchamber.visual.field.wideChatLayout': 'Disposition de discussion large',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Actions intégrées de l\'assistant',

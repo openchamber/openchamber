@@ -2264,6 +2264,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Bestanden automatisch opslaan',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Bestanden automatisch opslaan',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Sla bestandswijzigingen automatisch op zodra u stopt met typen. Zet dit uit om handmatig opslaan te vereisen.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Bevestigen voordat bestanden worden verplaatst',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'Brede chatindeling',
   'settings.openchamber.visual.field.wideChatLayout': 'Brede chatindeling',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Regels in codeblokken afbreken',

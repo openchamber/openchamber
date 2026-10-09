@@ -73,6 +73,33 @@ describe('useFilesViewTabsStore', () => {
     expect(state?.expandedPaths).toEqual(['/repo/src', '/repo/other']);
   });
 
+  test('moves open, selected and expanded paths with a moved folder', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+    store.addOpenPath(root, '/repo/src/a.ts');
+    store.addOpenPath(root, '/repo/src/deep/b.ts');
+    store.addOpenPath(root, '/repo/srcx/c.ts');
+    store.setSelectedPath(root, '/repo/src/deep/b.ts');
+    store.expandPaths(root, ['/repo/src', '/repo/src/deep', '/repo/srcx']);
+
+    store.movePaths(root, '/repo/src', '/repo/lib/src');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.openPaths).toEqual(['/repo/lib/src/a.ts', '/repo/lib/src/deep/b.ts', '/repo/srcx/c.ts']);
+    expect(state?.selectedPath).toBe('/repo/lib/src/deep/b.ts');
+    expect(state?.expandedPaths).toEqual(['/repo/lib/src', '/repo/lib/src/deep', '/repo/srcx']);
+  });
+
+  test('keeps the same state when a move touches none of its paths', () => {
+    const root = '/repo';
+    useFilesViewTabsStore.getState().addOpenPath(root, '/repo/a.ts');
+    const before = useFilesViewTabsStore.getState().byRoot;
+
+    useFilesViewTabsStore.getState().movePaths(root, '/repo/b.ts', '/repo/lib/b.ts');
+
+    expect(useFilesViewTabsStore.getState().byRoot).toBe(before);
+  });
+
   test('restores independent active projections across runtime switches', () => {
     useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
     useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');

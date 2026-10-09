@@ -2241,6 +2241,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.autoSaveEnabledAria": "Guardado automático de archivos",
   "settings.openchamber.visual.field.autoSaveEnabled": "Guardado automático de archivos",
   "settings.openchamber.visual.field.autoSaveEnabledInfo": "Guarda automáticamente las ediciones del archivo después de dejar de escribir. Desactívalo para exigir un guardado manual.",
+  "settings.openchamber.visual.field.confirmFileTreeMove": "Confirmar antes de mover archivos",
   "settings.openchamber.visual.field.wideChatLayoutAria": "Diseño de chat ancho",
   "settings.openchamber.visual.field.wideChatLayout": "Diseño de chat ancho",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Acciones en línea del asistente",

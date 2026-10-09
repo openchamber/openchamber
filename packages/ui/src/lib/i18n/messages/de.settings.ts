@@ -2425,6 +2425,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Dateien automatisch speichern',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Dateien automatisch speichern',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Dateiänderungen automatisch speichern, nachdem du mit dem Tippen aufgehört hast. Deaktivieren, um manuelles Speichern zu verlangen.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Vor dem Verschieben von Dateien nachfragen',
   'settings.openchamber.visual.field.draftStartersVisible': 'Starter auf dem Bildschirm für neue Sitzungen anzeigen',
   'settings.openchamber.visual.field.draftStartersVisibleAria': 'Starter auf dem Bildschirm für neue Sitzungen anzeigen',
   'settings.openchamber.visual.option.themeMode.system.description': 'Systemeinstellung übernehmen',

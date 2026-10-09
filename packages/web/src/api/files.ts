@@ -33,7 +33,7 @@ type WebDirectoryListResponse = {
   entries?: WebDirectoryEntry[];
 };
 
-type WebFileUploadResponse = {
+type WebFileMutationResponse = {
   success?: boolean;
   path?: string;
   error?: string;
@@ -249,14 +249,14 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     });
 
     if (!response.ok) {
-      const error: WebFileUploadResponse = await response.json().catch(() => ({ error: response.statusText }));
+      const error: WebFileMutationResponse = await response.json().catch(() => ({ error: response.statusText }));
       throw new FilesystemError(error.error || 'Failed to upload file', {
         reason: parseFilesystemErrorReason(error.reason),
         status: response.status,
       });
     }
 
-    const result: WebFileUploadResponse = await response.json().catch(() => ({}));
+    const result: WebFileMutationResponse = await response.json().catch(() => ({}));
     return {
       success: Boolean(result.success),
       path: result.path ? normalizePath(result.path) : target,
@@ -288,14 +288,17 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to rename file');
+      const error: WebFileMutationResponse = await response.json().catch(() => ({ error: response.statusText }));
+      throw new FilesystemError(error.error || 'Failed to rename file', {
+        reason: parseFilesystemErrorReason(error.reason),
+        status: response.status,
+      });
     }
 
-    const result = await response.json().catch(() => ({}));
+    const result: WebFileMutationResponse = await response.json().catch(() => ({}));
     return {
-      success: Boolean((result as { success?: boolean }).success),
-      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : newPath,
+      success: Boolean(result.success),
+      path: result.path ? normalizePath(result.path) : newPath,
     };
   },
 

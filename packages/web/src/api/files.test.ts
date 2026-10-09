@@ -190,6 +190,20 @@ describe('createWebFilesAPI', () => {
     });
   });
 
+  it('reports a rename onto an existing name as a conflict', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });
+    runtimeFetchMock.mockResolvedValueOnce(Response.json(
+      { error: 'Destination already exists', reason: 'already-exists' },
+      { status: 409 },
+    ));
+
+    await expect(api.rename?.('/workspace/src/a.ts', '/workspace/lib/a.ts')).rejects.toMatchObject({
+      reason: 'already-exists',
+      status: 409,
+    });
+  });
+
   it('opens the native share sheet for downloads in the Capacitor app', async () => {
     const { createWebFilesAPI } = await import('./files');
     const api = createWebFilesAPI({ urls, getDirectory: () => '/workspace' });

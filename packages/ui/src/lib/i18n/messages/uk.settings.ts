@@ -2241,6 +2241,7 @@ export const settingsDict = {
   "settings.openchamber.visual.field.autoSaveEnabledAria": "Автозбереження файлів",
   "settings.openchamber.visual.field.autoSaveEnabled": "Автозбереження файлів",
   "settings.openchamber.visual.field.autoSaveEnabledInfo": "Автоматично зберігати зміни у файлі після того, як ви припините друкувати. Вимкніть, щоб зберігати лише вручну.",
+  "settings.openchamber.visual.field.confirmFileTreeMove": "Питати перед переміщенням файлів",
   "settings.openchamber.visual.field.wideChatLayoutAria": "Широкий макет чату",
   "settings.openchamber.visual.field.wideChatLayout": "Широкий макет чату",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Вбудовані дії асистента",

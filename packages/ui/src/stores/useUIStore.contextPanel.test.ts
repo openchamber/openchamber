@@ -34,6 +34,34 @@ describe('useUIStore preview file tabs', () => {
     expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(fileTabs()[1].id);
   });
 
+  test('a moved folder takes its file tabs along, in place, keeping the active one active', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/src/a.ts');
+    store.openContextFile('/repo', '/repo/srcx/b.ts');
+    store.openContextFile('/repo', '/repo/src/deep/c.ts', { preview: true });
+
+    store.moveContextFilePaths('/repo', '/repo/src', '/repo/lib/src');
+
+    expect(fileTabs().map((tab) => [tab.targetPath, tab.preview])).toEqual([
+      ['/repo/lib/src/a.ts', false],
+      ['/repo/srcx/b.ts', false],
+      ['/repo/lib/src/deep/c.ts', true],
+    ]);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe(fileTabs()[2].id);
+    expect(fileTabs()[2].id).toBe('file:/repo/lib/src/deep/c.ts');
+  });
+
+  test('a moved tab replaces a stale tab already open at its destination', () => {
+    const store = useUIStore.getState();
+    store.openContextFile('/repo', '/repo/lib/a.ts');
+    store.openContextFile('/repo', '/repo/src/a.ts');
+
+    store.moveContextFilePaths('/repo', '/repo/src/a.ts', '/repo/lib/a.ts');
+
+    expect(fileTabs().map((tab) => tab.targetPath)).toEqual(['/repo/lib/a.ts']);
+    expect(useUIStore.getState().contextPanelByDirectory['/repo'].activeTabId).toBe('file:/repo/lib/a.ts');
+  });
+
   test('a regular open, an explicit pin, or a preview of an open file keeps the tab', () => {
     const store = useUIStore.getState();
     store.openContextFile('/repo', '/repo/a.ts', { preview: true });

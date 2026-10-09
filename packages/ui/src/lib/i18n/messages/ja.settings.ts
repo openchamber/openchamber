@@ -2274,6 +2274,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'ファイルの自動保存',
   'settings.openchamber.visual.field.autoSaveEnabled': 'ファイルの自動保存',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': '入力を止めた後にファイルの編集内容を自動保存します。無効にすると手動保存が必要になります。',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'ファイルを移動する前に確認する',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'ワイドチャットレイアウト',
   'settings.openchamber.visual.field.wideChatLayout': 'ワイドチャットレイアウト',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'インラインアシスタントアクション',

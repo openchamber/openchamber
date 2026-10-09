@@ -2165,6 +2165,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Dosyaları otomatik kaydet',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Dosyaları otomatik kaydet',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Yazmayı bıraktıktan sonra dosya düzenlemelerini otomatik kaydeder. Devre dışı bırakırsanız manuel kaydetme gerekir.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Dosyaları taşımadan önce onay iste',
   'settings.openchamber.visual.field.wideChatLayoutAria': 'Geniş sohbet yerleşimi',
   'settings.openchamber.visual.field.wideChatLayout': 'Geniş Sohbet Yerleşimi',
   'settings.openchamber.visual.field.codeBlockLineWrapAria': 'Kod bloğu satırlarını kaydır',

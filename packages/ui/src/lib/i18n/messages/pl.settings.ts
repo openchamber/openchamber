@@ -1269,6 +1269,7 @@ export const settingsDict = {
   'settings.openchamber.visual.field.autoSaveEnabledAria': 'Autozapis plików',
   'settings.openchamber.visual.field.autoSaveEnabled': 'Autozapis plików',
   'settings.openchamber.visual.field.autoSaveEnabledInfo': 'Automatycznie zapisuje edycje pliku po zatrzymaniu pisania. Wyłącz, aby wymagać ręcznego zapisu.',
+  'settings.openchamber.visual.field.confirmFileTreeMove': 'Potwierdzaj przed przeniesieniem plików',
   'settings.openchamber.visual.field.terminalFontSize': 'Rozmiar czcionki terminala',
   'settings.openchamber.visual.field.terminalShell': 'Powłoka terminala',
   'settings.openchamber.visual.field.terminalShellAria': 'Wybierz powłokę terminala',
