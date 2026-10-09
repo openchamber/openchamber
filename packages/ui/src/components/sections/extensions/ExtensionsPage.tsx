@@ -554,13 +554,21 @@ export const ExtensionsPage: React.FC = () => {
     source: InstallSource,
     options: { allowConflictDialog?: boolean } = {},
   ): Promise<boolean> => {
+    if (!result.ok && result.code === 'unreadable') {
+      // The server installed it; the list shows it as a row that cannot load.
+      setInstallValue('');
+      setReinstall(null);
+      toast.error(t(errorToastKey(result.code)));
+      await loadGuestCatalog();
+      return false;
+    }
     if (!result.ok) {
       if (
         options.allowConflictDialog !== false
         && (result.code === 'id-taken' || result.code === 'already-installed')
       ) {
         const existing = result.id
-          ? guests.find((guest) => guest.id === result.id)
+          ? guests.find((guest) => guest.id === result.id) ?? unreadable.find((guest) => guest.id === result.id)
           : undefined;
         setReinstall({
           source,

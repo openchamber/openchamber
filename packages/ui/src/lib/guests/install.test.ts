@@ -69,6 +69,14 @@ describe('installation diagnostics', () => {
     } finally { fetch.mockRestore(); }
   });
 
+  test('an installed row this build cannot read is reported as installed but unreadable', async () => {
+    const row = { id: 'newer', name: 'Newer', icon: 'window', capabilities: { requested: ['telepathy'], granted: [] } };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ guest: row }, { status: 201 }));
+    try {
+      expect(await installGuest('/tmp/extension')).toEqual({ ok: false, code: 'unreadable' });
+    } finally { fetch.mockRestore(); }
+  });
+
   test('retains actionable install errors and identifies the upload route', async () => {
     const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ error: 'host-too-old', required: '9.0.0', id: 'hello' }, { status: 400 }));
     try {

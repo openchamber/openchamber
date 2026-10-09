@@ -177,6 +177,22 @@ export const parseGuestCatalogJson = (json: string): GuestCatalog | null => {
   }
 };
 
+/**
+ * The answer to an install: the row, `'unreadable'` when the server installed
+ * a package and answered with a row this build cannot read, or null when the
+ * answer is not an install row at all.
+ */
+export const parseInstallAnswerJson = (json: string): InstalledGuest | 'unreadable' | null => {
+  try {
+    const raw: unknown = JSON.parse(json);
+    const guest = z.object({ guest: installedGuestSchema }).safeParse(raw);
+    if (guest.success) return guest.data.guest;
+    return z.object({ guest: z.object({ id: z.string() }) }).safeParse(raw).success ? 'unreadable' : null;
+  } catch {
+    return null;
+  }
+};
+
 export const parseInstalledGuestJson = (json: string): InstalledGuest | null => {
   try {
     const parsed = z.object({ guest: installedGuestSchema }).safeParse(JSON.parse(json));

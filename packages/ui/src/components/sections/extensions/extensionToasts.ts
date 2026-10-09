@@ -18,6 +18,7 @@ export const errorToastKey = (code: InstallGuestErrorCode): I18nKey => {
   if (code === 'extract-failed') return 'settings.extensions.toast.extractFailed';
   if (code === 'too-large') return 'settings.extensions.toast.zipTooLarge';
   if (code === 'enterprise-mode') return 'settings.extensions.toast.enterpriseMode';
+  if (code === 'unreadable') return 'settings.extensions.toast.installedUnreadable';
   return 'settings.extensions.toast.failed';
 };
 

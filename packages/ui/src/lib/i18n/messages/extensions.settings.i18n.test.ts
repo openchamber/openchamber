@@ -56,6 +56,7 @@ const requiredKeys = [
   'settings.extensions.service.permissions',
   'settings.extensions.status.needsApproval',
   'settings.extensions.status.unreadable',
+  'settings.extensions.toast.installedUnreadable',
   'settings.extensions.unreadable.hint',
   'settings.extensions.unreadable.unnamed',
   'settings.extensions.review',
