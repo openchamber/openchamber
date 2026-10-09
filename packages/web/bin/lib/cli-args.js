@@ -1,4 +1,5 @@
 import { TunnelCliError, EXIT_CODE } from './cli-errors.js';
+import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_TAIL_LINES = 200;
@@ -83,7 +84,11 @@ function parseArgs(argv = process.argv.slice(2)) {
   const options = {
     port: DEFAULT_PORT,
     host: undefined,
-    uiPassword: process.env.OPENCHAMBER_UI_PASSWORD || undefined,
+    // A password OpenChamber itself put into this shell (the desktop app's, a
+    // running server's) is not a default for a new one.
+    uiPassword: injectedEnvKeys(process.env).has('OPENCHAMBER_UI_PASSWORD')
+      ? undefined
+      : process.env.OPENCHAMBER_UI_PASSWORD || undefined,
     json: false,
     all: false,
     follow: true,

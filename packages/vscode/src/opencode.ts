@@ -11,6 +11,7 @@ import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkingDirectoryChange } from './workingDirectoryChange';
 import { reapOrphanedProcesses } from './opencodeProcessRegistry';
 import { applyProviderEnvAliases } from './provider-env-aliases';
+import { assignInjectedEnv } from './injected-env';
 import { checkOpenCodeVersionOutput } from './opencodeVersion';
 import { isSameOpenCodeServer } from './opencodeServiceUrl';
 import { runOpenCodeCliUpgrade } from '../../web/server/lib/opencode/cli-upgrade.js';
@@ -745,8 +746,10 @@ export function createOpenCodeManager(context: vscode.ExtensionContext): OpenCod
     managedPassword = normalized;
     managedPasswordSource = source;
     // The managed server inherits process.env, and OpenCode 2 prefers OPENCODE_PASSWORD.
-    process.env.OPENCODE_PASSWORD = normalized;
-    process.env.OPENCODE_SERVER_PASSWORD = normalized;
+    assignInjectedEnv(process.env, {
+      OPENCODE_PASSWORD: normalized,
+      OPENCODE_SERVER_PASSWORD: normalized,
+    });
     return normalized;
   };
 

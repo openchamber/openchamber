@@ -66,7 +66,7 @@ For a headless server that starts at login and is meant for desktop or mobile cl
 openchamber startup enable --port 3000 --api-only --host 0.0.0.0 --ui-password secret
 ```
 
-`startup enable` snapshots your current environment into the service so it behaves more like starting `openchamber` from the same shell. This keeps provider tokens, `PATH`, SSH agent settings, and other CLI auth/config variables available. Use `--no-env-snapshot` if you want a minimal service environment.
+`startup enable` snapshots your current environment into the service so it behaves more like starting `openchamber` from the same shell. This keeps provider tokens, `PATH`, SSH agent settings, and other CLI auth/config variables available. Variables a running OpenChamber put into that shell, such as the desktop app's own settings or the managed OpenCode's password, are left out. Use `--no-env-snapshot` if you want a minimal service environment.
 
 The startup service remembers `--port`, `--host`, `--ui-password`, and `--api-only`. CLI restart and update restart reuse those saved settings.
 

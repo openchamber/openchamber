@@ -1,3 +1,5 @@
+import { assignInjectedEnv } from '../injected-env.js';
+
 export const createOpenCodeAuthStateRuntime = (dependencies) => {
   const {
     crypto,
@@ -39,7 +41,7 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
 
     setAuthPassword(normalized);
     setAuthSource(source);
-    process.env.OPENCODE_SERVER_PASSWORD = normalized;
+    assignInjectedEnv(process.env, { OPENCODE_SERVER_PASSWORD: normalized });
     syncToHmrState();
     return normalized;
   };

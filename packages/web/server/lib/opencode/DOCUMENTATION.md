@@ -352,6 +352,14 @@ OpenChamber tool injection. Managed launch env strips AppImage `ARGV0` before
 spawn so zsh-backed OpenCode tools do not rewrite child argv[0] to the AppImage
 path (#2588).
 
+Everything the lifecycle and `auth-state-runtime.js` set for OpenCode goes
+through `assignInjectedEnv` (`../injected-env.js`), which records the names of
+the variables it changed in `OPENCHAMBER_INJECTED_ENV`. The agent's shell
+inherits that record, so `openchamber startup enable` run there leaves the
+managed config and password out of the service while the user's own
+`OPENCODE_*` exports carry over (#4604). A value the environment already had is
+not recorded: a user-provided password passed through stays the user's.
+
 Before spawn, `applyProviderEnvAliases` fills unset Google credential aliases
 from any present sibling (`GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`,
 `GEMINI_API_KEY`) so a shell that only exports `GEMINI_API_KEY` still satisfies

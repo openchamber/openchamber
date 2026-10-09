@@ -7,6 +7,7 @@ import { EXIT_CODE, TunnelCliError } from './cli-errors.js';
 import { getDataDir } from './cli-paths.js';
 import { hasUiPasswordConfigured } from './cli-network.js';
 import { searchPathFor } from './cli-executables.js';
+import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
 const STARTUP_SERVICE_ID = 'dev.openchamber.web';
 
@@ -79,9 +80,12 @@ function getWindowsStartupWrapperPath() {
 }
 
 function collectStartupEnv(options = {}) {
+  // Variables OpenChamber itself put into this shell (the desktop app's
+  // terminal, an agent's shell) describe that instance, not the service.
+  const injected = injectedEnvKeys(process.env);
   const env = options.envSnapshot === false ? {} : Object.fromEntries(
     Object.entries(process.env)
-      .filter(([key, value]) => shouldPersistStartupEnv(key, value))
+      .filter(([key, value]) => !injected.has(key) && shouldPersistStartupEnv(key, value))
       .map(([key, value]) => [key, String(value)])
   );
 

@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { injectedEnvKeys } from '../injected-env.js';
+
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
 const recordStartupPerformanceMock = vi.fn();
@@ -984,6 +986,13 @@ describe('OpenCode lifecycle', () => {
     expect(options.env.OPENCODE_PASSWORD).toBe('password');
     expect(options.env.OPENCHAMBER_AGENT_TOOL_TOKEN).toBe('ephemeral');
     expect(runtime.getManagedOpenCodeProcessEnv().DATABASE_URL).toBe('postgres://db');
+    // The replaced values are recorded as OpenChamber's; the user's are not.
+    const injected = injectedEnvKeys(options.env);
+    for (const key of ['OPENCODE_PASSWORD', 'OPENCODE_SERVER_PASSWORD', 'OPENCHAMBER_AGENT_TOOL_TOKEN']) {
+      expect(injected.has(key)).toBe(true);
+    }
+    expect(injected.has('DATABASE_URL')).toBe(false);
+    expect(injected.has('PATH')).toBe(false);
 
     await server.close();
   });

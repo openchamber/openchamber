@@ -5,7 +5,7 @@ description: Configure OpenChamber and OpenCode integration with environment var
 
 # Environment Variables
 
-OpenChamber reads these environment variables at startup. For startup services, `openchamber startup enable` snapshots the current environment by default, so rerun it after changing variables you want the service to use.
+OpenChamber reads these environment variables at startup. For startup services, `openchamber startup enable` snapshots the current environment by default, so rerun it after changing variables you want the service to use. Variables OpenChamber itself set in the shell you run it from, such as the desktop app's terminal or an agent's shell, stay out of the service; your own exports carry over from there too, unless you re-export a name OpenChamber already set in that shell, which a regular terminal avoids.
 
 ## Variables for OpenCode, Git and the terminal
 
