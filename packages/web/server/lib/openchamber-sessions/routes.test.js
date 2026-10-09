@@ -883,6 +883,70 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
+  it('starts the session in a worktree made from a pull request', async () => {
+    const createChangeRequestWorktree = vi.fn(async () => ({
+      name: 'feature-fix', branch: 'feature/fix', path: '/repo/worktrees/feature-fix',
+      provenance: { kind: 'contributor-fork' },
+    }));
+    const { app } = createApp({ createChangeRequestWorktree });
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, worktree: { name: 'review-42' }, prompt: 'Review it', model: 'openai/gpt-5.5' })
+      .expect(200);
+
+    expect(createChangeRequestWorktree).toHaveBeenCalledExactlyOnceWith({ directory: '/repo/app', number: 42, name: 'review-42' });
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(getWorktreeBootstrapStatusMock.mock.invocationCallOrder[0])
+      .toBeLessThan(sessionCreateMock.mock.invocationCallOrder[0]);
+    expect(sessionCreateMock).toHaveBeenCalledWith(expect.objectContaining({
+      location: { directory: '/repo/worktrees/feature-fix' },
+    }));
+    expect(response.body.directory).toBe('/repo/worktrees/feature-fix');
+    expect(response.body.worktree.branch).toBe('feature/fix');
+  });
+
+  it('refuses a pull request it cannot make a worktree for and creates no session', async () => {
+    const notFound = Object.assign(new Error('Pull request #42 was not found in acme/app'), { status: 404 });
+    const { app } = createApp({ createChangeRequestWorktree: vi.fn(async () => { throw notFound; }) });
+
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, prompt: 'Review it' })
+      .expect(404, { error: 'Pull request #42 was not found in acme/app' });
+
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+    expect(getWorktreeBootstrapStatusMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pull request where contributor worktrees are not served, with no plain worktree instead', async () => {
+    const { app } = createApp();
+
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42 })
+      .expect(501, { error: 'Worktrees from pull requests are not available here' });
+
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed pull request number or a start ref beside it', async () => {
+    const createChangeRequestWorktree = vi.fn();
+    const { app } = createApp({ createChangeRequestWorktree });
+
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: '#42' })
+      .expect(400, { error: 'pullRequest must be a pull or merge request number, such as 42' });
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', pullRequest: 42, worktree: { startRef: 'main' } })
+      .expect(400, { error: 'pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream' });
+
+    expect(createChangeRequestWorktree).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
   it('does not treat a missing bootstrap record as ready', async () => {
     getWorktreeBootstrapStatusMock
       .mockResolvedValueOnce(null)

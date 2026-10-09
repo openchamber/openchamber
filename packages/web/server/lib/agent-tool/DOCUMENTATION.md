@@ -101,10 +101,14 @@ both settings are `false`.
   create, send, or schedule always wins, even when it relates to the current
   task (strict models otherwise read the old unconditional "never delegate" as
   a hard ban and refused user-requested sends).
-- Optional behavior switches (`worktree`, `goal`, `agent`, `variant`,
-  `returnResult`) state their default and an explicit "only when the user
-  asks" rule so agents do not invent worktrees, goal mode, or result
+- Optional behavior switches (`worktree`, `pullRequest`, `goal`, `agent`,
+  `variant`, `returnResult`) state their default and an explicit "only when
+  the user asks" rule so agents do not invent worktrees, goal mode, or result
   deliveries the user never requested.
+- `pullRequest` is a pull or merge request number in the project. The session
+  starts in a worktree made from it the way the New worktree dialog makes one
+  (`../git/DOCUMENTATION.md`, *Worktree creation from a GitHub pull request*);
+  everything else about the request is resolved on the server.
 - A rule about when to act belongs where the model reads it before choosing a
   tool: the head of the tool description and, when it must hold in every
   session, the session context (`../session-knowledge/`). An action's

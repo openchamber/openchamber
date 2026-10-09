@@ -335,3 +335,84 @@ describe('GET /api/source-control/github/references', () => {
   });
 });
 
+
+describe('pull request head for a worktree made by number', () => {
+  let github;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-github-pr-head-'));
+  const project = path.join(dataDir, 'project');
+  const headSha = 'ABCDEF0123456789abcdef0123456789abcdef01';
+  const forkPull = (overrides = {}) => ({
+    ...pull(42),
+    user: { login: 'alice', id: 9 },
+    head: {
+      ref: 'feature/fix',
+      sha: headSha,
+      repo: {
+        name: 'project',
+        owner: { login: 'alice' },
+        html_url: 'https://github.com/alice/project',
+        clone_url: 'https://github.com/alice/project.git',
+      },
+    },
+    ...overrides,
+  });
+
+  beforeAll(async () => {
+    process.env.OPENCHAMBER_DATA_DIR = dataDir;
+    fs.mkdirSync(project);
+    execFileSync('git', ['init', '-q', project]);
+    execFileSync('git', ['-C', project, 'remote', 'add', 'origin', 'https://github.com/example/project.git']);
+    const { setGitHubAuth, setGhCliDisabled } = await import('./auth.js');
+    setGhCliDisabled(true);
+    ({ accountId } = await setGitHubAuth({ accessToken: 'fake-test-token', user: { id: 7, login: 'tester' } }));
+    github = registerGitHubRoutes(express(), routeOptions());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    if (previousDataDir === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+    else process.env.OPENCHAMBER_DATA_DIR = previousDataDir;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const serveGitHub = (pullResponse) => {
+    const fetch = vi.fn(async (url) => {
+      const endpoint = new URL(url);
+      if (endpoint.pathname === '/repos/example/project') return response({ full_name: 'example/project', fork: false });
+      if (endpoint.pathname === '/repos/example/project/pulls/42') return pullResponse();
+      throw new Error(`Unexpected GitHub request: ${endpoint.pathname}`);
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  };
+
+  it('answers the current account when no gh login is in use', async () => {
+    await expect(github.readCurrentAccountId()).resolves.toBe(accountId);
+  });
+
+  it('reads the project, head and head owner from the primary remote', async () => {
+    serveGitHub(() => response(forkPull()));
+    await expect(github.readChangeRequestHead({ context: readContext(project), number: 42 })).resolves.toEqual({
+      project: { id: 'example/project', owner: 'example', name: 'project' },
+      headSha: headSha.toLowerCase(),
+      headBranch: 'feature/fix',
+      headOwner: 'alice',
+    });
+  });
+
+  it('refuses a pull request whose fork was deleted', async () => {
+    serveGitHub(() => response(forkPull({ head: { ref: 'feature/fix', sha: headSha, repo: null } })));
+    await expect(github.readChangeRequestHead({ context: readContext(project), number: 42 }))
+      .rejects.toMatchObject({ status: 409, message: 'Pull request #42 has no branch to check out: its fork was deleted' });
+  });
+
+  it('refuses a number that is not a pull request there', async () => {
+    serveGitHub(() => response({ message: 'Not Found' }, 404));
+    await expect(github.readChangeRequestHead({ context: readContext(project), number: 42 }))
+      .rejects.toMatchObject({ status: 404, message: 'Pull request #42 was not found in example/project' });
+  });
+});

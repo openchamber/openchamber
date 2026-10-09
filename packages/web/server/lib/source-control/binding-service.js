@@ -269,7 +269,7 @@ const normalizeProviderInstance = (provider, instance, makeError = bindingInputE
 };
 
 /** The host a remote address or a provider instance points at, lowercased; null when it names none. */
-const hostOf = (value) => {
+export const hostOf = (value) => {
   const text = String(value ?? '').trim();
   if (!text) return null;
   try { return new URL(text.includes('://') ? text : `https://${text}`).hostname.toLowerCase() || null; }

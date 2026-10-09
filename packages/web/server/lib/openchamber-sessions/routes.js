@@ -383,6 +383,27 @@ const resolveRequestedDirectory = async ({ payload, readSettingsFromDiskMigrated
 const WORKTREE_BOOTSTRAP_TIMEOUT_MS = 60_000;
 const WORKTREE_BOOTSTRAP_POLL_MS = 150;
 
+/**
+ * A worktree from a pull or merge request: its number, and the folder and
+ * branch names when the caller chose them. The head, the fork and its remote
+ * come from the provider; a start ref or upstream would contradict them.
+ */
+const resolvePullRequestInput = (payload) => {
+  if (payload?.pullRequest === undefined) return null;
+  if (!Number.isSafeInteger(payload.pullRequest) || payload.pullRequest < 1) {
+    throw new OpenChamberControlError('pullRequest must be a pull or merge request number, such as 42', 400);
+  }
+  if (payload.worktree?.startRef !== undefined || payload.setUpstream !== undefined) {
+    throw new OpenChamberControlError('pullRequest checks out the pull request\'s own branch; do not combine it with startRef or setUpstream', 400);
+  }
+  const input = { number: payload.pullRequest };
+  const name = asNonEmptyString(payload.worktree?.name);
+  if (name) input.name = name;
+  const branchName = asNonEmptyString(payload.worktree?.branchName);
+  if (branchName) input.branchName = branchName;
+  return input;
+};
+
 const resolveWorktreeInput = (payload) => {
   if (!payload?.worktree || typeof payload.worktree !== 'object') return null;
   const name = asNonEmptyString(payload.worktree.name);
@@ -412,6 +433,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     sessionKnowledgeRuntime = null,
     worktreeBootstrapStore,
     hydrateWorktreeCheckout,
+    // Creates a worktree from a pull or merge request through the Git routes'
+    // contributor pipeline. Absent where contributor worktrees are not served.
+    createChangeRequestWorktree = null,
     dataDir = null,
     archiveStore: injectedArchiveStore = null,
     sessionMetadataStore: injectedSessionMetadataStore = null,
@@ -811,10 +835,11 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
     }
 
-    const worktreeInput = resolveWorktreeInput(payload);
+    const pullRequestInput = resolvePullRequestInput(payload);
+    const worktreeInput = pullRequestInput ? null : resolveWorktreeInput(payload);
     let worktree = null;
     let sessionDirectory = resolvedDirectory.directory;
-    if (payload?.worktree && !worktreeInput) {
+    if (payload?.worktree && !worktreeInput && !pullRequestInput) {
       throw new OpenChamberControlError('worktree.name is required when worktree is provided', 400);
     }
 
@@ -829,7 +854,25 @@ export const createOpenChamberSessionService = (dependencies) => {
       });
     }
 
-    if (worktreeInput) {
+    if (pullRequestInput) {
+      // Never a plain branch worktree instead: without the contributor
+      // pipeline the request is refused.
+      if (!(createChangeRequestWorktree instanceof Function)
+        || !(worktreeBootstrapStore?.read instanceof Function)
+        || !(worktreeBootstrapStore?.write instanceof Function)) {
+        throw new OpenChamberControlError('Worktrees from pull requests are not available here', 501);
+      }
+      try {
+        worktree = await createChangeRequestWorktree({ directory: resolvedDirectory.directory, ...pullRequestInput });
+      } catch (error) {
+        throw asControlError(error, `Failed to create a worktree from pull request ${pullRequestInput.number}`);
+      }
+      sessionDirectory = worktree.path;
+      await waitForWorktreeBootstrapReady({
+        directory: sessionDirectory,
+        bootstrapStore: worktreeBootstrapStore,
+      });
+    } else if (worktreeInput) {
       if (!(hydrateWorktreeCheckout instanceof Function)
         || !(worktreeBootstrapStore?.read instanceof Function)
         || !(worktreeBootstrapStore?.write instanceof Function)) {

@@ -17,6 +17,7 @@ This module provides Git repository operations for the web server runtime, inclu
    - `transport-config.js`: bounded effective Git transport and checkout-hydration configuration hashing for repository authority.
    - `submodule-discovery.js`, `lfs-discovery.js`, and `discovery-endpoint.js`: bounded pure parsers for committed checkout metadata and endpoint resolution.
   - `contributor-provenance-storage.js`: strict bounded persistence for contributor-fork worktree identity and push-safety authority.
+  - `worktree-creation.js`: worktree creation with the server's authority checks, including the change-request pipeline (resolve, exact account, managed head transfer, contributor remote and provenance). `POST /api/git/worktrees` and the session service (`session.create` with `pullRequest`) both create through it; `registerGitRoutes` returns its `createWorktree` for that.
   - `credential-resolver.js` and `credential-broker.js`: resolve opaque managed credential references and provide one-operation Git authentication without returning secrets to clients.
   - `redaction.js`: bounded Git output and error redaction.
   - `helper-launch.js`: how Git reaches this module's helper scripts through `sh`, telling Electron to run as Node inside the command itself.
@@ -166,6 +167,15 @@ serializes worktree remote provisioning per repository and remote name so concur
 creation attempts cannot overwrite each other's rollback. If upstream fetch fails during
 bootstrap, tracking is left unset rather than writing `branch.*.remote` /
 `branch.*.merge` for a ref that was never fetched. Contributor-fork creation always leaves tracking unset.
+
+The agent tool's `session.create` with `pullRequest: <number>` makes the same
+worktree without a client: `feature-routes-runtime.js` builds the change-request
+source on the server (`source-control/change-request-worktree.js`) and hands it
+to the same `worktree-creation.js` pipeline, so the remote, provenance, missing
+upstream and Publish destination chooser are the dialog's. VS Code has no
+contributor worktrees and no agent tool, so the parameter does not exist there;
+a server without the pipeline answers 501 and never falls back to a plain
+branch worktree.
 
 ### Commit and Remote Operations
 - `commit(directory, message, options)`: Create a commit from the current index. An applied identity writes the repository's own `user.name` and `user.email`, and those decide. A repository on the System identity has none on purpose — it says no override applies — so the machine's own author answers, the way Git itself resolves it, and the panel names that author before the commit. With no author anywhere the commit is refused with the two ways to set one. `options.stageFiles` may be provided with `options.files` by older callers to stage only selected unstaged rows before committing, but the shared Git panel now stages/unstages explicitly before commit.
