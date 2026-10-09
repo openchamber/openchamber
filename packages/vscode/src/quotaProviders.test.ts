@@ -2084,7 +2084,7 @@ describe('Kimi for Coding ratio-based usage payload (VS Code parity)', () => {
   // Migrated plans answer with a ratio-based `usages` map instead of the counted
   // `usage` block, and keep a coarser `limits[]` entry for the same 5-hour
   // window. `limit_month_code` is the code-typed share of `limit_month_total`,
-  // not a second allowance, so it renders inside that row's value label.
+  // not a second allowance, and is not shown.
   const migratedPlan = {
     limits: [{
       window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
@@ -2111,10 +2111,11 @@ describe('Kimi for Coding ratio-based usage payload (VS Code parity)', () => {
     assert.equal(result.usage?.windows['5h']?.resetAt, Date.parse('2026-10-08T11:50:22Z'));
   });
 
-  test('reports the code share inside the monthly value label', async () => {
+  test('reports the monthly row as a plain percent so it follows the used/remaining setting', async () => {
     const result = await run(migratedPlan);
     assert.ok(Math.abs((result.usage?.windows.monthly?.usedPercent ?? 0) - 26.36) < 1e-9);
-    assert.equal(result.usage?.windows.monthly?.valueLabel, '26% · Code 19%');
+    assert.ok(Math.abs((result.usage?.windows.monthly?.remainingPercent ?? 0) - 73.64) < 1e-9);
+    assert.equal(result.usage?.windows.monthly?.valueLabel, undefined);
     assert.equal(result.usage?.windows.monthly?.windowSeconds, null);
     assert.equal(result.usage?.windows.monthly?.resetAt, Date.parse('2026-10-18T00:00:00Z'));
   });
@@ -2124,12 +2125,6 @@ describe('Kimi for Coding ratio-based usage payload (VS Code parity)', () => {
     assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
     assert.equal(result.usage?.windows.weekly?.windowSeconds, 604800);
     assert.equal(result.usage?.windows.weekly?.valueLabel, undefined);
-  });
-
-  test('leaves the monthly value label off when no code share is served', async () => {
-    const result = await run({ usages: { limit_month_total: { used_ratio: 0.5, reset_time: null } } });
-    assert.equal(result.usage?.windows.monthly?.usedPercent, 50);
-    assert.equal(result.usage?.windows.monthly?.valueLabel, undefined);
   });
 
   test('keeps a zero ratio and skips an entry without one', async () => {

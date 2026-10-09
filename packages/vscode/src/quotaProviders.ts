@@ -1675,16 +1675,17 @@ const computeKimiUsedPercent = (
 };
 
 // The ratio-based `usages` block, in the order Kimi's own CLI renders it.
-// `limit_month_code` is deliberately absent: it is the code-typed share of
-// `limit_month_total` rather than a second allowance, so it renders inside that
-// row's value label. `limit_7d` arrives only on plans that still have a weekly
+// `limit_month_code` is not read: it is the code-typed share of
+// `limit_month_total`, not a second allowance, and a value label carrying it
+// would replace the monthly percent and stay a used figure when the panel shows
+// what remains. `limit_7d` arrives only on plans that still have a weekly
 // quota, and Kimi documents the client as rendering whichever entries are served.
-type KimiRatioWindow = { key: string; label: string; windowSeconds: number | null; codeKey?: string };
+type KimiRatioWindow = { key: string; label: string; windowSeconds: number | null };
 
 const KIMI_RATIO_WINDOWS: KimiRatioWindow[] = [
   { key: 'limit_5h', label: '5h', windowSeconds: 5 * 60 * 60 },
   { key: 'limit_7d', label: 'weekly', windowSeconds: 7 * 24 * 60 * 60 },
-  { key: 'limit_month_total', label: 'monthly', windowSeconds: null, codeKey: 'limit_month_code' },
+  { key: 'limit_month_total', label: 'monthly', windowSeconds: null },
 ];
 
 // `used_ratio` is a 0-1 fraction. An entry without a finite ratio carries no
@@ -1694,14 +1695,9 @@ const toKimiRatioPercent = (entry: Record<string, unknown> | null): number | nul
   return ratio === null ? null : Math.max(0, Math.min(100, ratio * 100));
 };
 
-const kimiCodeShareLabel = (totalPercent: number | null, codePercent: number | null): string | null => {
-  if (totalPercent === null || codePercent === null) return null;
-  return `${Math.round(totalPercent)}% · Code ${Math.round(codePercent)}%`;
-};
-
 const kimiRatioWindows = (usages: Record<string, unknown>) => {
   const windows: Record<string, UsageWindow> = {};
-  for (const { key, label, windowSeconds, codeKey } of KIMI_RATIO_WINDOWS) {
+  for (const { key, label, windowSeconds } of KIMI_RATIO_WINDOWS) {
     const entry = asObject(usages[key]);
     if (!entry) continue;
     const usedPercent = toKimiRatioPercent(entry);
@@ -1710,7 +1706,6 @@ const kimiRatioWindows = (usages: Record<string, unknown>) => {
       usedPercent,
       windowSeconds,
       resetAt: toTimestamp(entry.reset_time),
-      valueLabel: codeKey ? kimiCodeShareLabel(usedPercent, toKimiRatioPercent(asObject(usages[codeKey]))) : null,
     });
   }
   return windows;

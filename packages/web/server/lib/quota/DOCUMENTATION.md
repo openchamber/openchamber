@@ -169,9 +169,9 @@ Web and VS Code accept finite numeric balances and non-empty numeric strings. Mi
 | `limit_5h` | `5h` | Rolling five-hour frequency window |
 | `limit_7d` | `weekly` | Served only by plans that still have a weekly allowance |
 | `limit_month_total` | `monthly` | The plan's monthly allowance; `reset_time` is the subscription anchor, not a calendar month boundary |
-| `limit_month_code` | folded into `monthly` | The code-typed share of `limit_month_total`, not a second allowance |
+| `limit_month_code` | not shown | The code-typed share of `limit_month_total`, not a second allowance |
 
-`limit_month_code` renders inside the monthly row's `valueLabel` as `26% · Code 19%`, following Kimi's own CLI, which shows three rows and treats the code figure as a breakdown of the monthly total. Two peer monthly rows would read as two independent allowances. That label is not localized: `valueLabel` reaches the UI verbatim, as with the Copilot provider's `Unlimited`.
+`limit_month_code` is not surfaced. As its own row it would read as a second monthly allowance. As a `valueLabel` on the monthly row it would replace the row's percent with fixed used figures, so the row would ignore the used/remaining display setting that every other row follows.
 
 When `usages` is present the provider does not read `limits[]`. Its 300-minute entry describes the same five-hour window as `limit_5h`, carrying the same ratio rounded to a whole percentage against a fixed `limit` of `100`, and Kimi's own client ignores `limits[]` altogether.
 

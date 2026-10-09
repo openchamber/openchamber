@@ -172,8 +172,7 @@ describe('Kimi for Coding quota provider', () => {
     // 2026-10-08. Migrated plans answer with a ratio-based `usages` map instead
     // of the counted `usage` block, and keep a coarser `limits[]` entry for the
     // same 5-hour window. `limit_month_code` is the code-typed share of
-    // `limit_month_total`, not a second allowance, so it renders inside that
-    // row's value label.
+    // `limit_month_total`, not a second allowance, and is not shown.
     const migratedPlan = {
       limits: [{
         window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
@@ -198,11 +197,12 @@ describe('Kimi for Coding quota provider', () => {
       expect(result.usage.windows['5h'].resetAt).toBe(Date.parse('2026-10-08T11:50:22Z'));
     });
 
-    it('reports the code share inside the monthly value label', async () => {
+    it('reports the monthly row as a plain percent so it follows the used/remaining setting', async () => {
       const result = await run(migratedPlan);
 
       expect(result.usage.windows.monthly.usedPercent).toBeCloseTo(26.36, 9);
-      expect(result.usage.windows.monthly.valueLabel).toBe('26% · Code 19%');
+      expect(result.usage.windows.monthly.remainingPercent).toBeCloseTo(73.64, 9);
+      expect(result.usage.windows.monthly.valueLabel).toBeUndefined();
       expect(result.usage.windows.monthly.windowSeconds).toBeNull();
       expect(result.usage.windows.monthly.resetAt).toBe(Date.parse('2026-10-18T00:00:00Z'));
     });
@@ -213,13 +213,6 @@ describe('Kimi for Coding quota provider', () => {
       expect(result.usage.windows.weekly.usedPercent).toBe(25);
       expect(result.usage.windows.weekly.windowSeconds).toBe(604800);
       expect(result.usage.windows.weekly.valueLabel).toBeUndefined();
-    });
-
-    it('leaves the monthly value label off when no code share is served', async () => {
-      const result = await run({ usages: { limit_month_total: { used_ratio: 0.5, reset_time: null } } });
-
-      expect(result.usage.windows.monthly.usedPercent).toBe(50);
-      expect(result.usage.windows.monthly.valueLabel).toBeUndefined();
     });
 
     it('keeps a zero ratio and skips an entry without one', async () => {
