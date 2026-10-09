@@ -91,7 +91,10 @@ membership (`useRecentSessionCollection`), subsessions kept for expansion,
 compact rows labelled "project · branch" through `resolveSidebarSessionLocations`
 with the desktop Recent policy (live root branch included, a branch equal to
 the project label hidden; the branch map is held while the drawer closes),
-seven rows before Show more. The
+seven rows before Show more. A session of an isolated space has the space's
+name where the branch goes and `inSpace` set on its location, so the Timeline
+rows of the desktop and the phone, and the Recent tooltip, mark it with the
+container icon the space's group carries, never with the branch icon. The
 timeline never shows Recent. VS Code excludes worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.

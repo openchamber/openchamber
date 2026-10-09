@@ -46,7 +46,7 @@ describe('resolveSidebarSessionLocations', () => {
       });
       expect(locations.get(restored.id)).toEqual({
         projectId: 'repo', groupDirectory: restored.directory, projectLabel: 'Repo',
-        branchLabel: null, worktree: null,
+        branchLabel: null, inSpace: false, worktree: null,
       });
       const items = deriveTimelineActivityItems({
         sessions: [restored], getSessionLocation: (id) => locations.get(id) ?? null,
@@ -178,8 +178,9 @@ describe('resolveSidebarSessionLocations', () => {
       spaceLabelById: new Map([[SPACE, 'Fix login']]),
     });
     expect(locations.get('in-space')).toEqual({
-      projectId: 'repo', groupDirectory: `/spaces/${SPACE}/repo`, projectLabel: 'Repo', branchLabel: 'Fix login', worktree: null,
+      projectId: 'repo', groupDirectory: `/spaces/${SPACE}/repo`, projectLabel: 'Repo', branchLabel: 'Fix login', inSpace: true, worktree: null,
     });
     expect(locations.get('at-root')?.branchLabel).toBeNull();
+    expect(locations.get('at-root')?.inSpace).toBe(false);
   });
 });

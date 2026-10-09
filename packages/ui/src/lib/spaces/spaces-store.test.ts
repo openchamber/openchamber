@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { getSpaceMark, hasIsolatedSpaces, refreshSpacesJourney, spaceMarkSchema, spacesOfProject, spacesWithoutProject, useSpacesStore, type SpaceMark } from './spaces-store';
+import { getSpaceMark, hasIsolatedSpaces, isSpaceDirectoryStopped, refreshSpacesJourney, spaceMarkSchema, spacesOfProject, spacesWithoutProject, useSpacesStore, type SpaceMark } from './spaces-store';
 import type { SpaceEntry } from './spaces-api';
 
 const ID = 'a1b2c3d4e5f6';
@@ -64,6 +64,20 @@ describe('the journey list and creation progress', () => {
     setup: null,
     ...overrides,
   });
+  test('a directory of a space the list says is stopped or gone is stopped; anything unknown is not', () => {
+    const directory = `/spaces/${ID}/app/src`;
+    expect(isSpaceDirectoryStopped(directory)).toBe(false);
+    useSpacesStore.getState().applyJourney([entry({ state: 'exited', step: null })], 0);
+    expect(isSpaceDirectoryStopped(directory)).toBe(true);
+    expect(isSpaceDirectoryStopped('/home/me/app')).toBe(false);
+    useSpacesStore.getState().applyJourney([entry({ state: 'missing', step: null })], 0);
+    expect(isSpaceDirectoryStopped(directory)).toBe(true);
+    useSpacesStore.getState().applyJourney([entry({ state: 'running', step: null })], 0);
+    expect(isSpaceDirectoryStopped(directory)).toBe(false);
+    useSpacesStore.getState().applyJourney([entry()], 0);
+    expect(isSpaceDirectoryStopped(directory)).toBe(false);
+  });
+
   // One list answer the test releases by hand, so a progress event can land while the read is out.
   const heldList = () => {
     let release: (spaces: SpaceEntry[]) => void = () => undefined;

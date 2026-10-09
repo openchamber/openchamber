@@ -22,6 +22,10 @@ type Props = {
   title: React.ReactNode;
   titleClassName: string;
   branchLabel: string | null;
+  /** Set when the branch label is an isolated space's name: the third line
+      then carries the space's container mark, with this as its accessible
+      name, where a branch shows the branch icon. */
+  spaceMark?: string | null;
   /** Replaces the branch at the start of the third line (a run row puts its
       mark and lane count there). */
   thirdLineLead?: React.ReactNode;
@@ -91,6 +95,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   title,
   titleClassName,
   branchLabel,
+  spaceMark = null,
   thirdLineLead = null,
   statusDot,
   pinnedMarker,
@@ -142,7 +147,10 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       <div className="flex w-full min-w-0 items-center gap-1">
         {thirdLineLead ?? (branchLabel ? (
           <>
-            <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />
+            {spaceMark
+              // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
+              ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden={false} role="img" aria-label={spaceMark} />
+              : <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />}
             <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{branchLabel}</span>
           </>
         ) : null)}

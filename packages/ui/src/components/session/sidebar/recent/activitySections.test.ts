@@ -81,6 +81,7 @@ describe('deriveRecentActivitySections', () => {
         groupDirectory: '/workspace/app/worktrees/release',
         projectLabel: 'App',
         branchLabel: 'release',
+        inSpace: false,
         worktree: null,
       } : null,
       query: 'deploy',
@@ -110,6 +111,7 @@ describe('deriveRecentActivitySections', () => {
         groupDirectory: '/worktrees/feature',
         projectLabel: 'App',
         branchLabel: 'feature-1',
+        inSpace: false,
         worktree,
       } : null,
       // `buildActiveSessionNode` hands Recent rows a null worktree; the Recent

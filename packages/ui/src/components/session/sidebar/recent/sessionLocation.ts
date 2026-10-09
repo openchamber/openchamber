@@ -16,6 +16,8 @@ export type SidebarSessionLocation = {
   groupDirectory: string | null;
   projectLabel: string | null;
   branchLabel: string | null;
+  /** True for a session of an isolated space: `branchLabel` is then the space's name, not a branch. */
+  inSpace: boolean;
   worktree: WorktreeMetadata | null;
 };
 
@@ -83,6 +85,7 @@ export const resolveSidebarSessionLocations = ({
         groupDirectory: indexedOwner.scopeDirectory,
         projectLabel: formatProjectLabel(owner.label?.trim() || formatDirectoryName(owner.normalizedPath, homeDirectory) || owner.normalizedPath),
         branchLabel: (indexedOwner.spaceId && spaceLabelById?.get(indexedOwner.spaceId)) || null,
+        inSpace: true,
         worktree: null,
       });
       continue;
@@ -122,6 +125,7 @@ export const resolveSidebarSessionLocations = ({
       groupDirectory: directory,
       projectLabel,
       branchLabel: hidden ? null : branch,
+      inSpace: false,
       worktree,
     });
   }

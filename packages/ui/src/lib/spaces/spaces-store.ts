@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { z } from 'zod';
 
 import { listSpaces, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
+import { spaceIdOfDirectory } from './space-route';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { SpaceProgress } from '@/sync/event-pipeline';
 
@@ -269,6 +270,26 @@ export const refreshSpacesJourney = async (): Promise<void> => {
 export const hasIsolatedSpaces = (): boolean => useSpacesStore.getState().spaces.size > 0;
 
 export const getSpaceMark = (spaceId: string): SpaceMark | null => useSpacesStore.getState().spaces.get(spaceId) ?? null;
+
+/**
+ * Whether the journey list says the space that owns a directory is stopped, or its container is
+ * gone: nothing inside can answer, so a poll of it is a refusal and a log line on the host for
+ * nothing. False for a host directory, for a space the list does not know, and for one being
+ * made, so an unknown state never silences a poll.
+ */
+const isStoppedEntry = (entry: SpaceEntry | undefined): boolean => entry?.state === 'exited' || entry?.state === 'missing';
+
+export const isSpaceStopped = (spaceId: string): boolean => isStoppedEntry(useSpacesStore.getState().journey?.get(spaceId));
+
+export const isSpaceDirectoryStopped = (directory: string | null | undefined): boolean => {
+  const spaceId = spaceIdOfDirectory(directory);
+  return spaceId !== null && isSpaceStopped(spaceId);
+};
+
+export const useSpaceDirectoryStopped = (directory: string | null | undefined): boolean => {
+  const spaceId = spaceIdOfDirectory(directory);
+  return useSpacesStore((state) => spaceId !== null && isStoppedEntry(state.journey?.get(spaceId)));
+};
 
 /**
  * The spaces the sidebar shows a group for: every space the session list marked, and the ones
