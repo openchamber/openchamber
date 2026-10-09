@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useUIStore } from '@/stores/useUIStore';
 import { SidebarHeader } from './SidebarHeader';
 
 const baseProps = {
@@ -11,14 +12,12 @@ const baseProps = {
   showProjectDisplayControls: true,
   showRecentControls: true,
   handleOpenDirectoryDialog: () => undefined,
-  onOpenScheduled: () => undefined,
-  onOpenMultiRun: () => undefined,
-  canOpenMultiRun: true,
-  onOpenArchive: () => undefined,
+  showSourceBoard: true,
   headerActionIconClass: 'h-4.5 w-4.5',
   headerActionButtonClass: 'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed',
   isSessionSearchOpen: false,
-  setIsSessionSearchOpen: () => undefined,
+  openSessionSearch: () => undefined,
+  closeSessionSearch: () => undefined,
   sessionSearchInputRef: React.createRef<HTMLInputElement | null>(),
   sessionSearchQuery: '',
   setSessionSearchQuery: () => undefined,
@@ -150,5 +149,54 @@ describe('SidebarHeader', () => {
     expect(document.querySelector('[aria-label="Search sessions"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Add project"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Display mode"]')).not.toBeNull();
+  });
+
+  test('a page button opens its page, shows it pressed, and closes it on the next click', async () => {
+    const initial = useUIStore.getState();
+    try {
+      await act(async () => root.render(
+        <I18nProvider>
+          <TooltipProvider>
+            <SidebarHeader {...baseProps} />
+          </TooltipProvider>
+        </I18nProvider>,
+      ));
+      const button = (label: string) => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+      for (const [label, isOpen] of [
+        ['Archive', () => useUIStore.getState().isArchivePageOpen],
+        ['Scheduled tasks', () => useUIStore.getState().isScheduledTasksDialogOpen],
+        ['Issues and PRs', () => useUIStore.getState().isSourceBoardOpen],
+      ] as const) {
+        expect(button(label).getAttribute('aria-pressed')).toBe('false');
+        await act(async () => button(label).click());
+        expect(isOpen()).toBe(true);
+        expect(button(label).getAttribute('aria-pressed')).toBe('true');
+        await act(async () => button(label).click());
+        expect(isOpen()).toBe(false);
+        expect(button(label).getAttribute('aria-pressed')).toBe('false');
+      }
+    } finally {
+      useUIStore.setState(initial);
+    }
+  });
+
+  test('the search button opens the field and, once open, closes it', async () => {
+    let opened = 0;
+    let closed = 0;
+    const render = (isSessionSearchOpen: boolean) => act(async () => root.render(
+      <I18nProvider>
+        <TooltipProvider>
+          <SidebarHeader {...baseProps} isSessionSearchOpen={isSessionSearchOpen} openSessionSearch={() => { opened += 1; }} closeSessionSearch={() => { closed += 1; }} />
+        </TooltipProvider>
+      </I18nProvider>,
+    ));
+    const button = () => document.querySelector<HTMLButtonElement>('[aria-label="Search sessions"]')!;
+    await render(false);
+    await act(async () => button().click());
+    expect([opened, closed]).toEqual([1, 0]);
+    await render(true);
+    expect(button().getAttribute('aria-expanded')).toBe('true');
+    await act(async () => button().click());
+    expect([opened, closed]).toEqual([1, 1]);
   });
 });

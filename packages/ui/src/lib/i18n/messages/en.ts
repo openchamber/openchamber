@@ -575,6 +575,7 @@ export const dict = {
   'sessions.sidebar.empty.noSessions.description': 'Create your first session to start coding.',
   'sessions.sidebar.empty.noMatches.title': 'No matching sessions',
   'sessions.sidebar.empty.noMatches.description': 'Try a different title, branch, folder, or path.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Search the archive',
   'sessions.sidebar.activity.recentTitle': 'recent',
   'sessions.sidebar.activity.timelineTitle': 'projects',
   'sessions.sidebar.activity.chatsTitle': 'chats',

@@ -604,6 +604,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noSessions.description': '建立你的第一個會話以開始編碼。',
   'sessions.sidebar.empty.noMatches.title': '沒有符合的會話',
   'sessions.sidebar.empty.noMatches.description': '請嘗試其他標題、分支、資料夾或路徑。',
+  'sessions.sidebar.empty.noMatches.searchArchive': '在封存中搜尋',
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.activity.chatsTitle': '聊天',
   'sessions.sidebar.activity.timelineTitle': '專案',

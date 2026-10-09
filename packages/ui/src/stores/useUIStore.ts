@@ -836,6 +836,10 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
+  /** The query the Archive page opened with; empty for a plain open. */
+  archivePageSearch: string;
+  /** Grows on every open, so a page already on screen restarts with the new query. */
+  archivePageOpenCount: number;
   isUsageStatsPageOpen: boolean;
   /** The issues and pull requests board. */
   isSourceBoardOpen: boolean;
@@ -1113,7 +1117,8 @@ interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
-  setArchivePageOpen: (open: boolean) => void;
+  /** `search` fills the page's search field, for a sidebar search that found nothing. */
+  setArchivePageOpen: (open: boolean, search?: string) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
   setSourceBoardOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
@@ -1329,6 +1334,8 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
+        archivePageSearch: '',
+        archivePageOpenCount: 0,
         isUsageStatsPageOpen: false,
         isSourceBoardOpen: false,
         openGuestPageId: null,
@@ -2148,9 +2155,9 @@ export const useUIStore = create<UIStore>()(
             : { isScheduledTasksDialogOpen: false });
         },
 
-        setArchivePageOpen: (open) => {
+        setArchivePageOpen: (open, search = '') => {
           set(open
-            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, archivePageSearch: search, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
         },
 

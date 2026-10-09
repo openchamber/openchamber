@@ -585,6 +585,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noSessions.description": "Створіть першу сесію, щоб почати кодувати.",
   "sessions.sidebar.empty.noMatches.title": "Немає відповідних сесій",
   "sessions.sidebar.empty.noMatches.description": "Спробуйте інший заголовок, гілку, папку або шлях.",
+  "sessions.sidebar.empty.noMatches.searchArchive": "Пошукати в архіві",
   "sessions.sidebar.activity.recentTitle": "Останні",
   "sessions.sidebar.activity.chatsTitle": "Чати",
   "sessions.sidebar.activity.timelineTitle": "Проєкти",

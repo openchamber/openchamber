@@ -576,6 +576,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noSessions.description': '最初のセッションを作成してコーディングを始めましょう。',
   'sessions.sidebar.empty.noMatches.title': '一致するセッションがありません',
   'sessions.sidebar.empty.noMatches.description': '別のタイトル、ブランチ、フォルダ、パスをお試しください。',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'アーカイブを検索',
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.activity.chatsTitle': 'チャット',
   'sessions.sidebar.activity.timelineTitle': 'プロジェクト',

@@ -576,6 +576,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noSessions.description': '创建你的第一个会话以开始编码。',
   'sessions.sidebar.empty.noMatches.title': '没有匹配的会话',
   'sessions.sidebar.empty.noMatches.description': '请尝试其他标题、分支、文件夹或路径。',
+  'sessions.sidebar.empty.noMatches.searchArchive': '在归档中搜索',
   'sessions.sidebar.activity.recentTitle': '最近',
   'sessions.sidebar.activity.chatsTitle': '聊天',
   'sessions.sidebar.activity.timelineTitle': '项目',

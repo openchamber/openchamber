@@ -419,6 +419,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noSessions.description': 'Utwórz swoją pierwszą sesję, aby rozpocząć kodowanie.',
   'sessions.sidebar.empty.noMatches.title': 'Brak pasujących sesji',
   'sessions.sidebar.empty.noMatches.description': 'Spróbuj innego tytułu, gałęzi, folderu lub ścieżki.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Szukaj w archiwum',
   'sessions.sidebar.activity.recentTitle': 'ostatnie',
   'sessions.sidebar.activity.chatsTitle': 'czaty',
   'sessions.sidebar.activity.timelineTitle': 'Projekty',

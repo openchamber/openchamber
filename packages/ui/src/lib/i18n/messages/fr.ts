@@ -399,6 +399,7 @@ export const dict = {
   'sessions.sidebar.empty.noSessions.description': 'Créez votre première session pour commencer à coder.',
   'sessions.sidebar.empty.noMatches.title': 'Aucune session correspondante',
   'sessions.sidebar.empty.noMatches.description': 'Essayez un autre titre, branche, dossier ou chemin.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Rechercher dans les archives',
   'sessions.sidebar.activity.recentTitle': 'récent',
   'sessions.sidebar.activity.chatsTitle': 'discussions',
   'sessions.sidebar.activity.timelineTitle': 'Projets',

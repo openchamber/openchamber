@@ -575,6 +575,7 @@ export const dict = {
   'sessions.sidebar.empty.noSessions.description': 'Maak uw eerste sessie om te beginnen met programmeren.',
   'sessions.sidebar.empty.noMatches.title': 'Geen overeenkomende sessies',
   'sessions.sidebar.empty.noMatches.description': 'Probeer een andere titel, branch, map of pad.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Zoeken in het archief',
   'sessions.sidebar.activity.recentTitle': 'recente',
   'sessions.sidebar.activity.timelineTitle': 'projecten',
   'sessions.sidebar.activity.chatsTitle': 'gesprekken',

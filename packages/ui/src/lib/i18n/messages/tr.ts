@@ -499,6 +499,7 @@ export const dict = {
   'sessions.sidebar.empty.noSessions.description': 'Kodlamaya başlamak için ilk session\'ınızı oluşturun.',
   'sessions.sidebar.empty.noMatches.title': 'Eşleşen session yok',
   'sessions.sidebar.empty.noMatches.description': 'Farklı bir başlık, branch, klasör veya yol deneyin.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Arşivde ara',
   'sessions.sidebar.activity.recentTitle': 'son kullanılanlar',
   'sessions.sidebar.activity.chatsTitle': 'sohbetler',
   'sessions.sidebar.activity.timelineTitle': 'Projeler',

@@ -576,6 +576,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.empty.noSessions.description': '첫 세션을 만들고 코딩을 시작하세요.',
   'sessions.sidebar.empty.noMatches.title': '일치하는 세션 없음',
   'sessions.sidebar.empty.noMatches.description': '다른 제목, 브랜치, 폴더 또는 경로로 검색해 보세요.',
+  'sessions.sidebar.empty.noMatches.searchArchive': '보관함에서 검색',
   'sessions.sidebar.activity.recentTitle': '최근',
   'sessions.sidebar.activity.chatsTitle': '채팅',
   'sessions.sidebar.activity.timelineTitle': '프로젝트',

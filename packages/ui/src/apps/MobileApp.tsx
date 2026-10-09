@@ -737,7 +737,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             title={t('sessions.archivePage.title')}
           >
             <ErrorBoundary>
-              <ArchiveSessionsView open layout="mobile" onLeave={leaveArchive} />
+              <ArchiveSessionsView layout="mobile" onLeave={leaveArchive} />
             </ErrorBoundary>
           </MobileFullscreenSurface>
         ) : null}

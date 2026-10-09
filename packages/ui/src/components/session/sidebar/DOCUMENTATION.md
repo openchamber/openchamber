@@ -294,6 +294,20 @@ already empty. Session rows receive one stable reset action rather than transien
 search-open or draft state. Closing a retained mobile search discards unsubmitted
 text.
 
+The desktop sidebar field and its query go together: whatever hides the field
+(the search button, Escape, a click outside the sidebar, opening a session)
+also clears the query, so the list is never filtered by text that is not on
+screen. When a query matches nothing, the empty state offers "Search the
+archive": it opens the Archive page with that query in its field and clears the
+sidebar search. VS Code has no Archive page and no such button. The Archive page
+is mounted only while open and keyed by its open count, so every open, including
+a handover while it is already on screen, starts with the query it was given
+(empty for a plain open) and no directory filter.
+
+The header's page buttons (Issues and PRs, Scheduled tasks, Archive, extension
+pages, Usage in the footer) are toggles: pressed while their page is open, and
+the next click closes it.
+
 Sidebar and Recent queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
 return no matches, without falling back to titles, directories, group labels,

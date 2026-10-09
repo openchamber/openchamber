@@ -585,6 +585,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.empty.noSessions.description": "Crie sua primeira sessão para começar a programar.",
   "sessions.sidebar.empty.noMatches.title": "Não há sessões coincidentes",
   "sessions.sidebar.empty.noMatches.description": "Tente com outro título, branch, pasta ou caminho.",
+  "sessions.sidebar.empty.noMatches.searchArchive": "Pesquisar no arquivo",
   "sessions.sidebar.activity.recentTitle": "recente",
   "sessions.sidebar.activity.chatsTitle": "conversas",
   "sessions.sidebar.activity.timelineTitle": "Projetos",

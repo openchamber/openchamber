@@ -528,6 +528,7 @@ export const dict = {
   'sessions.sidebar.empty.noSessions.description': 'Erstellen Sie Ihre erste Sitzung, um zu coden.',
   'sessions.sidebar.empty.noMatches.title': 'Keine passenden Sitzungen',
   'sessions.sidebar.empty.noMatches.description': 'Versuchen Sie einen anderen Titel, Branch, Ordner oder Pfad.',
+  'sessions.sidebar.empty.noMatches.searchArchive': 'Im Archiv suchen',
   'sessions.sidebar.activity.recentTitle': 'kürzlich',
   'sessions.sidebar.activity.chatsTitle': 'Chats',
   'sessions.sidebar.activity.timelineTitle': 'Projekte',

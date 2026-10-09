@@ -3,7 +3,9 @@ import React from 'react';
 type Args = {
   enabled?: boolean;
   isSessionSearchOpen: boolean;
-  setIsSessionSearchOpen: (open: boolean) => void;
+  openSessionSearch: () => void;
+  /** Hides the field and drops its query: a filter nobody can see is a trap. */
+  closeSessionSearch: () => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
   sessionSearchContainerRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -11,7 +13,8 @@ type Args = {
 export const useSessionSearchEffects = ({
   enabled = true,
   isSessionSearchOpen,
-  setIsSessionSearchOpen,
+  openSessionSearch,
+  closeSessionSearch,
   sessionSearchInputRef,
   sessionSearchContainerRef,
 }: Args): void => {
@@ -33,13 +36,13 @@ export const useSessionSearchEffects = ({
       return;
     }
     const handleOpenRequest = () => {
-      setIsSessionSearchOpen(true);
+      openSessionSearch();
       sessionSearchInputRef.current?.focus();
       sessionSearchInputRef.current?.select();
     };
     window.addEventListener('openchamber:sidebar-session-search', handleOpenRequest);
     return () => window.removeEventListener('openchamber:sidebar-session-search', handleOpenRequest);
-  }, [enabled, setIsSessionSearchOpen, sessionSearchInputRef]);
+  }, [enabled, openSessionSearch, sessionSearchInputRef]);
 
   React.useEffect(() => {
     if (!enabled || !isSessionSearchOpen || typeof document === 'undefined') {
@@ -50,10 +53,10 @@ export const useSessionSearchEffects = ({
         return;
       }
       if (!sessionSearchContainerRef.current.contains(event.target as Node)) {
-        setIsSessionSearchOpen(false);
+        closeSessionSearch();
       }
     };
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [enabled, isSessionSearchOpen, setIsSessionSearchOpen, sessionSearchContainerRef]);
+  }, [enabled, isSessionSearchOpen, closeSessionSearch, sessionSearchContainerRef]);
 };
