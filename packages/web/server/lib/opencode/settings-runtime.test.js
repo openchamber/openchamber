@@ -82,6 +82,24 @@ describe('settings runtime', () => {
     }
   });
 
+  it('turns a stored last directory into a project only while one is stored', async () => {
+    const { runtime, tempRoot, cleanup } = await createRuntime();
+    try {
+      const directory = path.join(tempRoot, 'removed-project');
+      await fsPromises.mkdir(directory);
+      // The legacy migration: no projects, a last directory on disk.
+      await runtime.writeSettingsToDisk({ projects: [], lastDirectory: directory });
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([
+        expect.objectContaining({ path: directory }),
+      ]);
+      // Removing the last project forgets the last directory with ''.
+      await runtime.writeSettingsToDisk({ projects: [], lastDirectory: '' });
+      expect((await runtime.readSettingsFromDiskMigrated()).projects).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('uses OpenChamber themes when a new install has no theme preferences', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

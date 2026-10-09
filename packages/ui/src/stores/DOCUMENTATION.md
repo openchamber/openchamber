@@ -152,11 +152,12 @@ did before. A home that is already known, from storage or the desktop shell,
 shows the app at once.
 
 When nothing is stored, the app starts in the home, and that fallback is not
-saved as the last directory, locally or in the server settings. Only a
-directory the user moves to is. The server adds a stored last directory as a
-project when the list is empty and warms it on every start, so saving the
-fallback put the home in the sidebar as a project and started OpenCode there
-on every launch.
+saved as the last directory, locally or in the server settings. Removing the
+last project also goes home that way (`goHome`) and forgets the stored last
+directory: it is removed locally and sent to the server as `''`. The server
+adds a stored last directory as a project when the list is empty and warms it
+on every start, so either path used to put the home, or the project just
+removed, back in the sidebar and start OpenCode there on every launch.
 
 Nothing about directories is carried from one host to another (the desktop
 host switcher, a mobile instance switch). Three rules hold that:

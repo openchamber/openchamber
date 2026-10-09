@@ -88,6 +88,9 @@ mock.module('@/stores/useFileSearchStore', () => ({
   },
 }));
 
+// Local storage writes land on the next tick.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 describe('home directory on a first visit to a password-protected server', () => {
   afterEach(() => {
     setTestWindow(undefined);
@@ -123,13 +126,14 @@ describe('home directory on a first visit to a password-protected server', () =>
       }
       process.cwd = savedCwd;
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: '/', currentDirectory: '/', isHomeReady: false });
 
     loggedIn = true;
     await ensureHomeDirectoryResolved();
     expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: HOME, isHomeReady: true });
     expect(directoriesSet.at(-1)).toBe(HOME);
+    await settle();
     // Falling back to the home is not opening it. A stored last directory
     // becomes a project on the server when there is none, which put the home
     // in the sidebar and started OpenCode there on every launch.
@@ -141,5 +145,28 @@ describe('home directory on a first visit to a password-protected server', () =>
     const reads = homeReads;
     await ensureHomeDirectoryResolved();
     expect(homeReads).toBe(reads);
+  });
+
+  test('going home after the last project is removed forgets the last directory', async () => {
+    setTestWindow({
+      localStorage: testLocalStorage,
+      matchMedia: () => ({ matches: false }),
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    const { useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    useDirectoryStore.getState().setDirectory('/home/user/project');
+    await settle();
+    expect(storage.get('lastDirectory')).toBe('/home/user/project');
+
+    settingsUpdates.length = 0;
+    await useDirectoryStore.getState().goHome();
+    expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: HOME, hasPersistedDirectory: false });
+    expect(directoriesSet.at(-1)).toBe(HOME);
+    await settle();
+    // Neither the removed project nor the home stays stored: the server would
+    // turn either back into a project.
+    expect(storage.has('lastDirectory')).toBe(false);
+    expect(settingsUpdates).toEqual([{ lastDirectory: '' }]);
   });
 });

@@ -232,7 +232,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.splashFgDark === 'string' && candidate.splashFgDark.trim().length > 0) {
       result.splashFgDark = candidate.splashFgDark.trim();
     }
-    if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
+    // An empty string forgets the last directory (the last project was
+    // removed). Every reader treats it as unset, so nothing is warmed at start
+    // or turned back into a project.
+    if (candidate.lastDirectory === '') {
+      result.lastDirectory = '';
+    } else if (typeof candidate.lastDirectory === 'string') {
       const normalized = normalizePathForPersistence(candidate.lastDirectory);
       if (typeof normalized === 'string' && normalized.length > 0) {
         result.lastDirectory = normalized;

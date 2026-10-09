@@ -345,12 +345,30 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (parent) setDirectory(parent);
       },
 
+      // Where the app goes once the last project is removed. The removed
+      // project stops being the last directory, and the home is not stored in
+      // its place, for the same reason as in synchronizeHomeDirectory.
       goHome: async () => {
         const homeDir =
           cachedHomeDirectory ||
           get().homeDirectory ||
           (await initializeHomeDirectory());
-        get().setDirectory(homeDir);
+        opencodeClient.setDirectory(homeDir);
+        invalidateFileSearchCache();
+        safeStorage.removeItem('lastDirectory');
+        void updateDesktopSettings({ lastDirectory: '' });
+        set((state) => {
+          const alreadyCurrent = state.directoryHistory[state.historyIndex] === homeDir;
+          const newHistory = alreadyCurrent ? state.directoryHistory : [...state.directoryHistory.slice(0, state.historyIndex + 1), homeDir];
+          return {
+            currentDirectory: homeDir,
+            directoryHistory: newHistory,
+            historyIndex: alreadyCurrent ? state.historyIndex : newHistory.length - 1,
+            hasPersistedDirectory: false,
+            isHomeReady: true,
+            isSwitchingDirectory: false,
+          };
+        });
       },
 
       synchronizeHomeDirectory: (homePath: string) => {
