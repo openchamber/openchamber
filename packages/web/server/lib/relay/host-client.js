@@ -10,6 +10,7 @@ import { RELAY_PROTOCOL_VERSION, RelayCloseCode, createHostHandshake } from './e
 import { createOutboundFrameBatcher, decodeFrameBatch, decodeTunnelFrame, decodeDeliveryAck, encodeFrameBatch, TunnelFrameType } from './tunnel-codec.js';
 import { createTunnelHost } from './tunnel-host.js';
 import { createDownstreamScheduler, DOWNSTREAM_CHUNK_BYTES } from './downstream-scheduler.js';
+import { redactSensitiveText } from '../source-control/url-redaction.js';
 
 const BACKOFF_BASE_MS = 1000;
 const BACKOFF_CAP_MS = 30000;
@@ -49,6 +50,11 @@ const resolveBatchWindowMs = (option) => {
   return DEFAULT_BATCH_WINDOW_MS;
 };
 
+// Bun's WebSocket puts the full dial URL into its error messages, and that URL
+// carries the signed relay auth in its query string. Every relay error passes
+// through here before it reaches a log line or the relay status.
+export const describeRelayError = (error) => redactSensitiveText(error?.message ?? error);
+
 /**
  * @param {{
  *   relayUrl: string,
@@ -57,9 +63,10 @@ const resolveBatchWindowMs = (option) => {
  *   getLocalPort?: () => number,
  *   onStatus?: (status: { state: string, lastError: string | null, connectedClients: number }) => void,
  *   logger?: Pick<Console, 'warn'>,
+ *   createSocket?: (url: string) => WebSocket,
  * }} options
  */
-export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, batchWindowMs, batch, flowControl }) => {
+export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, onStatus, logger = console, createSocket = (url) => new WebSocket(url), batchWindowMs, batch, flowControl }) => {
   const { version } = createRequire(import.meta.url)('../../../package.json');
   const platform = process.env.OPENCHAMBER_RUNTIME || 'web';
   const resolveLocalPort = typeof getLocalPort === 'function' ? getLocalPort : () => localPort;
@@ -171,9 +178,9 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
 
     let socket;
     try {
-      socket = new WebSocket(buildSocketUrl('host-data', connectionId));
+      socket = createSocket(buildSocketUrl('host-data', connectionId));
     } catch (error) {
-      logger.warn(`[Relay] host-data dial failed: ${error?.message ?? error}`);
+      logger.warn(`[Relay] host-data dial failed: ${describeRelayError(error)}`);
       scheduleRedial(connectionId);
       return;
     }
@@ -205,7 +212,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           socket.send(encrypted, { binary: true });
         })
         .catch((error) => {
-          logger.warn(`[Relay] host-data send failed: ${error?.message ?? error}`);
+          logger.warn(`[Relay] host-data send failed: ${describeRelayError(error)}`);
           failChannel(RelayCloseCode.ChannelFailure, 'send failed');
         });
       return sendChain;
@@ -283,7 +290,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
           await dispatchFrame(plaintext);
         }
       } catch (error) {
-        logger.warn(`[Relay] tunnel frame handling failed: ${error?.message ?? error}`);
+        logger.warn(`[Relay] tunnel frame handling failed: ${describeRelayError(error)}`);
         failChannel(RelayCloseCode.ChannelFailure, 'invalid tunnel frame');
       }
     };
@@ -317,7 +324,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       processing = processing
         .then(() => handleMessage(data, isBinary))
         .catch((error) => {
-          logger.warn(`[Relay] data socket message failed: ${error?.message ?? error}`);
+          logger.warn(`[Relay] data socket message failed: ${describeRelayError(error)}`);
           failChannel(RelayCloseCode.ChannelFailure, 'internal error');
         });
     });
@@ -326,7 +333,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
       if (dataSockets.get(connectionId) === entry) teardownDataSocket(connectionId);
     });
     socket.on('error', (error) => {
-      logger.warn(`[Relay] host-data socket error: ${error?.message ?? error}`);
+      logger.warn(`[Relay] host-data socket error: ${describeRelayError(error)}`);
     });
   };
 
@@ -380,9 +387,9 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
 
     let socket;
     try {
-      socket = new WebSocket(buildSocketUrl('host-control'));
+      socket = createSocket(buildSocketUrl('host-control'));
     } catch (error) {
-      lastError = error?.message ?? String(error);
+      lastError = describeRelayError(error);
       scheduleReconnect();
       return;
     }
@@ -427,7 +434,7 @@ export const startRelayHost = ({ relayUrl, identity, localPort, getLocalPort, on
     });
     socket.on('error', (error) => {
       if (controlSocket !== socket) return;
-      lastError = error?.message ?? String(error);
+      lastError = describeRelayError(error);
     });
     socket.on('close', (code, reasonBuffer) => {
       clearInterval(pingTimer);

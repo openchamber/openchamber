@@ -186,6 +186,7 @@ Relay mode plugs into the existing client transport layer rather than a parallel
 
 - The relay never sees plaintext application traffic; it sees only routing metadata (routing id, connection identifiers, timestamps, coarse counts).
 - Pairing secrets travel in URL fragments only, never in query strings, never logged.
+- Host dial URLs carry the signed relay auth in their query string, and Bun's WebSocket copies the whole URL into its error messages. Relay errors reach logs and the relay status only through `describeRelayError` in `host-client.js`, which strips query strings and userinfo from every URL in the text.
 - The host dispatcher never injects credentials; the server authenticates each tunneled request.
 - The tunnel is transparent to the app: adding relay support to a feature should not require the feature to know the relay exists — it goes through the shared runtime transport helpers.
 - The two implementations stay byte-compatible and the wire format is versioned/negotiated so mixed client/host app versions degrade gracefully rather than break.

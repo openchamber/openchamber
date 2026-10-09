@@ -5,6 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { startRelayHost } from './host-client.js';
@@ -446,4 +447,71 @@ describe('relay host-client data socket retry', () => {
 
     expect(await relay.waitForDials(2, 2500)).toBe(false);
   }, 10000);
+});
+
+// Bun's WebSocket fails a dial with an error whose message and `url` hold the
+// whole dial URL, signed relay auth included. Node's `ws` never does, so these
+// sockets stand in for Bun.
+class BunLikeFailingSocket extends EventEmitter {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = WebSocket.CONNECTING;
+  }
+
+  fail(reason) {
+    this.readyState = WebSocket.CLOSED;
+    this.emit('error', Object.assign(new Error(`WebSocket connection to '${this.url}' failed: ${reason}`), { url: this.url }));
+    this.emit('close', 1006, Buffer.alloc(0));
+  }
+
+  close() {}
+
+  terminate() {}
+
+  ping() {}
+}
+
+describe('relay host-client error redaction', () => {
+  const fakeIdentity = {
+    serverId: 'fake-server-id',
+    hostEncPrivateKey: null,
+    signRelayAuth: () => ({ ts: 1, sig: 'FAKE-SIGNATURE', pk: 'FAKE-PUBLIC-KEY' }),
+  };
+
+  it('keeps the signed relay auth out of logs and status when a dial fails', () => {
+    const sockets = [];
+    const warnings = [];
+    const host = startRelayHost({
+      relayUrl: 'wss://relay.example.test/ws',
+      identity: fakeIdentity,
+      getLocalPort: () => 1,
+      logger: { warn: (line) => warnings.push(line) },
+      createSocket: (url) => {
+        const socket = new BunLikeFailingSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    try {
+      const control = sockets[0];
+      control.readyState = WebSocket.OPEN;
+      control.emit('open');
+      control.emit('message', Buffer.from(JSON.stringify({ type: 'connected', connectionId: 'conn-1' })), false);
+      expect(sockets[1].url).toContain('sig=FAKE-SIGNATURE');
+      sockets[1].fail('Expected 101 status code');
+      control.fail('Failed to connect');
+
+      const lastError = host.getStatus().lastError;
+      expect(warnings).toEqual(["[Relay] host-data socket error: WebSocket connection to 'wss://relay.example.test/ws' failed: Expected 101 status code"]);
+      expect(lastError).toBe("WebSocket connection to 'wss://relay.example.test/ws' failed: Failed to connect");
+      for (const text of [...warnings, lastError]) {
+        expect(text).not.toContain('FAKE-SIGNATURE');
+        expect(text).not.toContain('FAKE-PUBLIC-KEY');
+      }
+    } finally {
+      host.stop();
+    }
+  });
 });
