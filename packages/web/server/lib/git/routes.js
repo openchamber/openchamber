@@ -4,6 +4,7 @@ import { createGitRedactor, redactGitText } from './redaction.js';
 import { runAsUserAction } from '../environment/refresh-scope.js';
 import { redactRemoteUrl } from '../source-control/url-redaction.js';
 import { parsePublicGitIdentityProfile, toPublicGitIdentityProfile } from './identity-storage.js';
+import { WorktreeCreationError, createWorktreeCreation, hasClientContributorAuthority } from './worktree-creation.js';
 
 const NETWORK_OPERATION_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const toGitIdentitySummary = (identity) => identity ? {
@@ -177,35 +178,15 @@ export function registerGitRoutes(app, {
       return res.status(500).json({ code: 'UNKNOWN', error: errors[input.operation] });
     }
   });
-  const hasClientContributorAuthority = (body) => body?.contributorFork !== undefined
-    || body?.changeRequestTransfer !== undefined || body?.contributorTransferComplete !== undefined
-    || (body?.changeRequestSource && body?.ensureRemoteUrl !== undefined);
-  // A change request from this repository itself is fetched onto the primary
-  // remote it already has, under that remote's own URL, so the checkout adds no
-  // second remote for the same project. Only a fork gets a remote of its own.
-  // A fork's remote is named after its owner, which the provider just said; the
-  // picker cannot always know it (GitLab lists merge requests without it).
-  const forkRemoteName = (owner) => `pr-${String(owner || '').trim().toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '') || 'head'}`;
-  const changeRequestSourceOnRepository = async (directory, source) => {
-    if (source.classification !== 'same-repository') {
-      return source.sourceProject?.owner
-        ? Object.freeze({ ...source, requestedRemoteName: forkRemoteName(source.sourceProject.owner) })
-        : source;
-    }
-    const { getRepositoryRemoteUrls } = await getGitLibraries();
-    const primary = (await getRepositoryRemoteUrls(directory)).find((remote) => remote.name === source.context.primaryRemote);
-    if (!primary?.fetchUrl) return source;
-    return Object.freeze({ ...source, requestedRemoteName: primary.name, remoteUrl: primary.fetchUrl });
-  };
-  const worktreeInputForSource = (input, source) => ({
-    ...input,
-    changeRequestSource: undefined,
-    contributorFork: source.classification === 'contributor-fork',
-    changeRequestTransfer: true,
-    ensureRemoteName: source.requestedRemoteName,
-    ensureRemoteUrl: source.remoteUrl ?? source.endpoint,
-    expectedRevision: source.headSha,
+  const worktreeCreation = createWorktreeCreation({
+    getGitLibraries,
+    networkOperations,
+    getSourceControlBinding,
+    contributorProvenance,
+    resolveChangeRequestSource,
+    createHttpsCredentialReference,
+    resolveSourceControlAccount,
+    worktreeBootstrapStore,
   });
   const rejectLegacyNetworkOperation = async (directory, res) => {
     if (contributorProvenance?.read instanceof Function) {
@@ -1475,123 +1456,33 @@ export function registerGitRoutes(app, {
       if (hasClientContributorAuthority(req.body)) {
         return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
       }
-      let input = req.body || {};
-      if (input.changeRequestSource) {
-        if (!(resolveChangeRequestSource instanceof Function)) return res.status(501).json({ error: 'Contributor worktrees are unavailable', code: 'RUNTIME_UNSUPPORTED' });
-        const source = await changeRequestSourceOnRepository(directory, await resolveChangeRequestSource(input.changeRequestSource));
-        input = worktreeInputForSource(input, source);
-      }
+      const input = await worktreeCreation.validationInput(directory, req.body || {});
       const result = await validateWorktreeCreate(directory, input);
       res.json(result);
     } catch (error) {
+      if (error instanceof WorktreeCreationError) {
+        return res.status(error.status).json({ error: error.message, code: error.code });
+      }
       console.error('Failed to validate worktree creation:', error);
       res.status(500).json({ error: error.message || 'Failed to validate worktree creation' });
     }
   });
 
   app.post('/api/git/worktrees', userAction(async (req, res) => {
-    const { createWorktree, validateWorktreeCreate } = await getGitLibraries();
-    if (typeof createWorktree !== 'function' || typeof validateWorktreeCreate !== 'function') {
-      return res.status(501).json({ error: 'Worktree creation is not available' });
-    }
     try {
       const directory = req.query.directory;
       if (!directory || typeof directory !== 'string') {
         return res.status(400).json({ error: 'directory parameter is required' });
       }
-
-      if (hasClientContributorAuthority(req.body)) {
-        return res.status(400).json({ error: 'Invalid contributor worktree request', code: 'INVALID_CONTRIBUTOR_WORKTREE' });
-      }
-      if (!(networkOperations?.hydrateBoundCheckout instanceof Function)
-        || !(worktreeBootstrapStore?.read instanceof Function)
-        || !(worktreeBootstrapStore?.write instanceof Function)) {
-        return res.status(501).json({ error: 'Worktree checkout bootstrap is not available' });
-      }
-      let input = req.body || {};
-      let source = null;
-      if (input.changeRequestSource) {
-        if (!(resolveChangeRequestSource instanceof Function)
-          || !(createHttpsCredentialReference instanceof Function)
-          || !(resolveSourceControlAccount instanceof Function)
-          || !(networkOperations?.transferContributorHead instanceof Function)) {
-          return res.status(501).json({ error: 'Contributor worktrees are unavailable', code: 'RUNTIME_UNSUPPORTED' });
-        }
-        source = await changeRequestSourceOnRepository(directory, await resolveChangeRequestSource(input.changeRequestSource));
-        const headBranch = source.headRef.slice('refs/heads/'.length);
-        const destinationRef = `refs/remotes/${source.requestedRemoteName}/${headBranch}`;
-        input = {
-          ...worktreeInputForSource(input, source),
-          existingBranch: destinationRef.slice('refs/'.length),
-          setUpstream: false,
-        };
-        const validation = await validateWorktreeCreate(directory, input);
-        if (!validation.ok && !validation.errors.every((entry) => entry.code === 'contributor_transfer_unavailable')) {
-          // The same error shape as every other refusal here, so the reason reaches the user.
-          const collision = validation.errors.find((entry) => entry.code === 'remote_name_collision');
-          return res.status(409).json(collision
-            ? { error: collision.message, code: 'CONTRIBUTOR_REMOTE_COLLISION', remoteName: input.ensureRemoteName }
-            : {
-              error: validation.errors.map((entry) => entry.message).filter(Boolean).join('\n') || 'Failed to validate worktree creation',
-              code: 'INVALID_REQUEST',
-            });
-        }
-        const account = await resolveSourceControlAccount(source.context);
-        if (account?.credentialId !== source.context.accountId || account?.status !== 'valid'
-          || !Number.isSafeInteger(account?.credentialRevision) || account.credentialRevision < 1
-          || Object.prototype.toString.call(account?.providerUserId) !== '[object String]' || !account.providerUserId) {
-          throw Object.assign(new Error('Contributor credential is unavailable'), { code: 'AUTHENTICATION_REQUIRED', status: 409 });
-        }
-        const credentialId = createHttpsCredentialReference({
-          provider: source.context.provider,
-          instance: source.context.instance,
-          credentialId: account.credentialId,
-          credentialRevision: account.credentialRevision,
-          providerUserId: account.providerUserId,
-        });
-        const transfer = await networkOperations.transferContributorHead({
-          directory,
-          sourceRequest: req.body.changeRequestSource,
-          source,
-          destinationRef,
-          credentialId,
-        });
-        if (transfer.state !== 'succeeded') {
-          const status = transfer.error?.code === 'AUTHENTICATION_REQUIRED' ? 401 : 409;
-          return res.status(status).json({ error: transfer.error?.message || 'Contributor head transfer failed', code: transfer.error?.code || 'UNKNOWN' });
-        }
-        input.contributorTransferComplete = true;
-      }
-      const bindingRead = getSourceControlBinding instanceof Function
-        ? await getSourceControlBinding(directory)
-        : null;
-      const repositoryAuthority = bindingRead?.binding ? {
-        repositoryId: bindingRead.repository.repositoryId,
-        bindingRevision: bindingRead.revision,
-        configRevision: bindingRead.repository.configRevision,
-      } : null;
-      const hydrateCheckout = ({ directory: checkoutDirectory, parentRemoteName }) => networkOperations.hydrateBoundCheckout({
-        directory: checkoutDirectory,
-        parentRemoteName,
-        parentEndpoint: source?.endpoint,
-        repositoryAuthority,
-      });
-      const created = await createWorktree(directory, input, {
-        contributorProvenance,
-        contributorSource: source,
-        hydrateCheckout,
-        bootstrapStore: worktreeBootstrapStore,
-      });
-      res.json(created);
+      res.json(await worktreeCreation.create(directory, req.body || {}));
     } catch (error) {
-      console.error('Failed to create worktree:', error);
-      if (error?.code === 'CONTRIBUTOR_REMOTE_COLLISION') {
-        return res.status(409).json({
-          error: 'Contributor remote name is already used by a different endpoint',
-          code: 'CONTRIBUTOR_REMOTE_COLLISION',
-          remoteName: error.remoteName,
-        });
+      // A refusal carries the same error shape as every other one here, so the reason reaches the user.
+      if (error instanceof WorktreeCreationError) {
+        const body = { error: error.message, code: error.code };
+        if (error.remoteName !== undefined) body.remoteName = error.remoteName;
+        return res.status(error.status).json(body);
       }
+      console.error('Failed to create worktree:', error);
       res.status(Number.isInteger(error?.status) ? error.status : 500).json({
         error: error.message || 'Failed to create worktree',
         code: error?.code,
@@ -1835,4 +1726,7 @@ export function registerGitRoutes(app, {
     }
   });
 
+  // The session service creates worktrees from change requests through the
+  // same checks the route uses.
+  return { createWorktree: worktreeCreation.create };
 }

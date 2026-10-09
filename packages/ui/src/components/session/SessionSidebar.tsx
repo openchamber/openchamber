@@ -30,7 +30,7 @@ import {
   worktreeMapsEqual,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
-import { resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
+import { resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -585,16 +585,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
   React.useEffect(() => {
     if (isVSCode) return;
-    return subscribeOpenchamberEvents((event) => {
-      if (event.type === 'session-created') {
-        requestWorktreeDiscovery();
-        return;
-      }
-      if (event.type !== 'worktree-changed') return;
-
-      // One event names every directory of the changed repository the server
-      // has seen; refresh each registered project among them exactly once.
-      for (const project of resolveProjectsForWorktreeChange(event.directories)) {
+    const refreshProjects = (projects: ProjectRef[]) => {
+      for (const project of projects) {
         const projectPath = normalizePath(project.path);
         const refreshRuntime = getRuntimeKey();
         const publishDiscovery = (status: 'loading' | 'ready' | 'error') => {
@@ -619,6 +611,25 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
             setUnresolvedWorktreeProjectPaths((current) => new Set(current).add(projectPath));
           });
       }
+    };
+
+    return subscribeOpenchamberEvents((event) => {
+      if (event.type === 'session-created') {
+        // A new session can only have changed its own project's worktrees.
+        // When its project is not certain, every project is discovered.
+        const project = resolveProjectForCreatedSession(event.directory, useProjectsStore.getState().projects);
+        if (!project) {
+          requestWorktreeDiscovery();
+          return;
+        }
+        refreshProjects([project]);
+        return;
+      }
+      if (event.type !== 'worktree-changed') return;
+
+      // One event names every directory of the changed repository the server
+      // has seen; refresh each registered project among them exactly once.
+      refreshProjects(resolveProjectsForWorktreeChange(event.directories));
     });
   }, [isVSCode, worktreeRefreshDependencies]);
 

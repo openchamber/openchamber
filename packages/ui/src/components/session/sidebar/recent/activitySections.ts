@@ -8,7 +8,7 @@ type SidebarActivityItem = {
   node: SessionNode;
   projectId: string | null;
   groupDirectory: string | null;
-  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   getSecondaryMeta?: (sessionId: string) => SidebarActivityItem['secondaryMeta'];
 };
 
@@ -119,12 +119,14 @@ export const deriveRecentActivitySections = ({
       secondaryMeta: location ? {
         projectLabel: location.projectLabel,
         branchLabel: location.branchLabel,
+        inSpace: location.inSpace,
       } : null,
       getSecondaryMeta: (sessionId: string) => {
         const childLocation = getSessionLocation(sessionId);
         return childLocation ? {
           projectLabel: childLocation.projectLabel,
           branchLabel: childLocation.branchLabel,
+          inSpace: childLocation.inSpace,
         } : null;
       },
     }];
@@ -154,6 +156,7 @@ export const deriveTimelineActivityItems = ({
     secondaryMeta: {
       projectLabel: location?.projectLabel ?? null,
       branchLabel: location?.branchLabel ?? null,
+      inSpace: location?.inSpace ?? false,
     },
   }];
 });

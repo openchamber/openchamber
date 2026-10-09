@@ -30,7 +30,7 @@ import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButt
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
-import { hasFileStatChanged } from './fileStatChange';
+import { hasFileStatChanged, openFilePollStep } from './fileStatChange';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
@@ -932,6 +932,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const expandedPathSet = React.useMemo(() => new Set(expandedPaths), [expandedPaths]);
   const removeOpenPath = useFilesViewTabsStore((state) => state.removeOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
+  const removeUnselectedOpenPath = useFilesViewTabsStore((state) => state.removeUnselectedOpenPath);
   const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
@@ -1041,6 +1042,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const editorDocumentPath = documentPathAlias && documentPathAlias.path === loadedFilePath
     ? documentPathAlias.documentPath
     : loadedFilePath;
+  // The path whose last read failed. Requests waiting for that file to load
+  // (a line jump, a focus) end here instead of waiting forever.
+  const [failedFilePath, setFailedFilePath] = React.useState<string | null>(null);
+  // The path the open-file poll saw missing since its last load; only that
+  // observation lets the poll reload a failed file once it is back.
+  const missingSeenPathRef = React.useRef<string | null>(null);
   const filePositionKey = JSON.stringify([getRuntimeKey(), root, editorDocumentPath]);
 
   const [draftContent, setDraftContent] = React.useState('');
@@ -1784,11 +1791,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         const options = resolveFileReadOptions(path);
         const stat = await files.statFile?.(path, { ...options, directory: root || undefined });
         if (!cancelled && stat && !stat.isFile) {
-          removeOpenPathsByPrefix(root, path);
+          removeUnselectedOpenPath(root, path);
         }
       } catch (error) {
         if (!cancelled && isFileMissingError(error)) {
-          removeOpenPathsByPrefix(root, path);
+          removeUnselectedOpenPath(root, path);
         }
       }
     }));
@@ -1796,7 +1803,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     return () => {
       cancelled = true;
     };
-  }, [files, openPaths, removeOpenPathsByPrefix, resolveFileReadOptions, root]);
+  }, [files, openPaths, removeUnselectedOpenPath, resolveFileReadOptions, root]);
 
   const isDirty = draftContent !== fileContent || canvasDirty;
 
@@ -2067,6 +2074,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     pendingPathMoveRef.current = null;
     setDocumentPathAlias(null);
     setFileError(null);
+    setFailedFilePath(null);
+    missingSeenPathRef.current = null;
     setDesktopImageSrc('');
     setLoadedFilePath(null);
     setContentDetectedBinary(false);
@@ -2176,22 +2185,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           }
           return;
         }
-        if (isFileMissingError(error)) {
-          if (root) {
-            removeOpenPathsByPrefix(root, node.path);
-          }
-          setFileContent('');
-          setDraftContent('');
-          setFileError(null);
-          lastLoadedFileStatRef.current = null;
-          if (isMobile) {
-            setShowMobilePageContent(false);
-          }
-          return;
-        }
+        // A missing file keeps its tab and shows the error like any other
+        // failed read; the host's tab still names this path.
         setFileContent('');
         setDraftContent('');
         setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+        setFailedFilePath(node.path);
         lastLoadedFileStatRef.current = null;
       })
       .finally(() => {
@@ -2199,7 +2198,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           setFileLoading(false);
         }
       });
-  }, [applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, removeOpenPathsByPrefix, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
+  }, [applyLoadedTextContent, expandPaths, isMobile, loadDirectory, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!visible || !root) {
@@ -2349,13 +2348,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   // Poll open file for external changes. Metadata is compared first so an
   // unchanged file never reads content, and a changed text file swaps content
-  // in place; only other files fall back to a full reload.
+  // in place; only other files fall back to a full reload. A file that is
+  // missing shows the read error, and loads again once it is back.
   React.useEffect(() => {
-    if (!visible || !selectedFile?.path || loadedFilePath !== selectedFile.path) {
+    if (!visible || !selectedFile?.path || (loadedFilePath !== selectedFile.path && failedFilePath !== selectedFile.path)) {
       return;
     }
 
     const selectedPath = selectedFile.path;
+    const showsFailure = failedFilePath === selectedPath;
     const requestRuntime = getRuntimeKey();
     const requestScope = fileScopeRef.current;
     // draw.io preview edits live in the XML refs, not the draft buffer, so an
@@ -2397,6 +2398,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             return;
           }
 
+          const sawMissing = missingSeenPathRef.current === selectedPath;
+          const step = openFilePollStep({ stat: 'found', showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges() });
+          if (step === 'reload') {
+            lastLoadedFileStatRef.current = null;
+            setLoadedFilePath(null);
+            setFileContentRevision((revision) => revision + 1);
+            return;
+          }
+          if (step !== 'check-changes') {
+            return;
+          }
+
           const previousStat = lastLoadedFileStatRef.current;
           if (!previousStat || previousStat.path !== selectedPath) {
             lastLoadedFileStatRef.current = latestStat;
@@ -2425,7 +2438,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           // Reset loadedFilePath so the effect above triggers a single reload.
           setLoadedFilePath(null);
         })
-        .catch(() => {})
+        .catch((error) => {
+          if (cancelled || getRuntimeKey() !== requestRuntime || fileScopeRef.current !== requestScope) return;
+          // Unsaved edits stay on screen; saving writes the file back.
+          const stat = isFileMissingError(error) ? 'missing' : 'failed';
+          const sawMissing = missingSeenPathRef.current === selectedPath;
+          if (openFilePollStep({ stat, showsFailure, sawMissing, hasUnsavedChanges: hasUnsavedChanges() }) !== 'show-missing') {
+            return;
+          }
+          missingSeenPathRef.current = selectedPath;
+          lastLoadedFileStatRef.current = null;
+          setFileContent('');
+          setDraftContent('');
+          setFileError(error instanceof Error ? error.message : t('filesView.error.readFileFailed'));
+          setFailedFilePath(selectedPath);
+        })
         .finally(() => {
           polling = false;
         });
@@ -2438,7 +2465,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       contentPoller?.dispose();
       window.clearInterval(interval);
     };
-  }, [applyLoadedTextContent, contentDetectedBinary, loadedFilePath, readFile, readFileStat, selectedFile?.path, visible]);
+  }, [applyLoadedTextContent, contentDetectedBinary, failedFilePath, loadedFilePath, readFile, readFileStat, selectedFile?.path, t, visible]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
@@ -3214,11 +3241,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    if (fileLoading || loadedFilePath !== targetPath) {
+    if (fileLoading || (loadedFilePath !== targetPath && failedFilePath !== targetPath)) {
       return;
     }
 
-    if (fileError || isSelectedImage || isSelectedPdf || isUnsupportedBinary) {
+    if (failedFilePath === targetPath || fileError || isSelectedImage || isSelectedPdf || isUnsupportedBinary) {
       setPendingFileNavigation(null);
       pendingNavigationCycleRef.current = { key: '', attempts: 0 };
       return;
@@ -3286,6 +3313,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     confirmDiscardOpen,
     draftContent,
     editorViewReadyNonce,
+    failedFilePath,
     fileError,
     fileLoading,
     isSelectedImage,
@@ -3320,7 +3348,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       return;
     }
 
-    if (fileLoading || loadedFilePath !== targetPath) {
+    if (fileLoading || (loadedFilePath !== targetPath && failedFilePath !== targetPath)) {
       return;
     }
 
@@ -3328,13 +3356,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     // JSON tree, images, PDFs) never mount a CodeMirror editor, so the request
     // must clear regardless — otherwise it lingers and replays on every
     // dependency change.
-    if (!fileError && !isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && canEdit && textViewMode === 'edit') {
+    if (failedFilePath !== targetPath && !fileError && !isSelectedImage && !isSelectedPdf && !isUnsupportedBinary && canEdit && textViewMode === 'edit') {
       editorViewRef.current?.focus();
     }
 
     setPendingFileFocusPath(null);
   }, [
     canEdit,
+    failedFilePath,
     fileError,
     fileLoading,
     isSelectedImage,
@@ -3643,7 +3672,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       onClick={() => {
         const fn = files.downloadFile;
         if (!fn || !selectedFile) return;
-        void fn(selectedFile.path).catch((error) => {
+        void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
           console.error('Download failed:', error);
           toast.error(t('sidebarFilesTree.toast.operationFailed'));
         });
@@ -4391,7 +4420,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               size="sm"
               onClick={() => {
                 const fn = files.downloadFile;
-                if (fn) void fn(selectedFile.path).catch((error) => {
+                if (fn) void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
                   console.error('Download failed:', error);
                   toast.error(t('sidebarFilesTree.toast.operationFailed'));
                 });

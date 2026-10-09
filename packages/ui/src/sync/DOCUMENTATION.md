@@ -349,7 +349,15 @@ the snapshot without being deleted, so the authoritative cleanup skips it; the
 event pipeline hands the host's `openchamber:space-stream` announcement to
 `sync-context.tsx`, which marks a lost stream as stale and, when it is back,
 re-reads that one space's directories with `refreshSessionsForDirectories`,
-whose answer marks the space reachable again. The active-session snapshot that
+whose answer marks the space reachable again; a stream back on a space the
+journey list holds as stopped means it was started from another window, so
+the list is read again too. While the journey list says a space is stopped or
+its container is gone (`isSpaceDirectoryStopped`), the active-session
+watchdog skips that space's directories, status poll, stale resync and child
+discovery alike, because every request would be the dispatcher's refusal
+and a log line on the host; the sessions keep the status they last reported,
+and the polls resume with the list that says the space runs. The browser
+panel's dev-server look pauses on the same rule. The active-session snapshot that
 settles an unfinished turn is the host's, global, and never covers a space, so
 `getActiveSessionStatuses` asks a space directory's own server for it; the
 host's empty answer would otherwise mark a turn running inside as interrupted.

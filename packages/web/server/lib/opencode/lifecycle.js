@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import net from 'node:net';
 import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
+import { assignInjectedEnv } from '../injected-env.js';
 import { registerManagedProcess, unregisterManagedProcess, reapOrphanedProcesses } from './managed-process-registry.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { overlayEnvironment } from '../environment/variables.js';
@@ -773,16 +774,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     // in front of the managed PATH) and under everything OpenChamber itself
     // sets for OpenCode.
     const inheritedEnv = overlayEnvironment({ ...shellEnv, ...process.env, PATH: envPath }, getUserEnvironment());
-    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
-      ...inheritedEnv,
-      ...managedOpenCodeEnv,
-      PATH: inheritedEnv.PATH,
-      // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
-      // user's own OPENCODE_PASSWORD would otherwise win and every request
-      // we send with openCodePassword would get 401.
-      OPENCODE_PASSWORD: openCodePassword,
-      OPENCODE_SERVER_PASSWORD: openCodePassword,
-    })));
+    // What OpenChamber sets for OpenCode is recorded as injected, so a shell
+    // the agent opens can tell it from the user's own variables.
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases(assignInjectedEnv(
+      { ...inheritedEnv },
+      {
+        ...managedOpenCodeEnv,
+        PATH: inheritedEnv.PATH,
+        // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+        // user's own OPENCODE_PASSWORD would otherwise win and every request
+        // we send with openCodePassword would get 401.
+        OPENCODE_PASSWORD: openCodePassword,
+        OPENCODE_SERVER_PASSWORD: openCodePassword,
+      },
+    ))));
     managedProcessEnv = processEnv;
 
     let serverInstance;

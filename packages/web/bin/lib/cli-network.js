@@ -7,6 +7,7 @@ import {
   isNetworkExposedBindHost,
   isUnsafeUnauthenticatedLanAllowed,
 } from '../../server/lib/security/bind-host.js';
+import { injectedEnvKeys } from '../../server/lib/injected-env.js';
 
 // Browser-unsafe ports (Fetch/Chromium restricted ports).
 const UNSAFE_BROWSER_PORTS = new Set([
@@ -24,10 +25,15 @@ function isUnsafeBrowserPort(port) {
 }
 
 function resolveConfiguredBindHost(hostOverride) {
+  // A host OpenChamber itself put into this shell (the desktop app's, a
+  // running server's) is not a default for a new one.
+  const configuredHost = injectedEnvKeys(process.env).has('OPENCHAMBER_HOST')
+    ? undefined
+    : process.env.OPENCHAMBER_HOST;
   const configured = typeof hostOverride === 'string' && hostOverride.trim()
     ? hostOverride.trim()
-    : typeof process.env.OPENCHAMBER_HOST === 'string'
-      ? process.env.OPENCHAMBER_HOST.trim()
+    : typeof configuredHost === 'string'
+      ? configuredHost.trim()
       : '';
   return configured || '127.0.0.1';
 }

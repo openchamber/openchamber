@@ -429,6 +429,10 @@ export const createOpenChamberControlService = (dependencies) => {
     if (input.timeout !== undefined && input.wait !== true) throw new OpenChamberControlError('timeout requires wait', 400);
     if (input.lastAssistant === true && input.wait !== true) throw new OpenChamberControlError('lastAssistant requires wait', 400);
     assertSingleScope(input);
+    // Only a new session gets a worktree; elsewhere the number would be ignored.
+    if (input.pullRequest !== undefined && action !== 'session.create') {
+      throw new OpenChamberControlError('pullRequest applies only to session.create', 400);
+    }
     const sessionID = asNonEmptyString(input.sessionId);
     const parentSessionID = asNonEmptyString(contextSessionId);
     const returnResult = input.returnResult === true;
@@ -456,6 +460,16 @@ export const createOpenChamberControlService = (dependencies) => {
       ...(typeof input.setUpstream === 'boolean' ? { setUpstream: input.setUpstream } : {}),
       ...(asNonEmptyString(input.messageId) ? { messageId: input.messageId.trim() } : {}),
     };
+    // A pull request makes a worktree of its own, so its branch name (and a
+    // start ref the session service refuses) travel without a worktree name.
+    if (input.pullRequest !== undefined) {
+      payload.pullRequest = input.pullRequest;
+      if (!payload.worktree) {
+        payload.worktree = {};
+        if (asNonEmptyString(input.branch)) payload.worktree.branchName = input.branch.trim();
+        if (asNonEmptyString(input.startRef)) payload.worktree.startRef = input.startRef.trim();
+      }
+    }
     const startedAt = now();
     let result;
     if (action === 'session.create') {

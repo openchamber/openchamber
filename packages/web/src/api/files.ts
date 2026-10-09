@@ -318,11 +318,18 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return { success: Boolean((result as { success?: boolean }).success) };
   },
 
-  async downloadFile(path: string): Promise<void> {
+  async downloadFile(path: string, options): Promise<void> {
     const target = normalizePath(path);
+    const params = new URLSearchParams({ path: target, download: 'true' });
+    if (options?.allowOutsideWorkspace) {
+      params.set('allowOutsideWorkspace', 'true');
+    }
+    if (options?.outsideFileGrant) {
+      params.set('outsideFileGrant', options.outsideFileGrant);
+    }
     const response = await runtimeFetch('/api/fs/raw', {
-      query: { path: target, download: true },
-      headers: directoryHeaders(getDirectory),
+      query: params,
+      headers: directoryHeaders(getDirectory, options?.directory),
     });
     if (!response.ok) {
       throw new Error(`Download failed (${response.status})`);

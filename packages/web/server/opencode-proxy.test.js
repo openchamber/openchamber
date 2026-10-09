@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import http from 'node:http';
+import net from 'node:net';
 import express from 'express';
 import path from 'path';
 
@@ -22,6 +22,51 @@ const closeServer = (server) => new Promise((resolve, reject) => {
       return;
     }
     resolve();
+  });
+});
+
+const sendChunkedPost = (port, route, body, contentType) => new Promise((resolve, reject) => {
+  const socket = net.connect(port, '127.0.0.1');
+  const chunks = [];
+  socket.setTimeout(5000, () => socket.destroy(new Error('Timed out waiting for proxy response')));
+  socket.on('connect', () => {
+    const payload = Buffer.from(body);
+    socket.write([
+      `POST ${route} HTTP/1.1`,
+      `Host: 127.0.0.1:${port}`,
+      'Connection: close',
+      'Transfer-Encoding: chunked',
+      ...(contentType ? [`Content-Type: ${contentType}`] : []),
+      '',
+      payload.length > 0 ? `${payload.length.toString(16)}\r\n${body}\r\n0\r\n\r\n` : '0\r\n\r\n',
+    ].join('\r\n'));
+  });
+  socket.on('data', (chunk) => chunks.push(chunk));
+  socket.on('error', reject);
+  socket.on('end', () => {
+    const response = Buffer.concat(chunks).toString('utf8');
+    const headerEnd = response.indexOf('\r\n\r\n');
+    if (headerEnd === -1) {
+      reject(new Error('Proxy sent no response headers'));
+      return;
+    }
+    let body = response.slice(headerEnd + 4);
+    if (/\r\ntransfer-encoding: chunked\r\n/i.test(response.slice(0, headerEnd) + '\r\n')) {
+      const decoded = [];
+      let offset = 0;
+      while (offset < body.length) {
+        const lineEnd = body.indexOf('\r\n', offset);
+        const size = Number.parseInt(body.slice(offset, lineEnd), 16);
+        if (size === 0) break;
+        decoded.push(body.slice(lineEnd + 2, lineEnd + 2 + size));
+        offset = lineEnd + 2 + size + 2;
+      }
+      body = decoded.join('');
+    }
+    resolve({
+      status: Number(response.slice(0, response.indexOf('\r\n')).split(' ')[1]),
+      body,
+    });
   });
 });
 
@@ -352,6 +397,46 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(Number(data.contentLength)).toBeGreaterThan(0);
   });
 
+  it('forwards an unparsed chunked prompt body to OpenCode', async () => {
+    const upstream = express();
+    upstream.post('/api/session/abc/prompt', express.json(), (req, res) => {
+      res.json({
+        body: req.body,
+        transferEncoding: req.headers['transfer-encoding'] ?? null,
+        contentLength: req.headers['content-length'] ?? null,
+      });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    app.use('/api', express.urlencoded({ extended: true }));
+    registerOpenCodeProxy(app, {
+      fs: {},
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const payload = { parts: [{ type: 'text', text: 'hello' }] };
+    const response = await sendChunkedPost(proxyPort, '/api/session/abc/prompt', JSON.stringify(payload), 'application/json');
+
+    expect(response.status).toBe(200);
+    const data = JSON.parse(response.body);
+    expect(data.body).toEqual(payload);
+    expect(data.transferEncoding).toBe('chunked');
+    expect(data.contentLength).toBeNull();
+  });
+
   it('replays parsed chunked JSON bodies with a single framing header', async () => {
     const upstream = express();
     upstream.post('/api/session/abc/model', express.json(), (req, res) => {
@@ -403,7 +488,7 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(Number(data.contentLength)).toBe(JSON.stringify(payload).length);
   });
 
-  it('drops the copied transfer-encoding from an empty chunked request before forwarding it', async () => {
+  it('forwards an empty chunked request with one framing header', async () => {
     const upstream = express();
     upstream.post('/api/session/abc/interrupt', (req, res) => {
       res.json({
@@ -435,34 +520,13 @@ describe('OpenCode proxy SSE forwarding', () => {
     proxyServer = await listen(app);
     const proxyPort = proxyServer.address().port;
 
-    // An empty POST with no content-type, the way a tunnel forwards the
-    // interrupt request: nothing for a body parser to grab, so no body is
-    // replayed. http-proxy must not carry the copied `transfer-encoding`
-    // header onto the outgoing request. The outgoing client picks its own
-    // framing (Bun writes content-length for bodies it can size, empty ones
-    // included), and OpenCode rejects a request with both framing headers
-    // as ambiguous. The spy is the discriminator: whatever framing the
-    // client would have added by itself, the copied header may not ride
-    // along on top of it.
-    const originalRemoveHeader = http.ClientRequest.prototype.removeHeader;
-    const removedHeaders = [];
-    vi.spyOn(http.ClientRequest.prototype, 'removeHeader').mockImplementation(function (name) {
-      removedHeaders.push(name);
-      return originalRemoveHeader.call(this, name);
-    });
-
-    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/session/abc/interrupt`, {
-      method: 'POST',
-      headers: {},
-      body: new Blob([]).stream(),
-      duplex: 'half',
-    });
+    // A tunnel sends the terminal chunk with no content-length or content-type.
+    const response = await sendChunkedPost(proxyPort, '/api/session/abc/interrupt', '');
 
     expect(response.status).toBe(200);
-    const data = await response.json();
+    const data = JSON.parse(response.body);
     const framings = [data.transferEncoding !== null, data.contentLength !== null].filter(Boolean);
     expect(framings).toHaveLength(1);
-    expect(removedHeaders).toContain('transfer-encoding');
   });
 
   it.each([

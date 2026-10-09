@@ -100,6 +100,36 @@ describe('useFilesViewTabsStore', () => {
     expect(useFilesViewTabsStore.getState().byRoot).toBe(before);
   });
 
+  test('keeps a missing selected file selected while pruning stale tabs (issue 4477)', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/a.ts');
+    store.addOpenPath(root, '/repo/deleted.ts');
+    store.addOpenPath(root, '/repo/gone.ts');
+    store.setSelectedPath(root, '/repo/deleted.ts');
+
+    store.removeUnselectedOpenPath(root, '/repo/deleted.ts');
+    store.removeUnselectedOpenPath(root, '/repo/gone.ts');
+
+    const state = useFilesViewTabsStore.getState().byRoot[root];
+    expect(state?.selectedPath).toBe('/repo/deleted.ts');
+    expect(state?.openPaths).toEqual(['/repo/a.ts', '/repo/deleted.ts']);
+  });
+
+  test('keeps the first open path when nothing is selected, because the editor shows it', () => {
+    const root = '/repo';
+    const store = useFilesViewTabsStore.getState();
+
+    store.addOpenPath(root, '/repo/shown.ts');
+    store.addOpenPath(root, '/repo/other.ts');
+    store.setSelectedPath(root, null);
+
+    store.removeUnselectedOpenPath(root, '/repo/shown.ts');
+
+    expect(useFilesViewTabsStore.getState().byRoot[root]?.openPaths).toEqual(['/repo/shown.ts', '/repo/other.ts']);
+  });
+
   test('restores independent active projections across runtime switches', () => {
     useFilesViewTabsStore.getState().addOpenPath('/repo', '/repo/a.ts');
     useFilesViewTabsStore.getState().resetForRuntimeSwitch('runtime-b');

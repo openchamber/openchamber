@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 
-import { noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal } from './space-model-access';
+import { noteSpaceModelAccess, resetSpaceModelAccess, spaceModelRefusal, stoppedSpaceOfTarget } from './space-model-access';
 import type { SpaceEntry } from './spaces-api';
 import { useSpacesStore } from './spaces-store';
 
@@ -90,6 +90,23 @@ describe('spaceModelRefusal', () => {
     expect(spaceModelRefusal({ requestId: 'r1', directory: '/home/me/app' }, 'openai')).toEqual({ spaceId: ID, providerId: 'openai', reason: 'not_granted' });
     listed(running({ grants: [anthropic, { ...anthropic, id: 'openai', provider: 'openai' }] }));
     expect(spaceModelRefusal({ requestId: 'r1', directory: '/home/me/app' }, 'openai')).toBeNull();
+  });
+
+  test('a stopped space is named before any model is looked at; a running or unlisted one is not', () => {
+    expect(stoppedSpaceOfTarget(session)).toBeNull();
+    listed(running({ state: 'exited', stoppedIdle: true }));
+    expect(stoppedSpaceOfTarget(session)).toEqual({ spaceId: ID, reason: 'stopped', start: true });
+    // A draft still waiting on its creation request names the space by that request.
+    noteSpaceModelAccess({ requestId: 'r1', directory: DIRECTORY }, ['anthropic']);
+    expect(stoppedSpaceOfTarget({ requestId: 'r1', directory: '/home/me/app' })).toEqual({ spaceId: ID, reason: 'stopped', start: true });
+    expect(stoppedSpaceOfTarget({ requestId: null, directory: '/home/me/app' })).toBeNull();
+    // A stopped space whose gatekeeper is gone never starts again; a space whose container is gone can only be deleted.
+    listed(running({ state: 'exited', damage: 'gatekeeper_gone' }));
+    expect(stoppedSpaceOfTarget(session)).toEqual({ spaceId: ID, reason: 'stopped', start: false });
+    listed(running({ state: 'missing' }));
+    expect(stoppedSpaceOfTarget(session)).toEqual({ spaceId: ID, reason: 'gone', start: false });
+    listed(running());
+    expect(stoppedSpaceOfTarget(session)).toBeNull();
   });
 
   test('while the creation in this window is still giving access, what it chose decides', () => {

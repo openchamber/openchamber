@@ -36,6 +36,8 @@ export type TimelineEntry = {
   /** Worktree branch for worktree sessions, project root branch otherwise.
       Null when no branch is known — the row then drops its third line. */
   branch: string | null;
+  /** The branch is an isolated space's name; the row marks it with the space's container icon. */
+  inSpace: boolean;
 } | {
   /** A multi-run takes one row at its first lane's position. */
   kind: 'run';
@@ -131,7 +133,7 @@ const MobileTimelineRow: React.FC<{
   handlers: TimelineRowHandlers;
 }> = ({ entry, active, revealed, confirmingDelete, renaming, handlers }) => {
   const { t } = useI18n();
-  const { session, project, branch } = entry;
+  const { session, project, branch, inSpace } = entry;
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const time = formatRelativeShort(getSessionTimestamp(session));
   const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
@@ -230,7 +232,9 @@ const MobileTimelineRow: React.FC<{
               <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                 {branch ? (
                   <>
-                    <Icon name="git-branch" className="size-3.5 shrink-0" />
+                    {inSpace
+                      ? <Icon name="box-3" className="size-3.5 shrink-0" aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
+                      : <Icon name="git-branch" className="size-3.5 shrink-0" />}
                     <span className="block min-w-0 truncate typography-micro">{branch}</span>
                   </>
                 ) : null}

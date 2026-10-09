@@ -497,7 +497,7 @@ and the send path reading the same grammar.
   addressed to the fork's runtime, directory, and session. The hook consumes
   them after loading that identity's draft. Selection alone is not enough:
   the deferred chat column can still show the source composer. Ordinary
-  pending text insertions keep their existing path in `ChatInput`.
+  pending text insertions go through `state/usePendingComposerText.ts`.
   The hook also selects the attachment draft before paint. `input-store.ts`
   owns its in-memory files and scoped send recovery, documented in
   `packages/ui/src/sync/DOCUMENTATION.md`.
@@ -619,7 +619,12 @@ one app-wide composer state is split per column:
   which every app-wide source writes to (plugins, git dialogs, file
   selections, todo sends); a session id addresses the pinned composer on that
   session, which is what text quoted inside that chat and the composer's own
-  restores use. A composer consumes only what is addressed to it. Preset
+  restores use. A composer consumes only what is addressed to it. The main
+  chat's composer also waits until its deferred column shows the live
+  selection (`state/usePendingComposerText.ts`): a new-session draft opened
+  with a prompt, such as "resolve in new session" from a git conflict, leaves
+  the prompt while the column still shows the previous session, and taking it
+  then would save it into that session's draft. Preset
   submits, guest-issue attaches and pending composer references are main-chat
   only.
 - **Focus.** `focusChatInput()` focuses the main chat's composer and skips
@@ -886,7 +891,7 @@ and its search entry are hidden on mobile without changing the desktop preferenc
 The expanded desktop composer always inserts a newline with Enter, including
 Shift+Enter, and sends with Ctrl/Cmd+Enter; it ignores the Enter-to-send preference.
 
-Outside mobile and expanded mode, desktop Enter sends by default, and
-Shift-modified Enter does not send until the Chat setting is changed.
-An explicit choice controls Enter and Shift+Enter there;
-Ctrl/Cmd+Enter sends in either configured mode.
+Outside mobile and expanded mode, desktop Enter sends by default. The Chat
+setting controls plain Enter there: "Send with Enter" sends on Enter, "Send with
+Ctrl/Cmd+Enter" inserts a newline. Shift+Enter always inserts a newline, and
+Ctrl/Cmd+Enter always sends.

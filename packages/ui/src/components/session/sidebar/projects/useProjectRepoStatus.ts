@@ -4,6 +4,7 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
+import type { RuntimeAPIs } from '@/lib/api/types';
 
 type Project = { id: string; path: string; normalizedPath: string };
 const ROOT_BRANCH_TTL_MS = 5 * 60_000;
@@ -27,19 +28,42 @@ export const useProjectRepoStatus = (args: Args): void => {
 
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
+  const gitRuntimeKey = useGitStore((state) => state.runtimeKey);
+  // Paths this sidebar already populated. Collapsing, renaming, recoloring or
+  // opening a project rewrites the project list without adding a path; each
+  // status read costs a dozen or more Git processes, so only a path the
+  // sidebar has not populated yet is read.
+  const requestedStatusRef = React.useRef<{ runtimeKey: string; git: RuntimeAPIs['git']; paths: Set<string> } | null>(null);
 
-  // Derive repo status from centralized Git store
+  // Populate the centralized Git store for each project.
   React.useEffect(() => {
     if (!enabled || !git || normalizedProjects.length === 0) {
+      requestedStatusRef.current = null;
       setProjectRepoStatus(new Map());
       return;
     }
 
-    // Trigger ensureStatus for each project to populate store
-    normalizedProjects.forEach((project) => {
-      void runBackgroundNetworkTask(() => ensureStatus(project.normalizedPath, git));
-    });
-  }, [enabled, normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
+    let requested = requestedStatusRef.current;
+    if (!requested || requested.runtimeKey !== gitRuntimeKey || requested.git !== git) {
+      requested = { runtimeKey: gitRuntimeKey, git, paths: new Set() };
+      requestedStatusRef.current = requested;
+    }
+    const { paths } = requested;
+    const currentPaths = new Set(normalizedProjects.map((project) => project.normalizedPath));
+    for (const path of paths) {
+      if (!currentPaths.has(path)) paths.delete(path);
+    }
+    for (const path of currentPaths) {
+      if (paths.has(path)) continue;
+      paths.add(path);
+      // A failed read leaves the path unknown; the next list change retries it.
+      const forgetIfUnknown = () => {
+        const state = useGitStore.getState().directories.get(path);
+        if (state?.isGitRepo !== false && !state?.status) paths.delete(path);
+      };
+      void runBackgroundNetworkTask(() => ensureStatus(path, git)).then(forgetIfUnknown, forgetIfUnknown);
+    }
+  }, [enabled, normalizedProjects, git, gitRuntimeKey, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state
   React.useEffect(() => {

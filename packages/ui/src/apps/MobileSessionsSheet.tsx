@@ -1648,7 +1648,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   // Project, worktree and branch resolved once per session rather than per row.
   const timelineContextById = React.useMemo(() => {
-    const contexts = new Map<string, { project: ProjectMeta; branch: string | null }>();
+    const contexts = new Map<string, { project: ProjectMeta; branch: string | null; inSpace: boolean }>();
     if (!timelineActive) return contexts;
     const locations = resolveSidebarSessionLocations({
       sessions: projectSessions,
@@ -1665,7 +1665,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       const location = locations.get(session.id);
       const project = location ? projectsMeta.find((candidate) => candidate.id === location.projectId) : null;
       if (!project || !location) continue;
-      contexts.set(session.id, { project, branch: location.branchLabel });
+      contexts.set(session.id, { project, branch: location.branchLabel, inSpace: location.inSpace });
     }
     return contexts;
   }, [gitBranchesByDirectory, projectSessions, projectsMeta, sessionOwnership, spaceLabelById, timelineActive]);
@@ -1683,7 +1683,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       if (!context) return [];
       const runKey = runIndex.runKeyBySessionId.get(session.id);
       const run = runKey ? runIndex.runs.get(runKey) : undefined;
-      if (!run) return [{ kind: 'session', session, project: context.project, branch: context.branch }];
+      if (!run) return [{ kind: 'session', session, project: context.project, branch: context.branch, inSpace: context.inSpace }];
       if (listedRuns.has(run.key)) return [];
       listedRuns.add(run.key);
       return [{ kind: 'run', run, laneNodes: runLaneNodesByKey.get(run.key) ?? EMPTY_SESSION_NODES, project: context.project }];

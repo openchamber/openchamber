@@ -1130,6 +1130,37 @@ export function registerGitLabRoutes(app, options = {}) {
       .changeRequestFileContents(context.directory, number, {
         project: projectSelector(sourceRepo), remote: context.primaryRemote, path: filePath, previousPath, status,
       })),
+    /**
+     * The account GitLab reads on this instance use when none is named: the
+     * glab login while the user has switched to it, else the active account.
+     * Null when neither is there.
+     */
+    readCurrentAccountId: async (origin) => {
+      const instance = await store.readInstance(origin);
+      // A glab login that stopped working leaves the active account, as the status read does.
+      const cli = instance.cliActive ? await getUsableGlab(origin) : null;
+      if (cli) return `${origin}#cli:${cli.user.id}`;
+      return instance.accounts.find((account) => account.id === instance.activeAccountId && account.status !== 'invalid')?.id ?? null;
+    },
+    /** A merge request's head on the context's primary project network, by number, for a worktree made from it. */
+    readChangeRequestHead: async ({ context, number }) => {
+      const trusted = await options.validateReadContext(context);
+      const service = await getResourceService(trusted.instance, trusted.accountId, true);
+      const { changeRequest: request } = await service.changeRequestContext(trusted.directory, number, {
+        remote: trusted.primaryRemote,
+        constrainToPrimary: true,
+      });
+      const headSha = String(request?.headSha || '').toLowerCase();
+      if (!request?.project || !request.head || !/^[0-9a-f]{40}$/.test(headSha)) {
+        throw Object.assign(new Error('GitLab returned an invalid merge request head'), { code: 'MALFORMED_PROVIDER_RESPONSE' });
+      }
+      return {
+        project: { id: request.project.id, owner: request.project.owner, name: request.project.name },
+        headSha,
+        headBranch: request.head,
+        headOwner: (request.headProject ?? request.project).owner,
+      };
+    },
     resolveChangeRequestSource: async ({ context, project, number, expectedHeadSha, requestedRemoteName }) => {
       const trusted = await options.validateReadContext(context);
       const service = await getResourceService(trusted.instance, trusted.accountId, true);

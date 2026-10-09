@@ -345,12 +345,30 @@ export const useDirectoryStore = create<DirectoryStore>()(
         if (parent) setDirectory(parent);
       },
 
+      // Where the app goes once the last project is removed. The removed
+      // project stops being the last directory, and the home is not stored in
+      // its place, for the same reason as in synchronizeHomeDirectory.
       goHome: async () => {
         const homeDir =
           cachedHomeDirectory ||
           get().homeDirectory ||
           (await initializeHomeDirectory());
-        get().setDirectory(homeDir);
+        opencodeClient.setDirectory(homeDir);
+        invalidateFileSearchCache();
+        safeStorage.removeItem('lastDirectory');
+        void updateDesktopSettings({ lastDirectory: '' });
+        set((state) => {
+          const alreadyCurrent = state.directoryHistory[state.historyIndex] === homeDir;
+          const newHistory = alreadyCurrent ? state.directoryHistory : [...state.directoryHistory.slice(0, state.historyIndex + 1), homeDir];
+          return {
+            currentDirectory: homeDir,
+            directoryHistory: newHistory,
+            historyIndex: alreadyCurrent ? state.historyIndex : newHistory.length - 1,
+            hasPersistedDirectory: false,
+            isHomeReady: true,
+            isSwitchingDirectory: false,
+          };
+        });
       },
 
       synchronizeHomeDirectory: (homePath: string) => {
@@ -411,9 +429,14 @@ export const useDirectoryStore = create<DirectoryStore>()(
           const nextDirectory = shouldReplaceCurrent ? resolvedHome : (resolvedCurrent as string);
           opencodeClient.setDirectory(nextDirectory);
           invalidateFileSearchCache();
-          safeStorage.setItem('lastDirectory', nextDirectory);
-          void updateDesktopSettings({ lastDirectory: nextDirectory });
-
+          // Falling back to the home is not the user opening it, so it is not
+          // stored as the last directory: the server turns a stored last
+          // directory into a project when there is none and warms it on every
+          // start, which put the home in the sidebar and started OpenCode there.
+          if (!shouldReplaceCurrent) {
+            safeStorage.setItem('lastDirectory', nextDirectory);
+            void updateDesktopSettings({ lastDirectory: nextDirectory });
+          }
         }
 
         void updateDesktopSettings({ homeDirectory: resolvedHome });

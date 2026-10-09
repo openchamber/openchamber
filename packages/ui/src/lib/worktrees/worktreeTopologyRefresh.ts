@@ -7,6 +7,7 @@ import {
   worktreeMapsEqual,
   type ProjectRef,
 } from '@/lib/worktrees/worktreeManager';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
 
@@ -23,6 +24,32 @@ export const resolveProjectsForWorktreeChange = (directories: readonly string[])
     if (project && !byId.has(project.id)) byId.set(project.id, project);
   }
   return [...byId.values()];
+};
+
+/**
+ * The registered project a newly created session certainly belongs to: the
+ * project whose root is the session's directory, or the owner of a known
+ * worktree that holds it. A directory that only sits under a registered
+ * folder can be a worktree nobody has listed yet, of that project or of
+ * another one, so it resolves to `null` and the caller runs full discovery.
+ */
+export const resolveProjectForCreatedSession = (
+  directory: string,
+  projects: ReadonlyArray<ProjectRef>,
+): ProjectRef | null => {
+  const normalizedDirectory = normalizePath(directory);
+  if (!normalizedDirectory) return null;
+  const root = projects.find((project) => normalizePath(project.path) === normalizedDirectory);
+  if (root) return { id: root.id, path: root.path };
+  for (const worktrees of useSessionUIStore.getState().availableWorktreesByProject.values()) {
+    for (const worktree of worktrees) {
+      const worktreePath = normalizePath(worktree.path);
+      if (worktreePath && (normalizedDirectory === worktreePath || normalizedDirectory.startsWith(`${worktreePath}/`))) {
+        return resolveProjectRef(directory);
+      }
+    }
+  }
+  return null;
 };
 
 /**

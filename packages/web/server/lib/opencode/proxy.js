@@ -458,18 +458,19 @@ export const registerOpenCodeProxy = (app, deps) => {
   };
 
   const replayParsedBody = (proxyReq, req) => {
-    // http-proxy copies the incoming headers verbatim, so a request that
-    // arrived `Transfer-Encoding: chunked` (a tunnel or reverse proxy
-    // re-framing the body, including empty ones) would carry that header on
-    // top of the framing the outgoing client chooses itself; Bun's client
-    // also writes `content-length` for bodies it can size, empty ones
-    // included. OpenCode rejects a request carrying both framing headers as
-    // ambiguous. Drop the copied header on every proxied request and let
-    // the client frame it: content-length once the body length is known,
-    // chunked while the original body is still streaming through.
-    proxyReq.removeHeader('transfer-encoding');
     const body = serializeParsedBody(req, proxyReq);
-    if (!body) return;
+    if (!body) {
+      // DO NOT remove transfer-encoding from a stream without content-length:
+      // Node then sends tunneled prompt bodies without framing, and OpenCode
+      // reads an empty payload (#4576).
+      if (proxyReq.getHeader('content-length') !== undefined) {
+        proxyReq.removeHeader('transfer-encoding');
+      }
+      return;
+    }
+    // DO NOT keep the copied transfer-encoding alongside the replayed body's
+    // content-length: OpenCode rejects requests with both headers (#4280).
+    proxyReq.removeHeader('transfer-encoding');
     proxyReq.setHeader('content-length', String(body.length));
     proxyReq.write(body);
   };

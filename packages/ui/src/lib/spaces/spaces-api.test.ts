@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { applySpaceWork, cleanUpSpaceDisk, createSpace, listSpaces, previewSpaceApply, openSpaceDomain, readSpaceDisk, readSpaceIdleStop, readSpaceJournal, readSpaceSetup, readSpacesSwitch, runSpaceSetup, setSpaceIdleStop, SpacesRequestError } from './spaces-api';
+import { applySpaceWork, cleanUpSpaceDisk, createSpace, listSpaces, previewSpaceApply, openSpaceDomain, pullSpaceImage, readSpaceDisk, readSpaceIdleStop, readSpaceJournal, readSpaceSetup, readSpacesSwitch, runSpaceSetup, setSpaceIdleStop, SpacesRequestError } from './spaces-api';
 
 const ID = 'a1b2c3d4e5f6';
 const originalFetch = globalThis.fetch;
@@ -102,7 +102,18 @@ describe('spaces-api', () => {
 });
 
 describe('the disk of a place', () => {
-  const disk = { imageBytes: 1_632_000_000, toolsBytes: 438_000_000, spacesBytes: 0, freeBytes: 1_632_000_000, freesImage: true };
+  const disk = { imageBytes: 1_632_000_000, imagePulling: false, imageFailure: null, toolsBytes: 438_000_000, spacesBytes: 0, freeBytes: 1_632_000_000, freesImage: true };
+
+  test('starts the image download with a POST and reads the disk it answers; a host that says nothing of a download is read as none', async () => {
+    const pulling = { ...disk, imageBytes: null, freeBytes: 0, freesImage: false, imagePulling: true };
+    const posts = answer(202, JSON.stringify(pulling));
+    expect(await pullSpaceImage('docker')).toEqual(pulling);
+    expect(posts[0].method).toBe('POST');
+    expect(new URL(posts[0].url).pathname).toBe('/api/openchamber/spaces/places/docker/image');
+    const older = { imageBytes: disk.imageBytes, toolsBytes: disk.toolsBytes, spacesBytes: disk.spacesBytes, freeBytes: disk.freeBytes, freesImage: disk.freesImage };
+    answer(200, JSON.stringify(older));
+    expect(await readSpaceDisk('docker')).toEqual(disk);
+  });
 
   test('reads the disk of a place, and a clean-up is a POST that answers what was freed and the disk after', async () => {
     const reads = answer(200, JSON.stringify(disk));

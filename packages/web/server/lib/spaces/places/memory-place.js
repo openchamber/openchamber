@@ -50,6 +50,9 @@ export function createMemoryPlace({ id = 'memory' } = {}) {
   return {
     id,
     check: async () => ({ available: true, version: 'memory', os: 'none', arch: 'none', hostIsolation: true }),
+    // Memory has no image to download: a pull ends at once and none is ever under way.
+    pullImage: async () => {},
+    imagePulling: () => false,
     create: async ({ id: spaceId, name, project, created }) => {
       if (spaces.has(requireSpaceId(spaceId))) {
         throw new SpaceError('space_name_taken', `Space ${spaceId} already exists`);

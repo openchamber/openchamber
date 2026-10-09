@@ -11,6 +11,7 @@ import { browserUrlLabel } from '@/lib/browser/url';
 import { isRemoteWebLoopbackUrl, isSpaceUnreachableFromHere } from '@/lib/browser/devTunnel';
 import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { useSpaceMarkLabel } from '@/lib/spaces/space-mark';
+import { useSpaceDirectoryStopped } from '@/lib/spaces/spaces-store';
 import { hideDevServerPort, showHiddenDevServerPorts, useHiddenDevServerPorts } from '@/lib/browser/hiddenDevServers';
 
 /**
@@ -56,8 +57,15 @@ export const BrowserEmptyState: React.FC<{
   // name and place behind it.
   const insideSpace = isSpaceDirectory(directory);
   const spaceMark = useSpaceMarkLabel(directory);
+  // A stopped space runs no server and answers no request: its list is empty without asking,
+  // and the look resumes when the journey list says the space runs again.
+  const spaceStopped = useSpaceDirectoryStopped(directory);
 
   React.useEffect(() => {
+    if (spaceStopped) {
+      setDiscovery({ kind: 'ready', servers: [] });
+      return;
+    }
     let active = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
@@ -77,7 +85,7 @@ export const BrowserEmptyState: React.FC<{
       if (timer) clearTimeout(timer);
       controller.abort();
     };
-  }, [directory]);
+  }, [directory, spaceStopped]);
 
   const candidates = React.useMemo(() => mergeDevServerCandidates({
     announced,

@@ -68,7 +68,7 @@ mock.module('@/lib/worktreeSessionCreator', () => ({
   },
 }));
 
-const { refreshWorktreeTopologyForChange, resolveProjectsForWorktreeChange } = await import('./worktreeTopologyRefresh');
+const { refreshWorktreeTopologyForChange, resolveProjectForCreatedSession, resolveProjectsForWorktreeChange } = await import('./worktreeTopologyRefresh');
 
 const metadata = (path: string, projectDirectory: string, status: WorktreeMetadata['worktreeStatus'] = 'ready'): WorktreeMetadata => ({
   path,
@@ -91,6 +91,21 @@ describe('worktree topology refresh from control events', () => {
 
   test('maps event directories onto registered projects once each', () => {
     expect(resolveProjectsForWorktreeChange(['/repo', '/repo-feature', '/unknown'])).toEqual([{ id: 'repo', path: '/repo' }]);
+  });
+
+  test('places a created session only when its project is certain', () => {
+    sessionState.availableWorktreesByProject.set('/repo', [metadata('/repo-feature', '/repo')]);
+    const withHome = [...projects, { id: 'home', path: '/home' }];
+
+    // A project root, and a worktree the client already knows.
+    expect(resolveProjectForCreatedSession('/other/', withHome)).toEqual({ id: 'other', path: '/other' });
+    expect(resolveProjectForCreatedSession('/repo-feature', withHome)).toEqual({ id: 'repo', path: '/repo' });
+
+    // A new worktree under a broader registered folder may belong to any
+    // project, and a directory nothing registers belongs to none.
+    expect(resolveProjectForCreatedSession('/home/.local/share/opencode/worktree/abc/feature', withHome)).toBeNull();
+    expect(resolveProjectForCreatedSession('/repo/src', withHome)).toBeNull();
+    expect(resolveProjectForCreatedSession('/unknown', withHome)).toBeNull();
   });
 
   test('force-lists the affected project and replaces only its buckets', async () => {

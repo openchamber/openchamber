@@ -868,6 +868,9 @@ export function createSpaceJourney({
     if (Array.from(pending.values()).some((entry) => entry.state === 'preparing')) {
       throw new SpaceError('space_preparing', 'A space is being made. Clean up when it is ready.');
     }
+    if (place.imagePulling()) {
+      throw new SpaceError('image_pulling', 'The image is being downloaded. Clean up when it is done.');
+    }
     const { freedBytes, kept, machine } = await place.cleanUpDisk();
     for (const item of kept.filter((entry) => entry.reason === 'failed')) {
       logger.warn?.(`[spaces] clean-up could not remove ${item.kind} ${item.name}: ${item.message}`);
@@ -875,6 +878,18 @@ export function createSpaceJourney({
     if (machine.state === 'failed') logger.warn?.(`[spaces] the Colima machine did not trim its disk: ${machine.message}`);
     if (machine.state === 'trimmed') logger.info?.('[spaces] the Colima machine trimmed its disk after a clean-up');
     return { freedBytes, kept: kept.map(({ kind, reason }) => ({ kind, reason })), disk: await place.readDisk() };
+  };
+
+  /**
+   * Downloads the base image on a place ahead of the first space (journey step 0), so no create
+   * dialog waits for it. The place runs one download at a time and a creation under way shares it.
+   * Answers the disk at once, `imagePulling` set; the page reads the disk again until it is not,
+   * and `imageFailure` says why the image is still absent after a download that failed.
+   */
+  const pullImage = async (placeId) => {
+    requirePlace(placeId);
+    place.pullImage().catch((error) => { logger.warn?.(`[spaces] the image download failed: ${error.code ?? error.message}`); });
+    return place.readDisk();
   };
 
   /** For a turn-off that did not go through after the spaces were stopped: creations are taken again. */
@@ -938,5 +953,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

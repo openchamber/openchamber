@@ -4,6 +4,7 @@ import { registerGitHubRoutes } from '../github/routes.js';
 import { registerGitLabRoutes } from '../gitlab/routes.js';
 import { createBindingService } from './binding-service.js';
 import { createBindingStore } from './binding-storage.js';
+import { createChangeRequestWorktreeSource } from './change-request-worktree.js';
 import { createGitIdentityProvisioning } from '../git/identity-provisioning.js';
 import { createProfile, getProfiles, updateProfile } from '../git/identity-storage.js';
 import { resolveRepositoryIdentity } from './repository-identity.js';
@@ -291,5 +292,16 @@ export function registerSourceControlRoutes(app, dependencies = {}) {
         code: 'INVALID_SOURCE_CONTROL_READ_CONTEXT', status: 400,
       });
     },
+    // A worktree from a pull or merge request given by number (session.create).
+    resolveChangeRequestWorktreeSource: createChangeRequestWorktreeSource({
+      readBinding: bindingService.get,
+      listGitLabInstances: gitlab.listInstances,
+      readCurrentAccountId: ({ provider, instance }) => (provider === 'github'
+        ? github.readCurrentAccountId()
+        : gitlab.readCurrentAccountId(instance)),
+      readChangeRequestHead: (input) => (input.context.provider === 'github'
+        ? github.readChangeRequestHead(input)
+        : gitlab.readChangeRequestHead(input)),
+    }),
   });
 }

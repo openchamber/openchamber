@@ -5,8 +5,10 @@
  * The server decides what goes, see `places/docker-disk.js`; this screen only shows and asks.
  *
  * A place that cannot be reached says so and what to do, never a count of zero: the spaces this
- * window last saw are listed as out of reach, and nothing is when it saw none. Nothing polls; "Try
- * again" reads the place again. Rendered only while the switch is on (decision 19).
+ * window last saw are listed as out of reach, and nothing is when it saw none. Nothing polls, except
+ * the disk while the host downloads the image, which "Download image" starts ahead of the first
+ * space (journey step 0); "Try again" reads the place again. Rendered only while the switch is on
+ * (decision 19).
  */
 
 import React from 'react';
@@ -21,6 +23,7 @@ import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import {
   cleanUpSpaceDisk,
   listSpacePlaces,
+  pullSpaceImage,
   readSpaceDisk,
   type SpaceCleanUp,
   type SpaceDisk,
@@ -47,8 +50,11 @@ const formatDiskSize = (bytes: number): string => {
 
 type Read<T> = { kind: 'reading' } | { kind: 'read'; value: T } | { kind: 'failed'; error: Error };
 
-/** Reads once when mounted and again on `retry`; a failure is kept apart, never read as empty. */
-const useRead = <T,>(load: (signal: AbortSignal) => Promise<T>): [Read<T>, () => void, (value: T) => void] => {
+/**
+ * Reads once when mounted and again on `retry`; a failure is kept apart, never read as empty.
+ * `replace` and `fail` let a later read of the caller's own stand in for the last answer.
+ */
+const useRead = <T,>(load: (signal: AbortSignal) => Promise<T>): [Read<T>, () => void, (value: T) => void, (error: Error) => void] => {
   const [state, setState] = React.useState<Read<T>>({ kind: 'reading' });
   const [turn, setTurn] = React.useState(0);
   React.useEffect(() => {
@@ -62,7 +68,8 @@ const useRead = <T,>(load: (signal: AbortSignal) => Promise<T>): [Read<T>, () =>
   }, [load, turn]);
   const retry = React.useCallback(() => setTurn((current) => current + 1), []);
   const replace = React.useCallback((value: T) => setState({ kind: 'read', value }), []);
-  return [state, retry, replace];
+  const fail = React.useCallback((error: Error) => setState({ kind: 'failed', error }), []);
+  return [state, retry, replace, fail];
 };
 
 const DiskLine: React.FC<{ disk: SpaceDisk }> = ({ disk }) => {
@@ -133,11 +140,17 @@ const CleanUpOutcome: React.FC<{ outcome: SpaceCleanUp }> = ({ outcome }) => {
   );
 };
 
-/** The disk of a place that answers, and its clean-up. */
+/** How often the disk is read again while the host downloads the image. */
+const IMAGE_PULL_REFRESH_MS = 3_000;
+
+/** The "Download image" button: asking the host to start, or a start the host refused. */
+type DownloadState = { kind: 'idle' } | { kind: 'starting' } | { kind: 'failed'; error: Error };
+
+/** The disk of a place that answers, its image download while the image is absent, and its clean-up. */
 const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
   const { t } = useI18n();
   const load = React.useCallback((signal: AbortSignal) => readSpaceDisk(placeId, signal), [placeId]);
-  const [disk, , replaceDisk] = useRead(load);
+  const [disk, , replaceDisk, failDisk] = useRead(load);
   const [cleanUp, setCleanUp] = React.useState<CleanUpState>({ kind: 'idle' });
 
   const run = async () => {
@@ -152,23 +165,83 @@ const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
     }
   };
 
+  // "Download image" while the image is absent (journey step 0). The download runs on the host;
+  // the disk is read again, one read at a time with a pause between, until it says the download
+  // ended: the one poll of this page, and only while the user watches a download they started or
+  // found under way. A read that fails ends the poll and shows as the disk's own failure, so a
+  // host that went away does not leave the spinner turning.
+  const [download, setDownload] = React.useState<DownloadState>({ kind: 'idle' });
+  const pulling = disk.kind === 'read' && disk.value.imagePulling;
+  React.useEffect(() => {
+    if (!pulling) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const readAgain = () => {
+      timer = setTimeout(() => {
+        readSpaceDisk(placeId, controller.signal).then(
+          (value) => {
+            if (controller.signal.aborted) return;
+            replaceDisk(value);
+            if (value.imagePulling) readAgain();
+          },
+          (error: Error) => { if (!controller.signal.aborted) failDisk(error); },
+        );
+      }, IMAGE_PULL_REFRESH_MS);
+    };
+    readAgain();
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [failDisk, placeId, pulling, replaceDisk]);
+  const downloadImage = async () => {
+    setDownload({ kind: 'starting' });
+    try {
+      replaceDisk(await pullSpaceImage(placeId));
+      setDownload({ kind: 'idle' });
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      setDownload({ kind: 'failed', error });
+    }
+  };
+
   if (disk.kind === 'reading') return <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.reading')}</p>;
   if (disk.kind === 'failed') {
     return <p className="typography-meta text-[var(--status-error)]">{t('settings.openchamber.spaces.places.disk.readFailed', { reason: spaceFailureText(t, failureOfError(disk.error)) })}</p>;
   }
   const nothingToFree = disk.value.freeBytes === 0;
+  // A download this window could not start, or the host's word on the last one while the image is absent.
+  const imageFailure = download.kind === 'failed' ? failureOfError(download.error) : disk.value.imageFailure;
   return (
     <div className="space-y-2">
       <DiskLine disk={disk.value} />
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={nothingToFree || cleanUp.kind === 'cleaning'}
-        title={nothingToFree ? t('settings.openchamber.spaces.places.cleanUp.nothing') : undefined}
-        onClick={() => setCleanUp({ kind: 'confirming' })}
-      >
-        {cleanUp.kind === 'cleaning' ? t('settings.openchamber.spaces.places.cleanUp.running') : t('settings.openchamber.spaces.places.cleanUp.button')}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {disk.value.imageBytes === null ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disk.value.imagePulling || download.kind === 'starting'}
+            onClick={() => void downloadImage()}
+          >
+            {disk.value.imagePulling || download.kind === 'starting' ? (
+              <>
+                <Icon name="loader-4" className="size-3.5 animate-spin" />
+                {t('settings.openchamber.spaces.places.image.downloading')}
+              </>
+            ) : t('settings.openchamber.spaces.places.image.download')}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
+          // The server refuses a clean-up while the image is being downloaded.
+          disabled={nothingToFree || cleanUp.kind === 'cleaning' || disk.value.imagePulling}
+          title={nothingToFree ? t('settings.openchamber.spaces.places.cleanUp.nothing') : undefined}
+          onClick={() => setCleanUp({ kind: 'confirming' })}
+        >
+          {cleanUp.kind === 'cleaning' ? t('settings.openchamber.spaces.places.cleanUp.running') : t('settings.openchamber.spaces.places.cleanUp.button')}
+        </Button>
+      </div>
+      {imageFailure ? (
+        <p className="typography-meta text-[var(--status-error)]" role="alert">{spaceFailureText(t, imageFailure)}</p>
+      ) : null}
       {cleanUp.kind === 'done' ? <CleanUpOutcome outcome={cleanUp.outcome} /> : null}
       {cleanUp.kind === 'failed' ? (
         <p className="typography-meta text-[var(--status-error)]" role="alert">

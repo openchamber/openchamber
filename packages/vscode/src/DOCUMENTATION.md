@@ -289,6 +289,14 @@ resolves `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else
 `~/.config/opencode` at extension startup (the same rule OpenCode 2 applies);
 only `opencode.json(c)` is a config file, the v1 `config.json` is not read. Project paths, the explicit
 `OPENCODE_CONFIG` file layer, and the auth data directory stay separate.
+When both global files exist, every config entry lookup reads
+`opencode.jsonc` after `opencode.json`, so on a name clash the `.jsonc` entry
+wins. This covers MCP servers, agents, and commands: editing or deleting an
+entry updates the file that defines it, and without `OPENCODE_CONFIG` a new
+user-scoped entry goes into the primary config file.
+An invalid secondary file cannot answer an empty MCP list or a missing-server
+lookup as success; those reads report the parse error instead. An agent or
+command lookup that reaches the global files reports the same error.
 No files are migrated. The behavior GET bridge response includes the effective
 `path` for both existing and missing AGENTS.md files; shared Settings uses it
 in the warning.

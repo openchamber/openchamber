@@ -10,6 +10,7 @@ import { rotateLogFile } from './cli-log-files.js';
 import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cli-lifecycle.js';
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
+import { assignInjectedEnv } from '../../server/lib/injected-env.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -155,14 +156,16 @@ async function serveCommand(options) {
       }
 
       // Propagate resolved values into env before importing the server module.
+      // The binary path is left unmarked: a startup service enabled from this
+      // server's terminal wants the same OpenCode.
       if (opencodeBinary) {
         process.env.OPENCODE_BINARY = opencodeBinary;
       }
-      if (effectiveUiPassword) {
-        process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
-      }
-      process.env.OPENCHAMBER_HOST = effectiveHost;
-      process.env.OPENCHAMBER_RUNTIME = 'web';
+      assignInjectedEnv(process.env, {
+        OPENCHAMBER_UI_PASSWORD: effectiveUiPassword || undefined,
+        OPENCHAMBER_HOST: effectiveHost,
+        OPENCHAMBER_RUNTIME: 'web',
+      });
 
       // In --quiet mode, redirect stdout/stderr to the log file so that
       // server runtime output (console.log calls) does not pollute the
@@ -280,16 +283,16 @@ async function serveCommand(options) {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', logFd, logFd, 'ipc'],
-      env: {
-        ...process.env,
+      // Same marking as the foreground path above: the server's own settings
+      // are recorded as OpenChamber's, the binary path is not.
+      env: assignInjectedEnv({ ...process.env, OPENCODE_BINARY: opencodeBinary }, {
         OPENCHAMBER_PORT: String(targetPort),
         OPENCHAMBER_RUNTIME: 'web',
-        OPENCODE_BINARY: opencodeBinary,
         OPENCHAMBER_HOST: effectiveHost,
-        ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
-        ...(options.apiOnly === true ? { OPENCHAMBER_API_ONLY: 'true' } : {}),
-        ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
-      },
+        OPENCHAMBER_UI_PASSWORD: effectiveUiPassword || undefined,
+        OPENCHAMBER_API_ONLY: options.apiOnly === true ? 'true' : undefined,
+        OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START || undefined,
+      }),
     });
 
     child.unref();

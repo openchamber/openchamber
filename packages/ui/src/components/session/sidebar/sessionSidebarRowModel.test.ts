@@ -267,6 +267,7 @@ describe('buildSessionSidebarRowModel', () => {
       getSessionLocation: (id) => ({
         projectId: 'project-a', groupDirectory: '/repo', projectLabel: 'repo',
         branchLabel: branches.get(id) ?? null,
+        inSpace: false,
         worktree: null,
       }),
       query: '',
@@ -275,9 +276,9 @@ describe('buildSessionSidebarRowModel', () => {
       ? [{ id: row.node.session.id, metadata: row.secondaryMeta }]
       : []);
     expect(rows).toEqual([
-      { id: 'parent', metadata: { projectLabel: 'repo', branchLabel: 'main' } },
-      { id: 'child', metadata: { projectLabel: 'repo', branchLabel: 'feature-child' } },
-      { id: 'hidden', metadata: { projectLabel: 'repo', branchLabel: null } },
+      { id: 'parent', metadata: { projectLabel: 'repo', branchLabel: 'main', inSpace: false } },
+      { id: 'child', metadata: { projectLabel: 'repo', branchLabel: 'feature-child', inSpace: false } },
+      { id: 'hidden', metadata: { projectLabel: 'repo', branchLabel: null, inSpace: false } },
     ]);
   });
 

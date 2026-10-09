@@ -2079,6 +2079,79 @@ describe('Kimi for Coding credential lookup (VS Code parity)', () => {
   });
 });
 
+describe('Kimi for Coding ratio-based usage payload (VS Code parity)', () => {
+  // Captured live from GET https://api.kimi.com/coding/v1/usages on 2026-10-08.
+  // Migrated plans answer with a ratio-based `usages` map instead of the counted
+  // `usage` block, and keep a coarser `limits[]` entry for the same 5-hour
+  // window. `limit_month_code` is the code-typed share of `limit_month_total`,
+  // not a second allowance, and is not shown.
+  const migratedPlan = {
+    limits: [{
+      window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+      detail: { limit: '100', used: '50', remaining: '50', resetTime: '2026-10-08T11:50:22.234058Z' },
+    }],
+    usages: {
+      limit_5h: { used_ratio: 0.495422, reset_time: '2026-10-08T11:50:22Z' },
+      limit_month_total: { used_ratio: 0.2636, reset_time: '2026-10-18T00:00:00Z' },
+      limit_month_code: { used_ratio: 0.1907, reset_time: '2026-10-18T00:00:00Z' },
+    },
+  };
+
+  const run = async (payload: Parameters<typeof Response.json>[0]) => fetchKimiQuota({
+    readAuth: () => ({ 'kimi-for-coding': { key: 'test-token' } }),
+    fetchImpl: async () => Response.json(payload),
+  });
+
+  test('reads the 5h and monthly ratios and ignores the duplicate limits[] entry', async () => {
+    const result = await run(migratedPlan);
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage?.windows ?? {}), ['5h', 'monthly']);
+    assert.ok(Math.abs((result.usage?.windows['5h']?.usedPercent ?? 0) - 49.5422) < 1e-9);
+    assert.equal(result.usage?.windows['5h']?.windowSeconds, 18000);
+    assert.equal(result.usage?.windows['5h']?.resetAt, Date.parse('2026-10-08T11:50:22Z'));
+  });
+
+  test('reports the monthly row as a plain percent so it follows the used/remaining setting', async () => {
+    const result = await run(migratedPlan);
+    assert.ok(Math.abs((result.usage?.windows.monthly?.usedPercent ?? 0) - 26.36) < 1e-9);
+    assert.ok(Math.abs((result.usage?.windows.monthly?.remainingPercent ?? 0) - 73.64) < 1e-9);
+    assert.equal(result.usage?.windows.monthly?.valueLabel, undefined);
+    assert.equal(result.usage?.windows.monthly?.windowSeconds, null);
+    assert.equal(result.usage?.windows.monthly?.resetAt, Date.parse('2026-10-18T00:00:00Z'));
+  });
+
+  test('maps limit_7d to the weekly window when the plan still serves it', async () => {
+    const result = await run({ usages: { limit_7d: { used_ratio: 0.25, reset_time: null } } });
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 25);
+    assert.equal(result.usage?.windows.weekly?.windowSeconds, 604800);
+    assert.equal(result.usage?.windows.weekly?.valueLabel, undefined);
+  });
+
+  test('keeps a zero ratio and skips an entry without one', async () => {
+    const result = await run({
+      usages: {
+        limit_5h: { used_ratio: 0, reset_time: null },
+        limit_month_total: { used_ratio: 'not-a-number', reset_time: null },
+      },
+    });
+    assert.equal(result.usage?.windows['5h']?.usedPercent, 0);
+    assert.deepEqual(Object.keys(result.usage?.windows ?? {}), ['5h']);
+  });
+
+  test('still reads the counted payload from plans that have not migrated', async () => {
+    const result = await run({
+      usage: { limit: '100', used: '100', resetTime: '2026-08-04T06:21:48.514003Z' },
+      limits: [{
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', remaining: '100', resetTime: '2026-08-03T07:21:48.514003Z' },
+      }],
+    });
+    assert.deepEqual(Object.keys(result.usage?.windows ?? {}), ['weekly', 'Rate Limit (300m)']);
+    assert.equal(result.usage?.windows.weekly?.usedPercent, 100);
+    assert.equal(result.usage?.windows['Rate Limit (300m)']?.usedPercent, 0);
+  });
+});
+
 describe('NanoGPT quota provider (VS Code parity)', () => {
   const run = async (payload: Parameters<typeof Response.json>[0]) => {
     stubFetchReturning(async () => Response.json(payload));

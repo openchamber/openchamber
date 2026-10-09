@@ -1213,3 +1213,61 @@ describe('GitLab routes', () => {
   });
 });
 
+
+describe('merge request head for a worktree made by number', () => {
+  const account = { id: `${origin}#2`, token: 'bound-token', user: { id: 2 }, source: 'oauth', scope: 'api', status: 'valid' };
+  const register = (changeRequest, store = makeStore(account)) => {
+    const changeRequestContext = vi.fn(async () => ({ changeRequest }));
+    const gitlab = registerGitLabRoutes(express(), {
+      authFile: '/unused/source-control-auth.json',
+      execFile: async () => ({ stdout: '' }),
+      store,
+      createClient: vi.fn(() => ({})),
+      createResourceService: vi.fn(() => ({ changeRequestContext })),
+      validateReadContext: async (context) => ({ ...context, primaryRemote: 'upstream' }),
+    });
+    return { gitlab, changeRequestContext };
+  };
+  const context = {
+    provider: 'gitlab', instance: origin, directory: '/repo', repositoryId: 'repo_one',
+    accountId: account.id, bindingRevision: 3, primaryRemote: 'upstream',
+  };
+
+  it('answers the active account, and none once it is invalid', async () => {
+    const store = makeStore(account);
+    const { gitlab } = register(null, store);
+    await expect(gitlab.readCurrentAccountId(origin)).resolves.toBe(account.id);
+    await store.markAccountInvalid(origin, account.id);
+    await expect(gitlab.readCurrentAccountId(origin)).resolves.toBeNull();
+  });
+
+  it('falls back to the active account when the glab login it was switched to stopped working', async () => {
+    const store = makeStore(account);
+    await store.setCliActive(origin, true);
+    const { gitlab } = register(null, store);
+    await expect(gitlab.readCurrentAccountId(origin)).resolves.toBe(account.id);
+  });
+
+  it('reads the target project and the fork head on the primary project network', async () => {
+    const { gitlab, changeRequestContext } = register({
+      number: 7, head: 'feature/fix', headSha: 'C'.repeat(40),
+      project: { id: '11', owner: 'team', name: 'repo' },
+      headProject: { id: '22', owner: 'alice', name: 'repo' },
+    });
+
+    await expect(gitlab.readChangeRequestHead({ context, number: 7 })).resolves.toEqual({
+      project: { id: '11', owner: 'team', name: 'repo' },
+      headSha: 'c'.repeat(40),
+      headBranch: 'feature/fix',
+      headOwner: 'alice',
+    });
+    expect(changeRequestContext).toHaveBeenCalledExactlyOnceWith('/repo', 7, { remote: 'upstream', constrainToPrimary: true });
+  });
+
+  it('refuses a merge request answer without a usable head', async () => {
+    const { gitlab } = register({ number: 7, head: 'feature/fix', headSha: '', project: { id: '11', owner: 'team', name: 'repo' } });
+
+    await expect(gitlab.readChangeRequestHead({ context, number: 7 }))
+      .rejects.toMatchObject({ code: 'MALFORMED_PROVIDER_RESPONSE' });
+  });
+});

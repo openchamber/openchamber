@@ -18,7 +18,7 @@ type Context = {
   folderOwnerKey?: string | null;
   selectionScopeKey?: string | null;
   archivedBucket?: boolean;
-  secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null;
+  secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   renderContext?: SessionSidebarRenderContext;
   rowKey?: string;
   dragKey?: string;
@@ -275,6 +275,7 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.renderExtras?.subtreeContainsEditing?.has(id) ?? false) !== (next.renderExtras?.subtreeContainsEditing?.has(id) ?? false)) return false;
   if ((prev.secondaryMeta?.projectLabel ?? null) !== (next.secondaryMeta?.projectLabel ?? null)) return false;
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
+  if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
   const scalarKeys = [
     'depth', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
     'renderContext', 'rowKey', 'dragKey', 'renderChildren',

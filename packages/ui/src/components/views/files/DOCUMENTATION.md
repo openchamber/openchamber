@@ -36,6 +36,16 @@ loading do not request native file grants. Server-backed text reads and metadata
 requests have a 30-second deadline, including response-body reads, so a stalled
 request reaches the existing error handler instead of leaving loading pending.
 
+A file that cannot be read, a missing one included, stays selected and shows
+the read error; the host's tab still names that path, so the editor never falls
+back to another open file. A pending line jump or focus for that path ends
+there. The metadata poll treats a file deleted while open the same way: without
+unsaved edits it shows the error, with unsaved edits it keeps them. It keeps
+polling a failed file and loads it again once a missing file is back; a file
+that exists but fails to read is never reloaded by the poll
+(`openFilePollStep`). Pruning stale open paths (`removeUnselectedOpenPath`)
+never removes the path on screen.
+
 Sidebar root/runtime changes remount the scoped tree. Its bounded module cache
 provides continuity between mounts; request cancellation for collapsed paths
 stops queued batches, while already-started reads may populate the same-scope
