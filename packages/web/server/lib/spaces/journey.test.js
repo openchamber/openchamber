@@ -283,6 +283,17 @@ describe('the journey: start, stop, remove', () => {
     expect(calls.map(([name]) => name)).toEqual(['setNetwork']);
   });
 
+  it('lists a space whose code never arrived as a failed creation, which Remove takes away', async () => {
+    // A host that quit in the middle of bringing the code in leaves the containers running and
+    // the record without a space path. The next host must not list that as a healthy space.
+    const { journey, records, place, id } = await ready();
+    records.update(id, { spacePath: null, base: null });
+    expect((await journey.listSpaces())[0]).toMatchObject({ id, state: 'failed', step: 'failed', failure: { code: 'space_code_never_arrived', message: expect.stringContaining('closed before the code arrived'), details: null } });
+    expect(await journey.removeSpace(id)).toMatchObject({ id, removed: true, refsRemoved: true, failures: [] });
+    expect(await place.list()).toEqual([]);
+    expect(records.read(id)).toEqual({ status: 'missing', record: null });
+  });
+
   it('removes the space, the refs in the user\'s repository and the record', async () => {
     const { journey, place, records, calls, id } = await ready();
     expect(await journey.removeSpace(id)).toEqual({ id, removed: true, refsRemoved: true, failures: [], chats: null });
@@ -1163,6 +1174,14 @@ describe('the journey: the chat archive of a deleted space', () => {
     return { ...made, ...archive, id };
   };
   const notSaved = () => new SpaceError('chats_not_saved', 'The chats of "Fix login" could not be saved.', { name: 'Fix login', tooLarge: ['Big one'], failed: 0, listed: true });
+
+  it('does not ask the archive for a space whose code never arrived, and removes it', async () => {
+    const { journey, place, records, asked, id } = await ready();
+    records.update(id, { spacePath: null, base: null });
+    expect(await journey.removeSpace(id)).toMatchObject({ id, removed: true, refsRemoved: true, failures: [], chats: null });
+    expect(asked).toEqual([]);
+    expect(await place.list()).toEqual([]);
+  });
 
   it('saves the chats of a running space before it goes, and says how many', async () => {
     const { journey, place, asked, calls, id } = await ready();

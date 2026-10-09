@@ -505,6 +505,11 @@ export function createSpaceJourney({
       const { record } = records.read(space.id);
       const grants = record?.grants ?? [];
       const projectPath = record?.repository ?? projectDirectory;
+      // A record without a space path is a creation that a previous host did not live to finish:
+      // the containers run, the code never arrived, and the user would otherwise send the agent
+      // into an empty folder. It is listed as a failed creation, whose one way out is Remove; a
+      // creation under way in this process is replaced by its own entry below.
+      const codeNeverArrived = record !== null && record.spacePath === null;
       return {
         id: space.id,
         name: space.name,
@@ -513,10 +518,10 @@ export function createSpaceJourney({
         directory: projectDirectory === null ? null : spaceProjectPath(space.id, projectDirectory),
         projectFolder: { path: projectPath, found: projectPath === null ? null : await folderExists(projectPath) },
         created: space.created,
-        state: space.state,
+        state: codeNeverArrived ? 'failed' : space.state,
         stoppedIdle: space.stoppedIdle === true,
-        step: null,
-        failure: null,
+        step: codeNeverArrived ? 'failed' : null,
+        failure: codeNeverArrived ? { code: 'space_code_never_arrived', message: 'OpenChamber closed before the code arrived. Delete the space and create it again.', details: null } : null,
         network: record?.network ?? null,
         history: record?.history ?? 'unknown',
         setup: setup.describe(space.id, record),
@@ -780,7 +785,9 @@ export function createSpaceJourney({
       return { id: spaceId, ...(await removeEverything(spaceId, waiting.projectDirectory)), chats: null };
     }
     const space = await requireListed(spaceId);
-    const chats = await saveChatsOf(space, allowUnsaved);
+    // A creation that a previous host did not live to finish is a failed creation too: no chat
+    // could have run in it, so nothing is saved and the archive is not asked.
+    const chats = space.state === 'failed' ? null : await saveChatsOf(space, allowUnsaved);
     const { record } = records.read(spaceId);
     const outcome = await removeEverything(spaceId, record?.repository ?? space.projectDirectory);
     onSpacesChanged();

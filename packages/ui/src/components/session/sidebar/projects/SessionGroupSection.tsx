@@ -49,7 +49,7 @@ import { FolderDeleteConfirmDialog } from '../shell/ConfirmDialogs';
 import { getSessionFolderOwnerKey } from '../sessions/sessionFolderIdentity';
 import { SpaceActionsMenu } from '@/components/session/spaces/SpaceActions';
 import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
-import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { useSpaceTakesNoNewSession, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
@@ -317,6 +317,7 @@ const EMPTY_GROUP_ISSUES: readonly LinkedSidebarIssue[] = [];
 function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNode {
   const { t } = useI18n();
   const openOnBoard = useOpenOnBoard();
+  const spaceTakesNoNewSession = useSpaceTakesNoNewSession(props.group.space?.id);
   const {
     group,
     groupKey,
@@ -1022,7 +1023,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     >
       {renderFolderItems()}
       {visibleSessions.map(renderSessionNode)}
-      {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
+      {totalSessions === 0 && allFoldersForGroup.length === 0 && !spaceTakesNoNewSession ? (
         // pl-[26px] lines the text up with the worktree sub-header label
         // (gutter + icon + gap).
         !group.isArchivedBucket && !bootstrapLoading && !bootstrapFailureNotice && group.directory && !group.emptyMessage ? (

@@ -142,7 +142,9 @@ const spaceEntrySchema = z.object({
   state: z.enum(['preparing', 'running', 'exited', 'missing', 'failed']),
   // A stopped space that stopped itself after the idle hours, rather than by a hand or a crash.
   stoppedIdle: z.boolean().default(false),
-  step: spaceCreationStepSchema.nullable(),
+  // The step a creation is at, or `failed` for a creation that failed, in this process or in one
+  // that did not live to finish it; `failure` then says why. Null for a space that is made.
+  step: z.union([spaceCreationStepSchema, z.literal('failed')]).nullable(),
   failure: failureSchema.nullable(),
   // Null when the host could not read what the user chose: unknown, never "open".
   network: networkSchema.nullable(),
