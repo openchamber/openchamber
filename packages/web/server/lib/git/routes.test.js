@@ -527,7 +527,7 @@ describe('contributor worktree authority', () => {
     expect(hydrateBoundCheckout).toHaveBeenCalledWith(expect.objectContaining({ parentRemoteName: '' }));
   });
 
-  it('inspects an unbound local checkout and passes the durable store', async () => {
+  it('hydrates an unbound checkout under the unbound revision and passes the durable store', async () => {
     const hydrateBoundCheckout = vi.fn(async () => ({ status: 'not-needed', submodules: [], lfs: [] }));
     const worktreeBootstrapStore = { read: vi.fn(), write: vi.fn(), remove: vi.fn() };
     gitLibraries.createWorktree.mockImplementationOnce(async (_directory, _input, options) => {
@@ -556,7 +556,7 @@ describe('contributor worktree authority', () => {
       directory: '/repo-local',
       parentRemoteName: '',
       parentEndpoint: undefined,
-      repositoryAuthority: null,
+      repositoryAuthority: { repositoryId: 'repo_one', bindingRevision: 0, configRevision: 'config_one' },
     });
   });
 
