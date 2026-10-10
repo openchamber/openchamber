@@ -8,10 +8,12 @@ const temporaryDataDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'openchambe
 process.env.OPENCHAMBER_DATA_DIR = temporaryDataDirectory;
 
 import {
+  fetchConsoleBillingBalance,
   fetchConsoleGoUsage,
   fetchOpenCodeGoUsage,
   fetchQuota,
   isConfigured,
+  parseConsoleBillingBalance,
   parseConsoleGoUsage,
   parseOpenCodeGoUsage,
 } from './opencode-go.js';
@@ -30,6 +32,7 @@ afterAll(() => {
 
 const CONSOLE_SERVER = 'https://opencode.ai/console';
 const CONSOLE_STATUS_URL = `${CONSOLE_SERVER}/api/go/status`;
+const CONSOLE_BILLING_STATUS_URL = `${CONSOLE_SERVER}/api/billing/status`;
 
 const consoleAuth = (overrides = {}) => ({
   opencode: {
@@ -293,8 +296,8 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
         call += 1;
         return consoleAuth({ orgID: call === 1 ? 'org_FIRST123' : 'org_SECOND123' });
       },
-      fetchImpl: async (_url, options) => {
-        seen.push(options.headers['x-org-id']);
+      fetchImpl: async (url, options) => {
+        if (url === CONSOLE_STATUS_URL) seen.push(options.headers['x-org-id']);
         return new Response(JSON.stringify(consolePayload({ meters: {
           fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents: call === 1 ? '250' : '900' },
         } })));
@@ -310,5 +313,97 @@ describe('OpenCode Go quota provider — Console OAuth', () => {
       } }))),
     });
     expect(second.usage.windows['5h'].usedPercent).toBe(90);
+  });
+
+  it('parses the billing balance from micro-cents and rejects unusable amounts', () => {
+    expect(parseConsoleBillingBalance({ availableMicroCents: '12000000' })).toBe(12);
+    expect(parseConsoleBillingBalance({ availableMicroCents: '0' })).toBe(0);
+    expect(parseConsoleBillingBalance({ availableMicroCents: 500000 })).toBe(0.5);
+    expect(parseConsoleBillingBalance({ availableMicroCents: '-1' })).toBeNull();
+    expect(parseConsoleBillingBalance({ availableMicroCents: 'not-a-number' })).toBeNull();
+    expect(parseConsoleBillingBalance({})).toBeNull();
+    expect(parseConsoleBillingBalance(null)).toBeNull();
+  });
+
+  it('reads the billing balance with the Console token and organization', async () => {
+    let request;
+    const balance = await fetchConsoleBillingBalance(
+      { access: 'console-access', orgID: 'org_TESTORG123' },
+      async (url, options) => {
+        request = { url, options };
+        return new Response(JSON.stringify({ availableMicroCents: '12000000' }));
+      },
+    );
+    expect(request.url).toBe(CONSOLE_BILLING_STATUS_URL);
+    expect(request.options.headers).toMatchObject({
+      Accept: 'application/json',
+      Authorization: 'Bearer console-access',
+      'x-org-id': 'org_TESTORG123',
+    });
+    expect(request.options.headers['x-opencode-session']).toBeUndefined();
+    expect(request.options.redirect).toBe('error');
+    expect(balance).toBe(12);
+  });
+
+  it('drops the credits balance when the billing read fails, without touching the meters', async () => {
+    const nonOk = await fetchConsoleBillingBalance(
+      { access: 'console-access', orgID: 'org_TESTORG123' },
+      async () => new Response('', { status: 403 }),
+    );
+    expect(nonOk).toBeNull();
+
+    const malformed = await fetchConsoleBillingBalance(
+      { access: 'console-access', orgID: 'org_TESTORG123' },
+      async () => new Response('not json', { status: 200 }),
+    );
+    expect(malformed).toBeNull();
+
+    const network = await fetchConsoleBillingBalance(
+      { access: 'console-access', orgID: 'org_TESTORG123' },
+      async () => { throw new Error('offline'); },
+    );
+    expect(network).toBeNull();
+  });
+
+  it('adds a credits balance row after a successful Console read', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async (url) => new Response(JSON.stringify(
+        url === CONSOLE_BILLING_STATUS_URL
+          ? { availableMicroCents: '12000000' }
+          : consolePayload(),
+      )),
+    });
+    expect(result.ok).toBe(true);
+    expect(Object.keys(result.usage.windows)).toEqual(['5h', 'weekly', 'monthly', 'credits_balance']);
+    expect(result.usage.windows.credits_balance).toMatchObject({
+      usedPercent: null,
+      resetAt: null,
+      valueLabel: '$12.00',
+    });
+  });
+
+  it('keeps the meters when the billing balance cannot be read', async () => {
+    const result = await fetchQuota({
+      readAuth: async () => consoleAuth(),
+      fetchImpl: async (url) => (url === CONSOLE_BILLING_STATUS_URL
+        ? new Response('', { status: 500 })
+        : new Response(JSON.stringify(consolePayload()))),
+    });
+    expect(result.ok).toBe(true);
+    expect(Object.keys(result.usage.windows)).toEqual(['5h', 'weekly', 'monthly']);
+  });
+
+  it('does not read a billing balance on the API-key path', async () => {
+    const seen = [];
+    const result = await fetchQuota({
+      readAuth: async () => apiKeyAuth(),
+      fetchImpl: async (url) => {
+        seen.push(url);
+        return new Response(JSON.stringify({ usage: { rolling: { percent: 25, resetsAt: '2026-08-12T12:00:00.000Z' } } }));
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual(['https://opencode.ai/zen/go/v1/usage']);
   });
 });

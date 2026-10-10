@@ -4,6 +4,7 @@ import {
   asNonEmptyString,
   asObject,
   buildResult,
+  formatMoney,
   getAuthEntry,
   normalizeAuthEntry,
   toNumber,
@@ -21,6 +22,11 @@ const aliases = ['opencode-go'];
 // interchangeable with that key, so it uses the Console Go status endpoint.
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
+// The Go status response carries only the three meters. The spendable credit
+// balance that overage draws from lives on the Console billing status, read with
+// the same Console token and organization.
+const CONSOLE_BILLING_STATUS_URL = 'https://opencode.ai/console/api/billing/status';
+const MICRO_CENTS_PER_DOLLAR = 1_000_000;
 const CONSOLE_SERVER = 'https://opencode.ai/console';
 const CONSOLE_INTEGRATION_ID = 'opencode';
 const ORGANIZATION_ID_PATTERN = /^org_[A-Za-z0-9]+$/;
@@ -95,6 +101,17 @@ export const parseConsoleGoUsage = (payload) => {
   return windows;
 };
 
+/**
+ * The billing status reports the spendable balance as integer micro-cents in a
+ * decimal string. A missing, negative, or unparseable amount is not a $0.00
+ * balance, so it yields no credits row at all.
+ */
+export const parseConsoleBillingBalance = (payload) => {
+  const microCents = toMicroCents(asObject(payload)?.availableMicroCents);
+  if (microCents === null) return null;
+  return microCents / MICRO_CENTS_PER_DOLLAR;
+};
+
 export const fetchOpenCodeGoUsage = async (apiKey, fetchImpl = fetch) => {
   const response = await fetchImpl(API_KEY_USAGE_URL, {
     headers: {
@@ -144,6 +161,31 @@ export const fetchConsoleGoUsage = async ({ access, orgID, expires }, fetchImpl 
   return windows;
 };
 
+/**
+ * Best-effort. The Go meters are the authoritative result, so a billing read
+ * that fails (network, HTTP, malformed, or an expired token) drops the credits
+ * row instead of failing the refresh or reporting a $0.00 balance. It runs only
+ * after a successful Go read, so the token is already known to be valid.
+ */
+export const fetchConsoleBillingBalance = async ({ access, orgID }, fetchImpl = fetch) => {
+  try {
+    const response = await fetchImpl(CONSOLE_BILLING_STATUS_URL, {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${access}`,
+        'x-org-id': orgID,
+        'User-Agent': 'OpenChamber quota provider',
+      },
+      redirect: 'error',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    return parseConsoleBillingBalance(await response.json().catch(() => null));
+  } catch {
+    return null;
+  }
+};
+
 const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
@@ -180,7 +222,19 @@ export const fetchQuota = async ({ readAuth = readOpenCodeCredentials, fetchImpl
     if (consoleCredential) {
       try {
         const windows = await fetchConsoleGoUsage(consoleCredential, fetchImpl);
-        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
+        const balance = await fetchConsoleBillingBalance(consoleCredential, fetchImpl);
+        const usageWindows = balance === null
+          ? windows
+          : {
+              ...windows,
+              credits_balance: toUsageWindow({
+                usedPercent: null,
+                windowSeconds: null,
+                resetAt: null,
+                valueLabel: `$${formatMoney(balance)}`,
+              }),
+            };
+        return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: usageWindows } });
       } catch (consoleError) {
         if (!apiKey) throw consoleError;
       }

@@ -155,6 +155,9 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     let requestedUrl = '';
     let request: RequestInit | undefined;
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === 'https://opencode.ai/console/api/billing/status') {
+        return mockResponse({ availableMicroCents: '12000000' });
+      }
       requestedUrl = url;
       request = init;
       return mockResponse({
@@ -176,6 +179,25 @@ describe('OpenCode Go quota provider — Console OAuth (VS Code parity)', () => 
     assert.equal(result.usage!.windows['5h']!.usedPercent, 25);
     assert.equal(result.usage!.windows.weekly!.usedPercent, 40);
     assert.equal(result.usage!.windows.monthly!.usedPercent, 50);
+    assert.equal(result.usage!.windows.credits_balance!.valueLabel, '$12.00');
+    assert.equal(result.usage!.windows.credits_balance!.usedPercent, null);
+  });
+
+  test('keeps the meters when the billing balance cannot be read', async () => {
+    stubFetchReturning(async (url) => (url === 'https://opencode.ai/console/api/billing/status'
+      ? mockResponse({}, { ok: false, status: 500 })
+      : mockResponse({
+        product: 'go',
+        access: { meters: {
+          fiveHour: { resetsAt: '2026-08-12T12:00:00.000Z', limitMicroCents: '1000', usedMicroCents: '250' },
+        } },
+      })));
+
+    const result = await fetchQuotaForProvider('opencode-go');
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(Object.keys(result.usage!.windows), ['5h']);
+    assert.equal(result.usage!.windows.credits_balance, undefined);
   });
 
   test('supports Go Plus and keeps usable windows when another meter is malformed', async () => {

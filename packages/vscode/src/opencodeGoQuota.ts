@@ -6,6 +6,11 @@ type OpenCodeGoCredential = OpenCodeGoApiKeyCredential | OpenCodeGoConsoleCreden
 
 const API_KEY_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 const CONSOLE_STATUS_URL = 'https://opencode.ai/console/api/go/status';
+// The Go status response carries only the three meters. The spendable credit
+// balance that overage draws from lives on the Console billing status, read with
+// the same Console token and organization.
+const CONSOLE_BILLING_STATUS_URL = 'https://opencode.ai/console/api/billing/status';
+const MICRO_CENTS_PER_DOLLAR = 1_000_000;
 const CONSOLE_PRODUCTS = new Set(['go', 'go-plus']);
 
 // The Console and legacy Go endpoints report amounts as decimal strings (the
@@ -22,7 +27,18 @@ const resetTimestamp = z.union([
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
-const toWindow = (usedPercent: number, resetAt: number) => ({
+type OpenCodeGoWindow = {
+  usedPercent: number | null;
+  remainingPercent: number | null;
+  windowSeconds: number | null;
+  resetAfterSeconds: number | null;
+  resetAt: number | null;
+  resetAtFormatted: string | null;
+  resetAfterFormatted: string | null;
+  valueLabel?: string;
+};
+
+const toWindow = (usedPercent: number, resetAt: number): OpenCodeGoWindow => ({
   usedPercent: clampPercent(usedPercent),
   remainingPercent: clampPercent(100 - usedPercent),
   windowSeconds: null,
@@ -30,6 +46,18 @@ const toWindow = (usedPercent: number, resetAt: number) => ({
   resetAt,
   resetAtFormatted: null,
   resetAfterFormatted: null,
+});
+
+// A balance is a fixed amount, not a window: no percent, no reset.
+const toBalanceWindow = (valueLabel: string): OpenCodeGoWindow => ({
+  usedPercent: null,
+  remainingPercent: null,
+  windowSeconds: null,
+  resetAfterSeconds: null,
+  resetAt: null,
+  resetAtFormatted: null,
+  resetAfterFormatted: null,
+  valueLabel,
 });
 
 const apiKeyWindowSchema = z.object({
@@ -42,7 +70,7 @@ const apiKeyStatusSchema = z.object({
 type OpenCodeGoApiKeyStatus = z.infer<typeof apiKeyStatusSchema>;
 
 const parseApiKeyUsage = (payload: OpenCodeGoApiKeyStatus) => {
-  const windows: Record<string, ReturnType<typeof toWindow>> = {};
+  const windows: Record<string, OpenCodeGoWindow> = {};
   const usage = payload.usage;
   if (!usage) return windows;
   for (const [key, apiKey] of Object.entries({ '5h': 'rolling', weekly: 'weekly', monthly: 'monthly' })) {
@@ -69,8 +97,12 @@ const consoleStatusSchema = z.object({
 });
 type OpenCodeGoConsoleStatus = z.infer<typeof consoleStatusSchema>;
 
+const consoleBillingSchema = z.object({
+  availableMicroCents: numericValue.optional().catch(undefined),
+});
+
 const parseConsoleUsage = (payload: OpenCodeGoConsoleStatus) => {
-  const windows: Record<string, ReturnType<typeof toWindow>> = {};
+  const windows: Record<string, OpenCodeGoWindow> = {};
   const meters = payload.access?.meters;
   if (!meters) return windows;
   for (const [key, meterName] of Object.entries({ '5h': 'fiveHour', weekly: 'week', monthly: 'month' })) {
@@ -96,6 +128,28 @@ const fetchApiKeyUsage = async (credential: OpenCodeGoApiKeyCredential) => {
   return windows;
 };
 
+// Best-effort. The Go meters are the authoritative result, so a billing read
+// that fails (network, HTTP, malformed) drops the credits row instead of failing
+// the refresh or reporting a $0.00 balance. It runs only after a successful Go
+// read, so the token is already known to be valid.
+const fetchConsoleBillingBalance = async (credential: OpenCodeGoConsoleCredential) => {
+  try {
+    const response = await fetch(CONSOLE_BILLING_STATUS_URL, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${credential.accessToken}`, 'x-org-id': credential.orgID },
+      redirect: 'error',
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    const parsed = consoleBillingSchema.safeParse(await response.json().catch(() => null));
+    if (!parsed.success) return null;
+    const microCents = parsed.data.availableMicroCents;
+    if (microCents == null || microCents < 0) return null;
+    return microCents / MICRO_CENTS_PER_DOLLAR;
+  } catch {
+    return null;
+  }
+};
+
 const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (credential.expires != null && credential.expires > 0 && credential.expires <= Date.now()) {
     throw new Error('OpenCode Console sign-in expired. Sign in again in Providers.');
@@ -114,6 +168,8 @@ const fetchConsoleUsage = async (credential: OpenCodeGoConsoleCredential) => {
   if (!parsed.data.product || !CONSOLE_PRODUCTS.has(parsed.data.product)) throw new Error('No active OpenCode Go subscription on the selected Console account');
   const windows = parseConsoleUsage(parsed.data);
   if (!Object.keys(windows).length) throw new Error('OpenCode Go usage data could not be parsed');
+  const balance = await fetchConsoleBillingBalance(credential);
+  if (balance !== null) windows.credits_balance = toBalanceWindow(`$${balance.toFixed(2)}`);
   return windows;
 };
 
