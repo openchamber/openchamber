@@ -525,6 +525,20 @@ describe('Long paragraphs', () => {
     expect(html).toContain('class="katex"');
     expect(settled.map((block) => block.html).join('')).toContain('item_1799');
   });
+
+  test('a paragraph without `:`, `/` or `@` skips the linkify search', () => {
+    // Every bold and emphasis span is an inline token, and linkify searched the
+    // rest of the paragraph at each one (openchamber/openchamber#4648).
+    const prose = 'A simple sentence with **bold** and _emphasis_. '.repeat(80);
+    expect(prose.length).toBeLessThan(LIMIT);
+    resetScanStatsForTests();
+    expect(renderMarkdownSync(prose)).toContain('<strong>bold</strong>');
+    expect(__scanStatsForTests().linkify).toBe(0);
+
+    resetScanStatsForTests();
+    expect(hrefOf(renderMarkdownSync(`${prose}${cjkLink}`))).toBe('https://example.com');
+    expect(__scanStatsForTests().linkify).toBeGreaterThan(0);
+  });
 });
 
 describe('Many short paragraphs', () => {

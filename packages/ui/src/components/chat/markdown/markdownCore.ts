@@ -793,6 +793,14 @@ const OPENCHAMBER_SESSION_LINK_SCHEMA = {
   validate: (text: string, pos: number): number => OPENCHAMBER_SESSION_LINK_TAIL.exec(text.slice(pos))?.[0].length ?? 0,
 };
 
+// Streamed prose with many bold or emphasis tokens made linkify search the rest
+// of the paragraph at each token on every update (openchamber/openchamber#4648).
+// With fuzzyLink off, linkify only finds links that hold `:`, `/` or `@`: every
+// scheme, `openchamber:` included, ends in `:`, a protocol-relative link starts
+// with `//`, and an email needs `@`. Text without any of them skips the search.
+// Recheck these characters when the options or schemas below change.
+const LINK_MARKER = /[:/@]/;
+
 const boundedLinkify = (): MarkedExtension => ({
   extensions: (markedLinkifyIt({ fuzzyLink: false, schemas: { 'openchamber:': OPENCHAMBER_SESSION_LINK_SCHEMA } }).extensions ?? []).map((extension) => {
     if (!('tokenizer' in extension)) return extension;
@@ -800,12 +808,12 @@ const boundedLinkify = (): MarkedExtension => ({
     return {
       ...extension,
       start(src) {
-        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
         scanStats.linkify += src.length;
         return start?.call(this, src);
       },
       tokenizer(src, tokens) {
-        if (src.length > LINKIFY_SOURCE_LIMIT) return undefined;
+        if (src.length > LINKIFY_SOURCE_LIMIT || !LINK_MARKER.test(src)) return undefined;
         scanStats.linkify += src.length;
         return tokenizer.call(this, src, tokens);
       },
