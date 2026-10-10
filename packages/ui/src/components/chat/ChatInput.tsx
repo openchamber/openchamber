@@ -10,6 +10,7 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
+import { prepareUserMessageResume } from '@/sync/user-message-resume';
 import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
@@ -1366,6 +1367,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const queueRuntimeKey = getRuntimeKey();
         const queueTarget = messageQueueTarget;
         const queueSessionId = currentSessionId;
+        // Queueing is the same user intent as sending, so an archived session
+        // comes back once the queue accepts the message, not at delivery.
+        const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
@@ -1474,6 +1478,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setLinkedReferences((current) => withComposerReferences(linked, current));
             return;
         }
+        void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
     }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
@@ -1859,6 +1864,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         let sendMessageOptions: {
+            userInitiated?: boolean;
             target?: NonNullable<typeof capturedTarget>;
             sessionId?: string;
             directory?: string;
@@ -1878,6 +1884,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (capturedDraftSnapshot) sendMessageOptions.draftSnapshot = capturedDraftSnapshot;
         }
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
+        sendMessageOptions = { ...sendMessageOptions, userInitiated: true };
 
         // Queued messages resolved their mentions when they were queued; only
         // the composer's own text can still name a file to read.

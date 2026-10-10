@@ -775,6 +775,18 @@ Sending a message while forms are open cancels them through `dismissOpenFormsFor
 
 ### Restore (unarchive) contract
 
+An explicitly user-initiated composer send restores an archived top-level
+session after OpenCode accepts the prompt or command. Queueing from the
+composer is the same intent: the session is restored once the queue accepts
+the message, so delivery itself never restores anything and the server queue
+has no archive logic. Opening the archive, typing, shell commands, scheduled
+tasks and automated continuations do not restore it. The send captures the
+session's archive timestamp and runtime; a newer archive, manual restore or
+runtime switch supersedes that intent. Restoration uses the existing tree
+action, so archived subsessions come back with the session, and reports
+failure separately from the accepted message, so a restore failure cannot
+cause a duplicate send.
+
 The OpenCode server cannot clear `time.archived` over HTTP: `session.update`
 only applies the field when the payload carries a finite number, so an omitted
 key is a no-op and `null` is silently ignored. Restore therefore writes
