@@ -74,7 +74,8 @@ describe('the exchange', () => {
   });
 
   it('fails on a refusal, a body that is not the token answer, and a body too large, without the tokens in the error', async () => {
-    await expect(createLoginExchange({ fetch: fetching(401, '{"error":"invalid_grant"}').fetch })(tokenSharing)).rejects.toThrow('answered 401');
+    await expect(createLoginExchange({ fetch: fetching(401, '{"error":"invalid_grant"}').fetch })(tokenSharing)).rejects.toMatchObject({ message: 'The login issuer answered 401', code: 'login_refused' });
+    await expect(createLoginExchange({ fetch: fetching(503, 'down').fetch })(tokenSharing)).rejects.not.toHaveProperty('code');
     await expect(createLoginExchange({ fetch: fetching(200, '{"access_token":"at"}').fetch })(tokenSharing)).rejects.toThrow('did not answer with tokens');
     await expect(createLoginExchange({ fetch: fetching(200, 'not json').fetch })(tokenSharing)).rejects.toThrow('did not answer with tokens');
     await expect(createLoginExchange({ fetch: fetching(200, 'x'.repeat(64 * 1024 + 1)).fetch })(tokenSharing)).rejects.toThrow('too large');
@@ -96,7 +97,7 @@ describe('the keeper', () => {
         calls.push(['renew', provider]);
         expect(given).toBe(exchange);
         await new Promise((resolve) => setTimeout(resolve, 5));
-        if (state.renewFails) throw new Error('issuer answered 401');
+        if (state.renewFails) throw Object.assign(new Error(state.renewFails === 'transient' ? 'fetch failed' : 'issuer answered 401'), state.renewFails === 'transient' ? {} : { code: 'login_refused' });
         state.stored = state.renewed;
         return state.renewed;
       },
@@ -126,10 +127,10 @@ describe('the keeper', () => {
     await expect(ended.keeper.fresh('openai')).resolves.toEqual(renewed);
   });
 
-  it('keeps a login that still has time when the renewal fails, answers none for one that has ended, and asks the issuer again only for a login that changed', async () => {
+  it('answers the login as it is when the renewal fails, ended or not, asks a refusing issuer again only for a login that changed, and a failing network on the next look', async () => {
     const soon = make({ stored: login(NOW + 60_000), renewFails: true });
     await expect(soon.keeper.fresh('openai')).resolves.toEqual(login(NOW + 60_000));
-    expect(soon.warnings).toEqual([expect.stringContaining('could not be renewed: issuer answered 401')]);
+    expect(soon.warnings).toEqual([expect.stringContaining('could not be renewed: login_refused')]);
     // The same login once a minute: the issuer that refused is not asked again.
     await expect(soon.keeper.fresh('openai')).resolves.toEqual(login(NOW + 60_000));
     expect(soon.calls.filter(([name]) => name === 'renew')).toEqual([['renew', 'openai']]);
@@ -139,8 +140,16 @@ describe('the keeper', () => {
     soon.state.renewFails = false;
     await expect(soon.keeper.fresh('openai')).resolves.toEqual(login(NOW + 3600_000, 'at-renewed'));
     expect(soon.calls.filter(([name]) => name === 'renew')).toEqual([['renew', 'openai'], ['renew', 'openai']]);
+    // Ended and refused: the login as it is, for the journey to refuse as expired.
     const ended = make({ stored: login(NOW), renewFails: true });
-    await expect(ended.keeper.fresh('openai')).resolves.toBeNull();
+    await expect(ended.keeper.fresh('openai')).resolves.toEqual(login(NOW));
+    // The network, not the issuer: asked again on the next look.
+    const blip = make({ stored: login(NOW + 60_000), renewFails: 'transient' });
+    await expect(blip.keeper.fresh('openai')).resolves.toEqual(login(NOW + 60_000));
+    blip.state.renewFails = false;
+    blip.state.renewed = login(NOW + 3600_000, 'at-renewed');
+    await expect(blip.keeper.fresh('openai')).resolves.toEqual(login(NOW + 3600_000, 'at-renewed'));
+    expect(blip.calls.filter(([name]) => name === 'renew')).toEqual([['renew', 'openai'], ['renew', 'openai']]);
   });
 
   it('says the login to each holding space once per change, whoever changed it, and renews first when it is about to end', async () => {
@@ -163,7 +172,7 @@ describe('the keeper', () => {
     expect(calls).toEqual([['read', 'openai'], ['renew', 'openai'], ['say', 'a1', 'openai', NOW + 3600_000], ['say', 'b2', 'openai', NOW + 3600_000]]);
   });
 
-  it('says it again on the next look when a space was busy but not when its gatekeeper refused, leaves a login of another method and a host without one to the list, and forgets a space that stopped', async () => {
+  it('says it again on the next look when a space was busy but not when its gatekeeper refused, leaves a login of another method, a host without one and an ended login to the list, and forgets a space that stopped', async () => {
     const busy = make({ sayFails: 'busy' });
     await busy.keeper.tick();
     busy.state.sayFails = false;
@@ -179,8 +188,11 @@ describe('the keeper', () => {
     await other.keeper.tick();
     const none = make({ stored: null });
     await none.keeper.tick();
+    const ended = make({ stored: login(NOW - 1), renewFails: true });
+    await ended.keeper.tick();
     expect(other.calls).toEqual([['read', 'openai']]);
     expect(none.calls).toEqual([['read', 'openai']]);
+    expect(ended.calls).toEqual([['read', 'openai'], ['renew', 'openai']]);
     const gone = make();
     await gone.keeper.tick();
     gone.state.holding = [];

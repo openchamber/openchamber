@@ -105,7 +105,13 @@ export function createLoginExchange({ fetch = globalThis.fetch, now = Date.now, 
       body: new URLSearchParams(request.body).toString(),
       signal: AbortSignal.timeout(EXCHANGE_TIMEOUT_MS),
     });
-    if (!response.ok) throw new Error(`The login issuer answered ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`The login issuer answered ${response.status}`);
+      // A refusal is the issuer's answer about this login, after a sign-out or a revocation, and
+      // asking again with the same tokens changes nothing; anything else may pass next time.
+      if (response.status >= 400 && response.status < 500) error.code = 'login_refused';
+      throw error;
+    }
     const text = await response.text();
     if (text.length > MAX_ANSWER_BYTES) throw new Error('The login issuer answered with too large a body');
     let parsed;
@@ -129,9 +135,11 @@ export function createLoginExchange({ fetch = globalThis.fetch, now = Date.now, 
 export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, say, now = Date.now, logger = console }) {
   // One renewal per provider at a time; callers that arrive during it share its answer.
   const renewing = new Map();
-  // The `expires` of the login whose renewal the issuer last refused, by provider: it is not
-  // asked again for the same login, once a minute for as long as a space holds it, but only
-  // when the host's login changed, after the user signed in again.
+  // The `expires` of the login whose renewal the issuer refused, by provider: it is not asked
+  // again for the same login, once a minute for as long as a space holds it, but only when the
+  // host's login changed, after the user signed in again. A failure that is not the issuer's
+  // refusal, the network, a timeout, an issuer that is down, a write that failed, is tried
+  // again on the next look.
   const refused = new Map();
   // The `expires` of the login each space's gatekeeper was last told, by space and grant id,
   // so a tick says a login again only when it changed, whoever changed it.
@@ -146,23 +154,23 @@ export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, sa
 
   /**
    * The host's login for a provider as it is now, renewed first when it ends within the window
-   * or has ended, or null when the host has none. A renewal that fails is logged and leaves a
-   * login that still has time, so a turn under way inside is not cut short; one that has ended
-   * is answered as null, which is `login_expired` for a grant and "needs access" for a start.
+   * or has ended, or null when the host has none. A renewal that fails is logged and answers
+   * the login as it is: one that still has time keeps a turn under way inside from being cut
+   * short, and one that has ended is the journey's to refuse, `login_expired` for a grant and
+   * "needs access" for a start.
    */
   const fresh = async (provider) => {
     const login = await readLogin(provider);
     if (!login || login.expires > now() + RENEW_WINDOW_MS) return login;
-    const stillUsable = () => (login.expires > now() ? login : null);
-    if (refused.get(provider) === login.expires) return stillUsable();
+    if (refused.get(provider) === login.expires) return login;
     try {
       const renewed = await renew(provider);
       refused.delete(provider);
       return renewed;
     } catch (error) {
-      refused.set(provider, login.expires);
+      if (error?.code === 'login_refused') refused.set(provider, login.expires);
       logger.warn?.(`[spaces] the ${provider} login on this computer could not be renewed: ${error?.code ?? error?.message ?? error}`);
-      return stillUsable();
+      return login;
     }
   };
 
@@ -186,7 +194,7 @@ export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, sa
       const login = logins.get(grant.provider);
       // A host that is signed out, signed in another way, or whose login has ended and could not
       // be renewed, is what the list shows as "needs access"; the keeper has nothing to say.
-      if (!login || login.methodID !== grant.method) continue;
+      if (!login || login.methodID !== grant.method || login.expires <= now()) continue;
       if (said.get(spaceId)?.get(grant.id) === login.expires) continue;
       // A space with an action under way is asked again on the next look; a gatekeeper that
       // refused is not, for the same token: a start says the login again when it comes back.

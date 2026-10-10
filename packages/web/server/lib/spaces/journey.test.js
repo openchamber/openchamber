@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { SpaceError } from './errors.js';
 import { createSpaceJourney } from './journey.js';
+import { createLoginKeeper } from './login-keeper.js';
 import { ROLE_GATEKEEPER, spaceResourceName } from './labels.js';
 import { IMAGE_TIMEOUT } from './layout.js';
 import { createSpaceManager } from './manager.js';
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
+const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -108,7 +109,7 @@ const journeyWith = ({ failAt = null, place = createMemoryPlace(), projects = [P
     listProjectDirectories: async () => projects,
     archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
-    readHostLogin: async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null),
+    readHostLogin: readHostLogin ?? (async (provider) => (hostLogin && provider === 'openai' ? hostLogin : null)),
     folderExists: async () => true,
     readIdleStop: async () => idle.saved ?? { enabled: true, hours: 4 },
     saveIdleStop: async (setting) => { if (holdIdleSave) await idleSaveHeld; fail('saveIdleStop'); idle.saved = setting; },
@@ -871,6 +872,22 @@ describe('the journey: grants', () => {
       expect(await silent.journey.startSpace(silent.id)).toMatchObject({ state: 'running', grantsRestored: ['openai'] });
       await new Promise((resolve) => { setTimeout(resolve, 20); });
       expect(silent.calls.filter(([name]) => name === 'writeLogin' || name === 'removeLogin')).toEqual([]);
+    });
+
+    it('refuses an ended login the issuer would not renew as expired, read through the real keeper', async () => {
+      const ended = { ...tokenSharing, expires: Date.parse('2026-09-26T09:59:00.000Z') };
+      const keeper = createLoginKeeper({
+        readLogin: async (provider) => (provider === 'openai' ? ended : null),
+        renewLogin: async () => { throw Object.assign(new Error('The login issuer answered 401'), { code: 'login_refused' }); },
+        exchange: async () => ({}),
+        holders: async () => [],
+        say: async () => true,
+        now: () => Date.parse('2026-09-26T10:00:00.000Z'),
+        logger: quiet,
+      });
+      const made = await ready({ readHostLogin: keeper.fresh });
+      await expect(made.journey.grantAccess(made.id, login)).rejects.toMatchObject({ code: 'login_expired', message: expect.stringContaining('could not be renewed') });
+      expect(made.records.read(made.id).record.grants).toEqual([]);
     });
 
     it('says the login again for the keeper, the same window grant replaced, and leaves a space with an action under way to it', async () => {
