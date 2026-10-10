@@ -32,6 +32,7 @@ import { closeZoneOnEscape } from './zoneEscape';
 import { startZoneDragGesture } from './zoneDrag';
 import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
 import { useZoneHostsStore } from './zoneHosts';
+import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled } from './useOpenUntilSettled';
 
 // Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
@@ -229,7 +230,7 @@ const ZonePane: React.FC<{
   const handleKeyDownCapture = React.useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     closeZoneOnEscape(event, isOpen, () => {
       if (directoryKey) closeContextZone(directoryKey, zone);
-    });
+    }, event.currentTarget.closest('[data-context-zone]'));
   }, [closeContextZone, directoryKey, isOpen, zone]);
   return (
     <MovablePane zone={zone}>
@@ -273,14 +274,19 @@ export const ContextSurfacePanes: React.FC = () => {
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
 
+  // A page covering the chat (Archive, Usage, ...) covers the bottom zone
+  // under it too; its frame closes then (ContextPanel), and so must its panes.
+  const chatCovered = useRightSlotStore((state) => state.chatCovered);
+
   // What each zone shows. A zone is open only with a tab of its own.
   const zones = React.useMemo(() => {
     const viewOf = (zone: ContextZone) => {
       const activeTab = panelState ? resolveZoneActiveTab(panelState, placement, zone) : null;
-      return { activeTab, isOpen: Boolean(panelState && getZoneView(panelState, zone).isOpen && activeTab) };
+      const covered = zone === 'bottom' && chatCovered;
+      return { activeTab, isOpen: Boolean(panelState && getZoneView(panelState, zone).isOpen && activeTab) && !covered };
     };
     return { left: viewOf('left'), right: viewOf('right'), bottom: viewOf('bottom') };
-  }, [panelState, placement]);
+  }, [chatCovered, panelState, placement]);
 
   // A closing zone's content leaves the document (the editor's `detached`)
   // only once its animation has settled. The zone frame runs the same hook

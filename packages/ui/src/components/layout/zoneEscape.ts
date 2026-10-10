@@ -11,6 +11,9 @@ export const closeZoneOnEscape = (
   event: React.KeyboardEvent<HTMLElement>,
   isOpen: boolean,
   close: () => void,
+  // What counts as inside the zone. A pane passes its zone frame: the pane's
+  // toolbar is portalled into the frame's header, outside the pane itself.
+  scope: Element | null = event.currentTarget,
 ): void => {
   // Closed, a zone holds nothing whose Escape is its to take (the right one
   // holds only the work-status card).
@@ -20,7 +23,7 @@ export const closeZoneOnEscape = (
 
   // Portalled menus and dialogs own Escape even though their React events
   // still pass through this capture handler.
-  if (event.target instanceof Node && !event.currentTarget.contains(event.target)) {
+  if (event.target instanceof Node && !(scope ?? event.currentTarget).contains(event.target)) {
     return;
   }
 

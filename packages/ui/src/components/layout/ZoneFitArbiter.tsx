@@ -19,6 +19,11 @@ export const ZoneFitArbiter: React.FC = () => {
   const effectiveDirectory = useEffectiveDirectory();
   const directoryKey = effectiveDirectory ? normalizeContextPanelDirectoryKey(effectiveDirectory) : '';
 
+  // What this arbiter did, so it can undo exactly that. Memory only. The
+  // folded sidebar outlives a project switch (the sidebar is not per project);
+  // a displaced zone belongs to its project and is dropped with it.
+  const sidebarFoldedByRef = React.useRef<Side | null>(null);
+
   React.useEffect(() => {
     if (!directoryKey) return undefined;
 
@@ -36,8 +41,6 @@ export const ZoneFitArbiter: React.FC = () => {
       return panel?.widthByMode[tab.mode] ?? getContextSurfaceDefaultWidth(tab.mode);
     };
 
-    // What this arbiter did, so it can undo exactly that. Memory only.
-    let sidebarFoldedBy: Side | null = null;
     let displaced: { side: Side; by: Side; tabId: string } | null = null;
     let settingSidebar = false;
     let previous = sidesShown(useUIStore.getState());
@@ -47,6 +50,14 @@ export const ZoneFitArbiter: React.FC = () => {
       useUIStore.getState().setSidebarOpen(open);
       settingSidebar = false;
     };
+
+    // The project switched to may not show the side the sidebar folded for:
+    // the reason is gone, so the sidebar comes back.
+    const foldedFor = sidebarFoldedByRef.current;
+    if (foldedFor && !previous[foldedFor]) {
+      sidebarFoldedByRef.current = null;
+      if (!useUIStore.getState().isSidebarOpen) setSidebar(true);
+    }
 
     const makeRoom = (state: UIState, opening: Side, shown: Record<Side, boolean>) => {
       const rowWidth = document.querySelector<HTMLElement>('[data-workspace-row]')?.clientWidth;
@@ -63,7 +74,7 @@ export const ZoneFitArbiter: React.FC = () => {
         if (tabId) displaced = { side: plan.displace, by: opening, tabId };
       }
       if (plan.collapseSidebar) {
-        sidebarFoldedBy = opening;
+        sidebarFoldedByRef.current = opening;
         setSidebar(false);
       }
       if (plan.displace) state.closeContextZone(directoryKey, plan.displace);
@@ -73,19 +84,19 @@ export const ZoneFitArbiter: React.FC = () => {
       // The zone this arbiter closed to make room: the room stays taken, now
       // by the zone that displaced it.
       if (displaced?.side === closed) {
-        if (sidebarFoldedBy === closed) sidebarFoldedBy = displaced.by;
+        if (sidebarFoldedByRef.current === closed) sidebarFoldedByRef.current = displaced.by;
         return;
       }
       const restore = displaced?.by === closed ? displaced : null;
       if (restore) displaced = null;
-      if (sidebarFoldedBy === closed) {
+      if (sidebarFoldedByRef.current === closed) {
         // A zone coming back takes the room over: the sidebar stays folded
         // for it. Unfolding first would let it measure a row the sidebar
         // has not given back yet.
         if (restore) {
-          sidebarFoldedBy = restore.side;
+          sidebarFoldedByRef.current = restore.side;
         } else {
-          sidebarFoldedBy = null;
+          sidebarFoldedByRef.current = null;
           if (!useUIStore.getState().isSidebarOpen) setSidebar(true);
         }
       }
@@ -94,15 +105,27 @@ export const ZoneFitArbiter: React.FC = () => {
 
     return useUIStore.subscribe((state, prevState) => {
       // The user's own sidebar toggle is theirs to keep.
-      if (state.isSidebarOpen !== prevState.isSidebarOpen && !settingSidebar) sidebarFoldedBy = null;
+      if (state.isSidebarOpen !== prevState.isSidebarOpen && !settingSidebar) sidebarFoldedByRef.current = null;
       const shown = sidesShown(state);
       const before = previous;
       // Updated first: the actions below notify this listener again.
       previous = shown;
-      for (const side of ['left', 'right'] as const) {
-        if (shown[side] && !before[side]) makeRoom(state, side, shown);
-        else if (!shown[side] && before[side]) giveBack(side);
+      const sides = ['left', 'right'] as const;
+      const opened = sides.filter((side) => shown[side] && !before[side]);
+      const closed = sides.filter((side) => !shown[side] && before[side]);
+      // A surface moved from one side to the other closes one and opens the
+      // other in this one notification. The room the closing side held goes
+      // to the opening one: the sidebar stays folded, and nothing it had
+      // displaced comes back into the side the surface now takes.
+      for (const side of closed) {
+        const opposite = side === 'left' ? 'right' : 'left';
+        if (!opened.includes(opposite)) continue;
+        if (sidebarFoldedByRef.current === side) sidebarFoldedByRef.current = opposite;
+        if (displaced?.by === side) displaced = null;
       }
+      // Closes first, so a give-back never lands after a fold it would undo.
+      for (const side of closed) giveBack(side);
+      for (const side of opened) makeRoom(state, side, shown);
     });
   }, [directoryKey]);
 
