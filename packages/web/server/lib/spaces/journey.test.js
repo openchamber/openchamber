@@ -873,6 +873,22 @@ describe('the journey: grants', () => {
       expect(silent.calls.filter(([name]) => name === 'writeLogin' || name === 'removeLogin')).toEqual([]);
     });
 
+    it('says the login again for the keeper, the same window grant replaced, and leaves a space with an action under way to it', async () => {
+      const { journey, calls, id, releaseCodeOut } = await ready({ hostLogin: tokenSharing, holdCodeOut: true });
+      const grant = { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing' };
+      const renewed = { ...tokenSharing, access: 'eyJ-renewed', expires: Date.parse('2026-09-26T12:00:00.000Z') };
+      await expect(journey.sayLogin(id, grant, renewed)).resolves.toBe(true);
+      expect(calls).toEqual([['addGrant', id, { id: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', secret: 'eyJ-renewed' }]]);
+      calls.splice(0);
+      const preview = journey.previewApply(id);
+      await expect(journey.sayLogin(id, grant, renewed)).resolves.toBeNull();
+      expect(calls.filter(([name]) => name === 'addGrant')).toEqual([]);
+      releaseCodeOut();
+      await preview;
+      const refusing = await ready({ hostLogin: tokenSharing, failAt: 'addGrant' });
+      await expect(refusing.journey.sayLogin(refusing.id, grant, renewed)).resolves.toBe(false);
+    });
+
     it('says a login a running gatekeeper lost again when the host starts', async () => {
       const { journey, calls, gatekeeper, id } = await ready({ hostLogin: tokenSharing });
       await journey.grantAccess(id, login);

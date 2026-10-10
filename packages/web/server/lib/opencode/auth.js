@@ -1,6 +1,6 @@
 /**
- * READ-ONLY view of OpenCode's provider credentials, shared by the web server
- * and the VS Code extension host.
+ * OpenCode's provider credentials as the running OpenCode holds them, shared
+ * by the web server and the VS Code extension host. Reads, and one write.
  *
  * OpenCode 2.x owns every credential. Since 2.0.20 it hands them back over
  * `GET /api/credential`, secrets included, so the quota providers, voice keys
@@ -20,7 +20,13 @@
  * The answer keeps the legacy `auth.json` entry shape the consumers were
  * written against: `{ type: 'api', key }` / `{ type: 'oauth', access, refresh,
  * expires, accountId?, enterpriseUrl? }`, keyed by integration id, which for
- * providers is the provider id. Nothing here writes.
+ * providers is the provider id.
+ *
+ * One write exists, `renewStoredLogin`: an isolated space's gatekeeper holds
+ * the host's short OpenAI token, and the host keeps it fresh itself, because
+ * OpenCode refreshes a login only when the user sends it a prompt. The new
+ * login goes in through `POST /api/credential` and the old row is removed
+ * after it, which is how OpenCode takes a login from outside.
  */
 
 import { OpenCode } from '@opencode/client';
@@ -74,6 +80,8 @@ export const openCodeCredentialSource = ({
   };
   return {
     list: () => client().credential.list(),
+    create: (input) => client().credential.create(input),
+    remove: (credentialID) => client().credential.remove({ credentialID }),
     listEnvironmentKeys: async () => {
       const environment = getLaunchEnvironment();
       if (!environment) return {};
@@ -149,15 +157,16 @@ const sharedLoginRead = coalesce();
  * Each integration's selected browser login, as OpenCode stores it: the method, the short access
  * token, when it ends, and the login's metadata. The refresh token stays with OpenCode.
  */
+const projectLogin = ({ methodID, access, expires, metadata }) => ({ methodID, access, expires, metadata: metadata ?? {} });
 const readLogins = async (current) => {
   const result = {};
   for (const entry of await current.list()) {
-    if (!entry.active || entry.value.type !== 'oauth') continue;
-    const { methodID, access, expires, metadata } = entry.value;
-    result[entry.integrationID] = { methodID, access, expires, metadata: metadata ?? {} };
+    if (entry.active && entry.value.type === 'oauth') result[entry.integrationID] = projectLogin(entry.value);
   }
   return result;
 };
+/** The stored row OpenCode has selected for an integration, when it is a browser login. */
+const selectedLogin = (entries, integrationID) => entries.find((entry) => entry.integrationID === integrationID && entry.active && entry.value.type === 'oauth') ?? null;
 
 /**
  * The keys the running OpenCode uses, keyed by provider id: stored
@@ -186,4 +195,37 @@ export async function getProviderAuth(providerId) {
 export async function getStoredLogin(integrationID) {
   const logins = await sharedLoginRead(readLogins);
   return logins[integrationID] || null;
+}
+
+/**
+ * Replaces the browser login OpenCode has selected for an integration with the one `exchange`
+ * makes from it: `exchange({ methodID, refresh, metadata })` asks the issuer for new tokens and
+ * answers `{ access, refresh, expires, metadata }`. The refresh token passes through that call
+ * and is kept nowhere. The new row is created first, active, and the old one removed after it,
+ * so no request of the host's finds the integration without a login in between. OpenCode
+ * refreshes the same login itself when the user prompts it within five minutes of its end, so
+ * the row is read again before the write: one that changed in the meantime wins, and the
+ * exchanged tokens are dropped. Answers the login OpenCode holds afterwards, in the shape of
+ * `getStoredLogin`, or null when it holds none. Throws when OpenCode cannot be asked, when the
+ * connection cannot write, or when the exchange or the write fails.
+ */
+export async function renewStoredLogin(integrationID, exchange) {
+  const current = source;
+  if (!current) throw new Error('OpenCode is not connected yet');
+  if (!current.create || !current.remove) throw new Error('This OpenCode connection cannot write a login');
+  const before = selectedLogin(await current.list(), integrationID);
+  if (!before) return null;
+  const { methodID, refresh, metadata } = before.value;
+  const exchanged = await exchange({ methodID, refresh, metadata: metadata ?? {} });
+  const meanwhile = selectedLogin(await current.list(), integrationID);
+  if (!meanwhile) return null;
+  if (meanwhile.id !== before.id || meanwhile.value.expires !== before.value.expires || meanwhile.value.access !== before.value.access) return projectLogin(meanwhile.value);
+  const created = await current.create({
+    integrationID,
+    label: before.label,
+    value: { type: 'oauth', methodID, access: exchanged.access, refresh: exchanged.refresh, expires: exchanged.expires, metadata: exchanged.metadata },
+    activate: true,
+  });
+  await current.remove(before.id);
+  return projectLogin(created.value);
 }

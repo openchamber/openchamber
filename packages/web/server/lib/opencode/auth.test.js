@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 
-import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials, renewStoredLogin } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -187,5 +187,102 @@ describe('readOpenCodeCredentials', () => {
   it('throws before OpenCode is wired', async () => {
     configureOpenCodeCredentials(null);
     await expect(readOpenCodeCredentials()).rejects.toThrow('OpenCode is not connected yet');
+  });
+});
+
+describe('renewStoredLogin', () => {
+  const stored = (entries) => entries.map((entry) => ({ ...entry }));
+  const oauth = { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'at-old', refresh: 'rt-old', expires: 1791600000000, metadata: { clientID: 'client_1', scopes: ['chatgpt.tokens.use.direct'] } };
+  let server;
+  let rows;
+  let requests;
+  let created = 0;
+  let failCreate = false;
+
+  beforeEach(async () => {
+    requests = [];
+    rows = stored([{ id: 'cred_openai_old', integrationID: 'openai', label: 'My ChatGPT', active: true, value: oauth }, entry('deepseek', true, { type: 'key', key: 'ds' })]);
+    created = 0;
+    failCreate = false;
+    server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        requests.push({ method: req.method, url: req.url, body: body ? JSON.parse(body) : null });
+        res.setHeader('content-type', 'application/json');
+        if (req.method === 'GET' && req.url === '/api/credential') return res.end(JSON.stringify({ data: rows }));
+        if (req.method === 'POST' && req.url === '/api/credential') {
+          if (failCreate) { res.statusCode = 500; return res.end(JSON.stringify({ name: 'UnknownError', data: { message: 'no' } })); }
+          const input = JSON.parse(body);
+          const row = { id: input.id ?? `cred_made_${(created += 1)}`, integrationID: input.integrationID, label: input.label ?? 'default', active: input.activate !== false, value: input.value };
+          for (const other of rows) if (other.integrationID === row.integrationID && row.active) other.active = false;
+          rows.push(row);
+          return res.end(JSON.stringify({ data: row }));
+        }
+        const removal = req.method === 'DELETE' && /^\/api\/credential\/([^/]+)$/.exec(req.url);
+        if (removal) {
+          rows = rows.filter((row) => row.id !== removal[1]);
+          res.statusCode = 204;
+          return res.end();
+        }
+        res.statusCode = 404;
+        res.end('{}');
+      });
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    configureOpenCodeCredentials(openCodeCredentialSource({ buildOpenCodeUrl: (path) => `http://127.0.0.1:${port}${path}`, getOpenCodeAuthHeaders: () => ({}) }));
+  });
+
+  afterEach(async () => {
+    configureOpenCodeCredentials(null);
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  it('hands the refresh token to the exchange, writes the new login first and removes the old row after it, and answers without the refresh token', async () => {
+    const given = [];
+    const answer = await renewStoredLogin('openai', async (login) => { given.push(login); return { access: 'at-new', refresh: 'rt-new', expires: 1791603600000, metadata: { clientID: 'client_1', scopes: ['chatgpt.tokens.use.direct'] } }; });
+    expect(given).toEqual([{ methodID: 'chatgpt-token-sharing', refresh: 'rt-old', metadata: oauth.metadata }]);
+    expect(answer).toEqual({ methodID: 'chatgpt-token-sharing', access: 'at-new', expires: 1791603600000, metadata: oauth.metadata });
+    expect(requests.map(({ method, url }) => `${method} ${url}`)).toEqual(['GET /api/credential', 'GET /api/credential', 'POST /api/credential', 'DELETE /api/credential/cred_openai_old']);
+    expect(requests[2].body).toEqual({ integrationID: 'openai', label: 'My ChatGPT', activate: true, value: { ...oauth, access: 'at-new', refresh: 'rt-new', expires: 1791603600000 } });
+    expect(rows).toEqual([expect.objectContaining({ integrationID: 'deepseek' }), { id: 'cred_made_1', integrationID: 'openai', label: 'My ChatGPT', active: true, value: { ...oauth, access: 'at-new', refresh: 'rt-new', expires: 1791603600000 } }]);
+    await expect(getStoredLogin('openai')).resolves.toEqual(answer);
+  });
+
+  it('answers null without an exchange when the host has no such login', async () => {
+    const exchanges = [];
+    await expect(renewStoredLogin('anthropic', async (login) => { exchanges.push(login); })).resolves.toBeNull();
+    await expect(renewStoredLogin('deepseek', async (login) => { exchanges.push(login); })).resolves.toBeNull();
+    expect(exchanges).toEqual([]);
+    expect(requests.filter(({ method }) => method !== 'GET')).toEqual([]);
+  });
+
+  it('drops its tokens and answers the login OpenCode holds when the row changed during the exchange', async () => {
+    const answer = await renewStoredLogin('openai', async () => {
+      // OpenCode refreshed on its own meanwhile, as it does when the user prompts it.
+      rows[0] = { ...rows[0], value: { ...oauth, access: 'at-by-opencode', refresh: 'rt-by-opencode', expires: 1791607200000 } };
+      return { access: 'at-new', refresh: 'rt-new', expires: 1791603600000 };
+    });
+    expect(answer).toEqual({ methodID: 'chatgpt-token-sharing', access: 'at-by-opencode', expires: 1791607200000, metadata: oauth.metadata });
+    expect(requests.filter(({ method }) => method !== 'GET')).toEqual([]);
+    const signedOut = await renewStoredLogin('openai', async () => { rows = rows.filter((row) => row.integrationID !== 'openai'); return { access: 'at-new', refresh: 'rt-new', expires: 1 }; });
+    expect(signedOut).toBeNull();
+    expect(rows.find((row) => row.integrationID === 'openai')).toBeUndefined();
+  });
+
+  it('leaves the old row when the exchange or the write fails', async () => {
+    await expect(renewStoredLogin('openai', async () => { throw new Error('issuer answered 401'); })).rejects.toThrow('issuer answered 401');
+    failCreate = true;
+    await expect(renewStoredLogin('openai', async () => ({ access: 'at-new', refresh: 'rt-new', expires: 1 }))).rejects.toThrow();
+    expect(rows[0]).toEqual(expect.objectContaining({ id: 'cred_openai_old', active: true, value: oauth }));
+    expect(requests.filter(({ method }) => method === 'DELETE')).toEqual([]);
+  });
+
+  it('refuses before OpenCode is wired and on a connection that cannot write', async () => {
+    configureOpenCodeCredentials(null);
+    await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('not connected');
+    configureOpenCodeCredentials({ list: async () => rows });
+    await expect(renewStoredLogin('openai', async () => ({}))).rejects.toThrow('cannot write');
   });
 });

@@ -45,6 +45,10 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('grants on a real space: docker (live)', (
   // goes behind the window, and the method and metadata the row inside names.
   const LOGIN_TOKEN = `eyJ-live-${crypto.randomBytes(24).toString('hex')}`;
   const HOST_LOGIN = { methodID: 'chatgpt-token-sharing', access: LOGIN_TOKEN, expires: Date.now() + 3600_000, metadata: { clientID: 'client_live', scopes: ['chatgpt.tokens.use.direct'] } };
+  // The host's login as it is now: the keeper's cases move it, as the host's OpenCode or the
+  // keeper's own renewal would, and the renewals the keeper asked for.
+  let hostLogin = HOST_LOGIN;
+  const renewals = [];
   let place;
   let dispose = async () => {};
   let liveHost;
@@ -81,7 +85,9 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('grants on a real space: docker (live)', (
       place,
       listProjectDirectories: async () => [project],
       hostEnvironment: { ...process.env, OPENAI_API_KEY: ENV_KEY },
-      readHostLogin: async (provider) => (provider === 'openai' ? HOST_LOGIN : null),
+      readHostLogin: async (provider) => (provider === 'openai' ? hostLogin : null),
+      // The renewal as the host's OpenCode would take it: a new token, an hour from now.
+      renewHostLogin: async (provider) => { renewals.push(provider); hostLogin = { ...hostLogin, access: `eyJ-renewed-${crypto.randomBytes(24).toString('hex')}`, expires: Date.now() + 3600_000 }; return hostLogin; },
       // The login's upstream is the stand-in on the space's outer network, in place of OpenAI's.
       loginWindowOf: (provider, login) => { const window = loginGrantOf(provider, login); return window && { ...window, upstream: upstream.url }; },
       logger: { warn: () => {} },
@@ -262,15 +268,35 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       expect(JSON.stringify(await upstream.seen())).not.toContain(LOGIN_TOKEN);
     }, 180_000);
 
+    it('keeps the window\'s token fresh: a token the host\'s OpenCode changed goes out on the next look, and one about to end is renewed first', async () => {
+      const seenThroughWindow = async () => JSON.parse((await shell('curl -s http://gatekeeper:8080/model/openai/responses')).stdout).authorization;
+      // The host's OpenCode refreshed on its own, as it does when the user prompts it.
+      const byOpenCode = `eyJ-by-opencode-${crypto.randomBytes(24).toString('hex')}`;
+      hostLogin = { ...hostLogin, access: byOpenCode, expires: Date.now() + 7200_000 };
+      await host.keepLoginsFresh();
+      expect(await seenThroughWindow()).toBe(sha256(`Bearer ${byOpenCode}`));
+      expect(renewals).toEqual([]);
+      // Within ten minutes of its end: the keeper renews it, then says the renewed one.
+      hostLogin = { ...hostLogin, expires: Date.now() + 5 * 60_000 };
+      await host.keepLoginsFresh();
+      expect(renewals).toEqual(['openai']);
+      expect(hostLogin.access).not.toBe(byOpenCode);
+      expect(await seenThroughWindow()).toBe(sha256(`Bearer ${hostLogin.access}`));
+      // Nothing of either token reached the space.
+      const seen = await spaceCanSee();
+      for (const token of [LOGIN_TOKEN, byOpenCode, hostLogin.access]) expect(seen).not.toContain(token);
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: SPACE_LOGIN_CREDENTIAL_ID, value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
+    }, 180_000);
+
     it('says the login again after a stop and a start, from the host\'s login as it is then', async () => {
       await host.journey.stopSpace(spaceId);
       const started = await host.journey.startSpace(spaceId);
       expect(started).toMatchObject({ state: 'running', networkRestored: true, grantsRestored: expect.arrayContaining(['openai']) });
       const through = await shell('curl -s http://gatekeeper:8080/model/openai/responses');
-      expect(JSON.parse(through.stdout)).toMatchObject({ path: '/v1/responses', authorization: sha256(`Bearer ${LOGIN_TOKEN}`) });
+      expect(JSON.parse(through.stdout)).toMatchObject({ path: '/v1/responses', authorization: sha256(`Bearer ${hostLogin.access}`) });
       // The row survived the stop in the home volume.
       expect(await rowsInside()).toEqual([expect.objectContaining({ id: SPACE_LOGIN_CREDENTIAL_ID, value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
-      expect(await spaceCanSee()).not.toContain(LOGIN_TOKEN);
+      expect(await spaceCanSee()).not.toContain(hostLogin.access);
     }, 300_000);
 
     it('takes the row with it when a key replaces the login', async () => {
@@ -278,7 +304,12 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       expect(await rowsInside()).toEqual([]);
       const config = JSON.parse((await inside(['cat', SPACE_OPENCODE_CONFIG_PATH])).stdout);
       expect(config.provider.openai.options).toEqual({ baseURL: 'http://gatekeeper:8080/model/openai', apiKey: WINDOW_PLACEHOLDER_KEY });
-      expect(recordText()).not.toContain(LOGIN_TOKEN);
+      expect(recordText()).not.toContain(hostLogin.access);
+      // A space that holds a key is not one the keeper has a login to say to.
+      renewals.splice(0);
+      hostLogin = { ...hostLogin, expires: Date.now() + 60_000 };
+      await host.keepLoginsFresh();
+      expect(renewals).toEqual([]);
     }, 120_000);
   });
 });

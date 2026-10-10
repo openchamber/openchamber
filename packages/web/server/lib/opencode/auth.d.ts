@@ -1,4 +1,4 @@
-import type { CredentialEntry, IntegrationInfo, JsonValue } from '@opencode/client';
+import type { CredentialCreateInput, CredentialEntry, IntegrationInfo, JsonValue } from '@opencode/client';
 
 export type LegacyAuthEntry =
   | { type: 'api'; key: string; metadata?: { [key: string]: JsonValue } }
@@ -8,6 +8,9 @@ export type LegacyAuthFile = Record<string, LegacyAuthEntry>;
 /** Where credentials come from: the running OpenCode in production, a fixture in tests. */
 export type CredentialSource = {
   list: () => Promise<CredentialEntry[]>;
+  /** Writes, present on the web server only: `renewStoredLogin` needs both. */
+  create?: (input: CredentialCreateInput) => Promise<CredentialEntry>;
+  remove?: (credentialID: string) => Promise<void>;
   /** Variable keys by integration id; absent when the environment is unknown. */
   listEnvironmentKeys?: () => Promise<Record<string, string>>;
 };
@@ -31,3 +34,15 @@ export type StoredLogin = {
   metadata: { [key: string]: JsonValue };
 };
 export function getStoredLogin(integrationID: string): Promise<StoredLogin | null>;
+
+/** What the issuer answers for a refresh token: the new tokens and the login's metadata as the method keeps it. */
+export type ExchangedLogin = {
+  access: string;
+  refresh: string;
+  expires: number;
+  metadata?: { [key: string]: JsonValue };
+};
+export function renewStoredLogin(
+  integrationID: string,
+  exchange: (login: { methodID: string; refresh: string; metadata: { [key: string]: JsonValue } }) => Promise<ExchangedLogin>,
+): Promise<StoredLogin | null>;

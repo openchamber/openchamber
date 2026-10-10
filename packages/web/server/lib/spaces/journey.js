@@ -471,6 +471,18 @@ export function createSpaceJourney({
   const afterRowRepair = (spaceId) => (rowRepairs.get(spaceId) ?? Promise.resolve()).catch(() => {});
 
   /**
+   * Tells a space's gatekeeper the host's login again, for the keeper of `login-keeper.js`
+   * when the token changed: the same window grant, replaced in place. Resolves true when the
+   * gatekeeper took it and false when it refused, logged. A space with an action under way is
+   * left to it, which says the login itself at a start, and answers null so the keeper tries
+   * again on its next look.
+   */
+  const sayLogin = async (spaceId, grant, login) => {
+    if (busy.has(spaceId)) return null;
+    return deliverGrant(spaceId, grant, login);
+  };
+
+  /**
    * The grants of every running space that its gatekeeper does not hold, said again from the
    * record, at the host's start: a start the previous host did not live to finish leaves them
    * unsaid, and the user would otherwise be asked for a key the record already names. Only what
@@ -767,7 +779,7 @@ export function createSpaceJourney({
       if (!login) throw new SpaceError('login_not_found', `OpenChamber is not signed in to ${asked.provider} on this computer. Sign in first, or give a key instead.`);
       window = loginWindowOf(asked.provider, login);
       if (!window) throw new SpaceError('login_not_supported', `The ${asked.provider} login on this computer was made in a way the network filter does not know (${login.methodID}).`);
-      if (login.expires <= now().getTime()) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out. Use ${asked.provider} in OpenChamber once, then grant again.`);
+      if (login.expires <= now().getTime()) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out and could not be renewed. Sign in to ${asked.provider} again, then grant.`);
       grant = { kind: 'login', id: asked.provider, provider: asked.provider, method: login.methodID };
     } else {
       grant = { kind: 'domain', id: `open-${crypto.randomBytes(6).toString('hex')}`, upstream: asked.upstream };
@@ -1073,5 +1085,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, sayLogin, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }
