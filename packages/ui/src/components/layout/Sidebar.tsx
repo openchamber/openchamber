@@ -217,12 +217,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <aside
                 className={cn(
-                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-[120ms] ease-out motion-reduce:transition-none',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity ease-out motion-reduce:transition-none',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}
                 style={{
                     width: 'var(--oc-left-sidebar-width)',
+                    transitionDuration: `${layoutAnimationMs}ms`,
                     overflowX: 'hidden',
                     contentVisibility: contentSkipped ? 'hidden' : undefined,
                 }}

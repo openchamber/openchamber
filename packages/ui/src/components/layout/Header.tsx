@@ -68,6 +68,7 @@ import { Button } from '@/components/ui/button';
 import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 
@@ -92,6 +93,8 @@ export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t } = useI18n();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+  // The spacers move with the sidebar, so they follow its animation setting.
+  const layoutAnimationMs = useLayoutAnimationMs();
   const sessionTabsEnabled = useUIStore((state) => state.sessionTabsEnabled);
 
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
@@ -1025,8 +1028,8 @@ export const Header: React.FC = () => {
           of the overlay buttons — stays a window drag area. */}
       <div
         aria-hidden
-        className="shrink-0 self-stretch transition-[width] duration-[120ms] ease-out motion-reduce:transition-none"
-        style={{ width: headerInsetSpacerWidth }}
+        className="shrink-0 self-stretch transition-[width] ease-out motion-reduce:transition-none"
+        style={{ width: headerInsetSpacerWidth, transitionDuration: `${layoutAnimationMs}ms` }}
       />
       {/* No-drag carve under the persistent TitlebarLeftControls overlay so its
           buttons stay clickable. Width animates with the sidebar so the session
@@ -1034,8 +1037,8 @@ export const Header: React.FC = () => {
       <div
         ref={titlebarControlsWidthReaderRef}
         aria-hidden
-        className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-[120ms] ease-out motion-reduce:transition-none"
-        style={{ width: headerControlsSpacerWidth }}
+        className="app-region-no-drag shrink-0 self-stretch transition-[width] ease-out motion-reduce:transition-none"
+        style={{ width: headerControlsSpacerWidth, transitionDuration: `${layoutAnimationMs}ms` }}
       />
       {/* Sidebar toggle + project actions live in the persistent
           TitlebarLeftControls overlay; the spacers above reserve its footprint
