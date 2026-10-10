@@ -758,15 +758,15 @@ describe('serve UI password resolution', () => {
 
 describe('serve host resolution', () => {
   it('uses OPENCHAMBER_HOST when --host is not provided', () => {
-    const previous = process.env.OPENCHAMBER_HOST;
+    const previous = { OPENCHAMBER_HOST: process.env.OPENCHAMBER_HOST, [INJECTED_ENV_KEY]: process.env[INJECTED_ENV_KEY] };
+    delete process.env[INJECTED_ENV_KEY];
     process.env.OPENCHAMBER_HOST = '192.0.2.20';
     try {
       expect(resolveServeHost(undefined)).toBe('192.0.2.20');
     } finally {
-      if (typeof previous === 'string') {
-        process.env.OPENCHAMBER_HOST = previous;
-      } else {
-        delete process.env.OPENCHAMBER_HOST;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
       }
     }
   });
