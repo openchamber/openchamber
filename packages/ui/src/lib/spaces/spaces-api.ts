@@ -192,11 +192,11 @@ export type GrantRequest =
 
 // A browser login of the host's a space can be given (7c), never its token: `usable` can be said
 // to a space now, `expired` has run out and the host could not renew it, `unsupported` was made in
-// a way the host cannot forward.
+// a way the host cannot forward. `expires` is null for a token that has no end, Copilot's (7d).
 const hostLoginSchema = z.object({
   provider: z.string(),
   method: z.string(),
-  expires: z.string(),
+  expires: z.string().nullable(),
   state: z.enum(['usable', 'expired', 'unsupported']),
 });
 

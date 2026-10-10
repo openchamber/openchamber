@@ -13,10 +13,15 @@
  * `exchangeOpenAILogin` is what OpenCode's own plugins send to the issuer for each login
  * method, at v2.0.25: `packages/core/src/plugin/provider/chatgpt.ts` for "Sign in with ChatGPT"
  * and `openai.ts` for the two legacy Codex logins. A new method is refused, so a login the
- * host cannot renew is never left to fail inside without a word.
+ * host cannot renew is never left to fail inside without a word. Copilot's GitHub token has no
+ * end (7d), so the keeper only says it again when it changed.
  */
 
+import crypto from 'node:crypto';
+
 import { z } from 'zod';
+
+import { loginEndOf, loginEnded } from './space-opencode.js';
 
 const ISSUER = 'https://auth.openai.com';
 // The legacy Codex logins are made with OpenAI's own app client, as OpenCode's `openai.ts` has it.
@@ -141,9 +146,12 @@ export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, sa
   // refusal, the network, a timeout, an issuer that is down, a write that failed, is tried
   // again on the next look.
   const refused = new Map();
-  // The `expires` of the login each space's gatekeeper was last told, by space and grant id,
-  // so a tick says a login again only when it changed, whoever changed it.
+  // A fingerprint of the login each space's gatekeeper was last told, by space and grant id, so
+  // a tick says a login again only when its token changed, whoever changed it. A hash, not the
+  // token: the keeper holds no token between looks. Not `expires`, because Copilot's token has
+  // none and still changes when the user signs in to GitHub again.
   const said = new Map();
+  const fingerprintOf = (login) => crypto.createHash('sha256').update(login.access).digest('hex');
 
   const renew = (provider) => {
     if (!renewing.has(provider)) {
@@ -157,11 +165,14 @@ export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, sa
    * or has ended, or null when the host has none. A renewal that fails is logged and answers
    * the login as it is: one that still has time keeps a turn under way inside from being cut
    * short, and one that has ended is the journey's to refuse, `login_expired` for a grant and
-   * "needs access" for a start.
+   * "needs access" for a start. A token with no end, Copilot's, is answered as it is: there is
+   * nothing to renew.
    */
   const fresh = async (provider) => {
     const login = await readLogin(provider);
-    if (!login || login.expires > now() + RENEW_WINDOW_MS) return login;
+    if (!login) return null;
+    const end = loginEndOf(provider, login);
+    if (end === null || end > now() + RENEW_WINDOW_MS) return login;
     if (refused.get(provider) === login.expires) return login;
     try {
       const renewed = await renew(provider);
@@ -194,13 +205,14 @@ export function createLoginKeeper({ readLogin, renewLogin, exchange, holders, sa
       const login = logins.get(grant.provider);
       // A host that is signed out, signed in another way, or whose login has ended and could not
       // be renewed, is what the list shows as "needs access"; the keeper has nothing to say.
-      if (!login || login.methodID !== grant.method || login.expires <= now()) continue;
-      if (said.get(spaceId)?.get(grant.id) === login.expires) continue;
+      if (!login || login.methodID !== grant.method || loginEnded(grant.provider, login, now())) continue;
+      const fingerprint = fingerprintOf(login);
+      if (said.get(spaceId)?.get(grant.id) === fingerprint) continue;
       // A space with an action under way is asked again on the next look; a gatekeeper that
       // refused is not, for the same token: a start says the login again when it comes back.
       if ((await say(spaceId, grant, login)) === null) continue;
       if (!said.has(spaceId)) said.set(spaceId, new Map());
-      said.get(spaceId).set(grant.id, login.expires);
+      said.get(spaceId).set(grant.id, fingerprint);
     }
     const stillHolding = new Set(holding.map(({ spaceId }) => spaceId));
     for (const spaceId of said.keys()) if (!stillHolding.has(spaceId)) said.delete(spaceId);

@@ -58,6 +58,13 @@ describe('spaceModelRefusal', () => {
     expect(spaceModelRefusal(session, 'openai')).toEqual({ spaceId: ID, providerId: 'openai', reason: 'needs_again' });
   });
 
+  test('GitHub Copilot is given only through the host\'s login: refused without one, access with it', () => {
+    listed(running({ grants: [], access: null }));
+    expect(spaceModelRefusal(session, 'github-copilot')).toEqual({ spaceId: ID, providerId: 'github-copilot', reason: 'not_granted' });
+    listed(running({ grants: [{ kind: 'login' as const, id: 'github-copilot', provider: 'github-copilot', method: 'device', url: 'http://gatekeeper:8080/model/github-copilot' }] }));
+    expect(spaceModelRefusal(session, 'github-copilot')).toBeNull();
+  });
+
   test('a space with no grant at all refuses every provider, as after a reload during its creation', () => {
     listed(running({ grants: [], access: null }));
     expect(spaceModelRefusal(session, 'anthropic')).toEqual({ spaceId: ID, providerId: 'anthropic', reason: 'not_granted' });
@@ -66,7 +73,7 @@ describe('spaceModelRefusal', () => {
   test('never refuses a provider the grant dialog cannot give a key for, when the space can reach it', () => {
     listed(running({ grants: [], access: null, network: { mode: 'open', domains: [] } }));
     expect(spaceModelRefusal(session, 'opencode')).toBeNull();
-    expect(spaceModelRefusal(session, 'github-copilot')).toBeNull();
+    expect(spaceModelRefusal(session, 'azure')).toBeNull();
     listed(running({ grants: [], access: null, network: { mode: 'allowlist', domains: ['opencode.ai'] } }));
     expect(spaceModelRefusal(session, 'opencode')).toBeNull();
   });
@@ -80,7 +87,7 @@ describe('spaceModelRefusal', () => {
     expect(spaceModelRefusal(session, 'opencode')).toEqual(blocked);
     // A provider whose address nobody knows is not refused by the network; a space not listed yet, or
     // one whose network the host could not read, refuses nothing.
-    expect(spaceModelRefusal(session, 'github-copilot')).toBeNull();
+    expect(spaceModelRefusal(session, 'azure')).toBeNull();
     expect(spaceModelRefusal({ requestId: null, directory: '/spaces/ffffffffffff/app' }, 'opencode')).toBeNull();
     listed(running({ network: null }));
     expect(spaceModelRefusal(session, 'opencode')).toBeNull();

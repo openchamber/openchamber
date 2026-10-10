@@ -128,10 +128,16 @@ require('node:http').createServer((request, response) => {
   // One line per request in the container's log, so the host can read what a client it does
   // not control, OpenCode inside a space, sent here. Hashes only, as in the answer.
   console.log('seen ' + JSON.stringify(seen));
+  // GitHub Copilot's plugin in OpenCode asks for the model list before any turn and takes it in
+  // GitHub's own shape only: one model, enough for a turn to go through the window.
+  const models = request.method === 'GET' && request.url.split('?')[0].endsWith('/models');
+  const body = models
+    ? { data: [{ model_picker_enabled: true, id: 'gpt-4o', name: 'GPT-4o', version: 'gpt-4o-2024-11-20', capabilities: { family: 'gpt-4o', limits: { max_output_tokens: 4096, max_prompt_tokens: 64000 }, supports: { tool_calls: true, streaming: true } } }] }
+    : seen;
   request.resume();
   request.on('end', () => {
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(seen));
+    response.end(JSON.stringify(body));
   });
 }).listen(9000, '0.0.0.0', () => console.log('upstream listening'));
 `;

@@ -46,7 +46,7 @@ Decision: stay independent. It covers only OpenCode's API, while files, git, ter
 
 - OpenChamber users log in both ways. The Usage page tracks quotas for browser-login providers and for key providers.
 - OpenAI browser login: OpenCode's Codex plugin refreshes only when the stored token has expired, hard-codes the ChatGPT endpoint, and shapes requests differently when the auth type is `oauth`. So a base URL plus a dummy key does not work, and a record with a real short access token and no usable refresh token does. Access tokens last about an hour. Refresh tokens rotate, so two refreshers log each other out. The allowlist needs `chatgpt.com`.
-- Copilot: one long-lived GitHub token sent directly, no refresh, no conflict. The gatekeeper could hold it later.
+- Copilot: one long-lived GitHub token sent directly, no refresh, no conflict. Since 7d the gatekeeper holds it: the login row's `metadata.apiEndpoint` sends the plugin to the window, the configuration's `baseURL` does not.
 - Claude Pro/Max: OpenCode removed this login in 1.3.0 because Anthropic prohibits it. API keys only.
 - API-key providers: `options.apiKey` and `options.baseURL` in the provider config, with no stored auth entry, skip the auth plugin. That is the window path.
 - Suspected and unverified on `main`: `packages/web/server/lib/small-model/call.js` refreshes the same OpenAI token separately from OpenCode without locking. Tracked as its own task.

@@ -36,9 +36,13 @@ const KNOWN: ReadonlyMap<string, I18nKey> = new Map<string, I18nKey>([
 
 type Translate = (key: I18nKey, params?: I18nParams) => string;
 
-export const spaceFailureText = (t: Translate, failure: SpaceFailure): string => {
+/**
+ * The text of a failure. The `login_*` refusals name the login the user is to sign in to, so a
+ * caller that knows the provider passes its login's name as `name`.
+ */
+export const spaceFailureText = (t: Translate, failure: SpaceFailure, params?: I18nParams): string => {
   const key = KNOWN.get(failure.code);
-  return key ? t(key) : t('spaces.failure.unexpected', { message: failure.message || failure.code });
+  return key ? t(key, params) : t('spaces.failure.unexpected', { message: failure.message || failure.code });
 };
 
 /** A thrown error as a failure: the journey's own refusals keep their code, anything else is unexpected. */

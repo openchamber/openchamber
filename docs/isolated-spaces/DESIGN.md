@@ -26,8 +26,8 @@ The host treats everything that comes out of a space as untrusted data to displa
 - **Space manager.** New server module in `packages/web`. Creates, finds, stops, and removes spaces. Moves code in and out. Delivers grants.
 - **Dispatcher.** A thin layer in front of the existing server. It forwards requests that belong to a space to the server inside that space.
 - **Grant.** A credential or an opened domain that the user gives a space. There are two grades, shown to the user in plain words:
-  - **Uses without seeing.** The gatekeeper holds the secret and adds it to requests. Model API keys, the short-lived OpenAI login token since stage 7, git over https, private npm.
-  - **Handed over.** A file or variable inside the space that the agent can read. `.env`, SSH keys, cloud CLI keys, the Copilot token.
+  - **Uses without seeing.** The gatekeeper holds the secret and adds it to requests. Model API keys, the short-lived OpenAI login token and the GitHub Copilot token since stage 7, git over https, private npm.
+  - **Handed over.** A file or variable inside the space that the agent can read. `.env`, SSH keys, cloud CLI keys.
 
 ## Product decisions
 
@@ -43,7 +43,7 @@ The host treats everything that comes out of a space as untrusted data to displa
 10. Closing OpenChamber does not stop a space. OpenChamber can restart a stuck OpenCode inside it.
 11. A space stops itself after several idle hours. The threshold is a setting and the behaviour can be turned off. Stopping keeps files.
 12. The user never needs a terminal to manage containers. OpenChamber shows and manages only what it created.
-13. Model login. API-key providers, including coding plans that issue a key, go through the gatekeeper. OpenAI browser login goes through it too, decided on 2026-10-09 for stage 7: the short-lived access token lives only in the gatekeeper's memory, the space holds a login record that names the login method and carries no token, and the host stays the only refresher. Copilot's token is long-lived, so its dialog carries a stronger warning. Claude Pro/Max browser login is unavailable because OpenCode removed it.
+13. Model login. API-key providers, including coding plans that issue a key, go through the gatekeeper. OpenAI browser login goes through it too, decided on 2026-10-09 for stage 7: the short-lived access token lives only in the gatekeeper's memory, the space holds a login record that names the login method and carries no token, and the host stays the only refresher. Copilot's token goes the same way, decided on 2026-10-10 for 7d, and it is long-lived, so its dialog carries a stronger warning. Claude Pro/Max browser login is unavailable because OpenCode removed it.
 14. Previewing a dev server that runs inside a space is part of the first release.
 15. Default image first. Project-defined images (`devcontainer.json`, Dockerfile) are a later stage.
 16. Surfaces: web, desktop, mobile. VS Code never gets this feature. The entry point is absent there on purpose, and that must be visible in code.
@@ -191,4 +191,4 @@ Stage 0 proved the window and the corridor with fake keys and a fake model serve
 
 ## Later
 
-Project-defined images, submodules, sandbox services (a different trust model because code and grants go to a third party), Copilot through the gatekeeper, bringing new host changes into a running space.
+Project-defined images, submodules, sandbox services (a different trust model because code and grants go to a third party), bringing new host changes into a running space.

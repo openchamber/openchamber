@@ -20,7 +20,7 @@ import { registerOpenCodeProxy } from '../../opencode/proxy.js';
 import { runCommand } from '../run-command.js';
 import { createSpacesHost } from '../host.js';
 import { SPACE_HOME, SPACE_OPENCODE_CONFIG_PATH } from '../layout.js';
-import { SPACE_LOGIN_CREDENTIAL_ID, WINDOW_PLACEHOLDER_KEY, loginGrantOf } from '../space-opencode.js';
+import { WINDOW_PLACEHOLDER_KEY, loginGrantOf, spaceLoginCredentialId } from '../space-opencode.js';
 import { LIVE_DOCKER_ENABLED, createLiveDockerPlace } from './docker-live-support.js';
 
 const CREATE_TIMEOUT_MS = 25 * 60_000;
@@ -49,6 +49,10 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('grants on a real space: docker (live)', (
   // keeper's own renewal would, and the renewals the keeper asked for.
   let hostLogin = HOST_LOGIN;
   const renewals = [];
+  // The host's GitHub Copilot login (7d): a GitHub token with no end, as OpenCode's Copilot
+  // plugin stores it, with the address GitHub told it at login.
+  const GITHUB_TOKEN = `gho_live_${crypto.randomBytes(20).toString('hex')}`;
+  const COPILOT_LOGIN = { methodID: 'device', access: GITHUB_TOKEN, expires: 0, metadata: { apiEndpoint: 'https://api.individual.githubcopilot.com' } };
   let place;
   let dispose = async () => {};
   let liveHost;
@@ -85,7 +89,7 @@ describe.skipIf(!LIVE_DOCKER_ENABLED)('grants on a real space: docker (live)', (
       place,
       listProjectDirectories: async () => [project],
       hostEnvironment: { ...process.env, OPENAI_API_KEY: ENV_KEY },
-      readHostLogin: async (provider) => (provider === 'openai' ? hostLogin : null),
+      readHostLogin: async (provider) => (provider === 'openai' ? hostLogin : provider === 'github-copilot' ? COPILOT_LOGIN : null),
       // The renewal as the host's OpenCode would take it: a new token, an hour from now.
       renewHostLogin: async (provider) => { renewals.push(provider); hostLogin = { ...hostLogin, access: `eyJ-renewed-${crypto.randomBytes(24).toString('hex')}`, expires: Date.now() + 3600_000 }; return hostLogin; },
       // The login's upstream is the stand-in on the space's outer network, in place of OpenAI's.
@@ -238,7 +242,7 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       const through = await shell('curl -s -H "authorization: Bearer space-window" http://gatekeeper:8080/model/openai/responses');
       expect(JSON.parse(through.stdout)).toMatchObject({ path: '/v1/responses', authorization: sha256(`Bearer ${LOGIN_TOKEN}`) });
       // The row inside names the method with placeholder tokens; the key grant's row-less state is gone.
-      expect(await rowsInside()).toEqual([expect.objectContaining({ id: SPACE_LOGIN_CREDENTIAL_ID, integrationID: 'openai', active: true, value: expect.objectContaining({ type: 'oauth', methodID: 'chatgpt-token-sharing', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, metadata: { clientID: 'client_live', scopes: ['chatgpt.tokens.use.direct'] } }) })]);
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: spaceLoginCredentialId('openai'), integrationID: 'openai', active: true, value: expect.objectContaining({ type: 'oauth', methodID: 'chatgpt-token-sharing', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, metadata: { clientID: 'client_live', scopes: ['chatgpt.tokens.use.direct'] } }) })]);
       const config = JSON.parse((await inside(['cat', SPACE_OPENCODE_CONFIG_PATH])).stdout);
       expect(config.provider.openai.options).toEqual({ baseURL: 'http://gatekeeper:8080/model/openai', transport: 'http' });
       // Not on the host's disk, not in container metadata, not anywhere the space can look.
@@ -285,7 +289,7 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       // Nothing of either token reached the space.
       const seen = await spaceCanSee();
       for (const token of [LOGIN_TOKEN, byOpenCode, hostLogin.access]) expect(seen).not.toContain(token);
-      expect(await rowsInside()).toEqual([expect.objectContaining({ id: SPACE_LOGIN_CREDENTIAL_ID, value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: spaceLoginCredentialId('openai'), value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
     }, 180_000);
 
     it('says the login again after a stop and a start, from the host\'s login as it is then', async () => {
@@ -295,7 +299,7 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       const through = await shell('curl -s http://gatekeeper:8080/model/openai/responses');
       expect(JSON.parse(through.stdout)).toMatchObject({ path: '/v1/responses', authorization: sha256(`Bearer ${hostLogin.access}`) });
       // The row survived the stop in the home volume.
-      expect(await rowsInside()).toEqual([expect.objectContaining({ id: SPACE_LOGIN_CREDENTIAL_ID, value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: spaceLoginCredentialId('openai'), value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
       expect(await spaceCanSee()).not.toContain(hostLogin.access);
     }, 300_000);
 
@@ -311,5 +315,88 @@ console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1
       await host.keepLoginsFresh();
       expect(renewals).toEqual([]);
     }, 120_000);
+  });
+
+  describe('the host\'s GitHub Copilot login', () => {
+    const rowsInside = async () => {
+      const answer = await inside(['node', '--no-warnings', '-e', `
+const { DatabaseSync } = require('node:sqlite');
+const db = new DatabaseSync(${JSON.stringify(`${SPACE_HOME}/.local/share/opencode/opencode.db`)}, { readOnly: true, timeout: 5000 });
+const rows = db.prepare('SELECT id, integration_id AS integrationID, active, value FROM credential ORDER BY id').all();
+db.close();
+console.log(JSON.stringify(rows.map((row) => ({ ...row, active: row.active === 1, value: JSON.parse(row.value) }))));
+`]);
+      expect(answer.code, answer.stderr).toBe(0);
+      return JSON.parse(answer.stdout);
+    };
+    const spaceCanSee = async () => {
+      const seen = await shell(`env; ps auxeww; find /home/space /tmp /spaces/${spaceId} -type f -size -4M -exec cat {} + 2>/dev/null; true`);
+      expect(seen.stdout.length).toBeGreaterThan(0);
+      return seen.stdout;
+    };
+    const withToken = (entry) => entry.authorization === sha256(`Bearer ${GITHUB_TOKEN}`);
+
+    it('puts the GitHub token behind the window at the address GitHub gave, and inside a row that points OpenCode at the window and no configuration', async () => {
+      const granted = await host.journey.grantAccess(spaceId, { kind: 'login', provider: 'github-copilot' });
+      expect(granted).toEqual({ grant: { kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device', url: 'http://gatekeeper:8080/model/github-copilot' } });
+      // The window carries the token to the login's upstream, with no path of its own.
+      const before = (await upstream.seen()).length;
+      const through = await shell('curl -s -H "authorization: Bearer space-window" http://gatekeeper:8080/model/github-copilot/models');
+      expect(through.code, through.stderr).toBe(0);
+      expect((await upstream.seen()).slice(before)).toEqual([expect.objectContaining({ method: 'GET', path: '/v1/models', authorization: sha256(`Bearer ${GITHUB_TOKEN}`) })]);
+      // The row inside names the method and the window as the address, next to nothing else; the
+      // key the OpenAI provider holds stays in the configuration, and Copilot has no entry there.
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: spaceLoginCredentialId('github-copilot'), integrationID: 'github-copilot', active: true, value: { type: 'oauth', methodID: 'device', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: Date.UTC(2100, 0, 1), metadata: { apiEndpoint: 'http://gatekeeper:8080/model/github-copilot' } } })]);
+      const config = JSON.parse((await inside(['cat', SPACE_OPENCODE_CONFIG_PATH])).stdout);
+      expect(config.provider['github-copilot']).toBeUndefined();
+      expect(config.provider.openai.options).toEqual({ baseURL: 'http://gatekeeper:8080/model/openai', apiKey: WINDOW_PLACEHOLDER_KEY });
+      // The token is nowhere the host keeps or the space can look, and the address GitHub gave stays on the host.
+      expect(JSON.parse(recordText()).grants.find((grant) => grant.id === 'github-copilot')).toEqual({ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' });
+      expect(recordText()).not.toContain(GITHUB_TOKEN);
+      expect(await liveHost.spaceMetadata(spaceId)).not.toContain(GITHUB_TOKEN);
+      expect(await liveHost.gatekeeperMetadata(spaceId)).not.toContain(GITHUB_TOKEN);
+      const seen = await spaceCanSee();
+      expect(seen).not.toContain(GITHUB_TOKEN);
+      expect(seen).not.toContain('api.individual.githubcopilot.com');
+      // The typed Anthropic key of the first case is not remembered over the stop above, as designed.
+      expect((await listed()).needsAccess).not.toContain('github-copilot');
+    }, 180_000);
+
+    it('sends the model list and a turn of OpenCode inside through the window, where the stand-in sees the GitHub token', async () => {
+      const directory = (await listed()).directory;
+      const headers = { 'content-type': 'application/json', 'x-opencode-directory': encodeURIComponent(directory) };
+      const created = await prefixed('/session', json({ location: { directory }, title: 'With Copilot' }));
+      expect(created.status, await created.clone().text()).toBe(200);
+      const chat = (await created.json()).data;
+      const model = await prefixed(`/session/${chat.id}/model`, { ...json({ model: { id: 'gpt-4o', providerID: 'github-copilot' } }), headers });
+      expect(model.status, await model.clone().text()).toBeLessThan(300);
+      const prompt = await prefixed(`/session/${chat.id}/prompt`, { ...json({ id: `msg_${crypto.randomBytes(8).toString('hex')}`, text: 'Say hello with Copilot.' }), headers });
+      expect(prompt.status, await prompt.clone().text()).toBeLessThan(300);
+      // The plugin lives in the project's location, which the first turn boots: it reads the model
+      // list then, from the window, with the token; a row that arrives while the location is up
+      // is read at once, measured on the host.
+      const modelList = (entry) => entry.method === 'GET' && entry.path === '/v1/models' && withToken(entry) && entry.headerNames.includes('x-github-api-version');
+      expect(await until(async () => (await upstream.seen()).some(modelList), 120_000)).toBe(true);
+      // OpenCode's own turn: a POST with Copilot's headers, and the host's token in place of the placeholder.
+      const fromOpenCode = (entry) => entry.method === 'POST' && entry.path === '/v1/chat/completions' && withToken(entry);
+      expect(await until(async () => (await upstream.seen()).some(fromOpenCode), 120_000)).toBe(true);
+      expect((await upstream.seen()).find(fromOpenCode).headerNames).toEqual(expect.arrayContaining(['x-github-api-version', 'openai-intent', 'x-initiator']));
+      expect(JSON.stringify(await upstream.seen())).not.toContain(GITHUB_TOKEN);
+    }, 180_000);
+
+    it('is never renewed by the keeper, and is said again after a stop and a start', async () => {
+      renewals.splice(0);
+      await host.keepLoginsFresh();
+      expect(renewals).toEqual([]);
+      await host.journey.stopSpace(spaceId);
+      const started = await host.journey.startSpace(spaceId);
+      expect(started).toMatchObject({ state: 'running', grantsRestored: expect.arrayContaining(['github-copilot', 'openai']) });
+      expect(started.needsAccess).not.toContain('github-copilot');
+      const before = (await upstream.seen()).length;
+      await shell('curl -s http://gatekeeper:8080/model/github-copilot/models');
+      expect((await upstream.seen()).slice(before)).toEqual([expect.objectContaining({ path: '/v1/models', authorization: sha256(`Bearer ${GITHUB_TOKEN}`) })]);
+      expect(await rowsInside()).toEqual([expect.objectContaining({ id: spaceLoginCredentialId('github-copilot'), value: expect.objectContaining({ access: WINDOW_PLACEHOLDER_KEY }) })]);
+      expect(await spaceCanSee()).not.toContain(GITHUB_TOKEN);
+    }, 300_000);
   });
 });

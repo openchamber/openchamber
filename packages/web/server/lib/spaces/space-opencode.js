@@ -39,28 +39,79 @@ export function buildProviderConfig(grants) {
   const provider = {};
   for (const grant of grants) {
     if (grant.kind === 'model') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
-    // A login takes its token from the row below, so no placeholder key; `http`, because the
-    // window carries no WebSocket, which OpenCode's legacy ChatGPT mode opens by default.
-    if (grant.kind === 'login') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), transport: 'http' } };
+    // A login takes its token from the row below, so no placeholder key. Copilot's plugin reads
+    // its address from the row and not from here, so a Copilot login writes nothing.
+    if (grant.kind === 'login') {
+      const options = loginMethodOf(grant.provider, grant.method)?.options(spaceWindowUrl(grant.id));
+      if (options) provider[grant.provider] = { options };
+    }
   }
   return { $schema: 'https://opencode.ai/config.json', provider };
 }
 
-// Where OpenCode sends a provider's requests for each browser login method, measured on OpenCode
-// 2.0.25: the window forwards there with the real token. The space's row names the same method,
+const CODEX_API = 'https://chatgpt.com/backend-api/codex';
+const COPILOT_API = 'https://api.githubcopilot.com';
+// What the row inside needs of a ChatGPT login's metadata: the account id the legacy Codex mode
+// sends as a header, and the client id and scopes the ChatGPT login reads at load. Nothing else
+// travels, so a key the host's plugin stores there one day, a cached model list among them
+// today, stays on the host.
+const CHATGPT_METADATA_KEYS = ['accountID', 'clientID', 'scopes'];
+const chatgptRowMetadataOf = (login) => {
+  const metadata = {};
+  for (const key of CHATGPT_METADATA_KEYS) if (login.metadata[key] !== undefined) metadata[key] = login.metadata[key];
+  return metadata;
+};
+// The ChatGPT modes read the provider's `baseURL` from the configuration, which wins over the
+// plugin's own address, measured on 2.0.25; `http`, because the window carries no WebSocket,
+// which the legacy mode opens by default.
+const chatgptOptionsOf = (windowUrl) => ({ baseURL: windowUrl, transport: 'http' });
+const CHATGPT_METHOD = { upstream: () => 'https://api.openai.com/v1', rowMetadata: chatgptRowMetadataOf, options: chatgptOptionsOf, ends: true };
+const CODEX_METHOD = { upstream: () => CODEX_API, rowMetadata: chatgptRowMetadataOf, options: chatgptOptionsOf, ends: true };
+// Where OpenCode's Copilot plugin sends a login's requests, `copilotBaseURL` in its
+// `github-copilot.ts` at 2.0.25: the address GitHub told it at login, else the enterprise
+// address, else GitHub's public one.
+const copilotMetadataSchema = z.object({ apiEndpoint: z.string().min(1).optional(), enterpriseUrl: z.string().min(1).optional() });
+const copilotUpstreamOf = (login) => {
+  const metadata = copilotMetadataSchema.safeParse(login.metadata);
+  if (!metadata.success) return COPILOT_API;
+  const { apiEndpoint, enterpriseUrl } = metadata.data;
+  if (apiEndpoint) return apiEndpoint;
+  if (enterpriseUrl) return `https://copilot-api.${enterpriseUrl.replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
+  return COPILOT_API;
+};
+const COPILOT_METHOD = {
+  upstream: copilotUpstreamOf,
+  // The row's address is where the plugin sends the model list and every turn: the window. The
+  // enterprise address stays on the host, since the row's address wins over it.
+  rowMetadata: (login, windowUrl) => ({ apiEndpoint: windowUrl }),
+  // The plugin keeps the address it read from the row and reads no `baseURL` from the configuration.
+  options: () => null,
+  // The GitHub token has no end: the plugin stores `expires: 0` and has no refresh, so OpenCode
+  // never renews it, and neither does the host's keeper. It lives until the user revokes it.
+  ends: false,
+};
+
+// Each browser login method a space can be given, by provider and method, as OpenCode has them
+// at 2.0.25: where OpenCode sends that method's requests, which the window forwards to with the
+// real token; what of the login's metadata the row inside carries; what the provider
+// configuration inside says; and whether the token ends. The space's row names the same method,
 // so OpenCode inside sends the headers that upstream wants, with the row's placeholder token in
 // `Authorization`, which the window replaces. A method not named here is refused: the host
-// cannot know where its requests go. `auth.openai.com`, where every method refreshes, is on no
-// list: the gatekeeper refuses it, and the host is the only refresher (decision 13).
-const LOGIN_UPSTREAM_BY_METHOD = new Map([
-  ['openai/chatgpt-token-sharing', 'https://api.openai.com/v1'],
-  ['openai/chatgpt-browser', 'https://chatgpt.com/backend-api/codex'],
-  ['openai/chatgpt-headless', 'https://chatgpt.com/backend-api/codex'],
+// cannot know where its requests go. `auth.openai.com`, where the ChatGPT methods refresh, is on
+// no list: the gatekeeper refuses it, and the host is the only refresher (decision 13).
+const LOGIN_METHODS = new Map([
+  ['openai/chatgpt-token-sharing', CHATGPT_METHOD],
+  ['openai/chatgpt-browser', CODEX_METHOD],
+  ['openai/chatgpt-headless', CODEX_METHOD],
+  ['github-copilot/device', COPILOT_METHOD],
 ]);
+const loginMethodOf = (provider, methodID) => LOGIN_METHODS.get(`${provider}/${methodID}`) ?? null;
 /** The providers whose browser login a space can be given, in the order the map names them. */
-export const LOGIN_PROVIDERS = Array.from(new Set(Array.from(LOGIN_UPSTREAM_BY_METHOD.keys(), (key) => key.split('/')[0])));
-/** The id of the one login row the host writes inside a space, so a replace finds it again. */
-export const SPACE_LOGIN_CREDENTIAL_ID = 'cred_openchamber_space';
+export const LOGIN_PROVIDERS = Array.from(new Set(Array.from(LOGIN_METHODS.keys(), (key) => key.split('/')[0])));
+/** The id of the one login row the host writes inside a space for a provider, so a replace finds it again. */
+export const spaceLoginCredentialId = (provider) => `cred_openchamber_space_${provider}`;
+// The id every provider's row shared before 7d; a removal takes it out of a space made then.
+const LEGACY_LOGIN_CREDENTIAL_ID = 'cred_openchamber_space';
 // OpenCode refreshes a login five minutes before `expires`. The row inside must never refresh,
 // because it holds no refresh token and the issuer is refused, so its token ends in 2100.
 const NEVER_EXPIRES = Date.UTC(2100, 0, 1);
@@ -70,26 +121,37 @@ const NEVER_EXPIRES = Date.UTC(2100, 0, 1);
  * Null for a method this module does not know.
  */
 export function loginGrantOf(provider, login) {
-  const upstream = LOGIN_UPSTREAM_BY_METHOD.get(`${provider}/${login.methodID}`);
-  return upstream ? { upstream, header: 'authorization', secret: login.access } : null;
+  const method = loginMethodOf(provider, login.methodID);
+  return method ? { upstream: method.upstream(login), header: 'authorization', secret: login.access } : null;
 }
 
-// What the row inside needs of a login's metadata: the account id the legacy Codex mode sends as
-// a header, and the client id and scopes the ChatGPT login reads at load. Nothing else travels,
-// so a key the host's plugin stores there one day, a cached model list among them today, stays
-// on the host.
-const LOGIN_METADATA_KEYS = ['accountID', 'clientID', 'scopes'];
+/**
+ * When a host login's token ends, in milliseconds since the epoch, or null for a token with no
+ * end, Copilot's. A method this module does not know answers what the login says.
+ */
+export function loginEndOf(provider, login) {
+  const method = loginMethodOf(provider, login.methodID);
+  return method && !method.ends ? null : login.expires;
+}
+
+/** Whether a host login's token has ended at `nowMs`; a token with no end never has. */
+export function loginEnded(provider, login, nowMs) {
+  const end = loginEndOf(provider, login);
+  return end !== null && end <= nowMs;
+}
 
 /**
- * The login row for OpenCode inside: the host login's method and the metadata named above,
- * which name the account and never a secret, with placeholder tokens that never expire.
+ * The login row for OpenCode inside: the host login's method and what that method keeps of the
+ * metadata, which names the account or the window and never a secret, with placeholder tokens
+ * that never expire. A method this module does not know has no row.
  */
 export function buildLoginRow(provider, login) {
-  const metadata = {};
-  for (const key of LOGIN_METADATA_KEYS) if (login.metadata[key] !== undefined) metadata[key] = login.metadata[key];
+  const method = loginMethodOf(provider, login.methodID);
+  if (!method) throw new SpaceError('login_not_supported', `The ${provider} login was made in a way a space cannot be given (${login.methodID}).`);
+  const metadata = method.rowMetadata(login, spaceWindowUrl(provider));
   const value = { type: 'oauth', methodID: login.methodID, access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: NEVER_EXPIRES };
   if (Object.keys(metadata).length > 0) value.metadata = metadata;
-  return { id: SPACE_LOGIN_CREDENTIAL_ID, integrationID: provider, label: 'OpenChamber space', value };
+  return { id: spaceLoginCredentialId(provider), integrationID: provider, label: 'OpenChamber space', value };
 }
 
 // A chat larger than this is not taken out: the host reads one chat into memory at a time, and a
@@ -243,10 +305,17 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
     return response.statusCode;
   };
 
-  /** Takes the host's login row out of OpenCode inside; a row that is not there is nothing to do. */
-  const removeLogin = async (spaceId) => {
-    const status = await askInside(spaceId, { method: 'DELETE', path: `/api/credential/${SPACE_LOGIN_CREDENTIAL_ID}` });
-    if (status !== 204 && status !== 200 && status !== 404) throw new SpaceError('space_setup_failed', `Could not remove the login row inside the space: OpenCode answered ${status}`);
+  /**
+   * Takes the host's login row for a provider out of OpenCode inside; a row that is not there is
+   * nothing to do. The one row of a space made before 7d, under the id every provider shared,
+   * goes with it: OpenCode activates the newest remaining row of an integration when the active
+   * one is removed, so a legacy row left behind would come back as the login.
+   */
+  const removeLogin = async (spaceId, provider) => {
+    for (const id of [spaceLoginCredentialId(provider), LEGACY_LOGIN_CREDENTIAL_ID]) {
+      const status = await askInside(spaceId, { method: 'DELETE', path: `/api/credential/${id}` });
+      if (status !== 204 && status !== 200 && status !== 404) throw new SpaceError('space_setup_failed', `Could not remove the ${provider} login row inside the space: OpenCode answered ${status}`);
+    }
   };
 
   /**
@@ -255,7 +324,7 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
    * on 2.0.25. A row the agent made under the host's id is replaced like the host's own.
    */
   const writeLogin = async (spaceId, provider, login) => {
-    await removeLogin(spaceId);
+    await removeLogin(spaceId, provider);
     const status = await askInside(spaceId, { method: 'POST', path: '/api/credential', body: JSON.stringify(buildLoginRow(provider, login)) });
     if (status !== 200) throw new SpaceError('space_setup_failed', `Could not write the login row inside the space: OpenCode answered ${status}`);
   };

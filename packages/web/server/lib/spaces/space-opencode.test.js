@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
-import { SPACE_LOGIN_CREDENTIAL_ID, WINDOW_PLACEHOLDER_KEY, archivedChatOf, buildLoginRow, buildProviderConfig, createSpaceOpenCode, loginGrantOf } from './space-opencode.js';
+import { LOGIN_PROVIDERS, WINDOW_PLACEHOLDER_KEY, archivedChatOf, buildLoginRow, buildProviderConfig, createSpaceOpenCode, loginEndOf, loginEnded, loginGrantOf, spaceLoginCredentialId } from './space-opencode.js';
 
 const ID = 'a1b2c3d4e5f6';
 const GRANTS = [
@@ -47,6 +47,9 @@ describe('the provider configuration inside a space', () => {
     expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-browser' }]).provider).toEqual({
       openai: { options: { baseURL: 'http://gatekeeper:8080/model/openai', transport: 'http' } },
     });
+    // Copilot's plugin reads its address from the row, so the configuration says nothing of it.
+    expect(buildProviderConfig([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]).provider).toEqual({});
+    expect(buildProviderConfig([{ kind: 'login', id: 'openai', provider: 'openai', method: 'some-new-method' }]).provider).toEqual({});
   });
 });
 
@@ -56,13 +59,48 @@ describe('the login row inside a space', () => {
     expect(loginGrantOf('openai', { ...LOGIN, methodID: 'chatgpt-browser' })).toMatchObject({ upstream: 'https://chatgpt.com/backend-api/codex' });
     expect(loginGrantOf('openai', { ...LOGIN, methodID: 'chatgpt-headless' })).toMatchObject({ upstream: 'https://chatgpt.com/backend-api/codex' });
     expect(loginGrantOf('openai', { ...LOGIN, methodID: 'some-new-method' })).toBeNull();
-    expect(loginGrantOf('github-copilot', { ...LOGIN, methodID: 'device' })).toBeNull();
+    expect(loginGrantOf('openai', { ...LOGIN, methodID: 'device' })).toBeNull();
+    expect(loginGrantOf('github-copilot', { ...LOGIN, methodID: 'chatgpt-token-sharing' })).toBeNull();
+    expect(LOGIN_PROVIDERS).toEqual(['openai', 'github-copilot']);
+  });
+
+  const COPILOT = { methodID: 'device', access: 'gho_live_github_token', expires: 0, metadata: {} };
+
+  it('sends a Copilot login where its plugin would: the address GitHub gave at login, else the enterprise address, else the public one', () => {
+    expect(loginGrantOf('github-copilot', COPILOT)).toEqual({ upstream: 'https://api.githubcopilot.com', header: 'authorization', secret: 'gho_live_github_token' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { apiEndpoint: 'https://api.individual.githubcopilot.com' } })).toMatchObject({ upstream: 'https://api.individual.githubcopilot.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com' } })).toMatchObject({ upstream: 'https://copilot-api.company.ghe.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'https://company.ghe.com/' } })).toMatchObject({ upstream: 'https://copilot-api.company.ghe.com' });
+    expect(loginGrantOf('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com', apiEndpoint: 'https://api.company.ghe.com' } })).toMatchObject({ upstream: 'https://api.company.ghe.com' });
+  });
+
+  it('knows that a ChatGPT token ends and a Copilot token does not, whatever its row says', () => {
+    expect(loginEndOf('openai', LOGIN)).toBe(LOGIN.expires);
+    expect(loginEnded('openai', LOGIN, LOGIN.expires - 1)).toBe(false);
+    expect(loginEnded('openai', LOGIN, LOGIN.expires)).toBe(true);
+    expect(loginEndOf('github-copilot', COPILOT)).toBeNull();
+    expect(loginEnded('github-copilot', COPILOT, Date.UTC(2200, 0, 1))).toBe(false);
+    // A method nobody knows answers what the login says: the journey refuses it anyway.
+    expect(loginEndOf('openai', { ...LOGIN, methodID: 'some-new-method' })).toBe(LOGIN.expires);
+  });
+
+  it('points a Copilot row at the window, with nothing else of the host\'s login, and builds no row for a method it does not know', () => {
+    const row = buildLoginRow('github-copilot', { ...COPILOT, metadata: { enterpriseUrl: 'company.ghe.com', apiEndpoint: 'https://api.company.ghe.com' } });
+    expect(row).toEqual({
+      id: spaceLoginCredentialId('github-copilot'),
+      integrationID: 'github-copilot',
+      label: 'OpenChamber space',
+      value: { type: 'oauth', methodID: 'device', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: Date.UTC(2100, 0, 1), metadata: { apiEndpoint: 'http://gatekeeper:8080/model/github-copilot' } },
+    });
+    expect(JSON.stringify(row)).not.toContain('gho_');
+    expect(JSON.stringify(row)).not.toContain('company.ghe.com');
+    expect(() => buildLoginRow('openai', { ...LOGIN, methodID: 'some-new-method' })).toThrow(expect.objectContaining({ code: 'login_not_supported' }));
   });
 
   it('names the method and the account, holds placeholder tokens that never end, and carries no other metadata', () => {
     const row = buildLoginRow('openai', { ...LOGIN, metadata: { ...LOGIN.metadata, someNewSecret: 'shh' } });
     expect(row).toEqual({
-      id: SPACE_LOGIN_CREDENTIAL_ID,
+      id: spaceLoginCredentialId('openai'),
       integrationID: 'openai',
       label: 'OpenChamber space',
       value: { type: 'oauth', methodID: 'chatgpt-token-sharing', access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: Date.UTC(2100, 0, 1), metadata: { clientID: 'client_1', scopes: ['chatgpt.tokens.use.direct'] } },
@@ -84,23 +122,26 @@ describe('the login row inside a space', () => {
   };
 
   it('replaces the row through OpenCode inside: the old one out, the new one in as JSON', async () => {
-    const { asked, opencode } = answering([204, 200]);
+    const { asked, opencode } = answering([204, 404, 200]);
     await opencode.writeLogin(ID, 'openai', LOGIN);
     expect(asked).toEqual([
-      expect.objectContaining({ spaceId: ID, method: 'DELETE', path: `/api/credential/${SPACE_LOGIN_CREDENTIAL_ID}` }),
+      expect.objectContaining({ spaceId: ID, method: 'DELETE', path: '/api/credential/cred_openchamber_space_openai' }),
+      // The one row of a space made before 7d goes too, or OpenCode would activate it in place of the removed one.
+      expect.objectContaining({ spaceId: ID, method: 'DELETE', path: '/api/credential/cred_openchamber_space' }),
       expect.objectContaining({ spaceId: ID, method: 'POST', path: '/api/credential', headers: expect.objectContaining({ 'content-type': 'application/json' }), body: JSON.stringify(buildLoginRow('openai', LOGIN)) }),
     ]);
     expect(JSON.stringify(asked)).not.toContain(ACCESS);
     // A row that was not there is nothing to remove.
-    const first = answering([404, 200]);
+    const first = answering([404, 404, 200]);
     await first.opencode.writeLogin(ID, 'openai', LOGIN);
-    expect(first.asked).toHaveLength(2);
+    expect(first.asked).toHaveLength(3);
   });
 
   it('says when OpenCode inside refused the row, or would not let the old one go', async () => {
-    await expect(answering([204, 409]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('409') });
+    await expect(answering([204, 404, 409]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('409') });
     await expect(answering([500]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('500') });
-    await expect(answering([404]).opencode.removeLogin(ID)).resolves.toBeUndefined();
+    await expect(answering([404, 500]).opencode.writeLogin(ID, 'openai', LOGIN)).rejects.toMatchObject({ code: 'space_setup_failed', message: expect.stringContaining('500') });
+    await expect(answering([404, 404]).opencode.removeLogin(ID, 'openai')).resolves.toBeUndefined();
   });
 });
 

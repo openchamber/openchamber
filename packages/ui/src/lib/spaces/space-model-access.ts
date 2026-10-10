@@ -14,7 +14,7 @@
 // chosen addresses blocks unless that name is on its list, so the message would fail inside
 // with a bare 403; it stays in the composer with the name to allow instead.
 
-import { SPACE_MODEL_PROVIDERS } from './model-access';
+import { isSpaceGrantableProvider } from './model-access';
 import { spaceMenuActionsOf } from './space-repair';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
@@ -83,7 +83,7 @@ const refusalFromList = (entry: SpaceEntry, providerId: string): SpaceModelRefus
  * its directory; a session by its directory.
  */
 export const spaceModelRefusal = (target: SpaceTarget, providerId: string): SpaceModelRefusal | null => {
-  const grantable = SPACE_MODEL_PROVIDERS.some((provider) => provider.id === providerId);
+  const grantable = isSpaceGrantableProvider(providerId);
   const domain = UNGRANTABLE_PROVIDER_DOMAINS.get(providerId);
   if (!grantable && !domain) return null;
   const space = spaceOfTarget(target);

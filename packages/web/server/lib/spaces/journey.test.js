@@ -80,7 +80,7 @@ const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemory
   const spaceOpenCode = {
     writeProviderConfig: async (spaceId, grants) => { calls.push(['writeProviderConfig', spaceId, grants]); fail('writeProviderConfig'); },
     writeLogin: async (spaceId, provider, login) => { calls.push(['writeLogin', spaceId, provider, login]); if (holdLoginRow) await loginRowHeld; fail('writeLogin'); },
-    removeLogin: async (spaceId) => { calls.push(['removeLogin', spaceId]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
+    removeLogin: async (spaceId, provider) => { calls.push(['removeLogin', spaceId, provider]); if (holdLoginRow) await loginRowHeld; fail('removeLogin'); },
   };
   const codeIn = {
     bringCodeIn: async (request) => {
@@ -787,6 +787,36 @@ describe('the journey: grants', () => {
       await expect(broken.journey.readHostLogins()).rejects.toThrow('OpenCode is not connected yet');
     });
 
+    describe('a Copilot login', () => {
+      const GITHUB_TOKEN = 'gho_live_github_token_of_the_host';
+      const copilot = { methodID: 'device', access: GITHUB_TOKEN, expires: 0, metadata: { apiEndpoint: 'https://api.individual.githubcopilot.com' } };
+      const asked = { kind: 'login', provider: 'github-copilot' };
+      const readHostLogin = async (provider) => (provider === 'github-copilot' ? copilot : null);
+
+      it('is usable without an end, goes to the gatekeeper at the address GitHub gave, is remembered as its method, and is said again after a start', async () => {
+        const { journey, calls, records, dataDir, id, gatekeeper } = await ready({ readHostLogin });
+        expect(await journey.readHostLogins()).toEqual({ logins: [{ provider: 'github-copilot', method: 'device', expires: null, state: 'usable' }] });
+        const granted = await journey.grantAccess(id, asked);
+        expect(granted).toEqual({ grant: { kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device', url: 'http://gatekeeper:8080/model/github-copilot' } });
+        expect(calls).toEqual([
+          ['addGrant', id, { id: 'github-copilot', upstream: 'https://api.individual.githubcopilot.com', header: 'authorization', secret: GITHUB_TOKEN }],
+          ['writeProviderConfig', id, [{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]],
+          ['writeLogin', id, 'github-copilot', copilot],
+        ]);
+        expect(fs.readFileSync(path.join(dataDir, 'spaces', 'records', `${id}.json`), 'utf8')).not.toContain(GITHUB_TOKEN);
+        expect(records.read(id).record.grants).toEqual([{ kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' }]);
+        expect((await journey.listSpaces({ access: true }))[0]).toMatchObject({ access: 'granted' });
+        // Said again after a start: a token with no end never runs out.
+        await journey.stopSpace(id);
+        gatekeeper.forget(id);
+        calls.splice(0);
+        expect(await journey.startSpace(id)).toMatchObject({ grantsRestored: ['github-copilot'], needsAccess: [] });
+        expect(calls.filter(([name]) => name === 'addGrant')).toEqual([['addGrant', id, { id: 'github-copilot', upstream: 'https://api.individual.githubcopilot.com', header: 'authorization', secret: GITHUB_TOKEN }]]);
+        await until(() => calls.some(([name]) => name === 'writeLogin'));
+        expect(calls.filter(([name]) => name === 'writeLogin')).toEqual([['writeLogin', id, 'github-copilot', copilot]]);
+      });
+    });
+
     it('replaces a key with the login and the login with a key, taking the row inside with the login', async () => {
       const { journey, calls, records, id } = await ready({ hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY } });
       await journey.grantAccess(id, openai);
@@ -857,8 +887,8 @@ describe('the journey: grants', () => {
       racing.calls.splice(0);
       await racing.journey.grantAccess(racing.id, openai);
       racing.releaseReady();
-      await until(() => racing.calls.filter(([name]) => name === 'removeLogin').length === 2);
-      expect(racing.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig', 'waitUntilReady', 'removeLogin']);
+      await until(() => racing.calls.filter(([name]) => name === 'removeLogin').length === 3);
+      expect(racing.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig', 'waitUntilReady', 'removeLogin', 'removeLogin']);
       expect(racing.records.read(racing.id).record.grants).toEqual([expect.objectContaining({ kind: 'model', id: 'openai' })]);
 
       // A key granted while the repair is writing the login row waits for that write and then
@@ -878,7 +908,8 @@ describe('the journey: grants', () => {
       expect(held.calls).toEqual([]);
       held.releaseLoginRow();
       await granting;
-      expect(held.calls.map(([name]) => name)).toEqual(['removeLogin', 'addGrant', 'writeProviderConfig']);
+      // The repair ends by taking out the rows of the login providers the record does not hold, then the grant goes.
+      expect(held.calls.map(([name, , provider]) => (name === 'removeLogin' ? `removeLogin:${provider}` : name))).toEqual(['removeLogin:github-copilot', 'removeLogin:openai', 'addGrant', 'writeProviderConfig']);
 
       const silent = await ready({ hostLogin: tokenSharing, failAt: 'waitUntilReady' });
       await silent.journey.grantAccess(silent.id, login);

@@ -23,12 +23,13 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getCurrentIntlLocale } from '@/lib/i18n/intl';
 import { blockedAttemptsOf, isDomainName, providerAccessOf, type BlockReason } from '@/lib/spaces/space-access';
+import { SPACE_LOGIN_ONLY_PROVIDERS } from '@/lib/spaces/model-access';
 import { grantSpaceAccess, providerGrantOf, type SpaceEntry } from '@/lib/spaces/spaces-api';
 import { runSpaceAction, spaceMenuActionsOf } from '@/lib/spaces/space-repair';
 import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelKeySource } from './ModelKeySource';
-import { isKeySourceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type HostLoginOffer, type KeySourceChoice } from './spaceModelKeys';
+import { isAccessChoiceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type HostLoginOffer, type KeySourceChoice, type SpaceModelProviderOption } from './spaceModelKeys';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { useOpenSpaceDomain, useSpaceJournal } from './spaceNetwork';
 
@@ -63,7 +64,7 @@ const Section: React.FC<{ title: string; action?: React.ReactNode; children: Rea
 
 type ModelRowProps = {
   entry: SpaceEntry;
-  provider: ReturnType<typeof useSpaceModelProviders>[number];
+  provider: SpaceModelProviderOption;
   initiallyOpen: boolean;
   /** The host's browser logins, by provider, or null while unread or when the host could not be asked. */
   logins: ReadonlyMap<string, HostLoginOffer> | null;
@@ -82,23 +83,24 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
   const loginName = offer?.name ?? hostLogin?.name ?? provider.name;
   const [open, setOpen] = React.useState(initiallyOpen);
   // The source the row starts from: the grant's own, and for a space without one the host's login
-  // when there is one to offer, since it asks the user for nothing.
+  // when there is one to offer, since it asks the user for nothing. A provider without a key has
+  // only the login.
   const defaultSource = (): KeySourceChoice['source'] => {
     if (grant?.kind === 'model') return grant.source.kind;
-    return offer ? 'login' : 'env';
+    return offer || !provider.key ? 'login' : 'env';
   };
   const [choice, setChoice] = React.useState<KeySourceChoice>(() => ({
     source: defaultSource(),
-    envName: grant?.kind === 'model' && grant.source.kind === 'env' ? grant.source.name : provider.envName,
+    envName: grant?.kind === 'model' && grant.source.kind === 'env' ? grant.source.name : provider.key?.envName ?? '',
     value: '',
   }));
   // Until the user picks a source, the row follows the host's logins as they arrive.
   const touched = React.useRef(false);
   const offered = offer !== null;
   React.useEffect(() => {
-    if (touched.current) return;
+    if (touched.current || !provider.key) return;
     setChoice((current) => ({ ...current, source: offered ? (grant?.kind === 'model' ? grant.source.kind : 'login') : current.source === 'login' ? 'env' : current.source }));
-  }, [grant, offered]);
+  }, [grant, offered, provider.key]);
   const [giving, setGiving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -117,7 +119,7 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
       const refusal = failureOfError(failure);
       // The host refused its own login: what it has for the provider may have changed, so the row reads it again.
       if (refusal.code.startsWith('login_')) refreshLogins();
-      setError(spaceFailureText(t, refusal));
+      setError(spaceFailureText(t, refusal, { name: loginName }));
     } finally {
       setGiving(false);
     }
@@ -148,17 +150,17 @@ const ModelRow: React.FC<ModelRowProps> = ({ entry, provider, initiallyOpen, log
           <div className="typography-meta break-words">{state}</div>
         </div>
         {!open ? (
-          <Button variant="outline" size="xs" className="shrink-0" onClick={() => setOpen(true)} disabled={entry.state !== 'running'}>
+          <Button variant="outline" size="xs" className="shrink-0" onClick={() => setOpen(true)} disabled={entry.state !== 'running' || (!provider.key && !offer)}>
             {access === 'granted' ? t(grant?.kind === 'login' ? 'spaces.access.model.changeLogin' : 'spaces.access.model.change') : t('spaces.access.model.give')}
           </Button>
         ) : null}
       </div>
       {open ? (
         <div className="space-y-2 pl-3">
-          <ModelKeySource providerName={provider.name} login={offer} choice={choice} onChange={(change) => { touched.current = true; setChoice((current) => ({ ...current, ...change })); }} />
+          <ModelKeySource provider={provider} login={offer} choice={choice} onChange={(change) => { touched.current = true; setChoice((current) => ({ ...current, ...change })); }} />
           {error ? <p className="typography-meta text-status-error">{error}</p> : null}
           <div className="flex gap-2">
-            <Button size="xs" onClick={() => void give()} disabled={giving || !isKeySourceComplete(choice)} className="gap-1.5">
+            <Button size="xs" onClick={() => void give()} disabled={giving || (!provider.key && !offer) || !isAccessChoiceComplete(provider, choice)} className="gap-1.5">
               {giving ? <Icon name="loader-4" className="h-3 w-3 animate-spin" /> : null}
               {t(choice.source === 'login' ? 'spaces.access.model.submitLogin' : 'spaces.access.model.submit')}
             </Button>
@@ -292,8 +294,11 @@ const StoppedNotice: React.FC<{ spaceId: string }> = ({ spaceId }) => {
 
 const SpaceAccessBody: React.FC<{ entry: SpaceEntry; focusProviderId: string | null; offeredDomain: string | null }> = ({ entry, focusProviderId, offeredDomain }) => {
   const { t } = useI18n();
-  const providers = useSpaceModelProviders(entry.projectDirectory);
   const hostLogins = useSpaceHostLogins(true);
+  // A login-only provider has a row while the host has a login for it, in any state, or the space
+  // holds its grant: the row is where "sign in again" is said.
+  const loginOnly = SPACE_LOGIN_ONLY_PROVIDERS.filter((id) => hostLogins.logins?.has(id) || entry.grants.some((grant) => grant.kind === 'login' && grant.provider === id));
+  const providers = useSpaceModelProviders(entry.projectDirectory, loginOnly);
   const running = entry.state === 'running';
   const journal = useSpaceJournal(entry.id, running);
   const domains = useOpenSpaceDomain(entry.id);

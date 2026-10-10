@@ -43,7 +43,7 @@ import { SpaceError } from './errors.js';
 import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
-import { LOGIN_PROVIDERS, loginGrantOf } from './space-opencode.js';
+import { LOGIN_PROVIDERS, loginEndOf, loginEnded, loginGrantOf } from './space-opencode.js';
 import { domainSchema, grantSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
@@ -407,7 +407,7 @@ export function createSpaceJourney({
    */
   const usableHostLogin = async (grant) => {
     const login = await readHostLogin(grant.provider).catch(() => null);
-    if (!login || login.methodID !== grant.method || login.expires <= now().getTime()) return null;
+    if (!login || login.methodID !== grant.method || loginEnded(grant.provider, login, now().getTime())) return null;
     return login;
   };
 
@@ -447,15 +447,15 @@ export function createSpaceJourney({
       const writing = (async () => {
         const { record } = records.read(spaceId);
         if (!record) return;
-        let written = false;
+        const written = new Set();
         for (const grant of record.grants) {
           if (grant.kind !== 'login') continue;
           const login = await usableHostLogin(grant);
           if (!login) continue;
           await spaceOpenCode.writeLogin(spaceId, grant.provider, login);
-          written = true;
+          written.add(grant.provider);
         }
-        if (!written) await spaceOpenCode.removeLogin(spaceId);
+        for (const provider of LOGIN_PROVIDERS) if (!written.has(provider)) await spaceOpenCode.removeLogin(spaceId, provider);
       })();
       rowRepairs.set(spaceId, writing);
       try {
@@ -470,17 +470,19 @@ export function createSpaceJourney({
   /**
    * The host's own browser logins a space can be given, for the grant dialog to offer the choice
    * and to say why a login grant needs the user again (7c): for each provider the host has a
-   * login for, its method, when it ends, and whether it can be said now, `usable`, has `expired`
-   * and could not be renewed, or was made in a way the window does not know, `unsupported`. Never
-   * the token. A host that cannot be asked throws, so a failed read never reads as "signed out".
+   * login for, its method, when it ends, null for a token with no end, and whether it can be said
+   * now, `usable`, has `expired` and could not be renewed, or was made in a way the window does
+   * not know, `unsupported`. Never the token. A host that cannot be asked throws, so a failed read
+   * never reads as "signed out".
    */
   const readHostLogins = async () => {
     const logins = [];
     for (const provider of LOGIN_PROVIDERS) {
       const login = await readHostLogin(provider);
       if (!login) continue;
-      const state = !loginWindowOf(provider, login) ? 'unsupported' : login.expires <= now().getTime() ? 'expired' : 'usable';
-      logins.push({ provider, method: login.methodID, expires: new Date(login.expires).toISOString(), state });
+      const end = loginEndOf(provider, login);
+      const state = !loginWindowOf(provider, login) ? 'unsupported' : loginEnded(provider, login, now().getTime()) ? 'expired' : 'usable';
+      logins.push({ provider, method: login.methodID, expires: end === null ? null : new Date(end).toISOString(), state });
     }
     return { logins };
   };
@@ -797,7 +799,7 @@ export function createSpaceJourney({
       if (!login) throw new SpaceError('login_not_found', `OpenChamber is not signed in to ${asked.provider} on this computer. Sign in first, or give a key instead.`);
       window = loginWindowOf(asked.provider, login);
       if (!window) throw new SpaceError('login_not_supported', `The ${asked.provider} login on this computer was made in a way the network filter does not know (${login.methodID}).`);
-      if (login.expires <= now().getTime()) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out and could not be renewed. Sign in to ${asked.provider} again, then grant.`);
+      if (loginEnded(asked.provider, login, now().getTime())) throw new SpaceError('login_expired', `The ${asked.provider} login on this computer has run out and could not be renewed. Sign in to ${asked.provider} again, then grant.`);
       grant = { kind: 'login', id: asked.provider, provider: asked.provider, method: login.methodID };
     } else {
       grant = { kind: 'domain', id: `open-${crypto.randomBytes(6).toString('hex')}`, upstream: asked.upstream };
@@ -807,7 +809,7 @@ export function createSpaceJourney({
     // keep the login's headers and model list for requests the window now sends with the key; a
     // removal that fails answers the grant before anything changed.
     const replaced = current.record.grants.find((entry) => entry.id === grant.id);
-    if (grant.kind === 'model' && replaced?.kind === 'login') await spaceOpenCode.removeLogin(spaceId);
+    if (grant.kind === 'model' && replaced?.kind === 'login') await spaceOpenCode.removeLogin(spaceId, grant.provider);
     await gatekeeper.addGrant(spaceId, { id: grant.id, ...window });
     const grants = [...current.record.grants.filter((entry) => entry.id !== grant.id), grant];
     if (records.update(spaceId, { grants }).status !== 'ok') {

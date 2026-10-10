@@ -117,6 +117,31 @@ describe('the keeper', () => {
     expect(calls).toEqual([['read', 'openai'], ['read', 'anthropic']]);
   });
 
+  it('leaves a Copilot login alone, since its token has no end: never renewed, said once, and again only when the user signed in to GitHub again', async () => {
+    const copilot = (access) => ({ methodID: 'device', access, expires: 0, metadata: {} });
+    const grant = { kind: 'login', id: 'github-copilot', provider: 'github-copilot', method: 'device' };
+    const state = { stored: copilot('gho_first') };
+    const calls = [];
+    const keeper = createLoginKeeper({
+      readLogin: async (provider) => { calls.push(['read', provider]); return provider === 'github-copilot' ? state.stored : null; },
+      renewLogin: async (provider) => { calls.push(['renew', provider]); throw new Error('must not be asked'); },
+      exchange: async () => ({}),
+      holders: async () => [{ spaceId: 'a1', grant }],
+      say: async (spaceId, said, givenLogin) => { calls.push(['say', spaceId, said.id, givenLogin.access]); return true; },
+      now: () => NOW,
+      logger: { warn: () => {} },
+    });
+    await expect(keeper.fresh('github-copilot')).resolves.toEqual(copilot('gho_first'));
+    calls.splice(0);
+    await keeper.tick();
+    await keeper.tick();
+    expect(calls).toEqual([['read', 'github-copilot'], ['say', 'a1', 'github-copilot', 'gho_first'], ['read', 'github-copilot']]);
+    state.stored = copilot('gho_second');
+    calls.splice(0);
+    await keeper.tick();
+    expect(calls).toEqual([['read', 'github-copilot'], ['say', 'a1', 'github-copilot', 'gho_second']]);
+  });
+
   it('renews a login within ten minutes of its end, or past it, once for callers that arrive together', async () => {
     const renewed = login(NOW + 3600_000, 'at-renewed');
     const { keeper, calls } = make({ stored: login(NOW + RENEW_WINDOW_MS), renewed });

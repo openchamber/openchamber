@@ -217,7 +217,7 @@ export const SpaceGroupStatus: React.FC<{ spaceId: string; className?: string }>
         <div className="flex flex-col gap-1">
           {access.failures.map((failure) => (
             <React.Fragment key={failure.provider}>
-              {grantLine(failure.provider, t('spaces.group.accessMissing', { provider: providerName(failure.provider), reason: spaceFailureText(t, failure) }))}
+              {grantLine(failure.provider, t('spaces.group.accessMissing', { provider: providerName(failure.provider), reason: spaceFailureText(t, failure, { name: SPACE_LOGIN_NAMES.get(failure.provider) ?? providerName(failure.provider) }) }))}
             </React.Fragment>
           ))}
         </div>
