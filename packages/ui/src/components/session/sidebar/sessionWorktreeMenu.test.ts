@@ -136,6 +136,24 @@ describe('buildSessionWorktreeMenuTargets', () => {
     expect(targets[0]?.metadata.label).toBe('main');
     expect(targets[0]?.metadata.headState).toBe('branch');
   });
+
+  test('leaves out the repository root of a sub-folder project unless the session is already there', () => {
+    const discoveredWorktrees = [
+      worktree({ path: '/repo', projectDirectory: '/repo', branch: 'main', label: 'main' }),
+      worktree({ path: '/repo-feature', projectDirectory: '/repo' }),
+    ];
+    const targetPaths = (sourceDirectory: string) => buildSessionWorktreeMenuTargets({
+      projectPath: '/repo/app',
+      discoveredWorktrees,
+      sourceDirectory,
+      currentWorktree: null,
+      projectRootBranch: 'main',
+    }).map((target) => target.metadata.path);
+
+    expect(targetPaths('/repo/app')).toEqual(['/repo-feature', '/repo/app']);
+    expect(targetPaths('/repo-feature')).toEqual(['/repo-feature']);
+    expect(targetPaths('/repo')).toEqual(['/repo', '/repo-feature']);
+  });
 });
 
 describe('commitDiscoveredRawWorktreesByProject', () => {

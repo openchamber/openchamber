@@ -1,4 +1,5 @@
 import {
+  checkoutHoldsSubfolder,
   preserveClientTrackedWorktreeStatus,
   replaceRepositoryWorktrees,
   type ProjectRef,
@@ -245,6 +246,16 @@ export const buildSessionWorktreeMenuTargets = (args: {
   const pushTarget = (target: SessionWorktreeMenuTarget): void => {
     const normalizedPath = normalizePath(target.metadata.path ?? null);
     if (!normalizedPath || targetsByPath.has(normalizedPath)) {
+      return;
+    }
+    // The repository root of a project at `repo/app` lies outside the project,
+    // so a session moved there would leave it. It stays listed as the current
+    // place of a session already there.
+    if (
+      normalizedProjectPath
+      && normalizedPath !== normalizedSourceDirectory
+      && checkoutHoldsSubfolder(normalizedPath, normalizedProjectPath)
+    ) {
       return;
     }
     targetsByPath.set(normalizedPath, {
