@@ -351,6 +351,7 @@ export const Header: React.FC = () => {
     return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
   const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
+  const draftProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId);
   const selectedSessionDirectory = useSessionUIStore((state) => state.currentSessionDirectory);
   const homeDirectory = useAppDirectoryStore((state) => state.homeDirectory);
 
@@ -680,6 +681,38 @@ export const Header: React.FC = () => {
   ]);
 
   const currentSessionOpenDirectory = sessionDirectory || normalize(selectedSessionDirectory || '') || worktreeDirectory;
+
+  // The header's Mini Chat button opens whatever is on screen: the new-session
+  // draft as a new Mini Chat, or the current session.
+  const handleOpenDraftMiniChat = React.useCallback(() => {
+    void invokeDesktop('desktop_open_draft_mini_chat_window', {
+      directory: isChatContext ? '' : draftDirectory,
+      projectId: isChatContext ? null : draftProjectId,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
+    }).catch((error) => {
+      console.warn('[header] failed to open draft mini chat window', error);
+    });
+  }, [draftDirectory, draftProjectId, isChatContext]);
+
+  const handleOpenCurrentMiniChat = React.useCallback(() => {
+    if (isNewSessionDraftOpen) {
+      handleOpenDraftMiniChat();
+      return;
+    }
+    if (!currentSessionId) {
+      return;
+    }
+    void invokeDesktop('desktop_open_session_mini_chat_window', {
+      sessionId: currentSessionId,
+      directory: sessionDirectory || normalize(selectedSessionDirectory || '') || worktreeDirectory,
+      apiBaseUrl: getRuntimeApiBaseUrl(),
+      clientToken: getRuntimeBearerTokenSync(),
+    }).catch((error) => {
+      console.warn('[header] failed to open session mini chat window', error);
+    });
+  }, [currentSessionId, handleOpenDraftMiniChat, isNewSessionDraftOpen, selectedSessionDirectory, sessionDirectory, worktreeDirectory]);
+  const showMiniChatHeaderAction = hasElectronDesktopIPC && (isNewSessionDraftOpen || Boolean(currentSessionId));
 
   const openSessionInMiniChat = React.useCallback((sessionId: string, directory: string) => {
     void invokeDesktop('desktop_open_session_mini_chat_window', {
@@ -1289,6 +1322,23 @@ export const Header: React.FC = () => {
         {/* Spacing comes from the gap only, so whichever control ends up last
             sits on the header's own right padding with no trailing margin. */}
         <div className="flex shrink-0 items-center gap-2">
+          {showMiniChatHeaderAction ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={isNewSessionDraftOpen ? t('header.actions.newMiniChatAria') : t('header.actions.openSessionMiniChatAria')}
+                  onClick={handleOpenCurrentMiniChat}
+                  className={DESKTOP_HEADER_ICON_BUTTON_CLASS}
+                >
+                  <Icon name="picture-in-picture-2" className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isNewSessionDraftOpen ? t('header.actions.newMiniChat') : t('header.actions.openSessionMiniChat')}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
           {!isVSCode ? (
             <Tooltip>
               <TooltipTrigger asChild>
