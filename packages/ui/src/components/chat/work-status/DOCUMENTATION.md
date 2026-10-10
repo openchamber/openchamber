@@ -24,8 +24,11 @@ selected session even without metrics, so a saved collapsed state can reopen.
 
 It is **not** a context-panel surface. It is not registered in
 `lib/surfaces/registry.ts`, has no rail icon, no tab, no persisted width and no
-resizer. It is a card floating inside the chat column — rounded border, faint
-fill, its own margin — rather than a docked pane flush against the window edge.
+resizer. It is a card inside the chat column — rounded, with the dropdown's
+hairline ring (`oc-panel-edge`, shared with the context panel card), a faint
+fill and its own margin — rather than a docked pane flush against the window
+edge. Opened over the transcript it is a dropdown and takes the dropdown's
+full edge, lit top and tight shadows included (`data-edge-floating`).
 When it overlays the transcript, it uses the shared `oc-glass-panel` surface;
 the inline card keeps its lighter, non-blurred fill instead.
 

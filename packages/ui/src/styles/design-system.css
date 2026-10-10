@@ -378,6 +378,80 @@
     0 6px 6px -3px rgb(0 0 0 / 0.16);
 }
 
+/* Panels that are part of the layout (the context panel card, the work
+   status card beside the chat) take the dropdown's hairline ring and nothing
+   else of its lift: they hold their place rather than float, so no lit top
+   edge and only the faint shadow. The ring sits inside, on ::after above the
+   content: the context panel card is flush under the header in a clipping
+   container, which cut an outside ring's top edge, and an editor or diff
+   painting its own background would cover an inset on the card itself.
+   Needs a positioned element. */
+.oc-panel-edge {
+  /* Its own stacking context, so the ring below can sit above every layer
+     inside (a diff's sticky file header, editor overlays) without competing
+     with anything outside the card. Not a backdrop root, so the work status
+     glass still blurs what is behind it. */
+  isolation: isolate;
+  box-shadow: 0 2px 8px -3px rgb(0 0 0 / 0.08);
+}
+
+.oc-panel-edge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  border-radius: inherit;
+  pointer-events: none;
+  /* The dropdown's outer and inner rings combined. */
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12);
+  transition: opacity 200ms ease;
+}
+
+.dark .oc-panel-edge::after {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+/* The work status card opened over the chat is a dropdown, and looks like
+   one: the full edge, lit top included, with the dropdown's tight shadows
+   (its widest one would be clipped where the context panel begins). */
+.oc-panel-edge[data-edge-floating] {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.1),
+    0 1px 2px -0.5px rgb(0 0 0 / 0.08),
+    0 4px 8px -2px rgb(0 0 0 / 0.08);
+}
+
+.oc-panel-edge[data-edge-floating]::after {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.8),
+    inset 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+
+.dark .oc-panel-edge[data-edge-floating] {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.36),
+    0 1px 1px -0.5px rgb(0 0 0 / 0.22),
+    0 3px 3px -1.5px rgb(0 0 0 / 0.2),
+    0 6px 6px -3px rgb(0 0 0 / 0.16);
+}
+
+.dark .oc-panel-edge[data-edge-floating]::after {
+  box-shadow:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.12),
+    inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+/* A panel animating out drops its edge along with its fill. Listed for dark
+   too, so it outranks the dark floating shadow above. */
+.oc-panel-edge[data-edge-hidden],
+.dark .oc-panel-edge[data-edge-hidden] {
+  box-shadow: none;
+}
+
+.oc-panel-edge[data-edge-hidden]::after {
+  opacity: 0;
+}
+
 /* A modal window (dialogs, the command palette, Settings) lifts off the
    dimmed page: a wide soft shadow plus a tighter one under the edge. */
 .oc-modal-shadow {
@@ -725,3 +799,4 @@
     border-color: rgb(from var(--agent-color) r g b / 0.2);
   }
 }
+
