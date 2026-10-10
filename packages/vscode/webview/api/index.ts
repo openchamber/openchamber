@@ -30,6 +30,9 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   git: createVSCodeGitAPI(),
   files: createVSCodeFilesAPI(),
   settings: createVSCodeSettingsAPI(),
+  openCodeProjectImportPrompt: {
+    claim: async () => 'unsupported',
+  },
   permissions: createVSCodePermissionsAPI(),
   notifications: createVSCodeNotificationsAPI(),
   sourceControl: createVSCodeSourceControlAPI(),

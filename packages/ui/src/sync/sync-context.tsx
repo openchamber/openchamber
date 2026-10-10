@@ -1605,7 +1605,7 @@ async function reloadCatalog(
   if (kind === "project") {
     const projects = await opencodeClient.listProjects().catch(() => null)
     if (isCatalogRuntimeCurrent(runtime) && projects) {
-      useGlobalSyncStore.getState().actions.set({ projects })
+      useGlobalSyncStore.getState().actions.set({ projects, hasLoadedProjects: true })
     }
     return
   }

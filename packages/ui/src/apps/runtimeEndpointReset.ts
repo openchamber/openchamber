@@ -35,6 +35,7 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
@@ -82,6 +83,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   // Cross-project session list (mobile sessions sheet & co) belongs to the
   // previous instance — drop it so stale sessions can't linger after a switch.
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  // OpenCode project roots and the successful-load marker belong to the old
+  // instance; retaining them could offer those paths for import on the new one.
+  useGlobalSyncStore.getState().actions.reset();
   useSpacesStore.getState().resetForRuntimeSwitch();
   useSpaceArchivesStore.getState().resetForRuntimeSwitch();
   resetSpaceModelAccess();

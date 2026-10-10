@@ -3,6 +3,7 @@ import { installRuntimeEndpointReset } from './runtimeEndpointReset';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useGlobalSyncStore } from '@/sync/global-sync-store';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalFetch = globalThis.fetch;
@@ -49,11 +50,17 @@ describe('installRuntimeEndpointReset', () => {
       expect(opencodeClient.getBaseUrl().startsWith('https://remote.example')).toBe(true);
 
       useConfigStore.setState({ isInitialized: true, isConnected: true });
+      useGlobalSyncStore.getState().actions.set({
+        projects: [{ id: 'remote-project', worktree: '/remote/repo', sandboxes: [], time: { created: 1, updated: 1 } }],
+        hasLoadedProjects: true,
+      });
       switchRuntimeEndpoint({ apiBaseUrl: 'http://127.0.0.1:4100', runtimeKey: 'local' });
 
       expect(opencodeClient.getBaseUrl().startsWith('http://127.0.0.1:4100')).toBe(true);
       expect(useConfigStore.getState().isInitialized).toBe(false);
       expect(useConfigStore.getState().isConnected).toBe(false);
+      expect(useGlobalSyncStore.getState().hasLoadedProjects).toBe(false);
+      expect(useGlobalSyncStore.getState().projects).toEqual([]);
     } finally {
       uninstall();
     }
@@ -68,10 +75,16 @@ describe('installRuntimeEndpointReset', () => {
     const uninstall = installRuntimeEndpointReset();
     try {
       useConfigStore.setState({ isInitialized: true, isConnected: true });
+      useGlobalSyncStore.getState().actions.set({
+        projects: [{ id: 'remote-project', worktree: '/remote/repo', sandboxes: [], time: { created: 1, updated: 1 } }],
+        hasLoadedProjects: true,
+      });
       switchRuntimeEndpoint({ apiBaseUrl: 'https://remote.example', clientToken: 'fresh-token', runtimeKey: 'remote' });
 
       expect(useConfigStore.getState().isInitialized).toBe(true);
       expect(useConfigStore.getState().isConnected).toBe(true);
+      expect(useGlobalSyncStore.getState().hasLoadedProjects).toBe(true);
+      expect(useGlobalSyncStore.getState().projects).toHaveLength(1);
     } finally {
       uninstall();
     }

@@ -201,6 +201,13 @@ describe('settings registry', () => {
     expect(useUIStore.getState().sessionRetentionAction).toBe('archive');
   });
 
+  test('stores the one-time import prompt marker as a runtime instance setting', () => {
+    expect(SETTINGS_REGISTRY.openCodeProjectImportPromptShown.scope).toBe('instance');
+    expect(parseSettingsDocument({ openCodeProjectImportPromptShown: true })).toEqual({ openCodeProjectImportPromptShown: true });
+    expect(parseSettingsDocument({ openCodeProjectImportPromptShown: false })).toEqual({ openCodeProjectImportPromptShown: false });
+    expect(parseSettingsDocument({ openCodeProjectImportPromptShown: 'true' })).toEqual({});
+  });
+
   test('applies the hidden-sections list together with its explicit marker', () => {
     applySettingsToStores({ workStatusHiddenSections: ['mcp', 'telemetry'] });
     expect(useUIStore.getState().workStatusHiddenSections).toEqual(['mcp']);

@@ -65,6 +65,8 @@ export type GlobalState = {
   error?: InitError
   path: Path
   projects: Project[]
+  /** True after a successful `project.list` response in this runtime. */
+  hasLoadedProjects: boolean
   providers: ProviderCatalog
   config: Config
   reload: undefined | "pending" | "complete"
@@ -144,6 +146,7 @@ export const INITIAL_GLOBAL_STATE: GlobalState = {
   ready: false,
   path: EMPTY_PATH,
   projects: [],
+  hasLoadedProjects: false,
   providers: EMPTY_PROVIDER_CATALOG,
   config: {},
   reload: undefined,

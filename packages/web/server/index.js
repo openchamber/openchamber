@@ -456,6 +456,7 @@ const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(.
 const readSettingsFromDiskStrict = (...args) => settingsRuntime.readSettingsFromDiskStrict(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+const claimOpenCodeProjectImportPrompt = (...args) => settingsRuntime.claimOpenCodeProjectImportPrompt(...args);
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -2288,6 +2289,7 @@ async function main(options = {}) {
       }
     },
     readSettingsFromDiskMigrated,
+    claimOpenCodeProjectImportPrompt,
     normalizeTunnelSessionTtlMs,
     sayTTSCapability,
     ensurePushInitialized,

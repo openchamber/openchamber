@@ -41,6 +41,9 @@
       "scope": "instance",
       "adopt": "bootstrap-only"
     },
+    "openCodeProjectImportPromptShown": {
+      "scope": "instance"
+    },
     "securityScopedBookmarks": {
       "scope": "instance",
       "surfaces": [

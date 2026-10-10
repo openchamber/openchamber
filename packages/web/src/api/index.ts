@@ -17,6 +17,7 @@ import { createWebPushAPI } from './push';
 import { createWebLinearAPI } from './linear';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebSourceControlAPI } from './source-control';
+import { createWebOpenCodeProjectImportPromptAPI } from './openCodeProjectImportPrompt';
 
 interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -45,6 +46,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   git: createWebGitAPI(),
   files: createWebFilesAPI({ urls: activeUrls, getDirectory: () => useDirectoryStore.getState().currentDirectory }),
   settings: createWebSettingsAPI(),
+  openCodeProjectImportPrompt: createWebOpenCodeProjectImportPromptAPI(),
   permissions: createWebPermissionsAPI(),
   notifications: createWebNotificationsAPI(),
   sourceControl: createWebSourceControlAPI(),

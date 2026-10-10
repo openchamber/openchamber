@@ -236,6 +236,7 @@ export const SETTINGS_REGISTRY = {
   opencodeBinary: field({ scope: 'instance', parse: parseTrimmedString }),
   projects: field<ProjectEntry[]>({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
+  openCodeProjectImportPromptShown: field({ scope: 'instance', parse: parseBoolean }),
   securityScopedBookmarks: field({ scope: 'instance', surfaces: ['desktop'], parse: parseStringList }),
   pinnedDirectories: field({ scope: 'instance', parse: parseStringSet }),
   desktopLanAccessEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),

@@ -31,6 +31,7 @@ plugin({
 const unavailable = (): never => { throw new Error('Reasoning scrolling must not call runtime APIs'); };
 const runtimeApis: RuntimeAPIs = {
   runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+  openCodeProjectImportPrompt: { claim: unavailable },
   get terminal() { return unavailable(); },
   get git() { return unavailable(); },
   get files() { return unavailable(); },
