@@ -4,8 +4,9 @@
 
 `packages/ui/src/lib/surfaces` owns the declarative registry of context panel
 surfaces — the desktop workspaces switched by the vertical rail on the right
-edge (`components/layout/ContextPanelRail.tsx`) and rendered by
-`components/layout/ContextPanel.tsx`.
+edge (`components/layout/ContextPanelRail.tsx`) and rendered in the zones
+around the chat by `components/layout/ContextPanel.tsx` (one per zone) and
+`components/layout/ContextSurfacePanes.tsx`.
 
 ## Model
 
@@ -53,6 +54,42 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
   until a tab of their mode exists. Both consumers use it so the digit shown
   on a rail badge always maps to the same surface the shortcut opens.
 
+## Zones
+
+Surfaces open in one of three zones around the chat (`lib/workspace/zones.ts`):
+`right` (the context panel, and the default), `left` (between the session
+sidebar and the chat) or `bottom` (under the chat column only; the side zones
+keep the full height). The chat is always the centre and cannot move.
+
+- Placement is per surface and per device: `useUIStore.contextSurfaceZones`
+  maps a mode to `left` or `bottom`; a mode not in it is on the right. A user
+  who never moves anything sees the single right panel as before.
+- Each zone works like the right panel always has: the rail switches what it
+  shows, multi-instance surfaces list their instances in its strip, and it
+  closes, expands (one zone at a time) and resizes on its own. Per directory,
+  the right zone keeps the panel's original top-level fields and the other two
+  live in `zones`; read them through `getZoneView` / `resolveZoneActiveTab`,
+  which never return a tab whose surface is placed elsewhere.
+- A surface moves by dragging a rail icon out of the rail, a tab out of its
+  strip (the zone's own, or a surface's own such as the terminal's, through
+  `zoneSurfaceDragContext`), or a zone header anywhere no control takes the
+  pointer (`components/layout/zoneDrag.ts`; a native listener, since surface
+  toolbars are portalled into the header), or from "Move panel to …" on a
+  tab's or rail icon's context menu. Targets are
+  measured once at drag start; the layout changes once, on drop
+  (`moveContextSurfaceToZone`). A surface that was on screen stays on screen
+  in its new zone, in every project; one that was not is opened by the drop.
+- Keep-alive surfaces mount once in `ContextSurfacePanes` and are portalled
+  into the body of their zone (`MovablePane`), so a move keeps the editor's
+  unsaved text and undo, the terminal session and the walkthrough's place. An
+  Electron webview reloads whenever its element moves, so a browser tab
+  reloads when its surface moves to another zone; nothing else moves it.
+- In a narrow window the chat keeps 400 px: a side zone that opens without
+  room folds the session sidebar, then closes the other side zone, and both
+  come back when it closes (`ZoneFitArbiter`, `lib/workspace/zoneFit.ts`).
+- Another window's move is adopted through the `storage` event
+  (`zoneSync.ts`); each window keeps its own open zones.
+
 ## Adding a surface
 
 1. Built-in: add a `ContextPanelMode` value in `packages/ui/src/lib/surfaces/modes.ts`
@@ -97,7 +134,7 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   command palette, an in-content link, a composer + menu row from
   `contributes.attach`, or New Worktree's guest icons for dialog attach.
 - Multi-instance and session-holding surfaces (file/editor, diff, browser,
-  terminal) are keep-alive panes in `ContextPanel.tsx`. Switching these
+  terminal) are keep-alive panes in `ContextSurfacePanes.tsx`. Switching these
   surfaces must not reset their state (open tabs, xterm session, scroll
   positions). Chat tab records stay open, but only the active chat tab's
   pinned chat column is mounted while the panel is open. A selected chat
@@ -106,6 +143,9 @@ chat/palette go through the `openContext*` actions in `useUIStore`.
   surfaces must restore their state from stores or snapshots.
 - Portalled menus and dialogs handle their own Escape key. The panel's capture
   handler ignores their events so dismissing an overlay does not close the panel.
+  Escape closes the zone it was pressed in: the frame and each keep-alive pane
+  run the same handler (`zoneEscape.ts`), since a pane's React events do not
+  pass through its frame.
 - Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
   mobile shell have their own layouts and do not consume this registry.
   Linear has no rail surface: its issues list on the issues and PRs board

@@ -6,7 +6,7 @@ import { create } from 'zustand';
  * panel's width and back, so the chat column narrows or widens once, in one
  * direction, while the card and the panel cross-fade inside it.
  *
- * `ContextPanel` owns the slot and renders the card's host element;
+ * The right zone's `ContextPanel` owns the slot and renders the card's host element;
  * `ChatContainer` portals the inline `WorkStatusPanel` into it. The card tells
  * the slot whether it wants its column while the context panel is closed.
  *

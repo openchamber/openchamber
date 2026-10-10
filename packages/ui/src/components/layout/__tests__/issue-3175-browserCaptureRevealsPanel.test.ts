@@ -14,7 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { useUIStore } from '@/stores/useUIStore';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextPanel.tsx'), 'utf-8');
+// The agent's browser opener is registered once, with the keep-alive panes.
+const contextPanelSource = readFileSync(join(__dirname, '..', 'ContextSurfacePanes.tsx'), 'utf-8');
 const browserPaneSource = readFileSync(join(__dirname, '..', '..', 'browser', 'BrowserPane.tsx'), 'utf-8');
 const DIRECTORY = '/path/to/repository';
 

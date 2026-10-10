@@ -736,6 +736,10 @@
       "scope": "device",
       "local": true
     },
+    "contextSurfaceZones": {
+      "scope": "device",
+      "local": true
+    },
     "contextEditorTreeVisible": {
       "scope": "device",
       "local": true

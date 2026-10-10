@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { ContextMenuItem } from '@/components/ui/context-menu';
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TerminalTabRenameDialog } from '@/components/terminal/TerminalTabRenameDialog';
 import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
@@ -35,6 +35,8 @@ import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { observeTerminalSessions } from '@/lib/terminalSessionObserver';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
+import { useZoneSurfaceDragOut } from '@/components/layout/zoneSurfaceDragContext';
+import { ZoneMoveMenuItems } from '@/components/layout/ZoneMoveMenuItems';
 
 type TerminalViewProps = {
     visible?: boolean;
@@ -861,6 +863,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     // Project action tabs are named by their action and renamed on every run,
     // so only plain terminals offer Rename.
+    const zoneDragOut = useZoneSurfaceDragOut();
+    const handleTabDragOut = React.useMemo(
+        () => (zoneDragOut ? (_tabId: string, isOutside: (point: { x: number; y: number }) => boolean) => zoneDragOut(isOutside) : undefined),
+        [zoneDragOut],
+    );
     const renderTabContextMenu = React.useCallback(
         ({ id, close }: { id: string; close: () => void }): React.ReactNode => {
             const tab = directoryTerminalState?.tabs.find((entry) => entry.id === id);
@@ -877,10 +884,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         <Icon name="close" className="mr-2 size-4" />
                         {t('terminalView.tabs.closeTabTitle')}
                     </ContextMenuItem>
+                    {/* In a zone, a tab moves the whole terminal, like a zone's own tabs. */}
+                    {zoneDragOut ? (
+                        <>
+                            <ContextMenuSeparator />
+                            <ZoneMoveMenuItems mode="terminal" />
+                        </>
+                    ) : null}
                 </>
             );
         },
-        [directoryTerminalState?.tabs, t]
+        [directoryTerminalState?.tabs, t, zoneDragOut]
     );
 
     const handleViewportInput = React.useCallback(
@@ -1249,6 +1263,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                                 onClose={handleCloseTab}
                                 onReorder={handleReorderTab}
                                 tabContextMenu={renderTabContextMenu}
+                                onTabDragOut={handleTabDragOut}
                                 layoutMode="scrollable"
                                 variant="default"
                                 className="h-full bg-transparent"

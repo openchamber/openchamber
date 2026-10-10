@@ -8,6 +8,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
   type Modifier,
 } from '@dnd-kit/core';
 import {
@@ -70,7 +71,20 @@ type SortableTabsStripProps = {
     close: () => void;
   }) => React.ReactNode;
   className?: string;
+  /**
+   * A tab dragged out of the strip does something else than reorder (the
+   * context panel moves its surface to another zone). Called when a drag
+   * starts, with a test for "the pointer is outside the strip"; the returned
+   * gesture decides on drop. A drop it takes skips the reorder.
+   */
+  onTabDragOut?: (id: string, isOutside: (point: { x: number; y: number }) => boolean) => {
+    finish: () => boolean;
+    cancel: () => void;
+  } | null;
 };
+
+// How far past the strip's top and bottom a drag still reorders.
+const DRAG_OUT_SLACK_PX = 16;
 
 // Keep in sync with `.pill-tabs__indicator--is-animated` in index.css.
 const PILL_SWITCH_ANIMATION_MS = 280;
@@ -132,6 +146,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   iconOnly = false,
   tabContextMenu,
   className,
+  onTabDragOut,
 }) => {
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
@@ -382,7 +397,31 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     };
   }, [activeId, isScrollable, items.length, updateOverflow]);
 
+  const dragOutRef = React.useRef<ReturnType<NonNullable<typeof onTabDragOut>> | null>(null);
+  const handleDragStart = React.useCallback((event: DragStartEvent) => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+    const strip = scrollRef.current;
+    if (!onTabDragOut || !strip) return;
+    // Measured once: nothing in the strip moves the strip itself during a drag.
+    const rect = strip.getBoundingClientRect();
+    dragOutRef.current = onTabDragOut(String(event.active.id), (point) => (
+      point.x < rect.left || point.x > rect.right
+      || point.y < rect.top - DRAG_OUT_SLACK_PX || point.y > rect.bottom + DRAG_OUT_SLACK_PX
+    ));
+  }, [onTabDragOut]);
+  const handleDragCancel = React.useCallback(() => {
+    dragOutRef.current?.cancel();
+    dragOutRef.current = null;
+  }, []);
+  React.useEffect(() => () => dragOutRef.current?.cancel(), []);
+
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+    const dragOut = dragOutRef.current;
+    dragOutRef.current = null;
+    if (dragOut?.finish()) {
+      return;
+    }
     if (!onReorder) {
       return;
     }
@@ -709,6 +748,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragCancel={handleDragCancel}
       onDragEnd={handleDragEnd}
       modifiers={[restrictToXAxis]}
     >

@@ -7,6 +7,7 @@ import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { shownContextModes, zoneOfMode } from '@/lib/workspace/zones';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { useKeybinds } from '@/hooks/useKeybind';
@@ -117,10 +118,10 @@ export const useKeyboardShortcuts = () => {
     const key = normalizeContextPanelDirectoryKey(currentDirectory);
     const state = useUIStore.getState();
     const panel = state.contextPanelByDirectory[key];
-    if (panel?.isOpen ? panel.tabs.find((tab) => tab.id === panel.activeTabId)?.mode !== 'terminal' : true) {
+    if (!shownContextModes(panel, state.contextSurfaceZones).has('terminal')) {
       state.openContextSurface(key, 'terminal');
     }
-    state.toggleContextPanelExpanded(key);
+    state.toggleContextPanelExpanded(key, zoneOfMode(state.contextSurfaceZones, 'terminal'));
   };
 
   useKeybinds({

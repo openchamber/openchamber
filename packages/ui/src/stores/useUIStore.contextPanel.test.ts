@@ -1230,3 +1230,134 @@ describe('useUIStore closeContextFile (the editor\'s Cmd/Ctrl+W)', () => {
     expect(editorOpenPaths()).not.toContain('/repo/stray.ts');
   });
 });
+
+describe('useUIStore workspace zones', () => {
+  beforeEach(() => {
+    useUIStore.setState({ contextSurfaceZones: {} });
+  });
+
+  const panel = (directory = '/repo') => useUIStore.getState().contextPanelByDirectory[directory];
+
+  test('with nothing moved every surface opens in the right zone, as before zones', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface('/repo', 'git');
+
+    expect(panel()?.isOpen).toBe(true);
+    expect(panel()?.activeTabId).toBe('git');
+    expect(panel()?.zones.left.isOpen).toBe(false);
+    expect(panel()?.zones.bottom.isOpen).toBe(false);
+  });
+
+  test('a moved surface opens in its zone and toggles there, beside the right zone', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('terminal', 'bottom');
+    store.openContextSurface('/repo', 'git');
+    store.openContextSurface('/repo', 'terminal');
+
+    expect(panel()?.isOpen).toBe(true);
+    expect(panel()?.activeTabId).toBe('git');
+    expect(panel()?.zones.bottom).toMatchObject({ isOpen: true, activeTabId: 'terminal' });
+
+    store.openContextSurface('/repo', 'terminal');
+    expect(panel()?.zones.bottom.isOpen).toBe(false);
+    expect(panel()?.isOpen).toBe(true);
+  });
+
+  test('moving the surface on screen carries it to the new zone in every project', () => {
+    const store = useUIStore.getState();
+    store.openContextSurface('/a', 'git');
+    store.openContextSurface('/b', 'git');
+    store.moveContextSurfaceToZone('git', 'left');
+
+    for (const directory of ['/a', '/b']) {
+      expect(panel(directory)?.isOpen).toBe(false);
+      expect(panel(directory)?.zones.left).toMatchObject({ isOpen: true, activeTabId: 'git' });
+    }
+    expect(useUIStore.getState().contextSurfaceZones).toEqual({ git: 'left' });
+
+    store.moveContextSurfaceToZone('git', 'right');
+    expect(useUIStore.getState().contextSurfaceZones).toEqual({});
+    expect(panel('/a')?.isOpen).toBe(true);
+    expect(panel('/a')?.zones.left.isOpen).toBe(false);
+  });
+
+  test('a background open fills its zone without opening it', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('browser', 'left');
+    store.openContextPanelTab('/repo', { mode: 'browser', dedupeKey: 'http://x' }, { reveal: false });
+
+    expect(panel()?.zones.left.isOpen).toBe(false);
+    expect(panel()?.zones.left.activeTabId).toBe('browser:http://x');
+    expect(panel()?.isOpen).toBe(false);
+  });
+
+  test('closing the last tab of a zone closes that zone only', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('terminal', 'bottom');
+    store.openContextSurface('/repo', 'git');
+    store.openContextSurface('/repo', 'terminal');
+    store.closeContextPanelTab('/repo', 'terminal');
+
+    expect(panel()?.zones.bottom.isOpen).toBe(false);
+    expect(panel()?.isOpen).toBe(true);
+    expect(panel()?.activeTabId).toBe('git');
+  });
+
+  test('closing the last file in a moved zone falls back to the file tree there', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('file', 'left');
+    store.openContextFile('/repo', '/repo/a.ts');
+    const fileTab = panel()?.tabs.find((tab) => tab.targetPath === '/repo/a.ts');
+    store.closeContextPanelTab('/repo', fileTab?.id ?? '');
+
+    const placeholder = panel()?.tabs.find((tab) => tab.mode === 'file');
+    expect(placeholder?.targetPath).toBeNull();
+    expect(panel()?.zones.left).toMatchObject({ isOpen: true, activeTabId: placeholder?.id });
+  });
+
+  test('one zone is expanded at a time', () => {
+    const store = useUIStore.getState();
+    store.moveContextSurfaceToZone('terminal', 'bottom');
+    store.openContextSurface('/repo', 'git');
+    store.openContextSurface('/repo', 'terminal');
+    store.toggleContextPanelExpanded('/repo');
+    store.toggleContextPanelExpanded('/repo', 'bottom');
+
+    expect(panel()?.expanded).toBe(false);
+    expect(panel()?.zones.bottom.expanded).toBe(true);
+  });
+
+  test('state saved before zones loads with every surface on the right', async () => {
+    useUIStore.persist.setOptions({ storage: {
+      getItem: () => ({
+        version: 23,
+        state: {
+          contextPanelByDirectory: {
+            '/repo': {
+              isOpen: true,
+              expanded: false,
+              widthByMode: {},
+              touchedAt: 1,
+              activeTabId: 'git',
+              tabs: [{ id: 'git', mode: 'git', dedupeKey: 'git', touchedAt: 1 }],
+            },
+          },
+        },
+      }),
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    } });
+
+    try {
+      useUIStore.setState(useUIStore.getInitialState(), true);
+      await useUIStore.persist.rehydrate();
+
+      expect(useUIStore.getState().contextSurfaceZones).toEqual({});
+      expect(panel()).toMatchObject({ isOpen: true, activeTabId: 'git', heightByMode: {} });
+      expect(panel()?.zones.left.isOpen).toBe(false);
+      expect(panel()?.zones.bottom.isOpen).toBe(false);
+    } finally {
+      useUIStore.persist.setOptions(originalPersistOptions);
+    }
+  });
+});

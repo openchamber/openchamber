@@ -1,6 +1,7 @@
 import React from 'react';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { isZoneShown } from '@/lib/workspace/zones';
 
 /**
  * Fixed panel width. The panel is not user-resizable: it is an object inside
@@ -77,18 +78,17 @@ export const useWorkStatusVisibility = ({ isMobile, isVSCode }: Options): Result
     [effectiveDirectory],
   );
 
-  // Mirrors ContextPanel's own derivation: a panel with `isOpen` but no
-  // resolvable active tab renders nothing, and must not displace this panel.
+  // Mirrors ContextPanel's own derivation: a zone with `isOpen` but no
+  // resolvable tab of its own renders nothing, and must not displace this
+  // panel. Only the right zone shares this card's slot; the left and bottom
+  // zones leave it in place.
   const contextPanelOpen = useUIStore(
     React.useCallback(
-      (state) => {
-        const panel = directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined;
-        if (!panel?.isOpen) return false;
-        const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId)
-          ?? panel.tabs[panel.tabs.length - 1]
-          ?? null;
-        return Boolean(activeTab);
-      },
+      (state) => isZoneShown(
+        directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined,
+        state.contextSurfaceZones,
+        'right',
+      ),
       [directoryKey],
     ),
   );

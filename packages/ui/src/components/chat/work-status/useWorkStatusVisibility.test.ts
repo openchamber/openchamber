@@ -2,19 +2,24 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
+type ZoneView = { isOpen: boolean; expanded: boolean; activeTabId: string | null };
 type PanelState = {
   isOpen: boolean;
   tabs: { id: string; mode: string }[];
   activeTabId: string | null;
+  zones?: { left: ZoneView; bottom: ZoneView };
 };
 
 let panelByDirectory: Record<string, PanelState> = {};
+/** The store's surface placement, as far as these tests move anything. */
+type SurfacePlacement = { git?: 'left' };
+let surfaceZones: SurfacePlacement = {};
 let panelEnabled = true;
 let effectiveDirectory: string | undefined = '/repo';
 
 mock.module('@/stores/useUIStore', () => ({
   useUIStore: (selector: (state: unknown) => unknown) =>
-    selector({ contextPanelByDirectory: panelByDirectory, workStatusPanelEnabled: panelEnabled }),
+    selector({ contextPanelByDirectory: panelByDirectory, contextSurfaceZones: surfaceZones, workStatusPanelEnabled: panelEnabled }),
   normalizeContextPanelDirectoryKey: (value: string) => value,
 }));
 
@@ -238,6 +243,22 @@ describe('useWorkStatusVisibility', () => {
     expect(result.visible).toBe(false);
     expect(observed).toEqual([rowNode]);
     teardown();
+  });
+
+  test('stays beside the chat while a surface is open in the left zone', () => {
+    // Only the right zone shares this card's slot.
+    const closed = { isOpen: false, expanded: false, activeTabId: null };
+    surfaceZones = { git: 'left' };
+    panelByDirectory['/repo'] = {
+      isOpen: false,
+      tabs: [{ id: 'tab-1', mode: 'git' }],
+      activeTabId: null,
+      zones: { left: { isOpen: true, expanded: false, activeTabId: 'tab-1' }, bottom: closed },
+    };
+    const { result, teardown } = renderVisibility({ isMobile: false, isVSCode: false }, REQUIRED);
+    expect(result.visible).toBe(true);
+    teardown();
+    surfaceZones = {};
   });
 
   test('keeps reporting room for the column while the context panel covers it', () => {

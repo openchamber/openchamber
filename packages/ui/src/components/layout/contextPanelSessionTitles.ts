@@ -49,3 +49,13 @@ export const buildSessionTitleMap = (states: Iterable<SessionSlice>, sessionIDs:
   }
   return next.size === 0 ? EMPTY_SESSION_TITLE_MAP : next;
 };
+
+/** The session a chat tab shows, from its `session:<id>` dedupe key. */
+export const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
+  if (!dedupeKey || !dedupeKey.startsWith('session:')) {
+    return null;
+  }
+
+  const sessionID = dedupeKey.slice('session:'.length).trim();
+  return sessionID || null;
+};
