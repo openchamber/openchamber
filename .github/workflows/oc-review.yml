@@ -3,11 +3,20 @@ name: pr checks
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # A merge can reach `main` without these jobs ever having run for it: a fork
+  # PR that sat waiting on approval cancels on expiry, a squash merge whose own
+  # run was superseded, an admin merge over a red run. None of those are visible
+  # here. Push events give `main` a run of its own, so a bad merge is caught by
+  # this workflow rather than by whichever PR touches the file next.
+  push:
+    branches: [main]
 
-# A new push to the same PR makes the older run pointless.
+# A new push to the same PR makes the older run pointless. A run on `main` has
+# the opposite requirement: it must finish even if more commits land, or the
+# coverage it exists to provide is lost exactly the way it was before.
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Four independent jobs on their own Blacksmith runners (same image as
 # ubuntu-24.04, faster CPUs, colocated cache; the Blacksmith GitHub App is
