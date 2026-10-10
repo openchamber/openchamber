@@ -411,6 +411,13 @@
     "confirmFileTreeMove": {
       "scope": "profile"
     },
+    "layoutAnimations": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
     "autoCreateWorktree": {
       "scope": "profile"
     },

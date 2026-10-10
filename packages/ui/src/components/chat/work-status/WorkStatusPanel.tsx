@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { useUIStore } from '@/stores/useUIStore';
 import { WORK_STATUS_PANEL_WIDTH } from './useWorkStatusVisibility';
 import { setWorkStatusReserved } from '@/components/layout/rightSlot';
-import { LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS } from '@/lib/layoutAnimation';
+import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WorkStatusGoalRow } from './WorkStatusGoalRow';
 import { WorkStatusPrimaryGroup } from './WorkStatusPrimaryGroup';
 import { WorkStatusUsageSection } from './WorkStatusUsageSection';
@@ -56,7 +57,6 @@ type Props = {
  * keeps its width and only fades, on the slot's duration and curve, while the
  * context panel fades in over it. The overlay fades and lifts.
  */
-const PANEL_TRANSITION_MS = LAYOUT_ANIMATION_MS;
 const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
 
 /**
@@ -75,6 +75,8 @@ const PANEL_TRANSITION_EASING = LAYOUT_ANIMATION_EASING;
  */
 export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible, reserved = false, repositoryEnabled = true, overlay = false }) => {
   const { t } = useI18n();
+  // The card's fade and lift follow the side columns' animation setting.
+  const panelTransitionMs = useLayoutAnimationMs();
   const setScrollTop = useUIStore((state) => state.setWorkStatusScrollTop);
   const setOverlayOpen = useUIStore((state) => state.setWorkStatusOverlayOpen);
   const hiddenSections = useUIStore((state) => state.workStatusHiddenSections);
@@ -125,9 +127,9 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
       setRenderedSections((count) => Math.max(count, 1));
       return undefined;
     }
-    const timer = window.setTimeout(() => setContentMounted(false), PANEL_TRANSITION_MS);
+    const timer = window.setTimeout(() => setContentMounted(false), panelTransitionMs);
     return () => window.clearTimeout(timer);
-  }, [visible]);
+  }, [panelTransitionMs, visible]);
 
   // Tells the right slot whether to keep the card's column. A card whose
   // sections all reported nothing gives it back, as its collapse did before.
@@ -260,7 +262,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         transformOrigin: 'top right',
         transitionProperty: overlay ? 'transform, box-shadow' : 'opacity',
-        transitionDuration: `${PANEL_TRANSITION_MS}ms`,
+        transitionDuration: `${panelTransitionMs}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
         pointerEvents: interactive ? undefined : 'none',
       }}
@@ -275,7 +277,7 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         style={overlay ? {
           opacity: interactive ? 1 : 0,
           transitionProperty: 'opacity',
-          transitionDuration: `${PANEL_TRANSITION_MS}ms`,
+          transitionDuration: `${panelTransitionMs}ms`,
           transitionTimingFunction: PANEL_TRANSITION_EASING,
         } : undefined}
       >

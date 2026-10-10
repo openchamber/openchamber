@@ -1011,6 +1011,11 @@ interface UIStore {
   autoSaveEnabled: boolean;
   /** Ask before a drag in the files tree moves a file or folder. */
   confirmFileTreeMove: boolean;
+  /**
+   * The session sidebar, the context zones and the work-status card animate
+   * as they open and close. Off, they snap (`useLayoutAnimationMs`).
+   */
+  layoutAnimations: boolean;
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   sessionRetentionOnlyArchived: boolean;
@@ -1278,6 +1283,7 @@ interface UIStore {
   setMergedWorktreeCleanupEnabled: (value: boolean) => void;
   setAutoSaveEnabled: (value: boolean) => void;
   setConfirmFileTreeMove: (value: boolean) => void;
+  setLayoutAnimations: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setSessionRetentionOnlyArchived: (value: boolean) => void;
@@ -1494,6 +1500,7 @@ export const useUIStore = create<UIStore>()(
         autoDeleteEnabled: false,
         autoSaveEnabled: true,
         confirmFileTreeMove: true,
+        layoutAnimations: true,
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         sessionRetentionOnlyArchived: false,
@@ -2567,6 +2574,10 @@ export const useUIStore = create<UIStore>()(
           set({ confirmFileTreeMove: value });
         },
 
+        setLayoutAnimations: (value) => {
+          set({ layoutAnimations: value });
+        },
+
         setAutoDeleteAfterDays: (days) => {
           const clampedDays = Math.max(1, Math.min(365, days));
           set({ autoDeleteAfterDays: clampedDays });
@@ -3563,6 +3574,7 @@ export const useUIStore = create<UIStore>()(
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoSaveEnabled: state.autoSaveEnabled,
           confirmFileTreeMove: state.confirmFileTreeMove,
+          layoutAnimations: state.layoutAnimations,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           sessionRetentionOnlyArchived: state.sessionRetentionOnlyArchived,

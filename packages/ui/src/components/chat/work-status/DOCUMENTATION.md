@@ -389,7 +389,7 @@ describes the current frame, not a preference.
 ## Appearing and disappearing
 
 The card keeps its width and only fades, on the slot's duration and curve
-(`LAYOUT_ANIMATION_MS`, ease-out); the slot animates the width. It stays
+(`LAYOUT_ANIMATION_MS` through `useLayoutAnimationMs`, ease-out; zero when the `layoutAnimations` setting is off); the slot animates the width. It stays
 mounted wherever it could ever show, so the fade has something to animate;
 its content is dropped once the fade finishes. A card whose sections all
 reported nothing gives its column back. When it is shown again the presence

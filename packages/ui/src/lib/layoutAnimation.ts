@@ -13,7 +13,11 @@
  * on the root that a selector reads restyles the whole document when it flips.
  */
 
-/** Duration of both side columns' width animation, kept in sync. */
+/**
+ * Duration of both side columns' width animation, kept in sync. Components
+ * read it through `useLayoutAnimationMs`, which is zero when the user turned
+ * the animations off (`layoutAnimations`, Settings › General › Navigation).
+ */
 export const LAYOUT_ANIMATION_MS = 120;
 /** Their timing function: a plain ease-out. */
 export const LAYOUT_ANIMATION_EASING = 'ease-out';

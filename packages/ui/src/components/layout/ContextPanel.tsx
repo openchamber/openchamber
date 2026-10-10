@@ -33,7 +33,8 @@ import { useGuestsStore } from '@/lib/guests/store';
 import { FALLBACK_GUEST_ICON } from '@/lib/guests/icon';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 import { getContextSurfaceDefaultWidth } from '@/lib/surfaces/registry';
-import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, LAYOUT_ANIMATION_MS, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { beginLayoutAnimation, cancelWhenLayoutSettled, LAYOUT_ANIMATION_EASING, runWhenLayoutSettled } from '@/lib/layoutAnimation';
+import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { WORK_STATUS_COLUMN_WIDTH } from '@/components/chat/work-status/useWorkStatusVisibility';
 import { setWorkStatusHost, useRightSlotStore } from './rightSlot';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
@@ -369,6 +370,7 @@ const maxPanelHeight = (availableHeight: number | null): number => {
  */
 export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' }) => {
   const geometry = ZONE_GEOMETRY[zone];
+  const layoutAnimationMs = useLayoutAnimationMs();
   const isVertical = geometry.axis === 'y';
   const { t } = useI18n();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
@@ -1009,8 +1011,8 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   React.useLayoutEffect(() => {
     if (animationKeyRef.current === animationKey) return;
     animationKeyRef.current = animationKey;
-    if (!coverChanged) beginLayoutAnimation(LAYOUT_ANIMATION_MS);
-  }, [animationKey, coverChanged]);
+    if (!coverChanged) beginLayoutAnimation(layoutAnimationMs);
+  }, [animationKey, coverChanged, layoutAnimationMs]);
 
   // A closing zone's content fades out and only then leaves the
   // accessibility tree, in the same commit that takes the file editor's DOM
@@ -1027,7 +1029,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     ...(isVertical
       ? { height: slotSize, maxHeight: '100%' }
       : { width: slotSize, maxWidth: '100%' }),
-    transitionDuration: coverChanged ? '0ms' : `${LAYOUT_ANIMATION_MS}ms`,
+    transitionDuration: coverChanged ? '0ms' : `${layoutAnimationMs}ms`,
     transitionTimingFunction: LAYOUT_ANIMATION_EASING,
   };
 
@@ -1109,7 +1111,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         )}
         style={{
           ...(isVertical ? { height: cardSize } : { width: cardSize }),
-          transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
+          transitionDuration: `${layoutAnimationMs}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
         aria-hidden={contentHidden}

@@ -454,6 +454,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.confirmFileTreeMove === true || candidate.confirmFileTreeMove === false) {
       result.confirmFileTreeMove = candidate.confirmFileTreeMove;
     }
+    if (candidate.layoutAnimations === true || candidate.layoutAnimations === false) {
+      result.layoutAnimations = candidate.layoutAnimations;
+    }
     if (typeof candidate.diffWrapLines === 'boolean') {
       result.diffWrapLines = candidate.diffWrapLines;
     }
