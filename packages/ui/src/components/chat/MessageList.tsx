@@ -211,7 +211,9 @@ const MessageRow = React.memo<MessageRowProps>(({
     // (or as nothing); only user and assistant go through ChatMessage.
     const role = message.info.role;
     if (isSkippedTimelineMessage(message.info)) return null;
-    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) return <TimelineNotice message={message.info} />;
+    if (isTimelineNoticeRole(role) || isBackgroundReportEntry(message.info)) {
+        return <TimelineNotice message={message.info} isFirstMessage={!previousMessage} />;
+    }
 
     return (
         <ChatMessage

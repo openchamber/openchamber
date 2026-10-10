@@ -123,14 +123,14 @@ const toShellToolPart = (message: Extract<Message, { role: 'shell' }>): ToolPart
     return { ...base, state: { status: 'completed', input, output, time: { start, end } } };
 };
 
-const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }> }> = ({ message }) => {
+const ShellNotice: React.FC<{ message: Extract<Message, { role: 'shell' }>; isFirstMessage: boolean }> = ({ message, isFirstMessage }) => {
     const isMobile = useUIStore((state) => state.isMobile);
     const [expanded, setExpanded] = React.useState(false);
     const part = React.useMemo(() => toShellToolPart(message), [message]);
     const toggle = React.useCallback(() => setExpanded((value) => !value), []);
 
     return (
-        <NoticeRow>
+        <NoticeRow spacingClassName={cn('pb-2', isFirstMessage && (isMobile ? 'pt-2' : 'pt-4'))}>
             <ToolPart part={part} isExpanded={expanded} onToggle={toggle} isMobile={isMobile} />
         </NoticeRow>
     );
@@ -316,14 +316,14 @@ const SubagentNotice: React.FC<{ message: SyntheticMessage }> = ({ message }) =>
  * The timeline row for a message, or `null` when the caller should render the
  * message itself.
  */
-export const TimelineNotice: React.FC<{ message: Message }> = ({ message }) => {
+export const TimelineNotice: React.FC<{ message: Message; isFirstMessage: boolean }> = ({ message, isFirstMessage }) => {
     switch (message.role) {
         case 'synthetic':
             return <SubagentNotice message={message} />;
         case 'compaction':
             return <CompactionNotice message={message} />;
         case 'shell':
-            return <ShellNotice message={message} />;
+            return <ShellNotice message={message} isFirstMessage={isFirstMessage} />;
         default:
             return null;
     }
