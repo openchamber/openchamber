@@ -41,6 +41,11 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
 - Rail order is user-reorderable and persisted globally in
   `useUIStore.contextRailOrder`; `sortContextSurfaces` applies it on top of the
   registry's default order and appends any missing surfaces.
+  `ContextRailSurfacesDialog` edits this same order with drag handles beside
+  the visibility checkboxes, including hidden panels. Mouse, touch and keyboard
+  drops update the rail immediately; visibility changes and "Show all" preserve
+  the order. Dialog reorders retain saved ids of unavailable extensions at the
+  end of the preference. Escape cancels a drag before closing the dialog.
 - `getVisibleContextRailSurfaces` is the single visibility filter shared by the
   rail and the global surface-switch shortcut (`switch_context_surface` in
   `lib/shortcuts`): it drops surfaces the user hid
