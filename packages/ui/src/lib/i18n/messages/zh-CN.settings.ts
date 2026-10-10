@@ -1388,6 +1388,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': '刷新用量数据失败',
   'settings.usage.page.state.providerNotConfiguredTitle': '提供商未配置',
   'settings.usage.page.state.providerNotConfiguredDescription': '请在“提供商”标签页添加凭据以启用用量跟踪。',
+  'settings.usage.page.state.claudeSignedOutTitle': '未登录 Claude Code',
+  'settings.usage.page.state.claudeSignInCommand': '请在终端中运行此命令：',
   'settings.usage.page.section.modelQuotas': '模型配额',
   'settings.usage.page.section.otherModels': '其他模型',
   'settings.usage.page.state.noQuotaWindowsTitle': '未报告配额窗口',

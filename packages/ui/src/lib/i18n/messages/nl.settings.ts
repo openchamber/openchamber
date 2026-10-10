@@ -1421,6 +1421,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': 'Kan gebruiksgegevens niet vernieuwen',
   'settings.usage.page.state.providerNotConfiguredTitle': 'Provider niet geconfigureerd',
   'settings.usage.page.state.providerNotConfiguredDescription': 'Voeg in het tabblad Providers inloggegevens toe om gebruikstracking in te schakelen.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Niet aangemeld bij Claude Code',
+  'settings.usage.page.state.claudeSignInCommand': 'Voer deze opdracht uit in een terminal:',
   'settings.usage.page.section.modelQuotas': 'Modellenlimieten',
   'settings.usage.page.section.otherModels': 'Overige modellen',
   'settings.usage.page.state.noQuotaWindowsTitle': 'Geen limietvensters gemeld',

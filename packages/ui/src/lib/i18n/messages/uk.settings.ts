@@ -1388,6 +1388,8 @@ export const settingsDict = {
   "settings.usage.page.state.refreshFailedTitle": "Не вдалося оновити дані про використання",
   "settings.usage.page.state.providerNotConfiguredTitle": "Провайдер не налаштований",
   "settings.usage.page.state.providerNotConfiguredDescription": "Додайте облікові дані на вкладці «Провайдери», щоб увімкнути відстеження використання.",
+  "settings.usage.page.state.claudeSignedOutTitle": "Ви не ввійшли в Claude Code",
+  "settings.usage.page.state.claudeSignInCommand": "Виконайте цю команду в терміналі:",
   "settings.usage.page.section.modelQuotas": "Модельні квоти",
   "settings.usage.page.section.otherModels": "Інші моделі",
   "settings.usage.page.state.noQuotaWindowsTitle": "Вікна квот не надходять",

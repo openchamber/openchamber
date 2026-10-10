@@ -2305,6 +2305,8 @@ export const settingsDict = {
   'settings.usage.page.window.giftResetNotNeeded': 'Reset limitu prezentu nie jest obecnie potrzebny',
   'settings.usage.page.state.noQuotaWindowsTitle': 'Brak raportowanych okien kwot',
   'settings.usage.page.state.providerNotConfiguredDescription': 'Dodaj dane uwierzytelniające w zakładce Dostawcy, aby włączyć śledzenie użycia.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Nie zalogowano do Claude Code',
+  'settings.usage.page.state.claudeSignInCommand': 'Uruchom to polecenie w terminalu:',
   'settings.usage.page.state.providerNotConfiguredTitle': 'Dostawca nie jest skonfigurowany',
   'settings.usage.page.state.refreshFailedTitle': 'Nie udało się odświeżyć danych o użyciu',
   'settings.usage.sidebar.actions.refreshAria': 'Odśwież użycie',

@@ -144,6 +144,17 @@ with that directory. It appears in the status card while the server reports
 `needs_auth`; once the credential is stored, the page connects the server
 again, which is what moves it out of `needs_auth`.
 
+### Claude sign-in on Usage
+
+Claude usage reads Claude Code's own login on the server machine, which the
+Providers page cannot add. When Claude reports not configured, the Usage page
+shows `usage/ClaudeCodeSignIn.tsx` in its warning instead of the "go to
+Providers" text. With the opencode-claude plugin installed it mounts the
+plugin's `claude-code` integration sign-in through the shared
+`providers/ProviderOAuthMethods.tsx` and re-reads Claude usage once it
+finishes. Without the plugin, or when the integration list cannot be read, it
+shows the `claude auth login` command, which works in both cases.
+
 ### Policy-blocked MCP servers and skills
 
 OpenCode drops an MCP server or skill an `integration.use` deny names

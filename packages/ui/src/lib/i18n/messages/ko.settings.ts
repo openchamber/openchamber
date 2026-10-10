@@ -1388,6 +1388,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': '사용량 데이터를 새로고침하지 못했습니다',
   'settings.usage.page.state.providerNotConfiguredTitle': '프로바이더가 설정되지 않았습니다',
   'settings.usage.page.state.providerNotConfiguredDescription': '사용량 추적을 활성화하려면 프로바이더 탭에서 인증 정보를 추가하세요.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Claude Code에 로그인되어 있지 않습니다',
+  'settings.usage.page.state.claudeSignInCommand': '터미널에서 이 명령을 실행하세요:',
   'settings.usage.page.section.modelQuotas': '모델 할당량',
   'settings.usage.page.section.otherModels': '기타 모델',
   'settings.usage.page.state.noQuotaWindowsTitle': '보고된 할당량 창이 없습니다',

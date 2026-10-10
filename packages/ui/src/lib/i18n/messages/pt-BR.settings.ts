@@ -1388,6 +1388,8 @@ export const settingsDict = {
   "settings.usage.page.state.refreshFailedTitle": "Não foi possível atualizar os dados de uso",
   "settings.usage.page.state.providerNotConfiguredTitle": "Provedor não configurado",
   "settings.usage.page.state.providerNotConfiguredDescription": "Adicione credenciais na aba de Provedores para habilitar o seguimiento de uso.",
+  "settings.usage.page.state.claudeSignedOutTitle": "Sem login no Claude Code",
+  "settings.usage.page.state.claudeSignInCommand": "Execute este comando em um terminal:",
   "settings.usage.page.section.modelQuotas": "Cotas de modelo",
   "settings.usage.page.section.otherModels": "Outros modelos",
   "settings.usage.page.state.noQuotaWindowsTitle": "Não se reportaron janelas de cota",

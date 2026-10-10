@@ -1420,6 +1420,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': 'Failed to refresh usage data',
   'settings.usage.page.state.providerNotConfiguredTitle': 'Provider not configured',
   'settings.usage.page.state.providerNotConfiguredDescription': 'Add credentials in the Providers tab to enable usage tracking.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Not signed in to Claude Code',
+  'settings.usage.page.state.claudeSignInCommand': 'Run this command in a terminal:',
   'settings.usage.page.section.modelQuotas': 'Model Quotas',
   'settings.usage.page.section.otherModels': 'Other Models',
   'settings.usage.page.state.noQuotaWindowsTitle': 'No quota windows reported',

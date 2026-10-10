@@ -1357,6 +1357,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': 'Kullanım verileri yenilenemedi',
   'settings.usage.page.state.providerNotConfiguredTitle': 'Provider yapılandırılmamış',
   'settings.usage.page.state.providerNotConfiguredDescription': 'Kullanım takibini etkinleştirmek için Provider\'lar sekmesinde kimlik bilgileri ekleyin.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Claude Code oturumu açık değil',
+  'settings.usage.page.state.claudeSignInCommand': 'Bu komutu bir terminalde çalıştırın:',
   'settings.usage.page.section.modelQuotas': 'Model Kotaları',
   'settings.usage.page.section.otherModels': 'Diğer Modeller',
   'settings.usage.page.state.noQuotaWindowsTitle': 'Bildirilen kota penceresi yok',

@@ -1277,6 +1277,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': '重新整理用量資料失敗',
   'settings.usage.page.state.providerNotConfiguredTitle': '供應商未設定',
   'settings.usage.page.state.providerNotConfiguredDescription': '請在「供應商」分頁新增憑證以啟用用量追蹤。',
+  'settings.usage.page.state.claudeSignedOutTitle': '尚未登入 Claude Code',
+  'settings.usage.page.state.claudeSignInCommand': '請在終端機中執行此指令：',
   'settings.usage.page.section.modelQuotas': '模型配額',
   'settings.usage.page.section.otherModels': '其他模型',
   'settings.usage.page.state.noQuotaWindowsTitle': '未報告配額視窗',

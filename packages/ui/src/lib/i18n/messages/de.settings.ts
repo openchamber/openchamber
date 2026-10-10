@@ -1362,6 +1362,8 @@ export const settingsDict = {
   'settings.usage.page.state.refreshFailedTitle': 'Aktualisierung der Nutzungsdaten fehlgeschlagen',
   'settings.usage.page.state.providerNotConfiguredTitle': 'Anbieter nicht konfiguriert',
   'settings.usage.page.state.providerNotConfiguredDescription': 'Fügen Sie Anmeldeinformationen auf der Registerkarte \'Anbieter\' hinzu, um die Nutzungsverfolgung zu aktivieren.',
+  'settings.usage.page.state.claudeSignedOutTitle': 'Nicht bei Claude Code angemeldet',
+  'settings.usage.page.state.claudeSignInCommand': 'Führen Sie diesen Befehl in einem Terminal aus:',
   'settings.usage.page.section.modelQuotas': 'Modell-Kontingente',
   'settings.usage.page.section.otherModels': 'Andere Modelle',
   'settings.usage.page.state.noQuotaWindowsTitle': 'Keine Kontingentfenster berichtet',
