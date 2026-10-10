@@ -389,6 +389,96 @@ describe('OpenChamber control service', () => {
     });
   });
 
+  it('follows the message cursor so all: true returns the whole history', async () => {
+    const { service, client } = createService();
+    const page = (data, next) => ({ data, cursor: { next } });
+    // Newest page first (the API pages with order: 'desc'), then older pages
+    // reachable only through cursor.next.
+    client.message.list.mockImplementation(async (input) => {
+      if (!input.cursor) {
+        return page([
+          { id: 'msg_new_user', type: 'user', time: { created: 40 }, text: 'Recent question' },
+          { id: 'msg_new_assistant', type: 'assistant', time: { created: 50, completed: 55 }, content: [{ type: 'text', text: 'Recent answer' }] },
+        ], 'cursor-page-2');
+      }
+      if (input.cursor === 'cursor-page-2') {
+        return page([
+          { id: 'msg_old_user', type: 'user', time: { created: 10 }, text: 'Older requirement' },
+        ], undefined);
+      }
+      throw new Error(`unexpected cursor ${input.cursor}`);
+    });
+
+    const result = await service.execute('session.messages', {
+      sessionId: 'ses_1',
+      directory: '/repo',
+      role: 'all',
+      all: true,
+    });
+
+    expect(client.message.list).toHaveBeenCalledTimes(2);
+    expect(client.message.list.mock.calls[1][0]).toMatchObject({ sessionID: 'ses_1', cursor: 'cursor-page-2' });
+    expect(result.messages.map((message) => message.id)).toEqual([
+      'msg_old_user', 'msg_new_user', 'msg_new_assistant',
+    ]);
+  });
+
+  it('pages a bounded read with the cursor alone until it has enough text messages', async () => {
+    const { service, client } = createService();
+    const page = (data, next) => ({ data, cursor: { next } });
+    client.message.list.mockImplementation(async (input) => {
+      if (!input.cursor) {
+        return page([
+          { id: 'msg_new_assistant', type: 'assistant', time: { created: 50, completed: 55 }, content: [{ type: 'text', text: 'Recent answer' }] },
+          { id: 'msg_new_user', type: 'user', time: { created: 40 }, text: 'Recent question' },
+        ], 'cursor-page-2');
+      }
+      if (input.cursor === 'cursor-page-2') {
+        return page([
+          { id: 'msg_mid_user', type: 'user', time: { created: 20 }, text: 'Earlier question' },
+          { id: 'msg_old_user', type: 'user', time: { created: 10 }, text: 'First question' },
+        ], 'cursor-page-3');
+      }
+      throw new Error(`unexpected cursor ${input.cursor}`);
+    });
+
+    const result = await service.execute('session.messages', {
+      sessionId: 'ses_1',
+      directory: '/repo',
+      role: 'user',
+      limit: 2,
+    });
+
+    expect(client.message.list).toHaveBeenCalledTimes(2);
+    expect(client.message.list.mock.calls[0][0]).toMatchObject({ sessionID: 'ses_1', order: 'desc' });
+    expect(client.message.list.mock.calls[1][0]).toMatchObject({ sessionID: 'ses_1', cursor: 'cursor-page-2' });
+    expect(client.message.list.mock.calls[1][0]).not.toHaveProperty('order');
+    expect(result.messages.map((message) => message.id)).toEqual(['msg_mid_user', 'msg_new_user']);
+  });
+
+  it('stops paging when the message cursor repeats or a page comes back empty', async () => {
+    const { service, client } = createService();
+    client.message.list.mockImplementation(async (input) => {
+      if (!input.cursor) {
+        return { data: [{ id: 'msg_new_user', type: 'user', time: { created: 20 }, text: 'Question' }], cursor: { next: 'cursor-loop' } };
+      }
+      return { data: [{ id: 'msg_old_user', type: 'user', time: { created: 10 }, text: 'Older question' }], cursor: { next: 'cursor-loop' } };
+    });
+
+    const looped = await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', all: true });
+    expect(client.message.list).toHaveBeenCalledTimes(2);
+    expect(looped.messages.map((message) => message.id)).toEqual(['msg_old_user', 'msg_new_user']);
+
+    client.message.list.mockReset();
+    client.message.list.mockImplementation(async (input) => (input.cursor
+      ? { data: [], cursor: { next: `${input.cursor}-next` } }
+      : { data: [{ id: 'msg_user', type: 'user', time: { created: 10 }, text: 'Question' }], cursor: { next: 'cursor-empty' } }));
+
+    const drained = await service.execute('session.messages', { sessionId: 'ses_1', directory: '/repo', all: true });
+    expect(client.message.list).toHaveBeenCalledTimes(2);
+    expect(drained.messages.map((message) => message.id)).toEqual(['msg_user']);
+  });
+
   it('rejects actions outside the fixed contract', async () => {
     const { service } = createService();
     await expect(service.execute('session.delete')).rejects.toThrow('Unsupported OpenChamber action');

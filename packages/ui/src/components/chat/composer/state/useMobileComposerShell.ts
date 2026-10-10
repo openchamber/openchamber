@@ -482,7 +482,9 @@ export function useMobileComposerShell(
         restoreKeyboardRef.current = false;
     }, []);
 
-    return {
+    // One identity until a field changes: composer callbacks depend on the
+    // shell, and a fresh object per render would rebuild them per keystroke.
+    return React.useMemo(() => ({
         expanded,
         focused,
         overlayHostBusy,
@@ -494,5 +496,17 @@ export function useMobileComposerShell(
         onEditorBlur,
         skipNextOverlayCloseRestore,
         cancelOverlayCloseRestore,
-    };
+    }), [
+        expanded,
+        focused,
+        overlayHostBusy,
+        dictationActive,
+        expand,
+        onDictationActiveChange,
+        holdDictationSend,
+        onEditorFocus,
+        onEditorBlur,
+        skipNextOverlayCloseRestore,
+        cancelOverlayCloseRestore,
+    ]);
 }

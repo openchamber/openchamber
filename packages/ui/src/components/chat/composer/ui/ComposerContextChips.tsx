@@ -40,7 +40,7 @@ import { withAttachmentChips } from '../../message/parts/attachmentCitationChips
 import { useInputStore } from '@/sync/input-store';
 import { GlassPopupMotion } from './GlassPopupMotion';
 
-export interface ComposerContextChipsProps {
+interface ComposerContextChipsProps {
     draftTarget: InlineCommentDraftTarget | null;
     colors: Theme['colors'];
     /** Positioned wrapper above which the preview opens; the preview waits for it. */
@@ -214,7 +214,7 @@ const DraftPreviewEntry: React.FC<{
     );
 };
 
-export function ComposerContextChips({ draftTarget, colors, previewHost }: ComposerContextChipsProps) {
+function ComposerContextChipsView({ draftTarget, colors, previewHost }: ComposerContextChipsProps) {
     const { t } = useI18n();
     const draftKey = draftTarget
         ? getInlineCommentDraftKey(getRuntimeKey(), draftTarget.directory, draftTarget.sessionKey)
@@ -494,3 +494,6 @@ export function ComposerContextChips({ draftTarget, colors, previewHost }: Compo
         </div>
     );
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const ComposerContextChips = React.memo(ComposerContextChipsView);

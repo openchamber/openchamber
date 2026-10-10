@@ -43,6 +43,7 @@ import { describeChange } from './git/changeStatus';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
+import { WhitespaceToggleIcon } from './WhitespaceToggleIcon';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -2689,10 +2690,10 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             'h-5 w-5 p-0 transition-opacity',
                             diffHideWhitespace ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
                         )}
-                        title={diffHideWhitespace ? t('diffView.actions.showWhitespace') : t('diffView.actions.hideWhitespace')}
-                        aria-label={diffHideWhitespace ? t('diffView.actions.showWhitespace') : t('diffView.actions.hideWhitespace')}
+                        title={diffHideWhitespace ? t('diffView.whitespace.hidden') : t('diffView.whitespace.shown')}
+                        aria-label={t('diffView.actions.hideWhitespace')}
                     >
-                        <Icon name="space" className="size-4" />
+                        <WhitespaceToggleIcon hidden={diffHideWhitespace} className="size-4" />
                     </Button>
                 )}
                 {currentLayoutForAllFiles && (

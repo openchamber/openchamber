@@ -138,7 +138,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 }
 
 /** Desktop: inline project and branch selects. */
-export function DraftTargetSelectors(props: DraftTargetProps) {
+function DraftTargetSelectorsView(props: DraftTargetProps) {
     const { t } = useI18n();
     const {
         projects,
@@ -725,3 +725,6 @@ export function MobileDraftTargetSheets(
         </>
     );
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const DraftTargetSelectors = React.memo(DraftTargetSelectorsView);

@@ -28,6 +28,7 @@ import { identityDisplayName } from '@/lib/source-control/identity';
 import { cn } from '@/lib/utils';
 import { describeIdentityApplicability, type IdentityApplicability } from '@/lib/source-control/applyIdentity';
 import { useDeviceInfo } from '@/lib/device';
+import { useIsContributorWorktree } from '@/hooks/useIsContributorWorktree';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import type { SourceControlProvider } from '@/lib/source-control/types';
@@ -356,6 +357,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
 }) => {
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
+  const choosesPushDestination = useIsContributorWorktree(directory);
   if (!status) {
     return null;
   }
@@ -485,6 +487,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       trackingRemoteName={status.tracking?.split('/')[0]}
       trackingBranch={status.tracking}
       hasUncommittedChanges={hasUncommittedTrackedChanges(status.files)}
+      choosesPushDestination={choosesPushDestination}
     />
   );
 

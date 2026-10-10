@@ -385,7 +385,8 @@ export const GUEST_SESSION_AGENT_MAX = 80;
 export const GUEST_SETTING_VALUE_MAX = 2_000;
 export const GUEST_REQUEST_PATH_MAX = 2_000;
 export const GUEST_REQUEST_BODY_MAX = 64_000;
-export const GUEST_REQUEST_RESPONSE_MAX = 256_000;
+/** Bytes of a `request` / `serviceRequest` answer; a larger one is `RESPONSE_TOO_LARGE`, never cut off. */
+export const GUEST_REQUEST_RESPONSE_MAX = 8_000_000;
 export const GUEST_REQUEST_TIMEOUT_MS = 20_000;
 /** Guest file path, in characters. */
 export const GUEST_FILE_PATH_MAX = 1_024;
@@ -424,6 +425,8 @@ export const HOST_REQUEST_ERROR_CODES = [
   'NO_INTEGRATION',
   'NO_SERVICE',
   'SERVICE_FAILED',
+  'REQUEST_FAILED',
+  'RESPONSE_TOO_LARGE',
   'NO_SESSION',
   'SESSION_BUSY',
   'NOT_GRANTED',

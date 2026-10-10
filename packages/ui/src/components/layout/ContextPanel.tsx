@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useBrowserFaviconStore } from '@/stores/useBrowserFaviconStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { clampContextEditorTreeWidth, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
+import { clampContextEditorTreeWidth, normalizeContextPanelDirectoryKey, useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { setExternallyViewedSession, useChildStoreManager } from '@/sync/sync-context';
 import { ContextPanelContent } from './ContextSidebarTab';
@@ -96,6 +96,14 @@ const CONTEXT_CHAT_MIN_WIDTH = 400;
 const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
+
+/** A browser tab with the project it belongs to, which may not be the one on screen. */
+type PanelBrowserTab = {
+  directory: string;
+  id: string;
+  targetPath: string | null;
+  ownerSessionId: string | null;
+};
 
 
 
@@ -520,15 +528,16 @@ export const ContextPanel: React.FC = () => {
   // something the browser view itself can do before it exists. Background on
   // purpose: an agent working a page must not pop the panel open or steal the
   // active tab while the user reads something else, and that includes taking
-  // a screenshot of it. The tab appears in the strip.
-  React.useEffect(() => {
-    if (!effectiveDirectory) return;
-    return registerBrowserOpener((url) => {
-      const tabId = openAgentBrowserTab(effectiveDirectory, url);
-      if (tabId) wakeBrowserTab(tabId);
-      return tabId;
-    });
-  }, [effectiveDirectory, openAgentBrowserTab, wakeBrowserTab]);
+  // a screenshot of it. The tab appears in the strip of the calling session's
+  // project, which is not always the project on screen, and belongs to that
+  // session.
+  React.useEffect(() => registerBrowserOpener((url, context) => {
+    const directory = context.directory ? normalizeContextPanelDirectoryKey(context.directory) : directoryKey;
+    if (!directory) return null;
+    const tabId = openAgentBrowserTab(directory, url, context.sessionId);
+    if (tabId) wakeBrowserTab(tabId);
+    return tabId;
+  }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
   // The agent asked for a file to be shown. It opens in front of whatever tab
   // the user had, on purpose: the agent is pointing at a result, and the prior
   // tab is one click away.
@@ -552,11 +561,13 @@ export const ContextPanel: React.FC = () => {
 
   const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
-  // Agent actions that name no tab go to the browser tab the user last had in front of them.
+  // Tells agent browser control which project is on screen and which browser
+  // tab the user last had in front of them there; a session without a tab of
+  // its own may use that tab only when it is the user's and in its project.
   const shownBrowserTabId = activeTab?.mode === 'browser' ? activeTab.id : null;
   React.useEffect(() => {
-    if (shownBrowserTabId) setShownBrowserTab(shownBrowserTabId);
-  }, [shownBrowserTabId]);
+    setShownBrowserTab(directoryKey, shownBrowserTabId);
+  }, [directoryKey, shownBrowserTabId]);
   // The issues and PRs board stays beside it and narrows instead.
   const isOpen = Boolean(panelState?.isOpen && activeTab);
   const [availablePanelAreaWidth, setAvailablePanelAreaWidth] = React.useState<number | null>(null);
@@ -922,31 +933,46 @@ export const ContextPanel: React.FC = () => {
               /></React.Suspense>
             : null;
 
-  const browserTabs = React.useMemo(
-    () => tabs.filter((tab) => tab.mode === 'browser'),
-    [tabs],
-  );
   const visibleBrowserTabId = isOpen && activeTab?.mode === 'browser' ? activeTab.id : null;
   React.useEffect(() => {
     if (visibleBrowserTabId) wakeBrowserTab(visibleBrowserTabId);
   }, [visibleBrowserTabId, wakeBrowserTab]);
-  const loadedBrowserTabs = React.useMemo(
-    () => browserTabs.filter((tab) => tab.id === visibleBrowserTabId || wokenBrowserTabIds.has(tab.id)),
-    [browserTabs, visibleBrowserTabId, wokenBrowserTabIds],
-  );
+  // The browser tabs agents can reach: this project's, and every other
+  // project's agent tabs, so a session working in a project the user is not
+  // looking at keeps its page. The user's own tabs in other projects are left
+  // out and unload with their project, as before. Sorted by directory and tab
+  // id, an order that neither the project on screen nor the store's own
+  // reordering of directories can change: a moved webview reloads its page.
+  const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
+  const { loadedBrowserTabs, sleepingBrowserTabs } = React.useMemo(() => {
+    const loaded: PanelBrowserTab[] = [];
+    const sleeping: PanelBrowserTab[] = [];
+    for (const [directory, directoryState] of Object.entries(contextPanelByDirectory)) {
+      const isShownDirectory = directory === directoryKey;
+      for (const tab of directoryState.tabs) {
+        if (tab.mode !== 'browser' || (!isShownDirectory && tab.ownerSessionId === null)) continue;
+        const entry = { directory, id: tab.id, targetPath: tab.targetPath, ownerSessionId: tab.ownerSessionId };
+        const isLoaded = wokenBrowserTabIds.has(tab.id) || (isShownDirectory && tab.id === visibleBrowserTabId);
+        (isLoaded ? loaded : sleeping).push(entry);
+      }
+    }
+    const renderKeyOf = (tab: PanelBrowserTab) => `${tab.directory}\u0000${tab.id}`;
+    loaded.sort((a, b) => (renderKeyOf(a) < renderKeyOf(b) ? -1 : 1));
+    return { loadedBrowserTabs: loaded, sleepingBrowserTabs: sleeping };
+  }, [contextPanelByDirectory, directoryKey, visibleBrowserTabId, wokenBrowserTabIds]);
   React.useEffect(() => {
     // Only a Chromium host mounts views that agents can drive, so only it may
     // offer to wake a tab; anywhere else a claimed action could never run.
     if (!window.__OPENCHAMBER_ELECTRON__) return;
-    const unregister = browserTabs
-      .filter((tab) => !loadedBrowserTabs.includes(tab))
-      .map((tab) => registerSleepingBrowserTab({
-        tabId: tab.id,
-        describe: () => ({ title: '', url: tab.targetPath ?? '' }),
-        wake: () => wakeBrowserTab(tab.id),
-      }));
+    const unregister = sleepingBrowserTabs.map((tab) => registerSleepingBrowserTab({
+      tabId: tab.id,
+      directory: tab.directory,
+      ownerSessionId: tab.ownerSessionId,
+      describe: () => ({ title: '', url: tab.targetPath ?? '' }),
+      wake: () => wakeBrowserTab(tab.id),
+    }));
     return () => unregister.forEach((release) => release());
-  }, [browserTabs, loadedBrowserTabs, wakeBrowserTab]);
+  }, [sleepingBrowserTabs, wakeBrowserTab]);
   const diffTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'diff'),
     [tabs],
@@ -1268,25 +1294,30 @@ export const ContextPanel: React.FC = () => {
             />
           </section>
         ) : null}
-        {loadedBrowserTabs.map((tab) => (
-          <div
-            // Keyed by the directory as well: a tab of the next directory with the
-            // same id is another tab, with its own view and its own session. Kept
-            // on the same instance, the view went on showing the previous
-            // directory's page, and a space's page would run in the host's
-            // session instead of the space's own.
-            key={`${directoryKey}\u0000${tab.id}`}
-            // Invisible rather than display:none, so a background tab the agent
-            // is working keeps its layout and its snapshots read a real page.
-            className={cn(
-              'absolute inset-0',
-              activeTab?.id !== tab.id && 'invisible pointer-events-none'
-            )}
-            aria-hidden={activeTab?.id !== tab.id || undefined}
-          >
-            <BrowserPane initialUrl={tab.targetPath ?? ''} directory={directoryKey} tabID={tab.id} />
-          </div>
-        ))}
+        {loadedBrowserTabs.map((tab) => {
+          const shown = tab.directory === directoryKey && activeTab?.id === tab.id;
+          return (
+            <div
+              // Keyed by the directory as well: a tab of the next directory with the
+              // same id is another tab, with its own view and its own session. Kept
+              // on the same instance, the view went on showing the previous
+              // directory's page, and a space's page would run in the host's
+              // session instead of the space's own.
+              key={`${tab.directory}\u0000${tab.id}`}
+              // Invisible rather than display:none, so a background tab the agent
+              // is working keeps its layout and its snapshots read a real page.
+              className={cn('absolute inset-0', !shown && 'invisible pointer-events-none')}
+              aria-hidden={!shown || undefined}
+            >
+              <BrowserPane
+                initialUrl={tab.targetPath ?? ''}
+                directory={tab.directory}
+                tabID={tab.id}
+                ownerSessionId={tab.ownerSessionId}
+              />
+            </div>
+          );
+        })}
         {diffTabs.map((tab) => (
           <div
             key={tab.id}

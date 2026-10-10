@@ -34,7 +34,48 @@ interface SnippetsStore {
 
 const SNIPPETS_LOAD_CACHE_TTL_MS = 5000;
 let lastLoadedAt = 0;
-let loadInFlight: Promise<boolean> | null = null;
+/**
+ * Advances on every local change. A load started before a change answers with
+ * the list from before it, so it neither commits nor serves later callers.
+ */
+let registryGeneration = 0;
+let loadInFlight: { generation: number; promise: Promise<boolean> } | null = null;
+/**
+ * The directory the loaded list is complete for; undefined until a load
+ * succeeds, and again from a local change until the reload lands.
+ */
+let registryDirectory: string | null | undefined;
+
+/**
+ * Snippets are files on disk that another window, client or editor can add,
+ * so the loaded list stands for the directory's registry only as long as the
+ * load cache does. Only such a list may rule out an expansion without asking
+ * the server.
+ */
+const isRegistryCurrent = (directory: string | null): boolean => (
+  registryDirectory === directory && Date.now() - lastLoadedAt < SNIPPETS_LOAD_CACHE_TTL_MS
+);
+
+const invalidateRegistry = () => {
+  registryGeneration += 1;
+  lastLoadedAt = 0;
+  registryDirectory = undefined;
+};
+
+// The server's own pattern (`lib/opencode/snippets.js`), names compared lowercase.
+const SNIPPET_TOKEN = /#([a-z0-9_-]+)/gi;
+
+const namesKnownSnippet = (text: string, snippets: readonly Snippet[]): boolean => {
+  const triggers = new Set<string>();
+  for (const snippet of snippets) {
+    triggers.add(snippet.name.toLowerCase());
+    for (const alias of snippet.aliases ?? []) triggers.add(alias.toLowerCase());
+  }
+  for (const match of text.matchAll(SNIPPET_TOKEN)) {
+    if (triggers.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+};
 
 const getRequestDirectory = (): string | null => {
   try {
@@ -62,35 +103,45 @@ export const useSnippetsStore = create<SnippetsStore>()(
       setSnippetDraft: (draft) => set({ snippetDraft: draft }),
 
       loadSnippets: async () => {
-        const now = Date.now();
-        if (get().snippets.length > 0 && now - lastLoadedAt < SNIPPETS_LOAD_CACHE_TTL_MS) return true;
-        if (loadInFlight) return loadInFlight;
+        const directory = getRequestDirectory();
+        if (get().snippets.length > 0 && isRegistryCurrent(directory)) return true;
+        if (loadInFlight?.generation === registryGeneration) return loadInFlight.promise;
 
-        const request = (async () => {
+        const generation = registryGeneration;
+        const request = (async (): Promise<boolean> => {
           set({ isLoading: true });
           try {
-            const directory = getRequestDirectory();
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             const response = await runtimeFetch(`/api/config/snippets${queryParams}`, {
               headers: { 'Cache-Control': 'no-cache', ...(directory ? { 'x-opencode-directory': directory } : {}) },
+              // runtimeFetch joins concurrent identical config reads unless the
+              // request carries a signal. A read after a local change must not
+              // join one started before it.
+              signal: new AbortController().signal,
             });
             if (!response.ok) throw new Error('Failed to load snippets');
             const snippets: Snippet[] = await response.json();
+            // A local change landed while this read was in flight: its list is
+            // from before the change. Answer with the read that follows it.
+            if (generation !== registryGeneration) return get().loadSnippets();
             set({ snippets, isLoading: false });
             lastLoadedAt = Date.now();
+            registryDirectory = directory;
             return true;
           } catch (error) {
+            if (generation !== registryGeneration) return get().loadSnippets();
             console.error('[SnippetsStore] Failed to load:', error);
             set({ isLoading: false });
             return false;
           }
         })();
 
-        loadInFlight = request;
+        const entry = { generation, promise: request };
+        loadInFlight = entry;
         try {
           return await request;
         } finally {
-          loadInFlight = null;
+          if (loadInFlight === entry) loadInFlight = null;
         }
       },
 
@@ -110,7 +161,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
             }
             throw new Error(payload?.error || 'Failed to create snippet');
           }
-          lastLoadedAt = 0;
+          invalidateRegistry();
           await get().loadSnippets();
           return true;
         } catch (error) {
@@ -129,7 +180,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
             body: JSON.stringify(updates),
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to update snippet');
-          lastLoadedAt = 0;
+          invalidateRegistry();
           await get().loadSnippets();
           return true;
         } catch (error) {
@@ -148,7 +199,7 @@ export const useSnippetsStore = create<SnippetsStore>()(
           });
           if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || 'Failed to delete snippet');
           if (get().selectedSnippetName === name) set({ selectedSnippetName: null });
-          lastLoadedAt = 0;
+          invalidateRegistry();
           await get().loadSnippets();
           return true;
         } catch (error) {
@@ -160,6 +211,9 @@ export const useSnippetsStore = create<SnippetsStore>()(
       expandText: async (text) => {
         if (!/#[a-z0-9_-]+/i.test(text)) return text;
         const directory = getRequestDirectory();
+        // "fix #42" names no snippet: skip the round trip when the current
+        // directory's list is loaded and none of its triggers appears.
+        if (isRegistryCurrent(directory) && !namesKnownSnippet(text, get().snippets)) return text;
         const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
         const response = await runtimeFetch(`/api/config/snippets/expand${queryParams}`, {
           method: 'POST',

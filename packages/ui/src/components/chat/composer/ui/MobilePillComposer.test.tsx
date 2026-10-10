@@ -33,7 +33,6 @@ const renderPill = async (options: { hasContent: boolean; newSessionDraftOpen: b
         <ThemeSystemProvider>
         <I18nProvider>
             <MobilePillComposer
-                directory="/fixture"
                 message={options.hasContent ? 'Draft message' : ''}
                 sessionId={options.newSessionDraftOpen ? null : 'session-1'}
                 newSessionDraftOpen={options.newSessionDraftOpen}
@@ -86,10 +85,10 @@ describe('MobilePillComposer', () => {
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false });
 
         expect(markup).toContain('aria-label="Send message"');
-        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
+        expect(markup).not.toContain('aria-label="Queue message"');
     });
 
-    test('uses the trailing action to queue content while the session is running', async () => {
+    test('queues content from inside the pill, between mic and stop, while the session is running', async () => {
         // The expanded composer shows a rotated send icon labelled "Queue
         // message" in this state; the collapsed pill must read the same.
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: false, canAbort: true });
@@ -98,28 +97,31 @@ describe('MobilePillComposer', () => {
         expect(markup).toContain('aria-label="Queue message"');
         expect(markup).toContain('-rotate-90');
         expect(markup).not.toContain('aria-label="Send message"');
-        expect(markup).not.toContain('w-0 opacity-0 overflow-hidden');
-        expect(markup.indexOf('aria-label="Stop generating"')).toBeLessThan(markup.indexOf('aria-label="Queue message"'));
+        const mic = markup.indexOf('aria-label="Start dictation"');
+        const queue = markup.indexOf('aria-label="Queue message"');
+        const stop = markup.indexOf('aria-label="Stop generating"');
+        expect(mic).toBeLessThan(queue);
+        expect(queue).toBeLessThan(stop);
     });
 
     test('uses the inline send action for content in a new-session draft', async () => {
         const markup = await renderPill({ hasContent: true, newSessionDraftOpen: true });
 
         expect(markup).toContain('aria-label="Send message"');
-        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
+        expect(markup).not.toContain('aria-label="Queue message"');
     });
 
-    test('keeps the trailing slot collapsed for an empty existing session', async () => {
+    test('shows neither send nor queue for an empty existing session', async () => {
         const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false });
 
-        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
+        expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
-    test('keeps the trailing action collapsed for an empty new-session draft', async () => {
+    test('shows neither send nor queue for an empty new-session draft', async () => {
         const markup = await renderPill({ hasContent: false, newSessionDraftOpen: true });
 
-        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
+        expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 
@@ -127,7 +129,7 @@ describe('MobilePillComposer', () => {
         const markup = await renderPill({ hasContent: false, newSessionDraftOpen: false, canAbort: true });
 
         expect(markup).toContain('aria-label="Stop generating"');
-        expect(markup).toContain('w-0 opacity-0 overflow-hidden');
+        expect(markup).not.toContain('aria-label="Queue message"');
         expect(markup).not.toContain('aria-label="Send message"');
     });
 

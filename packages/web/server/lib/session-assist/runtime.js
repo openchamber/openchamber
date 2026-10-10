@@ -183,13 +183,20 @@ export const createSessionAssistRuntime = ({
     const described = await describeSmallModel({ directory, preferredProviderID, preferredModelID });
     checkCurrent();
     if (!described) return;
+    // A local server keeps one prompt cache per slot: a side request on the
+    // session's own model evicts it, and the next turn reprocesses the whole
+    // history. There only a different model may write the assist, however the
+    // session's model was picked (fallback or an explicit Small Model).
+    if (described.localEndpoint
+      && described.providerID === preferredProviderID
+      && described.modelID === preferredModelID) return;
     const system = buildAssistSystemPrompt(targets);
     const prompt = buildAssistPrompt(turns, targets, described.inputCharBudget - system.length - 512);
     if (!prompt) return;
     let generated;
     try {
       generated = await generateSmallModelText({
-        prompt: prompt.text, system, directory, sessionID: sessionId,
+        prompt: prompt.text, system, directory,
         preferredProviderID, preferredModelID,
         onOverflow: 'error', timeoutMs: GENERATION_TIMEOUT_MS, signal,
       });

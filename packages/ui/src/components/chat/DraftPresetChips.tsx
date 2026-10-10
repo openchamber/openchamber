@@ -352,7 +352,10 @@ const DraftPresetChipsContent: React.FC<DraftPresetChipsProps> = ({ onSubmit, cl
     );
 };
 
-export const DraftPresetChips: React.FC<DraftPresetChipsProps> = (props) => {
+const DraftPresetChipsView: React.FC<DraftPresetChipsProps> = (props) => {
     const visible = useUIStore((state) => state.draftStartersVisible);
     return visible ? <DraftPresetChipsContent {...props} /> : null;
 };
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const DraftPresetChips = React.memo(DraftPresetChipsView);

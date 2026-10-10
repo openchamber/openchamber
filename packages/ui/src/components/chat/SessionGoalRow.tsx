@@ -6,20 +6,19 @@ import { formatGoalTokens } from '@/lib/sessionGoalMetadata';
 import { sessionGoalStatusColor, sessionGoalStatusLabelKey } from '@/lib/sessionGoalPresentation';
 import { setSessionGoalStatus } from '@/lib/sessionGoalActions';
 import { toast } from '@/components/ui';
+import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
-import { cn } from '@/lib/utils';
 
 interface SessionGoalRowProps {
   sessionId: string | null;
   directory?: string;
-  className?: string;
 }
 
-// Compact goal strip near the composer: informational only — status dot,
-// objective (or the latest audit note), token usage — plus an inline
+// The goal as a top row of the composer: informational only (status icon,
+// objective or the latest audit note, token usage) plus an inline
 // pause/resume action. The manage dialog opens from the composer target
 // button, not from here.
-export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory, className }) => {
+export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessionId, directory }) => {
   const { t } = useI18n();
   const { goal, enabled } = useSessionGoal(sessionId ?? '', directory);
   const objectiveContent = useGoalObjectiveContent(sessionId ?? '', goal);
@@ -60,19 +59,13 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
 
   return (
     <div
-      className={cn(
-        'flex w-full min-w-0 items-center gap-2 rounded-lg border px-2 py-1',
-        'border-[var(--interactive-border)]',
-        // The strip floats over the transcript like the composer box it sits
-        // above, so it needs a surface of its own: a border alone is clear glass.
-        'oc-glass-composer',
-        className,
-      )}
+      role="group"
+      className="flex h-10 min-w-0 items-center gap-2 border-b border-border/60 pl-3 pr-1.5"
       aria-label={t('chat.goal.row.aria')}
       title={objectiveContent ?? undefined}
     >
-      <Icon name="target" className="h-3.5 w-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate typography-meta text-foreground">
+      <Icon name="target" className="size-3.5 flex-shrink-0" style={{ color: sessionGoalStatusColor[goal.status] }} aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {objectiveContent || t('chat.goal.dialog.titleManage')}
       </span>
       {goal.status === 'active' && (!sessionStatus || sessionStatus.type === 'idle') ? (
@@ -94,16 +87,18 @@ export const SessionGoalRow: React.FC<SessionGoalRowProps> = React.memo(({ sessi
         </span>
       ) : null}
       {pauseResume ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => void handleToggleStatus(pauseResume.next)}
+          onMouseDown={(event) => event.preventDefault()}
           disabled={busy}
-          className="flex flex-shrink-0 cursor-pointer items-center gap-1 rounded px-1 py-0.5 typography-meta text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground disabled:opacity-50"
-          aria-label={t(pauseResume.labelKey)}
+          className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
         >
-          <Icon name={pauseResume.icon} className="h-3 w-3" aria-hidden="true" />
-          <span>{t(pauseResume.labelKey)}</span>
-        </button>
+          <Icon name={pauseResume.icon} className="size-3" aria-hidden="true" />
+          {t(pauseResume.labelKey)}
+        </Button>
       ) : null}
     </div>
   );

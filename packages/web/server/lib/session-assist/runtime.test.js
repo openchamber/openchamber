@@ -165,6 +165,47 @@ describe('session assist runtime', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ['skips the session model on a local server', { providerID: 'p', modelID: 'm', source: 'session-model', localEndpoint: true }, 0],
+    ['skips the session model chosen as Small Model on a local server', { providerID: 'p', modelID: 'm', source: 'settings', localEndpoint: true }, 0],
+    ['uses a different small model on a local server', { providerID: 'p', modelID: 'small', source: 'session-provider-small', localEndpoint: true }, 1],
+    ['uses the session model on a hosted provider', { providerID: 'p', modelID: 'm', source: 'session-model', localEndpoint: false }, 1],
+  ])('%s', async (_name, described, generations) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const persistSessionAssist = vi.fn(async () => undefined);
+    const records = [
+      { id: 'msg_idle', type: 'idle', outcome: 'succeeded' },
+      { id: 'msg_a', type: 'assistant', content: [{ type: 'text', text: 'All done.' }], finish: 'stop', time: { completed: 2 }, model: { providerID: 'p', id: 'm' } },
+      { id: 'msg_u', type: 'user', text: 'Do the thing' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (input) => {
+      const url = new URL(String(input));
+      let body;
+      if (url.pathname === '/api/session/ses_1') body = { data: { id: 'ses_1', location: { directory: '/repo' } } };
+      else if (url.pathname === '/api/session/ses_1/message') body = { data: records.slice(0, Number(url.searchParams.get('limit'))), cursor: {} };
+      else throw new Error(`unexpected ${url.pathname}`);
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const describeSmallModel = vi.fn(async () => ({ inputCharBudget: 20_000, ...described }));
+    const generateSmallModelText = vi.fn(async () => ({ text: '{"recap":"Did the thing.","suggestion":""}' }));
+    const { runtime } = makeRuntime({
+      persistSessionAssist,
+      buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+      getSmallModelService: async () => ({ describeSmallModel, generateSmallModelText }),
+    });
+
+    runtime.processPayload(idle());
+    for (let i = 0; i < 20 && (describeSmallModel.mock.calls.length === 0 || persistSessionAssist.mock.calls.length < generations); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(describeSmallModel).toHaveBeenCalledTimes(1);
+    expect(generateSmallModelText).toHaveBeenCalledTimes(generations);
+    expect(persistSessionAssist).toHaveBeenCalledTimes(generations);
+    vi.unstubAllGlobals();
+  });
+
   it('asks the turn-end gate first and arms nothing when it rules both fields out', async () => {
     const persistSessionAssist = vi.fn(async () => undefined);
     const getSmallModelService = vi.fn(async () => {

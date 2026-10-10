@@ -5,7 +5,7 @@ import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tun
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { useAuthSessionStore } from "@/lib/runtime-auth-expiry"
-import { createEventPipeline } from "./event-pipeline"
+import { classifyStreamPayload, createEventPipeline } from "./event-pipeline"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
   setTimeout(() => reject(new Error("Timed out waiting for event pipeline flush")), ms)
@@ -443,5 +443,36 @@ describe("createEventPipeline over the WebSocket transport", () => {
     // The ready frame and the heartbeat frame both prove the socket is alive. Neither is an event.
     expect(activity).toBe(2)
     expect(delivered).toEqual([])
+  })
+})
+
+describe("classifyStreamPayload", () => {
+  test("classifies each payload kind by its type", () => {
+    expect(classifyStreamPayload(textDelta("a"), undefined)).toMatchObject({ kind: "events", events: [{ directory: "/repo" }] })
+    expect(classifyStreamPayload({ type: "openchamber:space-setup", properties: { spaceId: "0123456789ab" } }, undefined))
+      .toEqual({ kind: "space-setup", spaceId: "0123456789ab" })
+    expect(classifyStreamPayload({ type: "openchamber:space-setup", properties: { spaceId: "bad" } }, undefined))
+      .toEqual({ kind: "events", events: [] })
+    expect(classifyStreamPayload({ type: "openchamber:session-archived", properties: { sessionID: "ses_1", archivedAt: 5 } }, "/frame"))
+      .toMatchObject({ kind: "events", events: [{ directory: "/frame", event: { type: "session.patched" } }] })
+    expect(classifyStreamPayload({ nothing: true }, undefined)).toEqual({ kind: "events", events: [] })
+    expect(classifyStreamPayload("text", undefined)).toEqual({ kind: "events", events: [] })
+  })
+
+  // Each delta used to be tried against nine OpenChamber schemas before the
+  // wire schema; failed zod parses build issue objects, so this cost ~37us per
+  // delta (750ms for 20k on an M-series laptop). Dispatching on `type` brings
+  // it under 1us. The bound is loose enough for slow CI and far below the old cost.
+  test("classifies a stream of text deltas without trying unrelated schemas", () => {
+    const payloads = Array.from({ length: 20_000 }, (_, index) => textDelta(`chunk ${index}`))
+    const started = performance.now()
+    let events = 0
+    for (const payload of payloads) {
+      const classified = classifyStreamPayload(payload, undefined)
+      if (classified.kind === "events") events += classified.events.length
+    }
+    const elapsed = performance.now() - started
+    expect(events).toBe(20_000)
+    expect(elapsed).toBeLessThan(300)
   })
 })

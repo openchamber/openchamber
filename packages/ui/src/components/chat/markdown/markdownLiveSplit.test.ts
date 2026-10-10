@@ -85,3 +85,64 @@ describe('live split while a fence stays open', () => {
     expect(extended.at(-1)?.highlight).toBe(false);
   });
 });
+
+// Prose lexes again only from the second-to-last block. Every prefix, fed one
+// character at a time, must split exactly as a fresh lex of that prefix does.
+describe('incremental split while prose streams', () => {
+  const documents = {
+    'list items merging across blank lines': '- one\n\n- two\n  continued\n\n- three\n\nAfter the list.\n\n1. a\n2. b\n',
+    'table interrupting a paragraph': 'Lead paragraph\n| a | b |\n|---|---|\n| 1 | 2 |\n\nTail.\n',
+    'setext heading and lazy quote': 'Title\n=====\n\n> quoted\nlazy line\n\nPara\n---\n\nend\n',
+    'nested fences': '````md\n```ts\nconst a = 1\n```\n````\n\n~~~\n```\nstill code\n~~~\n\nafter\n',
+    'display math spanning a blank line': 'Before.\n\n\\[\na = b\n\nc = d\n\\]\n\nAfter.\n',
+    'disclosure with a summary spanning a blank line': '<details><summary>Sum\n\nmary</summary>\n\n**Body**\n\n</details>\n\nAfter.\n',
+    'reference links': 'See [the docs][docs] and [^1].\n\n[docs]: https://example.com\n\n[^1]: A note.\n',
+    'html comment': 'Intro\n\n<!-- a comment\n\nspanning -->\n\nOutro\n',
+  } satisfies Record<string, string>;
+
+  for (const [name, document] of Object.entries(documents)) {
+    test(name, () => {
+      expectSameAsFreshAtEveryStep('', document);
+    });
+  }
+
+  test('a settled message splits as a fresh lex after streaming it', () => {
+    const text = Object.values(documents).join('\n');
+    resetLiveSplitMemoForTests();
+    for (let end = 1; end <= text.length; end += 7) __streamBlocksForTests(text.slice(0, end), true);
+    __streamBlocksForTests(text, true);
+    const settled = __streamBlocksForTests(text, false);
+    resetLiveSplitMemoForTests();
+    expect(settled).toEqual(__streamBlocksForTests(text, false));
+  });
+
+  test('a settled message is split into the same blocks it streamed in', () => {
+    resetLiveSplitMemoForTests();
+    const text = 'First paragraph.\n\n- a\n- b\n\n```ts\nconst x = 1\n```\n\nLast paragraph.';
+    const streamed = __streamBlocksForTests(text, true);
+    const settled = __streamBlocksForTests(text, false);
+    expect(settled.map((block) => block.raw)).toEqual(streamed.map((block) => block.raw));
+    expect(settled.every((block) => block.mode === 'full' && block.src === block.raw)).toBe(true);
+  });
+
+  test('a message streaming in the sorted mode is split incrementally and kept out of the settled memo', () => {
+    const text = Object.values(documents).join('\n');
+    resetLiveSplitMemoForTests();
+    const steps: Array<{ prefix: string; blocks: ReturnType<typeof __streamBlocksForTests> }> = [];
+    for (let end = 1; end <= text.length; end += 7) {
+      const prefix = text.slice(0, end);
+      steps.push({ prefix, blocks: __streamBlocksForTests(prefix, false, true) });
+    }
+    const stats = __liveSplitStatsForTests();
+    expect(stats.settled).toBe(0);
+    expect(stats.reused + stats.lexed).toBe(steps.length);
+    // Each step renders as the settled split of that text would.
+    for (const { prefix, blocks } of steps.filter((_, index) => index % 25 === 0)) {
+      resetLiveSplitMemoForTests();
+      expect(blocks).toEqual(__streamBlocksForTests(prefix, false));
+    }
+    resetLiveSplitMemoForTests();
+    __streamBlocksForTests(text, false);
+    expect(__liveSplitStatsForTests().settled).toBe(1);
+  });
+});

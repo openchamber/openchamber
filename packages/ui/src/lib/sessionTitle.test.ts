@@ -240,7 +240,7 @@ describe('bounded history loading', () => {
 
 describe('generation lifecycle', () => {
   const turns = collectSessionTitleTurns(pair('one'));
-  test('calls the existing Small Model route with the target session and provider', async () => {
+  test('calls the existing Small Model route with the target directory and provider', async () => {
     let calls = 0;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -248,14 +248,14 @@ describe('generation lifecycle', () => {
       expect(new URL(request.url).pathname).toBe('/api/small-model/generate');
       expect(request.method).toBe('POST');
       expect(await request.json()).toMatchObject({
-        sessionID: 'session', directory: '/project', preferredProviderID: 'provider', preferredModelID: 'model', restrictToPreferredProvider: true,
+        directory: '/project', preferredProviderID: 'provider', preferredModelID: 'model', restrictToPreferredProvider: true,
       });
       calls += 1;
       return calls === 1 ? Response.json({ text: 'A useful title' }) : new Response('Unavailable', { status: 503 });
     };
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://session-title.test' });
     try {
-      const input = { turns, sessionID: 'session', directory: '/project', signal: new AbortController().signal };
+      const input = { turns, directory: '/project', signal: new AbortController().signal };
       expect(await generateSessionTitle(input)).toBe('A useful title');
       await expect(generateSessionTitle(input)).rejects.toThrow('Session title generation failed');
       expect(calls).toBe(2);

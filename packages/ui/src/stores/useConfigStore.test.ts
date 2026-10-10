@@ -25,6 +25,7 @@ let persistedOpenChamberSettings: DesktopSettings | null = {};
 let settingsLoadCalls = 0;
 let checkHealthImpl = async () => true;
 let probeHealthImpl: (() => Promise<'healthy' | 'unhealthy' | 'unreachable'>) | null = null;
+let probeHealthOptions: Array<{ waitMs?: number } | undefined> = [];
 let loadSettingsImpl: (() => Promise<DesktopSettings | null>) | null = null;
 let projectsState: {
   activeProjectId: string | null;
@@ -153,7 +154,10 @@ mock.module('@/lib/opencode/client', () => ({
     getFilesystemHome: async () => '/workspace',
     getSystemInfo: async () => ({ homeDirectory: '/workspace' }),
     checkHealth: () => checkHealthImpl(),
-    probeHealth: () => (probeHealthImpl ? probeHealthImpl() : checkHealthImpl().then((healthy) => (healthy ? 'healthy' : 'unhealthy'))),
+    probeHealth: (options?: { waitMs?: number }) => {
+      probeHealthOptions.push(options);
+      return probeHealthImpl ? probeHealthImpl() : checkHealthImpl().then((healthy) => (healthy ? 'healthy' : 'unhealthy'));
+    },
     withDirectory: mock(async (directory: string | null, callback: () => Promise<unknown>) => {
       withDirectoryCalls.push(directory);
       const previous = currentFetchDirectory;
@@ -283,6 +287,7 @@ describe('useConfigStore provider persistence', () => {
     settingsLoadCalls = 0;
     checkHealthImpl = async () => true;
     probeHealthImpl = null;
+    probeHealthOptions = [];
     loadSettingsImpl = null;
     setSyncRefs({} as never, { children: new Map(), getState: () => undefined } as never, DIRECTORY);
     useSelectionStore.setState({
@@ -1506,6 +1511,16 @@ describe('useConfigStore provider persistence', () => {
     await useConfigStore.getState().initializeApp();
 
     expect(useConfigStore.getState().lastInitFailure).toEqual({ step: 'openCodeUnavailable', message: null });
+  }, 10_000);
+
+  test('startup asks the server to hold the health answer until OpenCode is ready', async () => {
+    let probes = 0;
+    probeHealthImpl = async () => (++probes < 2 ? 'unhealthy' : 'healthy');
+    await useConfigStore.getState().checkConnection();
+
+    expect(useConfigStore.getState().isConnected).toBe(true);
+    expect(probeHealthOptions.length).toBe(2);
+    expect(probeHealthOptions.every((options) => (options?.waitMs ?? 0) > 0)).toBe(true);
   }, 10_000);
 
   test('a project whose folder is gone does not block startup', async () => {

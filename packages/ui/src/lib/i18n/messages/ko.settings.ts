@@ -1020,7 +1020,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'PR 병합 후',
   'settings.openchamber.mergedWorktreeCleanup.info': '사이드바에 이미 표시된 PR 상태를 사용합니다. 워크트리에서 에이전트가 작업 중이거나 세션이 열려 있으면 아무것도 하지 않습니다.',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': '세션을 보관하고 워크트리 제거',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '워크트리와 로컬 브랜치는 그 안의 모든 내용이 병합된 PR에 있을 때만 제거됩니다. 그렇지 않으면 세션만 보관하고 워크트리는 남겨 둡니다.',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '커밋하지 않은 변경 사항이 없고 병합된 PR에 없는 커밋도 없으면 워크트리와 로컬 브랜치가 제거됩니다. 그전까지는 세션만 보관하고 워크트리는 남겨 둡니다.',
   'settings.openchamber.messageSearch.title': '메시지 검색',
   'settings.openchamber.messageSearch.field.enabled': '모든 대화에서 메시지 검색',
   'settings.openchamber.messageSearch.field.enabledInfo': '설정 옆에 내 메시지와 에이전트 답변의 작은 인덱스를 보관해 검색이 즉시 찾을 수 있게 합니다. OpenChamber가 실행되는 컴퓨터에만 저장되며 어디로도 전송되지 않습니다.',

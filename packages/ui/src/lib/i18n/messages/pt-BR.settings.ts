@@ -1020,7 +1020,7 @@ export const settingsDict = {
   "settings.openchamber.mergedWorktreeCleanup.title": "Depois que um PR é mesclado",
   "settings.openchamber.mergedWorktreeCleanup.info": "Usa o status do PR que a barra lateral já mostra. Nada acontece enquanto um agente trabalha no worktree ou uma das sessões dele está aberta.",
   "settings.openchamber.mergedWorktreeCleanup.field.enable": "Arquivar as sessões e remover o worktree",
-  "settings.openchamber.mergedWorktreeCleanup.field.enableDescription": "O worktree e a branch local só são removidos quando tudo nele está no PR mesclado. Caso contrário, as sessões são arquivadas e o worktree continua.",
+  "settings.openchamber.mergedWorktreeCleanup.field.enableDescription": "O worktree e a branch local são removidos quando não há mudanças sem commit nem commits que faltem no PR mesclado. Até lá, as sessões são arquivadas e o worktree continua.",
   "settings.openchamber.messageSearch.title": "Busca de mensagens",
   "settings.openchamber.messageSearch.field.enabled": "Buscar mensagens em todas as conversas",
   "settings.openchamber.messageSearch.field.enabledInfo": "Mantém, ao lado das configurações, um pequeno índice das suas mensagens e das respostas do agente, para que a busca as encontre na hora. Ele fica na máquina que executa o OpenChamber e nunca é enviado para lugar nenhum.",

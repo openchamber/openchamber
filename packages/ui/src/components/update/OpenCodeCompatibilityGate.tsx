@@ -1,18 +1,21 @@
 import * as React from 'react';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
-import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { useI18n } from '@/lib/i18n';
-import { hasCompatibleManagedDesktopOpenCode } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
-import { fetchOpenCodeCompatibility, recoverOpenCode, type OpenCodeCompatibility } from '@/lib/opencode/compatibility';
+import { recoverOpenCode, type OpenCodeCompatibility } from '@/lib/opencode/compatibility';
+import { runCompatibilityCheck, takeCompatibilityCheck, type CompatibilityCheck } from './openCodeCompatibilityCheck';
 
+/**
+ * The app mounts at once and keeps starting while the check runs; only a
+ * confirmed incompatible OpenCode replaces it with the recovery screen. A
+ * failed check leaves the app's own connection recovery in charge.
+ */
 export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren> = ({ children }) => {
   const { t } = useI18n();
   const [compatibility, setCompatibility] = React.useState<OpenCodeCompatibility | null>(null);
-  const [checked, setChecked] = React.useState(false);
   const titleId = React.useId();
   const [operation, setOperation] = React.useState<'install-v2' | 'reconnect' | null>(null);
   const [failed, setFailed] = React.useState(false);
@@ -20,36 +23,31 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren> = ({ c
 
   React.useEffect(() => {
     let mounted = true;
-    const check = async () => {
+    const check = async (request: CompatibilityCheck) => {
       const revision = ++generation.current;
       try {
-        if (await hasCompatibleManagedDesktopOpenCode()) return;
-        if (!mounted || revision !== generation.current) return;
-        const result = await fetchOpenCodeCompatibility();
-        if (mounted && revision === generation.current) setCompatibility(result);
+        const result = await request;
+        if (result && mounted && revision === generation.current) setCompatibility(result);
       } catch {
         // An unavailable host or an older OpenChamber host keeps its existing
         // connection UI. Failed reads never dismiss a known incompatible CLI.
-      } finally {
-        if (mounted && revision === generation.current) setChecked(true);
       }
     };
-    void check();
+    void check(takeCompatibilityCheck());
     const unsubscribe = subscribeRuntimeEndpointChanged(() => {
       generation.current += 1;
       setCompatibility(null);
-      setChecked(false);
       setOperation(null);
       setFailed(false);
-      void check();
+      void check(runCompatibilityCheck());
     });
     return () => { mounted = false; generation.current += 1; unsubscribe(); };
   }, []);
 
   React.useEffect(() => {
     if (compatibility?.state === 'incompatible') {
-      // The application cannot initialize against v1. Recovery owns the screen
-      // before App mounts, including dismissal of the HTML loading overlay.
+      // The application cannot initialize against v1. Recovery replaces it,
+      // including dismissal of the HTML loading overlay.
       document.getElementById('initial-loading')?.remove();
     }
   }, [compatibility]);
@@ -71,9 +69,6 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren> = ({ c
     }
   };
 
-  if (!checked) {
-    return <AppStartupOverlay ready={false} />;
-  }
   if (compatibility?.state !== 'incompatible') return <>{children}</>;
   const external = compatibility.installation === 'external';
   const bundled = compatibility.installation === 'bundled';

@@ -57,7 +57,7 @@ function caretStyle(
     };
 }
 
-export interface ComposerAutocompletePopupsProps {
+interface ComposerAutocompletePopupsProps {
     /** Which picker is open, if any. */
     open: AutocompleteKind | null;
     query: string;
@@ -75,7 +75,7 @@ export interface ComposerAutocompletePopupsProps {
     onClose: () => void;
 }
 
-export function ComposerAutocompletePopups(props: ComposerAutocompletePopupsProps) {
+function ComposerAutocompletePopupsView(props: ComposerAutocompletePopupsProps) {
     const { open } = props;
     // The wrapper is a zero-height box over the anchor's top edge, so the
     // picker's `bottom-full` and caret offsets resolve exactly as they would
@@ -140,3 +140,6 @@ function AutocompletePopup(props: ComposerAutocompletePopupsProps & { open: Auto
             );
     }
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const ComposerAutocompletePopups = React.memo(ComposerAutocompletePopupsView);

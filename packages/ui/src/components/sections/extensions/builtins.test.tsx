@@ -20,6 +20,8 @@ const builtIn: InstalledGuest = {
   integration: { name: 'SDK Demo', description: 'GitHub', auth: 'token' },
 };
 const installed: InstalledGuest = { ...builtIn, id: 'third-party', name: 'Third-party', source: 'git', origin: { url: 'git@github.com:acme/third-party.git' }, integration: { name: 'Third-party', description: 'GitHub', auth: 'token' } };
+// What a newer server can send: a capability this build does not know.
+const newer = { ...installed, id: 'newer-ext', name: 'Newer', capabilities: { requested: ['telepathy'], granted: [] } };
 const originalRuntimeKey = getRuntimeKey();
 const originalBase = getRuntimeApiBaseUrl();
 
@@ -28,6 +30,7 @@ describe('built-in extension settings', () => {
   let root: Root;
   let container: HTMLElement;
   let catalog: InstalledGuest[];
+  let unreadableRows: Array<typeof newer>;
   let requests: string[];
   let restoreFetch = () => {};
   const globals = new Map<string, PropertyDescriptor | undefined>();
@@ -48,12 +51,17 @@ describe('built-in extension settings', () => {
       Object.defineProperty(globalThis, key, { configurable: true, value });
     }
     catalog = [builtIn, installed];
+    unreadableRows = [];
     requests = [];
     useGuestsStore.getState().resetForRuntimeSwitch(getRuntimeKey());
     const fetch = spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const path = new URL(String(input), 'http://localhost').pathname;
       requests.push(`${init?.method ?? 'GET'} ${path}`);
-      if (path === '/api/guests') return Response.json({ guests: catalog });
+      if (path === '/api/guests') return Response.json({ guests: [...catalog, ...unreadableRows] });
+      if (init?.method === 'DELETE') {
+        unreadableRows = unreadableRows.filter((row) => path !== `/api/guests/${row.id}`);
+        return new Response(null, { status: 204 });
+      }
       if (path === '/api/guests/updates/check') return Response.json({ updates: {} });
       if (path.endsWith('/enabled')) {
         const payload = JSON.parse(String(init?.body));
@@ -112,6 +120,24 @@ describe('built-in extension settings', () => {
     expect(button('Disable', card)).toBeTruthy();
     expect(requests.some((entry) => entry.includes('/capabilities'))).toBe(false);
     expect(requests.some((entry) => entry.startsWith('DELETE'))).toBe(false);
+  });
+
+  test('an extension it cannot read keeps the others and can be removed', async () => {
+    unreadableRows = [newer];
+    await render(<ExtensionsPage />);
+    expect(container.textContent).not.toContain('Could not load extensions');
+    expect(container.textContent).toContain('SDK Demo');
+    expect(container.textContent).toContain('Third-party');
+    expect(container.textContent).toContain('Newer');
+    expect(container.textContent).toContain('Can\'t load');
+    const check = container.querySelector<HTMLButtonElement>('[data-settings-item="extensions.updates.check"]');
+    expect(check?.disabled).toBe(false);
+    const removeNewer = container.querySelector<HTMLButtonElement>('button[aria-label="Remove Newer"]');
+    if (!removeNewer) throw new Error('Missing remove button for the unreadable extension');
+    await act(async () => { removeNewer.click(); });
+    expect(requests).toContain('DELETE /api/guests/newer-ext');
+    expect(container.textContent).not.toContain('Newer');
+    expect(container.textContent).toContain('Third-party');
   });
 
   test('opens the Git source in the external browser', async () => {

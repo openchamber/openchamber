@@ -8,6 +8,7 @@ import {
 import { dropGuestTokens } from './auth-store.js';
 import { resolveHostAccessToken } from './host-session.js';
 import { GuestOAuthError, guestAuthorizationHeader, refreshGuestAccessToken, takeUsableGuestAuth } from './oauth.js';
+import { readBoundedResponseText } from './response-body.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -36,11 +37,14 @@ export const joinGuestRequestUrl = (apiOrigin, path, query) => {
 };
 
 const readCappedBody = async (response) => {
-  const text = await response.text();
-  if (text.length <= GUEST_REQUEST_RESPONSE_MAX) {
-    return text;
+  const body = await readBoundedResponseText(response, GUEST_REQUEST_RESPONSE_MAX);
+  if (body.tooLarge) {
+    throw new GuestOAuthError(
+      `The API answered with more than ${GUEST_REQUEST_RESPONSE_MAX} bytes. Ask for a smaller page.`,
+      'RESPONSE_TOO_LARGE',
+    );
   }
-  return text.slice(0, GUEST_REQUEST_RESPONSE_MAX);
+  return body.text;
 };
 
 const sendAuthorized = async (url, method, body, accessToken, authorization) => {

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
-type Listener = (event: { type: string; requestId: string; action: string; parameters: Record<string, unknown> }) => void;
+type RequestContext = { directory: string | null; sessionId: string | null };
+type Listener = (event: {
+  type: string;
+  requestId: string;
+  action: string;
+  parameters: Record<string, unknown>;
+  context: RequestContext;
+}) => void;
 
 const posted: Array<{ requestId: string; ok: boolean; data?: unknown; error?: string }> = [];
 const claims: string[] = [];
@@ -33,21 +40,46 @@ const {
   setShownBrowserTab,
 } = await import('./controlClient');
 
+/** A request from an older server or a caller with no session. */
+const UNKNOWN_CONTEXT: RequestContext = { directory: null, sessionId: null };
+/** The project every tab below lives in unless a test says otherwise. */
+const REPO = '/repo';
+
 /** Registrations are module-global, so every test unwinds its own. */
 const cleanups: Array<() => void> = [];
 
-const emitOpen = (parameters: Record<string, unknown>): void => {
-  listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters });
+const emitOpen = (parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
+  listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.open', parameters, context });
+};
+
+const emit = (action: string, parameters: Record<string, unknown>, context: RequestContext = UNKNOWN_CONTEXT): void => {
+  listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters, context });
 };
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** A mounted tab that records the actions it ran. */
+const tab = (
+  tabId: string,
+  ran: string[],
+  { directory = REPO, ownerSessionId = null }: { directory?: string; ownerSessionId?: string | null } = {},
+) => registerBrowserController({
+  tabId,
+  directory,
+  ownerSessionId,
+  describe: () => ({ title: `Title ${tabId}`, url: `https://${tabId}.test/` }),
+  run: async (action) => { ran.push(`${tabId}:${action}`); return { url: `https://${tabId}.test/` }; },
+});
+
+const resetRequests = (): void => {
+  posted.length = 0;
+  claims.length = 0;
+  grantClaims = true;
+  setShownBrowserTab(REPO, null);
+};
+
 describe('opening a page before any view exists', () => {
-  beforeEach(() => {
-    posted.length = 0;
-    claims.length = 0;
-    grantClaims = true;
-  });
+  beforeEach(resetRequests);
 
   afterEach(() => {
     while (cleanups.length > 0) cleanups.pop()?.();
@@ -63,6 +95,8 @@ describe('opening a page before any view exists', () => {
       setTimeout(() => {
         cleanups.push(registerBrowserController({
           tabId: 'tab-new',
+          directory: REPO,
+          ownerSessionId: null,
           describe: () => ({ title: '', url: '' }),
           run: async (action, parameters) => {
             ran.push({ action, parameters });
@@ -93,11 +127,7 @@ describe('opening a page before any view exists', () => {
     const opened: string[] = [];
     const ran: string[] = [];
     cleanups.push(registerBrowserOpener((url) => { opened.push(url); return 'tab-new'; }));
-    cleanups.push(registerBrowserController({
-      tabId: 'tab-1',
-      describe: () => ({ title: '', url: '' }),
-      run: async (action) => { ran.push(action); return {}; },
-    }));
+    cleanups.push(tab('tab-1', ran));
 
     emitOpen({ url: 'https://example.test' });
     await wait(50);
@@ -111,17 +141,13 @@ describe('opening a page before any view exists', () => {
 
   test('claims the request before touching a page', async () => {
     const ran: string[] = [];
-    cleanups.push(registerBrowserController({
-      tabId: 'tab-1',
-      describe: () => ({ title: '', url: '' }),
-      run: async (action) => { ran.push(action); return {}; },
-    }));
+    cleanups.push(tab('tab-1', ran));
 
-    listener?.({ type: 'browser-control-request', requestId: 'req-1', action: 'browser.click', parameters: { selector: 'button' } });
+    emit('browser.click', { selector: 'button' });
     await wait(50);
 
     expect(claims).toEqual(['req-1']);
-    expect(ran).toEqual(['browser.click']);
+    expect(ran).toEqual(['tab-1:browser.click']);
   });
 
   test('does not wait for a view when no layout was requested', async () => {
@@ -159,31 +185,17 @@ describe('opening a page before any view exists', () => {
 });
 
 describe('choosing the tab an action runs in', () => {
-  beforeEach(() => {
-    posted.length = 0;
-    claims.length = 0;
-    grantClaims = true;
-  });
+  beforeEach(resetRequests);
 
   afterEach(() => {
     while (cleanups.length > 0) cleanups.pop()?.();
   });
 
-  const tab = (tabId: string, ran: string[]) => registerBrowserController({
-    tabId,
-    describe: () => ({ title: `Title ${tabId}`, url: `https://${tabId}.test/` }),
-    run: async (action) => { ran.push(`${tabId}:${action}`); return { url: `https://${tabId}.test/` }; },
-  });
-
-  const emit = (action: string, parameters: Record<string, unknown>): void => {
-    listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters });
-  };
-
   test('runs in the tab the user sees, not the one that registered last', async () => {
     const ran: string[] = [];
     cleanups.push(tab('shown', ran));
     cleanups.push(tab('background', ran));
-    setShownBrowserTab('shown');
+    setShownBrowserTab(REPO, 'shown');
 
     emit('browser.click', { selector: 'button' });
     await wait(50);
@@ -196,10 +208,12 @@ describe('choosing the tab an action runs in', () => {
     cleanups.push(tab('shown', []));
     cleanups.push(registerBrowserController({
       tabId: 'background',
+      directory: REPO,
+      ownerSessionId: null,
       describe: () => ({ title: '', url: '' }),
       run: async (_action, parameters) => { seen.push(parameters); return {}; },
     }));
-    setShownBrowserTab('shown');
+    setShownBrowserTab(REPO, 'shown');
 
     emit('browser.click', { selector: 'button', tabId: 'background' });
     await wait(50);
@@ -210,7 +224,7 @@ describe('choosing the tab an action runs in', () => {
   test('lists every tab in a snapshot, marking the one the user sees', async () => {
     cleanups.push(tab('shown', []));
     cleanups.push(tab('background', []));
-    setShownBrowserTab('shown');
+    setShownBrowserTab(REPO, 'shown');
 
     emit('browser.snapshot', {});
     await wait(50);
@@ -218,8 +232,8 @@ describe('choosing the tab an action runs in', () => {
     expect(posted[0]?.data).toEqual({
       url: 'https://shown.test/',
       tabs: [
-        { id: 'shown', title: 'Title shown', url: 'https://shown.test/', active: true },
-        { id: 'background', title: 'Title background', url: 'https://background.test/', active: false },
+        { id: 'shown', title: 'Title shown', url: 'https://shown.test/', owner: 'user', active: true },
+        { id: 'background', title: 'Title background', url: 'https://background.test/', owner: 'user', active: false },
       ],
     });
   });
@@ -240,7 +254,7 @@ describe('choosing the tab an action runs in', () => {
     const ran: string[] = [];
     const opened: string[] = [];
     cleanups.push(tab('shown', ran));
-    setShownBrowserTab('shown');
+    setShownBrowserTab(REPO, 'shown');
     cleanups.push(registerBrowserOpener((url) => { opened.push(url); return 'agent-tab'; }));
 
     emit('browser.open', { url: 'https://example.test' });
@@ -265,36 +279,173 @@ describe('choosing the tab an action runs in', () => {
   });
 });
 
-describe('tabs that have not loaded their page yet', () => {
-  beforeEach(() => {
-    posted.length = 0;
-    claims.length = 0;
-    grantClaims = true;
-  });
+/**
+ * Regression coverage for https://github.com/openchamber/openchamber/issues/3313:
+ * two sessions sharing one browser panel must not read or drive each other's
+ * pages, and a page opened by a session in another project lands in that
+ * project.
+ */
+describe('tabs belong to the session that opened them', () => {
+  beforeEach(resetRequests);
 
   afterEach(() => {
     while (cleanups.length > 0) cleanups.pop()?.();
   });
 
-  const emit = (action: string, parameters: Parameters<Listener>[0]['parameters']): void => {
-    listener?.({ type: 'browser-control-request', requestId: 'req-1', action, parameters });
-  };
+  const sessionA: RequestContext = { directory: '/repo-a', sessionId: 'ses_a' };
+  const sessionB: RequestContext = { directory: '/repo-b', sessionId: 'ses_b' };
+
+  test('opens the tab with the calling session and its project', async () => {
+    const contexts: RequestContext[] = [];
+    cleanups.push(registerBrowserOpener((_url, context) => { contexts.push(context); return 'tab-a'; }));
+
+    emitOpen({ url: 'https://a.test' }, sessionA);
+    await wait(20);
+
+    expect(contexts).toEqual([sessionA]);
+  });
+
+  test("an action without tabId runs in the session's own tab, not the one on screen", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    cleanups.push(tab('tab-b', ran, { directory: '/repo-b', ownerSessionId: 'ses_b' }));
+    setShownBrowserTab('/repo-b', 'tab-b');
+
+    emit('browser.snapshot', {}, sessionA);
+    await wait(50);
+
+    expect(ran).toEqual(['tab-a:browser.snapshot']);
+  });
+
+  test('returns to the tab the session opened last', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a1', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    cleanups.push(registerBrowserOpener(() => 'tab-a2'));
+    emitOpen({ url: 'https://a2.test' }, sessionA);
+    await wait(20);
+    cleanups.push(tab('tab-a2', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    // A tab of the same session that registers later, as a restored one does
+    // when it wakes, does not take over.
+    cleanups.push(tab('tab-a3', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    posted.length = 0;
+
+    emit('browser.click', { selector: 'button' }, sessionA);
+    await wait(50);
+
+    expect(ran).toEqual(['tab-a2:browser.click']);
+  });
+
+  test("never drives another session's tab, and says why", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-b', ownerSessionId: 'ses_a' }));
+    setShownBrowserTab('/repo-b', 'tab-a');
+
+    emit('browser.click', { selector: 'button' }, sessionB);
+    await wait(600);
+
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('no browser tab of its own');
+    // Another session's tab in the caller's project is listed, so the agent
+    // can still use it when the user asks for it by name.
+    expect(posted[0]?.error).toContain('tab-a');
+  });
+
+  test("uses the user's tab on screen when the session has none of its own", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('mine', ran, { directory: '/repo-b' }));
+    setShownBrowserTab('/repo-b', 'mine');
+
+    emit('browser.snapshot', {}, sessionB);
+    // Past the head start a client holding the session's own tab gets.
+    await wait(600);
+
+    expect(ran).toEqual(['mine:browser.snapshot']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://mine.test/',
+      tabs: [{ id: 'mine', title: 'Title mine', url: 'https://mine.test/', owner: 'user', active: true }],
+    });
+  });
+
+  test("leaves the user's tab alone when it is in another project", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('mine', ran, { directory: '/repo-b' }));
+    setShownBrowserTab('/repo-b', 'mine');
+
+    emit('browser.click', { selector: 'button' }, sessionA);
+    await wait(600);
+
+    expect(ran).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    // Not offered as a target either.
+    expect(posted[0]?.error).not.toContain('mine');
+  });
+
+  test("lets a client holding the session's own tab claim before falling back to the user's tab", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    setShownBrowserTab('/repo-a', 'mine');
+
+    emit('browser.click', { selector: 'button' }, sessionA);
+    await wait(100);
+    expect(claims).toEqual([]);
+
+    await wait(500);
+    expect(claims).toEqual(['req-1']);
+    expect(ran).toEqual(['mine:browser.click']);
+  });
+
+  test("a request with no session stays out of another project's agent tab", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('elsewhere', ran, { directory: '/repo-c', ownerSessionId: 'ses_c' }));
+
+    emit('browser.click', { selector: 'button' });
+    await wait(50);
+
+    expect(ran).toEqual([]);
+    expect(claims).toEqual([]);
+  });
+
+  test('a named tab runs wherever it belongs, and the listing says who opened each', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    cleanups.push(tab('tab-b', ran, { directory: '/repo-a', ownerSessionId: 'ses_b' }));
+    cleanups.push(tab('elsewhere', ran, { directory: '/repo-c', ownerSessionId: 'ses_c' }));
+
+    emit('browser.snapshot', { tabId: 'tab-b' }, sessionA);
+    await wait(50);
+
+    expect(ran).toEqual(['tab-b:browser.snapshot']);
+    expect(posted[0]?.data).toEqual({
+      url: 'https://tab-b.test/',
+      tabs: [
+        { id: 'tab-a', title: 'Title tab-a', url: 'https://tab-a.test/', owner: 'you', active: true },
+        { id: 'tab-b', title: 'Title tab-b', url: 'https://tab-b.test/', owner: 'another session', active: false },
+      ],
+    });
+  });
+});
+
+describe('tabs that have not loaded their page yet', () => {
+  beforeEach(resetRequests);
+
+  afterEach(() => {
+    while (cleanups.length > 0) cleanups.pop()?.();
+  });
 
   /** A sleeping tab whose view mounts a moment after it is woken, as in the app. */
   const sleepingTab = (tabId: string, ran: string[], woken: string[]) => {
     let release = () => {};
     release = registerSleepingBrowserTab({
       tabId,
+      directory: REPO,
+      ownerSessionId: null,
       describe: () => ({ title: '', url: `https://${tabId}.test/` }),
       wake: () => {
         woken.push(tabId);
         setTimeout(() => {
           release();
-          cleanups.push(registerBrowserController({
-            tabId,
-            describe: () => ({ title: `Title ${tabId}`, url: `https://${tabId}.test/` }),
-            run: async (action) => { ran.push(`${tabId}:${action}`); return { url: `https://${tabId}.test/` }; },
-          }));
+          cleanups.push(tab(tabId, ran));
         }, 80);
       },
     });
@@ -305,11 +456,13 @@ describe('tabs that have not loaded their page yet', () => {
     const woken: string[] = [];
     cleanups.push(registerBrowserController({
       tabId: 'loaded',
+      directory: REPO,
+      ownerSessionId: null,
       describe: () => ({ title: 'Loaded', url: 'https://loaded.test/' }),
       run: async () => ({ url: 'https://loaded.test/' }),
     }));
     cleanups.push(sleepingTab('asleep', [], woken));
-    setShownBrowserTab('loaded');
+    setShownBrowserTab(REPO, 'loaded');
 
     emit('browser.snapshot', {});
     await wait(50);
@@ -318,8 +471,8 @@ describe('tabs that have not loaded their page yet', () => {
     expect(posted[0]?.data).toEqual({
       url: 'https://loaded.test/',
       tabs: [
-        { id: 'loaded', title: 'Loaded', url: 'https://loaded.test/', active: true },
-        { id: 'asleep', title: '', url: 'https://asleep.test/', active: false },
+        { id: 'loaded', title: 'Loaded', url: 'https://loaded.test/', owner: 'user', active: true },
+        { id: 'asleep', title: '', url: 'https://asleep.test/', owner: 'user', active: false },
       ],
     });
   });
@@ -346,7 +499,7 @@ describe('tabs that have not loaded their page yet', () => {
     const ran: string[] = [];
     const woken: string[] = [];
     cleanups.push(sleepingTab('shown-asleep', ran, woken));
-    setShownBrowserTab('shown-asleep');
+    setShownBrowserTab(REPO, 'shown-asleep');
 
     emit('browser.snapshot', {});
     await wait(300);
@@ -358,6 +511,8 @@ describe('tabs that have not loaded their page yet', () => {
   test('says so when a woken tab never gets a view', async () => {
     cleanups.push(registerSleepingBrowserTab({
       tabId: 'stuck',
+      directory: REPO,
+      ownerSessionId: null,
       describe: () => ({ title: '', url: '' }),
       wake: () => {},
     }));

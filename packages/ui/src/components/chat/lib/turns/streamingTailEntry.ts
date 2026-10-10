@@ -27,6 +27,12 @@ type BuildLiveStreamingEntryOptions = {
     mergeHiddenUserTurns?: boolean;
 };
 
+// The record with its live parts, kept per record so an unchanged pair is the
+// same object on the next publish. The display normalizer memoizes by object
+// identity; a fresh spread every 100 ms publish normalized every assistant
+// message of the turn again, not only the one that streamed.
+const liveMessageByRecord = new WeakMap<ChatMessageEntry, { parts: Part[]; message: ChatMessageEntry }>();
+
 const withLiveParts = (
     message: ChatMessageEntry,
     livePartsByMessageId: Readonly<Record<string, Part[]>>,
@@ -38,10 +44,11 @@ const withLiveParts = (
         return message;
     }
 
-    return getNormalizedMessageForDisplay({
-        ...message,
-        parts: liveParts,
-    });
+    const remembered = liveMessageByRecord.get(message);
+    if (remembered?.parts === liveParts) return getNormalizedMessageForDisplay(remembered.message);
+    const merged = { ...message, parts: liveParts };
+    liveMessageByRecord.set(message, { parts: liveParts, message: merged });
+    return getNormalizedMessageForDisplay(merged);
 };
 
 export const buildLiveStreamingEntry = <TEntry extends StreamingTailEntry>(

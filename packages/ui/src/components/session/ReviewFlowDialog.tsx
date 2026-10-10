@@ -50,7 +50,7 @@ const getInitialExecution = (params: {
   autoReview: false,
 });
 
-export function ReviewFlowDialog({
+function ReviewFlowDialogView({
   open,
   onOpenChange,
   projectDirectory,
@@ -224,3 +224,6 @@ export function ReviewFlowDialog({
     </Dialog>
   );
 }
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const ReviewFlowDialog = React.memo(ReviewFlowDialogView);

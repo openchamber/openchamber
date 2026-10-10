@@ -40,16 +40,29 @@ const mix32 = (hash: number): number => {
  * undiagnosable in the field. Two multiplies per character are free next to
  * Shiki tokenization.
  */
-export const contentFingerprint = (value: string): string => {
-  let h1 = 0x811c9dc5;
-  let h2 = 0xc2b2ae35;
-  for (let i = 0; i < value.length; i += 1) {
+export const contentFingerprint = (value: string): string => fingerprintKey(extendFingerprint(EMPTY_FINGERPRINT, value));
+
+/**
+ * Running state of `contentFingerprint`, so text that only grows (a streamed
+ * block) is hashed once per added character instead of once per render.
+ */
+export type FingerprintState = { readonly length: number; readonly h1: number; readonly h2: number };
+
+export const EMPTY_FINGERPRINT: FingerprintState = { length: 0, h1: 0x811c9dc5, h2: 0xc2b2ae35 };
+
+/** State after hashing `value.slice(from)` on top of `state`. */
+export const extendFingerprint = (state: FingerprintState, value: string, from = 0): FingerprintState => {
+  let { h1, h2 } = state;
+  for (let i = from; i < value.length; i += 1) {
     const code = value.charCodeAt(i);
     h1 = Math.imul(h1 ^ code, 0x01000193);
     h2 = Math.imul(h2 ^ code, 0x27220a95);
   }
-  return `${value.length.toString(36)}_${mix32(h1).toString(36)}_${mix32(h2).toString(36)}`;
+  return { length: state.length + value.length - from, h1, h2 };
 };
+
+export const fingerprintKey = (state: FingerprintState): string =>
+  `${state.length.toString(36)}_${mix32(state.h1).toString(36)}_${mix32(state.h2).toString(36)}`;
 
 /** Approximate byte cost of token-run lines without JSON.stringify. */
 export const estimateTokenRunsBytes = (

@@ -29,6 +29,20 @@ describe('browser control broker', () => {
     expect(await inflight).toEqual({ url: 'http://localhost:5173/' });
   });
 
+  test('sends the calling session and its project with the request', async () => {
+    const { broker, emitted } = createBroker();
+    const first = broker.request('browser.snapshot', {}, { context: { directory: '/a', sessionId: 'ses_a' } });
+    const second = broker.request('browser.snapshot', {});
+
+    expect(emitted[0]?.context).toEqual({ directory: '/a', sessionId: 'ses_a' });
+    // A caller with no session, such as the CLI, is sent as unknown.
+    expect(emitted[1]?.context).toEqual({ directory: null, sessionId: null });
+
+    broker.resolve(emitted[0].requestId, { ok: true, data: null });
+    broker.resolve(emitted[1].requestId, { ok: true, data: null });
+    await Promise.all([first, second]);
+  });
+
   test('fails fast when no client is connected instead of blocking', async () => {
     const { broker } = createBroker({ listeners: 0 });
     await expect(broker.request('browser.open', { url: 'http://a/' })).rejects.toThrow(BrowserControlError);

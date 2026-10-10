@@ -362,6 +362,7 @@ mock.module('@/stores/useSourceControlAuthStore', () => ({
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 mock.module('@/lib/i18n', () => ({ useI18n: () => ({ t: translate }) }));
 mock.module('@/lib/url', () => ({ openExternalUrl: async () => undefined }));
+mock.module('@/lib/worktrees/worktreeBootstrap', () => ({ waitForWorktreeGitReady: async () => undefined }));
 mock.module('@/lib/utils', () => ({
   cn: (...values: Array<string | false | null | undefined>) => values.filter(Boolean).join(' '),
 }));

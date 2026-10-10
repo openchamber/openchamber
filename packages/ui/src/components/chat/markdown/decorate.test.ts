@@ -2,7 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import { marked } from 'marked';
 import { cloneMessageImageExportSource } from '../message/imageExport';
-import { attachMarkdownInteractions, decorateMarkdown, stabilizeMarkdownTableWidths, type DecorateContext } from './decorate';
+import {
+  attachMarkdownInteractions,
+  decorateMarkdown,
+  layoutReservedCodeLines,
+  RESERVED_CODE_GUTTER_SELECTOR,
+  stabilizeMarkdownTableWidths,
+  type DecorateContext,
+} from './decorate';
 
 const win = new Window({ url: 'https://openchamber.test/' });
 Object.assign(globalThis, {
@@ -260,5 +267,28 @@ describe('Markdown selection copy', () => {
 
   test('copies the visible text when the user chose plain text', async () => {
     expect(await copySelection(() => 'plain')).toEqual(['Setup\n\n• Install playwright']);
+  });
+});
+
+describe('Deferred code line numbers', () => {
+  const highlighted = '<pre data-md-lang="ts"><code><span class="line"><span>const a = 1;</span></span>\n<span class="line"><span>const b = 2;</span></span>\n<span class="line"></span></code></pre>';
+
+  test('filling in the numbers later gives the DOM an immediate pass builds', () => {
+    const immediate = document.createElement('div');
+    immediate.innerHTML = highlighted;
+    decorateMarkdown(immediate, context);
+
+    const deferred = document.createElement('div');
+    deferred.innerHTML = highlighted;
+    decorateMarkdown(deferred, { ...context, deferCodeLineNumberSync: true });
+    const pre = deferred.querySelector<HTMLPreElement>(RESERVED_CODE_GUTTER_SELECTOR);
+    if (!pre) throw new Error('the deferred pass must reserve the gutter');
+    expect(deferred.querySelector('[data-md-code-line-number]')).toBeNull();
+
+    layoutReservedCodeLines(pre, context);
+
+    expect(deferred.querySelector(RESERVED_CODE_GUTTER_SELECTOR)).toBeNull();
+    // Attribute order may differ; the nodes must not.
+    expect(deferred.isEqualNode(immediate)).toBe(true);
   });
 });

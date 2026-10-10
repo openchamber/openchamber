@@ -35,6 +35,8 @@ interface SyncActionsProps {
   trackingBranch?: string | null;
   /** Changes to tracked files; untracked files do not block a rebase. */
   hasUncommittedChanges?: boolean;
+  /** A contributor's fork worktree: pushing opens a choice of where to. */
+  choosesPushDestination?: boolean;
 }
 
 export const SyncActions: React.FC<SyncActionsProps> = ({
@@ -54,6 +56,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   behindCount = 0,
   trackingRemoteName,
   hasUncommittedChanges = false,
+  choosesPushDestination = false,
 }) => {
   const { t } = useI18n();
   const skipRemoteSelectRef = React.useRef(false);
@@ -71,12 +74,15 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   // the sync button shows. A branch without upstream can always be published.
   const isPushDisabled = detached || (hasTracking && aheadCount === 0);
   const hasKnownSyncWork = aheadCount > 0 || behindCount > 0;
+  // "Publish" on a fresh contributor PR reads as unpublished work; this one
+  // only ever pushes to a destination picked in the dialog.
+  const publishLabel = t(choosesPushDestination ? 'gitView.publish.pushTo' : 'gitView.publish.title');
   const primaryLabel = [
-    t(publish ? 'gitView.publish.title' : 'gitView.sync.sync'),
+    publish ? publishLabel : t('gitView.sync.sync'),
     behindCount > 0 ? `↓${behindCount}` : null,
     aheadCount > 0 ? `↑${aheadCount}` : null,
   ].filter(Boolean).join(' ');
-  const tooltipLabel = detached ? t('gitView.publish.detached') : publish ? t('gitView.publish.title') : blocksRebaseSync
+  const tooltipLabel = detached ? t('gitView.publish.detached') : publish ? publishLabel : blocksRebaseSync
     ? t('gitView.sync.commitOrStashTooltip')
     : trackingRemote
     ? hasKnownSyncWork
@@ -109,7 +115,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                 'inline-flex h-7 items-center gap-1.5 px-2 typography-ui-label font-medium text-foreground',
                 'transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
               )}
-              aria-label={t(publish ? 'gitView.publish.title' : 'gitView.sync.syncChanges')}
+              aria-label={publish ? publishLabel : t('gitView.sync.syncChanges')}
             >
               {syncAction === 'sync' || syncAction === 'publish' ? (
                 <Icon name="loader-4" className="size-4 animate-spin" />
@@ -142,7 +148,7 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
           <DropdownMenuItem disabled={isPushDisabled} onSelect={onPublish}>
             <Icon name="arrow-up" className="size-4 text-muted-foreground" />
             {/* A branch with an upstream is pushed there; only a new one is published. */}
-            {t(hasTracking ? 'gitView.sync.push' : 'gitView.publish.title')}
+            {hasTracking ? t('gitView.sync.push') : publishLabel}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={isPullDisabled}

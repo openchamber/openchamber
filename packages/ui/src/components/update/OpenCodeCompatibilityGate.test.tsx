@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
 import { OpenCodeCompatibilityGate } from './OpenCodeCompatibilityGate';
+import { prefetchOpenCodeCompatibility } from './openCodeCompatibilityCheck';
 import { recoverOpenCode } from '@/lib/opencode/compatibility';
 
 let root: Root;
@@ -64,12 +65,12 @@ const render = () => act(async () => {
   root.render(<I18nProvider><OpenCodeCompatibilityGate><Application /></OpenCodeCompatibilityGate></I18nProvider>);
 });
 
-test('v1 recovery is visible without mounting application bootstrap or waiting for retries', async () => {
+test('v1 recovery replaces the application once the check confirms an incompatible OpenCode', async () => {
   const splash = document.createElement('div');
   splash.id = 'initial-loading';
   document.body.append(splash);
   await render();
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('OpenCode v2 required');
   expect(host.textContent).toContain('1.18.30');
   expect(host.querySelector('a')?.href).toBe('https://opencode.ai/download');
@@ -78,20 +79,32 @@ test('v1 recovery is visible without mounting application bootstrap or waiting f
   expect(requests[0]).toContain('/api/opencode/compatibility');
 });
 
-test('bootstrap stays unmounted while checking, and starts once for v2', async () => {
+test('the application mounts while the check runs and stays mounted for v2', async () => {
   let complete: (response: Response) => void = () => { throw new Error('Missing request'); };
   respond = () => new Promise<Response>((resolve) => { complete = resolve; });
   await render();
-  expect(mounts).toBe(0);
-  const splash = host.firstElementChild;
-  expect(splash?.classList.contains('fixed')).toBe(true);
-  expect(splash?.classList.contains('inset-0')).toBe(true);
-  expect(splash?.className).toContain('--splash-background');
-  expect(splash?.querySelector('svg')?.getAttribute('width')).toBe('120');
-  expect(host.querySelectorAll('svg')).toHaveLength(1);
+  expect(mounts).toBe(1);
+  expect(host.textContent).toContain('Application mounted');
   await act(async () => complete(version('2.0.14')));
   expect(mounts).toBe(1);
   expect(host.textContent).toContain('Application mounted');
+});
+
+test('a check prefetched at page load answers the gate without a second request', async () => {
+  prefetchOpenCodeCompatibility();
+  await render();
+  expect(requests).toHaveLength(1);
+  expect(host.textContent).toContain('OpenCode v2 required');
+});
+
+test('a prefetched check that failed before sign-in is asked again when the gate mounts', async () => {
+  respond = async () => requests.length === 1 ? new Response(null, { status: 401 }) : version('1.18.30');
+  prefetchOpenCodeCompatibility();
+  await render();
+  // The 401 also starts the app's sign-in probe (/auth/session); only the
+  // compatibility requests belong to the gate.
+  expect(requests.filter((url) => url.includes('/api/opencode/compatibility'))).toHaveLength(2);
+  expect(host.textContent).toContain('OpenCode v2 required');
 });
 
 test('an unavailable compatibility endpoint leaves the existing connection recovery in charge', async () => {
@@ -116,7 +129,7 @@ test('a failed restart remains a failure', async () => {
   await expect(recoverOpenCode()).rejects.toThrow('OpenCode recovery failed');
 });
 
-test('a stale compatibility result cannot mount the app after a runtime switch', async () => {
+test('a stale compatible result cannot dismiss recovery after a runtime switch', async () => {
   const replies: Array<(response: Response) => void> = [];
   respond = () => new Promise<Response>((resolve) => { replies.push(resolve); });
   await render();
@@ -126,7 +139,7 @@ test('a stale compatibility result cannot mount the app after a runtime switch',
   expect(replies).toHaveLength(2);
   await act(async () => replies[1](version('1.18.30')));
   await act(async () => replies[0](version('2.0.14')));
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('OpenCode v2 required');
 });
 
@@ -155,7 +168,7 @@ test('failed installation keeps recovery visible and makes retry available', asy
   if (!button) throw new Error('Missing update action');
   respond = async () => new Response(null, { status: 500 });
   await act(async () => button.click());
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(host.querySelector('[role="alert"]')).not.toBeNull();
   expect(button.disabled).toBe(false);
 });
@@ -178,7 +191,7 @@ test('checking again refreshes v1 without an error, restart, reload, or applicat
   expect(requests).toHaveLength(2);
   expect(requests.every(url => url.includes('/api/opencode/compatibility'))).toBe(true);
   expect(reloads).toBe(0);
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
 });
 
 test('failed or unavailable checks preserve known v1; a successful v1 check clears the error', async () => {
@@ -188,7 +201,7 @@ test('failed or unavailable checks preserve known v1; a successful v1 check clea
     await checkAgain();
     expect(host.querySelector('[role="alert"]')).not.toBeNull();
     expect(host.textContent).toContain('1.18.30');
-    expect(mounts).toBe(0);
+    expect(host.textContent).not.toContain('Application mounted');
   }
   respond = async () => version('1.18.31');
   await checkAgain();
@@ -205,7 +218,7 @@ test('checking again with v2 reloads only after the restart completes', async ()
   await checkAgain();
   expect(requests.at(-1)).toContain('/api/config/reload');
   expect(reloads).toBe(0);
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   await act(async () => complete(Response.json({ success: true })));
   expect(reloads).toBe(1);
 });
@@ -220,17 +233,17 @@ test('a check again result from the previous runtime cannot replace the current 
   await act(async () => complete(version('1.18.31')));
   expect(host.textContent).toContain('1.18.32');
   expect(host.textContent).not.toContain('1.18.31');
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
 });
 
-test('desktop recovery keeps the instance switcher reachable before app bootstrap', async () => {
+test('desktop recovery keeps the instance switcher reachable', async () => {
   Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { configurable: true, value: { runtime: 'electron' } });
   await render();
   const button = host.querySelector<HTMLButtonElement>('[data-oc-host-switcher]');
   expect(button?.textContent).toContain('Switch instance');
   expect(button?.disabled).toBe(false);
   expect(button?.closest('.app-region-no-drag')).not.toBeNull();
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
 });
 
 test('browser recovery does not offer the desktop instance switcher', async () => {
@@ -247,7 +260,7 @@ test('a 2.x below the minimum asks for an update to that minimum, not for v2', a
     canInstall: true,
   });
   await render();
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('Update OpenCode');
   expect(host.textContent).toContain('requires OpenCode 2.0.15 or newer');
   expect(host.textContent).toContain('2.0.15+');
@@ -279,7 +292,7 @@ test('unconfirmed desktop readiness keeps the authoritative compatibility check'
   desktopReadiness(async () => false);
   await render();
   expect(requests).toHaveLength(1);
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('OpenCode v2 required');
 });
 
@@ -287,18 +300,18 @@ test('a failed native readiness read falls back to the compatibility endpoint', 
   desktopReadiness(async () => { throw new Error('Older desktop host'); });
   await render();
   expect(requests).toHaveLength(1);
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
 });
 
 test('switching to a remote runtime cannot reuse an in-flight local readiness verdict', async () => {
   let complete: (ready: boolean) => void = () => { throw new Error('Missing IPC'); };
   desktopReadiness(() => new Promise<boolean>(resolve => { complete = resolve; }));
   await render();
-  expect(mounts).toBe(0);
+  expect(mounts).toBe(1);
   Object.defineProperty(window, '__OPENCHAMBER_API_BASE_URL__', { value: 'https://remote.example' });
   await act(async () => window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed')));
   await act(async () => complete(true));
-  expect(mounts).toBe(0);
+  expect(host.textContent).not.toContain('Application mounted');
   expect(requests).toHaveLength(1);
   expect(host.textContent).toContain('OpenCode v2 required');
 });

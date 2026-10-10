@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { getBoundSourceControlReadContexts } from './identity';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
@@ -34,7 +35,11 @@ export class RepositoryBindingOwner {
   private resetListeners = new Set<() => void>();
   private trimScheduled = false;
 
-  constructor(private runtimeKey = getRuntimeKey, private idleLimit = 64) {}
+  constructor(
+    private runtimeKey = getRuntimeKey,
+    private idleLimit = 64,
+    private waitForRepository: (directory: string) => Promise<void> = waitForWorktreeGitReady,
+  ) {}
 
   scope(directory: string): BindingScope {
     return { runtimeKey: this.runtimeKey(), directory, generation: this.generation };
@@ -158,7 +163,11 @@ export class RepositoryBindingOwner {
     if (entry.pending) return entry.pending;
     if (!force && entry.state.status !== 'idle' && entry.state.status !== 'stale') return Promise.resolve(entry.state);
     const revision = entry.revision;
-    const pending = Promise.resolve().then(() => {
+    const pending = Promise.resolve().then(async () => {
+      if (!this.current(scope)) return null;
+      // A worktree still being checked out is not a repository yet; reading it
+      // then fails, and the failure would stay until a manual retry.
+      await this.waitForRepository(scope.directory);
       if (!this.current(scope)) return null;
       return api.repositoryBinding(scope.directory);
     }).then((read) => {

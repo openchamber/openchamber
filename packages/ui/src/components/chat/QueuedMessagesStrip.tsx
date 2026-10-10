@@ -1,5 +1,4 @@
 import React, { memo } from 'react';
-import { AnimatePresence } from 'motion/react';
 import {
     DndContext,
     MouseSensor,
@@ -19,29 +18,28 @@ import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { Icon } from "@/components/icon/Icon";
+import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
-import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { withAttachmentChips } from './message/parts/attachmentCitationChips';
 
-interface QueuedMessageChipProps {
+const ROW_ACTION_CLASS = 'shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground';
+
+interface QueuedMessageRowProps {
     message: QueuedMessage;
     target: MessageQueueTarget;
     onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
+    /** The leading slot: the queue icon for a lone message, a drag handle in the list. */
+    lead: React.ReactNode;
 }
 
-const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessageChipProps) => {
+const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, onEdit, onSend, lead }) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: message.id });
-
     const firstLine = getQueuedMessagePreview(message);
-
     const attachmentCount = message.attachments?.length ?? 0;
     // `[image-1.png]` citations of the message's own files read as file chips.
     const attachmentFilenames = React.useMemo(
@@ -50,22 +48,9 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
     );
 
     return (
-        <div
-            ref={setNodeRef}
-            // Translate only (no scaleX/scaleY) so the lifted row keeps its size.
-            style={{ transform: CSS.Translate.toString(transform), transition }}
-            className={cn('flex min-w-0 items-center gap-2 py-1', isDragging && 'z-10 opacity-60')}
-        >
-            <button
-                type="button"
-                {...attributes}
-                {...listeners}
-                className="flex flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
-                aria-label={t('chat.queuedMessage.reorderAria')}
-            >
-                <Icon name="draggable" className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
+        <>
+            {lead}
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                 {firstLine ? withAttachmentChips(firstLine, attachmentFilenames, `queued-${message.id}`) : t('chat.queuedMessage.empty')}
                 {attachmentCount > 0 && (
                     <span className="ml-1 text-muted-foreground">{t('chat.queuedMessage.attachments', { count: attachmentCount })}</span>
@@ -75,41 +60,79 @@ const QueuedMessageChip = memo(({ message, target, onEdit, onSend }: QueuedMessa
                 <>
                     <Button
                         type="button"
-                        variant="secondary"
-                        size="xs"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => onEdit(message)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        className={ROW_ACTION_CLASS}
                     >
-                        <Icon name="edit" className="h-3 w-3" aria-hidden="true" />
+                        <Icon name="edit" className="size-3.5" aria-hidden="true" />
                         {t('chat.queuedMessage.edit')}
                     </Button>
                     <Button
                         type="button"
-                        variant="secondary"
-                        size="xs"
+                        variant="ghost"
+                        size="sm"
                         onClick={() => onSend(message)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        className={ROW_ACTION_CLASS}
                     >
-                        <Icon name="send-plane" className="h-3 w-3" aria-hidden="true" />
+                        <Icon name="send-plane" className="size-3.5" aria-hidden="true" />
                         {t('chat.queuedMessage.send')}
                     </Button>
                 </>
             ) : null}
-            <button
+            <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => removeFromQueue(target, message.id)}
-                className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
+                onMouseDown={(event) => event.preventDefault()}
+                title={t('chat.queuedMessage.removeAria')}
                 aria-label={t('chat.queuedMessage.removeAria')}
+                className={ROW_ACTION_CLASS}
             >
-                <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-            </button>
+                <Icon name="close" className="size-4" aria-hidden="true" />
+            </Button>
+        </>
+    );
+};
+
+const ROW_CLASS = 'flex h-10 min-w-0 items-center gap-2 pl-3 pr-1.5';
+
+const SortableQueuedMessageRow = memo((props: Omit<QueuedMessageRowProps, 'lead'>) => {
+    const { t } = useI18n();
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.message.id });
+
+    return (
+        <div
+            ref={setNodeRef}
+            // Translate only (no scaleX/scaleY) so the lifted row keeps its size.
+            style={{ transform: CSS.Translate.toString(transform), transition }}
+            className={cn(ROW_CLASS, isDragging && 'relative z-10 opacity-60')}
+        >
+            <QueuedMessageRow
+                {...props}
+                lead={(
+                    <button
+                        type="button"
+                        {...attributes}
+                        {...listeners}
+                        className="flex size-3.5 flex-shrink-0 cursor-grab touch-none select-none items-center justify-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
+                        aria-label={t('chat.queuedMessage.reorderAria')}
+                    >
+                        <Icon name="draggable" className="size-3.5" aria-hidden="true" />
+                    </button>
+                )}
+            />
         </div>
     );
 });
 
-QueuedMessageChip.displayName = 'QueuedMessageChip';
+SortableQueuedMessageRow.displayName = 'SortableQueuedMessageRow';
 
-interface QueuedMessageChipsProps {
+interface QueuedMessagesStripProps {
     target: MessageQueueTarget | null;
-    hidden?: boolean;
     /** The message was taken from the queue in full; the composer restores it. */
     onEditMessage: (message: QueuedMessage) => void;
     onSendMessage: (messageId: string) => void;
@@ -117,14 +140,18 @@ interface QueuedMessageChipsProps {
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
-export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
+/**
+ * Messages waiting for the running turn, as a top row of the composer next to
+ * the background commands. One message is its own row; several collapse into
+ * a count that expands in place into a reorderable list.
+ */
+export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage }: QueuedMessagesStripProps) => {
     const { t } = useI18n();
     // One shared preference, so the list stays open (or closed) across
     // session switches instead of resetting with the queue key.
-    const collapsed = !useUIStore((state) => state.messageQueueExpanded);
+    const expanded = useUIStore((state) => state.messageQueueExpanded);
     const setMessageQueueExpanded = useUIStore((state) => state.setMessageQueueExpanded);
-    const bodyId = React.useId();
-    const bodyRef = React.useRef<HTMLDivElement | null>(null);
+    const listId = React.useId();
     const queueKey = target ? getMessageQueueKey(target) : null;
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
@@ -137,7 +164,6 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
-    const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, !hidden && !collapsed && queuedMessages.length > 0, 168 + 48);
 
     const sensors = useSensors(
         // Desktop: drag after a small move so other clicks still register.
@@ -156,7 +182,7 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
         if (!target) return;
 
         // The full message (attachments included) comes back from the queue's
-        // owner; the chip itself only knows the summary.
+        // owner; the row itself only knows the summary.
         void popToInput(target, message.id).then((popped) => {
             if (!popped) return;
             if (popped.attachments && popped.attachments.length > 0) {
@@ -174,27 +200,44 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    const visible = !hidden && queuedMessages.length > 0;
+    if (!target || queuedMessages.length === 0) return null;
 
+    if (queuedMessages.length === 1) {
+        return (
+            <div role="group" className={cn(ROW_CLASS, 'border-b border-border/60')} aria-label={t('chat.queuedMessage.title')}>
+                <QueuedMessageRow
+                    message={queuedMessages[0]}
+                    target={target}
+                    onEdit={handleEdit}
+                    onSend={handleSend}
+                    lead={<Icon name="time" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+                />
+            </div>
+        );
+    }
+
+    // The whole header toggles the list, as the background commands header does.
     return (
-        <AnimatePresence>
-        {visible && target ? (
-        <ComposerFloatingPanel key="queue" role="region" ariaLabel={t('chat.queuedMessage.title')} compact={collapsed} header={
+        <div role="group" className="border-b border-border/60" aria-label={t('chat.queuedMessage.title')}>
+            <div className="flex h-10 items-center pl-3 pr-3">
                 <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setMessageQueueExpanded(collapsed)}
-                    aria-expanded={!collapsed}
-                    aria-controls={collapsed ? undefined : bodyId}
-                    className="min-w-0 flex-1 shrink justify-start px-0 normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+                    onClick={() => setMessageQueueExpanded(!expanded)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    aria-expanded={expanded}
+                    aria-controls={expanded ? listId : undefined}
+                    className="min-w-0 flex-1 shrink justify-start gap-2 px-0 text-sm font-normal normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
                 >
                     <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
-                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 truncate">{t('chat.queuedMessage.title')} {queuedMessages.length}</span>
+                    <span className="min-w-0 flex-1 truncate text-left">
+                        {t('chat.queuedMessage.title')} {queuedMessages.length}
+                    </span>
+                    <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
                 </Button>
-        }>
-            {!collapsed && (
+            </div>
+            {expanded ? (
                 <DndContext
                     sensors={sensors}
                     collisionDetection={closestCenter}
@@ -204,14 +247,11 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
                         items={queuedMessages.map((m) => m.id)}
                         strategy={verticalListSortingStrategy}
                     >
-                        <div
-                            ref={bodyRef}
-                            id={bodyId}
-                            className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto overscroll-contain"
-                            style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(72, availableMaxHeight - 48) }}
-                        >
+                        {/* Four rows, then the list scrolls, so a long queue
+                            cannot push the editor off a short screen. */}
+                        <div id={listId} className="max-h-40 overflow-y-auto overscroll-contain">
                             {queuedMessages.map((message) => (
-                                <QueuedMessageChip
+                                <SortableQueuedMessageRow
                                     key={message.id}
                                     message={message}
                                     target={target}
@@ -222,11 +262,9 @@ export const QueuedMessageChips = memo(({ target, hidden = false, onEditMessage,
                         </div>
                     </SortableContext>
                 </DndContext>
-            )}
-        </ComposerFloatingPanel>
-        ) : null}
-        </AnimatePresence>
+            ) : null}
+        </div>
     );
 });
 
-QueuedMessageChips.displayName = 'QueuedMessageChips';
+QueuedMessagesStrip.displayName = 'QueuedMessagesStrip';

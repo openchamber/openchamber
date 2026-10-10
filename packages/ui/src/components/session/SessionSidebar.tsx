@@ -21,6 +21,7 @@ import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { SidebarHeader } from './sidebar/shell/SidebarHeader';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
+import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -82,6 +83,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const { t } = useI18n();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  const openSessionSearch = React.useCallback(() => setIsSessionSearchOpen(true), []);
+  // The field and its query go together: once the field is hidden, a query
+  // still filtering the list would have no place to be cleared from.
   const resetSessionSearch = React.useCallback(() => {
     setSessionSearchQuery('');
     setIsSessionSearchOpen(false);
@@ -134,9 +138,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const toggleHelpDialog = useUIStore((state) => state.toggleHelpDialog);
   const setAboutDialogOpen = useUIStore((state) => state.setAboutDialogOpen);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
-  const setScheduledTasksDialogOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
-  const setArchivePageOpen = useUIStore((state) => state.setArchivePageOpen);
-  const setUsageStatsPageOpen = useUIStore((state) => state.setUsageStatsPageOpen);
   const setWorktreesPageProjectId = useUIStore((state) => state.setWorktreesPageProjectId);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
 
@@ -151,7 +152,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   useSessionSearchEffects({
     enabled: isVisible,
     isSessionSearchOpen,
-    setIsSessionSearchOpen,
+    openSessionSearch,
+    closeSessionSearch: resetSessionSearch,
     sessionSearchInputRef,
     sessionSearchContainerRef,
   });
@@ -527,12 +529,10 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   );
   const projectView = useSessionProjectViewState({ isVSCode, projects: sortedProjects });
 
+  // VS Code has no Archive page: its archived sessions sit inline behind the header toggle.
   const searchEmptyState = React.useMemo(() => (
-    <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">{t('sessions.sidebar.empty.noMatches.title')}</p>
-      <p className="typography-meta mt-1">{t('sessions.sidebar.empty.noMatches.description')}</p>
-    </div>
-  ), [t]);
+    <SidebarSearchEmptyState query={sessionSearchQuery} showArchive={!isVSCode} resetSessionSearch={resetSessionSearch} />
+  ), [isVSCode, resetSessionSearch, sessionSearchQuery]);
 
   // Web/desktop route archived sessions to the Archive page; only the VS Code
   // compact webview keeps inline archived buckets behind its toggle.
@@ -652,20 +652,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         showProjectDisplayControls={!isVSCode}
         showRecentControls={!isVSCode}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        onOpenScheduled={() => {
-          if (mobileVariant) setSessionSwitcherOpen(false);
-          setScheduledTasksDialogOpen(true);
-        }}
-        onOpenArchive={() => {
-          if (mobileVariant) setSessionSwitcherOpen(false);
-          setArchivePageOpen(true);
-        }}
         // A desktop page: phones have their own shell, VS Code no source pickers.
-        onOpenSourceBoard={mobileVariant || isVSCode ? undefined : () => useUIStore.getState().setSourceBoardOpen(true)}
+        showSourceBoard={!mobileVariant && !isVSCode}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
         isSessionSearchOpen={isSessionSearchOpen}
-        setIsSessionSearchOpen={setIsSessionSearchOpen}
+        openSessionSearch={openSessionSearch}
+        closeSessionSearch={resetSessionSearch}
         sessionSearchInputRef={sessionSearchInputRef}
         sessionSearchQuery={sessionSearchQuery}
         setSessionSearchQuery={setSessionSearchQuery}
@@ -738,7 +731,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
 
       <SidebarFooter
         onOpenSettings={handleOpenSettings}
-        onOpenUsage={() => setUsageStatsPageOpen(!useUIStore.getState().isUsageStatsPageOpen)}
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}

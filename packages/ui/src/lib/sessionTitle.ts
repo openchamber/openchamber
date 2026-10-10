@@ -111,7 +111,6 @@ export const generatedSessionTitleSchema = z.object({ text: z.string().trim().mi
 
 export async function generateSessionTitle(input: {
   turns: readonly TitleTurn[];
-  sessionID: string;
   directory: string;
   signal: AbortSignal;
 }): Promise<string> {
@@ -125,7 +124,6 @@ export async function generateSessionTitle(input: {
       prompt: formatSessionTitleContext(input.turns),
       system: TITLE_SYSTEM_PROMPT,
       directory: input.directory,
-      sessionID: input.sessionID,
       preferredProviderID: last.assistant.info.providerID,
       preferredModelID: last.assistant.info.modelID,
       // Read by servers before 2026-10; newer ones stay on the named provider anyway.

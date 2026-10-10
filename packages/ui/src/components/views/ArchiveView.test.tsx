@@ -109,7 +109,7 @@ test('the mobile layout names each row\'s project, offers Restore without Delete
   });
   let left = 0;
   await act(async () => root.render(
-    <I18nProvider><ArchiveSessionsView open layout="mobile" onLeave={() => { left += 1; }} /></I18nProvider>,
+    <I18nProvider><ArchiveSessionsView layout="mobile" onLeave={() => { left += 1; }} /></I18nProvider>,
   ));
   expect(document.querySelector('.group\\/dir')).toBeNull();
   expect(document.querySelector('[aria-label="Restore Phone chat"]')).not.toBeNull();
@@ -119,6 +119,30 @@ test('the mobile layout names each row\'s project, offers Restore without Delete
   expect(row.textContent).toContain('workspace');
   await act(async () => { row.click(); });
   expect(left).toBe(1);
+});
+
+test('the page opens with the query the sidebar handed over, and a plain open starts fresh', async () => {
+  useGlobalSessionsStore.setState({
+    archivedSessions: [session('ses_a', 'Release notes'), session('ses_b', 'Login fix')],
+    activeSessions: [],
+    status: 'ready',
+  });
+  const titles = () => [...document.querySelectorAll('[role="button"] > span:first-child')].map((row) => row.textContent);
+  useUIStore.getState().setArchivePageOpen(true, 'release');
+  await act(async () => root.render(<I18nProvider><ArchiveView /></I18nProvider>));
+  expect(browser.document.querySelector('input')?.value).toBe('release');
+  expect(titles()).toEqual(['Release notes']);
+
+  // A second handover while the page is already open replaces the query.
+  await act(async () => { useUIStore.getState().setArchivePageOpen(true, 'login'); });
+  expect(browser.document.querySelector('input')?.value).toBe('login');
+  expect(titles()).toEqual(['Login fix']);
+
+  await act(async () => { useUIStore.getState().setArchivePageOpen(false); });
+  expect(browser.document.querySelector('input')).toBeNull();
+  await act(async () => { useUIStore.getState().setArchivePageOpen(true); });
+  expect(browser.document.querySelector('input')?.value).toBe('');
+  expect(titles()).toHaveLength(2);
 });
 
 test('an empty archive is not reported before the session list has loaded, or after it failed to load', async () => {

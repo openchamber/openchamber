@@ -41,9 +41,12 @@ export function peekIntegrationCatalog(): IntegrationCatalog | null {
  * bring back the state from before it. Throws when the integration list
  * cannot be read; a failed read is never an empty list.
  */
-async function readIntegrations(): Promise<IntegrationInfo[]> {
+async function readIntegrations(directory: string | null): Promise<IntegrationInfo[]> {
   try {
-    const response = await opencodeClient.getSdkClient().integration.list()
+    // Scoped like every location read: without a directory OpenCode answers
+    // for its own working directory, the home, and starts a location there.
+    const client = directory ? opencodeClient.getScopedSdkClient(directory) : opencodeClient.getSdkClient()
+    const response = await client.integration.list()
     return response.data
   } catch (error) {
     throw normalizeOpencodeError("integration.list", error)
@@ -53,9 +56,10 @@ async function readIntegrations(): Promise<IntegrationInfo[]> {
 export async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
   const runtimeKey = getRuntimeKey()
   const read = ++latestRead
+  const directory = opencodeClient.getDirectory() || null
   const [integrations, webSearchProviders] = await Promise.all([
-    readIntegrations(),
-    listWebSearchProviders(opencodeClient.getDirectory() ?? null).catch(() => null),
+    readIntegrations(directory),
+    listWebSearchProviders(directory).catch(() => null),
   ])
   const catalog: IntegrationCatalog = {
     integrations,

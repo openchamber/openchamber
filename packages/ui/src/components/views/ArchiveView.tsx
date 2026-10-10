@@ -30,22 +30,24 @@ type DirectoryBucket = {
 const PAGE_SIZE = 100;
 
 /**
- * The archive itself. `page` is the desktop surface that replaces the chat
- * area; `mobile` is the single-column list inside the phone's fullscreen
- * surface. `onLeave` runs once an archived session has been opened.
+ * The archive itself, mounted only while it is on screen, so every open starts
+ * fresh. `page` is the desktop surface that replaces the chat area; `mobile`
+ * is the single-column list inside the phone's fullscreen surface. `onLeave`
+ * runs once an archived session has been opened. `initialQuery` fills the
+ * search field, for a sidebar search that found nothing.
  */
-export function ArchiveSessionsView({ open, layout, onLeave }: {
-  open: boolean;
+export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   layout: 'page' | 'mobile';
   onLeave: () => void;
+  initialQuery?: string;
 }): React.ReactNode {
   const { t } = useI18n();
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const unarchiveSession = useSessionUIStore((state) => state.unarchiveSession);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
-  const archivedSessions = useGlobalSessionsStore(useShallow((state) => open ? state.archivedSessions : []));
+  const archivedSessions = useGlobalSessionsStore(useShallow((state) => state.archivedSessions));
   const sessionsStatus = useGlobalSessionsStore((state) => state.status);
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState(initialQuery);
   const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
   const spaceArchives = useSpaceArchivesStore((state) => state.byDirectory);
@@ -53,8 +55,8 @@ export function ArchiveSessionsView({ open, layout, onLeave }: {
   // The chats of deleted spaces are read-only and named after their space; read which they are
   // each time the page opens, since a space may have been deleted from another window.
   React.useEffect(() => {
-    if (open) void refreshSpaceArchives().catch(() => {});
-  }, [open]);
+    void refreshSpaceArchives().catch(() => {});
+  }, []);
 
   const labelOf = React.useCallback((directory: string): string => {
     const archive = spaceArchives?.get(directory);
@@ -65,12 +67,11 @@ export function ArchiveSessionsView({ open, layout, onLeave }: {
   const normalizedQuery = query.trim().toLowerCase();
 
   const sortedSessions = React.useMemo(() => {
-    if (!open) return [];
     // Subsessions are restored with their parent and never listed on their own.
     return archivedSessions
       .filter((session) => !session.parentID)
       .sort((a, b) => (b.time?.archived ?? 0) - (a.time?.archived ?? 0));
-  }, [archivedSessions, open]);
+  }, [archivedSessions]);
 
   const buckets = React.useMemo<DirectoryBucket[]>(() => {
     const byDirectory = new Map<string, DirectoryBucket>();
@@ -128,8 +129,6 @@ export function ArchiveSessionsView({ open, layout, onLeave }: {
       }
     });
   }, [t, unarchiveSession]);
-
-  if (!open) return null;
 
   const searchInput = (
     <SessionSearchInput
@@ -389,7 +388,11 @@ export function ArchiveSessionsView({ open, layout, onLeave }: {
 
 export function ArchiveView(): React.ReactNode {
   const open = useUIStore((state) => state.isArchivePageOpen);
+  const initialQuery = useUIStore((state) => state.archivePageSearch);
+  const openCount = useUIStore((state) => state.archivePageOpenCount);
   const setOpen = useUIStore((state) => state.setArchivePageOpen);
   const leave = React.useCallback(() => setOpen(false), [setOpen]);
-  return <ArchiveSessionsView open={open} layout="page" onLeave={leave} />;
+  if (!open) return null;
+  // Keyed by open, so a handed-over query lands even while the page is already on screen.
+  return <ArchiveSessionsView key={openCount} layout="page" onLeave={leave} initialQuery={initialQuery} />;
 }

@@ -13,6 +13,7 @@ const REMOTE = 'https://remote.example';
 const LOCAL_HOME = '/Users/me';
 const LOCAL_DIRECTORY = '/Users/me/project';
 const REMOTE_HOME = '/home/remote';
+const REMOTE_CHATS = '/srv/remote/chats';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -57,7 +58,7 @@ const installWindow = (): void => {
 type SeenRequest = { origin: string; path: string; directory: string | null };
 const seen: SeenRequest[] = [];
 
-// Each host names its own home; everything else is not there.
+// Each host names its own home and chats root; everything else is not there.
 const stubFetch = (): void => {
   const respond = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -65,7 +66,9 @@ const stubFetch = (): void => {
     const header = request.headers.get('x-opencode-directory');
     seen.push({ origin: url.origin, path: url.pathname, directory: header ? decodeURIComponent(header) : url.searchParams.get('directory') });
     if (url.pathname === '/api/fs/home') {
-      return Response.json({ home: url.origin === REMOTE ? REMOTE_HOME : LOCAL_HOME });
+      return Response.json(url.origin === REMOTE
+        ? { home: REMOTE_HOME, chatsRoot: REMOTE_CHATS }
+        : { home: LOCAL_HOME, chatsRoot: `${LOCAL_HOME}/.config/openchamber/chats` });
     }
     return new Response(null, { status: 404 });
   };
@@ -107,8 +110,9 @@ describe('working directory across a real host switch', () => {
       expect(opencodeClient.getDirectory()).toBeUndefined();
 
       await settle();
-      expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: REMOTE_HOME, homeDirectory: REMOTE_HOME, isHomeReady: true });
-      expect(opencodeClient.getDirectory()).toBe(REMOTE_HOME);
+      // No project is open on that host yet: the app works in its chats root.
+      expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: REMOTE_CHATS, homeDirectory: REMOTE_HOME, isHomeReady: true });
+      expect(opencodeClient.getDirectory()).toBe(REMOTE_CHATS);
       const homeLookups = seen.filter((request) => request.path === '/api/fs/home');
       expect(homeLookups.length).toBeGreaterThan(0);
       expect(homeLookups.every((request) => request.origin === REMOTE)).toBe(true);
@@ -120,7 +124,7 @@ describe('working directory across a real host switch', () => {
 
       switchRuntimeEndpoint({ apiBaseUrl: REMOTE, runtimeKey: 'host:remote' });
       await settle();
-      expect(useDirectoryStore.getState().currentDirectory).toBe(REMOTE_HOME);
+      expect(useDirectoryStore.getState().currentDirectory).toBe(REMOTE_CHATS);
     } finally {
       uninstall();
     }

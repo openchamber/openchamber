@@ -46,6 +46,15 @@ that exists but fails to read is never reloaded by the poll
 (`openFilePollStep`). Pruning stale open paths (`removeUnselectedOpenPath`)
 never removes the path on screen.
 
+A pending line jump (`pendingFileNavigationStep`) selects its file only until
+that file has been on screen. If the user then switches tabs while it loads,
+the jump leaves the other tab alone and runs when its file is selected again.
+A read-only text file, one outside the workspace for example, opens in the
+read-only code editor, because the selection effect resets the text mode after
+the effect that switches read-only files to the view mode; the jump runs there.
+If no editor is on screen the jump ends, so the waiting mask never hides a
+loaded file.
+
 Sidebar root/runtime changes remount the scoped tree. Its bounded module cache
 provides continuity between mounts; request cancellation for collapsed paths
 stops queued batches, while already-started reads may populate the same-scope

@@ -220,8 +220,8 @@ sees only that final turn, so the report is its evidence.
   execution.
 - `hooks/useSessionGoal.ts` — live goal state.
 - `components/chat/SessionGoalButton.tsx` — composer target button
-  (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal strip
-  above the composer; `SessionGoalDialog.tsx` — manage dialog
+  (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal row
+  among the composer's top rows; `SessionGoalDialog.tsx` — manage dialog
   (edit/pause/resume/complete/clear).
 - Sidebar glyph next to the date in `SessionNodeItem`.
 - `components/sections/openchamber/SessionGoalCheckerField.tsx` — Settings →

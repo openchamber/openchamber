@@ -33,6 +33,21 @@ describe('catalog request diagnostics', () => {
     } finally { fetch.mockRestore(); }
   });
 
+  test('one row the UI cannot read leaves the rest of the catalog loaded', async () => {
+    useGuestsStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    const hello = { id: 'hello', name: 'Hello', icon: 'window', capabilities: { requested: [], granted: [] } };
+    const newer = { ...hello, id: 'newer', name: 'Newer', capabilities: { requested: ['telepathy'], granted: [] } };
+    const fetch = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ guests: [hello, newer] }));
+    try {
+      await loadGuestCatalog();
+      const state = useGuestsStore.getState();
+      expect(state.status).toBe('ready');
+      expect(state.failure).toBeNull();
+      expect(state.guests).toEqual([hello]);
+      expect(state.unreadable).toEqual([{ id: 'newer', name: 'Newer', builtIn: false }]);
+    } finally { fetch.mockRestore(); }
+  });
+
   test('late failures cannot contaminate the next runtime', async () => {
     useGuestsStore.getState().resetForRuntimeSwitch(getRuntimeKey());
     let respond: ((response: Response) => void) | undefined;

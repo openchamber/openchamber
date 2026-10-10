@@ -31,6 +31,7 @@ import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
+import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -763,6 +764,21 @@ const fetchModelsDevMetadata = async (): Promise<Map<string, ModelMetadata>> => 
 
 let modelsMetadataInFlight: Promise<Map<string, ModelMetadata>> | null = null;
 
+const MODELS_METADATA_IDLE_TIMEOUT_MS = 3_000;
+
+const whenIdle = (): Promise<void> => new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+        resolve();
+        return;
+    }
+    // Safari and iOS have no requestIdleCallback.
+    if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => resolve(), { timeout: MODELS_METADATA_IDLE_TIMEOUT_MS });
+    } else {
+        window.setTimeout(resolve, 1_000);
+    }
+});
+
 const ensureModelsMetadataFetch = (
     getModelsMetadata: () => Map<string, ModelMetadata>,
     setModelsMetadata: (metadata: Map<string, ModelMetadata>) => void,
@@ -777,7 +793,11 @@ const ensureModelsMetadataFetch = (
     }
 
     markStartupTrace('modelsMetadata:queued');
-    modelsMetadataInFlight = measureStartupTrace('modelsMetadata', fetchModelsDevMetadata)
+    // Model metadata (prices, limits, capabilities) only enriches the pickers
+    // and usage display, so it waits until the browser is idle instead of
+    // competing with startup for the network and main thread.
+    modelsMetadataInFlight = whenIdle()
+        .then(() => measureStartupTrace('modelsMetadata', fetchModelsDevMetadata))
         .then((metadata) => {
             if (metadata.size > 0) {
                 markStartupTrace('modelsMetadata:set', { entries: metadata.size });
@@ -793,6 +813,10 @@ const ensureModelsMetadataFetch = (
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const CONNECTION_PROBE_TIMEOUT_MS = 800;
+// How long the server may hold one startup health probe for OpenCode to become
+// ready. It answers within ~100 ms of readiness, so startup notices OpenCode
+// at once instead of on the next poll.
+const CONNECTION_HEALTH_WAIT_MS = 3_000;
 
 const probeOpenCodeHealth = async (timeoutMs = CONNECTION_PROBE_TIMEOUT_MS): Promise<boolean> => {
     return Promise.race([
@@ -995,14 +1019,17 @@ const markCatalogStale = (loadedAt: Map<string, number>, staleAt: Map<string, nu
     staleAt.set(directoryKey, _catalogRevision);
 };
 
+/** True when a catalog event for the directory landed after a load began at `loadRevision`. */
+const isCatalogStaleSince = (staleAt: Map<string, number>, directoryKey: string, loadRevision: number): boolean =>
+    Math.max(staleAt.get(directoryKey) ?? 0, staleAt.get(ALL_DIRECTORIES) ?? 0) > loadRevision;
+
 const markCatalogLoaded = (
     loadedAt: Map<string, number>,
     staleAt: Map<string, number>,
     directoryKey: string,
     loadRevision: number,
 ): void => {
-    const lastStale = Math.max(staleAt.get(directoryKey) ?? 0, staleAt.get(ALL_DIRECTORIES) ?? 0);
-    if (lastStale > loadRevision) return;
+    if (isCatalogStaleSince(staleAt, directoryKey, loadRevision)) return;
     loadedAt.set(directoryKey, Date.now());
 };
 
@@ -1022,6 +1049,99 @@ export const markConfigCatalogStale = (kind: CatalogKind, directory: string | nu
 const getConfigLoadKey = (context: ConfigRuntimeContext, directoryKey: string): string => (
     JSON.stringify([context.generation, context.runtimeKey, directoryKey])
 );
+
+// Catalogs shown from the persisted cache (configCatalogCache.ts), by load key,
+// with the entry count they showed: providers count their models. The first
+// live load of such a directory is checked against that count; see
+// `shouldHoldFirstLoadAgainstCache`.
+const _providersShownFromCache = new Map<string, number>();
+const _agentsShownFromCache = new Map<string, number>();
+// A location OpenCode is still starting completes its catalog about two
+// seconds after the first, partial answer.
+const CATALOG_CACHE_RECHECK_MS = 2_500;
+const CATALOG_CACHE_RECHECK_SOURCE = 'catalogCacheRecheck';
+
+const countCatalogModels = (providers: readonly ProviderWithModelList[]): number =>
+    providers.reduce((count, provider) => count + provider.models.length, 0);
+
+/**
+ * True when a first live catalog for a directory shown from the cache is
+ * smaller than the cache. The caller keeps the cached catalog on screen and
+ * re-reads once; that re-read is applied whatever it holds.
+ */
+const holdFirstLoadAgainstCache = (shownFromCache: Map<string, number>, loadKey: string, loadedCount: number): boolean => {
+    const cachedCount = shownFromCache.get(loadKey);
+    if (cachedCount === undefined) return false;
+    shownFromCache.delete(loadKey);
+    return shouldHoldFirstLoadAgainstCache(cachedCount, loadedCount);
+};
+
+/**
+ * Persists a catalog a live load applied, once it has settled. A location
+ * OpenCode is still starting answers partial first (no plugin providers or
+ * agents) and announces the full catalog with catalog events about two seconds
+ * later; a load such an event superseded is never stored, the re-read the event
+ * triggers is. An empty catalog is stored only by the re-read after a held
+ * first load: a cold location answers empty before it has started, and that
+ * answer must not erase a good cached catalog.
+ */
+const persistLoadedCatalog = (
+    context: ConfigRuntimeContext,
+    directoryKey: string,
+    source: string,
+    update: CachedCatalog,
+    isEmpty: boolean,
+    staleAt: Map<string, number>,
+    loadRevision: number,
+): void => {
+    if (directoryKey === DIRECTORY_KEY_GLOBAL) return;
+    if (isEmpty && source !== CATALOG_CACHE_RECHECK_SOURCE) return;
+    writeCachedCatalogWhenSettled(
+        context.runtimeKey,
+        directoryKey,
+        update,
+        () => !isConfigRuntimeContextCurrent(context) || isCatalogStaleSince(staleAt, directoryKey, loadRevision),
+    );
+};
+
+/**
+ * Shows the cached catalog of a directory whose live catalog has not loaded
+ * yet, so the pickers render while OpenCode starts. Never replaces a live
+ * catalog, and never marks anything loaded: settings pickers keep waiting for
+ * the live load, which revalidates and replaces it.
+ */
+const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void> => {
+    if (directoryKey === DIRECTORY_KEY_GLOBAL) return;
+    const context = captureConfigRuntimeContext();
+    const cached = await readCachedCatalog(context.runtimeKey, directoryKey);
+    if (!cached || !isConfigRuntimeContextCurrent(context)) return;
+    const loadKey = getConfigLoadKey(context, directoryKey);
+    useConfigStore.setState((state) => {
+        const snapshot = state.directoryScoped[directoryKey] ?? createEmptyDirectoryScopedConfig();
+        const isActive = state.activeDirectoryKey === directoryKey;
+        const providersLive = snapshot.providersLoaded === true || snapshot.providers.length > 0
+            || (isActive && (state.providersLoaded || state.providers.length > 0));
+        const agentsLive = snapshot.agentsLoaded === true || snapshot.agents.length > 0
+            || (isActive && (state.agentsLoaded || state.agents.length > 0));
+        const providers = !providersLive && cached.providers?.length ? cached.providers : null;
+        const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
+        if (!providers && !agents) return state;
+        if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
+        if (agents) _agentsShownFromCache.set(loadKey, agents.length);
+        markStartupTrace('configCatalogCache:hydrated', { directoryKey, providers: providers?.length ?? 0, agents: agents?.length ?? 0 });
+        const defaultProviders = providers && cached.defaultProviders ? cached.defaultProviders : snapshot.defaultProviders;
+        const nextSnapshot: DirectoryScopedConfig = {
+            ...snapshot,
+            ...(providers ? { providers, defaultProviders } : {}),
+            ...(agents ? { agents } : {}),
+        };
+        return {
+            directoryScoped: { ...state.directoryScoped, [directoryKey]: nextSnapshot },
+            ...(isActive && providers ? { providers, defaultProviders } : {}),
+            ...(isActive && agents ? { agents } : {}),
+        };
+    });
+};
 
 // Last agent-load error text per config-directory key, read by initializeApp
 // to explain a startup failure. Cleared when that directory loads again.
@@ -1044,6 +1164,8 @@ subscribeRuntimeEndpointChanged((detail) => {
     _providersStaleAt.clear();
     _agentsStaleAt.clear();
     _agentsLoadErrors.clear();
+    _providersShownFromCache.clear();
+    _agentsShownFromCache.clear();
     _inFlightProviders.clear();
     _inFlightAgents.clear();
     _agentsLoadGeneration.clear();
@@ -2103,6 +2225,16 @@ export const useConfigStore = create<ConfigStore>()(
                                 }));
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                            if (holdFirstLoadAgainstCache(_providersShownFromCache, inFlightKey, countCatalogModels(processedProviders))) {
+                                // The cached catalog stays on screen; this answer is likely a
+                                // location still starting. The re-read is applied as it is.
+                                markStartupTrace('loadProviders:heldAgainstCache', { directoryKey, source, providers: processedProviders.length });
+                                setTimeout(() => {
+                                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                                    void get().loadProviders({ directory: fromDirectoryKey(directoryKey), source: CATALOG_CACHE_RECHECK_SOURCE, fresh: true });
+                                }, CATALOG_CACHE_RECHECK_MS);
+                                return;
+                            }
                             // A re-read that returns the same catalog keeps the arrays the
                             // store already holds, so nothing subscribed to them re-renders.
                             const nextProviders = isSameProviderCatalog(previousProviders, processedProviders)
@@ -2229,6 +2361,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 models: processedProviders.reduce((count, provider) => count + provider.models.length, 0),
                             });
                             markCatalogLoaded(_providersLoadedAt, _providersStaleAt, directoryKey, loadRevision);
+                            if (nextProviders !== previousProviders || nextDefaults !== previousDefaults || source === CATALOG_CACHE_RECHECK_SOURCE) {
+                                persistLoadedCatalog(runtimeContext, directoryKey, source, { providers: nextProviders, defaultProviders: nextDefaults }, nextProviders.length === 0, _providersStaleAt, loadRevision);
+                            }
                             return;
                         } catch (error) {
                             lastError = error;
@@ -2686,6 +2821,15 @@ export const useConfigStore = create<ConfigStore>()(
                                 throw new Error('Session defaults are not available yet');
                             }
                             const safeAgents = Array.isArray(agents) ? agents : [];
+                            if (holdFirstLoadAgainstCache(_agentsShownFromCache, inFlightKey, safeAgents.length)) {
+                                // Same as providers: the cached agents stay until the re-read.
+                                markStartupTrace('loadAgents:heldAgainstCache', { directoryKey, source, agents: safeAgents.length });
+                                setTimeout(() => {
+                                    if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
+                                    void get().loadAgents({ directory: configDirectoryPath, source: CATALOG_CACHE_RECHECK_SOURCE, fresh: true });
+                                }, CATALOG_CACHE_RECHECK_MS);
+                                return true;
+                            }
 
                             const latestSyncedOpencodeConfig = getSyncConfig(requestedDirectory ?? undefined)
                                 ?? getSyncConfig(configDirectoryPath ?? undefined);
@@ -2830,6 +2974,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     agents: safeAgents.length,
                                 });
                                 markCatalogLoaded(_agentsLoadedAt, _agentsStaleAt, directoryKey, loadRevision);
+                                persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, _agentsStaleAt, loadRevision);
                                 clearProjectConfigError(directoryKey);
                                 return true;
                             }
@@ -2941,6 +3086,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 agents: safeAgents.length,
                             });
                             markCatalogLoaded(_agentsLoadedAt, _agentsStaleAt, directoryKey, loadRevision);
+                            persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, _agentsStaleAt, loadRevision);
                             _agentsLoadErrors.delete(directoryKey);
                             clearProjectConfigError(directoryKey);
                             return true;
@@ -3897,9 +4043,10 @@ export const useConfigStore = create<ConfigStore>()(
                         if (!isConfigRuntimeContextCurrent(runtimeContext)) return false;
                         try {
                             markStartupTrace('checkConnection:attempt', { attempt: attempt + 1 });
+                            const probeStarted = Date.now();
                             lastProbe = await measureStartupTrace(
                                 'checkConnection:health',
-                                () => opencodeClient.probeHealth(),
+                                () => opencodeClient.probeHealth({ waitMs: CONNECTION_HEALTH_WAIT_MS }),
                                 { attempt: attempt + 1 },
                             );
                             const isHealthy = lastProbe === 'healthy';
@@ -3912,7 +4059,10 @@ export const useConfigStore = create<ConfigStore>()(
                                     lastDisconnectReason: 'health_check_unhealthy',
                                 });
                                 attempt += 1;
-                                await sleep(400 * attempt);
+                                // A host that held the answer has already waited; one that
+                                // answered at once (an older host, the VS Code bridge, an
+                                // unreachable server) keeps the old pacing.
+                                await sleep(Math.max(0, 400 * attempt - (Date.now() - probeStarted)));
                                 continue;
                             }
 
@@ -4023,6 +4173,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const configDirectoryKey = toDirectoryKey(configDirectory);
                             if (get().activeDirectoryKey !== configDirectoryKey) {
                                 set({ activeDirectoryKey: configDirectoryKey });
+                                void hydrateConfigCatalogFromCache(configDirectoryKey);
                             }
 
                             if (debug) console.log("Loading providers and agents...");
@@ -4214,6 +4365,14 @@ if (typeof window !== "undefined") {
     window.__zustand_config_store__ = useConfigStore;
 }
 
+// Show the last known catalogs of the active directory while OpenCode starts.
+// After persist hydration, which restores the active directory key.
+if (typeof window !== "undefined") {
+    const hydrateActiveCatalog = () => void hydrateConfigCatalogFromCache(useConfigStore.getState().activeDirectoryKey);
+    if (useConfigStore.persist.hasHydrated()) hydrateActiveCatalog();
+    else useConfigStore.persist.onFinishHydration(hydrateActiveCatalog);
+}
+
 const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
     const runtimeContext = captureConfigRuntimeContext();
     const state = useConfigStore.getState();
@@ -4284,6 +4443,7 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreDirectoryChanges) {
         }
 
         markStartupTrace('directoryStore:changed', { previous: prevKey, next: nextKey });
+        void hydrateConfigCatalogFromCache(toConfigDirectoryKey(state.currentDirectory));
         void useConfigStore.getState().activateDirectory(state.currentDirectory);
     });
 }

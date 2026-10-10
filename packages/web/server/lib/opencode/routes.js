@@ -1,4 +1,5 @@
 import { readOpenCodeInfo, isSupportedOpenCodeVersion } from './compatibility.js';
+import { createSharedHealthProbe, parseHealthWaitMs, waitForOpenCodeHealth } from './health-wait.js';
 import express from 'express';
 import { resolveNpmRegistryRequest } from './npm-registry-config.js';
 import fs from 'fs';
@@ -212,27 +213,50 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   // OpenCode 2.0.8 removed `GET /api/health`; `GET /api/info` replaces it and a
   // 200 from it is the readiness signal (there is no `healthy` field any more).
   // OpenChamber's own `{ healthy }` response shape stays as its clients know it.
-  app.get('/api/opencode/health', async (_req, res) => {
+  const probeOpenCodeHealth = async () => {
     try {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(3_000),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
-        return res.status(healthResponse.status).json({
+        return {
           healthy: false,
-          error: info?.error || healthResponse.statusText || 'OpenCode health check failed',
-        });
+          status: healthResponse.status,
+          body: { healthy: false, error: info?.error || healthResponse.statusText || 'OpenCode health check failed' },
+        };
       }
       const parsed = await readOpenCodeInfo(Response.json(info));
-      return res.json({ healthy: parsed !== null && isSupportedOpenCodeVersion(parsed.version) });
+      const healthy = parsed !== null && isSupportedOpenCodeVersion(parsed.version);
+      // OpenCode answered: an unsupported version stays unsupported however long a client waits.
+      return { healthy, final: true, status: 200, body: { healthy } };
     } catch (error) {
-      return res.status(503).json({
+      return {
         healthy: false,
-        error: error instanceof Error ? error.message : 'OpenCode health check failed',
-      });
+        status: 503,
+        body: { healthy: false, error: error instanceof Error ? error.message : 'OpenCode health check failed' },
+      };
     }
+  };
+
+  // Concurrent waiters (several windows, tabs or devices starting together)
+  // share one probe per interval.
+  const sharedOpenCodeHealthProbe = createSharedHealthProbe({ probe: probeOpenCodeHealth });
+
+  // `?wait=<ms>` holds an unhealthy answer until OpenCode is ready or the wait
+  // runs out (capped), so a starting client learns of readiness at once.
+  app.get('/api/opencode/health', async (req, res) => {
+    let clientGone = false;
+    res.on('close', () => { clientGone = true; });
+    const result = await waitForOpenCodeHealth({
+      probe: sharedOpenCodeHealthProbe,
+      waitMs: parseHealthWaitMs(req.query?.wait),
+      isAborted: () => clientGone,
+    });
+    if (clientGone) return;
+    return res.status(result.status).json(result.body);
   });
 
   app.get('/api/opencode/version', async (_req, res) => {

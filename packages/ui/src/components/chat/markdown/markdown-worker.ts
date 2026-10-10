@@ -244,21 +244,57 @@ const cacheKeyFor = (kind: string, lang: string, code: string, themeName?: strin
   return themeName === undefined ? `${kind}:${lang}:${fp}` : `${kind}:${themeName}:${lang}:${fp}`;
 };
 
+// The last results of still-streaming code blocks, one per block streaming
+// side by side. When a fence closes, its code is usually the text of its last
+// open step, so the settled request is answered from here.
+const RECENT_TRANSIENT_MAX = 4;
+const recentTransient: Array<{ key: string; html: string }> = [];
+
 /** Test-only: clear client-side highlight memoization. */
 export const resetMarkdownWorkerClientCacheForTests = (): void => {
   resultCache.clear();
   inflight.clear();
+  recentTransient.length = 0;
+};
+
+const highlightTransient = async (key: string, code: string, lang: string): Promise<string | null> => {
+  const fullPass = !streamTuning.incrementalHighlight();
+  const outcome = await request((id) => ({ type: 'highlight', id, code, lang, fullPass }));
+  if (outcome.status === 'timeout') memoizeFailure(key);
+  if (outcome.status !== 'ok' || outcome.response.type !== 'highlight') return null;
+  const html = outcome.response.html;
+  const index = recentTransient.findIndex((entry) => entry.key === key);
+  if (index !== -1) recentTransient.splice(index, 1);
+  recentTransient.unshift({ key, html });
+  recentTransient.length = Math.min(recentTransient.length, RECENT_TRANSIENT_MAX);
+  return html;
 };
 
 /**
  * Highlight a complete code block in the worker. Resolves to Shiki `<pre>` HTML,
  * or `null` if highlighting is unavailable or failed (caller keeps plain code).
  */
-export const highlightCodeInWorker = async (code: string, lang: string): Promise<string | null> => {
+export const highlightCodeInWorker = async (
+  code: string,
+  lang: string,
+  options: { transient?: boolean } = {},
+): Promise<string | null> => {
   const key = cacheKeyFor('highlight', lang, code);
   const cached = resultCache.get(key);
   if (cached?.type === 'highlight') return cached.html;
   if (cached?.type === 'failed') return null;
+  const recent = recentTransient.find((entry) => entry.key === key);
+  if (recent) {
+    if (!options.transient) {
+      const entry: CachedHighlight = { type: 'highlight', html: recent.html };
+      resultCache.set(key, entry, entryBytes(key, entry));
+    }
+    return recent.html;
+  }
+  // A code block that is still streaming asks once per new line and never
+  // again for the same text, so its results are not kept: each would push a
+  // settled block's highlight out of the cache. A timeout is still memoized.
+  if (options.transient) return highlightTransient(key, code, lang);
 
   const result = await coalesce(key, async () => {
     const fullPass = !streamTuning.incrementalHighlight();

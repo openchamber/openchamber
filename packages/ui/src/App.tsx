@@ -8,7 +8,6 @@ import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
 import { setStreamPerfMemoryDebugEnabled } from '@/stores/utils/streamDebug';
 import { setRequestsInFlightTrackingEnabled } from '@/stores/utils/requestsInFlight';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -43,7 +42,8 @@ import {
 import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
-import { restoreLastActiveSession } from '@/sync/last-session-restore';
+import { parseRoute } from '@/lib/router';
+import { beginLastSessionRestore, type LastSessionRestoreResult } from '@/sync/last-session-restore';
 import { markSessionViewed } from '@/sync/notification-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -53,7 +53,6 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
-import { AboutDialog } from '@/components/ui/AboutDialog';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useUIStore } from '@/stores/useUIStore';
@@ -63,6 +62,8 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
+import { preloadFileTypeSprite } from '@/lib/fileTypeIcons';
 import { useI18n } from '@/lib/i18n';
 import { applyMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { SyncAppEffects } from '@/apps/AppEffects';
@@ -80,15 +81,26 @@ const OnboardingScreen = lazyWithChunkRecovery(() =>
   import('@/components/onboarding/OnboardingScreen').then((m) => ({ default: m.OnboardingScreen })),
 );
 
+const loadAboutDialog = () => import('@/components/ui/AboutDialog').then((m) => m.AboutDialog);
+const loadMemoryDebugPanel = () => import('@/components/ui/MemoryDebugPanel').then((m) => m.MemoryDebugPanel);
+
+// Loaded on its first open; stays mounted afterwards so the close animation plays.
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
+  const AboutDialog = useOnDemandComponent(isAboutDialogOpen, loadAboutDialog, () => setAboutDialogOpen(false));
+  if (!AboutDialog) return null;
   return (
     <AboutDialog
       open={isAboutDialogOpen}
       onOpenChange={setAboutDialogOpen}
     />
   );
+};
+
+const MemoryDebugPanelLoader: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const MemoryDebugPanel = useOnDemandComponent(true, loadMemoryDebugPanel, onClose);
+  return MemoryDebugPanel ? <MemoryDebugPanel onClose={onClose} /> : null;
 };
 
 const StartupInitializationRecovery: React.FC<{
@@ -201,8 +213,10 @@ function App({ apis }: AppProps) {
   const initializeApp = useConfigStore((s) => s.initializeApp);
   const isInitialized = useConfigStore((s) => s.isInitialized);
   const isConnected = useConfigStore((s) => s.isConnected);
-  const providersCount = useConfigStore((state) => state.providers.length);
-  const agentsCount = useConfigStore((state) => state.agents.length);
+  // Loaded flags, not list lengths: a catalog shown from the persisted cache is
+  // not a live load, and recovery must keep trying until one succeeds.
+  const providersLoaded = useConfigStore((state) => state.providersLoaded);
+  const agentsLoaded = useConfigStore((state) => state.agentsLoaded);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const error = useSessionUIStore((s) => s.error);
@@ -326,18 +340,19 @@ function App({ apis }: AppProps) {
   const bootOutcomeKnown = bootInjectionStatus === 'valid';
   const bootViewIsMain = bootView?.screen === 'main';
 
-  // Splash dismissal: use the authoritative loading gate from desktopBoot.
-  // Desktop shells strictly require a valid boot outcome before dismissing.
-  // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
+  // Splash dismissal: the shell and composer are usable before OpenCode is
+  // ready, so the splash leaves as soon as the shell mounts. Desktop shells
+  // still require a valid boot outcome, which picks main, chooser or recovery.
   React.useEffect(() => {
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
-      isInitialized,
       bootOutcomeKnown,
-      bootViewIsMain,
     })) {
       return;
     }
+
+    // The shell is now interactive: fetch the file-type icons off the startup path.
+    preloadFileTypeSprite();
 
     const timer = setTimeout(() => {
       const loadingElement = document.getElementById('initial-loading');
@@ -350,7 +365,7 @@ function App({ apis }: AppProps) {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain]);
+  }, [isDesktopRuntime, bootOutcomeKnown]);
 
   // Deterministic malformed handling: update splash text so the user
   // sees a specific error instead of a generic spinner, but do NOT
@@ -365,25 +380,6 @@ function App({ apis }: AppProps) {
       loadingElement.textContent = 'Desktop startup failed — please restart the app.';
     }
   }, [isDesktopRuntime, bootInjectionStatus]);
-
-  // Non-desktop fallback: remove splash after 5 seconds even if init stalls.
-  React.useEffect(() => {
-    if (isDesktopRuntime) {
-      return;
-    }
-
-    const fallbackTimer = setTimeout(() => {
-      const loadingElement = document.getElementById('initial-loading');
-      if (loadingElement && !isInitialized) {
-        loadingElement.classList.add('fade-out');
-        setTimeout(() => {
-          loadingElement.remove();
-        }, 300);
-      }
-    }, 5000);
-
-    return () => clearTimeout(fallbackTimer);
-  }, [isDesktopRuntime, isInitialized]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -449,7 +445,9 @@ function App({ apis }: AppProps) {
         setInitRetryExhausted(true);
         return;
       }
-      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 16000);
+      // Each attempt already waits for OpenCode on the server (a held health
+      // probe), so the gap between attempts stays short.
+      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 4000);
       retryTimer = setTimeout(retryInitialization, delay);
     };
 
@@ -484,17 +482,17 @@ function App({ apis }: AppProps) {
   // so a reactive effect can't detect failure — we need an interval.
   React.useEffect(() => {
     if (isVSCodeRuntime || !isConnected) return;
-    if (providersCount > 0 && agentsCount > 0) return;
+    if (providersLoaded && agentsLoaded) return;
 
     let active = true;
     let retries = 0;
     const MAX_RETRIES = 15;
     const attempt = async () => {
       const state = useConfigStore.getState();
-      if (state.providers.length > 0 && state.agents.length > 0) return;
+      if (state.providersLoaded && state.agentsLoaded) return;
       try {
-        if (state.providers.length === 0) await loadProviders({ source: 'startupRecovery' });
-        if (useConfigStore.getState().agents.length === 0) await loadAgents({ source: 'startupRecovery' });
+        if (!state.providersLoaded) await loadProviders({ source: 'startupRecovery' });
+        if (!useConfigStore.getState().agentsLoaded) await loadAgents({ source: 'startupRecovery' });
       } catch { /* retry next interval */ }
     };
 
@@ -505,7 +503,7 @@ function App({ apis }: AppProps) {
       void attempt();
     }, 2000);
     return () => { active = false; clearInterval(id); };
-  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
+  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersLoaded, agentsLoaded]);
 
   React.useEffect(() => {
     if (isSwitchingDirectory) {
@@ -582,13 +580,41 @@ function App({ apis }: AppProps) {
   }, [t]);
 
   // Launch continuity: reopen the session that was open when the app last
-  // closed, once per page load. A link or route that already opened
-  // something wins; see restoreLastActiveSession.
-  const lastSessionRestoreStartedRef = React.useRef(false);
+  // closed, once per page load. The shell shows before OpenCode is ready, so
+  // the session is selected in a layout effect, before any passive effect of
+  // the tree runs: ChatContainer's would otherwise open the automatic draft
+  // first and the launch would flash it. A route that names a session wins and
+  // is not preempted. The list check that follows reports `failed` while
+  // OpenCode is starting and runs again once startup completes; see
+  // beginLastSessionRestore.
+  const lastSessionRestoreRef = React.useRef<{
+    attempt: (() => Promise<LastSessionRestoreResult>) | null;
+    running: boolean;
+    done: boolean;
+  }>({ attempt: null, running: false, done: false });
+  React.useLayoutEffect(() => {
+    const restore = lastSessionRestoreRef.current;
+    if (restore.attempt) return;
+    restore.attempt = beginLastSessionRestore({ selectNow: !parseRoute().sessionId });
+  }, []);
   React.useEffect(() => {
-    if (!isInitialized || lastSessionRestoreStartedRef.current) return;
-    lastSessionRestoreStartedRef.current = true;
-    void restoreLastActiveSession({ refresh: false });
+    const restore = lastSessionRestoreRef.current;
+    const run = () => {
+      const attempt = restore.attempt;
+      if (!attempt || restore.running || restore.done) return;
+      const startedInitialized = useConfigStore.getState().isInitialized;
+      restore.running = true;
+      void attempt().then((result) => {
+        restore.running = false;
+        if (result !== 'failed' || startedInitialized) {
+          restore.done = true;
+          return;
+        }
+        // Startup completed while this attempt was failing: try once more now.
+        if (useConfigStore.getState().isInitialized) run();
+      });
+    };
+    run();
   }, [isInitialized]);
 
   // Open a draft Mini Chat window from the native File menu / tray. Uses a
@@ -855,10 +881,10 @@ function App({ apis }: AppProps) {
     );
   }
 
-  // Always mount the full provider tree to avoid remounts when isInitialized
-  // flips from false → true. FireworksProvider is a lightweight shell; its
-  // heavy children are only activated when actually needed.
-  const isBootShell = !isInitialized && !isDesktopRuntime;
+  // The full provider tree mounts before OpenCode is ready and stays mounted
+  // when initialization completes: the sidebar, composer and model picker are
+  // usable from the start (catalogs come from the persisted cache, then
+  // revalidate), and a message sent meanwhile waits for OpenCode.
 
   return (
     <ErrorBoundary>
@@ -871,18 +897,14 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <ProjectConfigErrorToast />
                   <MainLayout />
-                  <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
+                  {isDesktopRuntime ? <AppStartupOverlay ready={bootOutcomeKnown && bootViewIsMain} /> : null}
                   <Toaster />
                   <AppLinkConfirmDialog />
                   <SharedTrustConfirmDialog />
-                  {!isBootShell && (
-                    <>
-                      <ConfigUpdateOverlay />
-                      <AboutDialogWrapper />
-                      {showMemoryDebug && (
-                        <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />
-                      )}
-                    </>
+                  <ConfigUpdateOverlay />
+                  <AboutDialogWrapper />
+                  {showMemoryDebug && (
+                    <MemoryDebugPanelLoader onClose={() => setShowMemoryDebug(false)} />
                   )}
                 </div>
               </TooltipProvider>

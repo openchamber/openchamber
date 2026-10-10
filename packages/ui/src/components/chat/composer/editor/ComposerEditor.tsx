@@ -23,7 +23,7 @@
 
 import React from 'react';
 import { history, historyKeymap, standardKeymap } from '@codemirror/commands';
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Prec, type Extension } from '@codemirror/state';
 import {
     EditorView,
     drawSelection,
@@ -57,6 +57,12 @@ export interface ComposerChange {
     fromPaste: boolean;
     /** The text this edit inserted, empty for deletions. */
     insertedText: string;
+    /**
+     * True when the edit only applied a new `value` prop: text the app put
+     * there (a restored draft, a prepared prompt), not anything the user typed
+     * or pasted. Callers must not open pickers for it.
+     */
+    fromValueProp: boolean;
 }
 
 export interface ComposerEditorHandle {
@@ -166,6 +172,9 @@ function isDeferredSyntheticEvent(event: KeyboardEvent): boolean {
  */
 const editableCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
+
+/** Marks the transaction that writes a changed `value` prop into the editor. */
+const valuePropWrite = Annotation.define<true>();
 
 export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEditorProps>(
     function ComposerEditor(props, ref) {
@@ -295,6 +304,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                                     selection,
                                     fromPaste,
                                     insertedText,
+                                    fromValueProp: update.transactions.every(
+                                        (transaction) => !transaction.docChanged || transaction.annotation(valuePropWrite) === true,
+                                    ),
                                 });
                                 return;
                             }
@@ -378,7 +390,10 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             // keeping the old caret instead left it stranded before the
             // inserted text, and the next insertion or keystroke landed inside
             // the previous one.
-            view.dispatch(replaceWithCaret(view.state, 0, current.length, value));
+            view.dispatch({
+                ...replaceWithCaret(view.state, 0, current.length, value),
+                annotations: valuePropWrite.of(true),
+            });
             // A large insert can push the caret below the fold, and a
             // transaction-time `scrollIntoView` cannot reach it: wrapped-line
             // heights are still estimates during the update, and the

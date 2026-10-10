@@ -1,0 +1,31 @@
+# branch: stand-in relay with one client leg per server
+relay status: {"enabled":true,"state":"connected","serverId":"j3trtzKyqpeL6iwdPRqqpg7KuQob9MnVnaQkgdEQvjA","connectedClients":0,"relayUrl":"ws://127.0.0.1:5226","relayUrlLocked":true,"blockedByEnterprise":false}
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
+[mobile-connect] relay:session {"shared":false,"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
++  107ms [phone] cold-launch auto-connect: {"status":"connected"}
++  113ms [phone] event stream opened, status 200
++ 2114ms [phone] background auto-connect retry while connected...
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
+[mobile-connect] relay:session {"shared":true,"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
+[mobile-connect] auto-connect:superseded {}
++ 2116ms [phone] retry outcome: {"status":"no-candidate"}
++ 3117ms [phone] auto-connect (no skip) while connected, e.g. the cold-launch no-connection fallback...
+[mobile-connect] auto-connect:start {"hasCandidate":true,"fast":false}
+[mobile-connect] relay:session {"shared":true,"ok":true,"status":200,"hasToken":true,"error":null}
+[mobile-connect] auto-connect:probe {"status":"ok","candidates":["relay"]}
++ 3119ms [phone] outcome: {"status":"connected"}
+[mobile-connect] candidates:refresh-skip {"reason":"no-lan-reported"}
+[mobile-connect] candidates:refresh-result {"result":"skipped"}
+
+===== RESULT =====
+runtime tunnel state : connected 
+still the runtime one: true
+event stream         : still open (1 chunks)
+request on live tunnel: HTTP 200
+
+===== RELAY LOG (this run) =====
+15:15:25.704 [relay] client dial c8
+15:15:25.704 [relay] host-data up c8
+15:15:30.727 [relay] client c8 closed (1006)

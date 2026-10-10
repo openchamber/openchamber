@@ -584,6 +584,25 @@ describe('describeSmallModel', () => {
 
     expect(await describeSmallModel({ directory: '/proj' })).toBeNull();
   });
+
+  it.each([
+    ['http://127.0.0.1:8080/v1', true],
+    ['http://localhost:1234/v1', true],
+    ['http://[::1]:11434/v1', true],
+    ['http://192.168.1.20:8080/v1', true],
+    ['http://100.101.102.103:8080/v1', true],
+    ['http://gpu-box:8080/v1', true],
+    ['http://llm.home.arpa/v1', true],
+    ['https://api.example.com/v1', false],
+    ['http://8.8.8.8/v1', false],
+    [undefined, false],
+  ])('reports whether %s is a local endpoint', async (baseURL, local) => {
+    state.models = [MODEL({ id: 'qwen3', modelID: 'qwen3', providerID: 'llama', settings: baseURL ? { baseURL } : {} })];
+
+    const described = await describeSmallModel({ directory: '/proj', preferredProviderID: 'llama', preferredModelID: 'qwen3' });
+
+    expect(described).toMatchObject({ source: 'session-model', localEndpoint: local });
+  });
 });
 
 describe('listAuthenticatedProviders', () => {

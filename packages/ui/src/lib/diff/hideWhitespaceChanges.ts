@@ -284,9 +284,38 @@ const withHunks = (fileDiff: FileDiffMetadata, hunks: Hunk[]): FileDiffMetadata 
 
   return {
     ...fileDiff,
-    hunks,
+    ...(fileDiff.isPartial ? compactPartialLines(fileDiff, hunks) : { hunks }),
     splitLineCount,
     unifiedLineCount,
     cacheKey: fileDiff.cacheKey === undefined ? undefined : `${fileDiff.cacheKey}:hide-whitespace`,
   };
+};
+
+/**
+ * A patch diff holds only the lines its hunks show, in hunk order, and the
+ * renderer rebuilds each side by joining its hunks' lines. A hunk dropped or
+ * trimmed here would shift every later line and leave the last ones missing,
+ * so the kept lines are copied out and the blocks point at their new places.
+ */
+const compactPartialLines = (
+  fileDiff: FileDiffMetadata,
+  hunks: Hunk[],
+): Pick<FileDiffMetadata, 'hunks' | 'deletionLines' | 'additionLines'> => {
+  const deletionLines: string[] = [];
+  const additionLines: string[] = [];
+  const copy = (from: string[], to: string[], start: number, count: number) => {
+    for (let index = start; index < start + count; index += 1) to.push(from[index]);
+  };
+  const compacted = hunks.map((hunk): Hunk => {
+    const deletionLineIndex = deletionLines.length;
+    const additionLineIndex = additionLines.length;
+    const hunkContent = hunk.hunkContent.map((block): HunkBlock => {
+      const moved = { ...block, deletionLineIndex: deletionLines.length, additionLineIndex: additionLines.length };
+      copy(fileDiff.deletionLines, deletionLines, block.deletionLineIndex, block.type === 'context' ? block.lines : block.deletions);
+      copy(fileDiff.additionLines, additionLines, block.additionLineIndex, block.type === 'context' ? block.lines : block.additions);
+      return moved;
+    });
+    return { ...hunk, deletionLineIndex, additionLineIndex, hunkContent };
+  });
+  return { hunks: compacted, deletionLines, additionLines };
 };

@@ -13,7 +13,7 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:session` | What receiving and rendering a live assistant response costs. |
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
-| `bun run profile:startup` | How long a packaged Desktop build takes from process spawn to a visible window and a mounted interface. |
+| `bun run profile:startup` | How long a packaged Desktop build (from process spawn), or the web app with `--url` (from navigation start), takes to mount and become usable. |
 | `bun run profile:browser` | A manually driven capture, for interactions that cannot be scripted. |
 
 All of them measure a real browser over CDP. Pass `--help` to any of them for
@@ -172,6 +172,8 @@ bun run profile:session -- --url http://127.0.0.1:4599 --dir <project directory>
 ```
 
 Rates from `stream-100cps` to `stream-1200cps` cover hosted models.
+One run is never a result: repeat a scenario and aggregate with
+`node scripts/perf/aggregate-runs.mjs <run directories…>`.
 `perf/code-300cps` and `perf/code-1200cps` stream one 240-line code block,
 because what a growing fence costs does not show in fences of five lines.
 `perf/think-30s` stays silent for thirty seconds and then answers in one word:
@@ -182,6 +184,20 @@ each step says a line and calls the `glob` tool, OpenCode runs the tool for
 real, and after the last step the document streams. The turn on screen then
 carries twenty tool parts while the text arrives, which is the shape of a long
 agentic turn and what the cost of re-rendering a turn per delta depends on.
+`perf/unicode-300cps` (and `unicode-1200cps`) streams prose with em dashes,
+curly quotes and whole Cyrillic paragraphs, and a 150-line TypeScript fence
+whose comments and strings carry the same characters. V8 stores a string with
+any character above Latin-1 at two bytes per character, which changes what
+concatenation, slicing, lexing and hashing cost; the ASCII documents never
+reach that path, and a Ukrainian-speaking user always does.
+`stream-20000cps`, `code-20000cps` and `unicode-20000cps` are not stimuli:
+they answer in about a second so that `seed-long-session.mjs` can build a
+session with a hundred turns of realistic history in minutes:
+
+```bash
+node scripts/perf/seed-long-session.mjs --port 4599 --dir <project directory> --turns 120 --title "perf: long 120"
+```
+
 Run-to-run spread on an unchanged build is one to two points of renderer CPU,
 so a smaller difference is noise.
 
@@ -189,6 +205,25 @@ so a smaller difference is noise.
 or an animation costs by switching it off without a rebuild. The report marks
 such a run as a modified app. Keep it for attribution; a fix is measured on a
 real build.
+
+### Frame budget and the end of the reply
+
+Besides long tasks (over 50 ms, what a user calls a freeze), the report counts
+renderer main-thread tasks over 8.33 ms and over 16.7 ms: one frame at 120 Hz
+and at 60 Hz, what a user calls jank while text streams. These counts use the
+`CrRendererMain` thread only and warn when the trace does not name it.
+
+`finalizeLongestTaskMs` is the longest main-thread task within 1000 ms after
+the session went idle: the spike when the finished turn is finalised. The idle
+edge is the first idle status frame for the session on the page's realtime
+WebSocket after a busy one (OpenChamber's `openchamber:session-status`, or
+OpenCode's `session.status` / `session.idle`), timestamped by the
+browser, so the window starts when the page learned the reply ended; the CLI
+poll that ends the recording is a second late and is not used. CDP network
+timestamps and trace timestamps share Chrome's monotonic clock; the run checks
+that the busy frame lands after its `perf:stream-start` mark and that the idle
+frame lies inside the trace, and otherwise reports the metric as missing with a
+warning, never as zero. Keep `--tail` at 1 s or more so the window is recorded.
 
 ### Measuring the desktop shell
 
@@ -270,27 +305,67 @@ that is not listed.
 
 ## profile:switch
 
-Clicks sidebar session rows with real mouse input and measures, per click, the
-two moments a user feels: `ack`, when the clicked row is highlighted as active
-(the first visible reaction), and `content`, when the timeline shows messages
-that were not on screen before. It also reports the longest main-thread task
-inside each switch and every request the switch triggered, so fan-out
-regressions show up next to the latency they cause.
+Clicks sidebar session rows with real mouse input and measures, per click:
 
-Every session in the plan is visited twice. The first visit is usually cold
-(a network round trip for messages); the second is warm, served from the
-in-memory session store. They have different budgets and are reported
-separately.
+- `ack`: the clicked row is highlighted as active (the first visible reaction);
+- `content`: messages that were not in the DOM before are in it. They may still
+  be invisible: a freshly opened timeline stays at opacity 0 while renderers
+  hold their provisional first paint (`data-timeline-reveal="pending"`), then
+  fades in;
+- `visible`: every new message that intersects the chat viewport has an
+  effective opacity (its own times every ancestor's) of 1, checked once per
+  animation frame. This is when the user sees the session, and it does not
+  depend on how the reveal is implemented. `revealCleared` (the
+  `data-timeline-reveal` attribute left the DOM) and `revealStates` (each
+  attribute state with its time) are recorded next to it to explain it;
+- layout shift after `visible`, for `--shift-window` ms (default 1500): the
+  messages on screen at reveal are anchors, and `shift.maxPx` is the largest
+  distance any of them moved relative to the chat viewport. That covers late
+  code highlighting changing block heights, list re-measurement and scroll
+  corrections alike, which is what a user sees as a jump. Also recorded:
+  frames with movement, scroll-height and scroll-top changes, and the
+  browser's own `layout-shift` score for the same window (which ignores
+  scrolling, so it can read 0 while the content jumped). Showing a session
+  before code is highlighted must not shift it: gate with `--budget-shift`.
+  A zero is proven, not assumed: `--inject-script` with a script that adds a
+  60 px margin to the on-screen message after each reveal reads `maxPx` 60
+  on every switch (the app's pin-to-end scroll compensates a frame later, and
+  the browser's layout-shift score missed one switch in four);
+- the longest main-thread task inside the switch;
+- every request the switch triggered, with encoded (on the wire) and decoded
+  (parsed) bytes, totals per switch and per endpoint pattern (ids collapsed to
+  `:id`, hashed assets to `/assets/*.js`), so fan-out and payload regressions
+  show up next to the latency they cause.
+
+Every session in the plan is visited twice per cycle. A visit is cold when it
+is the first visit to that session since the page loaded (a network round
+trip for messages), warm otherwise (served from the in-memory session store).
+They have different budgets and are reported separately, overall and per
+session.
+
+Targeting: `--title <text>` adds the sidebar row containing that text
+(repeatable), which is how a long seeded session joins the plan.
+`--cold-reload --repeat <n>` reloads the page before every cycle, parked on a
+session outside the plan (`--park`, default the first other row, opened with
+`?session=`), so every cycle gives one cold visit per session; without it,
+cycles after the first are all warm. `--profile-dir` gives a run its own
+Chrome profile; the app keeps sidebar state and the last session in storage
+per origin, so compared builds served on the same port each need a fresh one.
 
 ```bash
 bun run profile:switch -- --url http://127.0.0.1:4599 --output artifacts/switch-before
 bun run profile:switch -- --url http://127.0.0.1:4599 --baseline artifacts/switch-before --budget-ack 32 --budget-content 100
 ```
 
+```bash
+bun run profile:switch -- --url http://127.0.0.1:4599 --title "perf: long 120" --title "perf: short A" --title "perf: short B" --cold-reload --repeat 5 --headless
+```
+
 `--sessions a,b,c` picks the rows to click; the default is the first rows in
-the sidebar, so pass explicit ids to compare runs across days. The row must be
-present in the sidebar; the command fails rather than measuring a click on
-nothing.
+the sidebar, so pass explicit ids or titles to compare runs across days. The
+row must be present in the sidebar; the command fails rather than measuring a
+click on nothing, and skips (with a warning) a click on the session that is
+already active, which would measure nothing.
 
 ## profile:startup
 
@@ -298,9 +373,43 @@ Launches a packaged Desktop build and reports, per launch, milliseconds since
 the process was spawned: the main process's own `[startup-performance]` marks
 (entry module, Electron ready, window created and shown, main module loaded,
 server start and ready, OpenCode ready, application navigation and load), and
-renderer readiness polled over CDP (React mounted into `#root`, the composer
-present, and `rendererIdle` once the renderer main thread stayed quiet for
-`--settle-ms`). Medians with min…max over the measured runs.
+renderer readiness from `startup-probe.mjs`, a recorder installed into the
+application document before it runs and checked once per animation frame:
+
+- `reactMounted`: a child of `#root` carries React's fiber expando. `#root`
+  holds the HTML splash `#initial-loading` from the first parsed byte, so a
+  child count says nothing;
+- `splashGone`: `#initial-loading` left the document (on the web, React's
+  first commit replaces it);
+- `overlayGone`: the React `AppStartupOverlay` left the DOM after its fade.
+  It has no test id and is matched by its classes; `overlaySeen: false` in a
+  sample means the selector is stale, not that the overlay was instant;
+- `composerHittable` (the composer host wins `elementFromPoint` at its centre)
+  and `composerEditable` (its editor is contenteditable outside any inert or
+  disabled subtree);
+- `usable`: all of the above in one frame;
+- `modelPickerReady`: the app's `ModelControls:ready` trace mark with providers
+  and a selected model;
+- `trace:<name>`: the first occurrence of every `markStartupTrace` mark (the
+  recorder turns the `OPENCHAMBER_STARTUP_TRACE` flag on);
+- `rendererIdle` once the renderer main thread stayed quiet for `--settle-ms`.
+
+Medians and p95 with min…max over the measured runs. A launch fails, and the
+command exits non-zero, when the app process exits early, the application
+never mounts, the recorder never ran, or it never becomes usable within
+`--timeout-ms`; a failed warm-up counts too, because it means a broken build.
+CDP calls are bounded, so a dead renderer fails the launch instead of hanging
+the run.
+
+`--url <OpenChamber URL>` measures the web app the same way in a fresh Chrome
+per launch, from navigation start, and also records every request made until
+`usable` with its bytes, grouped by endpoint. `--cache cold` (default) uses an
+empty profile per launch, a first visit; `--cache warm` reuses one profile, a
+returning user.
+
+```bash
+bun run profile:startup -- --url http://127.0.0.1:4599 --runs 10 --warmup 1 --cache cold
+```
 
 ```bash
 bun run electron:build           # or the package steps with --dir; only the .app is needed
@@ -358,6 +467,7 @@ compared later without re-running:
 - `profile:idle` → `idle-summary.json`, `cpu-profile.cpuprofile`
 - `profile:session` → `session-summary.json`, `cpu-profile.cpuprofile`
 - `profile:startup` → `startup-summary.json`
+- `profile:switch` → `switch-summary.json`, `trace.json`, `cpu-profile.cpuprofile`
 
 `--baseline <directory>` prints a per-metric delta table against a previous run
 of the same command. `--budget-*` options make the command exit non-zero, so the
@@ -388,8 +498,17 @@ of these failure modes once produced a confident, wrong "everything is fast":
   passes the check above. The run asks the session for an assistant message and
   says so when there is none.
 - **A launch that never became the app.** `profile:startup` fails a run whose
-  application document never mounted React within the timeout, rather than
-  reporting the milestones it did reach as a fast launch.
+  process exited early, or whose application document never mounted React or
+  never became usable within the timeout, and exits non-zero, rather than
+  reporting the milestones it did reach as a fast launch. "Mounted" means a
+  React-created node, never the HTML splash.
+- **Content that is in the DOM but not on screen.** A switched-to timeline is
+  hidden until its reveal finishes; `profile:switch` reports `visible` from
+  computed opacity next to `content`, and counts switches whose content never
+  became visible.
+- **A finalize window placed on the wrong clock.** The idle edge for the
+  after-idle task is checked against a page mark and the trace bounds, and is
+  reported missing when it does not fit.
 - **A path no user takes.** Streaming state follows the app's active directory.
   A session opened by URL from another directory renders, but its timeline
   re-renders in full on every flush instead of only the streaming tail. The run
@@ -421,9 +540,13 @@ be a measurement, never a disabled instrument.
 | File | Responsibility |
 |---|---|
 | `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags. |
-| `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, trace-event and per-thread summaries. |
+| `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, frame-budget, windowed longest-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
 | `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
+| `seed-long-session.mjs` | Builds a long session (default 120 turns) through the `openchamber session` CLI and the fixture provider's seeding models. |
+| `aggregate-runs.mjs` | Median, p95, min and max per metric over repeated single-run captures, excluding runs whose validity flags say they measured nothing. |
+| `network.mjs` | Request and byte accounting over the CDP Network domain, grouped by endpoint pattern. |
+| `startup-probe.mjs` | Page-side startup recorder: React mounted, splash and overlay gone, composer usable, model picker, and the app's startup trace marks. |
 | `cpu-profile.mjs` | Aggregates `Profiler.stop()` output into self time per function. |
 | `idle-probe.mjs` | Page-side instrumentation installed before application code runs; attributes scheduled work to the call site that scheduled it. Must never change observable behaviour. |
 | `scenario.mjs` | Shared scenario setup, currently sidebar expansion. Setup always runs before the measured window. |

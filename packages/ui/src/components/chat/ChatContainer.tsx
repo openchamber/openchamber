@@ -23,7 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
-import { createTimelineRevealGate, TimelineRevealGateContext, type TimelineRevealGate } from './timelineRevealGate';
+import { createTimelineRevealGate, type TimelineRevealGate } from './timelineRevealGate';
 
 // How long the previous timeline stays on screen while a session that is not
 // in memory loads, before the skeleton takes over.
@@ -384,10 +384,11 @@ const ChatViewport = React.memo(({
     ), [currentSessionId, directory, floatingComposer, isMobile]);
 
     // Opening a session paints the timeline as one finished picture: the root
-    // stays invisible while any renderer holds a provisional first paint, then
-    // everything appears together. A session the user waited for fades in
-    // once as a whole; one that was ready at the click shows in the same
-    // frame.
+    // stays invisible only until the viewport is in place (the scroll hook's
+    // hold) and the list's measured heights settle, then everything appears
+    // together. Markdown does not hold it: its first paint already has the
+    // final geometry and highlighting only recolours code. A session the user
+    // waited for fades in once as a whole.
     const timelineRootRef = React.useRef<HTMLDivElement | null>(null);
     const endPinningReleasedRef = React.useRef(endPinningReleased);
     endPinningReleasedRef.current = endPinningReleased;
@@ -505,7 +506,6 @@ const ChatViewport = React.memo(({
             aria-hidden={isDesktopExpandedInput}
         >
             <div className="absolute inset-0">
-              <TimelineRevealGateContext.Provider value={revealGate}>
                 <MessageList
                     key={currentSessionKey}
                     ref={messageListRef}
@@ -531,7 +531,6 @@ const ChatViewport = React.memo(({
                     listFooter={listFooter}
                     scrollContainerProps={scrollContainerProps}
                 />
-              </TimelineRevealGateContext.Provider>
                 <OverlayScrollbar containerRef={scrollRef} disableHorizontal suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
                 {showPromptNavigator && promptTurnIds.length >= 2 ? (
                     <PromptNavigatorRail

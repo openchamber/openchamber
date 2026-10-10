@@ -86,14 +86,28 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const showGitignored = useFilesViewShowGitignored();
   const [files, setFiles] = React.useState<FileInfo[]>([]);
   const [directories, setDirectories] = React.useState<FileInfo[]>([]);
-  const [agents, setAgents] = React.useState<AgentInfo[]>([]);
+  // Derived, not stored: the subagent list follows the registry, and only the
+  // ranking follows the query, in the same render as the keystroke.
+  const subagents = React.useMemo<AgentInfo[]>(() => filterVisibleAgents(configAgents)
+    .filter((agent) => agent.mode && agent.mode !== 'primary')
+    .map((agent) => ({
+      name: agent.name,
+      displayName: agent.displayName,
+      description: agent.description,
+      mode: agent.mode,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name)), [configAgents]);
+  const agents = React.useMemo(
+    () => rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]),
+    [searchQuery, subagents],
+  );
   const [loading, setLoading] = React.useState(false);
   const pendingSearchRef = React.useRef(0);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const [marqueeWidth, setMarqueeWidth] = React.useState(360);
-  const [overflowMap, setOverflowMap] = React.useState<Record<number, boolean>>({});
-  const [marqueeDurations, setMarqueeDurations] = React.useState<Record<number, number>>({});
+  // Only the selected row scrolls an overflowing path, so only it is measured.
+  const [selectedOverflow, setSelectedOverflow] = React.useState<{ index: number; duration: number } | null>(null);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const labelRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
   const measureRefs = React.useRef<(HTMLSpanElement | null)[]>([]);
@@ -340,22 +354,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   }, [currentDirectory, debouncedQuery, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
-    const subagents = filterVisibleAgents(configAgents)
-      .filter((agent) => agent.mode && agent.mode !== 'primary')
-      .map((agent) => ({
-        name: agent.name,
-        displayName: agent.displayName,
-        description: agent.description,
-        mode: agent.mode,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    setAgents(rankByQuery(subagents, searchQuery ?? '', (agent) => [agent.name, agent.displayName, agent.description]));
-  }, [configAgents, searchQuery]);
-
-  React.useEffect(() => {
     setSelectedIndex(0);
-    setOverflowMap({});
-    setMarqueeDurations({});
+    setSelectedOverflow(null);
   }, [visibleResults, visibleRecentFiles, visibleAgents.length]);
 
   React.useEffect(() => {
@@ -376,24 +376,21 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         cancelAnimationFrame(frameId);
       }
       frameId = requestAnimationFrame(() => {
-        const next: Record<number, boolean> = {};
-        const durations: Record<number, number> = {};
-        labelRefs.current.forEach((node, index) => {
-          if (!node) {
-            return;
-          }
-          const measureNode = measureRefs.current[index];
-          const fullWidth = measureNode?.offsetWidth ?? node.scrollWidth;
-          const overflowPx = Math.max(0, fullWidth - node.clientWidth);
-          const isOverflowing = overflowPx > 8;
-          next[index] = isOverflowing;
-          if (isOverflowing) {
-            const duration = Math.max(0.6, overflowPx / 110);
-            durations[index] = duration;
-          }
+        const node = labelRefs.current[selectedIndex];
+        if (!node) {
+          setSelectedOverflow(null);
+          return;
+        }
+        const measureNode = measureRefs.current[selectedIndex];
+        const fullWidth = measureNode?.offsetWidth ?? node.scrollWidth;
+        const overflowPx = Math.max(0, fullWidth - node.clientWidth);
+        const duration = Math.max(0.6, overflowPx / 110);
+        setSelectedOverflow((current) => {
+          if (overflowPx <= 8) return null;
+          return current?.index === selectedIndex && current.duration === duration
+            ? current
+            : { index: selectedIndex, duration };
         });
-        setOverflowMap(next);
-        setMarqueeDurations(durations);
       });
     };
 
@@ -406,7 +403,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }
       window.removeEventListener('resize', updateOverflow);
     };
-  }, [visibleResults]);
+  }, [selectedIndex, visibleAgents, visibleRecentFiles, visibleResults]);
 
   React.useEffect(() => {
     const labelNode = labelRefs.current[selectedIndex];
@@ -556,8 +553,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
               const relativePath = file.relativePath || file.name;
               const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
               const isSelected = selectedIndex === rowIndex;
-              const isOverflowing = overflowMap[rowIndex] ?? false;
-              const marqueeDuration = marqueeDurations[rowIndex] ?? 2.6;
+              const isOverflowing = selectedOverflow?.index === rowIndex;
+              const marqueeDuration = selectedOverflow?.index === rowIndex ? selectedOverflow.duration : 2.6;
 
               return (
                 <div
@@ -608,8 +605,8 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
               const relativePath = file.relativePath || file.name;
               const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
               const isSelected = selectedIndex === rowIndex;
-              const isOverflowing = overflowMap[rowIndex] ?? false;
-              const marqueeDuration = marqueeDurations[rowIndex] ?? 2.6;
+              const isOverflowing = selectedOverflow?.index === rowIndex;
+              const marqueeDuration = selectedOverflow?.index === rowIndex ? selectedOverflow.duration : 2.6;
 
               const item = (
                 <div

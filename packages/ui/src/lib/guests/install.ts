@@ -3,7 +3,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { z } from 'zod';
 
-import { parseInstalledGuestJson } from './parse.ts';
+import { parseInstallAnswerJson } from './parse.ts';
 import type { InstalledGuest } from './types.ts';
 import type { GuestRequestFailure } from './request-failure.ts';
 import { removeDeviceGuestStorage } from './device-storage.ts';
@@ -47,6 +47,8 @@ export type InstallGuestErrorCode =
   | 'extract-failed'
   | 'too-large'
   | 'enterprise-mode'
+  /** The server installed it, but this build cannot read the row it answered with. */
+  | 'unreadable'
   | 'failed';
 
 type InstallGuestResult =
@@ -118,7 +120,10 @@ const readInstallResponse = async (response: Response, path: GuestRequestFailure
     return { ok: false, ...error, diagnostic: { method: 'POST', path, kind: 'http', status: response.status } };
   }
   const content = await response.text().catch(() => null);
-  const guest = content === null ? null : parseInstalledGuestJson(content);
+  const guest = content === null ? null : parseInstallAnswerJson(content);
+  if (guest === 'unreadable') {
+    return { ok: false, code: 'unreadable' };
+  }
   if (!guest) {
     return { ok: false, code: 'failed', diagnostic: { method: 'POST', path, kind: 'invalid-response', status: response.status } };
   }

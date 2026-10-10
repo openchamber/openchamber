@@ -4,7 +4,14 @@ import type { Session } from "@/lib/opencode/model"
 import type { SessionPage } from "@/lib/opencode/client"
 
 import { opencodeClient } from "@/lib/opencode/client"
+import { flushPendingSessionWrites } from "@/sync/persist-cache"
 import { useGlobalSessionsStore } from "./useGlobalSessionsStore"
+
+// Every test starts from no pending global snapshot: a complete load of one
+// test would otherwise seed the next test's store.
+beforeEach(() => {
+  flushPendingSessionWrites()
+})
 
 type Deferred<T> = {
   promise: Promise<T>

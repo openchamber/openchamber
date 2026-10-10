@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { getStoredLogin } from '../opencode/auth.js';
 import { createCodeIn } from './code-in.js';
 import { createCodeOut } from './code-out.js';
 import { createSpaceDispatcher } from './dispatcher.js';
@@ -120,6 +121,9 @@ export function readOrCreateOwner(dataDir) {
  * without it every space is marked as of an unknown project. `readIdleStop` and `saveIdleStop`
  * read and keep the user's idle stop setting in the host's settings. `archive` is the chat archive
  * of `space-archive.js`, which a delete saves the space's chats to; without it they go with it.
+ * `readHostLogin(provider)` reads the host's own browser login for a provider from the host's
+ * OpenCode, for a login grant; the tests give a login of their own, and `loginWindowOf` lets the
+ * live test point that grant's upstream at its stand-in.
  */
 export function createSpacesHost({
   dataDir,
@@ -131,6 +135,8 @@ export function createSpacesHost({
   readIdleStop,
   saveIdleStop,
   archive = null,
+  readHostLogin = getStoredLogin,
+  loginWindowOf = undefined,
   runCommand = runCommandProcess,
   openCommandStream = openCommandStreamProcess,
   place = null,
@@ -265,6 +271,8 @@ export function createSpacesHost({
     // A key named by an environment variable is read from the host's own environment, now, and
     // its value is kept nowhere (decision 5).
     readHostSecret: (name) => hostEnvironment[name],
+    readHostLogin,
+    loginWindowOf,
     readIdleStop,
     saveIdleStop,
     announce: (spaceId, payload) => { hub?.injectEvent({ payload, directory: 'global', spaceId }); },

@@ -326,6 +326,8 @@ Use `mountPopoverAnchor` from `@openchamber/sdk/ui` for DOM anchors. It measures
 | `MODEL_FAILED`     | The Small Model returned an error             |
 | `UNSUPPORTED`      | This host surface cannot do that (for example `openCommit` without a Diff view) |
 | `SERVICE_FAILED`     | Service crashed or never became ready           |
+| `REQUEST_FAILED`     | `serviceRequest` was sent but got no usable answer; the service may have acted on it |
+| `RESPONSE_TOO_LARGE` | `request` / `serviceRequest` answer over 8 000 000 bytes; the call ran, ask for a smaller page |
 
 
 ### 1.4 Field limits (client clamps before send)
@@ -343,7 +345,7 @@ Use `mountPopoverAnchor` from `@openchamber/sdk/ui` for DOM anchors. It measures
 | Branch name                      | 200       |
 | Request path                     | 2 000     |
 | Request body                     | 64 000    |
-| Request response                 | 256 000   |
+| Request response (bytes)         | 8 000 000 |
 | Request timeout                  | 20 000 ms |
 | `resolve` answer (host waits)    | 20 000 ms |
 | Background action loading and execution | 20 000 ms |

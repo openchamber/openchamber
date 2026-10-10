@@ -560,8 +560,14 @@
     <script>
       // Fallback: hide loading screen after 10 seconds if React fails to load.
       // Desktop shells manage their own splash via the injected boot outcome;
-      // do not force-remove for desktop windows.
+      // do not force-remove for desktop windows. Electron's preload sets
+      // __OPENCHAMBER_ELECTRON__ before any page script; a packaged launch can
+      // hold the parser on /__runtime-config.js longer than 10s while the
+      // local server starts, and removing the splash then leaves a blank window.
       setTimeout(function() {
+        if (window.__OPENCHAMBER_ELECTRON__) {
+          return;
+        }
         if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
           return;
         }

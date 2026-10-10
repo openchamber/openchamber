@@ -138,6 +138,17 @@ in ESM and CJS. Drop it once upstream ships #536 or an equivalent, and verify
 with `bun packages/ui/tests/chat-history-scroll.browser.mjs`, which runs the
 prepend scenarios over several row-height profiles for this reason.
 
+The same patch makes the list's DOM-order pass (`useDOMOrder`) treat its own
+mount as activity. With `initialScrollAtEnd` the list hands its first
+containers to the last rows, so a freshly opened timeline is always in reverse
+DOM order and the pass moves most rows. Moving a row restyles its whole
+subtree, about 45 ms on an eight-turn session. Unpatched, the first pass ran
+with no delay whenever the first paint already had its final geometry, inside
+the opening reveal, and held the fade-in back by that much. Patched, it waits
+for 500 ms of quiet after mount, after the reveal. Rows keep their visual
+order throughout; only the DOM order (screen readers, tab order) is corrected
+later. `scripts/legend-list-dom-order.test.mjs` checks the installed bundles.
+
 The header retains its report when expanded and has no hover background. Its
 left inset matches sorted Activity. Diff deletions use the ASCII hyphen.
 The header reports five categories: changed files, codebase

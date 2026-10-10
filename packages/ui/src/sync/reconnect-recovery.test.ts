@@ -180,3 +180,40 @@ describe("mergeBootstrapSessions", () => {
     })
   })
 })
+
+describe("mergeBootstrapSessions over a persisted list", () => {
+  test("drops sessions deleted elsewhere and keeps references of unchanged ones", () => {
+    const kept = createSession("a-kept")
+    const renamed = createSession("b-renamed")
+    const deleted = createSession("c-deleted")
+    const persisted = [kept, renamed, deleted]
+    const fetchedKept = createSession("a-kept")
+    const fetchedRenamed = createSession("b-renamed", { title: "New title", time: { created: 1, updated: 2 } })
+    const created = createSession("d-created")
+
+    const { sessions, rootCount } = mergeBootstrapSessions(
+      [fetchedKept, fetchedRenamed, created],
+      [fetchedKept, fetchedRenamed, created],
+      persisted,
+    )
+
+    expect(sessions.map((session) => session.id)).toEqual(["a-kept", "b-renamed", "d-created"])
+    expect(sessions[0]).toBe(kept)
+    expect(sessions[1]).toBe(fetchedRenamed)
+    expect(rootCount).toBe(3)
+  })
+
+  test("returns the cached list itself when nothing changed", () => {
+    const persisted = [createSession("a"), createSession("b")]
+    const fetched = [createSession("a"), createSession("b")]
+
+    expect(mergeBootstrapSessions(fetched, fetched, persisted).sessions).toBe(persisted)
+  })
+
+  test("a field change under the same update time still replaces the record", () => {
+    const persisted = [createSession("a")]
+    const fetched = [createSession("a", { title: "Renamed elsewhere" })]
+
+    expect(mergeBootstrapSessions(fetched, fetched, persisted).sessions[0]).toBe(fetched[0])
+  })
+})

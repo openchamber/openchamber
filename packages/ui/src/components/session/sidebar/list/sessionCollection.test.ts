@@ -13,6 +13,7 @@ import {
   partitionSidebarSessions,
   projectSidebarActiveSessions,
   projectSidebarCollection,
+  selectLiveGapSessions,
   useRecentSessionCollection,
 } from './sessionCollection';
 
@@ -430,3 +431,38 @@ opencodeClient.getFilesystemHomeInfo = async () => ({
 });
 await ensureChatsRootDirectory();
 opencodeClient.getFilesystemHomeInfo = originalHomeInfo;
+
+describe('selectLiveGapSessions', () => {
+  test('keeps the gap reference when a live session the global cache holds bumps its time', () => {
+    const covered = session('covered', '/repo');
+    const gapSession = session('gap', '/repo');
+    const globalIds = new Set(['covered']);
+    const first = selectLiveGapSessions([covered, gapSession], globalIds, []);
+
+    // A streamed step replaces the covered session with a newer time.updated;
+    // before, that rebuilt the whole sidebar structure.
+    const bumped = { ...covered, time: { created: 1, updated: 2 } };
+    const second = selectLiveGapSessions([bumped, gapSession], globalIds, first);
+
+    expect(first).toEqual([gapSession]);
+    expect(second).toBe(first);
+  });
+
+  test('returns a new gap when a session outside the global cache changes', () => {
+    const gapSession = session('gap', '/repo');
+    const first = selectLiveGapSessions([gapSession], new Set(), []);
+    const renamed = { ...gapSession, title: 'Renamed' };
+
+    const second = selectLiveGapSessions([renamed], new Set(), first);
+
+    expect(second).not.toBe(first);
+    expect(second).toEqual([renamed]);
+  });
+
+  test('drops a session from the gap once the global cache holds it', () => {
+    const gapSession = session('gap', '/repo');
+    const first = selectLiveGapSessions([gapSession], new Set(), []);
+
+    expect(selectLiveGapSessions([gapSession], new Set(['gap']), first)).toEqual([]);
+  });
+});

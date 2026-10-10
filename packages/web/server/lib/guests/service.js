@@ -11,6 +11,7 @@ import {
 } from '@openchamber/sdk';
 
 import { readExtensionStore, updateExtensionStore } from './persist.js';
+import { readBoundedResponseText } from './response-body.js';
 import { resolveServiceSocketEnv } from './sockets.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -65,11 +66,12 @@ const assertGuestHostActive = (lifecycle) => {
 export class GuestServiceError extends Error {
   /**
    * @param {string} message
-   * @param {'NO_SERVICE' | 'SERVICE_FAILED' | 'REQUEST_FAILED' | 'BAD_PATH' | 'BAD_METHOD' | 'DISABLED' | 'CANCELLED'} code
+   * @param {'NO_SERVICE' | 'SERVICE_FAILED' | 'REQUEST_FAILED' | 'RESPONSE_TOO_LARGE' | 'BAD_PATH' | 'BAD_METHOD' | 'DISABLED' | 'CANCELLED'} code
    * `SERVICE_FAILED` is a service that never became ready: nothing was sent
    * to it. `REQUEST_FAILED` is a request that was sent and got no usable
    * answer (timeout, dropped connection, unreadable body): the service may
-   * have acted on it.
+   * have acted on it. `RESPONSE_TOO_LARGE` is an answer over `responseMax`:
+   * the service did act on the request.
    */
   constructor(message, code) {
     super(message);
@@ -694,14 +696,14 @@ export const openGuestServiceRequest = async ({
 };
 
 /**
- * Panel-shaped proxy: text answer, capped. Same params as
+ * Panel-shaped proxy: text answer, refused over `responseMax`. Same params as
  * `openGuestServiceRequest` plus `responseMax`.
  */
 export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RESPONSE_MAX, ...params }) => {
   const { response, finished } = await openGuestServiceRequest(params);
-  let text;
+  let body;
   try {
-    text = await response.text();
+    body = await readBoundedResponseText(response, responseMax);
   } catch {
     finished();
     if (params.signal?.aborted) {
@@ -712,10 +714,11 @@ export const proxyGuestServiceRequest = async ({ responseMax = GUEST_REQUEST_RES
     throw new GuestServiceError('Guest service request failed.', 'REQUEST_FAILED');
   }
   finished();
+  if (body.tooLarge) {
+    throw new GuestServiceError(`The service answered with more than ${responseMax} bytes.`, 'RESPONSE_TOO_LARGE');
+  }
   return {
     status: response.status,
-    body: text.length <= responseMax
-      ? text
-      : text.slice(0, responseMax),
+    body: body.text,
   };
 };

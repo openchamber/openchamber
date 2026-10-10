@@ -61,6 +61,8 @@ Use `Button` from `packages/ui/src/components/ui/button.tsx`.
 
 Do not hardcode button height/padding when a size variant exists. Do not recreate selection/destructive styling with ad-hoc classes.
 
+A button that opens a page, panel, or search field is a toggle: while what it opened is on screen it carries `aria-pressed` and the selection tokens, and the next click closes it. Closing a search field also clears its query, so the list never stays filtered by text nobody can see.
+
 ## Keyboard Navigation Contract
 
 - Menus, selects, and autocomplete pickers with ArrowDown/ArrowUp navigation must also support Ctrl+N/Ctrl+P, including submenus and searchable lists.

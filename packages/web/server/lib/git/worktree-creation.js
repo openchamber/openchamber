@@ -162,7 +162,9 @@ export const createWorktreeCreation = ({
     const bindingRead = getSourceControlBinding instanceof Function
       ? await getSourceControlBinding(directory)
       : null;
-    const repositoryAuthority = bindingRead?.binding ? {
+    // An unbound repository hydrates through the machine's own Git for every
+    // remote, the same way it pushes; its authority is the unbound revision.
+    const repositoryAuthority = bindingRead ? {
       repositoryId: bindingRead.repository.repositoryId,
       bindingRevision: bindingRead.revision,
       configRevision: bindingRead.repository.configRevision,

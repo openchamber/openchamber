@@ -29,6 +29,18 @@ describe('live aggregate', () => {
     expect(areSessionListsEquivalent([original], [{ ...original, model: { ...original.model, providerID: 'custom' } }])).toBe(false)
   })
 
+  it('compares rebuilt session lists field by field', () => {
+    const list = [session('ses-1', '/a', 10), session('ses-2', '/b', 20, { parentID: 'ses-1' })]
+
+    expect(areSessionListsEquivalent(list, [...list])).toBe(true)
+    expect(areSessionListsEquivalent(list, list.map((item) => ({ ...item, time: { ...item.time } })))).toBe(true)
+    expect(areSessionListsEquivalent(list, [list[0], { ...list[1], time: { ...list[1].time, updated: 21 } }])).toBe(false)
+    expect(areSessionListsEquivalent(list, [list[0], { ...list[1], title: 'renamed' }])).toBe(false)
+    expect(areSessionListsEquivalent(list, [list[0], { ...list[1], parentID: undefined }])).toBe(false)
+    expect(areSessionListsEquivalent(list, [list[0], { ...list[1], directory: '/c' }])).toBe(false)
+    expect(areSessionListsEquivalent(list, [list[0], { ...list[1], time: { ...list[1].time, archived: 30 } }])).toBe(false)
+  })
+
   it('prefers the freshest live session snapshot across child stores', () => {
     const states = [
       {

@@ -42,6 +42,10 @@ export type DecorateContext = {
   labels: DecorateLabels;
   mermaidControls: MermaidControlOptions;
   codeBlockLineWrap: boolean;
+  // Reserve the code line-number gutter but leave the numbers for later
+  // (`layoutReservedCodeLines`). The renderer gives a streaming and a settled
+  // context the same decoration identity, so blocks keep their DOM when a
+  // stream ends.
   deferCodeLineNumberSync?: boolean;
   onToggleCodeBlockLineWrap?: () => void;
   // Tables fit the available width and wrap cell text instead of scrolling.
@@ -181,7 +185,9 @@ const applyCodeBlockWrapState = (wrapper: HTMLElement, enabled: boolean, labels:
 };
 
 const layoutCodeLines = (pre: HTMLPreElement): void => {
-  const code = pre.querySelector<HTMLElement>(':scope > code');
+  // A direct child walk rather than `:scope > code`: happy-dom, which the
+  // decoration tests run on, does not match `:scope`.
+  const code = Array.from(pre.children).find((child) => child.tagName === 'CODE');
   if (!code || code.hasAttribute('data-md-code-lines')) return;
 
   // The real gutter takes over the reserved footprint.
@@ -235,6 +241,18 @@ const layoutCodeLines = (pre: HTMLPreElement): void => {
 
 export { getMarkdownCodeText };
 
+/**
+ * Fill in the line numbers of one code block decorated while streaming. The
+ * gutter's width was reserved then, so this only adds the numbers.
+ */
+export const layoutReservedCodeLines = (pre: HTMLPreElement, ctx: DecorateContext): void => {
+  const wrapper = pre.closest<HTMLElement>('[data-component="markdown-code"]');
+  layoutCodeLines(pre);
+  if (wrapper) applyCodeBlockWrapState(wrapper, ctx.codeBlockLineWrap, ctx.labels);
+};
+
+export const RESERVED_CODE_GUTTER_SELECTOR = 'pre[data-md-gutter-reserved]';
+
 export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: boolean, labels: DecorateLabels): void => {
   const wrappers = root.querySelectorAll<HTMLElement>('[data-component="markdown-code"]');
   for (const wrapper of Array.from(wrappers)) {
@@ -284,7 +302,9 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
     // `data-md-lang` is stamped by the async highlight pass; on the synchronous
     // first paint it isn't set yet, so fall back to the `language-*` class marked
     // emits — keeps the card header label stable instead of flashing 'text'.
-    const classLang = pre.querySelector('code')?.className.match(/language-([\w+#.-]+)/)?.[1];
+    // Lowercased like the highlight pass's stamp, so the label does not
+    // change case when highlighting lands.
+    const classLang = pre.querySelector('code')?.className.match(/language-([\w+#.-]+)/)?.[1]?.toLowerCase();
     const language = pre.getAttribute('data-md-lang') ?? classLang ?? 'text';
 
     const wrapper = document.createElement('div');
@@ -320,9 +340,9 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
       layoutCodeLines(pre);
     } else {
       // Streaming defers the per-line gutter markup, but the gutter's
-      // horizontal footprint is reserved immediately — otherwise the
-      // end-of-stream decorate pass shifts every code line right by the
-      // gutter column and the finished message visibly jumps.
+      // horizontal footprint is reserved immediately — otherwise filling in
+      // the numbers after the stream (`layoutReservedCodeLines`) would shift
+      // every code line right by the gutter column.
       pre.setAttribute('data-md-gutter-reserved', '');
     }
     body.appendChild(pre);

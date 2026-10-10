@@ -1020,7 +1020,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'PR 合并后',
   'settings.openchamber.mergedWorktreeCleanup.info': '使用侧边栏已显示的 PR 状态。当智能体正在该工作树中工作或其会话处于打开状态时，不会执行任何操作。',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': '归档会话并移除工作树',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '只有当工作树中的所有内容都已包含在合并的 PR 中时，才会移除工作树及其本地分支。否则只归档会话，保留工作树。',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '当工作树中没有未提交的更改、也没有合并的 PR 中缺少的提交时，工作树及其本地分支就会被移除。在此之前只归档会话，保留工作树。',
   'settings.openchamber.messageSearch.title': '消息搜索',
   'settings.openchamber.messageSearch.field.enabled': '在所有对话中搜索消息',
   'settings.openchamber.messageSearch.field.enabledInfo': '在设置文件旁边为你的消息和智能体回复保存一个小型索引，让搜索能立即找到它们。索引保存在运行 OpenChamber 的机器上，不会发送到任何地方。',

@@ -323,18 +323,36 @@ export const createOpenChamberControlService = (dependencies) => {
     return asPublicStatus(statuses[sessionID]);
   };
 
-  // `order: 'desc'` puts the newest messages in the limited page;
-  // extractTextMessages re-sorts them oldest-first for the caller.
+  // The message list is cursor-paginated and `order: 'desc'` puts the newest
+  // messages in the page, so a single call returns only the recent tail.
+  // `all: true` walks `cursor.next` until the history is exhausted; a bounded
+  // `limit` stops once enough text messages are collected. Later pages carry
+  // the order inside the cursor, and OpenCode rejects a cursor combined with
+  // `order`, so only the first page sends it. An empty page or a repeated
+  // cursor ends the walk. `extractTextMessages` sorts the gathered records
+  // oldest-first for the caller.
+  const MESSAGE_PAGE_LIMIT = 200;
   const sessionMessages = async (client, sessionID, role, limit) => {
     const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
-    let response = await client.message.list({ sessionID, ...(fetchLimit ? { limit: fetchLimit, order: 'desc' } : {}) });
-    let raw = Array.isArray(response?.data) ? response.data : [];
-    let messages = extractTextMessages(raw, role);
-    if (limit !== undefined && messages.length < limit && raw.length >= fetchLimit) {
-      response = await client.message.list({ sessionID });
-      raw = Array.isArray(response?.data) ? response.data : [];
-      messages = extractTextMessages(raw, role);
+    const collected = [];
+    const seenCursors = new Set();
+    let cursor;
+    for (;;) {
+      const response = await client.message.list({
+        sessionID,
+        limit: fetchLimit ?? MESSAGE_PAGE_LIMIT,
+        ...(cursor ? { cursor } : fetchLimit ? { order: 'desc' } : {}),
+      });
+      const raw = Array.isArray(response?.data) ? response.data : [];
+      collected.push(...raw);
+      const next = asNonEmptyString(response?.cursor?.next);
+      if (!next || raw.length === 0 || seenCursors.has(next)) break;
+      // A bounded read only needs enough pages to project `limit` text messages.
+      if (limit !== undefined && extractTextMessages(collected, role).length >= limit) break;
+      seenCursors.add(next);
+      cursor = next;
     }
+    const messages = extractTextMessages(collected, role);
     return limit === undefined ? messages : messages.slice(-limit);
   };
 

@@ -551,7 +551,7 @@ export const registerGuestRoutes = (app, {
       res.json(result);
     } catch (error) {
       if (error instanceof GuestOAuthError) {
-        const status = error.code === 'DISCONNECTED' ? 409 : 400;
+        const status = error.code === 'DISCONNECTED' ? 409 : error.code === 'RESPONSE_TOO_LARGE' ? 502 : 400;
         return res.status(status).json({ error: error.code, message: error.message });
       }
       console.error('Failed to proxy guest request:', error);
@@ -585,7 +585,7 @@ export const registerGuestRoutes = (app, {
       res.json(result);
     } catch (error) {
       if (error instanceof GuestServiceError) {
-        const status = error.code === 'SERVICE_FAILED' || error.code === 'REQUEST_FAILED' ? 502 : 400;
+        const status = ['SERVICE_FAILED', 'REQUEST_FAILED', 'RESPONSE_TOO_LARGE'].includes(error.code) ? 502 : 400;
         return res.status(status).json({ error: error.code, message: error.message });
       }
       console.error('Failed to proxy guest service request:', error);

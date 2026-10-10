@@ -9,6 +9,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 const MAC_HOME = '/Users/me';
 const MAC_PROJECT = '/Users/me/project';
 const REMOTE_HOME = '/home/remote';
+const REMOTE_CHATS = '/srv/remote/chats';
 
 const storage = new Map<string, string>([['lastDirectory', MAC_PROJECT]]);
 const testLocalStorage = {
@@ -72,12 +73,20 @@ mock.module('@/lib/opencode/client', () => ({
     // The real one derives a home from the stored last directory when the
     // host answers nothing, which after a switch is still this Mac's.
     getSystemInfo: async () => ({ homeDirectory: runtimeKey === 'local' || !loggedInOnRemote ? MAC_HOME : REMOTE_HOME }),
+    getFilesystemHomeInfo: async () => {
+      const boundTo = clientBoundTo;
+      await holdLookup;
+      if (boundTo === 'local') return { home: MAC_HOME, chatsRoot: `${MAC_HOME}/.config/openchamber/chats` };
+      if (!loggedInOnRemote) throw new Error('Failed to resolve the chats root (401)');
+      return { home: REMOTE_HOME, chatsRoot: REMOTE_CHATS };
+    },
   },
 }));
 
 mock.module('@/lib/desktop', () => ({
   getDesktopHomeDirectory: async () => MAC_HOME,
   isVSCodeRuntime: () => false,
+  isDesktopShell: () => false,
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -146,7 +155,8 @@ describe('directory store after the desktop switches to another host', () => {
 
     loggedInOnRemote = true;
     await ensureHomeDirectoryResolved();
-    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: REMOTE_HOME, currentDirectory: REMOTE_HOME, isHomeReady: true });
-    expect(clientDirectory).toBe(REMOTE_HOME);
+    // No project is open on that host: the app works in its chats root.
+    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: REMOTE_HOME, currentDirectory: REMOTE_CHATS, isHomeReady: true });
+    expect(clientDirectory).toBe(REMOTE_CHATS);
   });
 });

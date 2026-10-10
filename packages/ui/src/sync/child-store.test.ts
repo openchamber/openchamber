@@ -14,7 +14,7 @@ import {
   getSyncPerformanceDiagnostics,
   setSyncPerformanceDiagnosticsEnabled,
 } from './performance-diagnostics';
-import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES } from './types';
+import { DIR_IDLE_TTL_MS, EVICTION_GRACE_MS, MAX_DIR_STORES, type State } from './types';
 import { FilesystemError } from '@/lib/api/files-errors';
 import type { PermissionRequest } from '@/lib/opencode/model';
 
@@ -787,6 +787,160 @@ describe('ChildStoreManager bootstrap context liveness', () => {
     expect(contexts[0]?.isCurrent()).toBe(false);
     expect(contexts[1]?.isCurrent()).toBe(true);
 
+    cleanup();
+    manager.disposeAll();
+  });
+});
+
+describe('ChildStoreManager after an OpenCode stream restart', () => {
+  const bootstrapped = (manager: ChildStoreManager, directory: string, patch: Partial<State> = {}) => {
+    manager.ensureChild(directory, { bootstrap: false }).setState({ status: 'complete', ...patch });
+  };
+
+  // Before: every bootstrapped store re-read at once (six bootstraps here, each
+  // about eight requests and a location start on v2).
+  test('re-reads only stores in use or showing live state, the rest on their next demand', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    bootstrapped(manager, '/current');
+    bootstrapped(manager, '/pinned-column');
+    bootstrapped(manager, '/waiting', {
+      permission: { ses_waiting: [{ id: 'per_1', sessionID: 'ses_waiting' } as PermissionRequest] },
+    });
+    bootstrapped(manager, '/busy', { session_status: { ses_busy: { type: 'busy' } } });
+    bootstrapped(manager, '/idle-a', { session_status: { ses_idle: { type: 'idle' } } });
+    bootstrapped(manager, '/idle-b');
+    manager.ensureChild('/never-bootstrapped', { bootstrap: false });
+    manager.setBootstrapDemand('column', [{ directory: '/pinned-column', priority: 'selected', reason: 'selected-session' }]);
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => { started.push(directory); },
+    });
+    expect(started).toEqual([]);
+
+    const refreshing = manager.refreshAfterStreamRestart('/current');
+    for (let index = 0; index < 20; index += 1) await settle();
+
+    expect([...refreshing].sort()).toEqual(['/busy', '/current', '/pinned-column', '/waiting']);
+    expect([...started].sort()).toEqual(['/busy', '/current', '/pinned-column', '/waiting']);
+    // Foreground first; live-state stores drain behind them in the background.
+    expect(started.slice(0, 2).sort()).toEqual(['/current', '/pinned-column']);
+
+    // A deferred store re-reads as soon as something uses it, once.
+    manager.setBootstrapDemand('sidebar', [{ directory: '/idle-a', priority: 'selected', reason: 'selected-session' }]);
+    await settle();
+    expect(started.filter((directory) => directory === '/idle-a')).toEqual(['/idle-a']);
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/idle-a', priority: 'selected', reason: 'selected-session' },
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+    ]);
+    await settle();
+    expect(started.filter((directory) => directory === '/idle-a' || directory === '/current')).toEqual(['/current', '/idle-a']);
+    expect(started.includes('/idle-b')).toBe(false);
+    expect(started.includes('/never-bootstrapped')).toBe(false);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('a store idle before the gap re-reads when OpenCode lists one of its sessions active', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    const session = (id: string) => ({ id } as State['session'][number]);
+    bootstrapped(manager, '/current');
+    // Idle before the gap; its session asked a permission while events were lost.
+    bootstrapped(manager, '/asked-during-gap', { session: [session('ses_asked')], session_status: { ses_asked: { type: 'idle' } } });
+    bootstrapped(manager, '/still-idle', { session: [session('ses_quiet')] });
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => { started.push(directory); },
+    });
+
+    manager.refreshAfterStreamRestart('/current');
+    await settle();
+    expect(started).toEqual(['/current']);
+
+    // Before: nothing re-read it until it was selected, so it showed idle
+    // with no permission. The current store is not stale anymore and is skipped.
+    const queued = manager.refreshStaleDirectoriesWithActiveSessions(new Set(['ses_asked', 'ses_elsewhere']));
+    for (let index = 0; index < 5; index += 1) await settle();
+    expect([...queued]).toEqual(['/asked-during-gap']);
+    expect(started).toEqual(['/current', '/asked-during-gap']);
+
+    // A store that re-read is no longer stale; a second answer queues nothing.
+    expect([...manager.refreshStaleDirectoriesWithActiveSessions(new Set(['ses_asked']))]).toEqual([]);
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('bootstraps that failed while OpenCode started re-run on its first connection; complete ones do not', async () => {
+    const manager = new ChildStoreManager();
+    const started: string[] = [];
+    let openCodeReady = false;
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: async ({ directory }) => {
+        started.push(directory);
+        if (!openCodeReady && directory !== '/complete') throw new Error('502 OpenCode is starting');
+      },
+    });
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+      { directory: '/complete', priority: 'active-project', reason: 'known-project' },
+    ]);
+    manager.requestBootstrap({ directory: '/background', priority: 'background', reason: 'action-demand' });
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect(manager.getBootstrapState('/current')).toBe('failed');
+    expect(manager.getBootstrapState('/background')).toBe('failed');
+    expect(manager.getBootstrapState('/complete')).toBe('complete');
+    // A failed bootstrap stays failed: demand without force does not retry it.
+    manager.setBootstrapDemand('sidebar', [
+      { directory: '/current', priority: 'selected', reason: 'current-directory' },
+      { directory: '/complete', priority: 'active-project', reason: 'known-project' },
+    ]);
+    await settle();
+    expect(started.filter((directory) => directory === '/current')).toEqual(['/current']);
+
+    openCodeReady = true;
+    started.length = 0;
+    const queued = manager.retryFailedBootstraps();
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect([...queued]).toEqual(['/current']);
+    expect(started).toEqual(['/current']);
+    expect(manager.getBootstrapState('/current')).toBe('complete');
+
+    // The background store re-reads when something uses it again.
+    manager.setBootstrapDemand('column', [{ directory: '/background', priority: 'visible', reason: 'known-project' }]);
+    for (let index = 0; index < 10; index += 1) await settle();
+    expect(started).toEqual(['/current', '/background']);
+    expect(manager.getBootstrapState('/background')).toBe('complete');
+    cleanup();
+    manager.disposeAll();
+  });
+
+  test('a bootstrap running across the restart reruns when its store is in use', async () => {
+    const manager = new ChildStoreManager();
+    const tasks: Array<ReturnType<typeof deferred>> = [];
+    const started: string[] = [];
+    const cleanup = manager.configure({
+      bootstrapConcurrency: 2,
+      onBootstrap: ({ directory }) => {
+        started.push(directory);
+        const task = deferred();
+        tasks.push(task);
+        return task.promise;
+      },
+    });
+    manager.ensureChild('/current', { bootstrap: false }).setState({ status: 'partial' });
+    manager.setBootstrapDemand('sidebar', [{ directory: '/current', priority: 'selected', reason: 'current-directory', force: true }]);
+    expect(started).toEqual(['/current']);
+
+    manager.refreshAfterStreamRestart('/current');
+    tasks[0]?.resolve();
+    await settle();
+    await settle();
+    expect(started).toEqual(['/current', '/current']);
+    tasks[1]?.resolve();
+    await settle();
     cleanup();
     manager.disposeAll();
   });

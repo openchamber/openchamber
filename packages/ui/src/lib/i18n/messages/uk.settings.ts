@@ -1020,7 +1020,7 @@ export const settingsDict = {
   "settings.openchamber.mergedWorktreeCleanup.title": "Після злиття PR",
   "settings.openchamber.mergedWorktreeCleanup.info": "Використовує статус PR, який уже показує бічна панель. Нічого не відбувається, поки в worktree працює агент або відкрита одна з його сесій.",
   "settings.openchamber.mergedWorktreeCleanup.field.enable": "Архівувати сесії й видаляти worktree",
-  "settings.openchamber.mergedWorktreeCleanup.field.enableDescription": "Worktree і локальна гілка видаляються, лише коли все з них є в злитому PR. Інакше сесії архівуються, а worktree лишається.",
+  "settings.openchamber.mergedWorktreeCleanup.field.enableDescription": "Worktree і локальна гілка видаляються, щойно в ньому немає незакомічених змін і комітів, яких бракує в злитому PR. До того сесії архівуються, а worktree лишається.",
   "settings.openchamber.messageSearch.title": "Пошук по повідомленнях",
   "settings.openchamber.messageSearch.field.enabled": "Шукати повідомлення в усіх розмовах",
   "settings.openchamber.messageSearch.field.enabledInfo": "Поруч із налаштуваннями зберігається невеликий індекс ваших повідомлень і відповідей агента, тож пошук знаходить їх миттєво. Він лишається на машині, де працює OpenChamber, і нікуди не надсилається.",

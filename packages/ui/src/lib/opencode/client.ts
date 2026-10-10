@@ -1324,7 +1324,11 @@ class OpencodeService {
     return id
   }
 
-  /** Stages a revert to before `messageId`; nothing changes until {@link commitRevert}. */
+  /**
+   * Stages a revert to before `messageId`: the later messages hide and their
+   * file changes roll back. The next prompt commits it on the server;
+   * {@link clearRevert} puts everything back.
+   */
   async stageRevert(sessionId: string, messageId: string, options?: { files?: boolean; directory?: string | null }): Promise<SessionRevert> {
     return call("session.revert.stage", () =>
       this.clientFor(options?.directory).session.revert.stage({
@@ -1333,10 +1337,6 @@ class OpencodeService {
         files: options?.files,
       }),
     )
-  }
-
-  async commitRevert(sessionId: string, directory?: string | null): Promise<void> {
-    await call("session.revert.commit", () => this.clientFor(directory).session.revert.commit({ sessionID: sessionId }))
   }
 
   async clearRevert(sessionId: string, directory?: string | null): Promise<void> {
@@ -1861,15 +1861,22 @@ class OpencodeService {
    * server did not answer (network error or timeout); "unhealthy" means it
    * answered but OpenCode is not ready.
    */
-  async probeHealth(): Promise<OpencodeHealthProbe> {
+  async probeHealth(options?: { waitMs?: number }): Promise<OpencodeHealthProbe> {
+    // `waitMs` asks the OpenChamber server to hold an unhealthy answer until
+    // OpenCode is ready or the wait runs out. Hosts that predate the wait
+    // (and the VS Code bridge) ignore it and answer at once.
+    const waitMs = Math.max(0, Math.floor(options?.waitMs ?? 0))
     const normalizedBase = this.baseUrl.endsWith("/") ? this.baseUrl.replace(/\/+$/, "") : this.baseUrl
     const healthUrl =
       normalizedBase === "/api" || normalizedBase.endsWith("/api") ? "/api/opencode/health" : `${normalizedBase}/opencode/health`
     markStartupTrace("opencodeClient.checkHealth:url", { baseUrl: this.baseUrl, healthUrl })
     let response: Response
     try {
-      const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS)
-      response = await runtimeFetch(healthUrl, { signal: timeout.signal }).finally(timeout.cleanup)
+      const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS + waitMs)
+      response = await runtimeFetch(healthUrl, {
+        signal: timeout.signal,
+        ...(waitMs > 0 ? { query: { wait: String(waitMs) } } : {}),
+      }).finally(timeout.cleanup)
     } catch {
       return "unreachable"
     }

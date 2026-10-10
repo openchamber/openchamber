@@ -12,9 +12,13 @@
  *   (`[startup-performance]`, enabled through OPENCHAMBER_STARTUP_PERF=1):
  *   Electron ready, splash navigation, window shown, server start/ready,
  *   application navigation and renderer load;
- * - renderer readiness polled over CDP: React mounted into `#root`, the
- *   composer on screen, and `rendererIdle` once the renderer main thread
- *   stayed quiet for `--settle-ms`;
+ * - renderer readiness from a page-side recorder installed before the
+ *   application document runs (`perf/startup-probe.mjs`): React committed its
+ *   first tree into `#root` (not the HTML splash, which is a child of `#root`
+ *   from the first byte), the HTML splash and the startup overlay gone, the
+ *   composer hittable and editable (`usable`), the model picker populated,
+ *   and the app's own `markStartupTrace` marks; `rendererIdle` once the
+ *   renderer main thread stayed quiet for `--settle-ms`;
  * - with `--screen`, when the window's pixels first changed (`screenPainted`)
  *   and when they stopped changing (`screenSettled`), sampled from the screen
  *   itself. Chromium stops painting an occluded window and a splash reads as
@@ -28,6 +32,12 @@
  * a new binary pays the Gatekeeper scan). `--opencode warm` starts the bundled
  * OpenCode CLI once before the runs and points every launch at it through
  * OPENCODE_PORT, so the measurement excludes OpenCode's own start.
+ *
+ * `--url <OpenChamber URL>` measures the web app instead: a fresh Chrome per
+ * launch loads the URL, and every milestone is in milliseconds since that
+ * navigation started. `--cache cold` (default) gives every launch an empty
+ * profile, a first visit; `--cache warm` keeps one profile (HTTP cache,
+ * storage, service worker) across launches, a returning user.
  */
 
 import { spawn, spawnSync } from "node:child_process"
@@ -36,14 +46,25 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import process from "node:process"
 
-import { CdpClient, reservePort, wait } from "./perf/cdp.mjs"
+import { CdpClient, createPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
 import { round } from "./perf/metrics.mjs"
+import { createNetworkRecorder, summarizeRequests } from "./perf/network.mjs"
+import { buildStartupProbeSource, STARTUP_PROBE_GLOBAL } from "./perf/startup-probe.mjs"
 
 const HELP = `Usage: bun run profile:startup -- [options]
 
-Measures how long a packaged OpenChamber Desktop build takes to start.
+Measures how long a packaged OpenChamber Desktop build, or the web app at
+--url, takes to start and become usable.
 
 Options:
+  --url <url>              Measure the web app at this OpenChamber URL in Chrome
+                           instead of a packaged build
+  --cache cold|warm        Web only. cold: an empty Chrome profile per launch
+                           (default). warm: one profile reused by every launch
+  --chrome <path>          Web only. Chrome/Chromium executable
+  --headed                 Web only. Show the browser (default: headless)
+  --model-label <text>     Record modelPickerShown: when the composer footer
+                           first shows this model name
   --app <path>             Packaged app (.app bundle on macOS, executable elsewhere).
                            Default: packages/electron/dist/mac-<arch>/OpenChamber.app
   --compare <path>         Second build; launches alternate between the two
@@ -89,6 +110,11 @@ const parseArgs = (argv) => {
     timeoutMs: 60_000,
     output: null,
     label: null,
+    url: null,
+    cache: "cold",
+    chrome: null,
+    headed: false,
+    modelLabel: null,
   }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
@@ -111,11 +137,17 @@ const parseArgs = (argv) => {
     else if (value === "--timeout-ms") options.timeoutMs = Number(argv[++index])
     else if (value === "--output") options.output = argv[++index]
     else if (value === "--label") options.label = argv[++index]
+    else if (value === "--url") options.url = argv[++index]
+    else if (value === "--cache") options.cache = argv[++index]
+    else if (value === "--chrome") options.chrome = argv[++index]
+    else if (value === "--headed") options.headed = true
+    else if (value === "--model-label") options.modelLabel = argv[++index]
     else throw new Error(`Unknown option: ${value}`)
   }
   if (!Number.isInteger(options.runs) || options.runs < 1) throw new Error("--runs must be a positive integer")
   if (!Number.isInteger(options.warmup) || options.warmup < 0) throw new Error("--warmup must be a non-negative integer")
   if (options.opencode !== "cold" && options.opencode !== "warm") throw new Error("--opencode must be cold or warm")
+  if (options.cache !== "cold" && options.cache !== "warm") throw new Error("--cache must be cold or warm")
   if (!Number.isFinite(options.shellDelayMs) || options.shellDelayMs < 0) throw new Error("--shell-delay-ms must be a non-negative number")
   return options
 }
@@ -242,19 +274,48 @@ const listTargets = async (port) => {
 }
 
 // Renderer readiness, read in one round trip. The splash is a data: document
-// with no #root; the application document mounts React into it.
+// with no #root; the application document mounts React into it. `#root` holds
+// the HTML splash from the first parsed byte, so "mounted" means a child that
+// React created (it carries React's fiber expando), never just a child.
+// `recorder` is the page-side startup recorder when it was installed before
+// the document ran; the polled fields are the fallback when it was not.
 const PROBE = `(() => ({
   origin: performance.timeOrigin,
   url: location.href,
   visible: document.visibilityState === 'visible',
   firstPaint: performance.getEntriesByType('paint').find((entry) => entry.name === 'first-paint')?.startTime ?? null,
   domInteractive: performance.getEntriesByType('navigation')[0]?.domInteractive ?? null,
-  mounted: (document.getElementById('root')?.childElementCount ?? 0) > 0,
+  mounted: [...(document.getElementById('root')?.children ?? [])]
+    .some((child) => child.id !== 'initial-loading' && Object.keys(child).some((key) => key.startsWith('__reactFiber$'))),
   composer: !!document.querySelector('[data-chat-input="true"]'),
   sessionRows: document.querySelectorAll('[data-session-row]').length,
+  recorder: window.${STARTUP_PROBE_GLOBAL}?.read() ?? null,
 }))()`
 
+// Recorder marks that are moments a user could feel, in the order reported.
+const RECORDER_MARKS = ["splashGone", "overlayGone", "composerHittable", "composerEditable", "usable", "modelPickerReady", "modelPickerShown", "sessionRows"]
+
+// First occurrence of every startup trace mark, shifted onto the run's clock.
+const firstTraceMarks = (trace, shift) => {
+  const marks = {}
+  for (const event of trace ?? []) {
+    const key = `trace:${event.name}`
+    if (marks[key] === undefined) marks[key] = Math.round(event.at + shift)
+  }
+  return marks
+}
+
 const metricValue = (metrics, name) => metrics.find((entry) => entry.name === name)?.value ?? 0
+
+// A CDP call into a renderer that died never answers, which would hang the
+// run instead of failing it; every polling call is bounded.
+const sendBounded = (client, method, params = {}, timeoutMs = 5000) => {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${method} did not answer within ${timeoutMs} ms; the renderer is gone`)), timeoutMs)
+  })
+  return Promise.race([client.send(method, params), timeout]).finally(() => clearTimeout(timer))
+}
 
 // Sample a 16x16 grid of the window's pixels from the screen every ~50 ms and
 // report when the content first differed from the initial frame and when it
@@ -393,6 +454,11 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   const child = spawn(build.executable, [`--remote-debugging-port=${cdpPort}`], { env, stdio: "ignore", detached: true })
   child.unref()
   const pid = child.pid
+  // A crash at startup ends the launch as a failure at once: not a timeout
+  // that reads like a slow start, and never a clean result.
+  let exited = null
+  child.on("exit", (code, signal) => { exited ??= { code, signal, afterMs: Date.now() - spawnAt } })
+  child.on("error", (spawnError) => { exited ??= { code: null, signal: null, afterMs: Date.now() - spawnAt, message: spawnError.message } })
   const deadline = spawnAt + options.timeoutMs
   const seen = {}
   let client = null
@@ -402,9 +468,11 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   let taskMs = 0
   const window = []
   let error = null
+  let recorder = null
 
   try {
     while (Date.now() < deadline) {
+      if (exited) break
       if (!client) {
         const targets = await listTargets(cdpPort)
         const page = targets.find((entry) => entry.type === "page" && entry.webSocketDebuggerUrl && !entry.url.startsWith("devtools://"))
@@ -414,11 +482,19 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
         await client.connect()
         await client.send("Runtime.enable")
         await client.send("Performance.enable")
+        // Applies to the next document in this target, which is the
+        // application once the splash navigates; a launch whose application
+        // document was already running falls back to the polled fields.
+        try {
+          await client.send("Page.enable")
+          await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+        } catch {
+        }
         seen.rendererTarget = Date.now() - spawnAt
       }
       let probe
       try {
-        const result = await client.send("Runtime.evaluate", { expression: PROBE, returnByValue: true })
+        const result = await sendBounded(client, "Runtime.evaluate", { expression: PROBE, returnByValue: true })
         probe = result.result?.value
       } catch {
         await wait(25)
@@ -438,10 +514,15 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
       if (isApplication && probe.firstPaint !== null && seen.applicationFirstPaint === undefined) {
         seen.applicationFirstPaint = Math.round(probe.origin + probe.firstPaint - spawnAt)
       }
+      if (isApplication && probe.recorder) {
+        recorder = probe.recorder
+        if (recorder.marks.reactMounted !== undefined) seen.reactMounted = Math.round(probe.origin + recorder.marks.reactMounted - spawnAt)
+      }
+      const usable = recorder?.marks.usable !== undefined
 
       let metrics = []
       try {
-        metrics = (await client.send("Performance.getMetrics")).metrics ?? []
+        metrics = (await sendBounded(client, "Performance.getMetrics")).metrics ?? []
       } catch {
       }
       const task = metricValue(metrics, "TaskDuration") * 1000
@@ -450,10 +531,15 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
       while (window.length > 1 && window[1].at <= Date.now() - 500) window.shift()
       if (task - window[0].task > 50) quietSince = undefined
       else quietSince ??= window[0].at
-      if (seen.reactMounted !== undefined && quietSince && Date.now() - quietSince >= options.settleMs) break
+      // Without the recorder (injected too late) mounting is the last signal.
+      const ready = recorder ? usable : seen.reactMounted !== undefined
+      if (ready && quietSince && Date.now() - quietSince >= options.settleMs) break
       await wait(50)
     }
-    if (seen.reactMounted === undefined) error = `the application never mounted within ${options.timeoutMs} ms (last url: ${last?.url ?? "none"})`
+    if (exited) error = `the app exited ${exited.afterMs} ms after spawn (${exited.message ?? `code ${exited.code}, signal ${exited.signal}`}) before the run finished`
+    else if (seen.reactMounted === undefined) error = `the application never mounted within ${options.timeoutMs} ms (last url: ${last?.url ?? "none"})`
+    else if (!recorder) error = "the startup recorder never ran in the application document, so usable was not measured"
+    else if (recorder.marks.usable === undefined) error = `the application mounted but never became usable within ${options.timeoutMs} ms`
   } catch (caught) {
     error = caught?.message ?? String(caught)
   }
@@ -462,7 +548,7 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   let renderer = null
   if (client) {
     try {
-      const metrics = (await client.send("Performance.getMetrics")).metrics ?? []
+      const metrics = (await sendBounded(client, "Performance.getMetrics")).metrics ?? []
       renderer = {
         taskMs: Math.round(metricValue(metrics, "TaskDuration") * 1000),
         scriptMs: Math.round(metricValue(metrics, "ScriptDuration") * 1000),
@@ -481,10 +567,13 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
   const { marks, codeStartedAt } = readStartupMarks(layout.mainLog, spawnAt)
   await stopTree(pid)
 
+  const recorderShift = recorder ? recorder.origin - spawnAt : 0
   const msSinceSpawn = {
     codeStart: codeStartedAt !== undefined ? Math.round(codeStartedAt - spawnAt) : undefined,
     ...Object.fromEntries(Object.entries(marks).map(([key, at]) => [key, at - spawnAt])),
     ...seen,
+    ...(recorder ? Object.fromEntries(RECORDER_MARKS.filter((key) => recorder.marks[key] != null).map((key) => [key, Math.round(recorder.marks[key] + recorderShift)])) : {}),
+    ...(recorder ? firstTraceMarks(recorder.trace, recorderShift) : {}),
     rendererIdle,
     screenPainted: screen?.painted,
     screenSettled: screen?.settled,
@@ -499,7 +588,101 @@ const launchOnce = async ({ build, run, layout, env, cdpPort, options, outputDir
     screen,
     finalUrl: last?.url ?? null,
     sessionRows: last?.sessionRows ?? null,
+    recorderInstalled: recorder !== null,
+    overlaySeen: recorder?.seen.overlay ?? null,
     targetId,
+  }
+}
+
+// One web launch: a fresh Chrome loads the URL; every milestone is measured
+// in the page against its own navigation start, so there is no polling error.
+const launchWebOnce = async ({ run, options, chrome, profileDir }) => {
+  if (options.cache === "cold") rmSync(profileDir, { recursive: true, force: true })
+  mkdirSync(profileDir, { recursive: true })
+  const port = await reservePort()
+  const browser = launchChrome({ chrome, profileDir, port, headless: !options.headed })
+  let client = null
+  let recorder = null
+  let error = null
+  let renderer = null
+  let quietSince
+  const window = []
+  let network = null
+  try {
+    const target = await createPageTarget(port)
+    client = new CdpClient(target.webSocketDebuggerUrl)
+    await client.connect()
+    await Promise.all([
+      client.send("Page.enable"),
+      client.send("Runtime.enable"),
+      client.send("Performance.enable"),
+      client.send("Network.enable", { maxTotalBufferSize: 0, maxResourceBufferSize: 0 }),
+    ])
+    const recorderNetwork = createNetworkRecorder(client)
+    await client.send("Emulation.setDeviceMetricsOverride", { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, deviceScaleFactor: 1, mobile: false })
+    await client.send("Page.addScriptToEvaluateOnNewDocument", { source: buildStartupProbeSource({ modelLabel: options.modelLabel }) })
+    const navigatedAt = Date.now()
+    await client.send("Page.navigate", { url: options.url })
+    const deadline = navigatedAt + options.timeoutMs
+    while (Date.now() < deadline) {
+      await wait(50)
+      let value = null
+      try {
+        value = (await sendBounded(client, "Runtime.evaluate", { expression: `window.${STARTUP_PROBE_GLOBAL}?.read() ?? null`, returnByValue: true })).result?.value ?? null
+      } catch {
+        continue
+      }
+      if (value) recorder = value
+      let metrics = []
+      try {
+        metrics = (await sendBounded(client, "Performance.getMetrics")).metrics ?? []
+      } catch {
+      }
+      const task = metricValue(metrics, "TaskDuration") * 1000
+      window.push({ at: Date.now(), task })
+      while (window.length > 1 && window[1].at <= Date.now() - 500) window.shift()
+      if (task - window[0].task > 50) quietSince = undefined
+      else quietSince ??= window[0].at
+      if (recorder?.marks.usable != null && quietSince && Date.now() - quietSince >= options.settleMs) break
+    }
+    if (!recorder) error = "the startup recorder never ran in the page"
+    else if (recorder.marks.reactMounted == null) error = `the application never mounted within ${options.timeoutMs} ms`
+    else if (recorder.marks.usable == null) error = `the application mounted but never became usable within ${options.timeoutMs} ms`
+    const metrics = (await sendBounded(client, "Performance.getMetrics")).metrics ?? []
+    renderer = {
+      taskMs: Math.round(metricValue(metrics, "TaskDuration") * 1000),
+      scriptMs: Math.round(metricValue(metrics, "ScriptDuration") * 1000),
+      layoutMs: Math.round(metricValue(metrics, "LayoutDuration") * 1000),
+      styleMs: Math.round(metricValue(metrics, "RecalcStyleDuration") * 1000),
+      domNodes: metricValue(metrics, "Nodes"),
+      jsHeapMB: Math.round(metricValue(metrics, "JSHeapUsedSize") / 1048576),
+    }
+    // Requests the page made until it was usable: what the startup waited on.
+    const usableAt = recorder?.marks.usable != null ? recorder.origin + recorder.marks.usable : Date.now()
+    network = summarizeRequests(recorderNetwork.startedBetween(navigatedAt - 50, usableAt), options.url)
+  } catch (caught) {
+    error = caught?.message ?? String(caught)
+  } finally {
+    client?.close()
+    browser.kill()
+    await wait(300)
+  }
+  const marks = recorder?.marks ?? {}
+  const msSinceNavigation = {
+    ...Object.fromEntries(Object.entries(marks).filter(([, at]) => at != null)),
+    ...firstTraceMarks(recorder?.trace, 0),
+    rendererIdle: quietSince && recorder ? Math.round(quietSince - recorder.origin) : undefined,
+  }
+  return {
+    build: "web",
+    run,
+    error,
+    msSinceSpawn: msSinceNavigation,
+    renderer,
+    network,
+    overlaySeen: recorder?.seen.overlay ?? null,
+    splashSeen: recorder?.seen.splash ?? null,
+    finalUrl: recorder?.url ? recorder.url.split("?")[0] : null,
   }
 }
 
@@ -531,7 +714,8 @@ const startWarmOpenCode = async (builds, env, port) => {
 const median = (values) => {
   const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
   if (sorted.length === 0) return null
-  return { median: sorted[Math.floor(sorted.length / 2)], min: sorted[0], max: sorted[sorted.length - 1], n: sorted.length }
+  const p95 = sorted[Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1)]
+  return { median: sorted[Math.floor(sorted.length / 2)], p95, min: sorted[0], max: sorted[sorted.length - 1], n: sorted.length }
 }
 
 // The checkpoints a user could feel, in the order they happen, so the report
@@ -553,8 +737,25 @@ const MILESTONES = [
   ["electron.renderer.dom-ready.application", "app dom-ready"],
   ["electron.renderer.loaded.application", "app loaded"],
   ["applicationFirstPaint", "app first paint"],
+  ["responseEnd", "document received"],
+  ["firstContentfulPaint", "first contentful paint"],
+  ["domContentLoaded", "DOMContentLoaded"],
+  ["loadEvent", "load event"],
   ["reactMounted", "react mounted"],
-  ["composerVisible", "composer visible"],
+  ["splashGone", "html splash gone"],
+  ["composerVisible", "composer in DOM (polled)"],
+  ["trace:App:mounted", "trace App:mounted"],
+  ["trace:checkConnection:end", "trace connection checked"],
+  ["trace:config.defaults:end", "trace config defaults"],
+  ["trace:loadProviders:end", "trace providers loaded"],
+  ["trace:loadAgents:end", "trace agents loaded"],
+  ["modelPickerReady", "model picker populated (trace)"],
+  ["modelPickerShown", "model name shown in picker"],
+  ["composerEditable", "composer editable"],
+  ["composerHittable", "composer hittable"],
+  ["overlayGone", "startup overlay gone"],
+  ["usable", "usable"],
+  ["sessionRows", "session rows visible"],
   ["rendererIdle", "renderer idle"],
   ["screenPainted", "screen: first change"],
   ["screenSettled", "screen: settled"],
@@ -570,8 +771,69 @@ const summarize = (samples) => {
   return out
 }
 
+// Prints the milestone table: median, p95 (min…max) per build column.
+const printTable = (heading, labels, summaries) => {
+  const width = 34
+  console.log(heading)
+  console.log(`${"".padEnd(30)}${labels.map((label) => (labels.length > 1 ? label : "").padStart(6).padEnd(width)).join("")}`)
+  for (const [key, title] of MILESTONES) {
+    if (!labels.some((label) => summaries[label][key])) continue
+    const cells = labels.map((label) => {
+      const stats = summaries[label][key]
+      return stats ? `${String(round(stats.median, 0)).padStart(6)} p95 ${String(round(stats.p95, 0)).padStart(5)}  (${round(stats.min, 0)}…${round(stats.max, 0)})`.padEnd(width) : "".padEnd(width)
+    })
+    console.log(`${title.padEnd(30)}${cells.join("")}`)
+  }
+}
+
+const mainWeb = async (options) => {
+  const outputDir = resolve(options.output ?? join(repoRoot, "artifacts", `startup-web-${new Date().toISOString().replace(/[:.]/g, "-")}`))
+  mkdirSync(outputDir, { recursive: true })
+  const chrome = resolveChrome(options.chrome)
+  const profileDir = resolve(options.home ?? join(tmpdir(), "openchamber-bench-startup-web"))
+  rmSync(profileDir, { recursive: true, force: true })
+  console.log(`web: ${options.url}, cache: ${options.cache}, runs: ${options.runs} (+${options.warmup} warm-up)`)
+  const samples = []
+  for (let run = 1 - options.warmup; run <= options.runs; run += 1) {
+    const sample = await launchWebOnce({ run, options, chrome, profileDir })
+    const tag = run < 1 ? "warm-up" : `run ${run}`
+    const m = sample.msSinceSpawn
+    if (sample.error) console.error(`${tag}: FAILED — ${sample.error}`)
+    else console.log(`${tag}: mounted ${m.reactMounted ?? "?"} · model picker ${m.modelPickerReady ?? "?"} · usable ${m.usable ?? "?"} · idle ${m.rendererIdle ?? "?"} ms · ${sample.network?.count ?? "?"} requests, ${sample.network?.decodedKb ?? "?"} KB`)
+    if (sample.overlaySeen === false) console.log("  the startup overlay was never seen: absent on this build, or its selector is stale; usable then rests on mounted + splash gone + composer hittable and editable")
+    // A warm-up that fails is a broken build, not a discarded launch.
+    if (run >= 1 || sample.error) samples.push(sample)
+  }
+  rmSync(profileDir, { recursive: true, force: true })
+  const valid = samples.filter((sample) => !sample.error)
+  const summaries = { A: summarize(valid) }
+  const failures = samples.length - valid.length
+  const networkStats = (key) => median(valid.map((sample) => sample.network?.[key]))
+  const summary = {
+    generatedAt: new Date().toISOString(),
+    label: options.label,
+    mode: "web",
+    timeZero: "navigation start",
+    url: options.url,
+    cache: options.cache,
+    runs: options.runs,
+    warmup: options.warmup,
+    failures,
+    summaries,
+    network: { requests: networkStats("count"), encodedBytes: networkStats("encodedBytes"), decodedBytes: networkStats("decodedBytes") },
+    samples,
+  }
+  writeFileSync(join(outputDir, "startup-summary.json"), JSON.stringify(summary, null, 2))
+  printTable(`\nweb, ${options.cache} cache — median, p95 (min…max) ms since navigation start over ${valid.length} runs`, ["A"], summaries)
+  if (summary.network.requests) console.log(`requests until usable: ${summary.network.requests.median} · ${round(summary.network.decodedBytes.median / 1024, 0)} KB decoded · ${round(summary.network.encodedBytes.median / 1024, 0)} KB on the wire (medians)`)
+  if (failures > 0) console.error(`\nFAILED: ${failures} launch(es) crashed or never became usable; the numbers above leave them out. See startup-summary.json.`)
+  console.log(`\nsummary: ${join(outputDir, "startup-summary.json")}`)
+  process.exit(failures > 0 || samples.length === 0 ? 1 : 0)
+}
+
 const main = async () => {
   const options = parseArgs(process.argv.slice(2))
+  if (options.url) return mainWeb(options)
   const builds = [resolveBuild(options.app ?? defaultApp(), options.compare ? "A" : "")]
   if (options.compare) builds.push(resolveBuild(options.compare, "B"))
   const home = resolve(options.home ?? join(tmpdir(), "openchamber-bench-startup"))
@@ -611,8 +873,9 @@ const main = async () => {
         const sample = await launchOnce({ build, run, layout, env, cdpPort, options, outputDir })
         const tag = `${run < 1 ? "warm-up" : `run ${run}`}${build.label ? ` ${build.label}` : ""}`
         if (sample.error) {
-          console.log(`${tag}: FAILED — ${sample.error}`)
-          if (run >= 1) samples.push(sample)
+          // A warm-up that crashes is a broken build, not a discarded launch.
+          console.error(`${tag}: FAILED — ${sample.error}`)
+          samples.push(sample)
           continue
         }
         const m = sample.msSinceSpawn
@@ -635,6 +898,8 @@ const main = async () => {
     opencode: options.opencode,
     runs: options.runs,
     warmup: options.warmup,
+    mode: "desktop",
+    timeZero: "process spawn",
     fresh: options.fresh,
     shellDelayMs: options.shellDelayMs,
     home,
@@ -644,22 +909,12 @@ const main = async () => {
   }
   writeFileSync(join(outputDir, "startup-summary.json"), JSON.stringify(summary, null, 2))
 
-  const width = 22
-  console.log(`\n${options.opencode} opencode${options.fresh ? ", fresh home" : ""} — median (min…max) ms since spawn over ${options.runs} runs`)
-  console.log(`${"".padEnd(30)}${labels.map((label) => (labels.length > 1 ? label : "").padStart(6).padEnd(width)).join("")}`)
-  for (const [key, title] of MILESTONES) {
-    if (!labels.some((label) => summaries[label][key])) continue
-    const cells = labels.map((label) => {
-      const stats = summaries[label][key]
-      return stats ? `${String(round(stats.median, 0)).padStart(6)}  (${round(stats.min, 0)}…${round(stats.max, 0)})`.padEnd(width) : "".padEnd(width)
-    })
-    console.log(`${title.padEnd(30)}${cells.join("")}`)
-  }
+  printTable(`\n${options.opencode} opencode${options.fresh ? ", fresh home" : ""} — median, p95 (min…max) ms since spawn over ${options.runs} runs`, labels, summaries)
   const screenErrors = samples.map((sample) => sample.screen?.error).filter(Boolean)
   if (screenErrors.length > 0) console.log(`\nscreen sampling unavailable: ${screenErrors[0]}`)
-  if (failures > 0) console.log(`\n${failures} launch(es) failed; see startup-summary.json`)
+  if (failures > 0) console.error(`\nFAILED: ${failures} launch(es) crashed or never became usable (warm-ups included); the numbers above leave them out. See startup-summary.json.`)
   console.log(`\nsummary: ${join(outputDir, "startup-summary.json")}`)
-  process.exit(failures > 0 ? 1 : 0)
+  process.exit(failures > 0 || samples.length === 0 ? 1 : 0)
 }
 
 main().catch((error) => {

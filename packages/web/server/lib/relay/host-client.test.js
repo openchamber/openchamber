@@ -2,9 +2,10 @@
 // client using the JS e2ee initiator. Verifies the full handshake and a tunneled
 // HTTP GET /health, and asserts only binary frames cross the relay post-handshake.
 
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { startRelayHost } from './host-client.js';
@@ -313,5 +314,204 @@ describe('relay host-client integration', () => {
     const plaintextForwarded = forwarded.filter((f) => !f.isBinary);
     expect(plaintextForwarded.length).toBe(2); // hello + ready only
     expect(forwarded.filter((f) => f.isBinary).length).toBeGreaterThan(0);
+  });
+});
+
+// Control-only relay whose host-data upgrades the test scripts: each dial is
+// answered by the next entry of `outcomes` ('reject' -> 503, 'hang' -> no
+// answer, 'accept' -> 101),
+// accepting once the list runs out.
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const startScriptedRelay = (outcomes) => {
+  const server = http.createServer();
+  const wss = new WebSocketServer({ noServer: true });
+  const state = { control: null, dials: [], dataSockets: [] };
+  // Upgraded sockets leave the server's connection tracking, so a hung one
+  // would hold server.close() open: destroy them on stop.
+  const hungSockets = [];
+  let notifyDial = () => {};
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, 'http://localhost');
+    const role = url.searchParams.get('role');
+    if (role === 'host-data') {
+      state.dials.push(url.searchParams.get('connectionId'));
+      notifyDial();
+      const outcome = outcomes.shift() ?? 'accept';
+      if (outcome === 'reject') {
+        socket.end('HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n');
+        return;
+      }
+      if (outcome === 'hang') {
+        socket.on('error', () => {});
+        hungSockets.push(socket);
+        return;
+      }
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (role === 'host-control') state.control = ws;
+      else state.dataSockets.push(ws);
+    });
+  });
+  const waitForDials = (count, timeoutMs) => new Promise((resolve) => {
+    const check = () => {
+      if (state.dials.length >= count) resolve(true);
+    };
+    notifyDial = check;
+    check();
+    setTimeout(() => resolve(state.dials.length >= count), timeoutMs);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve({
+        wsUrl: `ws://127.0.0.1:${server.address().port}/`,
+        state,
+        waitForDials,
+        send: (message) => state.control.send(JSON.stringify(message)),
+        stop: () => new Promise((r) => {
+          for (const client of wss.clients) client.terminate();
+          for (const socket of hungSockets) socket.destroy();
+          server.closeAllConnections();
+          wss.close();
+          server.close(() => r());
+        }),
+      });
+    });
+  });
+};
+
+describe('relay host-client data socket retry', () => {
+  let relay;
+  let host;
+
+  afterEach(async () => {
+    host?.stop();
+    host = null;
+    await relay?.stop();
+    relay = null;
+  });
+
+  const startHost = async (outcomes) => {
+    relay = await startScriptedRelay(outcomes);
+    const identity = await buildIdentity();
+    let markConnected;
+    const connected = new Promise((resolve) => { markConnected = resolve; });
+    host = startRelayHost({
+      relayUrl: relay.wsUrl,
+      identity,
+      getLocalPort: () => 1,
+      onStatus: (status) => {
+        if (status.state === 'connected') markConnected();
+      },
+      logger: { warn: () => {}, info: () => {} },
+    });
+    await connected;
+  };
+
+  it('dials a waiting client again after a dial the relay refused', async () => {
+    await startHost(['reject', 'reject']);
+    relay.send({ type: 'connected', connectionId: 'conn-retry' });
+
+    // No second `connected` arrives: the host retries on its own.
+    expect(await relay.waitForDials(3, 6000)).toBe(true);
+    expect(relay.state.dials).toEqual(['conn-retry', 'conn-retry', 'conn-retry']);
+    await sleep(100);
+    expect(host.getStatus().connectedClients).toBe(1);
+  }, 10000);
+
+  it('gives up on a hung dial well inside the client handshake timeout and dials again', async () => {
+    await startHost(['hang']);
+    relay.send({ type: 'connected', connectionId: 'conn-hung' });
+
+    expect(await relay.waitForDials(2, 9000)).toBe(true);
+    await sleep(100);
+    expect(host.getStatus().connectedClients).toBe(1);
+  }, 12000);
+
+  it('stops retrying once the relay reports the client gone', async () => {
+    await startHost(['reject', 'reject', 'reject']);
+    relay.send({ type: 'connected', connectionId: 'conn-gone' });
+    expect(await relay.waitForDials(1, 2000)).toBe(true);
+    relay.send({ type: 'disconnected', connectionId: 'conn-gone' });
+
+    expect(await relay.waitForDials(2, 2500)).toBe(false);
+    expect(relay.state.dials).toEqual(['conn-gone']);
+  }, 10000);
+
+  it('leaves a data socket that opened and then closed to the client reconnect', async () => {
+    await startHost([]);
+    relay.send({ type: 'connected', connectionId: 'conn-opened' });
+    expect(await relay.waitForDials(1, 2000)).toBe(true);
+    await sleep(100);
+    relay.state.dataSockets[0].close(1012, 'gone');
+
+    expect(await relay.waitForDials(2, 2500)).toBe(false);
+  }, 10000);
+});
+
+// Bun's WebSocket fails a dial with an error whose message and `url` hold the
+// whole dial URL, signed relay auth included. Node's `ws` never does, so these
+// sockets stand in for Bun.
+class BunLikeFailingSocket extends EventEmitter {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = WebSocket.CONNECTING;
+  }
+
+  fail(reason) {
+    this.readyState = WebSocket.CLOSED;
+    this.emit('error', Object.assign(new Error(`WebSocket connection to '${this.url}' failed: ${reason}`), { url: this.url }));
+    this.emit('close', 1006, Buffer.alloc(0));
+  }
+
+  close() {}
+
+  terminate() {}
+
+  ping() {}
+}
+
+describe('relay host-client error redaction', () => {
+  const fakeIdentity = {
+    serverId: 'fake-server-id',
+    hostEncPrivateKey: null,
+    signRelayAuth: () => ({ ts: 1, sig: 'FAKE-SIGNATURE', pk: 'FAKE-PUBLIC-KEY' }),
+  };
+
+  it('keeps the signed relay auth out of logs and status when a dial fails', () => {
+    const sockets = [];
+    const warnings = [];
+    const host = startRelayHost({
+      relayUrl: 'wss://relay.example.test/ws',
+      identity: fakeIdentity,
+      getLocalPort: () => 1,
+      logger: { warn: (line) => warnings.push(line) },
+      createSocket: (url) => {
+        const socket = new BunLikeFailingSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+
+    try {
+      const control = sockets[0];
+      control.readyState = WebSocket.OPEN;
+      control.emit('open');
+      control.emit('message', Buffer.from(JSON.stringify({ type: 'connected', connectionId: 'conn-1' })), false);
+      expect(sockets[1].url).toContain('sig=FAKE-SIGNATURE');
+      sockets[1].fail('Expected 101 status code');
+      control.fail('Failed to connect');
+
+      const lastError = host.getStatus().lastError;
+      expect(warnings).toEqual(["[Relay] host-data socket error: WebSocket connection to 'wss://relay.example.test/ws' failed: Expected 101 status code"]);
+      expect(lastError).toBe("WebSocket connection to 'wss://relay.example.test/ws' failed: Failed to connect");
+      for (const text of [...warnings, lastError]) {
+        expect(text).not.toContain('FAKE-SIGNATURE');
+        expect(text).not.toContain('FAKE-PUBLIC-KEY');
+      }
+    } finally {
+      host.stop();
+    }
   });
 });

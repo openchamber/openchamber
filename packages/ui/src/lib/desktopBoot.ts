@@ -223,14 +223,7 @@ export type BootInjectionStatus =
 
 export type InitialLoadingState = {
   isDesktopShell: boolean;
-  isInitialized: boolean;
   bootOutcomeKnown: boolean;
-  /**
-   * Whether the resolved boot view is 'main'.
-   * When false (chooser/recovery), splash dismisses on bootOutcomeKnown alone.
-   * When true or absent, splash also requires isInitialized.
-   */
-  bootViewIsMain?: boolean;
 };
 
 export type DesktopBootFlowRestartInput = {
@@ -241,28 +234,13 @@ export type DesktopBootFlowRestartInput = {
 /**
  * Whether the initial loading screen can be dismissed.
  *
- * Desktop shells must wait until a valid boot outcome is injected by the native host.
- * For non-main views (chooser, recovery), the splash can dismiss as soon as
- * the outcome is known — `isInitialized` is not required because OpenCode
- * may not be available in those flows.
- * For main views, both `isInitialized` and `bootOutcomeKnown` are required.
- * Non-desktop shells only need the app to be initialized.
+ * The app shell and composer are usable before OpenCode is ready, so the
+ * splash never waits for app initialization. Desktop shells still wait until
+ * the native host injects a valid boot outcome, which decides between the main
+ * view, the first-launch chooser, and recovery.
  */
 export function canDismissInitialLoading(state: InitialLoadingState): boolean {
-  if (!state.isDesktopShell) {
-    return state.isInitialized;
-  }
-
-  if (!state.bootOutcomeKnown) {
-    return false;
-  }
-
-  // Non-main boot views (chooser, recovery) can dismiss without waiting for init.
-  if (state.bootViewIsMain === false) {
-    return true;
-  }
-
-  return state.isInitialized;
+  return !state.isDesktopShell || state.bootOutcomeKnown;
 }
 
 /**

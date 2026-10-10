@@ -27,13 +27,19 @@ const getObjectVersion = (value: object): number => {
   return next;
 };
 
+// One version pair per message: its info record and its parts array. Store
+// reducers never mutate either in place: a part update replaces the message's
+// parts array, and a message update replaces its info. So the pair changes
+// whenever anything the projection reads changes, and individual parts need
+// no signature of their own.
 const buildMessagesVersionSignature = (messages: ChatMessageEntry[]): string => {
-  return messages.map((message) => {
-    const infoVersion = getObjectVersion(message.info as object);
-    const partsVersion = getObjectVersion(message.parts);
-    const partVersions = message.parts.map((part) => getObjectVersion(part as object)).join(',');
-    return `${infoVersion}:${partsVersion}:${partVersions}`;
-  }).join(';');
+  let signature = '';
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (index > 0) signature += ';';
+    signature += `${getObjectVersion(message.info)}:${getObjectVersion(message.parts)}`;
+  }
+  return signature;
 };
 
 export const buildProjectionCacheKey = (
@@ -43,14 +49,8 @@ export const buildProjectionCacheKey = (
   showTurnChangedFiles: boolean,
   mergeHiddenUserTurnsKey: string,
 ): string => {
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
-  const lastMessageId = lastMessage?.info?.id ?? '';
-  const lastMessagePartCount = lastMessage?.parts?.length ?? 0;
   return [
     sessionKey,
-    messages.length,
-    lastMessageId,
-    lastMessagePartCount,
     buildMessagesVersionSignature(messages),
     showTextJustificationActivity ? '1' : '0',
     showTurnChangedFiles ? '1' : '0',

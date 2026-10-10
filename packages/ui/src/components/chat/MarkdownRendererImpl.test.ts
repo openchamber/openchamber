@@ -271,9 +271,12 @@ mock.module('@/lib/path-utils', () => ({ getDirectoryForFilePath: () => '', isFi
 mock.module('./markdown/markdownCore', () => ({
     getCachedMarkdownBlocks: () => cachedRendererBlocks,
     renderMarkdownBlocks: () => renderMarkdownBlocksForTest(),
-    renderMarkdownSync: () => {
+    // Like the real module: cached blocks are returned as they are, and only
+    // a cache miss parses.
+    renderMarkdownBlocksSync: () => {
+        if (cachedRendererBlocks) return cachedRendererBlocks;
         syncRenderCalls += 1;
-        return '<p>cold</p>';
+        return [{ id: 'full:cold:unhighlighted', html: '<p>cold</p>' }];
     },
 }));
 mock.module('./markdown/markdownTheme', () => ({ ensureMarkdownShikiTheme: () => undefined }));
@@ -305,6 +308,8 @@ mock.module('./markdown/decorate', () => ({
         );
     },
     getMarkdownCodeText: () => '',
+    layoutReservedCodeLines: () => undefined,
+    RESERVED_CODE_GUTTER_SELECTOR: 'pre[data-md-gutter-reserved]',
     stabilizeMarkdownTableWidths: () => undefined,
 }));
 mock.module('./markdown/textPosition', () => ({ findTextPosition: () => null }));

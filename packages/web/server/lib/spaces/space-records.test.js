@@ -58,12 +58,16 @@ describe('space records', () => {
     const model = { kind: 'model', id: 'anthropic', provider: 'anthropic', upstream: 'https://api.anthropic.com/v1', header: 'x-api-key', source: { kind: 'env', name: 'ANTHROPIC_API_KEY' } };
     const typed = { ...model, id: 'openai', provider: 'openai', upstream: 'https://api.openai.com/v1', header: 'authorization', source: { kind: 'typed' } };
     const domain = { kind: 'domain', id: 'open-0a1b2c3d4e5f', upstream: 'https://registry.example.com/npm/' };
-    const written = records.write(ID, { network: { mode: 'open' }, grants: [model, typed, domain] });
-    expect(written.grants).toEqual([model, typed, domain]);
-    expect(records.read(ID).record.grants).toEqual([model, typed, domain]);
+    const login = { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing' };
+    const written = records.write(ID, { network: { mode: 'open' }, grants: [model, typed, domain, login] });
+    expect(written.grants).toEqual([model, typed, domain, login]);
+    expect(records.read(ID).record.grants).toEqual([model, typed, domain, login]);
 
     for (const bad of [
       { ...model, secret: 'sk-live-1' },
+      { ...login, access: 'eyJ-live' },
+      { ...login, upstream: 'https://api.openai.com/v1' },
+      { ...login, method: 'not a method' },
       { ...model, value: 'sk-live-1' },
       { ...model, source: { kind: 'typed', value: 'sk-live-1' } },
       { ...model, source: { kind: 'env', name: 'ANTHROPIC_API_KEY', value: 'sk-live-1' } },

@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { GUEST_REQUEST_RESPONSE_MAX } from '@openchamber/sdk';
+
 import { getGuestAuth, guestAuthPersistPath, patchGuestAuth } from './auth-store.js';
 import { credentialTarget } from './oauth.js';
 import { joinGuestRequestUrl, proxyGuestRequest } from './request.js';
@@ -88,6 +90,27 @@ describe('proxyGuestRequest', () => {
         href: 'https://api.clickup.com/api/v2/user',
         auth: 'pk_tok',
       }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses an answer over the cap instead of handing over a cut-off body', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'oc-guest-req-'));
+    const persistPath = guestAuthPersistPath(dir);
+    await patchGuestAuth('clickup', { accessToken: 'tok-1', target: credentialTarget(clickupGuest.integration) }, persistPath);
+    const originalFetch = globalThis.fetch;
+    const fits = JSON.stringify({ text: 'x'.repeat(GUEST_REQUEST_RESPONSE_MAX - '{"text":""}'.length) });
+    expect(fits.length).toBe(GUEST_REQUEST_RESPONSE_MAX);
+    const unannounced = (text) => new Response(new Blob([text]).stream(), { status: 200 });
+    const answers = [unannounced(fits), unannounced(`${fits} `), new Response(`${fits} `, { status: 200 })];
+    globalThis.fetch = async () => answers.shift();
+    const send = () => proxyGuestRequest({ guest: clickupGuest, persistPath, method: 'GET', path: '/api/v2/task' });
+    try {
+      expect(await send()).toEqual({ status: 200, body: fits });
+      await expect(send()).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
+      await expect(send()).rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
     } finally {
       globalThis.fetch = originalFetch;
       await fs.rm(dir, { recursive: true, force: true });

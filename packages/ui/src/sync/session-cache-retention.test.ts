@@ -338,7 +338,10 @@ describe("session cache retention", () => {
     expect(env.messages("s0")).toBeDefined()
   })
 
-  for (const [surface, expected] of [["desktop", 200], ["mobile", 150]] as const) {
+  // One extension sized from the prompt density of the first page, with 20%
+  // headroom, capped by the surface's record ceiling. 13-record turns: desktop
+  // reads 100 + 72 (13 turns), mobile 50 + 150 (15 turns, at its 200 ceiling).
+  for (const [surface, expected, limits] of [["desktop", 172, [100, 72]], ["mobile", 200, [50, 150]]] as const) {
     test(`${surface}: cold navigation expands toward ten turns and publishes once`, async () => {
       const env = setup(surface, (id) => transcript(id, 20, 12))
       const store = env.childStores.ensureChild("/repo", { bootstrap: false })
@@ -347,6 +350,7 @@ describe("session cache retention", () => {
         if (state.message.a !== previous.message.a) publications.push(state.message.a?.length ?? 0)
       }))
       await env.select("a")
+      expect(env.requests.map((request) => request.limit)).toEqual([...limits])
       expect(publications).toEqual([expected])
       expect(env.loader.getSnapshot(env.target("a")).complete).toBe(false)
     })

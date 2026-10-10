@@ -1639,9 +1639,9 @@ html:not(.dark) .chat-scroll {
   animation: oc-chat-hydration-reveal 100ms ease-out both;
 }
 
-/* Timeline root while a freshly opened session still has provisional first
-   paints (see timelineRevealGate.ts): hidden until every hold releases, then
-   revealed as a whole. */
+/* Timeline root while a freshly opened session is still being put in place
+   (see timelineRevealGate.ts): hidden until every hold releases and the list
+   heights settle, then revealed as a whole. */
 [data-timeline-reveal='pending'] {
   opacity: 0;
 }

@@ -89,6 +89,54 @@ export const summarizeLongTasks = (traceEvents, thresholdMs = 50) => {
 }
 
 /**
+ * `RunTask` events of the renderer main thread (`CrRendererMain`), the thread
+ * that input, React and layout share. Other threads also emit `RunTask`; a
+ * frame-budget count over all of them would mix compositor and IO work into
+ * a figure about responsiveness. Falls back to every task, flagged, when the
+ * trace carries no thread names.
+ */
+export const mainThreadTasks = (traceEvents) => {
+  const mainThreads = new Set(traceEvents
+    .filter((event) => event.name === "thread_name" && event.args?.name === "CrRendererMain")
+    .map((event) => `${event.pid}:${event.tid}`))
+  const tasks = traceEvents.filter((event) => event.name === "RunTask" && Number(event.dur) > 0
+    && (mainThreads.size === 0 || mainThreads.has(`${event.pid}:${event.tid}`)))
+  return { tasks, identified: mainThreads.size > 0 }
+}
+
+/**
+ * Frame-budget view of main-thread tasks: how many tasks overran one frame at
+ * 120 Hz (8.33 ms) and at 60 Hz (16.7 ms). Long tasks (50 ms) are what a user
+ * calls a freeze; these are what a user calls jank while text streams.
+ */
+export const summarizeFrameBudget = (traceEvents) => {
+  const { tasks, identified } = mainThreadTasks(traceEvents)
+  const durations = tasks.map((event) => Number(event.dur) / 1000)
+  return {
+    mainThreadIdentified: identified,
+    mainThreadTaskCount: durations.length,
+    tasksOver8msCount: durations.filter((duration) => duration > 8.33).length,
+    tasksOver16msCount: durations.filter((duration) => duration > 16.7).length,
+  }
+}
+
+/**
+ * Longest main-thread task overlapping a window given in trace microseconds.
+ * Null when the trace has no tasks at all, so a missing instrument never reads
+ * as a quiet window.
+ */
+export const longestTaskInWindow = (traceEvents, startMicros, endMicros) => {
+  const { tasks } = mainThreadTasks(traceEvents)
+  if (tasks.length === 0) return null
+  const inWindow = tasks.filter((event) => event.ts < endMicros && event.ts + Number(event.dur) > startMicros)
+  return {
+    longestMs: round(inWindow.reduce((max, event) => Math.max(max, Number(event.dur) / 1000), 0)),
+    tasks: inWindow.length,
+    tasksOver16msCount: inWindow.filter((event) => Number(event.dur) / 1000 > 16.7).length,
+  }
+}
+
+/**
  * Attributes recorded CPU time to threads, and within each thread to the
  * trace events that spent it.
  *

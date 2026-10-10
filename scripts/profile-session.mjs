@@ -31,7 +31,7 @@ import process from "node:process"
 import { CdpClient, createPageTarget, evaluateValue, findPageTarget, launchChrome, reservePort, resolveChrome, wait } from "./perf/cdp.mjs"
 import { buildIdleProbeSource, IDLE_PROBE_GLOBAL } from "./perf/idle-probe.mjs"
 import { summarizeCpuProfile } from "./perf/cpu-profile.mjs"
-import { growthPerSecond, metricMap, round, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
+import { growthPerSecond, longestTaskInWindow, metricMap, round, summarizeFrameBudget, summarizeLongTasks, summarizeThreads, summarizeTraceEvents } from "./perf/metrics.mjs"
 import { createProcessCpuSampler, openBrowserClient, resolveServerProcesses } from "./perf/process-cpu.mjs"
 import { expandProjects, expandSessionLists } from "./perf/scenario.mjs"
 
@@ -307,8 +307,74 @@ const snapshotAnimations = async (client) => {
   }
 }
 
+/**
+ * Reads a session status out of one realtime WebSocket frame, or null.
+ *
+ * The frame wraps an event (`{ type: "event", payload: { type, properties } }`).
+ * OpenChamber's `openchamber:session-status` (status "busy"/"idle"), and
+ * OpenCode's `session.status` and `session.idle`, all mark the end of the
+ * reply; the frame's CDP timestamp is the moment the page received it,
+ * which is when the app starts finalising the turn.
+ */
+const readSessionStatus = (payload, sessionId) => {
+  let parsed
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return null
+  }
+  const event = parsed?.payload ?? parsed
+  const data = event?.properties ?? event?.data ?? {}
+  if ((data.sessionID ?? data.sessionId) !== sessionId) return null
+  // OpenChamber's server bridges status as its own event, which is what the
+  // UI's sync pipeline turns into `session.status`.
+  if (event?.type === "openchamber:session-status") return typeof data.status === "string" ? data.status : null
+  if (event?.type === "session.idle") return "idle"
+  if (event?.type === "session.status") return data.status?.type ?? data.type ?? null
+  return null
+}
+
+/**
+ * Places the end of the reply on the trace clock: the first idle frame after
+ * a busy one. CDP network timestamps and trace timestamps both read Chrome's
+ * monotonic clock (seconds and microseconds); the busy frame must land after
+ * the `perf:stream-start` mark and the idle frame inside the trace, or the
+ * result says so instead of measuring a window somewhere else.
+ */
+const locateSessionIdle = (statusFrames, traceEvents) => {
+  const firstBusy = statusFrames.findIndex((frame) => frame.status !== "idle")
+  const idle = firstBusy < 0 ? null : statusFrames.slice(firstBusy).find((frame) => frame.status === "idle") ?? null
+  const result = { source: "websocket", framesSeen: statusFrames.length, detected: idle !== null, inTrace: false, micros: null, msAfterStreamStart: null, clockCheck: null }
+  if (!idle) return result
+  let minTs = Infinity
+  let maxTs = -Infinity
+  let streamStart = null
+  for (const event of traceEvents) {
+    const ts = Number(event.ts)
+    if (!(ts > 0)) continue
+    if (ts < minTs) minTs = ts
+    const end = ts + Number(event.dur ?? 0)
+    if (end > maxTs) maxTs = end
+    if (event.name === "perf:stream-start" && streamStart === null) streamStart = ts
+  }
+  result.micros = idle.timestamp * 1_000_000
+  result.inTrace = result.micros >= minTs && result.micros <= maxTs
+  if (streamStart !== null) {
+    const busyMs = (statusFrames[firstBusy].timestamp * 1_000_000 - streamStart) / 1000
+    result.msAfterStreamStart = round((result.micros - streamStart) / 1000)
+    // The prompt is dispatched right after the mark; its busy status arrives
+    // within seconds, never before the mark.
+    result.clockCheck = busyMs >= 0 && busyMs < 30_000 ? "ok" : `busy frame ${round(busyMs)} ms after the stream-start mark; clocks disagree`
+    if (result.clockCheck !== "ok") result.inTrace = false
+  }
+  return result
+}
+
 const REPORTED_METRICS = [
   { key: "longTaskCount", fromTrace: true, label: "Long tasks (>50ms)", unit: "", lowerIsBetter: true },
+  { key: "tasksOver16msCount", fromTrace: true, label: "Main tasks >16.7ms", unit: "", lowerIsBetter: true },
+  { key: "tasksOver8msCount", fromTrace: true, label: "Main tasks >8.33ms", unit: "", lowerIsBetter: true },
+  { key: "finalizeLongestTaskMs", fromTrace: true, label: "Longest task ≤1s after idle", unit: "ms", lowerIsBetter: true },
   { key: "longestTaskMs", fromTrace: true, label: "Longest task", unit: "ms", lowerIsBetter: true },
   { key: "taskP95Ms", fromTrace: true, label: "Task p95", unit: "ms", lowerIsBetter: true },
   { key: "taskP99Ms", fromTrace: true, label: "Task p99", unit: "ms", lowerIsBetter: true },
@@ -349,7 +415,7 @@ const printReport = (summary, baseline) => {
       continue
     }
     const previous = baseline.metrics?.[metric.key]
-    const change = Number.isFinite(previous) ? round(current - previous) : null
+    const change = Number.isFinite(previous) && Number.isFinite(current) ? round(current - previous) : null
     const marker = change === null || change === 0
       ? ""
       : (change < 0) === metric.lowerIsBetter ? "  improved" : "  WORSE"
@@ -575,6 +641,17 @@ const main = async () => {
     const renderedBefore = await countRenderedMessages(client)
     const directoryAlignment = options.viewSession ? null : await readDirectoryAlignment(client)
     await processCpu.sample()
+    // The idle edge comes from the realtime channel the page itself listens
+    // to, timestamped by the browser, so the finalize window starts when the
+    // page learned the reply ended. Polling the CLI would be a second late.
+    const statusFrames = []
+    const unsubscribeFrames = client.on("Network.webSocketFrameReceived", (params) => {
+      const payload = String(params.response?.payloadData ?? "")
+      if (!payload.includes(sessionId) || !payload.includes("status") && !payload.includes("session.idle")) return
+      const status = readSessionStatus(payload, sessionId)
+      if (status) statusFrames.push({ timestamp: params.timestamp, status })
+    })
+    if (instrumented) await evaluateValue(client, `performance.mark("perf:stream-start")`)
     const startedAt = Date.now()
 
     const sendArgs = [
@@ -665,6 +742,8 @@ const main = async () => {
       }
     }
     unsubscribeTrace()
+    unsubscribeFrames()
+    if (options.tail < 1) console.warn("WARNING: --tail is under 1 s, so the window after idle is cut short and the finalize task may be missing.")
 
     await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.stop()`)
     const probe = await evaluateValue(client, `globalThis[${JSON.stringify(IDLE_PROBE_GLOBAL)}]?.snapshot() ?? null`)
@@ -687,6 +766,11 @@ const main = async () => {
       : domGrew && (messageListRendered || !instrumented)
 
     const tasks = summarizeLongTasks(traceEvents)
+    const frameBudget = summarizeFrameBudget(traceEvents)
+    const sessionIdle = locateSessionIdle(statusFrames, traceEvents)
+    const finalize = sessionIdle.inTrace
+      ? longestTaskInWindow(traceEvents, sessionIdle.micros, sessionIdle.micros + 1_000_000)
+      : null
     const traceBreakdown = summarizeTraceEvents(traceEvents)
     const threadBreakdown = options.threadBreakdown ? summarizeThreads(traceEvents) : null
     const delta = (name) => Number(after[name] ?? 0) - Number(before[name] ?? 0)
@@ -718,8 +802,14 @@ const main = async () => {
       renderedCharacterGrowth,
       traceComplete,
       disposableSession: !options.keepSession && !options.session,
+      sessionIdle,
       metrics: {
         ...tasks,
+        ...frameBudget,
+        // The end-of-reply spike: the turn is finalised (markdown settles,
+        // code highlights, the list re-measures) right after the session goes idle.
+        finalizeLongestTaskMs: finalize?.longestMs ?? null,
+        finalizeTasksOver16msCount: finalize?.tasksOver16msCount ?? null,
         blockedPercent: round((tasks.longTaskTotalMs / (elapsedSeconds * 1000)) * 100),
         mainThreadBusyPercent: round((delta("TaskDuration") / elapsedSeconds) * 100),
         recalcStylePerSecond: perSecond("RecalcStyleCount"),
@@ -777,6 +867,16 @@ const main = async () => {
         "\nWARNING: the trace contained no RunTask events, so every long-task number below is a"
         + " placeholder zero rather than a measurement. Check the tracing categories before trusting them.",
       )
+    }
+
+    if (instrumented && !sessionIdle.inTrace) {
+      console.warn(
+        `\nWARNING: the end of the reply was not placed on the trace (${sessionIdle.detected ? sessionIdle.clockCheck ?? "idle frame outside the trace" : `no idle status frame among ${sessionIdle.framesSeen} for this session`}),`
+        + " so the longest task after idle is missing, not zero.",
+      )
+    }
+    if (instrumented && !frameBudget.mainThreadIdentified) {
+      console.warn("\nWARNING: the trace named no CrRendererMain thread; the >8.33/16.7 ms counts include every thread's tasks.")
     }
 
     if (directoryAlignment && !directoryAlignment.aligned) {

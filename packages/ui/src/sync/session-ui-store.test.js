@@ -2087,3 +2087,87 @@ describe('missing session directory recovery', () => {
     expect(moves).toEqual([]);
   });
 });
+
+describe('send does not wait for session knowledge before showing the message', () => {
+  let originalSendMessage;
+  let originalFetch;
+
+  beforeEach(() => {
+    originalSendMessage = opencodeClient.sendMessage;
+    originalFetch = globalThis.fetch;
+    useConfigStore.setState({ isConnected: true });
+    useSessionGoalArmStore.getState().setArmed(false, null);
+  });
+
+  afterEach(() => {
+    opencodeClient.sendMessage = originalSendMessage;
+    globalThis.fetch = originalFetch;
+  });
+
+  test('inserts the user message before the knowledge request resolves, then sends the knowledge first', async () => {
+    let state = { session: [], message: {}, part: {}, session_status: {} };
+    const childStore = {
+      getState: () => state,
+      setState: (patch) => { state = { ...state, ...patch }; },
+    };
+    setActionRefs({ children: new Map(), ensureChild: () => childStore, getChild: () => childStore }, () => '/repo');
+    const added = [];
+    setOptimisticRefs((input) => { added.push(input.message); }, () => {});
+
+    const sendCalls = [];
+    opencodeClient.sendMessage = async (params) => {
+      sendCalls.push(params);
+      return 'msg';
+    };
+    let releaseKnowledge = null;
+    const delivered = [];
+    globalThis.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/session-knowledge/delivered')) {
+        delivered.push(JSON.parse(init.body));
+        return Response.json({});
+      }
+      if (url.includes('/api/session-knowledge?')) {
+        return new Promise((resolve) => {
+          releaseKnowledge = () => resolve(Response.json({ text: 'Pinned notes', signature: 'sig-1' }));
+        });
+      }
+      return Response.json({});
+    };
+
+    const sending = useSessionUIStore.getState().sendMessage(
+      'hello',
+      'provider-a',
+      'model-a',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'normal',
+      { target: { runtimeKey: getRuntimeKey(), sessionId: 'session-knowledge', directory: '/repo' } },
+    );
+    for (let tick = 0; tick < 50 && (added.length === 0 || !releaseKnowledge); tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    // The bubble is already there; the prompt request waits for the knowledge.
+    expect(added.map((message) => message.role)).toEqual(['user']);
+    expect(releaseKnowledge).not.toBe(null);
+    expect(sendCalls).toHaveLength(0);
+
+    releaseKnowledge();
+    await sending;
+
+    expect(added.map((message) => message.role)).toEqual(['user', 'synthetic']);
+    const [userMessage, knowledgeMessage] = added;
+    expect(knowledgeMessage.id < userMessage.id).toBe(true);
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0].messageId).toBe(userMessage.id);
+    expect(sendCalls[0].context).toEqual([{ id: knowledgeMessage.id, text: 'Pinned notes' }]);
+    for (let tick = 0; tick < 50 && delivered.length === 0; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(delivered).toEqual([{ directory: '/repo', sessionId: 'session-knowledge', signature: 'sig-1' }]);
+  });
+});

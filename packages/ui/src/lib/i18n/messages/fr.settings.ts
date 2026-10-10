@@ -934,7 +934,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'Après la fusion d\'une PR',
   'settings.openchamber.mergedWorktreeCleanup.info': 'Utilise le statut de PR déjà affiché dans la barre latérale. Rien ne se passe tant qu\'un agent travaille dans le worktree ou qu\'une de ses sessions est ouverte.',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': 'Archiver les sessions et supprimer le worktree',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'Le worktree et sa branche locale ne sont supprimés que si tout son contenu est dans la PR fusionnée. Sinon, les sessions sont archivées et le worktree est conservé.',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'Le worktree et sa branche locale sont supprimés dès qu’il n’a plus de modifications non commitées ni de commits absents de la PR fusionnée. D’ici là, les sessions sont archivées et le worktree est conservé.',
   'settings.openchamber.messageSearch.title': 'Recherche dans les messages',
   'settings.openchamber.messageSearch.field.enabled': 'Rechercher les messages dans toutes les conversations',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Conserve à côté des réglages un petit index de vos messages et des réponses de l’agent, pour que la recherche les trouve instantanément. Il reste sur la machine qui exécute OpenChamber et n’est jamais envoyé ailleurs.',

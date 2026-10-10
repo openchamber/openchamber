@@ -15,7 +15,9 @@ itself; it can only ask and wait.
 - `routes.js` is the result callback (`POST /api/browser-control/result`). It
   validates the envelope and hands the outcome to the broker.
 - `../../index.js` supplies `emitRequest`, which writes the request to the
-  OpenChamber SSE clients and returns how many were reached.
+  OpenChamber SSE clients and returns how many were reached. The event carries
+  the same `context` (`directory`, `sessionId`, each `null` when unknown) the
+  extension provider receives, so the in-app browser knows which session asked.
 - `provider.js` sits between the control service and the broker. It reads
   the `browserProvider` setting on every action: `builtin` goes to the broker;
   an extension id goes to that extension's service (`contributes.service.provides`
@@ -47,15 +49,33 @@ itself; it can only ask and wait.
   `request()` (same signature as the broker) and owns their parameter
   validation.
 - The client half is `packages/ui/src/lib/browser/controlClient.ts`. Every
-  mounted browser tab registers its pane under its context-panel tab id. An
-  action with `tabId` runs in that tab; without one it runs in the browser tab
-  the user last had in front of them (`setShownBrowserTab`, set by
-  `ContextPanel`), never in whichever pane registered last, and never switches
-  the user to the tab it acts in. `browser.open` without `tabId` never
-  navigates an existing tab: the registered opener (`ContextPanel`,
-  `useUIStore.openAgentBrowserTab`) makes a new background tab and the answer
-  carries its `tabId`. `browser.snapshot` answers carry `tabs`
-  (`id`, `title`, `url`, `active`). A client without the named tab waits
+  mounted browser tab registers its pane under its context-panel tab id, with
+  its project and the session whose agent opened it (`ownerSessionId` on the
+  tab, null for the user's own). An action with `tabId` runs in that tab,
+  whoever opened it. Without one it runs in the calling session's tab: the
+  shown tab if it is the session's, else the one the session last opened or
+  worked in, else its newest. A session with no tab of its own gets the browser
+  tab the user last had in front of them (`setShownBrowserTab`, set by
+  `ContextPanel` with the project on screen) only when that tab is the user's
+  and in the session's project, and claims it only after a short delay, so a
+  client that holds the session's own tab wins the claim; otherwise the agent
+  is told so, with the tabs it could name. A request with no session keeps the
+  earlier rule within the project on screen: the shown tab, else that
+  project's newest tab. An action
+  never switches the user to the tab it acts in. `browser.open` without `tabId`
+  never navigates an existing tab: the registered opener (`ContextPanel`,
+  `useUIStore.openAgentBrowserTab`) makes a new background tab in the calling
+  session's project, owned by that session, and the answer carries its `tabId`.
+  `ContextPanel` keeps agent tabs of every project mounted (or registered as
+  sleeping), so a session keeps working its page while the user looks at
+  another project; the user's own tabs in other projects unload with their
+  project. `browser.snapshot` answers carry `tabs` (`id`, `title`, `url`,
+  `owner`: `you`, `user`, or `another session`, `active`: the tab an action
+  without `tabId` would use); a session sees its own tabs and the other tabs of
+  its project, never another project's. `ContextPanel` renders loaded tabs
+  sorted by directory and tab id, so neither a project switch nor the store
+  reordering directories moves a live webview, which would reload its page.
+  A client without the named tab waits
   briefly, so the client that has it claims first, then claims and answers
   "no such tab". A tab restored from a previous run has no pane until it is
   shown or used, so `ContextPanel` registers it as sleeping

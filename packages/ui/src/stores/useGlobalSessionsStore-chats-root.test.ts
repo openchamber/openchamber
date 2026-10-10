@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { persistSessions, readDirCache } from '@/sync/persist-cache';
+import { flushPendingSessionWrites, persistSessions, readDirCache } from '@/sync/persist-cache';
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
 
@@ -64,7 +64,7 @@ afterEach(() => {
 });
 const seed = async () => {
   persistSessions(scope, [chat('saved')]);
-  await new Promise((resolve) => setTimeout(resolve, 70));
+  flushPendingSessionWrites();
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
 };
 
@@ -109,10 +109,10 @@ describe('global load owns chats-root readiness', () => {
     await seed();
     await ensureChatsRootDirectory();
     useGlobalSessionsStore.getState().upsertSession(chat('created'));
-    await new Promise((resolve) => setTimeout(resolve, 70));
+    flushPendingSessionWrites();
     expect(readDirCache(scope).sessions?.map((session) => session.id).sort()).toEqual(['created', 'saved']);
     useGlobalSessionsStore.getState().removeSessions(['saved']);
-    await new Promise((resolve) => setTimeout(resolve, 70));
+    flushPendingSessionWrites();
     expect(readDirCache(scope).sessions?.map((session) => session.id)).toEqual(['created']);
     const list = spyOn(opencodeClient, 'listSessionsPage').mockRejectedValue(new Error('offline'));
     try {
@@ -131,7 +131,7 @@ describe('global load owns chats-root readiness', () => {
       list.mockRejectedValue(new Error('offline'));
       await useGlobalSessionsStore.getState().loadSessions();
       expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['refreshed']);
-      await new Promise((resolve) => setTimeout(resolve, 70));
+      flushPendingSessionWrites();
       expect(readDirCache(scope).sessions?.map((session) => session.id)).toEqual(['refreshed']);
     } finally { list.mockRestore(); }
   });

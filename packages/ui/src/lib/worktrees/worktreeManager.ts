@@ -31,6 +31,7 @@ type WorktreeListEntry = {
   head?: string;
   name?: string;
   prunable?: boolean;
+  provenance?: WorktreeMetadata['provenance'];
 };
 
 const deriveHeadStateFromWorktreeEntry = (entry: WorktreeListEntry): 'branch' | 'detached' | 'unborn' => {
@@ -533,6 +534,7 @@ const readProjectWorktrees = async (projectDirectory: string): Promise<WorktreeM
         worktreeStatus: canonical.worktreeStatus,
         headState: canonical.headState,
         worktreeSource: canonical.worktreeSource,
+        ...(entry.provenance ? { provenance: entry.provenance } : {}),
       };
     })
     .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);

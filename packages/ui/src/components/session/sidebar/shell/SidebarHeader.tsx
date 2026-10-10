@@ -27,14 +27,14 @@ type Props = {
   showProjectDisplayControls: boolean;
   showRecentControls: boolean;
   handleOpenDirectoryDialog: () => void;
-  onOpenScheduled: () => void;
-  onOpenArchive: () => void;
-  /** The issues and pull requests board; absent where it is not offered. */
-  onOpenSourceBoard?: () => void;
+  /** Whether the issues and pull requests board is offered. */
+  showSourceBoard: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
   isSessionSearchOpen: boolean;
-  setIsSessionSearchOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
+  openSessionSearch: () => void;
+  /** Hides the field and drops its query. */
+  closeSessionSearch: () => void;
   sessionSearchInputRef: React.RefObject<HTMLInputElement | null>;
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
@@ -83,6 +83,38 @@ function useGuestPagesFitInline(
   return fits;
 }
 
+const PRESSED_PAGE_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
+const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
+
+/**
+ * A page the sidebar opens in the main area. The button stays pressed while
+ * its page is open, and the same click closes the page again.
+ */
+function SidebarPageButton({ label, pressed, onClick, className, children }: {
+  label: string;
+  pressed: boolean;
+  onClick: () => void;
+  className: string;
+  children: React.ReactNode;
+}): React.ReactNode {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          className={cn(className, pressed ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
+          aria-label={label}
+          aria-pressed={pressed}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" sideOffset={4}><p>{label}</p></TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
   const guestPages = useGuestPages();
@@ -91,13 +123,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
     showProjectDisplayControls,
     showRecentControls,
     handleOpenDirectoryDialog,
-    onOpenScheduled,
-    onOpenArchive,
-    onOpenSourceBoard,
+    showSourceBoard,
     headerActionIconClass,
     headerActionButtonClass,
     isSessionSearchOpen,
-    setIsSessionSearchOpen,
+    openSessionSearch,
+    closeSessionSearch,
     sessionSearchInputRef,
     sessionSearchQuery,
     setSessionSearchQuery,
@@ -114,6 +145,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
+
+  const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
+  const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
+  const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
+  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
 
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
@@ -141,7 +177,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
           inputRef={sessionSearchInputRef}
           value={sessionSearchQuery}
           onSearch={setSessionSearchQuery}
-          onClose={() => setIsSessionSearchOpen(false)}
+          onClose={closeSessionSearch}
           placeholder={t('sessions.sidebar.header.search.placeholder')}
           clearLabel={t('sessions.sidebar.header.search.clear')}
           leadingHint={hasSessionSearchQuery
@@ -170,66 +206,47 @@ export function SidebarHeader(props: Props): React.ReactNode {
               titlebar controls. */}
           <div className="ml-[3px] flex min-w-0 items-center gap-1.5">
             <div ref={builtinPagesRef} className="flex items-center gap-1.5">
-              {onOpenSourceBoard ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={onOpenSourceBoard}
-                      className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                      aria-label={t('sourceBoard.title')}
-                    >
-                      <Icon name="todo" className={headerActionIconClass} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sourceBoard.title')}</p></TooltipContent>
-                </Tooltip>
+              {showSourceBoard ? (
+                <SidebarPageButton
+                  label={t('sourceBoard.title')}
+                  pressed={isSourceBoardOpen}
+                  onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
+                  className={headerActionButtonClass}
+                >
+                  <Icon name="todo" className={headerActionIconClass} />
+                </SidebarPageButton>
               ) : null}
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={onOpenScheduled}
-                    className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                    aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
-                  >
-                    <Icon name="calendar-schedule" className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.scheduledTasks')}</p></TooltipContent>
-              </Tooltip>
+              <SidebarPageButton
+                label={t('sessions.sidebar.header.actions.scheduledTasks')}
+                pressed={isScheduledOpen}
+                onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
+                className={headerActionButtonClass}
+              >
+                <Icon name="calendar-schedule" className={headerActionIconClass} />
+              </SidebarPageButton>
 
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={onOpenArchive}
-                    className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                    aria-label={t('sessions.sidebar.nav.archive')}
-                  >
-                    <Icon name="archive" className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.nav.archive')}</p></TooltipContent>
-              </Tooltip>
+              <SidebarPageButton
+                label={t('sessions.sidebar.nav.archive')}
+                pressed={isArchiveOpen}
+                onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
+                className={headerActionButtonClass}
+              >
+                <Icon name="archive" className={headerActionIconClass} />
+              </SidebarPageButton>
             </div>
             {guestPagesInline ? guestPages.map((guest) => {
-              const title = guest.pageTitle ?? guest.name;
+              const pressed = openGuestPageId === guest.id;
               return (
-                <Tooltip key={guest.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => useUIStore.getState().setOpenGuestPage(guest.id)}
-                      className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                      aria-label={title}
-                    >
-                      <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>{title}</p></TooltipContent>
-                </Tooltip>
+                <SidebarPageButton
+                  key={guest.id}
+                  label={guest.pageTitle ?? guest.name}
+                  pressed={pressed}
+                  onClick={() => useUIStore.getState().setOpenGuestPage(pressed ? null : guest.id)}
+                  className={headerActionButtonClass}
+                >
+                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
+                </SidebarPageButton>
               );
             }) : guestPages.length > 0 && <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -252,8 +269,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <TooltipTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => setIsSessionSearchOpen((prev) => !prev)}
-                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
+                  onClick={isSessionSearchOpen ? closeSessionSearch : openSessionSearch}
+                  className={cn(headerActionButtonClass, isSessionSearchOpen ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
                   aria-label={t('sessions.sidebar.header.actions.searchSessions')}
                   aria-expanded={isSessionSearchOpen}
                 >
@@ -437,7 +454,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
               inputRef={sessionSearchInputRef}
               value={sessionSearchQuery}
               onSearch={setSessionSearchQuery}
-              onClose={() => setIsSessionSearchOpen(false)}
+              onClose={closeSessionSearch}
               placeholder={t('sessions.sidebar.header.search.placeholder')}
               clearLabel={t('sessions.sidebar.header.search.clear')}
               leadingHint={hasSessionSearchQuery

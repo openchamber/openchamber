@@ -8,6 +8,7 @@ import { isCapacitorApp } from '@/lib/platform';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import {
+  hasUnmergedCommits,
   runMergedWorktreeCleanup,
   type MergedWorktreeCandidate,
   type MergedWorktreeCleanupDeps,
@@ -108,12 +109,17 @@ const createDeps = (): MergedWorktreeCleanupDeps => {
     isSessionIdle: (sessionId) => getSessionLiveActivity(sessionId) === 'idle',
     isWorktreeOpen: (path) => normalizePath(useDirectoryStore.getState().currentDirectory ?? null) === normalizePath(path),
     isSessionOpen: (sessionId) => useSessionUIStore.getState().currentSessionId === sessionId,
-    readWorktreeState: async (path) => {
-      const [status, log] = await Promise.all([
-        getGitStatus(path, { fresh: true }),
-        getGitLog(path, { maxCount: 1 }),
-      ]);
-      return { isDirty: !status.isClean, headCommit: log.latest?.hash ?? null };
+    readWorktreeState: async (candidate) => {
+      const path = candidate.worktree.path;
+      const status = await getGitStatus(path, { fresh: true });
+      return {
+        isDirty: !status.isClean,
+        hasUnmergedCommits: await hasUnmergedCommits({
+          mergedHeadSha: candidate.mergedHeadSha,
+          status,
+          hasCommitsAfter: async (sha) => (await getGitLog(path, { from: sha, to: 'HEAD', maxCount: 1 })).all.length > 0,
+        }),
+      };
     },
     archiveSessions: (sessionIds) => archiveSessions(sessionIds),
     removeWorktree: (candidate) => removeProjectWorktree(candidate.project, candidate.worktree, { deleteLocalBranch: true }),
@@ -136,32 +142,31 @@ export const useMergedWorktreeCleanup = ({ enabled }: { enabled: boolean }): voi
     if (!active) return;
     let disposed = false;
     let running = false;
-    let rerun = false;
+    let rerun: { recheckKept: boolean } | null = null;
     let debounce: ReturnType<typeof setTimeout> | null = null;
 
-    const pass = async () => {
+    const pass = async (options: { recheckKept: boolean }) => {
       if (running) {
-        rerun = true;
+        rerun = { recheckKept: options.recheckKept || Boolean(rerun?.recheckKept) };
         return;
       }
       running = true;
       try {
-        await runMergedWorktreeCleanup(createDeps());
+        await runMergedWorktreeCleanup(createDeps(), options);
       } catch (error) {
         console.warn('[MergedWorktreeCleanup] pass failed', error);
       } finally {
         running = false;
       }
-      if (rerun && !disposed) {
-        rerun = false;
-        void pass();
-      }
+      const next = rerun;
+      rerun = null;
+      if (next && !disposed) void pass(next);
     };
     const schedule = () => {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        if (!disposed) void pass();
+        if (!disposed) void pass({ recheckKept: false });
       }, PASS_DEBOUNCE_MS);
     };
 
@@ -174,8 +179,9 @@ export const useMergedWorktreeCleanup = ({ enabled }: { enabled: boolean }): voi
       if (state.currentSessionId !== previous.currentSessionId
         || state.availableWorktreesByProject !== previous.availableWorktreesByProject) schedule();
     });
-    const interval = setInterval(() => void pass(), PASS_INTERVAL_MS);
-    schedule();
+    // Kept worktrees change by hand (a pull, a cleanup), which no event reports.
+    const interval = setInterval(() => void pass({ recheckKept: true }), PASS_INTERVAL_MS);
+    void pass({ recheckKept: true });
 
     return () => {
       disposed = true;

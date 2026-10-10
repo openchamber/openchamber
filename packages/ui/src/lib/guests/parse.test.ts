@@ -4,9 +4,42 @@ import { browserProviderGuests } from './browser-providers.ts';
 import { parseGuestCatalogJson, parseInstalledGuestJson } from './parse.ts';
 import { enabledGuestSurfaces } from './surfaces.ts';
 
+/** The readable rows, or null when any row was not readable. */
+const readGuests = (json: string) => {
+  const catalog = parseGuestCatalogJson(json);
+  return catalog && catalog.unreadable.length === 0 ? catalog.guests : null;
+};
+
 describe('parseGuestCatalogJson', () => {
-  test('reads a valid catalog', () => {
+  test('one row it cannot read keeps the others and is listed by name', () => {
+    const valid = {
+      id: 'hello',
+      name: 'Hello',
+      icon: 'window',
+      capabilities: { requested: [], granted: [] },
+      source: 'path',
+    };
+    // A newer server can send a capability this build does not know.
+    const newer = { ...valid, id: 'engram-memory', name: 'Engram', capabilities: { requested: ['telepathy'], granted: [] } };
     expect(parseGuestCatalogJson(JSON.stringify({
+      guests: [valid, newer, { id: 'Not An Id', icon: 7, source: 'bundled' }, 'junk'],
+    }))).toEqual({
+      guests: [valid],
+      unreadable: [
+        { id: 'engram-memory', name: 'Engram', builtIn: false },
+        { id: null, name: null, builtIn: true },
+        { id: null, name: null, builtIn: false },
+      ],
+    });
+  });
+
+  test('a response without a guest list is still a failure', () => {
+    expect(parseGuestCatalogJson('<html>Fallback</html>')).toBeNull();
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: {} }))).toBeNull();
+  });
+
+  test('reads a valid catalog', () => {
+    expect(readGuests(JSON.stringify({
       guests: [{
         id: 'hello',
         name: 'Hello',
@@ -66,7 +99,7 @@ describe('parseGuestCatalogJson', () => {
   });
 
   test('keeps attach when the catalog sends it', () => {
-    expect(parseGuestCatalogJson(JSON.stringify({
+    expect(readGuests(JSON.stringify({
       guests: [{
         id: 'hello',
         name: 'Hello',
@@ -88,7 +121,7 @@ describe('parseGuestCatalogJson', () => {
   });
 
   test('keeps a public integration slice and drops oauth URLs if sent', () => {
-    expect(parseGuestCatalogJson(JSON.stringify({
+    expect(readGuests(JSON.stringify({
       guests: [{
         id: 'clickup',
         name: 'ClickUp',
@@ -123,7 +156,7 @@ describe('parseGuestCatalogJson', () => {
   });
 
   test('keeps a public service slice', () => {
-    expect(parseGuestCatalogJson(JSON.stringify({
+    expect(readGuests(JSON.stringify({
       guests: [{
         id: 'docker',
         name: 'Docker',
@@ -171,7 +204,7 @@ describe('parseGuestCatalogJson', () => {
   });
 
   test('keeps a service\'s provider role and surface, so the dropdown and the rail see them', () => {
-    const [guest] = parseGuestCatalogJson(JSON.stringify({
+    const [guest] = readGuests(JSON.stringify({
       guests: [{
         id: 'server-chrome',
         name: 'Server Chrome',
@@ -185,7 +218,7 @@ describe('parseGuestCatalogJson', () => {
     expect(enabledGuestSurfaces(guest ? [guest] : [], (path) => path)).toHaveLength(1);
 
     // An unknown role is a newer server; the row still parses, minus that field.
-    const [newer] = parseGuestCatalogJson(JSON.stringify({
+    const [newer] = readGuests(JSON.stringify({
       guests: [{
         id: 'x', name: 'X', icon: 'window', capabilities: { requested: [], granted: [] },
         service: { runtime: 'host', granted: true, provides: ['printer'] },
@@ -207,30 +240,33 @@ describe('parseGuestCatalogJson', () => {
       capabilities: { requested: [], granted: [] },
       ...extra,
     });
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools })] }))).toEqual([guest({ tools })]);
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools: [{ match: 'mcp.*.search' }] })] }))).toBeNull();
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools })] }))).toEqual([guest({ tools })]);
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools: [{ match: 'mcp.*.search' }] })] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [guest({ tools: [{ match: 'x', output: 'html' }] })] }))).toBeNull();
   });
 
   test('keeps a status section without a panel entry and drops an out-of-range height', () => {
     const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }] })))
       .toEqual([{ ...row, statusEntry: 'status/index.html', statusTitle: 'Commits', statusHeight: 160 }]);
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, statusEntry: 'status/index.html', statusHeight: 4000 }] }))).toBeNull();
   });
 
   test('keeps bounded storage and status metadata', () => {
     const row = { id: 'git-graph', name: 'Git graph', icon: 'git-commit', capabilities: { requested: [], granted: [] } };
     const storageId = '123e4567-e89b-12d3-a456-426614174000';
-    expect(parseGuestCatalogJson(JSON.stringify({
+    expect(readGuests(JSON.stringify({
       guests: [{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }],
     }))).toEqual([{ ...row, storageId, statusDefaultExpanded: false, statusRequiresProject: true }]);
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...row, storageId: 'not-an-installation-id' }] }))).toBeNull();
+    expect(readGuests(JSON.stringify({ guests: [{ ...row, storageId: 'not-an-installation-id' }] }))).toBeNull();
   });
 
   test('rejects junk instead of returning an empty catalog', () => {
     expect(parseGuestCatalogJson('null')).toBeNull();
-    expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toBeNull();
+    expect(parseGuestCatalogJson('{"guests":[{"id":"Nope"}]}')).toEqual({
+      guests: [],
+      unreadable: [{ id: null, name: null, builtIn: false }],
+    });
   });
 });
 

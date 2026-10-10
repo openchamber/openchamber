@@ -27,6 +27,13 @@
  * for real, so the turn on screen carries twenty tool parts by the time the
  * answer streams, which is the shape a long agentic turn has and what the
  * cost of re-rendering a whole turn per delta depends on.
+ * `unicode-300cps` streams prose with em dashes, curly quotes and Cyrillic
+ * paragraphs and a 150-line TypeScript fence whose comments and strings carry
+ * the same characters. A string with any character above Latin-1 is stored by
+ * V8 as two bytes per character, which changes what concatenation, slicing,
+ * regex lexing and hashing cost; the ASCII documents never reach that path.
+ * `stream-20000cps`, `code-20000cps` and `unicode-20000cps` exist only to
+ * seed long sessions quickly.
  */
 
 import { createServer } from "node:http"
@@ -35,6 +42,11 @@ import process from "node:process"
 const FIXTURE_PROVIDER_ID = "perf"
 const FIXTURE_RATES = [100, 300, 600, 1200]
 const FIXTURE_CODE_RATES = [300, 1200]
+const FIXTURE_UNICODE_RATES = [300, 1200]
+// Not a streaming stimulus: answers in about a second, so a session with a
+// hundred turns of realistic history can be built in minutes (see
+// seed-long-session.mjs).
+const FIXTURE_SEED_RATE = 20000
 const FIXTURE_THINK_SECONDS = [30]
 const FIXTURE_AGENT_STEPS = [20, 40]
 const FIXTURE_AGENT_RATES = [300]
@@ -135,16 +147,67 @@ const FIXTURE_CODE_DOCUMENT = [
   "",
 ].join("\n")
 
+// Prose a Ukrainian-speaking user actually receives: typographic punctuation
+// mixed into English, and whole Cyrillic paragraphs.
+const UNICODE_PROSE = (index) => `## ${index}. Чому рядок «важить» удвічі більше — and why it matters
+
+The renderer receives every delta as a JavaScript string. A string that holds only Latin-1 characters is stored
+one byte per character; the moment a single “curly quote”, an em dash — like this one — or a Cyrillic letter
+arrives, the whole string becomes two bytes per character. Section ${index} says it again so the response is long.
+
+Коли модель відповідає українською, кожен фрагмент тексту містить кирилицю, тож усі операції над рядком —
+конкатенація, пошук, розбиття на блоки Markdown — працюють із дворазовим представленням. Це не помилка,
+а властивість рушія V8, і її варто вимірювати на реальному тексті, а не на ASCII.
+
+- “Smart quotes” and ‘single ones’ … ellipses, and non-breaking spaces between numbers and units: 42 ms.
+- Списки з тире — звичайна річ: «лапки-ялинки», апостроф у слові «пам’ять», і знак № ${index}.
+- Mixed: the cache key «owner:${index}» is hashed — not compared — on every read.
+
+`
+
+const UNICODE_CODE_FUNCTION = (index) => [
+  `/** Повертає власника запису ${index} — і кешує відповідь. */`,
+  `export function ownerLabel${index}(entries: Map<string, Entry>, key: string): string {`,
+  `  const cacheKey = key + "→${index}"`,
+  "  const cached = labelCache.get(cacheKey)",
+  "  if (cached !== undefined) return cached",
+  "  const entry = entries.get(key)",
+  `  // Немає запису — повертаємо «невідомо», а не порожній рядок.`,
+  `  if (!entry) return "невідомо — ${index}"`,
+  `  const label = "Власник “" + entry.ownerId + "” (рівень ${index % 5})"`,
+  "  labelCache.set(cacheKey, label)",
+  "  return label",
+  "}",
+  "",
+].join("\n")
+
+const FIXTURE_UNICODE_DOCUMENT = [
+  UNICODE_PROSE(1),
+  UNICODE_PROSE(2),
+  "Нижче — індекс власників, який тримає підписи в кеші:",
+  "",
+  `${FENCE}typescript`,
+  "type Entry = { ownerId: string; revision: number }",
+  "",
+  "// Кеш підписів: ключ — «запис→номер», значення — готовий рядок.",
+  "const labelCache = new Map<string, string>()",
+  "",
+  Array.from({ length: 12 }, (_, index) => UNICODE_CODE_FUNCTION(index + 1)).join("\n") + FENCE,
+  "",
+  UNICODE_PROSE(3),
+].join("\n")
+
 const parseModel = (model) => {
   const think = /think-(\d+)s/.exec(String(model ?? ""))
   if (think) return { delayMs: Number(think[1]) * 1000, charactersPerSecond: 1200, document: THINK_ANSWER, toolSteps: 0 }
   const agent = /agent-(\d+)tools-(\d+)cps/.exec(String(model ?? ""))
   if (agent) return { delayMs: 0, charactersPerSecond: Math.max(1, Number(agent[2])), document: FIXTURE_DOCUMENT, toolSteps: Number(agent[1]) }
-  const rate = /(stream|code)-(\d+)cps/.exec(String(model ?? ""))
+  const rate = /(stream|code|unicode)-(\d+)cps/.exec(String(model ?? ""))
+  const documents = { code: FIXTURE_CODE_DOCUMENT, unicode: FIXTURE_UNICODE_DOCUMENT }
   return {
     delayMs: 0,
     charactersPerSecond: rate ? Math.max(1, Number(rate[2])) : 300,
-    document: rate?.[1] === "code" ? FIXTURE_CODE_DOCUMENT : FIXTURE_DOCUMENT,
+    document: documents[rate?.[1]] ?? FIXTURE_DOCUMENT,
     toolSteps: 0,
   }
 }
@@ -277,6 +340,8 @@ const fixtureProviderConfig = (port) => ({
       models: Object.fromEntries([
         ...FIXTURE_RATES.map((rate) => [`stream-${rate}cps`, { name: `Fixture stream, ${rate} characters/s` }]),
         ...FIXTURE_CODE_RATES.map((rate) => [`code-${rate}cps`, { name: `Fixture code block, ${rate} characters/s` }]),
+        ...FIXTURE_UNICODE_RATES.map((rate) => [`unicode-${rate}cps`, { name: `Fixture non-Latin prose and code, ${rate} characters/s` }]),
+        ...["stream", "code", "unicode"].map((kind) => [`${kind}-${FIXTURE_SEED_RATE}cps`, { name: `Fixture ${kind}, seeding speed` }]),
         ...FIXTURE_THINK_SECONDS.map((seconds) => [`think-${seconds}s`, { name: `Fixture silence, ${seconds}s` }]),
         ...FIXTURE_AGENT_STEPS.flatMap((steps) => FIXTURE_AGENT_RATES.map((rate) => [
           `agent-${steps}tools-${rate}cps`,

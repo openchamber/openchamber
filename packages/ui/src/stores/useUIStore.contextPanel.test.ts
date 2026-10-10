@@ -614,7 +614,7 @@ describe('useUIStore browser tabs opened with an address', () => {
   });
 
   test('an agent tab opened with an address counts as opened now', () => {
-    const agentTabID = useUIStore.getState().openAgentBrowserTab('/repo', url);
+    const agentTabID = useUIStore.getState().openAgentBrowserTab('/repo', url, 'ses_1');
     expect(agentTabID === null).toBe(false);
     expect(wasBrowserTabOpenedWithAddress('/repo', agentTabID ?? '')).toBe(true);
     forgetBrowserTabOpenedWithAddress('/repo', agentTabID ?? '');
@@ -1156,12 +1156,45 @@ describe('useUIStore openAgentBrowserTab', () => {
     useUIStore.getState().openContextBrowser(directory, 'https://a.test');
     const shownId = useUIStore.getState().contextPanelByDirectory[directory]?.activeTabId;
 
-    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test');
+    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test', 'ses_1');
 
     const state = useUIStore.getState().contextPanelByDirectory[directory];
     expect(agentId).not.toBeNull();
     expect(agentId).not.toBe(shownId);
     expect(state?.tabs.find((tab) => tab.id === agentId)?.targetPath).toBe('https://a.test');
     expect(state?.activeTabId).toBe(shownId);
+  });
+
+  test("records the session that opened the tab and keeps it through the persisted state's sanitizer", () => {
+    useUIStore.getState().openContextBrowser(directory, 'https://mine.test');
+    const agentId = useUIStore.getState().openAgentBrowserTab(directory, 'https://a.test', 'ses_1');
+    // Any later open re-reads the tabs through the sanitizer rehydration uses.
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs.find((tab) => tab.id === agentId)?.ownerSessionId).toBe('ses_1');
+    expect(tabs.find((tab) => tab.targetPath === 'https://mine.test')?.ownerSessionId).toBeNull();
+  });
+
+  test('reads a browser tab saved before tabs had owners as the user\'s own', () => {
+    const persisted = {
+      contextPanelByDirectory: {
+        [directory]: {
+          isOpen: false,
+          expanded: false,
+          widthByMode: {},
+          touchedAt: 1,
+          activeTabId: null,
+          tabs: [{ id: 'browser:browser:agent:1-1', mode: 'browser', targetPath: 'https://old.test', dedupeKey: 'browser:agent:1-1', touchedAt: 1 }],
+        },
+      },
+    };
+    // SAFETY: the object mirrors an older persisted context-panel shape;
+    // setState bypasses the persist middleware's typing, not its migration.
+    useUIStore.setState(persisted as never);
+    useUIStore.getState().openContextPanelTab(directory, { mode: 'diff' });
+
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs.find((tab) => tab.mode === 'browser')?.ownerSessionId).toBeNull();
   });
 });

@@ -7,6 +7,8 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
  */
 
 const HOME = '/home/user';
+// Outside the home, as with OPENCHAMBER_DATA_DIR.
+const CHATS_ROOT = '/srv/openchamber/chats';
 
 const storage = new Map<string, string>();
 const testLocalStorage = {
@@ -60,12 +62,17 @@ mock.module('@/lib/opencode/client', () => ({
       if (!loggedIn) throw new Error('UI authentication required');
       return { homeDirectory: HOME };
     },
+    getFilesystemHomeInfo: async () => {
+      if (!loggedIn) throw new Error('Failed to resolve the chats root (401)');
+      return { home: HOME, chatsRoot: CHATS_ROOT };
+    },
   },
 }));
 
 mock.module('@/lib/desktop', () => ({
   getDesktopHomeDirectory: async () => null,
   isVSCodeRuntime: () => false,
+  isDesktopShell: () => false,
 }));
 
 const settingsUpdates: Array<Record<string, string>> = [];
@@ -96,7 +103,7 @@ describe('home directory on a first visit to a password-protected server', () =>
     setTestWindow(undefined);
   });
 
-  test('starts on "/" before login and moves to the real home once logged in', async () => {
+  test('starts on "/" before login and moves to the chats root once logged in', async () => {
     setTestWindow({
       localStorage: testLocalStorage,
       matchMedia: () => ({ matches: false }),
@@ -131,10 +138,13 @@ describe('home directory on a first visit to a password-protected server', () =>
 
     loggedIn = true;
     await ensureHomeDirectoryResolved();
-    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: HOME, isHomeReady: true });
-    expect(directoriesSet.at(-1)).toBe(HOME);
+    // With no project open the app works in the chats root. Every OpenCode
+    // read names the app's directory, and the home started OpenCode over the
+    // whole home folder.
+    expect(useDirectoryStore.getState()).toMatchObject({ homeDirectory: HOME, currentDirectory: CHATS_ROOT, isHomeReady: true });
+    expect(directoriesSet).toEqual([CHATS_ROOT]);
     await settle();
-    // Falling back to the home is not opening it. A stored last directory
+    // The fallback is not opening a directory. A stored last directory
     // becomes a project on the server when there is none, which put the home
     // in the sidebar and started OpenCode there on every launch.
     expect(storage.has('lastDirectory')).toBe(false);
@@ -147,7 +157,7 @@ describe('home directory on a first visit to a password-protected server', () =>
     expect(homeReads).toBe(reads);
   });
 
-  test('going home after the last project is removed forgets the last directory', async () => {
+  test('removing the last project moves to the chats root and forgets the last directory', async () => {
     setTestWindow({
       localStorage: testLocalStorage,
       matchMedia: () => ({ matches: false }),
@@ -160,13 +170,26 @@ describe('home directory on a first visit to a password-protected server', () =>
     expect(storage.get('lastDirectory')).toBe('/home/user/project');
 
     settingsUpdates.length = 0;
-    await useDirectoryStore.getState().goHome();
-    expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: HOME, hasPersistedDirectory: false });
-    expect(directoriesSet.at(-1)).toBe(HOME);
+    await useDirectoryStore.getState().goToNoProjectDirectory();
+    expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: CHATS_ROOT, hasPersistedDirectory: false });
+    expect(directoriesSet.at(-1)).toBe(CHATS_ROOT);
     await settle();
-    // Neither the removed project nor the home stays stored: the server would
-    // turn either back into a project.
+    // Neither the removed project nor the chats root stays stored: the server
+    // would turn either into a project.
     expect(storage.has('lastDirectory')).toBe(false);
     expect(settingsUpdates).toEqual([{ lastDirectory: '' }]);
+  });
+
+  test('a known home without a chats root before login is resolved again after login', async () => {
+    const { ensureHomeDirectoryResolved, useDirectoryStore } = await import('@/stores/useDirectoryStore');
+    // A returning visitor whose login expired: the home is stored, no project
+    // is open, and the server names nothing until login.
+    loggedIn = false;
+    useDirectoryStore.getState().synchronizeHomeDirectory(HOME, null);
+    expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: HOME, isHomeReady: false });
+
+    loggedIn = true;
+    await ensureHomeDirectoryResolved();
+    expect(useDirectoryStore.getState()).toMatchObject({ currentDirectory: CHATS_ROOT, isHomeReady: true });
   });
 });

@@ -1017,7 +1017,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'PR 合併後',
   'settings.openchamber.mergedWorktreeCleanup.info': '使用側邊欄已顯示的 PR 狀態。當代理正在該工作樹中工作或其工作階段處於開啟狀態時，不會執行任何動作。',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': '封存工作階段並移除工作樹',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '只有當工作樹中的所有內容都已包含在合併的 PR 中時，才會移除工作樹及其本機分支。否則只封存工作階段，保留工作樹。',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': '當工作樹中沒有未提交的變更、也沒有合併的 PR 中缺少的提交時，工作樹及其本機分支就會被移除。在此之前只封存工作階段，保留工作樹。',
   'settings.openchamber.messageSearch.title': '訊息搜尋',
   'settings.openchamber.messageSearch.field.enabled': '在所有對話中搜尋訊息',
   'settings.openchamber.messageSearch.field.enabledInfo': '在設定檔旁為你的訊息與代理回覆保存一個小型索引，讓搜尋能立即找到它們。索引保存在執行 OpenChamber 的機器上，不會傳送到任何地方。',

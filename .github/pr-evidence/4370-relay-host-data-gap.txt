@@ -1,0 +1,94 @@
+Issue 4370: how long a relay client goes without the event stream when the host's data socket dial fails.
+Lab: real OpenChamber server (this branch / main) with the relay host on, a local stand-in for the relay worker
+(same sync/connected/disconnected, buffering, 1012 close and 15 s stuck-control rules as apps/relay/src/relay-do.ts),
+and the app's own relay tunnel client (packages/ui/src/lib/relay/tunnel-client.ts) paired as a mobile device and reading
+/api/global/event through the tunnel. At 6 s the relay drops the live data socket and the next 1 or 2 host-data dials
+are rejected (503) or hang. A session is created over loopback every 2 s; 'delivered' counts its session.created arriving
+through the tunnel, 'missed' counts the ones produced while the stream was down.
+
+## run-main-reject1
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial rejects, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 23.0s tunnel connected
+ 23.0s event stream open (200)
+ 53.3s [main-reject1] delivered=15 missed=10 worstDelayMs=2
+ 53.3s tunnel idle
+## run-fix-reject1
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial rejects, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+  8.0s tunnel connected
+  8.0s event stream open (200)
+ 53.2s [fix-reject1] delivered=23 missed=2 worstDelayMs=1
+ 53.2s tunnel idle
+## run-main-reject2
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial rejects, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 37.0s tunnel error (relay handshake timeout)
+ 37.0s event stream failed: relay handshake timeout
+ 39.0s tunnel reconnecting (relay handshake timeout)
+ 39.0s tunnel connected
+ 39.0s event stream open (200)
+ 53.6s [main-reject2] delivered=7 missed=18 worstDelayMs=2
+ 53.6s tunnel idle
+## run-fix-reject2
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial rejects, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 10.0s tunnel connected
+ 10.0s event stream open (200)
+ 53.2s [fix-reject2] delivered=22 missed=3 worstDelayMs=1
+ 53.2s tunnel idle
+## run-main-hang1
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial hangs, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 23.0s tunnel connected
+ 23.0s event stream open (200)
+ 53.4s [main-hang1] delivered=15 missed=10 worstDelayMs=3
+ 53.4s tunnel idle
+## run-fix-hang1
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial hangs, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 13.0s tunnel connected
+ 13.0s event stream open (200)
+ 53.2s [fix-hang1] delivered=20 missed=5 worstDelayMs=1
+ 53.2s tunnel idle
+## run-main-hang2
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial hangs, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 37.0s tunnel error (relay handshake timeout)
+ 37.0s event stream failed: relay handshake timeout
+ 39.0s tunnel reconnecting (relay handshake timeout)
+ 39.0s tunnel connected
+ 39.0s event stream open (200)
+ 53.3s [main-hang2] delivered=7 missed=18 worstDelayMs=2
+ 53.3s tunnel idle
+## run-fix-hang2
+  0.0s tunnel connected
+  0.0s event stream open (200)
+  6.0s FAULT: next host-data dial hangs, then relay drops the live host-data socket
+  6.0s tunnel reconnecting (relay socket closed (code 1012))
+  6.0s event stream failed: relay tunnel reset: relay socket closed (code 1012)
+ 25.0s tunnel connected
+ 25.0s event stream open (200)
+ 53.2s [fix-hang2] delivered=14 missed=11 worstDelayMs=1
+ 53.2s tunnel idle

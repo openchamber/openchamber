@@ -125,6 +125,51 @@ describe('hideWhitespaceChanges', () => {
     expect(visible.hunks[0]?.hunkSpecs).toBe('@@ -13,6 +13,6 @@\n');
   });
 
+  test('a patch diff keeps exactly the lines its remaining hunks show, in order', () => {
+    // The renderer rebuilds each side of a patch diff by joining its hunks'
+    // lines; a dropped hunk must not leave its lines behind to shift the rest.
+    const patch = [
+      'diff --git a/a.ts b/a.ts',
+      'index 1111111..2222222 100644',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -1,4 +1,4 @@',
+      ' a',
+      '-  b',
+      '+    b',
+      ' c',
+      ' d',
+      '@@ -20,4 +20,4 @@',
+      ' p',
+      '-q',
+      '+Q',
+      ' r',
+      ' s',
+      '',
+    ].join('\n');
+    const fileDiff = parsePatchFiles(patch)[0]?.files[0];
+    if (!fileDiff) throw new Error('patch did not parse');
+
+    const visible = hideWhitespaceChanges(fileDiff);
+
+    const joined = { deletion: [] as string[], addition: [] as string[] };
+    for (const hunk of visible.hunks) {
+      for (const block of hunk.hunkContent) {
+        const deletions = block.type === 'context' ? block.lines : block.deletions;
+        const additions = block.type === 'context' ? block.lines : block.additions;
+        expect(block.deletionLineIndex).toBe(joined.deletion.length);
+        expect(block.additionLineIndex).toBe(joined.addition.length);
+        joined.deletion.push(...visible.deletionLines.slice(block.deletionLineIndex, block.deletionLineIndex + deletions));
+        joined.addition.push(...visible.additionLines.slice(block.additionLineIndex, block.additionLineIndex + additions));
+      }
+    }
+    expect(visible.hunks.map((hunk) => hunk.hunkSpecs)).toEqual(['@@ -20,4 +20,4 @@\n']);
+    expect(joined.deletion).toEqual(visible.deletionLines);
+    expect(joined.addition).toEqual(visible.additionLines);
+    expect(visible.deletionLines.map((line) => line.trimEnd())).toEqual(['p', 'q', 'r', 's']);
+    expect(visible.additionLines.map((line) => line.trimEnd())).toEqual(['p', 'Q', 'r', 's']);
+  });
+
   test('a change next to a re-indented line keeps its usual context', () => {
     const before = ['a', 'b', '  c', 'd', ''].join('\n');
     const after = ['A', 'b', 'c', 'd', ''].join('\n');

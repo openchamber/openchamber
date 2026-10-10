@@ -14,6 +14,9 @@ performs its own fresh safety reads through RuntimeAPIs, outside this UI owner.
 - `idle`, `loading`, `ready`, `stale` and `error` distinguish an unresolved read, an actual
   request, successful empty binding and failure. Refresh failure retains the last
   complete `read` as stale, along with the original Error and its metadata.
+- A read of a worktree whose checkout is still running waits for its `git-ready`
+  phase first and stays `loading` meanwhile. Reading earlier fails, and that
+  error would stay until a manual retry. A failed checkout settles as `error`.
 - `contexts` grants provider-read demand only while the owner read is ready and
   the selected association's readiness is `ready` with a matching approved fetch
   fingerprint. Aggregate `needs-attention` does not suppress healthy siblings.
@@ -269,7 +272,8 @@ storage context.
 
 ## Tests
 
-`repository-binding.test.ts` covers deferred failure, successful empty, concurrent
+`repository-binding.test.ts` covers deferred failure, successful empty, a read
+waiting for a worktree checkout, concurrent
 demand, mutation overlays, aliases, scope invalidation, conflict reconciliation
 and retention. The 100-consumer regression permits one initial request and no
 additional requests or notifications for 10,000 warm snapshot reads.

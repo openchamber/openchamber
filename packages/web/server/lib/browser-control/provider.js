@@ -135,12 +135,14 @@ export const createBrowserControlRouter = ({
       if (error instanceof GuestServiceError) {
         // Read by the agent. A request that was sent and lost may have been
         // acted on; only a service that never took it leaves the page as it was.
-        const outcome = error.code === 'REQUEST_FAILED' || error.code === 'CANCELLED'
-          ? 'The action was sent but no answer came back, so it may or may not have run; read the page before repeating it.'
-          : 'Nothing was changed.';
+        const outcome = error.code === 'RESPONSE_TOO_LARGE'
+          ? 'The action ran, but its answer was too large to read; read the page before repeating it.'
+          : error.code === 'REQUEST_FAILED' || error.code === 'CANCELLED'
+            ? 'The action was sent but no answer came back, so it may or may not have run; read the page before repeating it.'
+            : 'Nothing was changed.';
         throw new BrowserControlError(
           `The browser provider "${guest.name}" could not complete this action (${error.code}): ${error.message} ${outcome}`,
-          error.code === 'REQUEST_FAILED' ? 504 : 503,
+          error.code === 'REQUEST_FAILED' ? 504 : error.code === 'RESPONSE_TOO_LARGE' ? 502 : 503,
         );
       }
       throw error;

@@ -55,7 +55,9 @@ const fixture = [
 
 const fixtureWorkload = {
   rendererCount: 3,
-  domBlocksPerRenderer: 1,
+  // A settled message renders one block per top-level token: heading,
+  // paragraph, table, code and two diagrams.
+  domBlocksPerRenderer: 6,
   mermaidBlocksPerRenderer: 2,
 };
 
@@ -76,6 +78,8 @@ let MarkdownRenderer: React.ComponentType<{
   enableFileReferences?: boolean;
 }>;
 let clearDetachedMarkdownDomCache: () => void;
+// The worker is mocked; a test that needs highlighting swaps this in.
+let highlightCodeForTest: (code: string, lang: string) => Promise<string | null> = async () => null;
 let detachedMarkdownDomCacheStats: () => { sessions: number; entries: number };
 
 const makeCounts = (): OperationCounts => ({
@@ -316,7 +320,7 @@ const initializePerformanceDom = async (): Promise<void> => {
   }));
   mock.module('@/stores/utils/streamDebug', () => ({ streamPerfCount: () => undefined, streamPerfObserve: () => undefined }));
   mock.module('./markdown/markdown-worker', () => ({
-    highlightCodeInWorker: async () => null,
+    highlightCodeInWorker: (code: string, lang: string) => highlightCodeForTest(code, lang),
     highlightLinesInWorker: async () => null,
     highlightTokensInWorker: async () => null,
   }));
@@ -658,6 +662,79 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     expect(spriteIconInnerHTMLWrites).toBe(0);
   });
 
+  test('keeps every block of an unhighlighted first paint when highlighting lands', async () => {
+    let releaseHighlight: () => void = () => undefined;
+    const highlightGate = new Promise<void>((resolve) => {
+      releaseHighlight = resolve;
+    });
+    highlightCodeForTest = async (code) => {
+      await highlightGate;
+      return `<pre class="shiki" data-test-highlighted><code><span class="line"><span style="color:#f00">${code.trim()}</span></span></code></pre>`;
+    };
+    const content = [
+      'First-paint identity check with **bold** text.',
+      '',
+      '```ts',
+      'const firstPaintIdentity = 1;',
+      '```',
+      '',
+      '| first | paint |',
+      '| --- | --- |',
+      '| identity | table |',
+      '',
+      '<details><summary>First paint details</summary>',
+      '',
+      'Body of the first-paint disclosure.',
+      '',
+      '</details>',
+      '',
+      'Closing paragraph of the first-paint check.',
+    ].join('\n');
+    const host = document.createElement('div');
+    document.body.replaceChildren(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => {
+        root.render(<MarkdownRenderer content={content} messageId="first-paint-identity" isAnimated={false} enableFileReferences={false} />);
+        await waitForSettledEffects();
+      });
+      const firstPaintBlocks = Array.from(host.querySelectorAll('[data-md-block]'));
+      // One block per top-level token, as the async render will produce.
+      expect(firstPaintBlocks).toHaveLength(5);
+      expect(host.querySelector('[data-test-highlighted]')).toBeNull();
+      const firstPaintChildren = firstPaintBlocks.map((block) => Array.from(block.children));
+      const table = host.querySelector('table');
+      const details = host.querySelector<HTMLDetailsElement>('details');
+      expect(table).not.toBeNull();
+      expect(details).not.toBeNull();
+      details!.open = true;
+
+      await act(async () => {
+        releaseHighlight();
+        await waitForSettledEffects();
+      });
+      await act(async () => waitForSettledEffects());
+
+      expect(host.querySelector('[data-test-highlighted]')).not.toBeNull();
+      const settledBlocks = Array.from(host.querySelectorAll('[data-md-block]'));
+      expect(settledBlocks).toHaveLength(firstPaintBlocks.length);
+      settledBlocks.forEach((block, index) => {
+        expect(block).toBe(firstPaintBlocks[index]!);
+        expect(block.getAttribute('data-md-id')?.endsWith(':unhighlighted')).toBe(false);
+      });
+      // Blocks without code were final at first paint and are not touched.
+      for (const index of [0, 2, 3, 4]) {
+        expect(Array.from(settledBlocks[index]!.children)).toEqual(firstPaintChildren[index]!);
+      }
+      expect(host.querySelector('table')).toBe(table);
+      expect(host.querySelector('details')).toBe(details);
+      expect(details!.open).toBe(true);
+    } finally {
+      highlightCodeForTest = async () => null;
+      await act(async () => root.unmount());
+    }
+  });
+
   test('reuses settled Markdown DOM without parsing or decorating it again', async () => {
     clearDetachedMarkdownDomCache();
     const content = '# Cached viewport\n\nA settled paragraph.';
@@ -824,9 +901,14 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     const mounted = await mountFixture(fixtureWorkload.rendererCount);
     const critical = mounted.counts;
 
-    expect(critical.getBoundingClientRectCalls).toBe(0);
+    // The first paint is shown without waiting for the async render, so each
+    // table gets its measured column widths in the mount commit, and the one
+    // shared table-width observer starts watching. Mermaid geometry waits.
+    expect(critical.tableProbeReads).toBe(fixtureWorkload.rendererCount * 2);
+    expect(critical.getBoundingClientRectCalls).toBe(critical.tableProbeReads);
     expect(critical.viewBoxWrites).toBe(0);
-    expect(critical.resizeObserverCreates).toBe(0);
+    expect(critical.resizeObserverCreates).toBe(1);
+    expect(critical.resizeObserverObserveCalls).toBe(0);
     expect(mounted.host.querySelectorAll('[data-markdown="mermaid"] svg')).toHaveLength(6);
 
     await flushDeferredMermaidInitialization();
@@ -869,9 +951,10 @@ describe('MarkdownRenderer DOM mount performance contract', () => {
     await act(async () => mounted.root.unmount());
     await flushDeferredMermaidInitialization();
 
-    expect(mounted.operations.getBoundingClientRectCalls).toBe(0);
+    // Only the table layout of the mount commit read geometry.
+    expect(mounted.operations.getBoundingClientRectCalls).toBe(mounted.operations.tableProbeReads);
     expect(mounted.operations.viewBoxWrites).toBe(0);
-    expect(mounted.operations.resizeObserverCreates).toBe(0);
+    expect(mounted.operations.resizeObserverObserveCalls).toBe(0);
   });
 
   test('keeps DOM operation fanout linear when renderer count doubles', async () => {

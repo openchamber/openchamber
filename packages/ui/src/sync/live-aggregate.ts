@@ -14,18 +14,21 @@ const getSessionUpdatedAt = (session: Session): number => {
   return typeof createdAt === 'number' && Number.isFinite(createdAt) ? createdAt : 0
 }
 
-const getSessionSignature = (session: Session): string => {
-  const directory = (session as Session & { directory?: string | null }).directory ?? ''
-  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
-  return [
-    session.id,
-    session.title ?? '',
-    session.time?.created ?? 0,
-    session.time?.updated ?? 0,
-    session.time?.archived ?? 0,
-    directory,
-    parentID,
-  ].join('|')
+// The fields a live-session consumer renders or orders by. Compared field by
+// field rather than through a joined string: this runs over every live
+// session each time any directory's session list changes, and an unchanged
+// session is usually the same object, which is checked first.
+const areSessionsEquivalent = (left: Session, right: Session): boolean => {
+  if (left === right) return true
+  return left.id === right.id
+    && (left.title ?? '') === (right.title ?? '')
+    && (left.time?.created ?? 0) === (right.time?.created ?? 0)
+    && (left.time?.updated ?? 0) === (right.time?.updated ?? 0)
+    && (left.time?.archived ?? 0) === (right.time?.archived ?? 0)
+    && (left.directory ?? '') === (right.directory ?? '')
+    && (left.parentID ?? '') === (right.parentID ?? '')
+    && left.model?.id === right.model?.id
+    && left.model?.providerID === right.model?.providerID
 }
 
 const getStatusPriority = (status: SessionStatus | undefined): number => {
@@ -88,11 +91,7 @@ export const areSessionListsEquivalent = (left: Session[], right: Session[]): bo
   }
 
   for (let index = 0; index < left.length; index += 1) {
-    if (left[index].model?.id !== right[index].model?.id
-      || left[index].model?.providerID !== right[index].model?.providerID) {
-      return false
-    }
-    if (getSessionSignature(left[index]) !== getSessionSignature(right[index])) {
+    if (!areSessionsEquivalent(left[index], right[index])) {
       return false
     }
   }

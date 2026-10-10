@@ -7,6 +7,8 @@ type ConfirmRequest = {
   title: string;
   message: string;
   action: string;
+  /** Label for declining, when declining still goes on without the action; defaults to Cancel. */
+  decline?: string;
   /** The action discards something; its button reads as destructive. */
   destructive?: boolean;
 };
@@ -55,7 +57,7 @@ export function useConfirmDialog() {
           <DialogDescription className="whitespace-pre-line">{request?.message}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button size="sm" variant="outline" autoFocus onClick={() => settle(false)}>{t('dialog.common.actions.cancel')}</Button>
+          <Button size="sm" variant="outline" autoFocus onClick={() => settle(false)}>{request?.decline ?? t('dialog.common.actions.cancel')}</Button>
           <Button size="sm" variant={request?.destructive ? 'destructive' : 'default'} onClick={() => settle(true)}>{request?.action}</Button>
         </DialogFooter>
       </DialogContent>

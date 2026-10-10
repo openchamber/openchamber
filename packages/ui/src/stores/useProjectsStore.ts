@@ -757,7 +757,7 @@ export const useProjectsStore = create<ProjectsStore>()(
           useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false });
         }
       } else {
-        void useDirectoryStore.getState().goHome();
+        void useDirectoryStore.getState().goToNoProjectDirectory();
       }
     },
 

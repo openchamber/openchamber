@@ -149,6 +149,10 @@ export default defineConfig({
             return 'vendor-vite-runtime';
           }
           if (!id.includes('node_modules')) return undefined;
+          // A stylesheet stays with the chunk that imports it. Grouping KaTeX's
+          // eager stylesheet into `vendor-katex` made that chunk eager, and with
+          // it the 260KB KaTeX engine only the lazy markdown renderer uses.
+          if (id.endsWith('.css')) return undefined;
 
           // Resolve the real package from the LAST `node_modules/` segment.
           // bun's isolated install nests packages as

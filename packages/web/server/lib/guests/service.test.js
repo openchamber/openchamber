@@ -251,12 +251,16 @@ describe('host-driven services', () => {
     }
   });
 
-  test('a longer timeout and a bigger response cap are honoured', async () => {
+  test('a longer timeout and a response cap are honoured, and an answer over the cap is refused whole', async () => {
     const { dir, persistPath, packageRoot } = await writeFixture();
     try {
       await setCapabilityGrants('docker', persistPath, ['service']);
-      const result = await proxyGuestServiceRequest(request({ packageRoot, persistPath, timeoutMs: 45_000, responseMax: 5 }));
-      expect(result).toEqual({ status: 200, body: '{"pon' });
+      const result = await proxyGuestServiceRequest(request({ packageRoot, persistPath, timeoutMs: 45_000, responseMax: 1_000 }));
+      expect(result.status).toBe(200);
+      expect(JSON.parse(result.body)).toBeTruthy();
+      await expect(proxyGuestServiceRequest(request({ packageRoot, persistPath, responseMax: 5 })))
+        .rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' });
+      expect(getServiceStatus('docker')).toBe('ready');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

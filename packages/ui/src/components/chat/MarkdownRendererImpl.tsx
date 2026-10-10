@@ -25,7 +25,7 @@ import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath 
 import {
   getCachedMarkdownBlocks,
   renderMarkdownBlocks,
-  renderMarkdownSync,
+  renderMarkdownBlocksSync,
   type MarkdownImageMode,
   type MarkdownRawHtmlMode,
 } from './markdown/markdownCore';
@@ -37,6 +37,8 @@ import {
   applyMarkdownTableWrapState,
   decorateMarkdown,
   getMarkdownCodeText,
+  layoutReservedCodeLines,
+  RESERVED_CODE_GUTTER_SELECTOR,
   stabilizeMarkdownTableWidths,
   type DecorateContext,
   type DecorateLabels,
@@ -58,7 +60,6 @@ import {
 import { fileReferenceExists, findUniqueFileByName } from './fileReferenceStat';
 import { streamPerfCount, streamPerfObserve } from '@/stores/utils/streamDebug';
 import { detachedMarkdownDomCache, type DetachedMarkdownDomKey } from './markdown/detachedMarkdownDomCache';
-import { TimelineRevealGateContext } from './timelineRevealGate';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 const useCurrentMermaidTheme = () => {
@@ -766,6 +767,30 @@ const markLastMarkdownBlock = (target: HTMLElement): void => {
   }
 };
 
+// Safari has no requestIdleCallback; there a short timeout stands in and one
+// block is handled per task.
+const scheduleIdle = (run: (deadline?: IdleDeadline) => void): (() => void) => {
+  if ('requestIdleCallback' in window) {
+    const handle = window.requestIdleCallback(run, { timeout: 500 });
+    return () => window.cancelIdleCallback(handle);
+  }
+  const handle = setTimeout(() => run(), 16);
+  return () => clearTimeout(handle);
+};
+
+const BLOCK_ENTER_CLASS = 'oc-md-block-enter';
+
+/**
+ * Drops the entrance animation streamed blocks carry. Settled blocks now keep
+ * their streamed DOM, and re-attached DOM (the detached cache) would replay it.
+ */
+const clearBlockEnterAnimation = (target: HTMLElement): void => {
+  for (const element of Array.from(target.querySelectorAll<HTMLElement>(`.${BLOCK_ENTER_CLASS}`))) {
+    element.classList.remove(BLOCK_ENTER_CLASS);
+    element.style.removeProperty('--oc-md-enter-delay');
+  }
+};
+
 const domMatchesRenderedBlocks = (
   target: HTMLElement,
   blocks: ReadonlyArray<{ id: string }>,
@@ -866,7 +891,7 @@ const useDecorateContext = (
     setTableCellWrap(!useUIStore.getState().tableCellWrap);
   }, [setTableCellWrap]);
 
-  return React.useMemo<DecorateContext>(() => {
+  const ctx = React.useMemo<DecorateContext>(() => {
     const colors = mermaidColorsFromTheme(currentTheme);
     const mode = useUIStore.getState().mermaidRenderingMode;
     const themeId = currentTheme.metadata?.id ?? 'theme';
@@ -883,7 +908,6 @@ const useDecorateContext = (
       labels,
       mermaidControls,
       codeBlockLineWrap,
-      deferCodeLineNumberSync,
       onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap,
       tableCellWrap,
       onToggleTableCellWrap: toggleTableCellWrap,
@@ -891,7 +915,17 @@ const useDecorateContext = (
       onPreviewLoopback,
       getCopyFormat: readCopyFormat,
     };
-  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
+
+  // Streaming only defers code line numbers, which the settled pass fills in
+  // per block. Both variants share one decoration identity, so a finished
+  // stream keeps every block's DOM instead of decorating the reply again.
+  const streamingCtx = React.useMemo<DecorateContext>(() => {
+    const variant = { ...ctx, deferCodeLineNumberSync: true };
+    MARKDOWN_DECORATION_IDS.set(variant, getMarkdownDecorationId(ctx));
+    return variant;
+  }, [ctx]);
+  return deferCodeLineNumberSync ? streamingCtx : ctx;
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -906,10 +940,14 @@ const useMorphdomMarkdown = ({
   ctx,
   domCacheKey,
   tableLayoutSettled,
+  growing = streaming,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
   streaming: boolean;
+  // The text is still streaming, though rendered as settled when `streaming`
+  // is false (the sorted chat mode): its steps stay out of settled caches.
+  growing?: boolean;
   imageMode?: MarkdownImageMode;
   rawHtml?: MarkdownRawHtmlMode;
   syntaxVars: Record<string, string>;
@@ -925,16 +963,6 @@ const useMorphdomMarkdown = ({
   const renderRevisionRef = React.useRef(0);
   const tableLayoutFrameRef = React.useRef<number | null>(null);
   const stopTableWidthWatchRef = React.useRef<(() => void) | null>(null);
-  // A provisional first paint (blocks not in the settled cache) holds the
-  // timeline reveal until the async render lands, so the session opens with
-  // final code highlighting instead of a visible restyle.
-  const revealGate = React.useContext(TimelineRevealGateContext);
-  const releaseRevealHoldRef = React.useRef<(() => void) | null>(null);
-  const releaseRevealHold = React.useCallback(() => {
-    releaseRevealHoldRef.current?.();
-    releaseRevealHoldRef.current = null;
-  }, []);
-  React.useEffect(() => releaseRevealHold, [releaseRevealHold]);
   // Only DOM that was actually restored or completed by the async pipeline is
   // eligible for capture. A fallback from an earlier content revision is not.
   const mountedDomRef = React.useRef<{
@@ -956,6 +984,17 @@ const useMorphdomMarkdown = ({
     mermaidViewerRef.current.refresh();
   }, [containerRef]);
   const { tableCellWrap } = ctx;
+  const layoutTables = React.useCallback(() => {
+    const container = containerRef.current;
+    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+    if (!target) return;
+    stabilizeMarkdownTableWidths(target, tableCellWrap);
+    // Column widths are fixed for the width they were laid out in, so a
+    // resized chat or document lays the tables out again.
+    if (!stopTableWidthWatchRef.current && target.querySelector('table[data-markdown="table"]')) {
+      stopTableWidthWatchRef.current = observeMarkdownTableWidth(target, () => scheduleTableLayoutRef.current());
+    }
+  }, [containerRef, tableCellWrap]);
   const scheduleTableLayout = React.useCallback(() => {
     if (!tableLayoutSettled) return;
     const previousFrame = tableLayoutFrameRef.current;
@@ -965,18 +1004,18 @@ const useMorphdomMarkdown = ({
       if (tableLayoutFrameRef.current !== frame) return;
       tableLayoutFrameRef.current = null;
       if (renderRevisionRef.current !== renderRevision) return;
-      const container = containerRef.current;
-      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-      if (!target) return;
-      stabilizeMarkdownTableWidths(target, tableCellWrap);
-      // Column widths are fixed for the width they were laid out in, so a
-      // resized chat or document lays the tables out again.
-      if (!stopTableWidthWatchRef.current && target.querySelector('table[data-markdown="table"]')) {
-        stopTableWidthWatchRef.current = observeMarkdownTableWidth(target, () => scheduleTableLayoutRef.current());
-      }
+      layoutTables();
     });
     tableLayoutFrameRef.current = frame;
-  }, [containerRef, tableCellWrap, tableLayoutSettled]);
+  }, [layoutTables, tableLayoutSettled]);
+  // Lays tables out in the same task as the DOM change that reset them, so
+  // no frame paints them at their unmeasured width.
+  const layoutTablesNow = React.useCallback(() => {
+    const pendingFrame = tableLayoutFrameRef.current;
+    if (pendingFrame !== null) window.cancelAnimationFrame(pendingFrame);
+    tableLayoutFrameRef.current = null;
+    layoutTables();
+  }, [layoutTables]);
   const scheduleTableLayoutRef = React.useRef(scheduleTableLayout);
   React.useEffect(() => {
     scheduleTableLayoutRef.current = scheduleTableLayout;
@@ -989,6 +1028,45 @@ const useMorphdomMarkdown = ({
     if (frame === null) return;
     window.cancelAnimationFrame(frame);
     tableLayoutFrameRef.current = null;
+  }, []);
+
+  // Code blocks decorated while streaming reserve the line-number gutter but
+  // leave out the numbers. Once the message settles, the numbers are filled in
+  // one block at a time in idle time, not all in the task that ends the stream.
+  const latestCtxRef = React.useRef(ctx);
+  const streamingRef = React.useRef(streaming);
+  React.useLayoutEffect(() => {
+    latestCtxRef.current = ctx;
+    streamingRef.current = streaming;
+  }, [ctx, streaming]);
+  const cancelLineNumberTaskRef = React.useRef<(() => void) | null>(null);
+  const scheduleCodeLineNumbers = React.useCallback(() => {
+    if (cancelLineNumberTaskRef.current) return;
+    const run = (deadline?: IdleDeadline) => {
+      cancelLineNumberTaskRef.current = null;
+      if (streamingRef.current) return;
+      const container = containerRef.current;
+      const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
+      if (!target) return;
+      const pending = target.querySelectorAll<HTMLPreElement>(RESERVED_CODE_GUTTER_SELECTOR);
+      let done = 0;
+      do {
+        const pre = pending[done];
+        if (!pre) break;
+        // Laying out lines rebuilds plain code text, which would drop file
+        // links already found in it; unwrap them so the annotation pass,
+        // woken by this mutation, finds them again.
+        if (pre.querySelector(`code[${CODE_BLOCK_PATH_SCANNED_ATTR}]`)) unwrapBlockCodePathTokens(pre);
+        layoutReservedCodeLines(pre, latestCtxRef.current);
+        done += 1;
+      } while (deadline && deadline.timeRemaining() > 4);
+      if (done < pending.length) cancelLineNumberTaskRef.current = scheduleIdle(run);
+    };
+    cancelLineNumberTaskRef.current = scheduleIdle(run);
+  }, [containerRef]);
+  React.useEffect(() => () => {
+    cancelLineNumberTaskRef.current?.();
+    cancelLineNumberTaskRef.current = null;
   }, []);
 
   React.useLayoutEffect(() => {
@@ -1043,6 +1121,7 @@ const useMorphdomMarkdown = ({
         .some((button) => button.getAttribute('title') === mountedDom.copiedLabel);
       if (openMenu || copiedButton) return;
 
+      clearBlockEnterAnimation(target);
       const fragment = document.createDocumentFragment();
       fragment.append(...Array.from(target.childNodes));
       detachedMarkdownDomCache.store({ ...mountedDom.key, fragment });
@@ -1050,53 +1129,48 @@ const useMorphdomMarkdown = ({
     };
   }, [containerRef]);
 
-  // Synchronous first paint: while the async parse is in-flight, show escaped
-  // plain text immediately so there is no blank frame on initial mount. Only
-  // runs when the target is empty — subsequent updates keep the prior rich DOM
-  // until the next async render morphs in (no flash). Mirrors OpenCode's
-  // `initialValue: fallback(text)` resource pattern.
+  // Synchronous first paint: while the async render (code highlighting) is in
+  // flight, show the parsed blocks without colour so there is no blank frame
+  // on initial mount. Only runs when the target is empty — subsequent updates
+  // keep the prior rich DOM until the next async render morphs in (no flash).
+  // Mirrors OpenCode's `initialValue: fallback(text)` resource pattern.
   React.useLayoutEffect(() => {
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     if (!target) return;
     const decorationId = getMarkdownDecorationId(ctx);
     if (text && target.childNodes.length === 0) {
-      const cachedBlocks = !streaming ? getCachedMarkdownBlocks(text, imageMode, rawHtml) : null;
-      if (cachedBlocks) {
-        let hasMermaidBlock = false;
-        for (const cachedBlock of cachedBlocks) {
-          const block = document.createElement('div');
-          block.setAttribute('data-md-block', '');
-          block.style.display = 'contents';
-          block.innerHTML = cachedBlock.html;
-          decorateMarkdown(block, ctx);
-          block.setAttribute('data-md-id', cachedBlock.id);
-          block.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
-          hasMermaidBlock ||= shouldRefreshMermaidViewers(block);
-          target.appendChild(block);
-        }
-        if (hasMermaidBlock) refreshMermaidViewers();
-      } else {
-        if (!streaming && !releaseRevealHoldRef.current) {
-          releaseRevealHoldRef.current = revealGate?.hold() ?? null;
-        }
+      // The first paint has the same blocks and ids as the async render. A
+      // block whose code is not highlighted yet carries an id that render
+      // does not match, so it recolours that block in place and keeps every
+      // other block's DOM (selection, file links, images, disclosures).
+      const blocks = renderMarkdownBlocksSync(text, streaming, imageMode, rawHtml, growing);
+      let hasMermaidBlock = false;
+      for (const renderedBlock of blocks) {
         const block = document.createElement('div');
         block.setAttribute('data-md-block', '');
         block.style.display = 'contents';
-        block.innerHTML = renderMarkdownSync(text, imageMode, rawHtml);
+        block.innerHTML = renderedBlock.html;
         decorateMarkdown(block, ctx);
+        block.setAttribute('data-md-id', renderedBlock.id);
         block.setAttribute(MARKDOWN_DECORATION_ID_ATTR, decorationId);
+        hasMermaidBlock ||= shouldRefreshMermaidViewers(block);
         target.appendChild(block);
-        if (shouldRefreshMermaidViewers(block)) refreshMermaidViewers();
       }
+      if (hasMermaidBlock) refreshMermaidViewers();
       markLastMarkdownBlock(target);
+      // The first paint is shown as it is, without waiting for highlighting,
+      // so it must already have its final geometry. Code blocks do: the
+      // highlight pass only colours their lines. Tables get their measured
+      // column widths here, before the browser paints this commit.
+      if (tableLayoutSettled) layoutTablesNow();
     } else if (!mermaidViewerRef.current && shouldRefreshMermaidViewers(target)) {
       // StrictMode re-runs this setup after the cleanup probe. The DOM remains,
       // but the viewer registry does not, so recreate it without reinstalling
       // or re-decorating ordinary blocks.
       refreshMermaidViewers();
     }
-  }, [containerRef, text, streaming, imageMode, rawHtml, ctx, refreshMermaidViewers, revealGate]);
+  }, [containerRef, text, streaming, growing, imageMode, rawHtml, ctx, refreshMermaidViewers, tableLayoutSettled, layoutTablesNow]);
 
   React.useEffect(() => () => {
     mermaidViewerRef.current?.cleanup();
@@ -1112,21 +1186,25 @@ const useMorphdomMarkdown = ({
     const decorationId = getMarkdownDecorationId(ctx);
 
     if (!streaming) {
-      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml);
+      const cachedBlocks = getCachedMarkdownBlocks(text, imageMode, rawHtml, growing);
       if (cachedBlocks && domMatchesRenderedBlocks(target, cachedBlocks, decorationId)) {
         mountedDomRef.current = domCacheKey
           ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
           : null;
         streamPerfCount('ui.markdown_renderer.settled_paint.reused');
+        scheduleCodeLineNumbers();
         scheduleTableLayout();
-        releaseRevealHold();
         return;
       }
     }
 
-    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, imageMode, rawHtml, growing).then((blocks) => {
       if (!active || renderRevisionRef.current !== renderRevision) return;
       const existing = Array.from(target.children) as HTMLElement[];
+      // Reconciling against freshly parsed HTML drops the measured column
+      // widths of tables already on screen (the first paint lays them out).
+      const resetsMeasuredTables = tableLayoutSettled
+        && target.querySelector('table[data-md-table-layout="fixed"]') !== null;
       // Capture before block reconciliation: streaming completion changes the
       // wrapper layout, and theme changes can replace entire decorated blocks.
       // Match by disclosure order plus heading so unrelated replacements cannot
@@ -1234,14 +1312,15 @@ const useMorphdomMarkdown = ({
       mountedDomRef.current = domCacheKey
         ? { key: domCacheKey, copiedLabel: ctx.labels.copied }
         : null;
-      scheduleTableLayout();
-      releaseRevealHold();
+      if (!streaming) scheduleCodeLineNumbers();
+      if (resetsMeasuredTables) layoutTablesNow();
+      else scheduleTableLayout();
     });
 
     return () => {
       active = false;
     };
-  }, [containerRef, ctx, domCacheKey, imageMode, rawHtml, refreshMermaidViewers, releaseRevealHold, scheduleTableLayout, streaming, text]);
+  }, [containerRef, ctx, domCacheKey, growing, imageMode, rawHtml, refreshMermaidViewers, layoutTablesNow, scheduleCodeLineNumbers, scheduleTableLayout, streaming, tableLayoutSettled, text]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1259,13 +1338,11 @@ const useMorphdomMarkdown = ({
     }
   }, [containerRef, syntaxVars]);
 
+  // DOM painted before the stream ended may still hold code blocks whose
+  // numbers were deferred.
   React.useEffect(() => {
-    const container = containerRef.current;
-    const target = container?.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
-    if (!target) return;
-    if (ctx.deferCodeLineNumberSync) return;
-    applyMarkdownCodeBlockWrapState(target, ctx.codeBlockLineWrap, ctx.labels);
-  }, [containerRef, ctx.codeBlockLineWrap, ctx.deferCodeLineNumberSync, ctx.labels]);
+    if (!streaming) scheduleCodeLineNumbers();
+  }, [scheduleCodeLineNumbers, streaming]);
 
 };
 
@@ -1358,6 +1435,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
     containerRef,
     text: content,
     streaming: live,
+    growing: isStreaming,
     imageMode,
     syntaxVars,
     ctx,

@@ -1,10 +1,12 @@
 // The one place that knows OpenCode's own formats inside a space, so an OpenCode format change is
 // a one-file edit (DESIGN.md, "Parts"). Today: the provider configuration that sends a provider's
-// model calls through the gatekeeper's window, and since 5e-2 a chat taken out of a space for the
-// host's archive. The login record for the short OpenAI token belongs here too, in its stage.
+// model calls through the gatekeeper's window, since 5e-2 a chat taken out of a space for the
+// host's archive, and since stage 7 the login row that puts OpenCode inside into its ChatGPT mode
+// while the real token stays in the gatekeeper.
 //
-// What is written here cooperates and enforces nothing. The agent can change or delete the file;
-// the gatekeeper is what keeps the key out of the space and the space away from the internet.
+// What is written here cooperates and enforces nothing. The agent can change or delete the file
+// and the row; the gatekeeper is what keeps the key and the token out of the space and the space
+// away from the internet.
 //
 // A chat taken out is untrusted data, like everything from a space: its record is rebuilt from a
 // few checked fields, and the messages go to the host's OpenCode, whose import checks their shape.
@@ -36,10 +38,56 @@ const WRITE_CONFIG_SCRIPT = [
 export function buildProviderConfig(grants) {
   const provider = {};
   for (const grant of grants) {
-    if (grant.kind !== 'model') continue;
-    provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
+    if (grant.kind === 'model') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), apiKey: WINDOW_PLACEHOLDER_KEY } };
+    // A login takes its token from the row below, so no placeholder key; `http`, because the
+    // window carries no WebSocket, which OpenCode's legacy ChatGPT mode opens by default.
+    if (grant.kind === 'login') provider[grant.provider] = { options: { baseURL: spaceWindowUrl(grant.id), transport: 'http' } };
   }
   return { $schema: 'https://opencode.ai/config.json', provider };
+}
+
+// Where OpenCode sends a provider's requests for each browser login method, measured on OpenCode
+// 2.0.25: the window forwards there with the real token. The space's row names the same method,
+// so OpenCode inside sends the headers that upstream wants, with the row's placeholder token in
+// `Authorization`, which the window replaces. A method not named here is refused: the host
+// cannot know where its requests go. `auth.openai.com`, where every method refreshes, is on no
+// list: the gatekeeper refuses it, and the host is the only refresher (decision 13).
+const LOGIN_UPSTREAM_BY_METHOD = new Map([
+  ['openai/chatgpt-token-sharing', 'https://api.openai.com/v1'],
+  ['openai/chatgpt-browser', 'https://chatgpt.com/backend-api/codex'],
+  ['openai/chatgpt-headless', 'https://chatgpt.com/backend-api/codex'],
+]);
+/** The id of the one login row the host writes inside a space, so a replace finds it again. */
+export const SPACE_LOGIN_CREDENTIAL_ID = 'cred_openchamber_space';
+// OpenCode refreshes a login five minutes before `expires`. The row inside must never refresh,
+// because it holds no refresh token and the issuer is refused, so its token ends in 2100.
+const NEVER_EXPIRES = Date.UTC(2100, 0, 1);
+
+/**
+ * The window grant a host login makes: the upstream of its method, with the token as a bearer.
+ * Null for a method this module does not know.
+ */
+export function loginGrantOf(provider, login) {
+  const upstream = LOGIN_UPSTREAM_BY_METHOD.get(`${provider}/${login.methodID}`);
+  return upstream ? { upstream, header: 'authorization', secret: login.access } : null;
+}
+
+// What the row inside needs of a login's metadata: the account id the legacy Codex mode sends as
+// a header, and the client id and scopes the ChatGPT login reads at load. Nothing else travels,
+// so a key the host's plugin stores there one day, a cached model list among them today, stays
+// on the host.
+const LOGIN_METADATA_KEYS = ['accountID', 'clientID', 'scopes'];
+
+/**
+ * The login row for OpenCode inside: the host login's method and the metadata named above,
+ * which name the account and never a secret, with placeholder tokens that never expire.
+ */
+export function buildLoginRow(provider, login) {
+  const metadata = {};
+  for (const key of LOGIN_METADATA_KEYS) if (login.metadata[key] !== undefined) metadata[key] = login.metadata[key];
+  const value = { type: 'oauth', methodID: login.methodID, access: WINDOW_PLACEHOLDER_KEY, refresh: WINDOW_PLACEHOLDER_KEY, expires: NEVER_EXPIRES };
+  if (Object.keys(metadata).length > 0) value.metadata = metadata;
+  return { id: SPACE_LOGIN_CREDENTIAL_ID, integrationID: provider, label: 'OpenChamber space', value };
 }
 
 // A chat larger than this is not taken out: the host reads one chat into memory at a time, and a
@@ -49,6 +97,8 @@ const CHAT_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
 // A chat that has not come whole in this time is not taken out, however slowly the space keeps
 // sending: a space must not hold its own delete.
 const CHAT_EXPORT_TIMEOUT_MS = 5 * 60_000;
+// A login row is two small requests to OpenCode inside, which answers them in milliseconds.
+const ROW_TIMEOUT_MS = 30_000;
 
 // OpenCode's session id, checked before it goes into a path.
 export const chatIdSchema = z.string().regex(/^ses_[A-Za-z0-9]{1,64}$/);
@@ -181,5 +231,32 @@ export function createSpaceOpenCode({ exec, requestInside, chatMaxBytes = CHAT_E
     return parsed.data.data;
   };
 
-  return { writeProviderConfig, exportChat };
+  /** One request of the host's to OpenCode inside, answered with its status; the body is drained. */
+  const askInside = async (spaceId, request) => {
+    const headers = { accept: 'application/json' };
+    if (request.body) headers['content-type'] = 'application/json';
+    const response = await requestInside(spaceId, { ...request, headers, timeoutMs: ROW_TIMEOUT_MS });
+    response.resume();
+    await new Promise((resolve) => { response.on('end', resolve); response.on('error', resolve); response.on('close', resolve); });
+    return response.statusCode;
+  };
+
+  /** Takes the host's login row out of OpenCode inside; a row that is not there is nothing to do. */
+  const removeLogin = async (spaceId) => {
+    const status = await askInside(spaceId, { method: 'DELETE', path: `/api/credential/${SPACE_LOGIN_CREDENTIAL_ID}` });
+    if (status !== 204 && status !== 200 && status !== 404) throw new SpaceError('space_setup_failed', `Could not remove the login row inside the space: OpenCode answered ${status}`);
+  };
+
+  /**
+   * Writes the login row for a host login into OpenCode inside, replacing the one before: OpenCode
+   * takes the new row as the provider's login at once and switches its ChatGPT mode on, measured
+   * on 2.0.25. A row the agent made under the host's id is replaced like the host's own.
+   */
+  const writeLogin = async (spaceId, provider, login) => {
+    await removeLogin(spaceId);
+    const status = await askInside(spaceId, { method: 'POST', path: '/api/credential', body: JSON.stringify(buildLoginRow(provider, login)) });
+    if (status !== 200) throw new SpaceError('space_setup_failed', `Could not write the login row inside the space: OpenCode answered ${status}`);
+  };
+
+  return { writeProviderConfig, writeLogin, removeLogin, exportChat };
 }

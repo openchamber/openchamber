@@ -112,6 +112,25 @@ const mergeSidebarSessionSources = (
   return sessions;
 };
 
+const EMPTY_LIVE_GAP_SESSIONS: Session[] = [];
+
+/**
+ * The live sessions the global cache does not hold yet: the only ones the
+ * sidebar structure takes from the live list. A live session the global cache
+ * already holds is dropped by the merge, so its live changes (a `time.updated`
+ * bump on every streamed step) must not rebuild the structure. Returns
+ * `previous` while the gap holds the same session objects.
+ */
+export const selectLiveGapSessions = (
+  liveSessions: readonly Session[],
+  globalSessionIds: ReadonlySet<string>,
+  previous: Session[],
+): Session[] => {
+  const gap = liveSessions.filter((session) => !globalSessionIds.has(session.id));
+  if (gap.length === previous.length && gap.every((session, index) => session === previous[index])) return previous;
+  return gap.length === 0 ? EMPTY_LIVE_GAP_SESSIONS : gap;
+};
+
 // The collection owns hierarchy membership. Consumers receive this narrow
 // resolver instead of retaining the collection's mutable indexing detail.
 export const getDescendantIds = (
@@ -279,13 +298,23 @@ export const useSessionProjectCollection = ({
     (state) => isVisible ? state.rankById : EMPTY_SESSION_ORDER_RANKS,
     [isVisible],
   ));
+  const globalSessionIds = React.useMemo(
+    () => new Set(globalActiveSessions.map((session) => session.id)),
+    [globalActiveSessions],
+  );
+  const liveGapSessionsRef = React.useRef<Session[]>(EMPTY_LIVE_GAP_SESSIONS);
+  const liveGapSessions = React.useMemo(() => {
+    const gap = selectLiveGapSessions(liveSessions, globalSessionIds, liveGapSessionsRef.current);
+    liveGapSessionsRef.current = gap;
+    return gap;
+  }, [globalSessionIds, liveSessions]);
   const structure = React.useMemo(() => buildSidebarSessionStructure({
     globalActiveSessions,
     globalStructure,
-    liveSessions,
+    liveSessions: liveGapSessions,
     knownDirectories,
     isVSCode,
-  }), [globalActiveSessions, globalStructure, isVSCode, knownDirectories, liveSessions]);
+  }), [globalActiveSessions, globalStructure, isVSCode, knownDirectories, liveGapSessions]);
   const ordering = React.useMemo(
     () => orderSidebarSessionStructure(structure, pinnedSessionIds, sessionOrderRanks),
     [pinnedSessionIds, sessionOrderRanks, structure],

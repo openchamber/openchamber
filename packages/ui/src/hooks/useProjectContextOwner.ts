@@ -1,10 +1,10 @@
 import React from 'react';
 
-import { CHAT_DRAFT_PROJECT_ID, getChatsRootForHome, getChatsRootFromDirectory } from '@/lib/chatDirectories';
+import { CHAT_DRAFT_PROJECT_ID, getChatsRootFromDirectory } from '@/lib/chatDirectories';
 import { normalizePath } from '@/lib/pathNormalization';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import type { ProjectRef } from '@/lib/projectContextApi';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useChatsRoot } from '@/hooks/useChatsRoot';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -17,7 +17,8 @@ interface ProjectContextOwnerInput {
   activeProjectId: string | null;
   chatDraftOpen: boolean;
   chatDraftTarget: 'chat' | 'project';
-  homeDirectory: string | null;
+  /** The server-named chats root; null until known. */
+  chatsRoot: string | null;
 }
 
 export const resolveProjectContextOwner = ({
@@ -27,9 +28,9 @@ export const resolveProjectContextOwner = ({
   activeProjectId,
   chatDraftOpen,
   chatDraftTarget,
-  homeDirectory,
+  chatsRoot: knownChatsRoot,
 }: ProjectContextOwnerInput): ProjectRef | null => {
-  const chatsRoot = getChatsRootFromDirectory(directory) ?? getChatsRootForHome(homeDirectory);
+  const chatsRoot = getChatsRootFromDirectory(directory) ?? knownChatsRoot;
   const normalizedDirectory = normalizePath(directory);
   const normalizedChatsRoot = normalizePath(chatsRoot);
   const ownsChats = chatDraftOpen
@@ -64,7 +65,7 @@ export const resolveProjectContextOwner = ({
 export const useProjectContextOwner = (directory: string | null): ProjectRef | null => {
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+  const chatsRoot = useChatsRoot();
   const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const chatDraftOpen = useSessionUIStore((state) => state.newSessionDraft.open);
   const chatDraftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
@@ -76,13 +77,13 @@ export const useProjectContextOwner = (directory: string | null): ProjectRef | n
     activeProjectId,
     chatDraftOpen,
     chatDraftTarget,
-    homeDirectory,
+    chatsRoot,
   }), [
     activeProjectId,
     chatDraftOpen,
     chatDraftTarget,
+    chatsRoot,
     directory,
-    homeDirectory,
     projects,
     worktreesByProject,
   ]);

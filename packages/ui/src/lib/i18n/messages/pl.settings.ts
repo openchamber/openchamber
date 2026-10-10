@@ -1021,7 +1021,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'Po scaleniu PR',
   'settings.openchamber.mergedWorktreeCleanup.info': 'Korzysta ze statusu PR, który pasek boczny już pokazuje. Nic się nie dzieje, gdy agent pracuje w worktree lub jedna z jego sesji jest otwarta.',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': 'Archiwizuj sesje i usuń worktree',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'Worktree i lokalna gałąź są usuwane tylko wtedy, gdy cała ich zawartość jest w scalonym PR. W przeciwnym razie sesje są archiwizowane, a worktree zostaje.',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'Worktree i lokalna gałąź są usuwane, gdy nie ma w nim niezatwierdzonych zmian ani commitów, których brakuje w scalonym PR. Do tego czasu sesje są archiwizowane, a worktree zostaje.',
   'settings.openchamber.messageSearch.title': 'Wyszukiwanie wiadomości',
   'settings.openchamber.messageSearch.field.enabled': 'Szukaj wiadomości we wszystkich rozmowach',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Przechowuje obok ustawień mały indeks Twoich wiadomości i odpowiedzi agenta, aby wyszukiwanie znajdowało je od razu. Zostaje na komputerze, na którym działa OpenChamber, i nigdzie nie jest wysyłany.',

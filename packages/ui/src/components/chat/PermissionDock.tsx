@@ -32,7 +32,7 @@ interface PermissionDockProps {
     hidden: boolean;
 }
 
-export const PermissionDock: React.FC<PermissionDockProps> = ({ sessionId, directory, hidden }) => {
+const PermissionDockView: React.FC<PermissionDockProps> = ({ sessionId, directory, hidden }) => {
     const permissions = useScopedBlockingPermissions(sessionId, directory);
     return (
         <AnimatePresence>
@@ -168,3 +168,6 @@ const PermissionDockRequest: React.FC<{
         </ComposerFloatingPanel>
     );
 };
+
+/** Memoized: the composer re-renders on every keystroke, and nothing here depends on the draft text. */
+export const PermissionDock = React.memo(PermissionDockView);

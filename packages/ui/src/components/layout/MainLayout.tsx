@@ -10,27 +10,15 @@ import { PluginPane } from './PluginPane';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
-import { CommandPalette } from '../ui/CommandPalette';
-import { HelpDialog } from '../ui/HelpDialog';
-import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
-import { ScheduledTasksDialog } from '@/components/session/ScheduledTasksDialog';
-import { SourceBoardView } from '@/components/sourceBoard/SourceBoardView';
-import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
 import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
-import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
-import { SpaceSetupOutputDialog } from '@/components/session/spaces/SpaceSetupOutput';
-import { ArchiveView } from '@/components/views/ArchiveView';
-import { WorktreesView } from '@/components/views/WorktreesView';
-import { SpacesView } from '@/components/views/SpacesView';
-import { UsageStatsView } from '@/components/views/usage/UsageStatsView';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
-import { RunOverview } from '@/components/multirun/RunOverview';
 import { RunAutoFusion } from '@/lib/multirun/autoFusion';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useDeviceInfo } from '@/lib/device';
@@ -41,6 +29,35 @@ import { useSessionListSync } from '@/components/session/sidebar/list/useSession
 import { ChatView } from '@/components/views/ChatView';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
+
+// Surfaces that replace or cover the chat load the first time they open, so
+// the startup bundle carries only the chat. Each reads its own open state from
+// the store once mounted, and stays mounted after its first open.
+const loadCommandPalette = () => import('../ui/CommandPalette').then((m) => m.CommandPalette);
+const loadHelpDialog = () => import('../ui/HelpDialog').then((m) => m.HelpDialog);
+const loadOpenCodeStatusDialog = () => import('../ui/OpenCodeStatusDialog').then((m) => m.OpenCodeStatusDialog);
+const loadRunOverview = () => import('@/components/multirun/RunOverview').then((m) => m.RunOverview);
+const loadScheduledTasksDialog = () => import('@/components/session/ScheduledTasksDialog').then((m) => m.ScheduledTasksDialog);
+const loadArchiveView = () => import('@/components/views/ArchiveView').then((m) => m.ArchiveView);
+const loadUsageStatsView = () => import('@/components/views/usage/UsageStatsView').then((m) => m.UsageStatsView);
+const loadSourceBoardView = () => import('@/components/sourceBoard/SourceBoardView').then((m) => m.SourceBoardView);
+const loadWorktreesView = () => import('@/components/views/WorktreesView').then((m) => m.WorktreesView);
+const loadSpacesView = () => import('@/components/views/SpacesView').then((m) => m.SpacesView);
+const loadSpaceAccessDialog = () => import('@/components/session/spaces/SpaceAccessDialog').then((m) => m.SpaceAccessDialog);
+const loadSpaceApplyDialog = () => import('@/components/session/spaces/SpaceApplyDialog').then((m) => m.SpaceApplyDialog);
+const loadSpaceSetupOutputDialog = () => import('@/components/session/spaces/SpaceSetupOutput').then((m) => m.SpaceSetupOutputDialog);
+
+const closeMainSurfaces = () => useUIStore.getState().closeMainSurfaces();
+
+const OnDemand: React.FC<{
+    needed: boolean;
+    load: () => Promise<React.ComponentType>;
+    /** Closes the surface when its chunk fails to load, so the next open tries again. */
+    onFailure: () => void;
+}> = ({ needed, load, onFailure }) => {
+    const Component = useOnDemandComponent(needed, load, onFailure);
+    return Component ? <Component /> : null;
+};
 
 /**
  * Desktop-surface layout: the chat owns the main area, and every other
@@ -70,6 +87,12 @@ export const MainLayout: React.FC = () => {
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
     // The spaces page exists only while the feature's switch is on.
     const isSpacesPageOpen = useUIStore((state) => state.isolatedSpacesEnabled && state.spacesPageProjectId !== null);
+    const isCommandPaletteOpen = useUIStore((state) => state.isCommandPaletteOpen);
+    const isHelpDialogOpen = useUIStore((state) => state.isHelpDialogOpen);
+    const isOpenCodeStatusDialogOpen = useUIStore((state) => state.isOpenCodeStatusDialogOpen);
+    const isSpaceAccessDialogOpen = useSpacesStore((state) => state.accessDialog !== null);
+    const isSpaceApplyDialogOpen = useSpacesStore((state) => state.applyDialog !== null);
+    const isSpaceSetupOutputDialogOpen = useSpacesStore((state) => state.setupOutputDialog !== null);
     const openGuestPageId = useUIStore((state) => state.openGuestPageId);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
@@ -113,12 +136,20 @@ export const MainLayout: React.FC = () => {
                 data-page-scroll-lock="true"
                 className="main-content-safe-area relative flex h-[100dvh] bg-background"
             >
-                <CommandPalette />
-                <HelpDialog />
-                <OpenCodeStatusDialog />
+                <OnDemand needed={isCommandPaletteOpen} load={loadCommandPalette} onFailure={() => useUIStore.getState().setCommandPaletteOpen(false)} />
+                <OnDemand needed={isHelpDialogOpen} load={loadHelpDialog} onFailure={() => useUIStore.getState().setHelpDialogOpen(false)} />
+                <OnDemand needed={isOpenCodeStatusDialogOpen} load={loadOpenCodeStatusDialog} onFailure={() => useUIStore.getState().setOpenCodeStatusDialogOpen(false)} />
                 <RunAutoFusion />
                 <SessionDialogs />
-                {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
+                {isolatedSpacesEnabled ? (
+                    <>
+                        <OnDemand needed={isSpaceAccessDialogOpen} load={loadSpaceAccessDialog} onFailure={() => useSpacesStore.getState().closeAccessDialog()} />
+                        <SpaceActionsSheet />
+                        <OnDemand needed={isSpaceApplyDialogOpen} load={loadSpaceApplyDialog} onFailure={() => useSpacesStore.getState().closeApplyDialog()} />
+                        <SpaceDeleteDialog />
+                        <OnDemand needed={isSpaceSetupOutputDialogOpen} load={loadSpaceSetupOutputDialog} onFailure={() => useSpacesStore.getState().closeSetupOutputDialog()} />
+                    </>
+                ) : null}
 
                 {/* Persistent top-left controls (toggle + project actions) that
                     stay put while the sidebar/header animate beneath them. */}
@@ -147,17 +178,17 @@ export const MainLayout: React.FC = () => {
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
                                                 <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
                                             </div>
-                                            <ErrorBoundary><RunOverview /></ErrorBoundary>
-                                            <ErrorBoundary><ScheduledTasksDialog /></ErrorBoundary>
-                                            <ErrorBoundary><ArchiveView /></ErrorBoundary>
+                                            <ErrorBoundary><OnDemand needed={isRunOverviewOpen} load={loadRunOverview} onFailure={closeMainSurfaces} /></ErrorBoundary>
+                                            <ErrorBoundary><OnDemand needed={isScheduledTasksPageOpen} load={loadScheduledTasksDialog} onFailure={closeMainSurfaces} /></ErrorBoundary>
+                                            <ErrorBoundary><OnDemand needed={isArchivePageOpen} load={loadArchiveView} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             {isUsageStatsPageOpen && (
                                                 <div className="absolute inset-0 z-10 bg-background">
-                                                    <ErrorBoundary><UsageStatsView /></ErrorBoundary>
+                                                    <ErrorBoundary><OnDemand needed load={loadUsageStatsView} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                                 </div>
                                             )}
-                                            <SourceBoardView />
-                                            <ErrorBoundary><WorktreesView /></ErrorBoundary>
-                                            {isSpacesPageOpen ? <ErrorBoundary><SpacesView /></ErrorBoundary> : null}
+                                            <OnDemand needed={isSourceBoardOpen} load={loadSourceBoardView} onFailure={closeMainSurfaces} />
+                                            <ErrorBoundary><OnDemand needed={Boolean(worktreesPageProjectId)} load={loadWorktreesView} onFailure={closeMainSurfaces} /></ErrorBoundary>
+                                            {isSpacesPageOpen ? <ErrorBoundary><OnDemand needed load={loadSpacesView} onFailure={closeMainSurfaces} /></ErrorBoundary> : null}
                                             {guestPage && <div className="absolute inset-0 z-10 bg-background">
                                                 <ErrorBoundary><PluginPane mode={`plugin:${guestPage.id}`} surface="page" item={null}
                                                     onDismiss={() => useUIStore.getState().setOpenGuestPage(null)} /></ErrorBoundary>

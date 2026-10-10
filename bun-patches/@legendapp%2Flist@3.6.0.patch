@@ -1,5 +1,5 @@
 diff --git a/react-native.web.js b/react-native.web.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b35fb38d0 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb005d3625 100644
 --- a/react-native.web.js
 +++ b/react-native.web.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -15,8 +15,21 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
+@@ -6098,7 +6102,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
 diff --git a/react-native.web.mjs b/react-native.web.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951ed4585b28 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639db747ca3 100644
 --- a/react-native.web.mjs
 +++ b/react-native.web.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -32,8 +45,21 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951e
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
+@@ -6077,7 +6081,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
 diff --git a/react.js b/react.js
-index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b35fb38d0 100644
+index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..5061acfa213244b0a0922d33c6ab5deb005d3625 100644
 --- a/react.js
 +++ b/react.js
 @@ -1171,7 +1171,11 @@ function warnDevOnce(id, text) {
@@ -49,8 +75,21 @@ index a0f962c42b7b28a49e7480ed3e16056b9e154a4c..523b43cfd1261c4953032f3d2cdaf26b
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
+@@ -6098,7 +6102,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   React3.useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;
 diff --git a/react.mjs b/react.mjs
-index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951ed4585b28 100644
+index 9338287159778f842fa05b5a0467336bf5f50fe8..b64436bc40d3048766434a910a2d6639db747ca3 100644
 --- a/react.mjs
 +++ b/react.mjs
 @@ -1150,7 +1150,11 @@ function warnDevOnce(id, text) {
@@ -66,3 +105,16 @@ index 9338287159778f842fa05b5a0467336bf5f50fe8..1d540fb4c02884b6e36d12531f7d951e
  }
  function isNullOrUndefined(value) {
    return value === null || value === void 0;
+@@ -6077,7 +6081,11 @@ function useDOMOrder(ref) {
+   const ctx = useStateContext();
+   useEffect(() => {
+     let timeoutId;
+-    let lastUpdateTime = 0;
++    // A list that just mounted is still settling (initial scroll, measured
++    // heights). Count the mount as activity so the first DOM-order pass waits
++    // for the list to go quiet instead of landing in its opening frames:
++    // moving rows restyles their whole subtree.
++    let lastUpdateTime = Date.now();
+     let delay = 500;
+     const unsubscribe = listen$(ctx, "lastPositionUpdate", () => {
+       const container = ref.current;

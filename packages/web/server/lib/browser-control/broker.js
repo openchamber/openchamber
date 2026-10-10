@@ -63,11 +63,22 @@ export const createBrowserControlBroker = ({
      * Publishes one browser action and resolves with the client's result.
      * Rejects with a BrowserControlError the agent can act on.
      */
-    request(action, parameters = {}, { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
+    request(action, parameters = {}, { timeoutMs = DEFAULT_TIMEOUT_MS, signal, context } = {}) {
       const requestId = typeof createId === 'function' ? createId() : `browser-${Date.now()}-${pending.size}`;
       const boundedTimeout = Math.min(Math.max(1_000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS), MAX_TIMEOUT_MS);
 
-      const listenerCount = emitRequest({ requestId, action, parameters });
+      // The calling session goes out with the request: the client keeps one
+      // session's tabs apart from another's, and opens a tab in the project
+      // the session works in, which is not always the one on screen.
+      const listenerCount = emitRequest({
+        requestId,
+        action,
+        parameters,
+        context: {
+          directory: context?.directory ?? null,
+          sessionId: context?.sessionId ?? null,
+        },
+      });
       if (!listenerCount) {
         // Written for the agent reading it, not the user: state what this
         // environment can do, and leave deciding whether it matters to the

@@ -63,7 +63,7 @@ describe('guestActionEntries', () => {
     const background = guest('background', { entry: undefined, backgroundEntry: 'background/index.html', actions: [
       { id: 'count', label: 'Count', where: 'message', mode: 'background' },
     ] });
-    const catalog = parseGuestCatalogJson(JSON.stringify({ guests: [background] }));
+    const catalog = parseGuestCatalogJson(JSON.stringify({ guests: [background] }))?.guests;
     if (!catalog) throw new Error('Expected a valid catalog');
     expect(catalog[0].backgroundEntry).toBe('background/index.html');
     expect(guestActionEntries(catalog, (path) => path).map((entry) => entry.action.id)).toEqual(['count']);

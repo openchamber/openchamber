@@ -391,12 +391,15 @@
    transcript, so that content read through the overlay. While the overlay is
    up, the composer's own contents go transparent and exactly one glass
    surface remains. Desktop: the overlay is mounted inside the glass box, so
-   every box descendant off the overlay's ancestor chain hides and the box
-   stays the glass. Mobile: the overlay is mounted beside the pill/box in
-   [data-dictation-host], so those siblings hide and the overlay's inner
-   [data-dictation-glass] layer is the glass. */
-.oc-glass-composer:has(.oc-dictation-overlay)
-  *:not(.oc-dictation-overlay, .oc-dictation-overlay *, :has(.oc-dictation-overlay)),
+   every box child off the overlay's ancestor chain hides and the box stays
+   the glass. The chain is marked with [data-dictation-chain] and the box
+   with [data-dictating] while the overlay is up: a `:has()` over the box
+   would be re-evaluated for every descendant on each editor keystroke.
+   Mobile: the overlay is mounted beside the pill/box in [data-dictation-host],
+   so those siblings hide and the overlay's inner [data-dictation-glass]
+   layer is the glass. */
+.oc-glass-composer[data-dictating] > :not([data-dictation-chain]),
+.oc-glass-composer[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
 [data-dictation-host]:has(> .oc-dictation-overlay) > :not(.oc-dictation-overlay) {
   opacity: 0;
 }

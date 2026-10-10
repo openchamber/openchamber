@@ -148,7 +148,7 @@ export const SpaceGroupStatus: React.FC<{ spaceId: string; className?: string }>
     </Button>
   );
 
-  if (entry?.state === 'preparing' && entry.step && entry.step !== 'ready') {
+  if (entry?.state === 'preparing' && entry.step && entry.step !== 'ready' && entry.step !== 'failed') {
     return (
       <div className={className}>
         <Line icon="loader-4" tone="muted">

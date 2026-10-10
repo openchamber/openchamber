@@ -44,8 +44,8 @@ describe('guest action execution', () => {
   });
 
   test('catalog round-trip retains the execution mode', () => {
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [entry.guest] }))?.[0]?.actions).toEqual([entry.action]);
-    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...entry.guest, actions: [{ ...entry.action, mode: 'invalid' }] }] }))).toBeNull();
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [entry.guest] }))?.guests[0]?.actions).toEqual([entry.action]);
+    expect(parseGuestCatalogJson(JSON.stringify({ guests: [{ ...entry.guest, actions: [{ ...entry.action, mode: 'invalid' }] }] }))?.unreadable).toHaveLength(1);
   });
 
   test('background actions deliver the captured item once and preserve visible surfaces', async () => {
@@ -110,8 +110,8 @@ describe('guest action execution', () => {
       { ...entry.guest, actions: [{ ...entry.action, roles: ['user'] as const }] },
     ]) {
       const parsed = parseGuestCatalogJson(JSON.stringify({ guests: [guest] }));
-      if (!parsed) throw new Error('Invalid fixture');
-      useGuestsStore.getState().replaceCatalog(parsed, getRuntimeKey());
+      if (!parsed || parsed.unreadable.length > 0) throw new Error('Invalid fixture');
+      useGuestsStore.getState().replaceCatalog(parsed.guests, getRuntimeKey());
       await runGuestAction(entry, item, t);
       expect(useGuestActionHostStore.getState().requests).toEqual([]);
     }

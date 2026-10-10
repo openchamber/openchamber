@@ -106,6 +106,13 @@ model context is small. Page/count bounds are not a network-byte quota.
    existing explicit settings/config overrides. Naming that provider prevents
    an implicit cross-provider fallback. Production does not pin the
    experimental model. Generation accepts an abort signal and a 120-second limit.
+   When that resolves to the session's own model on a local endpoint
+   (`localEndpoint`), skip generation, whether it came from the fallback or
+   from an explicit Small Model naming the same model: llama.cpp-style
+   servers keep one prompt cache per slot, so a side request evicts the
+   session's cache and the next turn reprocesses the whole history (#3871).
+   A different model on the same machine, configured or found by the family
+   scan, is still used.
 5. Recap describes the substantive work and its current result, including the
    work behind a closing commit or acknowledgment. Suggestion is independent:
    only unfinished requested agent work should produce a sendable user message.

@@ -3,7 +3,15 @@ import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { Session } from "@/lib/opencode/model"
 import { switchRuntimeEndpoint } from "@/lib/runtime-switch"
-import { persistManagedChatSessions, persistSessions, readDirCache, readManagedChatSessions } from "./persist-cache"
+import {
+  flushPendingSessionWrites,
+  persistGlobalSessionSnapshot,
+  persistManagedChatSessions,
+  persistSessions,
+  readDirCache,
+  readGlobalSessionSnapshot,
+  readManagedChatSessions,
+} from "./persist-cache"
 import { getSyncPerformanceDiagnostics, setSyncPerformanceDiagnosticsEnabled } from "./performance-diagnostics"
 
 class TestStorage implements Storage {
@@ -41,7 +49,8 @@ class TestStorage implements Storage {
 const originalLocalStorage = globalThis.localStorage
 const directory = "/repo"
 let storage: TestStorage
-const waitForPersistence = () => new Promise((resolve) => setTimeout(resolve, 70))
+// Writes are throttled to one per 2 s; lifecycle suspension flushes them.
+const waitForPersistence = async () => flushPendingSessionWrites()
 
 const hashCode = (value: string): string => {
   let hash = 0
@@ -213,5 +222,143 @@ describe("persisted directory sessions", () => {
     await waitForPersistence()
     switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-stale-a.test", runtimeKey: "runtime-stale-a" })
     expect(readDirCache(directory).sessions).toBe(undefined)
+  })
+})
+
+/** A session as OpenCode serves it: usage, a permission ruleset, and a session-assist recap. */
+const fullSession = (index: number, updated: number, sessionDirectory = directory, parentID?: string): Session => ({
+  id: `ses_${String(index).padStart(3, "0")}`,
+  ...(parentID ? { parentID } : {}),
+  projectID: "4f8e2a91c7d3b6e0a5f1c8d2e9b7a3f6c1d4e8b2",
+  directory: sessionDirectory,
+  title: `Fix the sidebar seed for worktree sessions ${index}`,
+  agent: "build",
+  model: { providerID: "anthropic", id: "claude-opus-4-5", variant: "high" },
+  cost: 1.234567,
+  tokens: { input: 123456, output: 23456, reasoning: 3456, cache: { read: 456789, write: 56789 } },
+  outcome: "succeeded",
+  time: { created: updated - 1000, updated, idle: updated },
+  metadata: {
+    openchamber: {
+      work: { state: "open", openedAt: updated - 900, openedBy: "user" },
+      assist: {
+        recap: "Investigated why the sidebar paints only managed chats on launch. ".repeat(6),
+        suggestion: "Persist a bounded global snapshot and seed the store from it at module init.",
+        forMessageID: "msg_0123456789abcdef",
+        generatedAt: updated,
+      },
+    },
+  },
+  permissions: Array.from({ length: 40 }, (_, rule) => ({
+    action: ["bash", "edit", "read", "webfetch", "task"][rule % 5] ?? "bash",
+    resource: `/Users/someone/projects/repository-${rule}/**/*.{ts,tsx,js,jsx,json,md}`,
+    effect: rule % 3 === 0 ? "deny" : "allow",
+  })),
+})
+
+describe("persisted session projection", () => {
+  test("writes only what the sidebar paints and reports the size saved", async () => {
+    const sessions = Array.from({ length: 50 }, (_, index) => fullSession(index, 1_000_000 + index))
+    const fullChars = JSON.stringify(sessions).length
+
+    persistSessions(directory, sessions)
+    await waitForPersistence()
+
+    const written = [...storage.values.entries()].find(([key]) => key.endsWith(".sessions"))?.[1] ?? ""
+    console.info(`[persist-cache] 50 sessions: full ${fullChars} chars, persisted ${written.length} chars`)
+    expect(written.length).toBeLessThan(fullChars / 2)
+    const [cached] = readDirCache(directory).sessions ?? []
+    expect(cached).not.toHaveProperty("permissions")
+    expect(cached).not.toHaveProperty("tokens")
+    expect(cached).not.toHaveProperty("cost")
+    expect(cached?.metadata).toEqual({ openchamber: { work: { state: "open", openedAt: 999_100, openedBy: "user" } } })
+    expect(cached?.model).toEqual(sessions[0]?.model)
+  })
+
+  test("still reads full records an older build wrote", () => {
+    persistSessions(directory, [session(1, 1)])
+    flushPendingSessionWrites()
+    const key = [...storage.values.keys()].find((item) => item.endsWith(".sessions")) ?? ""
+    storage.setItem(key, JSON.stringify([fullSession(7, 7)]))
+
+    expect(readDirCache(directory).sessions?.map((item) => item.id)).toEqual(["ses_007"])
+  })
+
+  test("writes at most once per throttle interval and skips an unchanged projection", async () => {
+    persistSessions(directory, [session(1, 1)])
+    persistSessions(directory, [session(1, 2)])
+    expect(storage.writes).toBe(0)
+    await waitForPersistence()
+    expect(storage.writes).toBe(1)
+
+    // Usage changes alone leave the persisted projection as it was.
+    persistSessions(directory, [{ ...session(1, 2), cost: 5 }])
+    await waitForPersistence()
+    expect(storage.writes).toBe(1)
+  })
+})
+
+describe("persisted global session snapshot", () => {
+  test("keeps the most recent sessions and the ancestors of kept children", async () => {
+    const oldParent = fullSession(0, 1, "/repo-a")
+    const sessions = [
+      oldParent,
+      ...Array.from({ length: 249 }, (_, index) => fullSession(index + 1, 10 + index, `/repo-${index % 7}`)),
+      fullSession(999, 100_000, "/repo-b", oldParent.id),
+    ]
+
+    persistGlobalSessionSnapshot(sessions)
+    await waitForPersistence()
+
+    const seeded = readGlobalSessionSnapshot()
+    const ids = new Set(seeded.map((item) => item.id))
+    expect(ids.has("ses_999")).toBe(true)
+    expect(ids.has(oldParent.id)).toBe(true)
+    expect(seeded).toHaveLength(201)
+    const written = [...storage.values.entries()].find(([key]) => key.startsWith("oc.global-sessions."))?.[1] ?? ""
+    console.info(`[persist-cache] global snapshot of 200 sessions: ${written.length} chars`)
+  })
+
+  test("leaves out archived sessions and managed chats", async () => {
+    const chat = fullSession(1, 5, "/home/user/.config/openchamber/chats/2026-08-21/session-a")
+    const archived = { ...fullSession(2, 6), time: { created: 1, updated: 6, archived: 7 } }
+    persistGlobalSessionSnapshot([chat, archived, fullSession(3, 7, "/repo-worktree")])
+    await waitForPersistence()
+
+    expect(readGlobalSessionSnapshot().map((item) => item.id)).toEqual(["ses_003"])
+  })
+
+  test("is scoped to its runtime", async () => {
+    persistGlobalSessionSnapshot([fullSession(1, 1)])
+    await waitForPersistence()
+
+    switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-other.test", runtimeKey: "runtime-other" })
+    expect(readGlobalSessionSnapshot()).toEqual([])
+    switchRuntimeEndpoint({ apiBaseUrl: "https://runtime-default.test", runtimeKey: "runtime-default" })
+    expect(readGlobalSessionSnapshot().map((item) => item.id)).toEqual(["ses_001"])
+  })
+
+  test("drops a corrupt snapshot", async () => {
+    persistGlobalSessionSnapshot([fullSession(1, 1)])
+    await waitForPersistence()
+    const key = [...storage.values.keys()].find((item) => item.startsWith("oc.global-sessions.")) ?? ""
+
+    storage.setItem(key, "{not json")
+    expect(readGlobalSessionSnapshot()).toEqual([])
+    expect(storage.getItem(key)).toBeNull()
+
+    storage.setItem(key, JSON.stringify({ version: 1, runtimeKey: "runtime-default", sessions: [{ id: "ses_x" }, fullSession(2, 2)] }))
+    expect(readGlobalSessionSnapshot().map((item) => item.id)).toEqual(["ses_002"])
+  })
+
+  test("falls back to fewer sessions when quota is tight", async () => {
+    storage.maxValueLength = 30_000
+    persistGlobalSessionSnapshot(Array.from({ length: 200 }, (_, index) => fullSession(index, index + 1)))
+    await waitForPersistence()
+
+    const seeded = readGlobalSessionSnapshot()
+    expect(seeded.length).toBeGreaterThan(0)
+    expect(seeded.length).toBeLessThan(200)
+    expect(seeded.every((item) => Number(item.id.slice(4)) >= 200 - seeded.length)).toBe(true)
   })
 })

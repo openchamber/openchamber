@@ -110,6 +110,9 @@ export function useSync() {
       const hasSession = Binary.search(current.session, sessionID, (s) => s.id).found
       if (cachedReady && hasSession && !force) {
         if (!isStale()) markRecordedInterruptedTurn(targetStore, sessionID)
+        // Renders from cache; a transcript a stream gap left unconfirmed
+        // refreshes its tail in the background.
+        messageLoader.revalidateIfStale({ directory: targetDirectory, sessionID })
         return
       }
       const shouldLoadMessages = Boolean(!cachedReady || force)

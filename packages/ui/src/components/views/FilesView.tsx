@@ -31,6 +31,7 @@ import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
 import { hasFileStatChanged, openFilePollStep } from './fileStatChange';
+import { pendingFileNavigationStep } from './pendingFileNavigation';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
@@ -1097,7 +1098,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   const canvasLastEditAtRef = React.useRef(0);
   const [editorViewReadyNonce, setEditorViewReadyNonce] = React.useState(0);
   const pendingNavigationRafRef = React.useRef<number | null>(null);
-  const pendingNavigationCycleRef = React.useRef<{ key: string; attempts: number }>({ key: '', attempts: 0 });
+  const pendingNavigationCycleRef = React.useRef<{ key: string; attempts: number; targetShown: boolean }>({ key: '', attempts: 0, targetShown: false });
 
   React.useEffect(() => {
     return () => {
@@ -2815,6 +2816,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     };
   }, [selectedFile?.path, staticLanguageExtension]);
 
+  // The selection effect below sets the mode again in the same commit, so a
+  // read-only text file still opens in the read-only code editor; a pending
+  // line jump relies on that editor (`pendingFileNavigationStep`).
   React.useEffect(() => {
     if (!canEdit && textViewMode === 'edit') {
       setTextViewMode('view');
@@ -3225,38 +3229,47 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const targetPath = normalizePath(pendingFileNavigation.path);
     if (!targetPath) {
       setPendingFileNavigation(null);
-      pendingNavigationCycleRef.current = { key: '', attempts: 0 };
+      pendingNavigationCycleRef.current = { key: '', attempts: 0, targetShown: false };
       return;
     }
 
     const navigationKey = `${targetPath}:${pendingFileNavigation.line}:${pendingFileNavigation.column ?? 1}`;
     if (pendingNavigationCycleRef.current.key !== navigationKey) {
-      pendingNavigationCycleRef.current = { key: navigationKey, attempts: 0 };
+      pendingNavigationCycleRef.current = { key: navigationKey, attempts: 0, targetShown: false };
+    }
+    const selectedPath = selectedFile?.path ?? null;
+    if (selectedPath === targetPath) {
+      pendingNavigationCycleRef.current.targetShown = true;
     }
 
-    if (selectedFile?.path !== targetPath) {
-      if (confirmDiscardOpen) {
-        return;
+    const step = pendingFileNavigationStep({
+      selectedPath,
+      targetPath,
+      targetShown: pendingNavigationCycleRef.current.targetShown,
+      targetSettled: !fileLoading && (loadedFilePath === targetPath || failedFilePath === targetPath),
+      showsText: failedFilePath !== targetPath && !fileError && !isSelectedImage && !isSelectedPdf && !isUnsupportedBinary,
+      canEdit,
+      textViewMode,
+    });
+
+    if (step === 'select-target') {
+      if (!confirmDiscardOpen) {
+        void handleSelectFile(toFileNode(targetPath));
       }
-      void handleSelectFile(toFileNode(targetPath));
       return;
     }
 
-    if (fileLoading || (loadedFilePath !== targetPath && failedFilePath !== targetPath)) {
+    if (step === 'wait') {
       return;
     }
 
-    if (failedFilePath === targetPath || fileError || isSelectedImage || isSelectedPdf || isUnsupportedBinary) {
+    if (step === 'end') {
       setPendingFileNavigation(null);
-      pendingNavigationCycleRef.current = { key: '', attempts: 0 };
+      pendingNavigationCycleRef.current = { key: '', attempts: 0, targetShown: false };
       return;
     }
 
-    if (!canEdit) {
-      return;
-    }
-
-    if (textViewMode !== 'edit') {
+    if (step === 'show-editor') {
       setTextViewMode('edit');
       return;
     }
@@ -3308,7 +3321,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     }
 
     setPendingFileNavigation(null);
-    pendingNavigationCycleRef.current = { key: '', attempts: 0 };
+    pendingNavigationCycleRef.current = { key: '', attempts: 0, targetShown: false };
   }, [
     canEdit,
     confirmDiscardOpen,

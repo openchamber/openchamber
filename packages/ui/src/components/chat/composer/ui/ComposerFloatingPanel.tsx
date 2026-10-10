@@ -10,7 +10,7 @@ interface ComposerFloatingPanelProps {
     ariaLabel?: string;
 }
 
-/** Shared dock for mutually exclusive BTW, queue, and suggestion panels. */
+/** Shared dock for the mutually exclusive BTW, permission, and form panels. */
 /** Panels mounted per chat column, so the marker survives an overlap. */
 const mountedPanels = new WeakMap<HTMLElement, number>();
 

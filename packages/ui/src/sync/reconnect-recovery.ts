@@ -27,6 +27,11 @@ type BootstrapSessionRevisionOptions = {
 
 const getParentId = (session: Session): string | undefined => session.parentID
 
+const isSameSession = (left: Session, right: Session): boolean => (
+  left === right
+  || (left.time?.updated === right.time?.updated && JSON.stringify(left) === JSON.stringify(right))
+)
+
 const includeAncestorSessions = (
   parentIds: string[],
   includedIds: Set<string>,
@@ -85,10 +90,21 @@ export function mergeBootstrapSessions(
     includeAncestorSessions(pendingParentIds, includedIds, sessionsById, deletedIds)
   }
 
-  const sessions = [...includedIds]
+  const existingById = new Map(existingSessions.map((session) => [session.id, session]))
+  const merged = [...includedIds]
     .map((id) => sessionsById.get(id))
     .filter((session): session is Session => Boolean(session))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    // An unchanged record keeps its reference, so rows that did not change
+    // do not re-render when the authoritative list replaces the cached one.
+    .map((session) => {
+      const existing = existingById.get(session.id)
+      return existing && isSameSession(existing, session) ? existing : session
+    })
+  const sessions = merged.length === existingSessions.length
+    && merged.every((session, index) => session === existingSessions[index])
+    ? existingSessions
+    : merged
   const rootCount = sessions.reduce((count, session) => (
     getParentId(session) ? count : count + 1
   ), 0)

@@ -1,4 +1,5 @@
 import fs from 'fs';
+import net from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import os from 'os';
 import path from 'path';
@@ -204,6 +205,35 @@ const resolveSmallModel = async ({ client, directory, model, preferredProviderID
   // model, from any provider. A caller that named its provider stays on it.
   if (preferredProviderID && fallback.providerID !== preferredProviderID) return null;
   return { providerID: fallback.providerID, modelID: fallback.id, source: 'default' };
+};
+
+const LOCAL_NETWORKS = new net.BlockList();
+for (const [address, prefix] of [['0.0.0.0', 32], ['127.0.0.0', 8], ['10.0.0.0', 8], ['172.16.0.0', 12], ['192.168.0.0', 16], ['169.254.0.0', 16], ['100.64.0.0', 10]]) {
+  LOCAL_NETWORKS.addSubnet(address, prefix, 'ipv4');
+}
+for (const [address, prefix] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10]]) {
+  LOCAL_NETWORKS.addSubnet(address, prefix, 'ipv6');
+}
+const LOCAL_HOST_SUFFIXES = ['.localhost', '.local', '.lan', '.internal', '.home.arpa'];
+
+/**
+ * Whether the model is served from this machine or the local network, read
+ * from the endpoint OpenCode reports for it (`settings.baseURL`). Covers
+ * loopback, private and CGNAT (Tailscale) ranges, and LAN-style host names.
+ * A model whose endpoint OpenCode does not report is not local.
+ */
+const isLocalModelEndpoint = (modelInfo) => {
+  const endpoint = modelInfo?.settings?.baseURL ?? modelInfo?.settings?.endpoint;
+  if (typeof endpoint !== 'string' || !endpoint) return false;
+  let host;
+  try {
+    host = new URL(endpoint).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  } catch {
+    return false;
+  }
+  const family = net.isIP(host);
+  if (family) return LOCAL_NETWORKS.check(host, family === 6 ? 'ipv6' : 'ipv4');
+  return host === 'localhost' || !host.includes('.') || LOCAL_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
 };
 
 const JSON_FENCE = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/;
@@ -431,6 +461,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
   return {
     ...resolved,
     hasLogin,
+    localEndpoint: isLocalModelEndpoint(modelInfo),
     inputCharBudget: maxChars,
     contextTokens,
     contextKnown,

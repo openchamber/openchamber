@@ -1053,7 +1053,7 @@ export const settingsDict = {
   'settings.openchamber.mergedWorktreeCleanup.title': 'Nadat een PR is gemerged',
   'settings.openchamber.mergedWorktreeCleanup.info': 'Gebruikt de PR-status die de zijbalk al toont. Er gebeurt niets zolang een agent in de worktree werkt of een van de sessies open is.',
   'settings.openchamber.mergedWorktreeCleanup.field.enable': 'Sessies archiveren en worktree verwijderen',
-  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'De worktree en de lokale branch worden alleen verwijderd als alles erin in de gemergde PR zit. Anders worden de sessies gearchiveerd en blijft de worktree staan.',
+  'settings.openchamber.mergedWorktreeCleanup.field.enableDescription': 'De worktree en de lokale branch worden verwijderd zodra er geen niet-gecommitte wijzigingen meer zijn en geen commits die in de gemergde PR ontbreken. Tot dan worden de sessies gearchiveerd en blijft de worktree staan.',
   'settings.openchamber.messageSearch.title': 'Berichten zoeken',
   'settings.openchamber.messageSearch.field.enabled': 'Berichten in alle gesprekken doorzoeken',
   'settings.openchamber.messageSearch.field.enabledInfo': 'Houdt naast de instellingen een kleine index bij van je berichten en de antwoorden van de agent, zodat zoeken ze direct vindt. Hij blijft op de machine waarop OpenChamber draait en wordt nergens heen gestuurd.',

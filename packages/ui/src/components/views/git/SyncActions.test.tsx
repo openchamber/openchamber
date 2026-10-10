@@ -6,7 +6,7 @@ import type { GitRemote } from '@/lib/gitApi';
 const origin: GitRemote = { name: 'origin', fetchUrl: 'git@example.com:me/project.git', pushUrl: 'git@example.com:me/project.git' };
 const upstream: GitRemote = { name: 'upstream', fetchUrl: 'git@example.com:them/project.git', pushUrl: 'git@example.com:them/project.git' };
 
-test('the sync menu offers a pull from the tracking remote and blocks it over tracked changes', async () => {
+const installDom = () => {
   const dom = new Window({ url: 'http://localhost' });
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
@@ -20,6 +20,17 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
     originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
   }
+  return async () => {
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    await dom.happyDOM.close();
+  };
+};
+
+test('the sync menu offers a pull from the tracking remote and blocks it over tracked changes', async () => {
+  const restoreDom = installDom();
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { SyncActions } = await import('./SyncActions');
@@ -82,10 +93,43 @@ test('the sync menu offers a pull from the tracking remote and blocks it over tr
     expect(pushItem()?.getAttribute('aria-disabled')).toBe('true');
   } finally {
     await act(async () => root.unmount());
-    for (const [name, descriptor] of originals) {
-      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-      else Reflect.deleteProperty(globalThis, name);
-    }
-    await dom.happyDOM.close();
+    await restoreDom();
+  }
+});
+
+test('a branch without upstream reads Publish, a contributor fork worktree reads Push to', async () => {
+  const restoreDom = installDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { SyncActions } = await import('./SyncActions');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (choosesPushDestination: boolean) => act(async () => root.render(
+    <I18nProvider>
+      <SyncActions
+        syncAction={null}
+        remotes={[origin]}
+        onFetch={() => {}}
+        onPull={() => {}}
+        onSync={() => {}}
+        onPublish={() => {}}
+        onChooseSyncTargets={() => {}}
+        currentBranch="feature"
+        disabled={false}
+        choosesPushDestination={choosesPushDestination}
+      />
+    </I18nProvider>
+  ));
+  const primary = () => container.querySelector('button')?.textContent;
+
+  try {
+    await render(false);
+    expect(primary()).toBe('Publish');
+    await render(true);
+    expect(primary()).toBe('Push to…');
+  } finally {
+    await act(async () => root.unmount());
+    await restoreDom();
   }
 });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import http from 'node:http';
 
-import { configureOpenCodeCredentials, getProviderAuth, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials } from './auth.js';
+import { configureOpenCodeCredentials, getProviderAuth, getStoredLogin, openCodeCredentialSource, projectCredentialEntries, projectEnvironmentKeys, readOpenCodeCredentials } from './auth.js';
 
 const entry = (integrationID, active, value) => ({ id: `cred_${integrationID}_${active}`, integrationID, label: 'default', active, value });
 
@@ -128,6 +128,22 @@ describe('readOpenCodeCredentials', () => {
     await expect(getProviderAuth('deepseek')).resolves.toEqual({ type: 'api', key: 'ds' });
     await expect(getProviderAuth('openai')).resolves.toBeNull();
     expect(requests[0]).toEqual({ url: '/api/credential', authorization: 'Basic test' });
+  });
+
+  it('reads the selected browser login of an integration with its method and metadata, and without the refresh token', async () => {
+    const oauth = { type: 'oauth', methodID: 'chatgpt-token-sharing', access: 'eyJ-short', refresh: 'rt-long', expires: 1791600000000, metadata: { clientID: 'client_1' } };
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [entry('openai', false, { ...oauth, methodID: 'chatgpt-browser' }), entry('openai', true, oauth), entry('deepseek', true, { type: 'key', key: 'ds' })] }));
+    };
+    await expect(getStoredLogin('openai')).resolves.toEqual({ methodID: 'chatgpt-token-sharing', access: 'eyJ-short', expires: 1791600000000, metadata: { clientID: 'client_1' } });
+    await expect(getStoredLogin('deepseek')).resolves.toBeNull();
+    await expect(getStoredLogin('anthropic')).resolves.toBeNull();
+    respond = (res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ data: [entry('openai', true, { ...oauth, metadata: undefined })] }));
+    };
+    await expect(getStoredLogin('openai')).resolves.toMatchObject({ metadata: {} });
   });
 
   it('adds variable keys of a managed OpenCode, with stored credentials winning', async () => {

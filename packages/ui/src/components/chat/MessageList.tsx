@@ -12,6 +12,7 @@ import { LiveTurnActivity } from './components/LiveTurnActivity';
 import { getTurnsWithLaterAssistant, hasLiveActivity } from './lib/turns/liveActivity';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
+import { buildHistoryEntries, type TimelineEntry } from './lib/turns/timelineEntries';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { buildLiveStreamingEntry } from './lib/turns/streamingTailEntry';
 import { FULL_MESSAGE_WINDOW, TurnMessageWindowContext, createTurnMessageWindowStore } from './lib/turns/turnMessageWindow';
@@ -145,15 +146,7 @@ export interface MessageListHandle {
     scrollToBottom: () => void;
 }
 
-type RenderEntry =
-    | {
-        kind: 'ungrouped';
-        key: string;
-        message: ChatMessageEntry;
-        previousMessage?: ChatMessageEntry;
-        nextMessage?: ChatMessageEntry;
-    }
-    | { kind: 'turn'; key: string; turn: TurnRecord; isLastTurn: boolean; hasLaterAssistant?: boolean; nextEntryFirstMessage?: ChatMessageEntry };
+type RenderEntry = TimelineEntry;
 
 type TurnUiState = { isExpanded: boolean; isLiveExpanded?: boolean };
 type ToggleTurnGroup = (turnId: string, mode?: 'sorted' | 'live') => void;
@@ -1101,52 +1094,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [chatRenderMode, defaultActivityExpanded, staticTurns, tailHasAssistant]);
     const staticEntryMessages = hasUngroupedStaticEntries ? displayMessages : EMPTY_STATIC_ENTRY_MESSAGES;
     const staticEntryUngroupedIds = hasUngroupedStaticEntries ? projection.ungroupedMessageIds : EMPTY_UNGROUPED_MESSAGE_IDS;
-    const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
-        const turnEntries = staticTurns.map((turn) => ({
-            kind: 'turn' as const,
-            key: `turn:${turn.turnId}`,
-            turn,
-            isLastTurn: turn.turnId === projection.lastTurnId,
-            hasLaterAssistant: turnsWithLaterAssistant.has(turn.turnId),
-        }));
-
-        if (staticEntryUngroupedIds.size === 0) {
-            return turnEntries;
-        }
-
-        const turnEntryByUserMessageId = new Map<string, RenderEntry>();
-        turnEntries.forEach((entry) => {
-            turnEntryByUserMessageId.set(entry.turn.userMessage.info.id, entry);
-        });
-
-        const orderedEntries: RenderEntry[] = [];
-        staticEntryMessages.forEach((message, index) => {
-            const turnEntry = turnEntryByUserMessageId.get(message.info.id);
-            if (turnEntry) {
-                orderedEntries.push(turnEntry);
-                return;
-            }
-
-            if (!staticEntryUngroupedIds.has(message.info.id)) {
-                return;
-            }
-            // Without a live turn the trailing entry renders the last message.
-            if (!streamingTurn && index === staticEntryMessages.length - 1) {
-                return;
-            }
-
-            orderedEntries.push({
-                kind: 'ungrouped',
-                key: `msg:${message.info.id}`,
-                message,
-                previousMessage: index > 0 ? staticEntryMessages[index - 1] : undefined,
-                nextMessage: index < staticEntryMessages.length - 1 ? staticEntryMessages[index + 1] : undefined,
-            });
-        });
-
-        return orderedEntries;
-    }), [projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, streamingTurn, turnsWithLaterAssistant]);
-
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
             return {
@@ -1185,23 +1132,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const trailingEntryFirstMessage = trailingStreamingEntry
         ? (trailingStreamingEntry.kind === 'turn' ? trailingStreamingEntry.turn.userMessage : trailingStreamingEntry.message)
         : undefined;
-    const historyEntries = React.useMemo<RenderEntry[]>(() => {
-        return staticRenderEntries.map((entry, index) => {
-            if (entry.kind !== 'turn') {
-                return entry;
-            }
-            const nextEntryFirstMessage = index < staticRenderEntries.length - 1
-                ? (() => {
-                    const nextEntry = staticRenderEntries[index + 1];
-                    return nextEntry.kind === 'turn' ? nextEntry.turn.userMessage : nextEntry.message;
-                })()
-                : trailingEntryFirstMessage;
-            if (!nextEntryFirstMessage) {
-                return entry;
-            }
-            return { ...entry, nextEntryFirstMessage };
-        });
-    }, [staticRenderEntries, trailingEntryFirstMessage]);
+    const previousHistoryEntriesRef = React.useRef<RenderEntry[]>([]);
+    const hasStreamingTurn = Boolean(streamingTurn);
+    const historyEntries = React.useMemo(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
+        const entries = buildHistoryEntries({
+            staticTurns,
+            lastTurnId: projection.lastTurnId,
+            turnsWithLaterAssistant,
+            messages: staticEntryMessages,
+            ungroupedMessageIds: staticEntryUngroupedIds,
+            hasStreamingTurn,
+            trailingEntryFirstMessage,
+        }, previousHistoryEntriesRef.current);
+        previousHistoryEntriesRef.current = entries;
+        return entries;
+    }), [hasStreamingTurn, projection.lastTurnId, staticEntryMessages, staticEntryUngroupedIds, staticTurns, trailingEntryFirstMessage, turnsWithLaterAssistant]);
     // Every surface uses the same virtualized list for the whole timeline —
     // there is no small-list DOM path to transition out of, which is what used
     // to remount the history subtree mid-prepend.
@@ -1276,39 +1221,42 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         userAnimationRef.current.animatedIds.delete(messageId);
     }, []);
 
-    const messageIndexMap = React.useMemo(() => {
-        const indexMap = new Map<string, number>();
-
-        allEntries.forEach((entry, index) => {
-            if (entry.kind === 'ungrouped') {
-                indexMap.set(entry.message.info.id, index);
-                return;
-            }
-            indexMap.set(entry.turn.userMessage.info.id, index);
-            entry.turn.assistantMessages.forEach((message) => {
-                indexMap.set(message.info.id, index);
-            });
-        });
-
-        return indexMap;
-    }, [allEntries]);
-
-    // Assistant messages before a turn's last one: in a collapsed turn their
-    // text sits inside the folded activity and has no row of its own.
+    // Row lookups for navigation, built in one pass over the rows. Assistant
+    // messages before a turn's last one are collapsible: in a collapsed turn
+    // their text sits inside the folded activity and has no row of its own.
     // Reasoning of any of a turn's messages, the last one included, sits in
     // that fold too.
-    const { collapsibleTurnByMessageId, turnByAssistantMessageId } = React.useMemo(() => {
+    const {
+        messageIndexMap,
+        turnIndexMap,
+        collapsibleTurnByMessageId,
+        turnByAssistantMessageId,
+    } = React.useMemo(() => {
+        const messageIndexes = new Map<string, number>();
+        const turnIndexes = new Map<string, number>();
         const collapsible = new Map<string, string>();
         const all = new Map<string, string>();
-        for (const entry of allEntries) {
-            if (entry.kind !== 'turn') continue;
-            const { assistantMessages } = entry.turn;
-            assistantMessages.forEach((message, index) => {
-                all.set(message.info.id, entry.turn.turnId);
-                if (index < assistantMessages.length - 1) collapsible.set(message.info.id, entry.turn.turnId);
+        allEntries.forEach((entry, index) => {
+            if (entry.kind === 'ungrouped') {
+                messageIndexes.set(entry.message.info.id, index);
+                return;
+            }
+            const { turnId, userMessage, assistantMessages } = entry.turn;
+            turnIndexes.set(turnId, index);
+            messageIndexes.set(userMessage.info.id, index);
+            assistantMessages.forEach((message, assistantIndex) => {
+                const messageId = message.info.id;
+                messageIndexes.set(messageId, index);
+                all.set(messageId, turnId);
+                if (assistantIndex < assistantMessages.length - 1) collapsible.set(messageId, turnId);
             });
-        }
-        return { collapsibleTurnByMessageId: collapsible, turnByAssistantMessageId: all };
+        });
+        return {
+            messageIndexMap: messageIndexes,
+            turnIndexMap: turnIndexes,
+            collapsibleTurnByMessageId: collapsible,
+            turnByAssistantMessageId: all,
+        };
     }, [allEntries]);
     const turnUiStatesRef = React.useRef(turnUiStates);
     turnUiStatesRef.current = turnUiStates;
@@ -1346,16 +1294,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         setTurnUiStates((previous) => new Map(previous).set(turnId, opened));
         return true;
     }, [collapsibleTurnByMessageId, defaultActivityExpanded, turnByAssistantMessageId]);
-
-    const turnIndexMap = React.useMemo(() => {
-        const indexMap = new Map<string, number>();
-        allEntries.forEach((entry, index) => {
-            if (entry.kind === 'turn') {
-                indexMap.set(entry.turn.turnId, index);
-            }
-        });
-        return indexMap;
-    }, [allEntries]);
 
     const findMessageElement = React.useCallback((messageId: string): HTMLElement | null => {
         const container = resolveScrollContainer();

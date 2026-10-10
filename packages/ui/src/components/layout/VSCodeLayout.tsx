@@ -425,10 +425,12 @@ export const VSCodeLayout: React.FC = () => {
 
         // Keep trying to fetch core datasets on cold starts.
         if (configStore.isConnected) {
-          if (configStore.providers.length === 0) {
+          // Loaded flags, not list lengths: a catalog shown from the
+          // persisted cache is not a live load.
+          if (!configStore.providersLoaded) {
             await configStore.loadProviders({ source: 'vscodeLayout:bootstrap' });
           }
-          if (configStore.agents.length === 0) {
+          if (!useConfigStore.getState().agentsLoaded) {
             await configStore.loadAgents({ source: 'vscodeLayout:bootstrap' });
           }
         }
@@ -436,7 +438,7 @@ export const VSCodeLayout: React.FC = () => {
         const configState = useConfigStore.getState();
         // If OpenCode is still warming up, the initial provider/agent loads can fail and be swallowed by retries.
         // Only mark bootstrap complete when core datasets are present so we keep retrying on cold starts.
-        if (!configState.isInitialized || !configState.isConnected || configState.providers.length === 0 || configState.agents.length === 0) {
+        if (!configState.isInitialized || !configState.isConnected || !configState.providersLoaded || !configState.agentsLoaded) {
           return;
         }
         if (debugEnabled) console.log('[OpenChamber][VSCode][bootstrap] post-load', {

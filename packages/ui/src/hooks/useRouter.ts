@@ -135,7 +135,11 @@ export function useRouter(): void {
 
     // Only process if URL has route params
     if (!hasRouteParams()) {
-      // No route params - just set up sync (URL will update when user navigates)
+      // No route params. The launch may already have reopened the last
+      // session (App selects it before this effect runs, so the session
+      // subscription below never sees that change): name it in the URL
+      // without adding a history entry.
+      syncURLFromState({ replace: true });
       return;
     }
 
@@ -159,7 +163,7 @@ export function useRouter(): void {
     };
 
     void initializeRoute();
-  }, [applyRoute, getCurrentAppState, isVSCode]);
+  }, [applyRoute, getCurrentAppState, isVSCode, syncURLFromState]);
 
   // Subscribe to session changes
   React.useEffect(() => {

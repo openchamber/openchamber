@@ -82,6 +82,10 @@ type ContextPanelTab = {
       click replaces it; opening the file any other way, editing it, or
       double-clicking keeps it. */
   preview: boolean;
+  /** The session whose agent opened this browser tab; null for a tab the
+      user opened. Agent actions that name no tab use their own session's tab
+      and leave another session's alone. */
+  ownerSessionId: string | null;
   touchedAt: number;
 };
 
@@ -98,6 +102,7 @@ type ContextPanelTabDescriptor = {
   stagedDiff?: boolean;
   diffScope?: PendingDiffScope | null;
   preview?: boolean;
+  ownerSessionId?: string | null;
 };
 
 type ContextPanelDirectoryState = {
@@ -303,6 +308,10 @@ const buildContextPanelTabID = (mode: ContextPanelMode, dedupeKey: string): stri
   return dedupeKey === mode ? mode : `${mode}:${dedupeKey}`;
 };
 
+const normalizeBrowserTabOwner = (mode: ContextPanelMode, value: string | null | undefined): string | null => (
+  mode === 'browser' && value?.trim() ? value.trim() : null
+);
+
 const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPanelTab => {
   const normalizedTargetPath = normalizeContextTargetPath(descriptor.targetPath);
   const normalizedTargetDirectory = contextPanelModeKeepsTargetDirectory(descriptor.mode)
@@ -329,6 +338,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     stagedDiff: descriptor.stagedDiff === true,
     diffScope: normalizePendingDiffScope(descriptor.diffScope) ?? (descriptor.stagedDiff === true ? 'staged' : 'working'),
     preview: descriptor.mode === 'file' && descriptor.preview === true,
+    ownerSessionId: normalizeBrowserTabOwner(descriptor.mode, descriptor.ownerSessionId),
     touchedAt: Date.now(),
   };
 };
@@ -392,6 +402,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       stagedDiff?: unknown;
       diffScope?: unknown;
       preview?: unknown;
+      ownerSessionId?: unknown;
       touchedAt?: unknown;
     };
 
@@ -450,6 +461,10 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       stagedDiff: candidate.stagedDiff === true,
       diffScope: normalizePendingDiffScope(candidate.diffScope) ?? (candidate.stagedDiff === true ? 'staged' : 'working'),
       preview: candidate.mode === 'file' && candidate.preview === true,
+      ownerSessionId: normalizeBrowserTabOwner(
+        candidate.mode,
+        typeof candidate.ownerSessionId === 'string' ? candidate.ownerSessionId : null,
+      ),
       touchedAt: typeof candidate.touchedAt === 'number' && Number.isFinite(candidate.touchedAt)
         ? candidate.touchedAt
         : Date.now(),
@@ -868,6 +883,10 @@ interface UIStore {
   isSessionCreateDialogOpen: boolean;
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
+  /** The query the Archive page opened with; empty for a plain open. */
+  archivePageSearch: string;
+  /** Grows on every open, so a page already on screen restarts with the new query. */
+  archivePageOpenCount: number;
   isUsageStatsPageOpen: boolean;
   /** The issues and pull requests board. */
   isSourceBoardOpen: boolean;
@@ -1108,7 +1127,7 @@ interface UIStore {
   openContextBrowser: (directory: string, url?: string, options?: { reveal?: boolean }) => void;
   openNewContextBrowserTab: (directory: string) => void;
   /** A new background browser tab for an agent at `url`; returns its tab id, or null where there is no browser. */
-  openAgentBrowserTab: (directory: string, url: string) => string | null;
+  openAgentBrowserTab: (directory: string, url: string, ownerSessionId: string | null) => string | null;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   /** Points file tabs and the editor's open files at or under `fromPath` at `toPath` after a move or rename. */
   moveContextFilePaths: (directory: string, fromPath: string, toPath: string) => void;
@@ -1149,7 +1168,8 @@ interface UIStore {
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
   setScheduledTasksDialogOpen: (open: boolean) => void;
-  setArchivePageOpen: (open: boolean) => void;
+  /** `search` fills the page's search field, for a sidebar search that found nothing. */
+  setArchivePageOpen: (open: boolean, search?: string) => void;
   setUsageStatsPageOpen: (open: boolean) => void;
   setSourceBoardOpen: (open: boolean) => void;
   setOpenGuestPage: (id: string | null) => void;
@@ -1341,7 +1361,7 @@ export const useUIStore = create<UIStore>()(
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
         workStatusExpandedSections: {},
-        messageQueueExpanded: true,
+        messageQueueExpanded: false,
         workStatusScrollTop: 0,
         workStatusPanelEnabled: true,
         workStatusPanelVisible: false,
@@ -1366,6 +1386,8 @@ export const useUIStore = create<UIStore>()(
         isSessionCreateDialogOpen: false,
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
+        archivePageSearch: '',
+        archivePageOpenCount: 0,
         isUsageStatsPageOpen: false,
         isSourceBoardOpen: false,
         openGuestPageId: null,
@@ -1746,7 +1768,7 @@ export const useUIStore = create<UIStore>()(
         // An agent's page gets its own tab in the background: never the tab
         // the user is on, never an existing tab that happens to show the same
         // address, and the panel stays as the user left it.
-        openAgentBrowserTab: (directory, url) => {
+        openAgentBrowserTab: (directory, url, ownerSessionId) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           if (!normalizedDirectory || isVSCodeRuntime()) return null;
           browserTabSequence += 1;
@@ -1757,6 +1779,7 @@ export const useUIStore = create<UIStore>()(
             targetPath: url.trim(),
             dedupeKey,
             label: null,
+            ownerSessionId,
           }, { reveal: false });
           return buildContextPanelTabID('browser', dedupeKey);
         },
@@ -2206,9 +2229,9 @@ export const useUIStore = create<UIStore>()(
             : { isScheduledTasksDialogOpen: false });
         },
 
-        setArchivePageOpen: (open) => {
+        setArchivePageOpen: (open, search = '') => {
           set(open
-            ? { isArchivePageOpen: true, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
+            ? { isArchivePageOpen: true, archivePageSearch: search, archivePageOpenCount: get().archivePageOpenCount + 1, isUsageStatsPageOpen: false, isSourceBoardOpen: false, isScheduledTasksDialogOpen: false, worktreesPageProjectId: null, spacesPageProjectId: null, runOverviewKey: null, openGuestPageId: null }
             : { isArchivePageOpen: false });
         },
 

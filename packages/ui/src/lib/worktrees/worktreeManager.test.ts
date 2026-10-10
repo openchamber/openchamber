@@ -924,6 +924,21 @@ describe('worktreeManager missing worktrees', () => {
     ]);
   });
 
+  test('keeps the contributor fork provenance the server lists', async () => {
+    const provenance = { kind: 'contributor-fork' as const, revision: 1, trust: 'untrusted' as const, push: 'destination-selection-required' as const };
+    listImplementation = async () => [
+      { path: '/repo-fork/.worktrees/own', branch: 'own', head: 'abc', name: 'own' },
+      { path: '/repo-fork/.worktrees/pr', branch: 'pr', head: 'def', name: 'pr', provenance },
+    ];
+
+    const result = await listProjectWorktrees({ id: 'project-fork', path: '/repo-fork' }, { force: true });
+
+    expect(result.map((entry) => [entry.path, entry.provenance ?? null])).toEqual([
+      ['/repo-fork/.worktrees/own', null],
+      ['/repo-fork/.worktrees/pr', provenance],
+    ]);
+  });
+
   test('a worktree that changes only its status still counts as a topology change', () => {
     const ready: WorktreeMetadata = { path: '/repo/.worktrees/a', projectDirectory: '/repo', branch: 'a', label: 'a', worktreeStatus: 'ready' };
     const missing: WorktreeMetadata = { ...ready, worktreeStatus: 'missing' };

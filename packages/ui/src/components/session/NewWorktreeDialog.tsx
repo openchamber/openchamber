@@ -472,6 +472,7 @@ export function NewWorktreeDialog({
             title: t('session.newWorktree.trust.title'),
             message: t('session.newWorktree.trust.confirmation', { actions: trust.actions.map((action) => action.label).join('\n') }),
             action: t('session.newWorktree.trust.run'),
+            decline: t('session.newWorktree.trust.skip'),
           });
           await git.decideCheckoutTrust(metadata.path, trust.digest, run ? 'run' : 'skip');
         }

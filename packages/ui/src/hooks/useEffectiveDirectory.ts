@@ -6,7 +6,8 @@ import type { SessionWorktreeAttachment } from '@/stores/types/sessionTypes';
 import { useSessionDirectory } from '@/sync/sync-context';
 import { getAllSyncSessionMap } from '@/sync/sync-refs';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { getChatsRootForHome } from '@/lib/chatDirectories';
+import { getChatsRoot } from '@/lib/chatDirectories';
+import { useChatsRoot } from '@/hooks/useChatsRoot';
 
 type EffectiveDirectoryInputs = {
     currentSessionId: string | null;
@@ -15,7 +16,7 @@ type EffectiveDirectoryInputs = {
     worktreeAttachment: SessionWorktreeAttachment | undefined;
     worktreePath: string | undefined;
     fallbackDirectory: string | null | undefined;
-    homeDirectory: string | null | undefined;
+    chatsRoot: string | null;
 };
 
 /**
@@ -28,7 +29,8 @@ type EffectiveDirectoryInputs = {
  * 3. Draft session directoryOverride (when creating a new session)
  * 4. For a Chat draft, the prepared chat directory or the managed Chats root —
  *    never the project the app was on before, which would leak that
- *    project's files, commands, and skills into the chat
+ *    project's files, commands, and skills into the chat. None until the
+ *    server names the root.
  * 5. Fallback directory from DirectoryStore
  */
 const pickEffectiveDirectory = ({
@@ -38,7 +40,7 @@ const pickEffectiveDirectory = ({
     worktreeAttachment,
     worktreePath,
     fallbackDirectory,
-    homeDirectory,
+    chatsRoot,
 }: EffectiveDirectoryInputs): string | undefined => {
     // If we have an active session, use its directory
     if (currentSessionId) {
@@ -60,8 +62,7 @@ const pickEffectiveDirectory = ({
     }
 
     if (newSessionDraft?.open && newSessionDraft.target === 'chat') {
-        const chatDirectory = newSessionDraft.preparedChatDirectory ?? getChatsRootForHome(homeDirectory);
-        if (chatDirectory) return chatDirectory;
+        return newSessionDraft.preparedChatDirectory ?? chatsRoot ?? undefined;
     }
 
     // Fall back to the global directory
@@ -83,7 +84,7 @@ export const useEffectiveDirectory = (): string | undefined => {
     const worktreeAttachment = useSessionWorktreeStore((s) => currentSessionId ? s.getAttachment(currentSessionId) : undefined);
     const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
+    const chatsRoot = useChatsRoot();
 
     return pickEffectiveDirectory({
         currentSessionId,
@@ -92,7 +93,7 @@ export const useEffectiveDirectory = (): string | undefined => {
         worktreeAttachment,
         worktreePath: currentSessionId ? worktreeMap.get(currentSessionId)?.path : undefined,
         fallbackDirectory,
-        homeDirectory,
+        chatsRoot,
     });
 };
 
@@ -119,6 +120,6 @@ export const resolveEffectiveDirectory = (): string | undefined => {
             : undefined,
         worktreePath: currentSessionId ? sessionUI.worktreeMetadata.get(currentSessionId)?.path : undefined,
         fallbackDirectory: directoryState.currentDirectory,
-        homeDirectory: directoryState.homeDirectory,
+        chatsRoot: getChatsRoot(),
     });
 };
