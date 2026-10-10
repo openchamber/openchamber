@@ -451,14 +451,44 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // many size changes that cannot matter (every frame of a sidebar animation,
   // most window resizes) do not re-render the zone and everything in it.
   // Changes that arrive during a side-column animation are applied once it ends.
-  const [areaSize, setAreaSize] = React.useState<number | null>(null);
+  //
+  // A side zone measures the whole workspace row, which no zone animation
+  // moves, and takes off what the other side will hold by the store, not by
+  // the DOM. A surface moved from one side to the other opens at its own
+  // width at once: measuring the chat area instead, it saw the side it left
+  // still in place, opened clamped, and widened again after that side closed.
+  const otherSide = zone === 'right' ? 'left' : zone === 'left' ? 'right' : null;
+  const otherSideWidth = useUIStore((state) => {
+    if (!otherSide || !directoryKey) return 0;
+    const panel = state.contextPanelByDirectory[directoryKey];
+    const tab = panel && isZoneShown(panel, state.contextSurfaceZones, otherSide)
+      ? resolveZoneActiveTab(panel, state.contextSurfaceZones, otherSide)
+      : null;
+    if (!panel || !tab) return 0;
+    const editorShown = panel.tabs.some((entry) => entry.mode === 'file' && entry.targetPath)
+      && (state.contextEditorVisible || !state.contextEditorTreeVisible);
+    if (tab.mode === 'file' && !editorShown) return state.contextEditorTreeWidth;
+    return panel.widthByMode[tab.mode] ?? getContextSurfaceDefaultWidth(tab.mode);
+  });
+  // The closed right zone still holds the work-status card's column.
+  const otherSideReserved = otherSide === 'right' && workStatusReserved && !chatCovered && otherSideWidth === 0
+    ? WORK_STATUS_COLUMN_WIDTH
+    : otherSideWidth;
+  const [measuredArea, setMeasuredArea] = React.useState<number | null>(null);
   const measuredAreaSizeRef = React.useRef<number | null>(null);
-  const areaDecidesRef = React.useRef<(areaSize: number) => boolean>(() => false);
-  areaDecidesRef.current = (measured) => isExpanded || (!isTreeOnly && measured - chatMinimum < desiredSize);
+  const otherSideRef = React.useRef(otherSideReserved);
+  otherSideRef.current = otherSideReserved;
+  const areaDecidesRef = React.useRef<(measured: number) => boolean>(() => false);
+  areaDecidesRef.current = (measured) => isExpanded || (!isTreeOnly && measured - otherSideRef.current - chatMinimum < desiredSize);
   const applyAreaSize = React.useCallback(() => {
     const measured = measuredAreaSizeRef.current;
-    setAreaSize(measured !== null && areaDecidesRef.current(measured) ? measured : null);
+    setMeasuredArea(measured !== null && areaDecidesRef.current(measured) ? measured : null);
   }, []);
+  // What the zone shares with the chat: the row less the other side.
+  const areaSize = measuredArea !== null ? measuredArea - otherSideReserved : null;
+  // Expanded, the left zone covers the whole row; the right one covers the
+  // chat area beside the left zone, as before zones.
+  const expandedArea = zone === 'left' ? measuredArea : areaSize;
   const size = isTreeOnly ? desiredSize : clampSize(desiredSize, areaSize);
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
@@ -480,7 +510,9 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const wasOpenRef = React.useRef(false);
 
   React.useLayoutEffect(() => {
-    const parent = panelRef.current?.parentElement;
+    const parent = isVertical
+      ? panelRef.current?.parentElement
+      : panelRef.current?.closest<HTMLElement>('[data-workspace-row]');
     if (!parent || typeof ResizeObserver === 'undefined') {
       return;
     }
@@ -501,10 +533,12 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     };
   }, [applyAreaSize, isVertical]);
 
-  // Expanding, or a surface wanting another size, may make the area matter.
+  // Expanding, a surface wanting another size, or the other side opening or
+  // closing may make the area matter. Applied in this commit, not after the
+  // animation: these change what the zone animates to.
   React.useLayoutEffect(() => {
     applyAreaSize();
-  }, [applyAreaSize, desiredSize, isExpanded]);
+  }, [applyAreaSize, desiredSize, isExpanded, otherSideReserved]);
 
   React.useEffect(() => {
     if (!isOpen || wasOpenRef.current) {
@@ -561,8 +595,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     startSizeRef.current = size;
     resizingSizeRef.current = size;
     // Measure once per drag; no layout reads happen during pointermove.
-    const parent = panelRef.current?.parentElement;
-    const available = isVertical ? parent?.clientHeight : parent?.clientWidth;
+    // The same area the ceiling uses: the row less the other side.
+    const available = isVertical
+      ? panelRef.current?.parentElement?.clientHeight
+      : (panelRef.current?.closest<HTMLElement>('[data-workspace-row]')?.clientWidth ?? 0) - otherSideRef.current;
     resizeAvailableSizeRef.current = available && available > 0 ? available : null;
     document.documentElement.style.cursor = isVertical ? 'row-resize' : 'col-resize';
     event.preventDefault();
@@ -942,7 +978,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // screen; open, it is the panel's width. Every value stays interpolable
   // across open/close (no instant min/max jumps).
   const workStatusColumn = zone === 'right' && workStatusReserved && !chatCovered;
-  const expandedSize = areaSize !== null ? `${areaSize}px` : '100%';
+  const expandedSize = expandedArea !== null ? `${expandedArea}px` : '100%';
   const slotSize = !isOpen
     ? (workStatusColumn ? `${WORK_STATUS_COLUMN_WIDTH}px` : '0px')
     : isExpanded
@@ -999,7 +1035,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // state too: px↔% size changes cannot interpolate, so the header controls
   // would snap instead of riding the animation.
   const cardSize = isExpanded
-    ? (areaSize !== null ? `calc(${areaSize}px - ${geometry.gutterSize})` : '100%')
+    ? (expandedArea !== null ? `calc(${expandedArea}px - ${geometry.gutterSize})` : '100%')
     : `calc(var(${geometry.sizeVariable}) - ${geometry.gutterSize})`;
 
   return (
