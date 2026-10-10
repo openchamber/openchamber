@@ -32,16 +32,34 @@ const GOOGLE_MODEL_FAMILIES: ModelFamily[] = [
     matcher: (modelName) => modelName.startsWith('gemini/'),
     order: 1,
   },
+];
+
+const ANTIGRAVITY_MODEL_FAMILIES: ModelFamily[] = [
   {
-    id: 'antigravity-auth',
-    label: 'Antigravity',
-    matcher: (modelName) => modelName.startsWith('antigravity/'),
+    id: 'antigravity-gemini',
+    label: 'Gemini Models',
+    matcher: (modelName) => {
+      const lower = modelName.toLowerCase();
+      const name = lower.includes('/') ? lower.split('/')[1] : lower;
+      return name.startsWith('gemini');
+    },
+    order: 1,
+  },
+  {
+    id: 'antigravity-3p',
+    label: 'Claude & Third-Party Models',
+    matcher: (modelName) => {
+      const lower = modelName.toLowerCase();
+      const name = lower.includes('/') ? lower.split('/')[1] : lower;
+      return name.startsWith('claude') || name.startsWith('gpt');
+    },
     order: 2,
   },
 ];
 
-const PROVIDER_MODEL_FAMILIES: Record<string, ModelFamily[]> = {
+const PROVIDER_MODEL_FAMILIES: Partial<Record<QuotaProviderId, ModelFamily[]>> = {
   google: GOOGLE_MODEL_FAMILIES,
+  antigravity: ANTIGRAVITY_MODEL_FAMILIES,
 };
 
 function getModelFamily(modelName: string, providerId: QuotaProviderId): ModelFamily | null {
