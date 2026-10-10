@@ -86,7 +86,6 @@ export const UsagePage: React.FC = () => {
       : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
   const credentialProviderId = selectedProviderId === 'exe-dev'
-    || selectedProviderId === 'ollama-cloud'
     || selectedProviderId === 'cursor'
     || selectedProviderId === 'zenmux'
     ? selectedProviderId

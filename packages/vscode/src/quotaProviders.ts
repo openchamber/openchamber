@@ -4,12 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fetchOpenCodeGoUsage, type OpenCodeGoConsoleCredential } from './opencodeGoQuota';
-import { deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
+import { deleteLegacyOllamaCloudCredential, deleteLegacyOpenCodeGoCredential, readCredential } from './quotaCredentials';
 import { readOpenCodeCredentials } from './opencodeAuth';
 import { readConfig } from './opencodeConfig';
 import { isRecord, toProviderEntity } from './opencode-config-v2';
 import { fetchExeDevUsage } from './exeDevQuota';
-import { fetchOllamaUsage } from './ollamaQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -380,6 +379,15 @@ const asNonEmptyString = (value: unknown): string | null => {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 };
+
+/**
+ * The Ollama Cloud API key on one auth entry, or null.
+ *
+ * Mirrors `apiKeyFromAuth` in the web server's `ollama-cloud.js`: the key a chat
+ * request would use, so the tracker reports on the account OpenCode has active.
+ */
+const ollamaApiKeyFrom = (entry: ReturnType<typeof normalizeAuthEntry>): string | null =>
+  asNonEmptyString(entry?.key) ?? asNonEmptyString(entry?.token);
 
 const parseGoogleRefreshToken = (rawRefreshToken: unknown) => {
   const refreshToken = asNonEmptyString(rawRefreshToken);
@@ -797,9 +805,15 @@ export const listConfiguredQuotaProviders = async () => {
   const openCodeGoAuth = normalizeAuthEntry(getAuthEntry(auth, ['opencode-go']));
   if (openCodeGoAuth && (typeof openCodeGoAuth.key === 'string' || typeof openCodeGoAuth.token === 'string')) configured.add('opencode-go');
   if (openCodeGoConsoleCredential(auth)) configured.add('opencode-go');
-  if (readCredential('ollama-cloud')) configured.add('ollama-cloud');
   if (readCredential('cursor')) configured.add('cursor');
   if (readCredential('exe-dev')) configured.add('exe-dev');
+
+  // Ollama Cloud reads its key from OpenCode's credential store, so it is
+  // configured exactly when that integration has a key.
+  const ollamaAuth = normalizeAuthEntry(getAuthEntry(auth, ['ollama-cloud', 'ollamacloud']));
+  if (ollamaApiKeyFrom(ollamaAuth)) {
+    configured.add('ollama-cloud');
+  }
 
   const anthropicAuth = normalizeAuthEntry(getAuthEntry(auth, ['anthropic', 'claude']));
   if (anthropicAuth && ((anthropicAuth as Record<string, unknown>).access || (anthropicAuth as Record<string, unknown>).token)) {
@@ -1989,16 +2003,68 @@ const fetchMiniMaxCnCodingPlanQuota = () => fetchMiniMaxQuota({
   usageFieldsAreRemaining: true,
 });
 
+/** The active account's Ollama Cloud API key, the same one chat requests use. */
+const readOllamaCloudApiKey = async (): Promise<string | undefined> => {
+  const entry = normalizeAuthEntry(getAuthEntry(await readOpenCodeCredentials(), ['ollama-cloud', 'ollamacloud']));
+  return ollamaApiKeyFrom(entry) ?? undefined;
+};
+
+const OLLAMA_USAGE_URL = 'https://ollama.com/api/usage';
+
+/**
+ * The account's buckets, read from `GET /api/usage`.
+ *
+ * Every step mirrors `toUsageWindows` in the web server's
+ * `quota/providers/ollama-cloud.js`, so the two runtimes report the same number
+ * for the same response: the endpoint is undocumented and its shape has moved
+ * repeatedly (`session` + `weekly`, then a single `monthly`, then back), a
+ * bucket is read on its own so an unfamiliar one costs only itself, `usage` is
+ * accepted as a number or a numeric string, and it is clamped because a plan at
+ * or over its cap must read as 100.
+ *
+ * Three distinct failures are kept distinct: an unreadable body throws from
+ * `json()` (transport), a body whose `limits` is not a plain object is a shape
+ * we do not understand, and a body with no usable bucket carries no usage data.
+ */
+const fetchOllamaCloudUsage = async (
+  apiKey: string,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<Record<string, UsageWindow>> => {
+  const response = await fetchImpl(OLLAMA_USAGE_URL, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status === 401 || response.status === 403) throw new Error('Ollama Cloud authentication failed');
+  if (!response.ok) throw new Error(`Ollama Cloud returned HTTP ${response.status}`);
+
+  // `asObject` accepts an array, whose keys are indices, so an array-shaped
+  // `limits` would render as windows named `0`, `1`. The web twin guards the
+  // same way.
+  const limits = asObject(asObject(await response.json())?.limits);
+  const windows: Record<string, UsageWindow> = {};
+  if (limits && !Array.isArray(limits)) {
+    for (const [name, raw] of Object.entries(limits)) {
+      const usage = toNumber(asObject(raw)?.usage);
+      if (!name || usage === null) continue;
+      windows[name] = toUsageWindow({ usedPercent: Math.min(100, Math.max(0, usage * 100)), windowSeconds: null, resetAt: null });
+    }
+  }
+
+  if (Object.keys(windows).length === 0) throw new Error('Ollama Cloud usage data could not be parsed');
+  return windows;
+};
+
 export const fetchOllamaCloudQuota = async ({
-  readCookie = () => readCredential('ollama-cloud')?.cookie,
+  readApiKey,
   fetchImpl = fetch,
 }: {
-  readCookie?: () => string | undefined;
+  readApiKey?: () => string | undefined | Promise<string | undefined>;
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
 } = {}): Promise<ProviderResult> => {
-  const cookie = readCookie();
+  const apiKey = await (readApiKey ?? readOllamaCloudApiKey)();
 
-  if (!cookie) {
+  if (!apiKey) {
     return buildResult({
       providerId: 'ollama-cloud',
       providerName: 'Ollama Cloud',
@@ -2008,11 +2074,12 @@ export const fetchOllamaCloudQuota = async ({
     });
   }
 
+  // The cookie this provider used to store is obsolete the first time we reach
+  // for the key instead. Mirrors the web server's cleanup.
+  deleteLegacyOllamaCloudCredential();
+
   try {
-    const parsed = await fetchOllamaUsage(cookie, fetchImpl);
-    const windows = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [
-      key, toUsageWindow({ ...value, windowSeconds: null, resetAt: null }),
-    ]));
+    const windows = await fetchOllamaCloudUsage(apiKey, fetchImpl);
 
     return buildResult({
       providerId: 'ollama-cloud',

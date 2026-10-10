@@ -58,7 +58,6 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.title': 'Gebruiksregistratie van OpenCode Go',
   'settings.providers.page.openCodeGo.description': 'Verbind het OpenCode Go-dashboard om doorlopende, wekelijkse en maandelijkse limiet te tonen.',
   'settings.providers.page.openCodeGo.workspaceId': 'Werkruimte-ID',
-  'settings.providers.page.openCodeGo.authCookie': 'Auth-cookie',
   'settings.providers.page.openCodeGo.apiKey': 'API-sleutel',
   'settings.providers.page.openCodeGo.help': 'Kopieer de werkruimte-ID uit de dashboard-URL en de auth-cookie uit de ontwikkelaarstools van uw browser. OpenChamber scant nooit de cookiestorage van de browser.',
   'settings.providers.page.openCodeGo.save': 'Opslaan en valideren',

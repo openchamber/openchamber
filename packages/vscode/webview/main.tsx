@@ -4,6 +4,7 @@ import { resolveCommentTarget } from './inlineCommentTarget';
 import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
+import { matchQuotaCredentialRoute } from './quotaCredentialRoutes';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import { opencodeClient } from '@openchamber/ui/lib/opencode/client';
 import { sanitizeHeadersForBrowser } from '@openchamber/ui/lib/runtime-fetch';
@@ -1213,12 +1214,11 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(exe-dev|ollama-cloud|cursor|zenmux)(?:\/(validate|import))?$/);
-  if (quotaCredentialMatch) {
+  const quotaCredential = matchQuotaCredentialRoute(pathname, method);
+  if (quotaCredential) {
     try {
       const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
-      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
-      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
+      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredential.providerId, method: quotaCredential.method, credential: body });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
