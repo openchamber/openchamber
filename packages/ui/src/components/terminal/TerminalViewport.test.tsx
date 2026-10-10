@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Window } from 'happy-dom';
 import { toast } from 'sonner';
@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { I18nProvider } from '@/lib/i18n';
 import { useTerminalStore, type TerminalChunk } from '@/stores/useTerminalStore';
 
-import type { TerminalSurface, TerminalSurfaceFactory } from './TerminalViewport';
+import type { TerminalController, TerminalSurface, TerminalSurfaceFactory } from './TerminalViewport';
 
 // Base UI determines DOM availability when its modules load.
 const initialWindow = new Window({ url: 'http://localhost/' });
@@ -24,6 +24,8 @@ const terminalEvents: TerminalEvent[] = [];
 let selectedText = '';
 let reportMouse = false;
 let focusCount = 0;
+const controller = createRef<TerminalController>();
+let confirmPaste: (() => boolean) | undefined;
 
 class TerminalSurfaceDouble implements TerminalSurface {
   write(data: string) {
@@ -49,7 +51,8 @@ class TerminalSurfaceDouble implements TerminalSurface {
   getSelection() {
     return selectedText;
   }
-  async pasteFromClipboard(readText: () => Promise<string>, isCurrent: () => boolean = () => true) {
+  async pasteFromClipboard(readText: () => Promise<string>, isCurrent: () => boolean = () => true, confirmUnprotectedMultiline?: () => boolean) {
+    confirmPaste = confirmUnprotectedMultiline;
     const data = await readText();
     if (isCurrent()) terminalEvents.push({ type: 'paste', data });
   }
@@ -125,6 +128,7 @@ const renderViewport = (root: Root, chunks: TerminalChunk[], isVisible = true, s
   root.render(
     <I18nProvider>
       <TerminalViewport
+        ref={controller}
         sessionKey={sessionKey}
         chunks={chunks}
         onInput={() => undefined}
@@ -151,6 +155,7 @@ describe('TerminalViewport integration', () => {
     selectedText = '';
     reportMouse = false;
     focusCount = 0;
+    confirmPaste = undefined;
     useTerminalStore.getState().clearAll();
     windowInstance = new Window({ url: 'http://localhost/' });
     Object.assign(globalThis, {
@@ -264,6 +269,53 @@ describe('TerminalViewport integration', () => {
     await flushSurfaceLoad();
     await openContextMenu();
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  test('supports toolbar paste on touch terminals and supplies a translated safety confirmation', async () => {
+    await navigator.clipboard.writeText('echo hello');
+    const prompts: string[] = [];
+    window.confirm = (message) => { prompts.push(message ?? ''); return false; };
+    await renderViewport(root, [], true, 'session-1', true);
+    await flushSurfaceLoad();
+    await act(async () => controller.current?.pasteClipboard());
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toEqual([{ type: 'paste', data: 'echo hello' }]);
+    expect(confirmPaste?.()).toBe(false);
+    expect(prompts).toEqual(['This terminal has not enabled protected paste. Pasting line breaks may run commands immediately. Paste anyway?']);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  test('drops toolbar clipboard reads after switching tabs and does not paste while hidden', async () => {
+    let finishRead: (text: string) => void = () => { throw new Error('read not started'); };
+    let reads = 0;
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => {
+        reads += 1;
+        return new Promise<string>((resolve) => { finishRead = resolve; });
+      },
+    });
+    await renderViewport(root, [], true, 'session-1', true);
+    await flushSurfaceLoad();
+    const pending = controller.current?.pasteClipboard();
+    await renderViewport(root, [], true, 'session-2', true);
+    await act(async () => { finishRead('stale text'); await pending; });
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(0);
+    await renderViewport(root, [], false, 'session-2', true);
+    await act(async () => controller.current?.pasteClipboard());
+    expect(reads).toBe(1);
+  });
+
+  test('reports a denied clipboard read from the touch toolbar without sending input', async () => {
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      configurable: true,
+      value: () => Promise.reject(new Error('Clipboard access denied')),
+    });
+    await renderViewport(root, [], true, 'session-1', true);
+    await flushSurfaceLoad();
+    await act(async () => controller.current?.pasteClipboard());
+    expect(terminalEvents.filter((event) => event.type === 'paste')).toHaveLength(0);
+    expect(toast.getHistory().some((entry) => 'title' in entry
+      && entry.title === 'Could not read the clipboard. Use the paste keyboard shortcut.')).toBe(true);
   });
 
   test('drops a pending clipboard read when the terminal session changes', async () => {

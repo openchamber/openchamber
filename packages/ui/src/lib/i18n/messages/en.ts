@@ -145,6 +145,7 @@ export const dict = {
   'terminalView.toast.copyFailed': 'Copy failed',
   'terminalView.actions.copy': 'Copy',
   'terminalView.actions.paste': 'Paste',
+  'terminalView.confirm.unprotectedMultilinePaste': 'This terminal has not enabled protected paste. Pasting line breaks may run commands immediately. Paste anyway?',
   'terminalView.toast.pasteFailed': 'Could not read the clipboard. Use the paste keyboard shortcut.',
   'terminalView.actions.restart': 'Restart terminal',
   'chat.message.terminalContext': '{terminal}, lines {start}-{end}',

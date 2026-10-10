@@ -1289,6 +1289,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                             >
                                 <Icon name="file-copy" className="h-4 w-4" />
                             </Button>
+                            <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => { void terminalControllerRef.current?.pasteClipboard(); }}
+                                disabled={!activeTab?.terminalSessionId || activeTab.isConnecting}
+                                title={t('terminalView.actions.paste')}
+                                aria-label={t('terminalView.actions.paste')}
+                            >
+                                <Icon name="clipboard" className="h-4 w-4" />
+                            </Button>
                             {previewUrl ? (
                                 <Button
                                     type="button"

@@ -146,6 +146,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': '複製失敗',
   'terminalView.actions.copy': '複製',
   'terminalView.actions.paste': '貼上',
+  'terminalView.confirm.unprotectedMultilinePaste': '此終端未啟用受保護的貼上。貼上換行符號可能會立即執行命令。仍要貼上嗎？',
   'terminalView.toast.pasteFailed': '無法讀取剪貼簿。請使用貼上快捷鍵。',
   'terminalView.actions.restart': '重新啟動終端',
   'chat.message.terminalContext': '{terminal}，第 {start}-{end} 行',

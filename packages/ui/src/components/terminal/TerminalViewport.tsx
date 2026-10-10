@@ -93,6 +93,7 @@ const getProvisionalTerminalSize = (
 export type TerminalController = {
   focus: () => void;
   fit: () => void;
+  pasteClipboard: () => Promise<void>;
   getSelection: () => { text: string; startLine: number; endLine: number } | null;
 };
 
@@ -261,18 +262,22 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     }
   };
 
-  const pasteClipboard = async () => {
+  const pasteClipboard = React.useCallback(async () => {
     const surface = surfaceRef.current;
     if (!surface || !visibleRef.current) return;
     const lifetime = clipboardLifetimeRef.current;
     const isCurrent = () => surfaceRef.current === surface
       && visibleRef.current && clipboardLifetimeRef.current === lifetime;
     try {
-      await surface.pasteFromClipboard(() => navigator.clipboard.readText(), isCurrent);
+      await surface.pasteFromClipboard(
+        () => navigator.clipboard.readText(),
+        isCurrent,
+        () => window.confirm(t('terminalView.confirm.unprotectedMultilinePaste')),
+      );
     } catch {
       if (isCurrent()) toast.error(t('terminalView.toast.pasteFailed'));
     }
-  };
+  }, [t]);
 
   React.useEffect(() => {
     const surface = surfaceRef.current;
@@ -395,6 +400,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
 
   React.useImperativeHandle(ref, () => ({
     focus: () => surfaceRef.current?.focus(),
+    pasteClipboard,
     fit: () => {
       const surface = surfaceRef.current;
       if (!surface) return;
@@ -408,7 +414,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (!range || !text.trim()) return null;
       return { text, startLine: range.start.y + 1, endLine: range.end.y + 1 };
     },
-  }), []);
+  }), [pasteClipboard]);
 
   return (
     <ContextMenu

@@ -145,6 +145,7 @@ export const dict = {
   'terminalView.toast.copyFailed': 'Échec de la copie',
   'terminalView.actions.copy': 'Copier',
   'terminalView.actions.paste': 'Coller',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Ce terminal n’a pas activé le collage protégé. Coller des sauts de ligne peut exécuter des commandes immédiatement. Coller quand même ?',
   'terminalView.toast.pasteFailed': 'Impossible de lire le presse-papiers. Utilisez le raccourci clavier pour coller.',
   'terminalView.actions.restart': 'Redémarrer le terminal',
   'chat.message.terminalContext': '{terminal}, lignes {start}-{end}',

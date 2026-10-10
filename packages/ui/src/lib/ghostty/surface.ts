@@ -1025,6 +1025,7 @@ export class GhosttyTerminalSurface {
   async pasteFromClipboard(
     readText: () => Promise<string>,
     isCurrent: () => boolean = () => true,
+    confirmUnprotectedMultiline?: () => boolean,
   ): Promise<void> {
     const token = this.pasteArbiter.beginRead();
     const text = await readText();
@@ -1034,8 +1035,10 @@ export class GhosttyTerminalSurface {
     // native paste event behind it.
     if (!this.pasteArbiter.settleRead(token, false, performance.now())) return;
     if (text.length === 0) return;
-    const encoded = this.core.encodePaste(text);
-    if (encoded.length > 0) this.options.onData(encoded);
+    const encoded = this.core.encodePaste(text, confirmUnprotectedMultiline);
+    if (!this.disposed && this.pasteShortcutToken === token + 1 && isCurrent() && encoded.length > 0) {
+      this.options.onData(encoded);
+    }
   }
 
   hasSelection(): boolean {

@@ -146,6 +146,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': '복사 실패',
   'terminalView.actions.copy': '복사',
   'terminalView.actions.paste': '붙여넣기',
+  'terminalView.confirm.unprotectedMultilinePaste': '이 터미널은 보호된 붙여넣기를 활성화하지 않았습니다. 줄바꿈을 붙여넣으면 명령이 즉시 실행될 수 있습니다. 그래도 붙여넣을까요?',
   'terminalView.toast.pasteFailed': '클립보드를 읽을 수 없습니다. 붙여넣기 단축키를 사용하세요.',
   'terminalView.actions.restart': '터미널 다시 시작',
   'chat.message.terminalContext': '{terminal}, {start}-{end}행',

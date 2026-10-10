@@ -156,6 +156,7 @@ export const dict: Record<I18nKey, string> = {
   'terminalView.toast.copyFailed': 'Error al copiar',
   'terminalView.actions.copy': 'Copiar',
   'terminalView.actions.paste': 'Pegar',
+  'terminalView.confirm.unprotectedMultilinePaste': 'Este terminal no tiene activado el pegado protegido. Pegar saltos de línea puede ejecutar comandos inmediatamente. ¿Pegar de todas formas?',
   'terminalView.toast.pasteFailed': 'No se pudo leer el portapapeles. Usa el atajo de teclado para pegar.',
   'terminalView.actions.restart': 'Reiniciar terminal',
   'chat.message.terminalContext': '{terminal}, líneas {start}-{end}',
