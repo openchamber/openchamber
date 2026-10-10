@@ -15,6 +15,9 @@ const sdkClient = {
   generate: {
     text: mock(),
   },
+  agent: {
+    get: mock(),
+  },
 };
 
 const make = mock(() => sdkClient);
@@ -34,6 +37,7 @@ describe('bridge git special runtime', () => {
     gitService.getGitRangeDiff.mockReset();
     sdkClient.model.list.mockReset();
     sdkClient.generate.text.mockReset();
+    sdkClient.agent.get.mockReset();
     make.mockReset();
     rawFetch.mockClear();
 
@@ -48,6 +52,13 @@ describe('bridge git special runtime', () => {
     sdkClient.generate.text.mockImplementation(async () => ({
       text: '{"title":"PR title","body":"PR body"}',
     }));
+    // A location with no configured title agent answers 404, the same shape
+    // the server's small-model client treats as "nothing configured".
+    sdkClient.agent.get.mockImplementation(async () => {
+      const error = new Error('agent not found');
+      error.status = 404;
+      throw error;
+    });
   });
 
   it('generates a commit message for the changed files through the OpenCode generate route', async () => {
@@ -106,13 +117,65 @@ describe('bridge git special runtime', () => {
     expect(rawFetch).not.toHaveBeenCalled();
     expect(make).toHaveBeenCalledWith({
       baseUrl: 'http://opencode.test',
-      headers: { Authorization: 'Bearer test' },
+      headers: { Authorization: 'Bearer test', 'x-opencode-directory': encodeURIComponent('/repo') },
     });
     expect(sdkClient.model.list).toHaveBeenCalled();
     expect(sdkClient.generate.text).toHaveBeenCalledWith(
       expect.objectContaining({ model: { id: 'claude-sonnet-4-5', providerID: 'anthropic' } }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
+  });
+
+  it('uses the title agent model when no request or override model is set', async () => {
+    gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
+    gitService.getGitLog.mockImplementation(async () => ({ all: [{ message: 'fix: earlier change' }] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.agent.get.mockImplementation(async () => ({ data: { model: { providerID: 'sidecar', id: 'tiny-model' } } }));
+    sdkClient.model.list.mockImplementation(async () => ({ data: [{ providerID: 'sidecar', id: 'tiny-model' }] }));
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":["adds a line"]}' }));
+
+    const response = await handleSpecialGitBridgeMessage({
+      id: 't1',
+      type: 'api:git/commit-message',
+      payload: { directory: '/repo' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+      readPromptOverrides: () => ({}),
+    });
+
+    expect(response.success).toBe(true);
+    expect(sdkClient.generate.text.mock.calls[0][0].model).toEqual({ id: 'tiny-model', providerID: 'sidecar' });
+  });
+
+  it('scopes the catalog, agent, and generate reads to the flow directory', async () => {
+    await handleSpecialGitBridgeMessage({
+      id: 's1',
+      type: 'api:git/pr-description',
+      payload: { directory: '/repo', base: 'main', head: 'feature' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+    });
+
+    expect(make.mock.calls.length).toBeGreaterThan(0);
+    expect(make.mock.calls.every((call) => call[0].headers['x-opencode-directory'] === encodeURIComponent('/repo'))).toBe(true);
+  });
+
+  it('reads the model catalog again when the flow directory changes', async () => {
+    const prFlow = (id, directory) => handleSpecialGitBridgeMessage({
+      id,
+      type: 'api:git/pr-description',
+      payload: { directory, base: 'main', head: 'feature' },
+    }, { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({}) } }, {
+      readSettings: () => ({}),
+      execGit: mock(),
+    });
+
+    await prFlow('c1', '/repo');
+    await prFlow('c2', '/other');
+
+    expect(sdkClient.model.list).toHaveBeenCalledTimes(2);
   });
 
   it('reports the failure instead of a half-written description when generation fails', async () => {

@@ -377,19 +377,21 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
 /**
  * Provider ids the small model can actually call. A provider counts when
  * OpenCode has at least one enabled model for it — that is the same test
- * OpenCode applies before letting a chat turn use it.
+ * OpenCode applies before letting a chat turn use it. The model list is
+ * directory-scoped, so `directory` scopes this answer the same way
+ * `describeSmallModel` scopes its own; without one the server default applies.
  *
  * The provider list alone is not enough: it comes back empty on setups where
  * models are perfectly usable, so the model list is the authority and the
  * provider list only contributes names.
  */
-export async function listAuthenticatedProviders() {
-  const client = getSmallModelClient();
+export async function listAuthenticatedProviders(directory) {
+  const client = getSmallModelClient(directory);
   if (!client) return [];
   try {
     const [providers, models] = await Promise.all([
       listProviderInfos(client),
-      listModelInfos(client),
+      listModelInfos(client, directory),
     ]);
     const enabled = new Set();
     for (const model of models) {

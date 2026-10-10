@@ -3,7 +3,9 @@
 //
 // Order: the request's explicit model, then the user's small-model override
 // from OpenChamber settings (the same setting every other utility generation in
-// the product uses), then the zen fallback.
+// the product uses), then the model OpenCode's own `title` agent is configured
+// with (`agents.title.model`), the same step the server-side resolver honors,
+// then the zen fallback.
 
 export const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
 
@@ -13,7 +15,7 @@ export type BridgeGitGenerationPayloadModel = {
   zenModel?: string;
 };
 
-type BridgeGitGenerationModelChoice = { providerID: string; modelID: string };
+export type BridgeGitGenerationModelChoice = { providerID: string; modelID: string };
 
 // Bridge settings are the merged persisted dictionary; a value is a string
 // only when the stored file says so, hence the narrowing here.
@@ -41,6 +43,7 @@ export const chooseBridgeGitGenerationModel = (
   payloadModel: BridgeGitGenerationPayloadModel,
   settings: Record<string, unknown>,
   hasModel: (providerID: string, modelID: string) => boolean,
+  configuredModel?: BridgeGitGenerationModelChoice | null,
 ): BridgeGitGenerationModelChoice => {
   // The payload reaches here from a webview message that is cast, not parsed,
   // so a wrong-typed field must degrade to "absent" instead of throwing.
@@ -53,6 +56,13 @@ export const chooseBridgeGitGenerationModel = (
   const override = readSmallModelOverride(settings);
   if (override && hasModel(override.providerID, override.modelID)) {
     return override;
+  }
+
+  // OpenCode's title agent carries the user's small-model config
+  // (`agents.title.model`); the server-side resolver honors it, so the bridge
+  // must agree or one config behaves differently per client.
+  if (configuredModel && hasModel(configuredModel.providerID, configuredModel.modelID)) {
+    return configuredModel;
   }
 
   const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';

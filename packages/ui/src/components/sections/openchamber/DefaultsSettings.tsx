@@ -20,6 +20,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSelectionStore } from '@/sync/selection-store';
@@ -256,16 +257,22 @@ export const DefaultsSettings: React.FC = () => {
     () => getDisplayModel(walkthroughModelOverride),
     [walkthroughModelOverride]
   );
+  const smallModelDirectory = useDirectoryStore((state) => state.currentDirectory);
   React.useEffect(() => {
     // Both pickers offer the same providers — the walkthrough runs through the
     // small model — and the walkthrough picker is always visible, so this is
     // always worth fetching. The server answers with the providers it has a
     // credential and an endpoint for, including plugin-registered ones that
-    // exist only inside the running OpenCode.
+    // exist only inside the running OpenCode. The model list is scoped to a
+    // directory, so the request names the one the user is working in or the
+    // picker would answer for OpenCode's own working directory instead.
     let cancelled = false;
     (async () => {
       try {
-        const response = await runtimeFetch('/api/small-model', { method: 'GET', headers: { Accept: 'application/json' } });
+        const url = smallModelDirectory
+          ? `/api/small-model?directory=${encodeURIComponent(smallModelDirectory)}`
+          : '/api/small-model';
+        const response = await runtimeFetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
         if (!response.ok) return;
         const payload = await response.json().catch(() => null) as { authenticatedProviders?: unknown } | null;
         if (!cancelled && Array.isArray(payload?.authenticatedProviders)) {
@@ -278,7 +285,7 @@ export const DefaultsSettings: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [smallModelDirectory]);
 
   const availableVariants = React.useMemo(() => {
     if (!parsedModel.providerId || !parsedModel.modelId) return [];

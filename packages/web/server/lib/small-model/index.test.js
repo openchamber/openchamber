@@ -635,6 +635,46 @@ describe('listAuthenticatedProviders', () => {
 
     expect(await listAuthenticatedProviders()).toEqual([]);
   });
+
+  // The model list is directory-scoped, so an unscoped read answers for
+  // OpenCode's own working directory, which need not be where the user works.
+  it('scopes the model and provider reads to the requested directory', async () => {
+    configureOpenCodeRuntimeProviders({
+      buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+      getDefaultDirectory: () => '/last/project',
+    });
+
+    await listAuthenticatedProviders('/proj/sub dir');
+
+    const reads = state.requests.filter((entry) => entry.path === '/api/model' || entry.path === '/api/provider');
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((entry) => entry.headers['x-opencode-directory'] === encodeURIComponent('/proj/sub dir'))).toBe(true);
+  });
+});
+
+describe('small model routes', () => {
+  it('forwards the request directory to the provider list', async () => {
+    let getHandler;
+    const providerCalls = [];
+    registerSmallModelRoutes({
+      get(_path, handler) { getHandler = handler; },
+      post() {},
+    }, {
+      getSmallModelService: async () => ({
+        describeSmallModel: async () => null,
+        listAuthenticatedProviders: async (directory) => {
+          providerCalls.push(directory);
+          return ['anthropic'];
+        },
+      }),
+    });
+    const response = { json() {}, status() { return response; } };
+
+    await getHandler({ query: { directory: '/proj/sub dir' } }, response);
+
+    expect(providerCalls).toEqual(['/proj/sub dir']);
+  });
 });
 
 

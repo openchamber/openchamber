@@ -83,4 +83,48 @@ describe('chooseBridgeGitGenerationModel', () => {
       { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL },
     );
   });
+
+  // The server's resolveSmallModel honors OpenCode's title agent; the bridge
+  // must agree or the same config behaves differently per client.
+  test('a configured title-agent model wins over the zen fallback when it is in the catalog', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      {},
+      catalogOf('sidecar/tiny-model'),
+      { providerID: 'sidecar', modelID: 'tiny-model' },
+    );
+    assert.deepEqual(choice, { providerID: 'sidecar', modelID: 'tiny-model' });
+  });
+
+  test('the request model and the small-model override outrank the title-agent model', () => {
+    const title = { providerID: 'sidecar', modelID: 'tiny-model' };
+    assert.deepEqual(
+      chooseBridgeGitGenerationModel(
+        { providerId: 'anthropic', modelId: 'claude-sonnet-4' },
+        {},
+        catalogOf('anthropic/claude-sonnet-4', 'sidecar/tiny-model'),
+        title,
+      ),
+      { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+    );
+    assert.deepEqual(
+      chooseBridgeGitGenerationModel(
+        {},
+        { smallModelUseDefault: false, smallModelOverride: 'sidecar/other-model' },
+        catalogOf('sidecar/other-model', 'sidecar/tiny-model'),
+        title,
+      ),
+      { providerID: 'sidecar', modelID: 'other-model' },
+    );
+  });
+
+  test('a title-agent model missing from the catalog falls back to zen', () => {
+    const choice = chooseBridgeGitGenerationModel(
+      {},
+      {},
+      catalogOf('anthropic/claude-sonnet-4'),
+      { providerID: 'sidecar', modelID: 'tiny-model' },
+    );
+    assert.deepEqual(choice, { providerID: 'zen', modelID: BRIDGE_ZEN_DEFAULT_MODEL });
+  });
 });

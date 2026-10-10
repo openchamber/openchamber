@@ -22,7 +22,7 @@ credentials, the provider dispatch and the token refresh. Routes live under
   trade. An unreachable OpenCode keeps the previous answer rather than
   retracting it.
 - `index.js` — `generateSmallModelText()`, `describeSmallModel()`,
-  `listAuthenticatedProviders()`.
+  `listAuthenticatedProviders(directory?)`.
 - `routes.js` — `GET /api/small-model` (resolution preview) and
   `POST /api/small-model/generate` (`{ prompt, system?, maxOutputTokens?,
   model?, directory? }` → `{ text, providerID, modelID, source }`).
@@ -172,17 +172,24 @@ capability is not knowable before the call, and callers must read `null` as
 
 ## Which providers the pickers may offer
 
-`listAuthenticatedProviders()` answers one question for the Small Model and
+`listAuthenticatedProviders(directory)` answers one question for the Small Model and
 Changes Walkthrough pickers: which providers OpenCode can call right now. A
 provider counts when it has at least one enabled model in `GET /api/model` —
-the same test OpenCode applies before letting a chat turn use it.
+the same test OpenCode applies before letting a chat turn use it. The model
+list is directory-scoped, so `directory` scopes this answer the same way
+`describeSmallModel` scopes its own; without one the server default applies,
+and a default directory with no model config would report no providers for
+models that work perfectly in the user's project.
 
 `GET /api/provider` only contributes names. It comes back empty on setups where
 models are perfectly usable, so an empty provider list is never read as "no
 providers". Claude Code is removed from the result for the reason above.
 
-The field is served as `authenticatedProviders` on `GET /api/small-model`. The
-name predates this resolution; it now means "callable".
+The field is served as `authenticatedProviders` on `GET /api/small-model`, and
+the route forwards its `?directory=` query to both halves of the answer. The
+Settings pickers send the current directory with the request, so the list
+matches what the user sees in chat for that project. The name predates this
+resolution; it now means "callable".
 
 ## describeSmallModel
 
