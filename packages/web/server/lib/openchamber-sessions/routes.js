@@ -13,6 +13,8 @@ import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js
 import { OpenChamberControlError, asControlError } from '../openchamber-control/error.js';
 import { readObjective, writeObjective } from '../session-goal/objectives.js';
 import { createArchiveStore } from './archive-store.js';
+import { prepareUserMessageResume } from './user-message-resume.js';
+import { createSessionActivityProbe } from '../opencode/session-activity.js';
 import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
@@ -475,6 +477,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     headers: getOpenCodeAuthHeaders(),
     directory,
   });
+  const activityProbe = createSessionActivityProbe({ buildOpenCodeUrl, getOpenCodeAuthHeaders });
 
   const waitForWorktreeBootstrapReady = async ({ directory, bootstrapStore }) => {
     const deadline = Date.now() + WORKTREE_BOOTSTRAP_TIMEOUT_MS;
@@ -1110,6 +1113,12 @@ export const createOpenChamberSessionService = (dependencies) => {
     archive,
     unarchive,
     archiveStore,
+    prepareUserMessageResume: (sessionId, directory) => prepareUserMessageResume(sessionId, {
+      archiveStore,
+      getSession: (id) => clientFor(directory).session.get({ sessionID: id }),
+      getChildren: activityProbe.fetchChildSessionIds,
+      broadcastRestored: (id) => broadcastArchived(id, null),
+    }),
     sessionMetadataStore,
     setMetadata,
     getMetadata,

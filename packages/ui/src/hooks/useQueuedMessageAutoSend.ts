@@ -120,7 +120,7 @@ export const sendQueuedAutoSendPayload = (
     payload.additionalParts.length > 0 ? payload.additionalParts : undefined,
     resolved.variant,
     'normal',
-    { target, historySubmissions: payload.historySubmissions },
+    { target, historySubmissions: payload.historySubmissions, userInitiated: true },
   );
 };
 

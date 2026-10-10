@@ -238,6 +238,7 @@ export function createMessageQueueRuntime({
   sessionKnowledgeRuntime = null,
   broadcastGlobalUiEvent,
   onPromptSent,
+  prepareUserMessageResume,
   beforeScheduledTaskSend,
   validateScheduledTaskTarget,
   onScheduledTaskResult,
@@ -700,12 +701,28 @@ export function createMessageQueueRuntime({
           return;
         }
       }
+      // Scheduled tasks are background work, not a user resuming a session.
+      let resumeAfterSend;
+      if (!item.scheduledTask && prepareUserMessageResume) {
+        try {
+          resumeAfterSend = await prepareUserMessageResume(sessionId, current.directory);
+        } catch (error) {
+          console.warn('[message-queue] could not prepare archive restoration:', error?.message ?? error);
+        }
+      }
       await sendItem(sessionId, current.directory, item);
       const after = queues.get(sessionId);
       if (after) setQueueItems(sessionId, after.directory, after.items.filter((entry) => entry.id !== item.id), 'sent');
       failures.delete(sessionId);
       sending.delete(sessionId);
       commit(sessionId);
+      // The accepted message has already left the queue. A restore failure
+      // must never retry the prompt or block the next queued message.
+      if (resumeAfterSend) {
+        void resumeAfterSend().catch((error) => {
+          console.warn('[message-queue] automatic archive restoration failed:', error?.message ?? error);
+        });
+      }
       try {
         onPromptSent?.(sessionId);
       } catch {

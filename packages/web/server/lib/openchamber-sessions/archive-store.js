@@ -214,6 +214,14 @@ export const createArchiveStore = ({
       const { applied, failedIds } = await applyBatch(ids, null);
       return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
     },
+    // Automatic restoration must not undo an archive made during the send.
+    unarchiveUnchanged: (id, expectedEntry) => runExclusive(async () => {
+      const result = await load();
+      if (!result.ok || !writable) return { restored: [], failedIds: [id] };
+      if (entries.get(id) !== expectedEntry) return { restored: [], failedIds: [] };
+      const { applied, failedIds } = await applyBatchExclusive([id], null);
+      return { restored: applied.map((sessionId) => ({ id: sessionId, archivedAt: null })), failedIds };
+    }),
     filePath,
   };
 };
