@@ -101,8 +101,11 @@ export function getDeviceInfo(): DeviceInfo {
   const isDesktopShellRuntime = isDesktopShell() || isVSCodeRuntime() || hasDesktopSurfaceOverride();
   const { isExplicitTablet } = getNavigatorDeviceHints(maxTouchPoints);
 
-  const hasTouchInput = prefersCoarsePointer || noHover || maxTouchPoints > 0;
   const hasTouchOnlyPointer = prefersCoarsePointer || noHover;
+  // A desktop shell reports touch points for any touchscreen, pen tablet or
+  // virtual digitizer, even while a hovering mouse drives it; there only the
+  // primary pointer decides touch.
+  const hasTouchInput = hasTouchOnlyPointer || (!isDesktopShellRuntime && maxTouchPoints > 0);
 
   const isTabletWidth = width > BREAKPOINTS.md && width <= BREAKPOINTS.lg;
   const isMobileWidth = width <= BREAKPOINTS.md;
