@@ -138,6 +138,28 @@ describe('hasBackgroundableWork', () => {
             time: { start: 1, end: 2 },
         })])).toBe(false);
     });
+
+    test('a command or subagent inside Code Mode can go to the background', () => {
+        for (const name of ['shell', 'subagent']) {
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'running', input: { code: 'await tools.shell(...)' }, time: { start: 1 },
+                metadata: { toolCalls: [{ tool: name, status: 'running' }] },
+            })])).toBe(true);
+        }
+    });
+
+    test('Code Mode uses live nested calls, including parallel work', () => {
+        const execute = (toolCalls: Array<{ tool: string; status: string }>) => tool('execute', {
+            status: 'running', input: {}, time: { start: 1 }, metadata: { toolCalls },
+        });
+        expect(hasBackgroundableWork([execute([{ tool: 'shell', status: 'completed' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([{ tool: 'shell', status: 'error' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([{ tool: 'read', status: 'running' }])])).toBe(false);
+        expect(hasBackgroundableWork([execute([])])).toBe(false);
+        expect(hasBackgroundableWork([execute([
+            { tool: 'shell', status: 'running' }, { tool: 'read', status: 'completed' },
+        ])])).toBe(true);
+    });
 });
 
 describe('createParsedStatus', () => {

@@ -188,11 +188,14 @@ const getStableWorkingPhrase = (key: string): string => {
  * waits for a permission), and a background call settles at once, so neither
  * counts.
  */
-export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => (
-    part.type === 'tool'
-    && part.state?.status === 'running'
-    && (isShellTool(part.tool) || isSubagentTool(part.tool))
-));
+export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => {
+    if (part.type !== 'tool' || part.state?.status !== 'running') return false;
+    if (isShellTool(part.tool) || isSubagentTool(part.tool)) return true;
+    if (!isExecuteTool(part.tool)) return false;
+    return executeToolCalls(part.state.metadata).some((call) => (
+        call.status === 'running' && (isShellTool(call.tool) || isSubagentTool(call.tool))
+    ));
+});
 
 export const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResult => {
     const runningToolCounts = countRunningToolCalls(parts);
