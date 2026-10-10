@@ -72,7 +72,7 @@ type OpenInAppButtonProps = {
   directory: string;
 };
 
-export const OpenInAppButton = ({ directory }: OpenInAppButtonProps) => {
+const OpenInAppButtonComponent = ({ directory }: OpenInAppButtonProps) => {
   const { t } = useI18n();
   const selectedAppId = useOpenInAppsStore((state) => state.selectedAppId);
   const availableApps = useOpenInAppsStore((state) => state.availableApps);
@@ -198,3 +198,7 @@ export const OpenInAppButton = ({ directory }: OpenInAppButtonProps) => {
     </div>
   );
 };
+
+// Memoised: it sits in the work-status card, which re-renders on every streamed
+// message, and its only prop is the directory.
+export const OpenInAppButton = React.memo(OpenInAppButtonComponent);

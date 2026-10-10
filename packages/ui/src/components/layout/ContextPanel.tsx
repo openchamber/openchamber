@@ -272,11 +272,13 @@ const useSessionTitleMap = (sessionIDs: readonly string[]): ReadonlyMap<string, 
   const sessionIDsRef = React.useRef<readonly string[]>(sessionIDs);
 
   sessionIDsRef.current = sessionIDs;
+  // No titles wanted, no subscription: every session update would wake it.
+  const wanted = sessionIDs.length > 0;
 
   return React.useSyncExternalStore(
     React.useCallback(
-      (notify: () => void) => childStores.subscribeAllSelected((state) => state.session, notify),
-      [childStores],
+      (notify: () => void) => (wanted ? childStores.subscribeAllSelected((state) => state.session, notify) : () => undefined),
+      [childStores, wanted],
     ),
     React.useCallback(() => {
       const liveStates = Array.from(childStores.children.values(), (store) => store.getState());
@@ -326,7 +328,7 @@ const CONTEXT_CHAT_MIN_HEIGHT = 200;
 const ZONE_GEOMETRY = {
   right: {
     axis: 'x',
-    gutter: 'pb-2 pl-2 pr-1.5',
+    gutter: 'mb-2 ml-2 mr-1.5',
     gutterSize: '0.875rem',
     expanded: 'absolute inset-y-0 right-0 z-20 min-w-0',
     handle: 'absolute bottom-2 left-1 top-0 z-50 w-2 cursor-col-resize',
@@ -334,7 +336,7 @@ const ZONE_GEOMETRY = {
   },
   left: {
     axis: 'x',
-    gutter: 'pb-2 pl-1.5 pr-2',
+    gutter: 'mb-2 ml-1.5 mr-2',
     gutterSize: '0.875rem',
     expanded: 'absolute inset-y-0 left-0 z-20 min-w-0',
     handle: 'absolute bottom-2 right-1 top-0 z-50 w-2 cursor-col-resize',
@@ -342,7 +344,7 @@ const ZONE_GEOMETRY = {
   },
   bottom: {
     axis: 'y',
-    gutter: 'pb-2 pt-2',
+    gutter: 'mb-2 mt-2',
     gutterSize: '1rem',
     expanded: 'absolute inset-x-0 bottom-0 z-20 min-h-0',
     handle: 'absolute inset-x-0 top-1 z-50 h-2 cursor-row-resize',
@@ -493,15 +495,19 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // chat area beside the left zone, as before zones.
   const expandedArea = zone === 'left' ? measuredArea : areaSize;
   const size = isTreeOnly ? desiredSize : clampSize(desiredSize, areaSize);
+  // Titles are for this zone's chat tab strip only; a zone that is closed or
+  // shows another surface subscribes to none.
+  const showsChatTabs = isOpen && activeTab?.mode === 'chat';
   const chatSessionIDs = React.useMemo(() => {
     const ids: string[] = [];
+    if (!showsChatTabs) return ids;
     for (const tab of tabs) {
       if (tab.mode !== 'chat') continue;
       const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
       if (sessionID && !ids.includes(sessionID)) ids.push(sessionID);
     }
     return ids;
-  }, [tabs]);
+  }, [showsChatTabs, tabs]);
   const sessionTitleById = useSessionTitleMap(chatSessionIDs);
 
   const [isResizing, setIsResizing] = React.useState(false);
@@ -1050,23 +1056,17 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         // content is wider than the card's column, so a `scrollIntoView`
         // inside it (the tab strip revealing its active tab on mount)
         // scrolled the slot sideways and dragged the card left, clipped.
-        // The gutter sets the panel apart from the chat as a card of its own
-        // and leaves the card's shadow room on every side the aside clips;
-        // the resize handle sits in the one facing the chat.
-        'box-border flex min-h-0 flex-col overflow-clip bg-background',
-        // An empty closed zone takes no room at all: its gutters close with it.
-        slotSize === '0px' ? 'p-0' : [
-          geometry.gutter,
-          zone === 'bottom' && (leftZoneShown ? 'pl-0' : 'pl-2'),
-          zone === 'bottom' && (rightSlotFilled ? 'pr-0' : 'pr-1.5'),
-        ],
+        // No padding: the card's own margins are the gutter (see the card),
+        // so a closed zone at zero size clips them away with the card and only
+        // the size ever animates.
+        'flex min-h-0 flex-col overflow-clip bg-background',
         // Anchored to its window edge while expanded: `inset-0` would teleport
         // the far edge instantly (position does not transition), so only the
         // size animates and the zone grows toward the chat from where it docks.
         isExpanded
           ? geometry.expanded
           : isVertical ? 'relative w-full flex-shrink-0' : 'relative h-full flex-shrink-0',
-        isVertical ? 'transition-[height,padding]' : 'transition-[width,padding]',
+        isVertical ? 'transition-[height]' : 'transition-[width]',
         'motion-reduce:transition-none',
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
@@ -1093,7 +1093,13 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
         data-zone-card=""
         className={cn(
           'relative z-10 flex min-h-0 shrink-0 flex-col motion-reduce:transition-none',
-          isVertical ? 'w-full' : 'h-full',
+          // The gutter sets the card apart from the chat and leaves its shadow
+          // room on every side the aside clips; the resize handle sits in the
+          // one facing the chat.
+          geometry.gutter,
+          zone === 'bottom' && (leftZoneShown ? 'ml-0' : 'ml-2'),
+          zone === 'bottom' && (rightSlotFilled ? 'mr-0' : 'mr-1.5'),
+          isVertical ? null : 'h-[calc(100%-0.5rem)]',
           // A framed card, inset from the chat: its own border and radius rather
           // than a divider running the length of the window.
           // The dropdown's hairline ring (`oc-panel-edge`), shared with the
@@ -1105,11 +1111,14 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
           !isOpen && 'pointer-events-none select-none opacity-0'
         )}
         style={{
-          ...(isVertical ? { height: cardSize } : { width: cardSize }),
+          ...(isVertical
+            ? { height: cardSize, width: `calc(100% - ${(leftZoneShown ? 0 : 0.5) + (rightSlotFilled ? 0 : 0.375)}rem)` }
+            : { width: cardSize }),
           transitionDuration: `${layoutAnimationMs}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
-        aria-hidden={contentHidden}
+        // inert alone: it already takes the subtree out of the accessibility
+        // tree, and aria-hidden on top cost a second pass when it flipped.
         inert={contentHidden || undefined}
       >
       {header}

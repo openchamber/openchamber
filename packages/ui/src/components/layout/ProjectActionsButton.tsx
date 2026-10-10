@@ -120,7 +120,7 @@ const normalizeManualOpenUrl = (value: string | undefined): string | null => {
 };
 
 
-export const ProjectActionsButton = ({
+const ProjectActionsButtonComponent = ({
   projectRef,
   directory,
   className,
@@ -1254,3 +1254,7 @@ export const ProjectActionsButton = ({
     </div>
   );
 };
+
+// Memoised: it sits in the work-status card, which re-renders on every streamed
+// message, and its props (a memoised project ref and a directory) rarely change.
+export const ProjectActionsButton = React.memo(ProjectActionsButtonComponent);

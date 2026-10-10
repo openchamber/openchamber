@@ -103,6 +103,7 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { cancelWhenLayoutSettled, runWhenLayoutSettled } from '@/lib/layoutAnimation';
 import {
   FileTreeChevron,
   FileTreeFileMarkers,
@@ -924,11 +925,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       ));
     };
     measure();
-    const observer = new ResizeObserver(measure);
+    // A side column's animation (the sidebar, a zone beside a bottom-zone
+    // editor) resizes the row on every frame: measure once, at its end.
+    const observer = new ResizeObserver(() => runWhenLayoutSettled(measure));
     observer.observe(dockedRowEl);
     if (dockedPrimaryEl) observer.observe(dockedPrimaryEl);
     if (dockedTailEl) observer.observe(dockedTailEl);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelWhenLayoutSettled(measure);
+    };
   }, [dockedPrimaryEl, dockedRowEl, dockedTailEl]);
 
   type TextViewMode = 'view' | 'edit';
