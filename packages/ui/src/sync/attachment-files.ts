@@ -204,6 +204,7 @@ const TEXT_MIMES = new Set([
 ])
 const ATTACHMENT_SAMPLE_BYTES = 4096
 const DOCUMENT_EXTENSIONS = new Set(["docx", "pptx", "xlsx", "odt", "odp", "ods"])
+const IMAGE_MENTION_EXTENSIONS = new Set(["gif", "heic", "heif", "jpeg", "jpg", "png", "webp"])
 const REDACTED = "[REDACTED]"
 const OMITTED = "[OMITTED BY OPENCHAMBER]"
 const SENSITIVE_NAMES = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|client[-_]?secret|password|secret|access[-_]?token|refresh[-_]?token|id[-_]?token|token)$/i
@@ -218,7 +219,18 @@ const extensionOf = (name: string): string => {
   return index === -1 ? "" : name.slice(index + 1).toLowerCase()
 }
 
-export const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+const isDocumentAttachmentFilename = (name: string): boolean => DOCUMENT_EXTENSIONS.has(extensionOf(name))
+
+/**
+ * An `@` mention of these files is read and attached by the client, like a
+ * picked file. Anything else reaches OpenCode as a path it reads itself; an
+ * image sent that way has no preview in the message. A PDF stays a path, so a
+ * model without PDF input can still extract its text with tools.
+ */
+export const isReadOnSendMentionFilename = (name: string): boolean => {
+  const extension = extensionOf(name)
+  return DOCUMENT_EXTENSIONS.has(extension) || IMAGE_MENTION_EXTENSIONS.has(extension)
+}
 
 const declaredMimeOf = (file: File): string => file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
 

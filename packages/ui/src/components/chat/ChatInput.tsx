@@ -19,7 +19,7 @@ import {
     ACCEPTED_ATTACHMENT_EXTENSIONS,
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
-    isDocumentAttachmentFilename,
+    isReadOnSendMentionFilename,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
@@ -955,7 +955,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const extractInlineFileMentions = React.useCallback((
         rawText: string,
-        preparedDocumentMentions?: ReadonlyMap<string, AttachedFile[]>,
+        preparedMentions?: ReadonlyMap<string, AttachedFile[]>,
     ) => {
         if (!rawText || !rawText.includes('@')) {
             return { sanitizedText: rawText, attachments: [] };
@@ -969,7 +969,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (!mention || seenPaths.has(mention.serverPath)) continue;
             seenPaths.add(mention.serverPath);
 
-            const prepared = preparedDocumentMentions?.get(mention.serverPath);
+            const prepared = preparedMentions?.get(mention.serverPath);
             if (prepared) {
                 attachments.push(...prepared);
                 continue;
@@ -992,28 +992,29 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         };
     }, [resolveInlineFileMention]);
 
-    type DocumentMentionPreparation =
+    type ReadOnSendMentionPreparation =
         | { status: 'ready'; prepared: Map<string, AttachedFile[]> }
         | { status: 'failed'; filename: string }
         | { status: 'runtime-changed' };
 
     /**
-     * Document mentions (`@notes.pdf`) are sent as converted attachments. Their
+     * Document and image mentions (`@notes.docx`, `@shot.png`) are sent as
+     * converted attachments with their real type, like a picked file. Their
      * sources are fetched up front — by the send, or by queueing, since the
      * server that later delivers a queued message cannot read them.
      */
-    const prepareDocumentMentions = React.useCallback(async (
+    const prepareReadOnSendMentions = React.useCallback(async (
         texts: readonly string[],
         reservedFilenames: Set<string>,
         runtimeKey: string,
-    ): Promise<DocumentMentionPreparation> => {
+    ): Promise<ReadOnSendMentionPreparation> => {
         const prepared = new Map<string, AttachedFile[]>();
         for (const rawText of texts) {
             for (const token of scanMentions(rawText, confirmedMentionsRef.current)) {
                 const mention = resolveInlineFileMention(token.name);
                 if (
                     !mention
-                    || !isDocumentAttachmentFilename(mention.filename)
+                    || !isReadOnSendMentionFilename(mention.filename)
                     || prepared.has(mention.serverPath)
                 ) {
                     continue;
@@ -1370,20 +1371,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // A queued message is resolved now, not at delivery: the server that
         // sends it has no agent list, no confirmed mentions, and no way to read
-        // a document the user named — and the mention must match what was
+        // a file the user named — and the mention must match what was
         // visible when the user typed it.
-        const documentMentions = await prepareDocumentMentions(
+        const readOnSendMentions = await prepareReadOnSendMentions(
             [messageToQueue],
             new Set(composerAttachments.map((attachment) => attachment.filename)),
             queueRuntimeKey,
         );
-        if (documentMentions.status === 'runtime-changed') return;
-        if (documentMentions.status === 'failed') {
-            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: documentMentions.filename }));
+        if (readOnSendMentions.status === 'runtime-changed') return;
+        if (readOnSendMentions.status === 'failed') {
+            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
         const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
-        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, documentMentions.prepared);
+        const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
         // delivery 400s.
@@ -1474,7 +1475,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareDocumentMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     /** Put the context a queued message was captured with back on the composer chips. */
     const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
@@ -1879,22 +1880,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (delivery && sendMessageOptions) sendMessageOptions.delivery = delivery;
 
         // Queued messages resolved their mentions when they were queued; only
-        // the composer's own text can still name a document.
+        // the composer's own text can still name a file to read.
         const reservedFilenames = new Set([
             ...attachedFiles.map((attachment) => attachment.filename),
             ...queuedProjection.flatMap((queued) => queued.attachments?.map((attachment) => attachment.filename) ?? []),
         ]);
-        const documentMentions = await prepareDocumentMentions(
+        const readOnSendMentions = await prepareReadOnSendMentions(
             !isBtwActive && !queuedOnly && inputSnapshot.hasContent ? [inputSnapshot.message] : [],
             reservedFilenames,
             submitRuntimeKey,
         );
-        if (documentMentions.status === 'runtime-changed') return;
-        if (documentMentions.status === 'failed') {
-            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: documentMentions.filename }));
+        if (readOnSendMentions.status === 'runtime-changed') return;
+        if (readOnSendMentions.status === 'failed') {
+            toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        const preparedDocumentMentions = documentMentions.prepared;
+        const preparedMentions = readOnSendMentions.prepared;
 
         // The composer delivers these itself, so they leave the queue now — the
         // queue's own delivery (server-side, or the auto-send hook in VS Code)
@@ -1978,7 +1979,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             },
             extractFileMentions: (text) => {
                 if (isBtwActive) return { text, attachments: [] };
-                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedDocumentMentions);
+                const { sanitizedText, attachments } = extractInlineFileMentions(text, preparedMentions);
                 return { text: sanitizedText, attachments };
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,

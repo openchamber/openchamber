@@ -4,7 +4,7 @@ import {
   ATTACHMENT_ACCEPT,
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
-  isDocumentAttachmentFilename,
+  isReadOnSendMentionFilename,
   prepareAttachmentFile,
 } from "./attachment-files"
 
@@ -48,9 +48,13 @@ describe("attachment file preparation", () => {
     }
   })
 
-  test("identifies Office and OpenDocument filenames for shared mention preparation", () => {
-    expect(isDocumentAttachmentFilename("reports/BUDGET.XLSX")).toBe(true)
-    expect(isDocumentAttachmentFilename("notes.txt")).toBe(false)
+  test("reads documents and images named by a mention on send", () => {
+    for (const filename of ["reports/BUDGET.XLSX", "shot.png", "photo.JPG", "anim.gif", "pic.webp", "IMG_1.heic"]) {
+      expect(isReadOnSendMentionFilename(filename)).toBe(true)
+    }
+    for (const filename of ["notes.txt", "icon.svg", "scan.pdf"]) {
+      expect(isReadOnSendMentionFilename(filename)).toBe(false)
+    }
   })
 
   test("renders notebooks as readable markdown without binary outputs", async () => {
