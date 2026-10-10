@@ -49,7 +49,7 @@ Shared `DropdownMenu` and `Select` can opt into this boundary with `disableGloba
 
 Terminal capture, Escape abort priming, and the shifted reverse-agent chord are input-boundary exceptions. They preserve their target-specific semantics and invoke the registered application handler rather than duplicating command behavior.
 
-`[data-btw-composer="true"]` owns Escape instead of main-session abort priming.
+Escape abort priming listens in the window bubble phase and only counts an Escape whose target is a chat composer editor (`[data-chat-input="true"]`) and that nothing prevented first. Escape from anywhere else, an Escape the composer spent on its own state (a picker, shell mode, the expanded input, a selection), IME composition, an open dropdown, or an open overlay clears the priming. `[data-btw-composer="true"]` owns Escape instead of main-session abort priming.
 While active, main and Mini Chat model/effort shortcuts yield; main agent,
 expansion and dictation shortcuts also yield. Footer unmounting alone cannot
 disable these global registrations or protect the parent composer's selection.

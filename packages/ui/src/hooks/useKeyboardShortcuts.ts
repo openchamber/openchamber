@@ -407,7 +407,6 @@ export const useKeyboardShortcuts = () => {
       if (event.key !== 'Escape') return;
       if (dispatcher.handleEscape()) {
         event.preventDefault();
-        resetAbortPriming();
         return;
       }
       const target = event.target as Element | null;
@@ -427,34 +426,42 @@ export const useKeyboardShortcuts = () => {
         || isVimEditorEventTarget(target)
         || dropdownOpen
       ) {
-        resetAbortPriming();
         return;
       }
       if (state.isPromptNavigatorPanelOpen) {
         event.preventDefault();
         state.setPromptNavigatorPanelOpen(false);
-        resetAbortPriming();
         return;
       }
       if (state.isSettingsDialogOpen) {
         event.preventDefault();
         state.setSettingsDialogOpen(false);
+      }
+    };
+    // Double Escape stops a run only from a chat's own composer. Escape
+    // anywhere else belongs to what has focus (dialogs, panels, menus), and
+    // an Escape the composer spent on itself (a picker, shell mode, the
+    // expanded input, a selection) arrives here already prevented.
+    const handleAbortEscapeKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target instanceof Element ? event.target : null;
+      const fromComposer = Boolean(target?.closest('[data-chat-input="true"]'))
+        && !target?.closest('[data-btw-composer="true"]');
+      if (event.defaultPrevented || !fromComposer || isIMECompositionEvent(event)) {
         resetAbortPriming();
         return;
       }
-      if (document.querySelector('[data-settings-view="true"]')) {
-        resetAbortPriming();
-        return;
-      }
+      const state = useUIStore.getState();
       const hasOverlay = state.isCommandPaletteOpen
         || state.isHelpDialogOpen
         || state.isSessionSwitcherOpen
         || state.isAboutDialogOpen
         || state.runOverviewKey !== null
-        || state.isImagePreviewOpen;
-      // Escape pressed inside a chat pinned in the side panel stops that
-      // chat's session, which the column names on its root; anywhere else it
-      // stops the main chat's.
+        || state.isImagePreviewOpen
+        || hasOpenDropdown();
+      // The composer of a chat pinned in the side panel stops that chat's
+      // session, which the column names on its root; the main composer stops
+      // the main chat's.
       const pinnedColumn = target?.closest<HTMLElement>('[data-chat-column="pinned"]') ?? null;
       const abortSessionId = pinnedColumn ? pinnedColumn.dataset.chatSessionId ?? null : currentSessionId;
       const abortable = pinnedColumn ? pinnedColumn.dataset.chatWorking === 'true' : sessionPhase !== 'idle';
@@ -595,6 +602,7 @@ export const useKeyboardShortcuts = () => {
     window.addEventListener('keydown', handleEscapeKeyDownCapture, true);
     window.addEventListener('keydown', handleActivePrefixKeyDownCapture, true);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleAbortEscapeKeyDown);
     window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyHoldDown, true);
@@ -604,6 +612,7 @@ export const useKeyboardShortcuts = () => {
       window.removeEventListener('keydown', handleEscapeKeyDownCapture, true);
       window.removeEventListener('keydown', handleActivePrefixKeyDownCapture, true);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleAbortEscapeKeyDown);
       window.removeEventListener('blur', handleBlur);
     };
   }, [armAbortPrompt, currentSessionId, dispatcher, effectiveDirectory, resetAbortPriming, selectionToolbarDispatcher, sessionPhase]);

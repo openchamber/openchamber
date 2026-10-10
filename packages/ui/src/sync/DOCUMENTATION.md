@@ -1107,8 +1107,8 @@ chat drives stays the main chat's: the work-status panel and its flags, the
 prompt navigator's keyboard panel, the global timeline dialog, the expanded
 composer preference, and the new-session draft. A pinned column keeps local
 copies where it needs them and leaves the global ones untouched, including on
-mount and unmount. Double Escape stops the session of the column the key was
-pressed in: the column root names its session and whether it runs
+mount and unmount. Double Escape in a column's composer stops that column's
+session: the column root names its session and whether it runs
 (`data-chat-column`, `data-chat-session-id`, `data-chat-working`).
 
 The composer's per-column state (model selection, attachments, pending text
