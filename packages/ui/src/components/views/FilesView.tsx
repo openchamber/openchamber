@@ -10,6 +10,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -896,6 +899,46 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       toolbarDropdownOpenCountRef.current + (open ? 1 : -1),
     );
   }, []);
+
+  // How many secondary buttons the docked toolbar row has room for; the rest
+  // go into its "More actions" menu. Every secondary button is the same 24px
+  // with a 4px gap, so only the row and its fixed groups need measuring. The
+  // file path to the left shrinks first.
+  const [dockedRowEl, setDockedRowEl] = React.useState<HTMLDivElement | null>(null);
+  const [dockedPrimaryEl, setDockedPrimaryEl] = React.useState<HTMLSpanElement | null>(null);
+  const [dockedTailEl, setDockedTailEl] = React.useState<HTMLSpanElement | null>(null);
+  const [dockedSecondaryFit, setDockedSecondaryFit] = React.useState({ all: Number.POSITIVE_INFINITY, withMenu: Number.POSITIVE_INFINITY });
+  React.useLayoutEffect(() => {
+    if (!dockedRowEl || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const slot = 28; // one 24px button plus the 4px gap before it
+    const measure = () => {
+      const rowStyle = window.getComputedStyle(dockedRowEl);
+      const rowGap = Number.parseFloat(rowStyle.columnGap) || 0;
+      const inner = dockedRowEl.clientWidth
+        - (Number.parseFloat(rowStyle.paddingLeft) || 0)
+        - (Number.parseFloat(rowStyle.paddingRight) || 0);
+      const hasPath = dockedRowEl.childElementCount > 1;
+      // The trailing group sits after one more 4px gap.
+      const fixed = (dockedPrimaryEl?.offsetWidth ?? 0) + (dockedTailEl?.offsetWidth ?? 0) + 4;
+      const available = inner - fixed - (hasPath ? rowGap : 0);
+      // `all`: how many fit with no menu button; `withMenu`: how many fit
+      // beside it. Only set on change, so a resize that keeps the counts
+      // does not re-render the editor.
+      const all = Math.max(0, Math.floor(available / slot));
+      const withMenu = Math.max(0, Math.floor((available - slot) / slot));
+      setDockedSecondaryFit((current) => (
+        current.all === all && current.withMenu === withMenu ? current : { all, withMenu }
+      ));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(dockedRowEl);
+    if (dockedPrimaryEl) observer.observe(dockedPrimaryEl);
+    if (dockedTailEl) observer.observe(dockedTailEl);
+    return () => observer.disconnect();
+  }, [dockedPrimaryEl, dockedRowEl, dockedTailEl]);
 
   type TextViewMode = 'view' | 'edit';
   type PreviewViewMode = 'preview' | 'edit';
@@ -4055,7 +4098,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
     const docked = layout === 'docked';
     const saveShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('save_file'));
     const wrapperCls = docked
-      ? 'pointer-events-auto flex flex-wrap items-center gap-1'
+      ? 'pointer-events-auto flex items-center gap-1'
       : 'pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm';
 
     const withTooltip = (label: React.ReactNode, trigger: React.ReactElement) => (
@@ -4069,8 +4112,321 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
       </Tooltip>
     );
 
-    return (
-      <div className={wrapperCls}>
+    // `announce` is for the overflow menu: the menu closes on select, so the
+    // button's check-mark feedback would never be seen there.
+    const copyContents = async (announce: boolean) => {
+      const result = await copyTextToClipboard(fileContent);
+      if (!result.ok) {
+        toast.error(t('filesView.toast.copyFailed'));
+        return;
+      }
+      if (announce) {
+        toast.success(t('filesView.editor.toast.contentsCopied'));
+        return;
+      }
+      setCopiedContent(true);
+      if (copiedContentTimeoutRef.current !== null) {
+        window.clearTimeout(copiedContentTimeoutRef.current);
+      }
+      copiedContentTimeoutRef.current = window.setTimeout(() => {
+        setCopiedContent(false);
+      }, 1200);
+    };
+
+    const copyPath = async (announce: boolean) => {
+      const result = await copyTextToClipboard(displaySelectedPath);
+      if (!result.ok) {
+        toast.error(t('filesView.toast.copyFailed'));
+        return;
+      }
+      if (announce) {
+        toast.success(t('sidebarFilesTree.toast.pathCopied'));
+        return;
+      }
+      setCopiedPath(true);
+      if (copiedPathTimeoutRef.current !== null) {
+        window.clearTimeout(copiedPathTimeoutRef.current);
+      }
+      copiedPathTimeoutRef.current = window.setTimeout(() => {
+        setCopiedPath(false);
+      }, 1200);
+    };
+
+    const downloadSelectedFile = () => {
+      const fn = files.downloadFile;
+      if (fn) void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
+        console.error('Download failed:', error);
+        toast.error(t('sidebarFilesTree.toast.operationFailed'));
+      });
+    };
+
+    const toggleTTS = () => {
+      if (isTTSPlaying) {
+        stopTTS();
+      } else if (fileContent.trim()) {
+        void playTTS(fileContent);
+      }
+    };
+
+    const openInAppMenuItems = (
+      <>
+        {/* Always first: whatever app the OS has for this file type. */}
+        <DropdownMenuItem
+          className="flex items-center gap-2"
+          onClick={() => {
+            if (!selectedFile?.path) return;
+            void openDesktopPath(selectedFile.path).then((opened) => {
+              if (!opened) toast.error(t('sidebarFilesTree.toast.operationFailed'));
+            });
+          }}
+        >
+          <Icon name="external-link" className="size-4" />
+          <span className="typography-ui-label text-foreground">{t('sidebarFilesTree.menu.openInDefaultApp')}</span>
+        </DropdownMenuItem>
+        {openInApps.length > 0 ? <DropdownMenuSeparator /> : null}
+        {openInApps.map((app) => (
+          <DropdownMenuItem
+            key={app.id}
+            className="flex items-center gap-2"
+            onClick={() => void handleOpenInApp(app)}
+          >
+            <OpenInAppListIcon label={app.label} iconDataUrl={app.iconDataUrl} />
+            <span className="typography-ui-label text-foreground">{app.label}</span>
+          </DropdownMenuItem>
+        ))}
+        {openInCacheStale ? (
+          <DropdownMenuItem
+            className="flex items-center gap-2"
+            onClick={() => void loadOpenInApps(true)}
+          >
+            <Icon name="refresh" className="size-4" />
+            <span className="typography-ui-label text-foreground">{t('filesView.editor.refreshApps')}</span>
+          </DropdownMenuItem>
+        ) : null}
+      </>
+    );
+
+    // Secondary actions, most useful first. In the docked toolbar the ones
+    // that do not fit move, from the end, into the "More actions" menu; each
+    // describes both its button and its menu item.
+    type SecondaryAction = {
+      id: string;
+      label: string;
+      icon: React.ReactNode;
+      button: React.ReactElement;
+      onSelect?: () => void;
+      submenu?: React.ReactNode;
+    };
+    const secondaryActions: SecondaryAction[] = [];
+
+    if (!isSelectedNonText) {
+      const wrapLabel = wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap');
+      secondaryActions.push({
+        id: 'wrap',
+        label: wrapLabel,
+        icon: <Icon name="text-wrap" className="size-4" />,
+        onSelect: () => setWrapLines(!wrapLines),
+        button: withTooltip(wrapLabel,
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setWrapLines(!wrapLines)}
+            className={cn(
+              'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
+              wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+            )}
+            title={wrapLabel}
+          >
+            <Icon name="text-wrap" className="size-4" />
+          </Button>
+        ),
+      });
+      if (textViewMode === 'edit') {
+        secondaryActions.push({
+          id: 'go-to-line',
+          label: t('filesView.editor.goToLine'),
+          icon: <Icon name="menu-fold-2" className="size-4" />,
+          onSelect: () => setIsGoToLineOpen(true),
+          button: withTooltip(t('filesView.editor.goToLine'),
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(event) => {
+                setIsGoToLineOpen((open) => !open);
+                event.currentTarget.blur();
+              }}
+              data-go-to-line-toggle
+              className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+              title={t('filesView.editor.goToLine')}
+            >
+              <Icon name="menu-fold-2" className="size-4" />
+            </Button>
+          ),
+        });
+        if (!isMobile) {
+          secondaryActions.push({
+            id: 'symbols',
+            label: t('filesView.editor.symbols'),
+            icon: <Icon name="list-unordered" className="size-4" />,
+            onSelect: () => setIsSymbolsOpen(true),
+            button: withTooltip(t('filesView.editor.symbols'),
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(event) => {
+                  setIsSymbolsOpen((open) => !open);
+                  event.currentTarget.blur();
+                }}
+                data-document-symbols-toggle
+                className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                aria-label={t('filesView.editor.symbols')}
+              >
+                <Icon name="list-unordered" className="size-4" />
+              </Button>
+            ),
+          });
+        }
+      }
+    }
+
+    secondaryActions.push({
+      id: 'open-in-app',
+      label: t('filesView.editor.openInDesktopApp'),
+      icon: <Icon name="file-transfer" className="size-4" />,
+      submenu: openInAppMenuItems,
+      button: (
+        <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    title={t('filesView.editor.openInDesktopApp')}
+                    aria-label={t('filesView.editor.openInDesktopApp')}
+                  >
+                    <Icon name="file-transfer" className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
+            {openInAppMenuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    });
+
+    if (isMarkdown && getMdViewMode() === 'preview' && showMessageTTSButtons) {
+      const ttsLabel = isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud');
+      secondaryActions.push({
+        id: 'tts',
+        label: ttsLabel,
+        icon: <Icon name="volume-up" className="size-4" />,
+        onSelect: toggleTTS,
+        button: (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+                aria-label={ttsLabel}
+                onClick={toggleTTS}
+              >
+                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8}>{ttsLabel}</TooltipContent>
+          </Tooltip>
+        ),
+      });
+    }
+
+    if (canCopy) {
+      secondaryActions.push({
+        id: 'copy-contents',
+        label: t('filesView.editor.copyFileContents'),
+        icon: <Icon name="clipboard" className="size-4" />,
+        onSelect: () => void copyContents(true),
+        button: withTooltip(t('filesView.editor.copyFileContents'),
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void copyContents(false)}
+            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+            title={t('filesView.editor.copyFileContents')}
+            aria-label={t('filesView.editor.copyFileContents')}
+          >
+            {copiedContent ? (
+              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+            ) : (
+              <Icon name="clipboard" className="size-4" />
+            )}
+          </Button>
+        ),
+      });
+    }
+
+    if (canCopyPath) {
+      const copyPathLabel = t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath });
+      secondaryActions.push({
+        id: 'copy-path',
+        label: copyPathLabel,
+        icon: <Icon name="file-copy-2" className="size-4" />,
+        onSelect: () => void copyPath(true),
+        button: withTooltip(copyPathLabel,
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void copyPath(false)}
+            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+            title={copyPathLabel}
+            aria-label={copyPathLabel}
+          >
+            {copiedPath ? (
+              <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
+            ) : (
+              <Icon name="file-copy-2" className="size-4" />
+            )}
+          </Button>
+        ),
+      });
+    }
+
+    if (files.downloadFile) {
+      secondaryActions.push({
+        id: 'download',
+        label: t('filesView.editor.saveFile'),
+        icon: <Icon name="download" className="size-4" />,
+        onSelect: downloadSelectedFile,
+        button: withTooltip(t('filesView.editor.saveFile'),
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={downloadSelectedFile}
+            className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+            title={t('filesView.editor.saveFile')}
+            aria-label={t('filesView.editor.saveFile')}
+          >
+            <Icon name="download" className="size-4" />
+          </Button>
+        ),
+      });
+    }
+
+    const inlineCount = !docked || secondaryActions.length <= dockedSecondaryFit.all
+      ? secondaryActions.length
+      : dockedSecondaryFit.withMenu;
+    const inlineActions = secondaryActions.slice(0, inlineCount);
+    const overflowActions = secondaryActions.slice(inlineCount);
+
+    const primaryControls = (
+      <>
         {canEdit && isEditingFile && (
           <>
             {isSaving ? (
@@ -4113,132 +4469,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           </>
         )}
 
-        <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="size-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                    title={t('filesView.editor.openInDesktopApp')}
-                    aria-label={t('filesView.editor.openInDesktopApp')}
-                  >
-                    <Icon name="file-transfer" className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.openInDesktopApp')}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-56 max-h-[70vh] overflow-y-auto">
-            {/* Always first: whatever app the OS has for this file type. */}
-            <DropdownMenuItem
-              className="flex items-center gap-2"
-              onClick={() => {
-                if (!selectedFile?.path) return;
-                void openDesktopPath(selectedFile.path).then((opened) => {
-                  if (!opened) toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                });
-              }}
-            >
-              <Icon name="external-link" className="size-4" />
-              <span className="typography-ui-label text-foreground">{t('sidebarFilesTree.menu.openInDefaultApp')}</span>
-            </DropdownMenuItem>
-            {openInApps.length > 0 ? <DropdownMenuSeparator /> : null}
-            {openInApps.map((app) => (
-              <DropdownMenuItem
-                key={app.id}
-                className="flex items-center gap-2"
-                onClick={() => void handleOpenInApp(app)}
-              >
-                <OpenInAppListIcon label={app.label} iconDataUrl={app.iconDataUrl} />
-                <span className="typography-ui-label text-foreground">{app.label}</span>
-              </DropdownMenuItem>
-            ))}
-            {openInCacheStale ? (
-              <DropdownMenuItem
-                className="flex items-center gap-2"
-                onClick={() => void loadOpenInApps(true)}
-              >
-                <Icon name="refresh" className="size-4" />
-                <span className="typography-ui-label text-foreground">{t('filesView.editor.refreshApps')}</span>
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {!isSelectedNonText && (
+        {!isSelectedNonText && textViewMode === 'edit' && (
           <>
-            {withTooltip(wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap'),
+            {withTooltip(t('filesView.editor.findInFile'),
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setWrapLines(!wrapLines)}
-                className={cn(
-                  'size-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
-                  wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-                )}
-                title={wrapLines ? t('filesView.editor.disableLineWrap') : t('filesView.editor.enableLineWrap')}
+                onClick={(event) => {
+                  setIsSearchOpen(!isSearchOpen);
+                  event.currentTarget.blur();
+                }}
+                className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                title={t('filesView.editor.findInFile')}
               >
-                <Icon name="text-wrap" className="size-4" />
+                <Icon name="search" className="size-4" />
               </Button>
             )}
-            {textViewMode === 'edit' && (
-              <>
-                {withTooltip(t('filesView.editor.findInFile'),
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      setIsSearchOpen(!isSearchOpen);
-                      event.currentTarget.blur();
-                    }}
-                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                    title={t('filesView.editor.findInFile')}
-                  >
-                    <Icon name="search" className="size-4" />
-                  </Button>
-                )}
-                {withTooltip(t('filesView.editor.goToLine'),
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      setIsGoToLineOpen((open) => !open);
-                      event.currentTarget.blur();
-                    }}
-                    data-go-to-line-toggle
-                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                    title={t('filesView.editor.goToLine')}
-                  >
-                    <Icon name="menu-fold-2" className="size-4" />
-                  </Button>
-                )}
-                {!isMobile && withTooltip(t('filesView.editor.symbols'),
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      setIsSymbolsOpen((open) => !open);
-                      event.currentTarget.blur();
-                    }}
-                    data-document-symbols-toggle
-                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-                    aria-label={t('filesView.editor.symbols')}
-                  >
-                    <Icon name="list-unordered" className="size-4" />
-                  </Button>
-                )}
-                <GoToLineDialog
-                  open={isGoToLineOpen}
-                  onOpenChange={setIsGoToLineOpen}
-                  view={editorViewRef.current}
-                  variant="inline"
-                />
-              </>
-            )}
+            {/* Rendered with search, not with its own button, so it still
+                opens when that button has moved into the overflow menu. */}
+            <GoToLineDialog
+              open={isGoToLineOpen}
+              onOpenChange={setIsGoToLineOpen}
+              view={editorViewRef.current}
+              variant="inline"
+            />
           </>
         )}
 
@@ -4331,31 +4585,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
           )
         )}
 
-        {isMarkdown && getMdViewMode() === 'preview' && showMessageTTSButtons && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
-                aria-label={isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
-                onClick={() => {
-                  if (isTTSPlaying) {
-                    stopTTS();
-                  } else if (fileContent.trim()) {
-                    void playTTS(fileContent);
-                  }
-                }}
-              >
-                <Icon name="volume-up" className={cn('size-4', isTTSPlaying && 'animate-pulse text-[var(--primary-text)]')} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8}>
-              {isTTSPlaying ? t('filesView.tts.stopSpeaking') : t('filesView.tts.readAloud')}
-            </TooltipContent>
-          </Tooltip>
-        )}
-
         {hasCanvas && (
           <>
             {/* Bytes have no source view. */}
@@ -4441,123 +4670,103 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             </Button>
           )
         )}
+      </>
+    );
 
-        {canCopy && (
-          withTooltip(t('filesView.editor.copyFileContents'),
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const result = await copyTextToClipboard(fileContent);
-                if (result.ok) {
-                  setCopiedContent(true);
-                  if (copiedContentTimeoutRef.current !== null) {
-                    window.clearTimeout(copiedContentTimeoutRef.current);
-                  }
-                  copiedContentTimeoutRef.current = window.setTimeout(() => {
-                    setCopiedContent(false);
-                  }, 1200);
-                } else {
-                  toast.error(t('filesView.toast.copyFailed'));
-                }
-              }}
-              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.copyFileContents')}
-              aria-label={t('filesView.editor.copyFileContents')}
-            >
-              {copiedContent ? (
-                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-              ) : (
-                <Icon name="clipboard" className="size-4" />
-              )}
-            </Button>
-          )
-        )}
+    const fullscreenControl = exitFullscreenOnly ? (
+      withTooltip(t('filesView.editor.exitFullscreen'),
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => changeFullscreen(false)}
+          className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+          title={t('filesView.editor.exitFullscreen')}
+          aria-label={t('filesView.editor.exitFullscreen')}
+        >
+          <Icon name="fullscreen-exit" className="size-4" />
+        </Button>
+      )
+    ) : (!isMobile && mode === 'full' ? (
+      withTooltip(isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen'),
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => changeFullscreen(!isFullscreen)}
+          className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+          title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+          aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+        >
+          {isFullscreen ? (
+            <Icon name="fullscreen-exit" className="size-4" />
+          ) : (
+            <Icon name="fullscreen" className="size-4" />
+          )}
+        </Button>
+      )
+    ) : null);
 
-        {canCopyPath && (
-          withTooltip(t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath }),
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                const result = await copyTextToClipboard(displaySelectedPath);
-                if (result.ok) {
-                  setCopiedPath(true);
-                  if (copiedPathTimeoutRef.current !== null) {
-                    window.clearTimeout(copiedPathTimeoutRef.current);
-                  }
-                  copiedPathTimeoutRef.current = window.setTimeout(() => {
-                    setCopiedPath(false);
-                  }, 1200);
-                } else {
-                  toast.error(t('filesView.toast.copyFailed'));
-                }
-              }}
-              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-              aria-label={t('filesView.editor.copyFilePathTitle', { path: displaySelectedPath })}
-            >
-              {copiedPath ? (
-                <Icon name="check" className="size-4 text-[color:var(--status-success)]" />
-              ) : (
-                <Icon name="file-copy-2" className="size-4" />
-              )}
-            </Button>
-          )
-        )}
+    const overflowMenu = overflowActions.length > 0 ? (
+      <DropdownMenu onOpenChange={handleToolbarDropdownOpenChange}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                  aria-label={t('filesView.editor.moreActions')}
+                >
+                  <Icon name="more" className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{t('filesView.editor.moreActions')}</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-56">
+          {overflowActions.map((action) => action.submenu ? (
+            <DropdownMenuSub key={action.id}>
+              <DropdownMenuSubTrigger className="flex items-center gap-2">
+                {action.icon}
+                <span className="typography-ui-label text-foreground">{action.label}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-56 max-h-[70vh] overflow-y-auto">
+                {action.submenu}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          ) : (
+            <DropdownMenuItem key={action.id} className="flex items-center gap-2" onClick={action.onSelect}>
+              {action.icon}
+              <span className="min-w-0 truncate typography-ui-label text-foreground">{action.label}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : null;
 
-        {files.downloadFile && (
-          withTooltip(t('filesView.editor.saveFile'),
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                const fn = files.downloadFile;
-                if (fn) void fn(selectedFile.path, selectedFileReadOptions).catch((error) => {
-                  console.error('Download failed:', error);
-                  toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                });
-              }}
-              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.saveFile')}
-              aria-label={t('filesView.editor.saveFile')}
-            >
-              <Icon name="download" className="size-4" />
-            </Button>
-          )
-        )}
+    if (!docked) {
+      return (
+        <div className={wrapperCls}>
+          {primaryControls}
+          {secondaryActions.map((action) => <React.Fragment key={action.id}>{action.button}</React.Fragment>)}
+          {fullscreenControl}
+        </div>
+      );
+    }
 
-        {exitFullscreenOnly ? (
-          withTooltip(t('filesView.editor.exitFullscreen'),
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => changeFullscreen(false)}
-              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={t('filesView.editor.exitFullscreen')}
-              aria-label={t('filesView.editor.exitFullscreen')}
-            >
-              <Icon name="fullscreen-exit" className="size-4" />
-            </Button>
-          )
-        ) : (!isMobile && mode === 'full' && (
-          withTooltip(isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen'),
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => changeFullscreen(!isFullscreen)}
-              className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
-              title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-              aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
-            >
-              {isFullscreen ? (
-                <Icon name="fullscreen-exit" className="size-4" />
-              ) : (
-                <Icon name="fullscreen" className="size-4" />
-              )}
-            </Button>
-          )
-        ))}
+    // The leading and trailing groups are measured (see `dockedSecondaryFit`)
+    // to work out how many secondary buttons the row has room for.
+    return (
+      <div className={wrapperCls}>
+        <span ref={setDockedPrimaryEl} className="flex shrink-0 items-center gap-1 empty:hidden">
+          {primaryControls}
+        </span>
+        {inlineActions.map((action) => <React.Fragment key={action.id}>{action.button}</React.Fragment>)}
+        {overflowMenu}
+        <span ref={setDockedTailEl} className="flex shrink-0 items-center gap-1 empty:hidden">
+          {fullscreenControl}
+        </span>
       </div>
     );
   };
@@ -4804,9 +5013,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         </div>
         ) : null}
 
-        {/* Row 2: Docked editor toolbar. */}
+        {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
+            the context panel's file tree draws beside it, so the two line up. */}
         {selectedFile ? (
-          <div className="flex min-w-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-3 py-1">
+          <div ref={setDockedRowEl} className="flex h-10 min-w-0 shrink-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
             {/* Mobile hosts already show the file name in their own header;
                 a truncated duplicate here just eats toolbar width. */}
             {displaySelectedPath && !isMobile ? (

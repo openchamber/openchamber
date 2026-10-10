@@ -1498,71 +1498,55 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
 
   return (
     <section ref={treeSectionRef} className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="flex flex-col gap-2 border-b border-border/40 px-3 py-2">
-        <div className="flex items-center justify-end gap-2">
-        {canCreateFile && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-                  className="w-7 p-0 flex-shrink-0"
-                  title={t('sidebarFilesTree.actions.newFileTitle')}
-                  aria-label={t('sidebarFilesTree.actions.newFileTitle')}
-                >
-                  <Icon name="file-add" className="h-4 w-4" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFileTitle')}</TooltipContent>
-          </Tooltip>
-        )}
-        {canCreateFolder && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-                  className="w-7 p-0 flex-shrink-0"
-                  title={t('sidebarFilesTree.actions.newFolderTitle')}
-                  aria-label={t('sidebarFilesTree.actions.newFolderTitle')}
-                >
-                  <Icon name="folder-add" className="h-4 w-4" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.newFolderTitle')}</TooltipContent>
-          </Tooltip>
-        )}
-        {canUpload && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex flex-shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => pickFiles(root)}
-                  disabled={!root || isUploading}
-                  className="w-7 p-0 flex-shrink-0"
-                  title={t('sidebarFilesTree.actions.uploadFilesTitle')}
-                  aria-label={t('sidebarFilesTree.actions.uploadFilesTitle')}
-                >
-                  <Icon name="upload-2" className="h-4 w-4" />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.uploadFilesTitle')}</TooltipContent>
-          </Tooltip>
-        )}
-        <GitignoredToggleButton className="h-8 w-8" />
+      {/* The action band matches the file editor's docked toolbar (40px,
+          24px buttons) so the two read as one row across the panel. */}
+      <div className="flex flex-col border-b border-border/40">
+        <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
+        {/* New file, new folder and upload share one "+" menu, so the band
+            keeps four buttons and fits even the narrowest tree. */}
+        {canCreateFile || canCreateFolder || canUpload ? (
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex flex-shrink-0">
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="size-6 p-0 flex-shrink-0"
+                      aria-label={t('sidebarFilesTree.actions.addMenuTitle')}
+                    >
+                      <Icon name={isUploading ? 'loader-4' : 'add'} className={cn('h-4 w-4', isUploading && 'animate-spin')} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.addMenuTitle')}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="min-w-[180px]">
+              {canCreateFile ? (
+                <DropdownMenuItem onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}>
+                  <Icon name="file-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFile')}
+                </DropdownMenuItem>
+              ) : null}
+              {canCreateFolder ? (
+                <DropdownMenuItem onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}>
+                  <Icon name="folder-add" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.newFolder')}
+                </DropdownMenuItem>
+              ) : null}
+              {canUpload ? (
+                <DropdownMenuItem disabled={!root || isUploading} onClick={() => pickFiles(root)}>
+                  <Icon name="upload-2" className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.menu.uploadFiles')}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        <GitignoredToggleButton className="size-6" />
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex flex-shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="w-7 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
+              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-6 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
                 <Icon name="refresh" className="h-4 w-4" />
               </Button>
             </span>
@@ -1578,7 +1562,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                 onClick={() => {
                   if (root) collapseAllExpandedPaths(root);
                 }}
-                className="w-7 p-0 flex-shrink-0"
+                className="size-6 p-0 flex-shrink-0"
                 title={t('sidebarFilesTree.actions.collapseAllTitle')}
                 aria-label={t('sidebarFilesTree.actions.collapseAllTitle')}
               >
@@ -1589,8 +1573,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
           <TooltipContent side="bottom" sideOffset={6}>{t('sidebarFilesTree.actions.collapseAllTitle')}</TooltipContent>
         </Tooltip>
         </div>
-        <div className="relative min-w-0">
-          <Icon name="search" className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />
+        <div className="relative min-w-0 px-2 py-2">
+          <Icon name="search" className="pointer-events-none absolute left-4 top-4 h-4 w-4 text-muted-foreground" />
           <Input
             ref={searchInputRef}
             value={searchQuery}
@@ -1602,7 +1586,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
             <button
               type="button"
               aria-label={t('sidebarFilesTree.search.clearAria')}
-              className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
+              className="absolute right-4 top-4 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
               onClick={() => {
                 setSearchQuery('');
                 searchInputRef.current?.focus();
