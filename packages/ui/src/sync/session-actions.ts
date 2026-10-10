@@ -515,6 +515,25 @@ async function fetchSessionMessages(sessionId: string, directory?: string | null
 }
 
 /**
+ * Finds one message by id, following the cursor until it appears or the
+ * history runs out. The local store holds only the newest page, so a revert
+ * target older than that must be searched for across pages, not assumed gone.
+ */
+async function findSessionMessageById(sessionId: string, messageId: string, directory?: string | null): Promise<Message | null> {
+  const seenCursors = new Set<string>()
+  let cursor: string | undefined
+  for (;;) {
+    const page = await opencodeClient.getSessionMessages(sessionId, cursor ? { cursor } : undefined, directory)
+    const found = page.items.map(({ info }) => info).find((message) => message.id === messageId)
+    if (found) return found
+    const next = page.cursor.next
+    if (!next || seenCursors.has(next)) return null
+    seenCursors.add(next)
+    cursor = next
+  }
+}
+
+/**
  * From when descendants are reverted along with a cut at `target`. A subagent
  * run's report lands after its child already worked, so reverting the run
  * reverts the child from its start; any other target cuts at its own time.
@@ -2487,7 +2506,7 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   const localTarget = state.message[sessionId]?.find((message) => message.id === messageId)
   const targetMessage = localTarget
-    ?? (await fetchSessionMessages(sessionId, directory)).find((message) => message.id === messageId)
+    ?? (await findSessionMessageById(sessionId, messageId, directory))
   if (!targetMessage) throw new Error(`Cannot revert session: message ${messageId} was not found`)
 
   // Abort if busy before mutating session state

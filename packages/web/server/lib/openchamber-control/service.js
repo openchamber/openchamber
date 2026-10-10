@@ -389,10 +389,18 @@ export const createOpenChamberControlService = (dependencies) => {
   const resolveSessionDirectory = async (sessionID) => {
     try {
       const client = await getClient();
-      const response = await client.session.list({});
-      const sessions = Array.isArray(response?.data) ? response.data : [];
-      const session = sessions.find((item) => item?.id === sessionID);
-      return asNonEmptyString(session?.location?.directory) || null;
+      const seenCursors = new Set();
+      let cursor;
+      for (;;) {
+        const response = await client.session.list(cursor ? { cursor } : {});
+        const sessions = Array.isArray(response?.data) ? response.data : [];
+        const session = sessions.find((item) => item?.id === sessionID);
+        if (session) return asNonEmptyString(session?.location?.directory) || null;
+        const next = asNonEmptyString(response?.cursor?.next);
+        if (!next || seenCursors.has(next)) return null;
+        seenCursors.add(next);
+        cursor = next;
+      }
     } catch {
       return null;
     }
@@ -785,15 +793,42 @@ export const createOpenChamberControlService = (dependencies) => {
         const client = await getClient(directory);
         if (action === 'session.list') {
           const limit = positiveInteger(input.limit, 10, 'limit');
-          const response = await client.session.list(directory ? { directory } : {});
-          // Archive is OpenChamber state; overlay it so callers keep reading
-          // it off the session the way OpenCode used to report it.
-          let sessions = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(async (session) => {
-            const archived = await archivedAt(session?.id);
-            return archived ? { ...session, time: { ...session.time, archived } } : session;
-          }));
-          if (input.all !== true) sessions = sessions.filter((session) => !session?.time?.archived);
-          sessions = sessions.slice(0, limit);
+          // Session reads are cursor-paginated: one upstream page is not the
+          // collection. Collect only until the limit is satisfied, skip ids a
+          // repeated page already contributed, and stop on a cursor seen twice
+          // so a pathological server cannot spin the walk.
+          const collected = [];
+          const seenCursors = new Set();
+          const seenSessionIds = new Set();
+          let cursor;
+          for (;;) {
+            const listInput = {};
+            if (directory) listInput.directory = directory;
+            if (cursor) listInput.cursor = cursor;
+            const response = await client.session.list(listInput);
+            // Archive is OpenChamber state; overlay it so callers keep reading
+            // it off the session the way OpenCode used to report it.
+            const page = await Promise.all((Array.isArray(response?.data) ? response.data : []).map(async (session) => {
+              const archived = await archivedAt(session?.id);
+              return archived ? { ...session, time: { ...session.time, archived } } : session;
+            }));
+            for (const session of page) {
+              const id = asNonEmptyString(session?.id);
+              if (id) {
+                if (seenSessionIds.has(id)) continue;
+                seenSessionIds.add(id);
+              }
+              if (input.all !== true && session?.time?.archived) continue;
+              collected.push(session);
+              if (collected.length >= limit) break;
+            }
+            if (collected.length >= limit) break;
+            const next = asNonEmptyString(response?.cursor?.next);
+            if (!next || page.length === 0 || seenCursors.has(next)) break;
+            seenCursors.add(next);
+            cursor = next;
+          }
+          let sessions = collected.slice(0, limit);
           if (input.withStatus === true) {
             // One global call now: v2 reports active sessions across directories.
             const statuses = await activeSessions(client).catch(() => null);

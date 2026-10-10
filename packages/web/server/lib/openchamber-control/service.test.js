@@ -234,6 +234,48 @@ describe('OpenChamber control service', () => {
     expect(sessionService.send).toHaveBeenCalledWith('ses_target', { directory: '/repo/worktrees/target', prompt: 'Continue' });
   });
 
+  it('finds the target session directory on a later session.list page', async () => {
+    const { service, client } = createService();
+    client.session.list
+      .mockResolvedValueOnce({ data: [{ id: 'ses_early', location: { directory: '/repo' } }], cursor: { next: 'page-2' } })
+      .mockResolvedValueOnce({ data: [{ id: 'ses_target', location: { directory: '/repo/worktrees/target' } }], cursor: { next: null } });
+
+    await expect(service.resolveSessionDirectory('ses_target')).resolves.toBe('/repo/worktrees/target');
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { cursor: 'page-2' });
+    expect(client.session.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps paging session.list until the requested limit is satisfied', async () => {
+    const { service, client } = createService();
+    client.session.list
+      .mockResolvedValueOnce({ data: [{ id: 'ses_1', location: { directory: '/repo' }, time: {} }], cursor: { next: 'page-2' } })
+      .mockResolvedValueOnce({ data: [{ id: 'ses_2', location: { directory: '/other' }, time: {} }], cursor: { next: null } });
+
+    await expect(service.execute('session.list', { limit: 2 })).resolves.toEqual({
+      sessions: [
+        { id: 'ses_1', location: { directory: '/repo' }, time: {} },
+        { id: 'ses_2', location: { directory: '/other' }, time: {} },
+      ],
+      limit: 2,
+      directory: null,
+      archived: 'excluded',
+    });
+    expect(client.session.list).toHaveBeenNthCalledWith(2, { cursor: 'page-2' });
+  });
+
+  it('stops paging the session list when a cursor repeats', async () => {
+    const { service, client } = createService();
+    client.session.list.mockResolvedValue({
+      data: [{ id: 'ses_1', location: { directory: '/repo' }, time: {} }],
+      cursor: { next: 'loop' },
+    });
+
+    const { sessions } = await service.execute('session.list', { limit: 10 });
+
+    expect(sessions).toEqual([{ id: 'ses_1', location: { directory: '/repo' }, time: {} }]);
+    expect(client.session.list).toHaveBeenCalledTimes(2);
+  });
+
   it('falls back to the context directory when the session is not in the global list', async () => {
     const { service, sessionService } = createService();
     sessionService.send.mockResolvedValue({ sessionId: 'ses_unknown', directory: '/repo', promptDispatched: true });

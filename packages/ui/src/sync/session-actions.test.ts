@@ -11,6 +11,9 @@ let formReplyError: unknown | null = null
 let formCancelError: unknown | null = null
 let permissionReplyError: unknown | null = null
 const sessionMessageRecords = new Map<string, Array<{ info: Message; parts: Part[] }>>()
+// Optional cursor pages for getSessionMessages: the request's cursor selects
+// the page by index, so a paged lookup can be pinned without the flat records.
+let cursorMessagePages: Array<{ items: Array<{ info: Message; parts: Part[] }>; cursor: { next?: string } }> | null = null
 const sessionRecords = new Map<string, Session>()
 const failingRevertSessionIds = new Set<string>()
 let sessionDeleteError: unknown | null = null
@@ -69,7 +72,9 @@ mock.module("@/lib/opencode/client", () => ({
       options?: { limit?: number; cursor?: string },
       directory?: string | null,
     ) => {
-      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit } })
+      replyCalls.push({ method: "session.messages", params: { sessionID: sessionId, directory, limit: options?.limit, cursor: options?.cursor } })
+      const page = cursorMessagePages ? cursorMessagePages[Number(options?.cursor ?? "0")] : undefined
+      if (page) return page
       return { items: sessionMessageRecords.get(sessionId) ?? [], cursor: {} }
     }),
     createSession: mock(async (params: Record<string, unknown>, directory?: string | null): Promise<Session> => {
@@ -2636,6 +2641,51 @@ describe("revertToMessage passes session directory", () => {
       "idle-child",
       "root",
     ])
+  })
+})
+
+describe("revertToMessage paged message lookup", () => {
+  beforeEach(() => {
+    replyCalls.length = 0
+    sessionMessageRecords.clear()
+    sessionRecords.clear()
+    failingRevertSessionIds.clear()
+    cursorMessagePages = null
+    Object.assign(inputState, {
+      pendingInputText: "",
+      pendingInputMode: "replace",
+      attachedFiles: [],
+    })
+  })
+
+  test("stages the revert when the target message is only on a later page", async () => {
+    const session = sessionFixture("session-a")
+    sessionRecords.set(session.id, session)
+    const newer: Message = { id: "msg_newer", sessionID: "session-a", role: "user", time: { created: 3 } }
+    const older: Message = { id: "msg_old", sessionID: "session-a", role: "user", time: { created: 1 } }
+    const sessionStore = createStore({}, {
+      session: [session],
+      message: { "session-a": [newer] },
+      part: {},
+    })
+    const currentStore = createStore({})
+    const childStores = createChildStores([
+      ["/test/project", sessionStore],
+      ["/current/project", currentStore],
+    ])
+    // The local store holds only the newest page; the target sits behind a cursor.
+    cursorMessagePages = [
+      { items: [{ info: newer, parts: [] }], cursor: { next: "1" } },
+      { items: [{ info: older, parts: [] }], cursor: {} },
+    ]
+    const { setActionRefs, revertToMessage } = await import("./session-actions")
+    setActionRefs(childStores, () => "/current/project")
+
+    await revertToMessage("session-a", "msg_old")
+
+    expect(replyCalls.find((call) => call.method === "session.revert.stage")?.params.messageID).toBe("msg_old")
+    expect(sessionStore.getState().session[0]?.revert?.messageID).toBe("msg_old")
+    expect(replyCalls.filter((call) => call.method === "session.messages")).toHaveLength(2)
   })
 })
 
