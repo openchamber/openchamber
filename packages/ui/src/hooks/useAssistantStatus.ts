@@ -1,7 +1,7 @@
 import React from 'react';
 import { useChatSessionSelection } from '@/components/chat/chatColumnSession';
 import type { Message, ModelRef, Part, ReasoningPart, TextPart, ToolPart } from '@/lib/opencode/model';
-import { executeToolCalls, isExecuteTool, isShellTool, isSubagentTool } from '@/lib/opencode/tools';
+import { executeHasBackgroundableWork, executeToolCalls, isExecuteTool, isShellTool, isSubagentTool } from '@/lib/opencode/tools';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -188,11 +188,12 @@ const getStableWorkingPhrase = (key: string): string => {
  * waits for a permission), and a background call settles at once, so neither
  * counts.
  */
-export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => (
-    part.type === 'tool'
-    && part.state?.status === 'running'
-    && (isShellTool(part.tool) || isSubagentTool(part.tool))
-));
+export const hasBackgroundableWork = (parts: readonly Part[]): boolean => parts.some((part) => {
+    if (part.type !== 'tool' || part.state?.status !== 'running') return false;
+    if (isShellTool(part.tool) || isSubagentTool(part.tool)) return true;
+    if (!isExecuteTool(part.tool)) return false;
+    return executeHasBackgroundableWork(part.state.metadata);
+});
 
 export const createParsedStatus = (parts: Part[], genericKey: string): ParsedStatusResult => {
     const runningToolCounts = countRunningToolCalls(parts);
