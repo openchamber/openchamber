@@ -87,8 +87,18 @@ const installFixtureDom = () => {
   return { dom, restore };
 };
 
-export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline') {
+export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' | 'cold-single', layout: 'inline' | 'side-by-side' = 'inline', wrapLines = false) {
   const { dom, restore } = installFixtureDom();
+  // happy-dom does no layout. Give the code column and every hunk marker the
+  // geometry Chromium reports: markers mid-column, and no box at all for a
+  // column Pierre lays out as `display: contents` (wrapped split view).
+  const measure = dom.Element.prototype.getBoundingClientRect;
+  dom.Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this.matches('[data-hunk-action-target]')) return new dom.DOMRect(0, 300, 600, 0);
+    if (this.matches('pre[data-diff-type="split"][data-overflow="wrap"] [data-code]')) return new dom.DOMRect();
+    if (this.matches('[data-code], [data-content]')) return new dom.DOMRect(0, 100, 600, 1800);
+    return measure.call(this);
+  };
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
   const { RuntimeAPIContext } = await import('@/contexts/runtimeAPIContext');
@@ -151,7 +161,7 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
   document.body.append(container);
   const root = createRoot(container);
   const render = () => act(async () => root.render(<I18nProvider><SyncProvider sdk={opencodeClient.getSdkClient()} directory=""><RuntimeAPIContext.Provider value={apis}>
-    <MultiFileDiffEntry directory="/repo" file={file} layout={layout} wrapLines={false} isSelected={false}
+    <MultiFileDiffEntry directory="/repo" file={file} layout={layout} wrapLines={wrapLines} isSelected={false}
       isExpanded isMounted onSelect={() => {}} onExpandedChange={() => {}} registerSectionRef={() => {}}
       showOpenInEditorAction onOpenInEditor={(_path, diff) => { openedPatch = diff?.patch ?? null; }}
       hunkActionsEnabled={!historical} loadFullFiles={fullContext}
@@ -176,6 +186,8 @@ export async function exerciseDiffHunkActions(snapshotCase?: 'cold' | 'cached' |
           expect(target?.style.height).toBe('0px');
           expect(slot?.closest('[data-line-annotation]')).not.toBeNull();
           if (layout === 'side-by-side') expect(slot?.closest('[data-additions]')).not.toBeNull();
+          // The control floats 4px below its marker, unclamped mid-file.
+          expect(target?.style.getPropertyValue('--oc-hunk-action-offset')).toBe('4px');
         }
         return;
       }

@@ -10,6 +10,7 @@ test('full-context and action reads must describe the same file version', () => 
 test('cached action patches cannot be paired with a newer full-context display', () => exerciseDiffHunkActions('cached'));
 test('single-hunk inline actions require matching display and action versions too', () => exerciseDiffHunkActions('cold-single'));
 test('split-view hunk controls occupy the matching rendered annotation rows', () => exerciseDiffHunkActions(undefined, 'side-by-side'));
+test('wrapped split-view hunk controls sit at their hunk', () => exerciseDiffHunkActions(undefined, 'side-by-side', true));
 test('patch-only diffs offer the lines after the last hunk and expand them from the full file', () => exerciseTrailingContextExpansion());
 test('split view puts the trailing row in the left column', () => exerciseTrailingContextExpansion('side-by-side'));
 test('mobile commit diffs expand collapsed context from the full file and survive a failed read', () => exerciseMobileComparisonContextExpansion());

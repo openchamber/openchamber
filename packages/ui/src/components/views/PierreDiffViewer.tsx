@@ -925,6 +925,9 @@ const PierreDiffViewerBody: React.FC<Omit<PierreDiffViewerProps, 'hideWhitespace
           let bounds = columns.get(column);
           if (!bounds) {
             bounds = column.getBoundingClientRect();
+            // Wrapped split view lays the column out as `display: contents`,
+            // which has no box. Its content grid spans the same rows.
+            if (bounds.height === 0) bounds = slot.closest('[data-content]')?.getBoundingClientRect() ?? bounds;
             columns.set(column, bounds);
           }
           const markerTop = target.getBoundingClientRect().top;
