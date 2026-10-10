@@ -324,7 +324,7 @@ describe('global session polling root coverage', () => {
   for (const [rootName, sourcePath] of rootSources) {
     test(`${rootName} mounts useGlobalSessionsPolling`, () => {
       const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
-      expect(source).toContain('useGlobalSessionsPolling(true)');
+      expect(/^\s*useGlobalSessionsPolling\(true\);/m.test(source)).toBe(true);
     });
   }
 });

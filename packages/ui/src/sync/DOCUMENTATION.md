@@ -330,9 +330,9 @@ Each full app root owns one global polling lifecycle through
 root, and the VS Code chat root load once when mounted and schedule the next
 refresh 45 seconds after completion, so sessions created by another OpenCode
 process are discovered without relying on the sidebar or native tray being
-visible. Before the first successful global
-load, failures receive at most three earlier retries after 1, 2, and 4 seconds;
-then the normal cadence continues. Store error status, including a chats-root
+visible. Before the first successful global load, failures receive at most
+three earlier retries after 1, 2, and 4 seconds; then the normal cadence
+continues. Store error status, including a chats-root
 lookup failure, drives recovery because the loader returns retained data on
 failure. Runtime changes retire the old timer and start a fresh load immediately;
 late completions cannot restart the old timer or seed the new runtime.
