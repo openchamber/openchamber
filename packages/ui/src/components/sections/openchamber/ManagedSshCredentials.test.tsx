@@ -57,6 +57,7 @@ const mount = async (initialSelection = '') => {
   const apis: RuntimeAPIs = {
     runtime: { platform: 'web', isVSCode: false, isDesktop: false }, git: gitApi,
     get sourceControl() { return unused(); }, get terminal() { return unused(); }, get files() { return unused(); },
+    openCodeProjectImportPrompt: { claim: unused },
     get settings() { return unused(); }, get permissions() { return unused(); }, get notifications() { return unused(); },
   };
   let view: React.ReactNode;
