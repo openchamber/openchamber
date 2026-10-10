@@ -16,4 +16,27 @@ describe('terminal replay history', () => {
   it('preserves ordinary OSC titles and split UTF-16 text', () => {
     expect(sanitizeTerminalHistoryChunk('', '\u001b]0;title\u0007ok')).toEqual({ visible: '\u001b]0;title\u0007ok', pending: '' });
   });
+
+  it('passes a clean chunk of ordinary text through unchanged', () => {
+    const line = 'build result source/file.ts 0123456789\r\n';
+    expect(sanitizeTerminalHistoryChunk('', line)).toEqual({ visible: line, pending: '' });
+  });
+
+  it('keeps ordinary runs between display controls in one piece', () => {
+    const input = 'line1\r\n\u001b[1mbold\u001b[0m\r\nline2 tail';
+    expect(sanitizeTerminalHistoryChunk('', input)).toEqual({ visible: input, pending: '' });
+  });
+
+  it('strips C1 device queries and keeps C1 string controls', () => {
+    expect(sanitizeTerminalHistoryChunk('', 'a\u009b6nb')).toEqual({ visible: 'ab', pending: '' });
+    expect(sanitizeTerminalHistoryChunk('', 'x\u009d10;?\u009cy\u009d0;title\u009cz')).toEqual({
+      visible: 'xy\u009d0;title\u009cz',
+      pending: '',
+    });
+  });
+
+  it('keeps DCS and APC string controls in the replay text', () => {
+    const input = 'a\u00901;2|data\u009cb\u001b[_apc\u0007c';
+    expect(sanitizeTerminalHistoryChunk('', input)).toEqual({ visible: input, pending: '' });
+  });
 });

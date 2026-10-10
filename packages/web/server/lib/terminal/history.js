@@ -25,8 +25,21 @@ const findEscapeEnd = (input, start) => {
   return input.charCodeAt(cursor) >= 0x30 && input.charCodeAt(cursor) <= 0x7e ? cursor + 1 : start + 1;
 };
 
+// All six control-string introducers: ESC, DCS, CSI, OSC, PM, and APC. Replay
+// history has to notice every one, or a C1 query byte leaks into the replay.
+const isControlIntroducer = (code) => code === 0x1b || code === 0x90 || code === 0x9b || code === 0x9d || code === 0x9e || code === 0x9f;
+const findControlIntroducer = (input, start) => {
+  for (let cursor = start; cursor < input.length; cursor += 1) {
+    if (isControlIntroducer(input.charCodeAt(cursor))) return cursor;
+  }
+  return -1;
+};
+
 export const sanitizeTerminalHistoryChunk = (pending, data) => {
   const input = `${pending}${data}`;
+  // With no carried state and no introducer anywhere, the chunk is ordinary
+  // text and replay-safe as it stands; hand it back instead of rebuilding it.
+  if (!pending && findControlIntroducer(input, 0) === -1) return { visible: input, pending: '' };
   let visible = '';
   let index = 0;
   while (index < input.length) {
@@ -76,8 +89,15 @@ export const sanitizeTerminalHistoryChunk = (pending, data) => {
       index = end;
       continue;
     }
-    visible += input[index];
-    index += 1;
+    // Ordinary text: copy the whole run up to the next introducer in one
+    // slice instead of appending one character at a time.
+    const runEnd = findControlIntroducer(input, index + 1);
+    if (runEnd === -1) {
+      visible += input.slice(index);
+      break;
+    }
+    visible += input.slice(index, runEnd);
+    index = runEnd;
   }
   return { visible, pending: '' };
 };
