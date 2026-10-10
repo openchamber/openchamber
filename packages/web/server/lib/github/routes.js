@@ -1107,7 +1107,12 @@ export function registerGitHubRoutes(app, options = {}) {
   };
 
   const isGitHubAuthInvalid = (error) => error?.status === 401;
-  const isGitHubResourceUnavailable = (error) => error?.status === 403 || error?.status === 404;
+  // GitHub's own words for a refusal, without the documentation URL Octokit
+  // appends to the error message.
+  const gitHubRefusalMessage = (error) => {
+    const message = error?.response?.data?.message;
+    return isProviderString(message) && message.trim() ? message : error.message;
+  };
 
   app.get('/api/source-control/github/capabilities', (req, res) => {
     const requestedInstance = typeof req.query?.instance === 'string' ? req.query.instance.trim() : '';
@@ -1737,7 +1742,12 @@ export function registerGitHubRoutes(app, options = {}) {
         }
         return res.status(503).json({ error: wasRateLimited ? 'GitHub rate limited' : 'GitHub request timed out' });
       }
-      if (isGitHubResourceUnavailable(error)) {
+      // A 403 is GitHub refusing this account, such as an organization that
+      // restricts OAuth apps; the user needs its message to fix access.
+      if (error?.status === 403) {
+        return res.status(403).json({ error: gitHubRefusalMessage(error) });
+      }
+      if (error?.status === 404) {
         return res.json({
           connected: true,
           repo: null,

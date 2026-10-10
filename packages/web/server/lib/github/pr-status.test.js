@@ -384,6 +384,60 @@ describe('resolveGitHubPrStatus for a contributor fork checkout', () => {
   });
 });
 
+describe('resolveGitHubPrStatus when GitHub refuses the repository', () => {
+  let directory;
+
+  beforeEach(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-status-refused-'));
+    git(directory, 'init', '-q', '-b', 'feature');
+    git(directory, 'remote', 'add', 'origin', 'https://github.com/acme/app.git');
+  });
+
+  afterEach(async () => {
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  const restricted = 'Although you appear to have the correct authorization credentials, the `acme` organization has enabled OAuth App access restrictions.';
+  const httpError = (status, message) => Object.assign(new Error(`${message} - https://docs.github.com/`), {
+    status,
+    response: { status, data: { message } },
+  });
+  const octokit = (token, get) => ({
+    openChamberCacheIdentity: getOctokitCacheIdentity(createOctokit(token, `${token}-account`)),
+    rest: { repos: { get }, pulls: { list: async () => ({ data: [] }) } },
+  });
+
+  test('a 403 on the only remote reaches the caller with GitHub\'s message', async () => {
+    const client = octokit('refused-token', async () => { throw httpError(403, restricted); });
+
+    const failure = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true })
+      .catch((error) => error);
+
+    expect(failure.status).toBe(403);
+    expect(failure.response.data.message).toBe(restricted);
+  });
+
+  test('a 404 on the only remote stays an empty answer', async () => {
+    const client = octokit('missing-token', async () => { throw httpError(404, 'Not Found'); });
+
+    const status = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true });
+
+    expect(status).toMatchObject({ repo: null, pr: null });
+  });
+
+  test('a 403 on one remote does not hide another that resolves', async () => {
+    git(directory, 'remote', 'add', 'upstream', 'https://github.com/open/app.git');
+    const client = octokit('partial-token', async ({ owner }) => {
+      if (owner === 'acme') throw httpError(403, restricted);
+      return { data: { default_branch: 'main' } };
+    });
+
+    const status = await resolveGitHubPrStatus({ octokit: client, directory, branch: 'feature', remoteName: 'origin', force: true });
+
+    expect(status.repo).toMatchObject({ owner: 'open', repo: 'app' });
+  });
+});
+
 describe('isHistoricalPrOfCheckout', () => {
   beforeEach(() => {
     isAncestorMock.mockReset();

@@ -232,6 +232,25 @@ describe('GitHub account routes', () => {
     expect(warm.body.fetchedAt).toBe(3_000);
   });
 
+  it('answers a refused PR status with GitHub\'s message and keeps a missing repository quiet', async () => {
+    const account = await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
+    const restricted = 'Although you appear to have the correct authorization credentials, the `acme` organization has enabled OAuth App access restrictions.';
+    const httpError = (status, message) => Object.assign(new Error(`${message} - https://docs.github.com/`), {
+      status,
+      response: { status, data: { message } },
+    });
+    const query = boundQuery(account.accountId, { branch: 'feature' });
+
+    const refused = await request(makeApp({ resolveGitHubPrStatus: async () => { throw httpError(403, restricted); } }))
+      .get('/api/source-control/github/pr/status').query(query).expect(403);
+    expect(refused.body).toEqual({ error: restricted });
+
+    const missing = await request(makeApp({ resolveGitHubPrStatus: async () => { throw httpError(404, 'Not Found'); } }))
+      .get('/api/source-control/github/pr/status').query(query).expect(200);
+    expect(missing.body).toMatchObject({ connected: true, repo: null, pr: null });
+    expect(await auth.getGitHubAuthByAccountId(account.accountId)).toMatchObject({ accessToken: 'token-one' });
+  });
+
   it('does not populate a legacy status cache', async () => {
     await auth.setGitHubAuth({ accessToken: 'token-one', user: { id: 7, login: 'first' } });
     const app = makeApp();

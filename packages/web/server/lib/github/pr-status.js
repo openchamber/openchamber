@@ -235,7 +235,7 @@ const getRepoMetadata = async (octokit, repo) => {
     return data;
   } catch (error) {
     noteIfGitHubRateLimit(error);
-    if (error?.status === 403 || error?.status === 404) {
+    if (error?.status === 404) {
       if (repoKey) {
         repoMetadataCache.set(repoKey, {
           data: null,
@@ -292,7 +292,12 @@ const expandRepoNetwork = async (octokit, candidates) => {
   // unchanged from the sequential version.
   const metadatas = await Promise.all(
     candidates.map((candidate) =>
-      getRepoMetadata(octokit, candidate.repo).then((metadata) => ({ candidate, metadata })),
+      getRepoMetadata(octokit, candidate.repo)
+        .then((metadata) => ({ candidate, metadata }))
+        .catch((error) => {
+          if (error?.status !== 403) throw error;
+          return { candidate, metadata: null, refusal: error };
+        }),
     ),
   );
 
@@ -320,6 +325,14 @@ const expandRepoNetwork = async (octokit, candidates) => {
         url: source.html_url || `https://github.com/${source.owner.login}/${source.name}`,
       }, candidate.remoteName, candidate.priority + 0.2);
     }
+  }
+
+  // A remote GitHub refuses, such as one in an organization that restricts
+  // OAuth apps, is skipped while another remote resolves. When none does, the
+  // refusal is the answer: its message tells the user how to grant access.
+  const refusal = metadatas.find((entry) => entry.refusal)?.refusal;
+  if (expanded.length === 0 && refusal) {
+    throw refusal;
   }
 
   return expanded.sort((left, right) => left.priority - right.priority);

@@ -128,7 +128,7 @@ that page, so callers cannot mistake a partial page for a complete one.
 - The history answer is remembered per repo, branch, and ordered primary source-owner set so discovery polls do not re-query it: a found closed/merged record for `6h`, and "no history yet" for `10m`. Scoping by ordered source owners prevents cache misses and result confusion when searching the same fork branch from different direct-upstream or fork-origin remotes. A found record only changes if a second PR appears on the same head, and while that one is open the open-PR path wins without ever reading this cache.
 - Creating, merging, or closing a PR invalidates both the shared repo pull list and that remembered history.
 - The route skips the checks summary and the merge-permission lookup for a closed/merged PR: neither is actionable, and both cost extra GitHub calls.
-- `403` and `404` during repo lookups are treated as expected gaps, not hard errors.
+- A `404` during repo lookups is an expected gap, not a hard error. A `403` skips that remote while another resolves; when none resolves, `/pr/status` answers `403` with GitHub's own message, such as an organization restricting OAuth apps, and the Git view shows it under "Pull request status unavailable". A `404` there keeps the quiet `repo: null` answer.
 
 ## Batched live summaries
 

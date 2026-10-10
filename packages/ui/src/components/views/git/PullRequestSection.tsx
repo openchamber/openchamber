@@ -741,7 +741,8 @@ export const PullRequestSection: React.FC<{
     }
     const targetProject = useDetectedUpstream ? detectedUpstream : statusProject;
     if (!readContext || !targetProject) {
-      toast.error(t('gitView.pr.toast.createPrFailed'), { description: t('gitView.pr.statusUnavailable') });
+      // The status read's own error, such as GitHub refusing the account, says what to fix.
+      toast.error(t('gitView.pr.toast.createPrFailed'), { description: error ?? t('gitView.pr.statusUnavailable') });
       return;
     }
 
@@ -807,7 +808,7 @@ export const PullRequestSection: React.FC<{
       if (!mutationSettled) finishMutation(signature, idempotencyKey, retainMutationKey);
       setIsCreating(false);
     }
-  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
+  }, [beginMutation, body, branch, branchPush, detectedUpstream, directory, draft, error, finishMutation, isMutationScopeCurrent, needsPush, prStatusKey, readContext, reconcileUnknownOutcome, refresh, scheduleActionRefresh, sourceControl, sourceControlCapabilities?.changeRequests, statusProject, targetBaseBranch, title, useDetectedUpstream, t]);
 
   const containerClassName = 'border-0 bg-transparent rounded-none px-4 py-3';
 
