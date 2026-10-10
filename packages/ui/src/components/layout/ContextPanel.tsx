@@ -398,6 +398,7 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
   const contextEditorVisible = useUIStore((state) => state.contextEditorVisible);
   const toggleContextEditor = useUIStore((state) => state.toggleContextEditor);
+  const fileTreeSide = useUIStore((state) => state.fileTreeSide);
   const openNewContextBrowserTab = useUIStore((state) => state.openNewContextBrowserTab);
   const faviconByOrigin = useBrowserFaviconStore((state) => state.byOrigin);
   const [headerSlotEl, setHeaderSlotEl] = React.useState<HTMLDivElement | null>(null);
@@ -917,34 +918,28 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
             <Icon name="add" className="h-3.5 w-3.5" />
           </Button>
         ) : null}
-        {isFileTabActive && hasOpenEditorFile ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={toggleContextEditor}
-            className="h-7 w-7 p-0"
-            title={t('contextRail.editor.toggle')}
-            aria-label={t('contextRail.editor.toggle')}
-            aria-pressed={showsEditor}
-          >
-            <Icon name="layout-left" className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
-        {isFileTabActive ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={toggleContextEditorTree}
-            className="h-7 w-7 p-0"
-            title={t('contextRail.editorTree.toggle')}
-            aria-label={t('contextRail.editorTree.toggle')}
-            aria-pressed={contextEditorTreeVisible}
-          >
-            <Icon name="layout-right" className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
+        {/* Each icon toggles the column on its side: the editor and the tree
+            swap sides with the file tree side setting, the icons stay put. */}
+        {isFileTabActive ? (['left', 'right'] as const).map((side) => {
+          const isTree = side === fileTreeSide;
+          if (!isTree && !hasOpenEditorFile) return null;
+          const label = isTree ? t('contextRail.editorTree.toggle') : t('contextRail.editor.toggle');
+          return (
+            <Button
+              key={side}
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={isTree ? toggleContextEditorTree : toggleContextEditor}
+              className="h-7 w-7 p-0"
+              title={label}
+              aria-label={label}
+              aria-pressed={isTree ? contextEditorTreeVisible : showsEditor}
+            >
+              <Icon name={side === 'left' ? 'layout-left' : 'layout-right'} className="h-3.5 w-3.5" />
+            </Button>
+          );
+        }) : null}
         {!isTreeOnly ? (
           <Button
             type="button"

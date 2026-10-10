@@ -457,6 +457,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.layoutAnimations === true || candidate.layoutAnimations === false) {
       result.layoutAnimations = candidate.layoutAnimations;
     }
+    if (candidate.fileTreeSide === 'left' || candidate.fileTreeSide === 'right') {
+      result.fileTreeSide = candidate.fileTreeSide;
+    }
     if (typeof candidate.diffWrapLines === 'boolean') {
       result.diffWrapLines = candidate.diffWrapLines;
     }

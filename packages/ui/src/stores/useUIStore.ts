@@ -879,6 +879,8 @@ interface UIStore {
   /** Surfaces the user moved off the right zone, per device (lib/workspace/zones.ts). */
   contextSurfaceZones: ContextZonePlacement;
   contextEditorTreeVisible: boolean;
+  /** Which side of the file surface its tree column docks to. */
+  fileTreeSide: 'left' | 'right';
   /** Whether the file surface shows its editor while files are open; hiding
       it leaves only the tree, with the file tabs kept open. */
   contextEditorVisible: boolean;
@@ -1284,6 +1286,7 @@ interface UIStore {
   setAutoSaveEnabled: (value: boolean) => void;
   setConfirmFileTreeMove: (value: boolean) => void;
   setLayoutAnimations: (value: boolean) => void;
+  setFileTreeSide: (side: 'left' | 'right') => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setSessionRetentionOnlyArchived: (value: boolean) => void;
@@ -1428,6 +1431,7 @@ export const useUIStore = create<UIStore>()(
         contextRailHiddenSurfaces: [],
         contextSurfaceZones: {},
         contextEditorTreeVisible: true,
+        fileTreeSide: 'right',
         contextEditorVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
@@ -2578,6 +2582,10 @@ export const useUIStore = create<UIStore>()(
           set({ layoutAnimations: value });
         },
 
+        setFileTreeSide: (side) => {
+          set({ fileTreeSide: side === 'left' ? 'left' : 'right' });
+        },
+
         setAutoDeleteAfterDays: (days) => {
           const clampedDays = Math.max(1, Math.min(365, days));
           set({ autoDeleteAfterDays: clampedDays });
@@ -3535,6 +3543,7 @@ export const useUIStore = create<UIStore>()(
           contextRailHiddenSurfaces: state.contextRailHiddenSurfaces,
           contextSurfaceZones: state.contextSurfaceZones,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
+          fileTreeSide: state.fileTreeSide,
           contextEditorVisible: state.contextEditorVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,

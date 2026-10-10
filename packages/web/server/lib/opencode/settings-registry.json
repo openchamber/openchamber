@@ -411,6 +411,13 @@
     "confirmFileTreeMove": {
       "scope": "profile"
     },
+    "fileTreeSide": {
+      "scope": "profile",
+      "surfaces": [
+        "web",
+        "desktop"
+      ]
+    },
     "layoutAnimations": {
       "scope": "profile",
       "surfaces": [

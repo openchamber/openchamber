@@ -86,10 +86,12 @@ type PanelBrowserTab = {
   ownerSessionId: string | null;
 };
 
-// The editor surface's file-tree column: docked on the right, resizable from
-// its left edge, and animated open/closed like the app sidebars. In tree-only
-// mode (`fill`), the panel collapses around this fixed-width, right-aligned column.
-const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean }> = ({ visible, active, fill = false }) => {
+// The editor surface's file-tree column: docked on the side the user picked
+// (`fileTreeSide`, right by default), resizable from the edge that faces the
+// editor, and animated open/closed like the app sidebars. In tree-only mode
+// (`fill`), the panel collapses around this fixed-width column, aligned to
+// its side.
+const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boolean; side: 'left' | 'right' }> = ({ visible, active, fill = false, side }) => {
   const { t } = useI18n();
   const width = useUIStore((state) => state.contextEditorTreeWidth);
   const setWidth = useUIStore((state) => state.setContextEditorTreeWidth);
@@ -130,7 +132,8 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
     if (!isResizing || pointerIDRef.current !== event.pointerId) {
       return;
     }
-    const delta = startXRef.current - event.clientX;
+    // The column grows away from its side's edge, toward the editor.
+    const delta = side === 'left' ? event.clientX - startXRef.current : startXRef.current - event.clientX;
     const nextWidth = clampContextEditorTreeWidth(startWidthRef.current + delta);
     if (liveWidthRef.current === nextWidth) {
       return;
@@ -162,7 +165,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
       ref={columnRef}
       className={cn(
         'relative h-full flex-shrink-0 overflow-hidden bg-background will-change-[width] motion-reduce:transition-none',
-        fill && 'ml-auto',
+        fill && (side === 'left' ? 'mr-auto' : 'ml-auto'),
       )}
       style={{
         width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
@@ -177,12 +180,13 @@ const EditorTreeColumn: React.FC<{ visible: boolean; active: boolean; fill?: boo
     >
       {/* Paint the divider without shifting tree content when the editor closes. */}
       {visible && !fill && (
-        <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 z-20 w-px bg-border" />
+        <div aria-hidden="true" className={cn('pointer-events-none absolute inset-y-0 z-20 w-px bg-border', side === 'left' ? 'right-0' : 'left-0')} />
       )}
       {visible && !fill && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            'absolute top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            side === 'left' ? 'right-0' : 'left-0',
             isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handlePointerDown}
@@ -263,6 +267,7 @@ export const ContextSurfacePanes: React.FC = () => {
   const openContextFile = useUIStore((state) => state.openContextFile);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
   const contextEditorVisible = useUIStore((state) => state.contextEditorVisible);
+  const fileTreeSide = useUIStore((state) => state.fileTreeSide);
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const headerSlots = useZoneHostsStore((state) => state.headerSlot);
 
@@ -504,7 +509,7 @@ export const ContextSurfacePanes: React.FC = () => {
           zone={fileZone.zone}
           isOpen={fileZone.isOpen}
           directoryKey={directoryKey}
-          className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}
+          className={cn('absolute inset-0 flex', fileTreeSide === 'left' && 'flex-row-reverse', isFileTabActive ? 'flex' : 'hidden')}
         >
           {hasOpenEditorFile || !contextEditorTreeVisible ? (
             // Hidden rather than unmounted so a hidden editor keeps its state.
@@ -520,7 +525,7 @@ export const ContextSurfacePanes: React.FC = () => {
               )}
             </div>
           ) : null}
-          <EditorTreeColumn visible={contextEditorTreeVisible} active={fileZone.isOpen && isFileTabActive} fill={!showsEditor} />
+          <EditorTreeColumn visible={contextEditorTreeVisible} active={fileZone.isOpen && isFileTabActive} fill={!showsEditor} side={fileTreeSide} />
         </ZonePane>
       ) : null}
       {chatActiveTab && activeChatSessionID && activeChatPinnedSession ? (
