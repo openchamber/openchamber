@@ -21,6 +21,7 @@
 		D0A2000000000000000000B2 /* OpenChamberWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A2 /* OpenChamberWidgets.swift */; };
 		D0A2000000000000000000B3 /* OpenChamberControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* OpenChamberControl.swift */; };
 		D0A2000000000000000000B6 /* OpenChamberControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A3 /* OpenChamberControl.swift */; };
+		D0E2000000000000000000B1 /* OpenChamberAppShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E1000000000000000000A1 /* OpenChamberAppShortcuts.swift */; };
 		D0A2000000000000000000B4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A4 /* Assets.xcassets */; };
 		D0A2000000000000000000B5 /* OpenChamberWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = D0A1000000000000000000A7 /* OpenChamberWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D0B2000000000000000000B1 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1000000000000000000A1 /* NotificationService.swift */; };
@@ -45,6 +46,7 @@
 		D0A1000000000000000000A1 /* WidgetShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetShared.swift; sourceTree = "<group>"; };
 		D0A1000000000000000000A2 /* OpenChamberWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenChamberWidgets.swift; sourceTree = "<group>"; };
 		D0A1000000000000000000A3 /* OpenChamberControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenChamberControl.swift; sourceTree = "<group>"; };
+		D0E1000000000000000000A1 /* OpenChamberAppShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenChamberAppShortcuts.swift; sourceTree = "<group>"; };
 		D0A1000000000000000000A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D0A1000000000000000000A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D0A1000000000000000000A6 /* OpenChamberWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenChamberWidget.entitlements; sourceTree = "<group>"; };
@@ -171,6 +173,7 @@
 			children = (
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
+				D0E1000000000000000000A1 /* OpenChamberAppShortcuts.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				D0C1000000000000000000A1 /* PrivacyInfo.xcprivacy */,
@@ -366,6 +369,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				D0A2000000000000000000B6 /* OpenChamberControl.swift in Sources */,
+				D0E2000000000000000000B1 /* OpenChamberAppShortcuts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
