@@ -7,6 +7,7 @@ import {
   executeOutputTruncation,
   executeScript,
   executeToolCalls,
+  executeHasBackgroundableWork,
   isExplorationTool,
   isFileChangeTool,
   isShellTool,
@@ -211,6 +212,14 @@ describe("tool row description", () => {
 })
 
 describe("execute call details", () => {
+  test("recognizes blocking child progress and ignores invalid job markers", () => {
+    expect(executeHasBackgroundableWork({ shellID: "sh_1" })).toBe(true)
+    expect(executeHasBackgroundableWork({ sessionID: "ses_child", status: "running" })).toBe(true)
+    expect(executeHasBackgroundableWork({ sessionID: "ses_child", status: "completed" })).toBe(false)
+    expect(executeHasBackgroundableWork({ shellID: 1, sessionID: false, status: "running" })).toBe(false)
+    expect(executeHasBackgroundableWork({ shellID: "  ", toolCalls: [null, { tool: "runtime.shell:3", status: "running" }] })).toBe(true)
+    expect(executeHasBackgroundableWork(undefined)).toBe(false)
+  })
   test("keeps order and status, serializes the input on one line, drops nameless calls", () => {
     expect(executeToolCalls({
       toolCalls: [

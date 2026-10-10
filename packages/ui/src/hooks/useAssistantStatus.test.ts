@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AssistantMessage, Part, SyntheticMessage, ToolState, UserMessage } from '@/lib/opencode/model';
+import type { AssistantMessage, Metadata, Part, SyntheticMessage, ToolState, UserMessage } from '@/lib/opencode/model';
 
 import { createParsedStatus, getActiveAssistantContext, hasBackgroundableWork } from './useAssistantStatus';
 
@@ -159,6 +159,18 @@ describe('hasBackgroundableWork', () => {
         expect(hasBackgroundableWork([execute([
             { tool: 'shell', status: 'running' }, { tool: 'read', status: 'completed' },
         ])])).toBe(true);
+    });
+
+    test('Code Mode recognizes child progress that replaces the nested call list', () => {
+        const progress: Metadata[] = [{ shellID: 'sh_1' }, { sessionID: 'ses_child', status: 'running' }];
+        for (const metadata of progress) {
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'running', input: {}, time: { start: 1 }, metadata,
+            })])).toBe(true);
+            expect(hasBackgroundableWork([tool('execute', {
+                status: 'completed', input: {}, output: 'done', time: { start: 1, end: 2 }, metadata,
+            })])).toBe(false);
+        }
     });
 });
 
