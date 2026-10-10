@@ -323,6 +323,7 @@ describe('buildQueuedAutoSendPayload', () => {
 
     expect(sendMessageCalls[0]?.[0]).toBe('sanitized transport text');
     expect(sendMessageCalls[0]?.[9]).toEqual({
+      userInitiated: true,
       target: {
         runtimeKey: 'runtime-original',
         sessionId: 'session-original',
@@ -372,6 +373,7 @@ describe('buildQueuedAutoSendPayload', () => {
       'variant-1',
       'normal',
       {
+        userInitiated: true,
         target: {
           runtimeKey: 'runtime-original',
           sessionId: 'session-original',

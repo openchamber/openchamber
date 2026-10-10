@@ -81,7 +81,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult, prepareUserMessageResume } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -102,6 +102,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
     abortHoldMs: 50,
     beforeScheduledTaskSend,
     onScheduledTaskResult,
+    prepareUserMessageResume,
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
@@ -122,6 +123,42 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
 const settle = async (ms = 30) => {
   await new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+describe('user sends restore archives only after acceptance', () => {
+  it('restores after delivery and does not replay a prompt when restoration fails', async () => {
+    const resume = vi.fn(async () => { throw new Error('restore failed'); });
+    const prepare = vi.fn(async () => resume);
+    const { runtime, openCode } = createRuntime({ prepareUserMessageResume: prepare });
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    await settle();
+    expect(prepare).toHaveBeenCalledWith(SESSION, DIRECTORY);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(openCode.state.sent).toHaveLength(1);
+    expect(runtime.sessionSnapshot(SESSION).items).toEqual([]);
+    runtime.stop();
+    await runtime.flush();
+  });
+
+  it('does not restore after a rejected send or for a scheduled task', async () => {
+    const resume = vi.fn(async () => {});
+    const prepare = vi.fn(async () => resume);
+    const { runtime, openCode } = createRuntime({ prepareUserMessageResume: prepare });
+    openCode.state.failNext = /\/prompt$/;
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    await settle();
+    expect(resume).not.toHaveBeenCalled();
+    runtime.stop();
+    await runtime.flush();
+    prepare.mockClear();
+    const scheduled = createRuntime({ prepareUserMessageResume: prepare });
+    await scheduled.runtime.enqueue(SESSION, DIRECTORY, item({ scheduledTask: { projectId: 'project', taskId: 'task' } }));
+    await settle();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(scheduled.openCode.state.sent).toHaveLength(1);
+    scheduled.runtime.stop();
+    await scheduled.runtime.flush();
+  });
+});
 
 describe('scheduled task items', () => {
   const scheduled = (projectId = 'project-1', overrides = {}) => item({

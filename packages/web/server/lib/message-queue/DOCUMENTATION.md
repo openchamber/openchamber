@@ -164,6 +164,15 @@ persisted "sending" flag would strand a message forever.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff. Project knowledge is recorded as delivered only after the prompt or command is accepted.
 
+Ordinary queued messages also resume an archived top-level session after
+acceptance. `openchamber-sessions/user-message-resume.js` captures the archive
+entries and archived descendants before dispatch and clears them through the
+archive store's conditional transaction after acceptance. A newer archive wins.
+Confirmed restores broadcast the existing archive-state event; persistence
+failure preserves the archive and is logged separately, never retrying the
+accepted prompt. Scheduled tasks do not capture or restore archive state.
+This server path works when the browser is closed and never relocates a session.
+
 ## Holds
 
 Auto-review is driven from the UI and bounces the original session through
