@@ -56,6 +56,16 @@ describe('spaces-api', () => {
     expect((await listSpaces()).map((space) => [space.id, space.state, space.step, space.failure?.code ?? null])).toEqual([[ID, 'preparing', 'checking_place', null], ['b2c3d4e5f6a7', 'failed', 'failed', 'space_code_never_arrived']]);
   });
 
+  test('parses a space given the host\'s login (7a) with the rest of the list', async () => {
+    // One space with a login grant used to fail the whole list as malformed, and the sidebar then
+    // showed no spaces at all.
+    const login = { kind: 'login', id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing', url: 'http://gatekeeper:8080/model/openai' };
+    answer(200, JSON.stringify({ spaces: [entry, { ...entry, id: 'b2c3d4e5f6a7', state: 'running', step: null, grants: [login], access: 'granted' }] }));
+    const spaces = await listSpaces();
+    expect(spaces.map((space) => space.id)).toEqual([ID, 'b2c3d4e5f6a7']);
+    expect(spaces[1]?.grants).toEqual([login]);
+  });
+
   test('reads the folder a space was made for, and names none for a host before 5e-3', async () => {
     const orphan = { ...entry, projectDirectory: null, directory: null, projectFolder: { path: '/home/me/app', found: false } };
     answer(200, JSON.stringify({ spaces: [entry, orphan] }));

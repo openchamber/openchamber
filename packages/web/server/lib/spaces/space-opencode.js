@@ -57,6 +57,8 @@ const LOGIN_UPSTREAM_BY_METHOD = new Map([
   ['openai/chatgpt-browser', 'https://chatgpt.com/backend-api/codex'],
   ['openai/chatgpt-headless', 'https://chatgpt.com/backend-api/codex'],
 ]);
+/** The providers whose browser login a space can be given, in the order the map names them. */
+export const LOGIN_PROVIDERS = Array.from(new Set(Array.from(LOGIN_UPSTREAM_BY_METHOD.keys(), (key) => key.split('/')[0])));
 /** The id of the one login row the host writes inside a space, so a replace finds it again. */
 export const SPACE_LOGIN_CREDENTIAL_ID = 'cred_openchamber_space';
 // OpenCode refreshes a login five minutes before `expires`. The row inside must never refresh,

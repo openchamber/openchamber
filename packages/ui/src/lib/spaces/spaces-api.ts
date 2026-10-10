@@ -102,10 +102,17 @@ const grantSchema = z.discriminatedUnion('kind', [
     ]),
     url: z.string(),
   }),
+  // The host's own browser login for a provider (7a): the record names the login's method and
+  // never a token, and the id is the provider's, so a login and a key replace each other.
+  z.object({ kind: z.literal('login'), id: z.string(), provider: z.string(), method: z.string(), url: z.string() }),
   z.object({ kind: z.literal('domain'), id: z.string(), upstream: z.string(), url: z.string() }),
 ]);
 
 export type SpaceGrant = z.infer<typeof grantSchema>;
+
+/** The grant that gives a space a provider: a key or the host's login, under the provider's id. */
+export const providerGrantOf = (grants: readonly SpaceGrant[], providerId: string): Extract<SpaceGrant, { kind: 'model' | 'login' }> | undefined =>
+  grants.find((grant): grant is Extract<SpaceGrant, { kind: 'model' | 'login' }> => (grant.kind === 'model' || grant.kind === 'login') && grant.provider === providerId);
 
 /** The steps of a creation, in order, as `openchamber:space-progress` announces them. */
 const SPACE_CREATION_STEPS = ['checking_place', 'creating', 'setting_network', 'bringing_code', 'ready'] as const;
@@ -180,7 +187,20 @@ export type CreateSpaceRequest = {
 
 export type GrantRequest =
   | { kind: 'model'; provider: string; upstream: string; secret: { kind: 'typed'; value: string } | { kind: 'env'; name: string } }
+  | { kind: 'login'; provider: string }
   | { kind: 'domain'; upstream: string };
+
+// A browser login of the host's a space can be given (7c), never its token: `usable` can be said
+// to a space now, `expired` has run out and the host could not renew it, `unsupported` was made in
+// a way the host cannot forward.
+const hostLoginSchema = z.object({
+  provider: z.string(),
+  method: z.string(),
+  expires: z.string(),
+  state: z.enum(['usable', 'expired', 'unsupported']),
+});
+
+export type SpaceHostLogin = z.infer<typeof hostLoginSchema>;
 
 const errorBodySchema = z.object({ code: z.string(), message: z.string(), details: failureDetailsSchema.nullable().optional().catch(null) });
 
@@ -256,6 +276,10 @@ export const listSpaces = async (signal?: AbortSignal): Promise<SpaceEntry[]> =>
 
 export const createSpace = (body: CreateSpaceRequest): Promise<SpaceEntry> =>
   request(SPACES_ROUTE, spaceEntrySchema, { method: 'POST', body: JSON.stringify(body) });
+
+/** The host's browser logins a space can be given, by provider; a host that cannot be asked throws. */
+export const readSpaceHostLogins = async (signal?: AbortSignal): Promise<SpaceHostLogin[]> =>
+  (await request(`${SPACES_ROUTE}/logins`, z.object({ logins: z.array(hostLoginSchema) }), { signal })).logins;
 
 export const grantSpaceAccess = async (spaceId: string, body: GrantRequest): Promise<SpaceGrant> =>
   (await request(`${SPACES_ROUTE}/${spaceId}/grants`, z.object({ grant: grantSchema }), { method: 'POST', body: JSON.stringify(body) })).grant;

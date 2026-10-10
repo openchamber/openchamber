@@ -2,7 +2,7 @@
 // host answers with the gatekeeper's own view: which provider has a key, which needs it again after
 // a restart, and what a blocked attempt in the gatekeeper's journal was refused for.
 
-import type { SpaceEntry, SpaceJournalRecord } from './spaces-api';
+import { providerGrantOf, type SpaceEntry, type SpaceJournalRecord } from './spaces-api';
 
 // The allowlist's rule for a name, the server's own (`space-records.js`): labels of letters,
 // digits and hyphens, with a real last label.
@@ -13,9 +13,9 @@ export const isDomainName = (value: string): boolean => DOMAIN_PATTERN.test(valu
 
 type ProviderAccess = 'granted' | 'needs_again' | 'none';
 
-/** Whether the space holds a key for a provider now, per the gatekeeper, or needs it again. */
+/** Whether the space holds a key or the host's login for a provider now, per the gatekeeper, or needs it again. */
 export const providerAccessOf = (entry: SpaceEntry, providerId: string): ProviderAccess => {
-  const grant = entry.grants.find((candidate) => candidate.kind === 'model' && candidate.provider === providerId);
+  const grant = providerGrantOf(entry.grants, providerId);
   if (!grant) return 'none';
   return entry.needsAccess.includes(grant.id) ? 'needs_again' : 'granted';
 };
@@ -33,7 +33,7 @@ type SpaceAccessNotice =
 export const spaceAccessNoticeOf = (entry: SpaceEntry | undefined): SpaceAccessNotice | null => {
   if (!entry || entry.state !== 'running') return null;
   if (entry.access === 'unknown') return { kind: 'unknown' };
-  const models = entry.grants.filter((grant) => grant.kind === 'model');
+  const models = entry.grants.filter((grant) => grant.kind === 'model' || grant.kind === 'login');
   if (models.length === 0) return { kind: 'no_model' };
   const providers = models.filter((grant) => entry.needsAccess.includes(grant.id)).map((grant) => grant.provider);
   return providers.length > 0 ? { kind: 'needs_again', providers } : null;

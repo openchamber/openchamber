@@ -43,7 +43,7 @@ import { SpaceError } from './errors.js';
 import { DEFAULT_IDLE_STOP, idleStopSchema } from './idle-stop.js';
 import { ROLE_GATEKEEPER, createSpaceId, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { spaceProjectPath, spaceWindowUrl } from './layout.js';
-import { loginGrantOf } from './space-opencode.js';
+import { LOGIN_PROVIDERS, loginGrantOf } from './space-opencode.js';
 import { domainSchema, grantSchema, networkSchema, providerIdSchema, secretSourceSchema } from './space-records.js';
 import { createSpaceToken } from './space-server.js';
 import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
@@ -467,6 +467,24 @@ export function createSpaceJourney({
       logger.warn?.(`[spaces] the login row of space ${spaceId} was not written again: ${error?.code ?? error?.message ?? error}`);
     });
   };
+  /**
+   * The host's own browser logins a space can be given, for the grant dialog to offer the choice
+   * and to say why a login grant needs the user again (7c): for each provider the host has a
+   * login for, its method, when it ends, and whether it can be said now, `usable`, has `expired`
+   * and could not be renewed, or was made in a way the window does not know, `unsupported`. Never
+   * the token. A host that cannot be asked throws, so a failed read never reads as "signed out".
+   */
+  const readHostLogins = async () => {
+    const logins = [];
+    for (const provider of LOGIN_PROVIDERS) {
+      const login = await readHostLogin(provider);
+      if (!login) continue;
+      const state = !loginWindowOf(provider, login) ? 'unsupported' : login.expires <= now().getTime() ? 'expired' : 'usable';
+      logins.push({ provider, method: login.methodID, expires: new Date(login.expires).toISOString(), state });
+    }
+    return { logins };
+  };
+
   /** Waits for a login row repair that is writing now; its failure is its own and logged there. */
   const afterRowRepair = (spaceId) => (rowRepairs.get(spaceId) ?? Promise.resolve()).catch(() => {});
 
@@ -1085,5 +1103,5 @@ export function createSpaceJourney({
     return { brought, applied, removal, kept };
   });
 
-  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, sayLogin, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
+  return { createSpace, listSpaces, startSpace, stopSpace, restartSpace, restartOpenCode, removeSpace, stopAllSpaces, reopen, grantAccess, sayLogin, readHostLogins, openDomain, restoreLostGrants, readJournal, previewApply, applySpace, readIdleStopSetting, changeIdleStop, runSetup, readSetup, readDisk, cleanUpDisk, pullImage };
 }

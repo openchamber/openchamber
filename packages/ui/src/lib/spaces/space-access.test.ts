@@ -6,6 +6,7 @@ import type { SpaceEntry, SpaceJournalRecord } from './spaces-api';
 const anthropic = { kind: 'model' as const, id: 'anthropic', provider: 'anthropic', upstream: 'https://api.anthropic.com/v1', source: { kind: 'typed' as const }, url: 'http://gatekeeper:8080/model/anthropic' };
 const openai = { ...anthropic, id: 'openai', provider: 'openai', source: { kind: 'env' as const, name: 'OPENAI_API_KEY' } };
 const registry = { kind: 'domain' as const, id: 'open-0123456789ab', upstream: 'https://registry.example.com/', url: 'http://gatekeeper:8080/model/open-0123456789ab' };
+const openaiLogin = { kind: 'login' as const, id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing', url: 'http://gatekeeper:8080/model/openai' };
 
 const entry = (change: Partial<SpaceEntry> = {}): SpaceEntry => ({
   id: 'a1b2c3d4e5f6',
@@ -34,6 +35,11 @@ describe('providerAccessOf', () => {
     expect(providerAccessOf(space, 'anthropic')).toBe('needs_again');
     expect(providerAccessOf(space, 'google')).toBe('none');
   });
+
+  test('the host\'s login counts as access, and as access to give again once the host cannot say it', () => {
+    expect(providerAccessOf(entry({ grants: [openaiLogin] }), 'openai')).toBe('granted');
+    expect(providerAccessOf(entry({ grants: [openaiLogin], access: 'needs_access', needsAccess: ['openai'] }), 'openai')).toBe('needs_again');
+  });
 });
 
 describe('spaceAccessNoticeOf', () => {
@@ -41,8 +47,10 @@ describe('spaceAccessNoticeOf', () => {
     expect(spaceAccessNoticeOf(entry({ access: 'needs_access', needsAccess: ['anthropic', registry.id], grants: [anthropic, openai, registry] }))).toEqual({ kind: 'needs_again', providers: ['anthropic'] });
   });
 
-  test('warns about a running space with no model key, an opened domain not counting', () => {
+  test('warns about a running space with no model key, an opened domain not counting and a login counting', () => {
     expect(spaceAccessNoticeOf(entry({ grants: [registry] }))).toEqual({ kind: 'no_model' });
+    expect(spaceAccessNoticeOf(entry({ grants: [openaiLogin] }))).toBeNull();
+    expect(spaceAccessNoticeOf(entry({ grants: [openaiLogin], access: 'needs_access', needsAccess: ['openai'] }))).toEqual({ kind: 'needs_again', providers: ['openai'] });
     expect(spaceAccessNoticeOf(entry({ grants: [], access: null }))).toEqual({ kind: 'no_model' });
   });
 

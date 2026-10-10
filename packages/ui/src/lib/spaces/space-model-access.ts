@@ -18,7 +18,7 @@ import { SPACE_MODEL_PROVIDERS } from './model-access';
 import { spaceMenuActionsOf } from './space-repair';
 import { spaceIdOfDirectory } from './space-route';
 import { useSpacesStore } from './spaces-store';
-import type { SpaceEntry } from './spaces-api';
+import { providerGrantOf, type SpaceEntry } from './spaces-api';
 
 type SpaceModelRefusal =
   | { spaceId: string; providerId: string; reason: 'not_granted' | 'needs_again' }
@@ -71,7 +71,7 @@ export const resetSpaceModelAccess = (): void => {
 /** What the host says a running space holds for a provider; a gatekeeper that did not answer refuses nothing. */
 const refusalFromList = (entry: SpaceEntry, providerId: string): SpaceModelRefusal | null => {
   if (entry.access === 'unknown') return null;
-  const grant = entry.grants.find((candidate) => candidate.kind === 'model' && candidate.provider === providerId);
+  const grant = providerGrantOf(entry.grants, providerId);
   if (!grant) return { spaceId: entry.id, providerId, reason: 'not_granted' };
   if (entry.needsAccess.includes(grant.id)) return { spaceId: entry.id, providerId, reason: 'needs_again' };
   return null;

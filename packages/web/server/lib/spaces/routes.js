@@ -245,6 +245,11 @@ export function registerSpaceRoutes(app, { getJourney, getPlaces = () => [], rea
     res.json(await journey.removeSpace(spaceIdOf(req), { allowUnsaved: req.query?.unsavedChats === 'delete' }));
   }));
 
+  // The host's browser logins a space can be given, without their tokens, for the grant dialogs.
+  app.get(`${SPACES_ROUTE}/logins`, withJourney(async (journey, _req, res) => {
+    res.json(await journey.readHostLogins());
+  }));
+
   // A grant for a running space; the key in the body goes to the gatekeeper and nowhere else.
   app.post(`${SPACES_ROUTE}/:id/grants`, withJourney(async (journey, req, res) => {
     res.json(await journey.grantAccess(spaceIdOf(req), requireBody(req)));

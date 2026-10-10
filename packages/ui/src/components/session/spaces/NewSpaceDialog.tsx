@@ -29,11 +29,14 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { failureOfError, spaceFailureText } from './spaceFailureText';
 import { ModelKeySource } from './ModelKeySource';
-import { isKeySourceComplete, modelGrantOf, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
+import { isKeySourceComplete, modelGrantOf, usableHostLoginOf, useSpaceHostLogins, useSpaceModelProviders, type KeySourceChoice } from './spaceModelKeys';
 
 type PlaceState = { kind: 'checking' } | { kind: 'ready'; place: Extract<SpacePlace, { available: true }> } | { kind: 'unavailable'; failure: SpaceFailure };
 type ChangesState = { kind: 'loading' } | { kind: 'ready'; files: string[] } | { kind: 'unknown' };
-type AccessChoice = KeySourceChoice & { selected: boolean };
+// `sourceChosen` once the user touched where the key comes from, the name or the key included, so
+// the host's logins arriving later never move the radio under their cursor; until then the host's
+// login, when it has one to offer, is the choice, since it asks for nothing.
+type AccessChoice = KeySourceChoice & { selected: boolean; sourceChosen: boolean };
 
 type NewSpaceDialogProps = {
   open: boolean;
@@ -94,6 +97,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const providers = useSpaceModelProviders();
+  const hostLogins = useSpaceHostLogins(open);
 
   React.useEffect(() => {
     if (!open) return;
@@ -108,10 +112,20 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     setAccess(Object.fromEntries(SPACE_MODEL_PROVIDERS.map((provider) => [provider.id, {
       selected: provider.id === useConfigStore.getState().currentProviderId,
       source: 'env' as const,
+      sourceChosen: false,
       envName: provider.envName,
       value: '',
     }])));
   }, [open]);
+
+  const logins = hostLogins.logins;
+  React.useEffect(() => {
+    setAccess((current) => Object.fromEntries(Object.entries(current).map(([providerId, choice]) => {
+      if (choice.sourceChosen) return [providerId, choice];
+      const offered = usableHostLoginOf(logins, providerId) !== null;
+      return [providerId, { ...choice, source: offered ? 'login' : choice.source === 'login' ? 'env' : choice.source }];
+    })));
+  }, [logins]);
 
   const changedFiles = changes.kind === 'ready' ? changes.files : [];
   const hasChanges = changedFiles.length > 0;
@@ -270,7 +284,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
                 </label>
                 {choice.selected ? (
                   <div className="pl-6">
-                    <ModelKeySource providerName={provider.name} choice={choice} onChange={(change) => updateAccess(provider.id, change)} />
+                    <ModelKeySource providerName={provider.name} login={usableHostLoginOf(logins, provider.id)} choice={choice} onChange={(change) => updateAccess(provider.id, { ...change, sourceChosen: true })} />
                   </div>
                 ) : null}
               </div>

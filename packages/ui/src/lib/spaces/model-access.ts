@@ -21,3 +21,10 @@ export const SPACE_MODEL_PROVIDERS: readonly SpaceModelProvider[] = [
   { id: 'deepseek', upstream: 'https://api.deepseek.com/v1', envName: 'DEEPSEEK_API_KEY' },
   { id: 'xai', upstream: 'https://api.x.ai/v1', envName: 'XAI_API_KEY' },
 ];
+
+/**
+ * What the host's browser login for a provider is called on screen, for the providers whose login
+ * a space can be given (the server's `LOGIN_PROVIDERS`): OpenAI's is a ChatGPT login. The three
+ * `spaces.failure.login*` texts name that login too; a second provider here needs its own.
+ */
+export const SPACE_LOGIN_NAMES: ReadonlyMap<string, string> = new Map([['openai', 'ChatGPT']]);

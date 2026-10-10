@@ -24,7 +24,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { noteSpaceModelAccess } from './space-model-access';
 import type { SpaceSetupPlan } from './space-setup';
 
-export type SpaceModelAccess = Extract<GrantRequest, { kind: 'model' }>;
+export type SpaceModelAccess = Extract<GrantRequest, { kind: 'model' | 'login' }>;
 
 type CreationOutcome = { kind: 'ready'; directory: string } | { kind: 'failed'; failure: SpaceFailure };
 

@@ -772,6 +772,21 @@ describe('the journey: grants', () => {
       }
     });
 
+    it('tells the dialogs which logins the host has, without the token: usable, run out, made another way, or none', async () => {
+      const usable = await ready({ hostLogin: tokenSharing });
+      expect(await usable.journey.readHostLogins()).toEqual({ logins: [{ provider: 'openai', method: 'chatgpt-token-sharing', expires: '2026-09-26T11:00:00.000Z', state: 'usable' }] });
+      expect(JSON.stringify(await usable.journey.readHostLogins())).not.toContain(ACCESS);
+      const ended = await ready({ hostLogin: { ...tokenSharing, expires: Date.parse('2026-09-26T09:59:00.000Z') } });
+      expect(await ended.journey.readHostLogins()).toEqual({ logins: [expect.objectContaining({ provider: 'openai', state: 'expired' })] });
+      const other = await ready({ hostLogin: { ...legacy, methodID: 'some-new-method' } });
+      expect(await other.journey.readHostLogins()).toEqual({ logins: [expect.objectContaining({ provider: 'openai', method: 'some-new-method', state: 'unsupported' })] });
+      const none = await ready();
+      expect(await none.journey.readHostLogins()).toEqual({ logins: [] });
+      // A host whose OpenCode cannot be asked is a failure, never "signed out".
+      const broken = journeyWith({ readHostLogin: async () => { throw new Error('OpenCode is not connected yet'); } });
+      await expect(broken.journey.readHostLogins()).rejects.toThrow('OpenCode is not connected yet');
+    });
+
     it('replaces a key with the login and the login with a key, taking the row inside with the login', async () => {
       const { journey, calls, records, id } = await ready({ hostLogin: tokenSharing, hostEnvironment: { OPENAI_API_KEY: ENV_KEY } });
       await journey.grantAccess(id, openai);

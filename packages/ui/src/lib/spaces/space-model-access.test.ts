@@ -50,6 +50,14 @@ describe('spaceModelRefusal', () => {
     expect(spaceModelRefusal(session, 'anthropic')).toEqual({ spaceId: ID, providerId: 'anthropic', reason: 'needs_again' });
   });
 
+  test('the host\'s login given to the space is access, and access to give again once the host cannot say it', () => {
+    const login = { kind: 'login' as const, id: 'openai', provider: 'openai', method: 'chatgpt-token-sharing', url: 'http://gatekeeper:8080/model/openai' };
+    listed(running({ grants: [login] }));
+    expect(spaceModelRefusal(session, 'openai')).toBeNull();
+    listed(running({ grants: [login], access: 'needs_access', needsAccess: ['openai'] }));
+    expect(spaceModelRefusal(session, 'openai')).toEqual({ spaceId: ID, providerId: 'openai', reason: 'needs_again' });
+  });
+
   test('a space with no grant at all refuses every provider, as after a reload during its creation', () => {
     listed(running({ grants: [], access: null }));
     expect(spaceModelRefusal(session, 'anthropic')).toEqual({ spaceId: ID, providerId: 'anthropic', reason: 'not_granted' });

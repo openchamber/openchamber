@@ -1,5 +1,6 @@
 /**
- * Where a model key comes from, as the create dialog and the grant dialog both ask it: an
+ * Where a model's access comes from, as the create dialog and the grant dialog both ask it: the
+ * host's own browser login, offered only when the host has one the space can be given (7c), an
  * environment variable of the host's, remembered by name and given again after every restart, or a
  * key typed once and kept nowhere.
  */
@@ -9,9 +10,9 @@ import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Radio } from '@/components/ui/radio';
 import { useI18n } from '@/lib/i18n';
-import type { KeySourceChoice } from './spaceModelKeys';
+import type { HostLoginOffer, KeySourceChoice } from './spaceModelKeys';
 
-export const ModelKeySource: React.FC<{ providerName: string; choice: KeySourceChoice; onChange: (change: Partial<KeySourceChoice>) => void }> = ({ providerName, choice, onChange }) => {
+export const ModelKeySource: React.FC<{ providerName: string; login: HostLoginOffer | null; choice: KeySourceChoice; onChange: (change: Partial<KeySourceChoice>) => void }> = ({ providerName, login, choice, onChange }) => {
   const { t } = useI18n();
   const option = (checked: boolean, onSelect: () => void, label: string) => (
     <label className="flex cursor-pointer items-start gap-2">
@@ -21,6 +22,7 @@ export const ModelKeySource: React.FC<{ providerName: string; choice: KeySourceC
   );
   return (
     <div className="space-y-1.5">
+      {login ? option(choice.source === 'login', () => onChange({ source: 'login' }), t('spaces.create.access.login', { name: login.name })) : null}
       {option(choice.source === 'env', () => onChange({ source: 'env' }), t('spaces.create.access.fromEnv'))}
       {choice.source === 'env' ? (
         <div className="pl-6">
