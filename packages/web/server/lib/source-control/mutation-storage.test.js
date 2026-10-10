@@ -95,6 +95,27 @@ describe('source-control mutation storage', () => {
     await expect(store.claim(claimFor('key-one', 'different'))).resolves.toEqual({ status: 'conflict', record: claimed.record });
   });
 
+  it('claims with binding revision 0, the no-binding repository state', async () => {
+    const { store } = await makeStore({ now: () => 100 });
+    const zero = claimFor('zero-revision', 'digest-zero', {
+      target: { ...claimFor('zero-revision').target, bindingRevision: 0 },
+    });
+
+    await expect(store.claim(zero)).resolves.toMatchObject({ status: 'claimed' });
+    await expect(store.read('zero-revision')).resolves.toMatchObject({ key: 'zero-revision' });
+    await expect(store.list()).resolves.toHaveLength(1);
+  });
+
+  it('still rejects binding revisions that are not non-negative safe integers', async () => {
+    const { store } = await makeStore({ now: () => 100 });
+    for (const [index, bindingRevision] of [-1, 1.5, Number.NaN].entries()) {
+      const invalid = claimFor(`bad-revision-${index}`, `digest-bad-${index}`, {
+        target: { ...claimFor(`bad-revision-${index}`).target, bindingRevision },
+      });
+      await expect(store.claim(invalid)).rejects.toMatchObject({ code: 'INVALID_SOURCE_CONTROL_MUTATIONS' });
+    }
+  });
+
   it.each(['constructor', '__proto__'])('treats the opaque key %s as data', async (key) => {
     const { store } = await makeStore({ now: () => 100 });
     const claimed = await store.claim(claimFor(key));

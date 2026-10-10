@@ -37,6 +37,9 @@ const hasExactKeys = (value, required, optional = []) => {
 };
 const isTimestamp = (value) => Number.isSafeInteger(value) && value >= 0;
 const isPositiveInteger = (value) => Number.isSafeInteger(value) && value > 0;
+// Revision 0 is the designed no-binding state the binding service accepts
+// (DOCUMENTATION.md, binding-service section), so the storage gate matches it.
+const isNonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
 const isFailureStatus = (value) => Number.isSafeInteger(value) && value >= 400 && value <= 599;
 
 const invalidState = () => {
@@ -71,7 +74,7 @@ const isTarget = (value) => isPlainObject(value)
     TARGET_OPTIONAL_KEYS,
   )
   && isNonEmptyString(value.repositoryId)
-  && isPositiveInteger(value.bindingRevision)
+  && isNonNegativeInteger(value.bindingRevision)
   && isNonEmptyString(value.primaryRemote)
   && isProject(value.project)
   && (value.number === undefined || isPositiveInteger(value.number))
