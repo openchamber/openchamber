@@ -11,8 +11,10 @@ import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
 
+// Like the icon rail: muted at rest, full strength on hover or while what it
+// controls is on, and no hover fill.
 const ICON_BUTTON_CLASS =
-  'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
+  'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors';
 
 /**
  * Persistent top-left titlebar controls (app menu on frameless chrome + sidebar toggle).
@@ -130,7 +132,8 @@ export const TitlebarLeftControls: React.FC = () => {
               onClick={toggleSidebar}
               data-sidebar-toggle=""
               aria-label={t('header.actions.openSessionsAria')}
-              className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
+              aria-pressed={isSidebarOpen}
+              className={cn(ICON_BUTTON_CLASS, 'shrink-0', isSidebarOpen && 'text-foreground')}
             >
               <Icon name="layout-left" className="h-4 w-4" />
             </button>

@@ -23,10 +23,14 @@ const createFoldMarker = (open: boolean): HTMLElement => {
 export const codeFolding = (): Extension => [
   foldGutter({ markerDOM: createFoldMarker }),
   keymap.of(FOLD_AT_CURSOR_KEYMAP),
+  // A narrow column: just the 12 px arrow, and the gutter's trailing gap
+  // shrunk to match, so the arrows sit close to the code they fold.
   EditorView.theme({
-    '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center' },
-    '.cm-fold-marker': { display: 'inline-flex', width: '14px', height: '14px', cursor: 'pointer', opacity: '0.6' },
+    '.cm-foldGutter': { width: '12px' },
+    '.cm-foldGutter .cm-gutterElement': { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0' },
+    '.cm-gutters:has(> .cm-foldGutter)': { paddingRight: '2px' },
+    '.cm-fold-marker': { display: 'inline-flex', width: '12px', height: '12px', cursor: 'pointer', opacity: '0.6' },
     '.cm-fold-marker:hover': { opacity: '1' },
-    '.cm-fold-marker svg': { width: '14px', height: '14px', fill: 'currentColor' },
+    '.cm-fold-marker svg': { width: '12px', height: '12px', fill: 'currentColor' },
   }),
 ];

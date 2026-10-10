@@ -70,7 +70,9 @@ import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorkt
 import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 
-const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
+// Like the icon rail: muted at rest, full strength on hover, while its menu is
+// open or while what it controls is on, and no hover fill.
+const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-muted-foreground hover:text-foreground data-[popup-open]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 transition-colors';
 
 
 const normalize = (value: string): string => {
@@ -1017,7 +1019,9 @@ export const Header: React.FC = () => {
       onMouseDown={handleDragStart}
       className={cn(
         'app-region-drag relative flex h-12 select-none items-center',
-        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-3',
+        // 10 px puts the last 24 px button's centre 22 px from the window edge,
+        // on the axis of the 44 px icon rail below it.
+        usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-2.5',
         macosHeaderSizeClass
       )}
       style={headerChromeStyle}
@@ -1296,9 +1300,8 @@ export const Header: React.FC = () => {
                   onClick={handleWorkStatusToggle}
                   className={cn(
                     DESKTOP_HEADER_ICON_BUTTON_CLASS,
-                    // On is the resting state and carries no chrome; off is the
-                    // one worth signalling, so it dims instead of filling.
-                    workStatusToggleActive ? 'text-foreground' : 'text-muted-foreground/50',
+                    // On is full strength, off rests muted like any header button.
+                    workStatusToggleActive && 'text-foreground',
                   )}
                 >
                   <Icon name="list-indefinite" className="h-4 w-4" />
