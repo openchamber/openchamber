@@ -204,7 +204,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
   const body = (
     <div className="space-y-5 pr-3">
       {section(t('spaces.create.name.label'), (
-        <Input value={name} onChange={(event) => setName(event.target.value)} className="h-9 max-w-sm" aria-label={t('spaces.create.name.label')} />
+        <Input value={name} onChange={(event) => setName(event.target.value)} className="max-w-sm" aria-label={t('spaces.create.name.label')} />
       ))}
 
       {section(t('spaces.create.place.label'), (
@@ -267,7 +267,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
                 onBlur={addDomain}
                 placeholder={t('spaces.create.network.domainPlaceholder')}
                 aria-label={t('spaces.create.network.domainPlaceholder')}
-                className="h-9 max-w-sm"
+                className="max-w-sm"
               />
               {domainError ? <p className="typography-meta text-status-error">{t('spaces.create.network.domainInvalid')}</p> : null}
               <p className="typography-meta text-muted-foreground">{t('spaces.create.network.modelNeedsNoDomain')}</p>

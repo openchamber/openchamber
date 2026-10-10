@@ -57,7 +57,6 @@ import {
     SettingsRadioOption,
     SettingsChipGroup,
     SETTINGS_SELECT_TRIGGER_CLASS,
-    SETTINGS_SELECT_SIZE,
     SETTINGS_ICON_BUTTON_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
     SETTINGS_CLUSTER_CONTROL_CLASS,
@@ -1117,7 +1116,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         settingsItem="appearance.language"
                                     >
                                         <Select value={locale} onValueChange={handleLocaleChange}>
-                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.appearance.language.select')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{label(locale)}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1138,7 +1137,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.time-format"
                                                 >
                                                     <Select value={timeFormatPreference} onValueChange={(value: 'auto' | '12h' | '24h') => handleTimeFormatPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectTimeFormatAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedTimeFormatLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1156,7 +1155,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     settingsItem="appearance.week-start"
                                                 >
                                                     <Select value={weekStartPreference} onValueChange={(value: 'auto' | 'monday' | 'sunday') => handleWeekStartPreferenceChange(value)}>
-                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectWeekStartAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                             <SelectValue>{selectedWeekStartLabel}</SelectValue>
                                                         </SelectTrigger>
                                                         <SelectContent>
@@ -1234,7 +1233,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void applyPwaOrientation(orientation);
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.pwaInstallOrientationAria')} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectOrientationPlaceholder')}>
                                                 {selectedPwaOrientationLabel}
                                             </SelectValue>
@@ -1280,7 +1279,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             void updateDesktopSettings({ mobileKeyboardMode: mode });
                                         }}
                                     >
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.mobileKeyboardModeAria')} className={SETTINGS_CLUSTER_CONTROL_CLASS}>
                                             <SelectValue placeholder={t('settings.openchamber.visual.field.selectMobileKeyboardModePlaceholder')}>
                                                 {selectedMobileKeyboardModeLabel}
                                             </SelectValue>
@@ -1326,7 +1325,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={uiFont} onValueChange={(value) => setUiFont(value as UiFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectInterfaceFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{uiFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : UI_FONT_OPTIONS.find((option) => option.id === uiFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1368,7 +1367,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         controlClassName="w-full flex-wrap"
                                     >
                                         <Select value={monoFont} onValueChange={(value) => setMonoFont(value as MonoFontOption)}>
-                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                            <SelectTrigger aria-label={t('settings.openchamber.visual.field.selectCodeFontAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                                 <SelectValue>{monoFont === CUSTOM_FONT_ID ? t('settings.openchamber.visual.field.customFont') : CODE_FONT_OPTIONS.find((option) => option.id === monoFont)?.label}</SelectValue>
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1661,7 +1660,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     className="pt-2"
                                 >
                                     <Select value={terminalShell} onValueChange={(value) => { if (isTerminalShell(value)) setTerminalShell(value); }}>
-                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
+                                        <SelectTrigger aria-label={t('settings.openchamber.visual.field.terminalShellAria')} className={SETTINGS_SELECT_TRIGGER_CLASS}>
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>

@@ -839,7 +839,7 @@ interface UIStore {
    * Whether it is actually on screen right now — the switch can be on while
    * layout still refuses it (narrow chat, open context panel). Transient, never
    * persisted: it describes the current frame, not a preference. The header
-   * reads it to stop repeating what the panel already shows.
+   * and the git rail read it to stop repeating what the panel already shows.
    */
   workStatusPanelVisible: boolean;
   /** Layout can host the panel inline. Transient, like the one above. */

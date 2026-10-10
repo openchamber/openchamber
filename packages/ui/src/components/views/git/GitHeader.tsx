@@ -33,6 +33,8 @@ import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import type { SourceControlProvider } from '@/lib/source-control/types';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 
 type SyncAction = 'fetch' | 'pull' | 'sync' | 'publish' | null;
 
@@ -187,7 +189,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
             <Button
               variant="ghost"
               size="sm"
-              className={cn('h-8 min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label', triggerClassName)}
+              className={cn('min-w-0 max-w-[15rem] justify-start gap-1.5 px-2 py-1 typography-ui-label', triggerClassName)}
               style={{ color: getIdentityColor(activeProfile?.color) }}
               disabled={isDisabled}
               aria-label={t('gitView.header.identityTooltip')}
@@ -291,7 +293,7 @@ const UpstreamStatusPill: React.FC<UpstreamStatusPillProps> = ({
   return (
     <Tooltip delayDuration={tooltipDelayMs}>
       <TooltipTrigger asChild>
-        <div className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 typography-micro text-muted-foreground">
+        <div className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 typography-micro text-muted-foreground">
           <Icon name="git-branch" className="size-3.5 shrink-0" />
           <span className="min-w-0 truncate text-foreground/80">{target}</span>
           {isSynced ? (
@@ -355,6 +357,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onSelectRepository,
   repositoryRoot,
 }) => {
+  const inPanelHeader = useInContextPanelHeader();
   const { t } = useI18n();
   const { isMobile } = useDeviceInfo();
   const choosesPushDestination = useIsContributorWorktree(directory);
@@ -374,7 +377,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-8 px-0"
+                  className="w-7 px-0"
                   aria-label={t('gitView.header.repositoryViews')}
                 >
                   <Icon name="more-fill" className="size-4" />
@@ -445,7 +448,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
           variant="ghost"
           size="sm"
           onClick={onOpenPullRequest}
-          className="h-8 gap-1.5 px-2 typography-micro"
+          className="gap-1.5 px-2 typography-micro"
         >
           <Icon
             name="git-pull-request"
@@ -514,37 +517,66 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   );
 
+  const branchControls = (
+    <div className="flex min-w-0 flex-1 items-center gap-1">
+      {isWorktreeMode && !isMobile ? (
+        <WorktreeBranchDisplay
+          currentBranch={status.current}
+          onRename={onRenameBranch}
+        />
+      ) : (
+        <BranchSelector
+          directory={directory}
+          currentBranch={status.current}
+          localBranches={localBranches}
+          remoteBranches={remoteBranches}
+          branchInfo={branchInfo}
+          currentBranchAhead={status.ahead}
+          onCheckout={onCheckoutBranch}
+          onCreate={onCreateBranch}
+          switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
+        />
+      )}
+      {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
+        <NestedRepoPicker
+          repositories={repositoryOptionsForPicker}
+          selectedRepository={selectedRepository ?? null}
+          onSelectRepository={onSelectRepository}
+          repositoryRoot={repositoryRoot}
+        />
+      ) : null}
+    </div>
+  );
+
+  // In the context panel the branch and the sync controls take the panel
+  // header's row; what stays below is the repository's state around them:
+  // who commits, the pull request, how far the branch is from its upstream.
+  if (inPanelHeader) {
+    return (
+      <>
+        <ContextPanelHeaderToolbar>
+          <div className="flex min-w-0 flex-1 items-center gap-2 pr-1">
+            {branchControls}
+            {managementButtons}
+            <div className="shrink-0">{syncButtons}</div>
+          </div>
+        </ContextPanelHeaderToolbar>
+        <header className="flex h-10 min-w-0 items-center gap-2 px-3">
+          <div className="shrink-0">{identityControl}</div>
+          {prChip ? <div className="shrink-0">{prChip}</div> : null}
+          <div className="min-w-0 flex-1" />
+          {upstreamStatusPill ? (
+            <div className="min-w-0 shrink">{upstreamStatusPill}</div>
+          ) : null}
+        </header>
+      </>
+    );
+  }
+
   return (
     <header className="@container/git-header px-3 py-2 bg-transparent">
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          {isWorktreeMode && !isMobile ? (
-            <WorktreeBranchDisplay
-              currentBranch={status.current}
-              onRename={onRenameBranch}
-            />
-          ) : (
-            <BranchSelector
-              directory={directory}
-              currentBranch={status.current}
-              localBranches={localBranches}
-              remoteBranches={remoteBranches}
-              branchInfo={branchInfo}
-              currentBranchAhead={status.ahead}
-              onCheckout={onCheckoutBranch}
-              onCreate={onCreateBranch}
-              switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
-            />
-          )}
-          {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
-            <NestedRepoPicker
-              repositories={repositoryOptionsForPicker}
-              selectedRepository={selectedRepository ?? null}
-              onSelectRepository={onSelectRepository}
-              repositoryRoot={repositoryRoot}
-            />
-          ) : null}
-        </div>
+        {branchControls}
         <div className="flex shrink-0 items-center gap-1">
           {identityControl}
         </div>

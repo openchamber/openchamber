@@ -30,7 +30,6 @@ import {
   SettingsCheckboxRow,
   SettingsFieldRow,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { resolveBehaviorPrompt, type BehaviorPromptSource } from './behaviorPrompt';
 
@@ -329,7 +328,7 @@ export const BehaviorPage: React.FC = () => {
             }}
             disabled={isLoading || !responseStyleEnabled}
           >
-            <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+            <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
               <SelectValue>
                 {(value) => {
                   if (value === 'custom') return t('settings.behavior.page.responseStyle.option.custom');

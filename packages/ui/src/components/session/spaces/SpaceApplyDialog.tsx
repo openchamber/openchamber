@@ -218,7 +218,7 @@ const ApplyDialogFor: React.FC<{ spaceId: string }> = ({ spaceId }) => {
                   <Input
                     value={branch}
                     onChange={(event) => { setBranch(event.target.value); if (branchRefusal) setRefusal(null); }}
-                    className="h-9 max-w-sm font-mono"
+                    className="max-w-sm font-mono"
                     aria-label={t('spaces.apply.branch.label')}
                   />
                   {branchRefusal ? <p className="typography-meta text-status-error">{refusalText(branchRefusal)}</p> : null}

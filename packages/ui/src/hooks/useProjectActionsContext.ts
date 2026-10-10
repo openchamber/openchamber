@@ -44,8 +44,8 @@ export const resolveProjectActionsOwner = ({
 
 /**
  * Resolves the active project ref + working directory used by
- * {@link ProjectActionsButton}. Directory priority mirrors the header:
- * worktree → session → draft → project path. A sticky ref keeps the last
+ * {@link ProjectActionsButton} in the work-status Project section. Directory
+ * priority: worktree → session → draft → project path. A sticky ref keeps the last
  * good context so the actions button doesn't flicker during session switches.
  */
 export function useProjectActionsContext(): ProjectActionsContext | null {

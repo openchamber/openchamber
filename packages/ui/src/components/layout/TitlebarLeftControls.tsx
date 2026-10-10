@@ -12,7 +12,7 @@ import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControls
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
 
 const ICON_BUTTON_CLASS =
-  'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
+  'app-region-no-drag inline-flex h-6 w-6 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-interactive-hover transition-colors';
 
 /**
  * Persistent top-left titlebar controls (app menu on frameless chrome + sidebar toggle).
@@ -114,7 +114,7 @@ export const TitlebarLeftControls: React.FC = () => {
                 aria-label={t('header.actions.openAppMenuAria')}
                 className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
               >
-                <Icon name="menu-2" className="h-[18px] w-[18px]" />
+                <Icon name="menu-2" className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent>
@@ -132,7 +132,7 @@ export const TitlebarLeftControls: React.FC = () => {
               aria-label={t('header.actions.openSessionsAria')}
               className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
             >
-              <Icon name="layout-left" className="h-[18px] w-[18px]" />
+              <Icon name="layout-left" className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent>
@@ -146,9 +146,9 @@ export const TitlebarLeftControls: React.FC = () => {
           <button
             type="button"
             onClick={handleNewSession}
-            className={cn(ICON_BUTTON_CLASS, '-ml-1 w-auto min-w-0 px-2 font-normal')}
+            className={cn(ICON_BUTTON_CLASS, '-ml-1 w-auto min-w-0 px-1.5 font-normal')}
           >
-            <Icon name="chat-new" className="h-[18px] w-[18px] shrink-0" />
+            <Icon name="chat-new" className="h-4 w-4 shrink-0" />
             <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
           </button>
         ) : (
@@ -160,7 +160,7 @@ export const TitlebarLeftControls: React.FC = () => {
                 aria-label={t('sessions.sidebar.header.actions.newSession')}
                 className={cn(ICON_BUTTON_CLASS, '-ml-1 shrink-0')}
               >
-                <Icon name="chat-new" className="h-[18px] w-[18px]" />
+                <Icon name="chat-new" className="h-4 w-4" />
               </button>
             </TooltipTrigger>
             <TooltipContent>

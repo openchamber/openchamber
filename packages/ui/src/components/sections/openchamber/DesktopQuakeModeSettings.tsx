@@ -8,7 +8,6 @@ import { formatShortcutForDisplay, getCustomizableShortcutActions, UNASSIGNED_SH
 import {
   SettingsCheckboxRow,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
   SettingsFieldRow,
 } from '@/components/sections/shared/SettingsSection';
 import { useUIStore } from '@/stores/useUIStore';
@@ -100,7 +99,7 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
             </span>
           ) : undefined}
         >
-          <kbd className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta font-mono text-foreground">
+          <kbd className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta text-foreground">
             {quake.combo
               ? formatShortcutForDisplay(quake.combo)
               : t('settings.openchamber.keyboardShortcuts.unassigned')}
@@ -144,7 +143,6 @@ export const DesktopQuakeModeSettings: React.FC<DesktopQuakeModeSettingsProps> =
             disabled={quake.isSaving}
           >
             <SelectTrigger
-              size={SETTINGS_SELECT_SIZE}
               className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
               aria-label={t('settings.openchamber.desktopNetwork.field.quakeModeHeightAria')}
             >

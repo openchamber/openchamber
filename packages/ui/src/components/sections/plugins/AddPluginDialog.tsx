@@ -150,8 +150,7 @@ export const AddPluginDialog: React.FC<AddPluginDialogProps> = ({
           onSelect={(id) => handleTabChange(id as TabKey)}
           layoutMode="fit"
           variant="active-pill"
-          activePillLowercase={false}
-          className="h-10"
+          className="h-7"
         />
 
         <div className="flex flex-col gap-4">

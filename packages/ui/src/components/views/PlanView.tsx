@@ -49,6 +49,9 @@ import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { useI18n } from '@/lib/i18n';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
+import { cn } from '@/lib/utils';
 
 type PlanViewProps = {
   targetPath?: string | null;
@@ -139,6 +142,7 @@ type SelectedLineRange = {
 
 export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProjectPlan = null, onNavigatedToChat }) => {
   const { t } = useI18n();
+  const inPanelHeader = useInContextPanelHeader();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const createSession = useSessionUIStore((state) => state.createSession);
   const initializeNewOpenChamberSession = useSessionUIStore((state) => state.initializeNewOpenChamberSession);
@@ -814,7 +818,8 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
 
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden bg-background">
-      <div className="flex min-w-0 items-center gap-2 border-b border-border/40 px-3 py-1.5 flex-shrink-0">
+      <ContextPanelHeaderToolbar>
+      <div className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pr-1' : 'border-b border-border/40 px-3 py-1.5 flex-shrink-0')}>
         <div className="min-w-0 flex-1">
           <div className="typography-ui-label font-medium truncate">{parsedTitle}</div>
           {loadError ? (
@@ -952,6 +957,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null, savedProj
           </div>
         ) : null}
       </div>
+      </ContextPanelHeaderToolbar>
 
       <TodoSendDialog
         open={pendingPlanSend !== null}

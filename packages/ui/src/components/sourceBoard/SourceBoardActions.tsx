@@ -205,7 +205,7 @@ export const SourceBoardActions: React.FC<{
                         size="sm"
                         variant="outline"
                         // Two halves of one control: the inner corners stay square.
-                        className={cn(mergeMethods.length > 1 && 'rounded-r-none supports-[corner-shape:squircle]:rounded-r-none')}
+                        className={cn(mergeMethods.length > 1 && 'rounded-r-none')}
                         disabled={busy === 'merge'}
                         onClick={() => void merge()}
                     >
@@ -218,7 +218,7 @@ export const SourceBoardActions: React.FC<{
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    className="rounded-l-none border-l-0 supports-[corner-shape:squircle]:rounded-l-none px-1.5"
+                                    className="rounded-l-none border-l-0 px-1.5"
                                     disabled={busy === 'merge'}
                                     aria-label={t('sourceBoard.merge.methodAria')}
                                 >

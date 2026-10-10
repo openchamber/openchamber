@@ -267,6 +267,21 @@ describe('ProjectActionsButton lifecycle', () => {
 
 
 
+  test('a running action takes the row over the first idle one', async () => {
+    mockedDeviceInfo.isMobile = false;
+    const originalList = terminal.listSessions;
+    Object.assign(terminal, { listSessions: async () => [{
+      sessionId: 'peer-run', cwd: '/repo', status: 'running', createdAt: 1, mode: 'command',
+      purpose: { type: 'project-action', actionId: 'build', executionId: 'peer-execution' },
+    }] });
+    try {
+      await renderButton();
+      await act(async () => { await Promise.resolve(); });
+      const primary = host.querySelector('button');
+      expect(primary?.getAttribute('aria-label') ?? '').toContain('Build');
+    } finally { terminal.listSessions = originalList; }
+  });
+
   test('adopting a saved URL action does not auto-open a different output URL', async () => {
     mockedActionsState.actions = [{ id: 'build', name: 'Build', command: 'echo hello', autoOpenUrl: true, openUrl: 'http://localhost:4000' }];
     const originalList = terminal.listSessions;

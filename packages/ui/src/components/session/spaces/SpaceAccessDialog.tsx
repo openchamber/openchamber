@@ -204,7 +204,8 @@ const NetworkSection: React.FC<{ entry: SpaceEntry; domains: ReturnType<typeof u
           onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void submit(); } }}
           placeholder={t('spaces.create.network.domainPlaceholder')}
           aria-label={t('spaces.create.network.domainPlaceholder')}
-          className="h-9 flex-1"
+          inputSize="compact"
+          className="flex-1"
           disabled={entry.state !== 'running'}
         />
         <Button variant="outline" size="sm" onClick={() => void submit()} disabled={entry.state !== 'running' || input.trim() === '' || domains.opening !== null}>

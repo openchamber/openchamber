@@ -72,7 +72,7 @@ const MiniChatHeader: React.FC<{ mode: MiniChatMode }> = ({ mode }) => {
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
   const macosHeaderSizeClass = hasMacTrafficLights
     ? macosMajor >= 26
-      ? 'h-12'
+      ? 'h-11'
       : macosMajor <= 15
         ? 'h-14'
         : ''

@@ -81,7 +81,7 @@ const render = async (keyMethod: IntegrationKeyMethod | undefined) => {
       element.dispatchEvent(new Event('input', { bubbles: true }));
     }),
     save: () => act(async () => {
-      const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === 'Save Key');
+      const button = [...host.querySelectorAll('button')].find((candidate) => candidate.textContent?.trim() === 'Save key');
       if (!button) throw new Error('Missing save button');
       button.click();
     }),

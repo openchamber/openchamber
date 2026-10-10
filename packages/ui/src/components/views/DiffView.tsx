@@ -9,6 +9,8 @@ import { CommitComparisonSelector } from '@/components/views/git/CommitCompariso
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { BranchComparisonSelector } from '@/components/views/git/BranchComparisonSelector';
 import { branchRefLabel, qualifyBaseRef } from '@/components/views/git/baseBranch';
 import { useGitStore, useGitStatus, useIsGitRepo, useGitLoadingStatus } from '@/stores/useGitStore';
@@ -1214,6 +1216,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     flushContent = false,
 }) => {
     const { t } = useI18n();
+    const inPanelHeader = useInContextPanelHeader();
     const { git, files, sourceControl } = useRuntimeAPIs();
     const rootDirectory = useEffectiveDirectory();
     const runtimeKey = useGitStore((state) => state.runtimeKey);
@@ -2506,7 +2509,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-background">
-            <div className="@container/diff-toolbar flex min-w-0 items-center gap-2 px-3 py-2 bg-background">
+            <ContextPanelHeaderToolbar>
+            <div className={cn('@container/diff-toolbar flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pr-1' : 'px-3 py-2 bg-background')}>
                 {rootIsGitRepo === false && Array.isArray(nestedRepoOptions) && nestedRepoOptions.length > 0 ? (
                     <NestedRepoPicker
                         repositories={nestedRepoOptions}
@@ -2703,6 +2707,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     />
                 )}
             </div>
+            </ContextPanelHeaderToolbar>
 
             <ReviewFlowDialog
                 open={reviewDialogOpen}

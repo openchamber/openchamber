@@ -63,6 +63,8 @@ Do not hardcode button height/padding when a size variant exists. Do not recreat
 
 A button that opens a page, panel, or search field is a toggle: while what it opened is on screen it carries `aria-pressed` and the selection tokens, and the next click closes it. Closing a search field also clears its query, so the list never stays filtered by text nobody can see.
 
+Controls in one row share one height. Every dropdown trigger on desktop is 28px (`dropdownTriggerVariants()` default, `SelectTrigger`), in forms and toolbars alike. Toolbars, filter rows and the context panel header use 28px throughout: `Button size="sm"`, `<Input inputSize="compact">`, and the active-pill tab strip (its default). Form inputs and buttons stay 32px (`default`). Pick the size variant instead of overriding `h-*` at the call site to match a neighbour; mobile/touch branches keep their own larger sizes (`mobile`, `touch`).
+
 ## Keyboard Navigation Contract
 
 - Menus, selects, and autocomplete pickers with ArrowDown/ArrowUp navigation must also support Ctrl+N/Ctrl+P, including submenus and searchable lists.

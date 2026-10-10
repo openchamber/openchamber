@@ -550,7 +550,7 @@ export const DesktopNetworkSettings: React.FC = () => {
                   </span>
                 ) : undefined}
               >
-                <kbd className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta font-mono text-foreground">
+                <kbd className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta text-foreground">
                   {miniChatGlobalShortcutCombo
                     ? formatShortcutForDisplay(miniChatGlobalShortcutCombo)
                     : t('settings.openchamber.keyboardShortcuts.unassigned')}

@@ -48,6 +48,8 @@ import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
 import { getSourceControlAuthKey, getSourceControlReadContextAuthState, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { NestedRepoResolutionStates } from '@/components/views/git/NestedRepoResolutionStates';
 import { NestedRepoPicker } from '@/components/views/git/NestedRepoPicker';
+import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 
 interface WalkthroughViewProps {
   directory: string;
@@ -85,15 +87,16 @@ const TOC_MAX_FRACTION = 0.5;
 // controls drop their text instead: every one of them carries an icon that
 // already identifies it.
 //
-// Every control in this row is 32px tall — `Button` size `sm` and the dropdown
-// trigger's `default` size are both h-8, so this is the design system's form
-// scale rather than a number picked here. Three heights in one row (28px
-// pickers, 32px action, 36px arrows) read as misalignment, not hierarchy.
+// Every control in this row is 28px tall — `Button` size `sm` and the dropdown
+// trigger's `compact` size are both h-7, the design system's toolbar scale
+// rather than a number picked here. Three heights in one row read as
+// misalignment, not hierarchy.
 const HEADER_COMPACT_WIDTH = 680;
 
 export const WalkthroughView = ({ directory: rootDirectory, visible = true }: WalkthroughViewProps) => {
   const { t, locale, locales, label } = useI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const inPanelHeader = useInContextPanelHeader();
   const [panelWidth, setPanelWidth] = useState(0);
 
   // The walkthrough documents one repository. When the root is not itself a
@@ -114,6 +117,25 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     return () => observer.disconnect();
   }, []);
 
+  // The header's own width, not the panel's: inside the context panel header
+  // it shares the row with the panel's fullscreen and close buttons, so the
+  // panel width overstated the room and the controls wrapped before they
+  // collapsed to icons. A callback ref, because the header remounts when it
+  // moves between the panel header and the view.
+  const [headerWidth, setHeaderWidth] = useState(0);
+  const headerObserverRef = useRef<ResizeObserver | null>(null);
+  const headerRef = useCallback((element: HTMLElement | null) => {
+    headerObserverRef.current?.disconnect();
+    headerObserverRef.current = null;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      setHeaderWidth(entry?.borderBoxSize?.[0]?.inlineSize ?? entry?.contentRect.width ?? 0);
+    });
+    observer.observe(element);
+    headerObserverRef.current = observer;
+  }, []);
+
   const storedTocWidth = useUIStore((state) => state.walkthroughTocWidth);
   const setStoredTocWidth = useUIStore((state) => state.setWalkthroughTocWidth);
   const [draggingToc, setDraggingToc] = useState(false);
@@ -121,7 +143,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   const showToc = panelWidth === 0 || panelWidth >= TOC_MIN_PANEL_WIDTH;
   // Zero means the observer has not reported yet; assume there is room rather
   // than rendering a compact header for one frame on every open.
-  const compactHeader = panelWidth > 0 && panelWidth < HEADER_COMPACT_WIDTH;
+  const compactHeader = headerWidth > 0 && headerWidth < HEADER_COMPACT_WIDTH;
   // Clamped on read rather than on write: the panel can be resized after the
   // width was stored, and a remembered 400px column must not swallow a narrow
   // panel.
@@ -597,7 +619,8 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
+      <ContextPanelHeaderToolbar>
+      <header ref={headerRef} className={cn('flex min-w-0 flex-wrap items-center gap-2', inPanelHeader ? 'flex-1 py-1 pr-1' : 'shrink-0 border-b border-border/60 px-3 py-2')}>
         {rootIsGitRepo === false && Array.isArray(nestedRepos) && nestedRepos.length > 0 ? (
           <NestedRepoPicker
             repositories={nestedRepos}
@@ -612,7 +635,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex h-8 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-7 flex-shrink-0 items-center gap-1.5 rounded-md px-2 typography-ui-label font-semibold text-foreground outline-none hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t('walkthrough.scope.selectorAria')}
             >
               <span className="whitespace-nowrap">{sourceLabel}</span>
@@ -744,7 +767,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex h-8 min-w-0 flex-shrink items-center gap-1.5 rounded-md px-2 typography-ui-label text-muted-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-7 min-w-0 flex-shrink items-center gap-1.5 rounded-md px-2 typography-ui-label text-muted-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t('walkthrough.language.selectorAria')}
                 title={compactHeader ? label(activeLanguage) : undefined}
               >
@@ -791,7 +814,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
             tooltipsEnabled={false}
             dropdownPortalToBody
             compact={compactHeader}
-            className={cn('h-8 min-w-0', !compactHeader && 'max-w-48')}
+            className={cn('h-7 min-w-0', !compactHeader && 'max-w-48')}
           />
           {view && (
             <>
@@ -852,6 +875,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
           )}
         </div>
       </header>
+      </ContextPanelHeaderToolbar>
 
       {/* While regenerating over an existing walkthrough the stream keeps showing
           the old content, so the only other signal would be the button swapping

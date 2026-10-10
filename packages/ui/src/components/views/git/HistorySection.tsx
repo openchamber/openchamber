@@ -227,7 +227,6 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
                 disabled={isLogLoading}
               >
                 <SelectTrigger
-                  size="sm"
                   className="w-auto"
                   disabled={isLogLoading}
                 >

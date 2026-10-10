@@ -54,7 +54,7 @@ export const FocusModeButton = React.memo(function FocusModeButton(props: FocusM
             <TooltipContent side="top" sideOffset={8}>
                 <div className="flex flex-col gap-0.5 text-center">
                     <span>{t('chat.chatInput.focusMode.label')}</span>
-                    {shortcut ? <span className="font-mono opacity-60">{shortcut}</span> : null}
+                    {shortcut ? <span className="opacity-60">{shortcut}</span> : null}
                 </div>
             </TooltipContent>
         </Tooltip>

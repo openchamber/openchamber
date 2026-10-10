@@ -35,6 +35,7 @@ import {
   installStartupMarkSink,
   isDev,
   isMacMenuBarEnabled,
+  macTrafficLightPosition,
   macosMajorVersion,
   readLoginItemSettings,
   readSettingsRoot,
@@ -2579,7 +2580,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+        browserWindow.setTrafficLightPosition(macTrafficLightPosition());
       } catch {}
     };
     browserWindow.on('minimize', () => {
@@ -3133,7 +3134,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
     frame: usesFramelessChrome() ? false : undefined,
     autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: process.platform === 'darwin' || usesFramelessChrome() ? 'hidden' : 'default',
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 17 } : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? macTrafficLightPosition() : undefined,
     webPreferences: {
       additionalArguments: buildRendererAdditionalArguments({
         localOrigin: desktopLocalOrigin,
@@ -3177,7 +3178,7 @@ const createMiniChatWindow = async ({ mode, sessionId = '', directory = '', proj
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition({ x: 16, y: 17 });
+        browserWindow.setTrafficLightPosition(macTrafficLightPosition());
       } catch {}
     };
     browserWindow.on('show', refreshTrafficLights);

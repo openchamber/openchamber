@@ -43,7 +43,6 @@ import {
   ProjectSettingsSubsection,
 } from '@/components/sections/projects/ProjectSettingsSubsection';
 import {
-  SETTINGS_SELECT_SIZE,
   SETTINGS_SELECT_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -502,7 +501,6 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                         }}
                       >
                         <SelectTrigger
-                          size={SETTINGS_SELECT_SIZE}
                           className={SETTINGS_SELECT_TRIGGER_CLASS}
                           aria-label={t('settings.projects.actions.runIn.aria')}
                         >
@@ -590,7 +588,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                                     }));
                                   }}
                                 >
-                                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-full">
+                                  <SelectTrigger className="w-full">
                                     <SelectValue placeholder={t('settings.projects.actions.field.useOutputManualUrl')} />
                                   </SelectTrigger>
                                   <SelectContent>

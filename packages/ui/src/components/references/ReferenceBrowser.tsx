@@ -51,8 +51,6 @@ export const ReferenceBrowserTabs: React.FC<{ browser: ReferenceBrowser }> = ({ 
                 onSelect={(id) => browser.selectGitHubKind(id === 'pull' ? 'pull' : 'issue')}
                 variant="active-pill"
                 layoutMode="fit"
-                // As tall as the search field and the filter beside it.
-                activePillButtonClassName={browser.isMobile ? undefined : 'h-7'}
             />
         </div>
     );
@@ -103,7 +101,7 @@ const ReferenceFilterMenu: React.FC<{ browser: ReferenceBrowser }> = ({ browser 
                     type="button"
                     aria-label={t('references.picker.filter.label')}
                     title={summary}
-                    className={cn(dropdownTriggerVariants(), 'min-w-0 max-w-[18rem] shrink-0', browser.isMobile && 'w-full max-w-none')}
+                    className={cn(dropdownTriggerVariants({ size: browser.isMobile ? 'mobile' : 'default' }), 'min-w-0 max-w-[18rem] shrink-0', browser.isMobile && 'w-full max-w-none')}
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
                         <Icon name="filter-3" className="size-4" />
@@ -155,7 +153,8 @@ export const ReferenceBrowserSearch: React.FC<{
                     placeholder={placeholder}
                     aria-label={placeholder}
                     title={placeholder}
-                    className={cn('w-full pl-8 pr-14', isMobile ? 'h-9' : 'h-8')}
+                    inputSize={isMobile ? 'default' : 'compact'}
+                    className={cn('w-full pl-8 pr-14', isMobile && 'h-9')}
                 />
                 <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {list.refreshing && list.status !== 'loading' ? (

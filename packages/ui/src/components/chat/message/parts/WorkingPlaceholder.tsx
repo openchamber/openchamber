@@ -252,7 +252,7 @@ export function WorkingPlaceholder({
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="text-sm">
+      <span className="text-[13px] leading-4">
         {providerLogo}
         {label}
       </span>

@@ -29,6 +29,9 @@ import {
 import { useReportWorkStatusPresence } from './presenceContext';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
+import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 
 type Props = {
   sessionId: string | null;
@@ -54,6 +57,7 @@ const UNKNOWN_PERCENT = '\u2014';
  */
 export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, goalRow, showSession, showRepository, children }) => {
   const { t } = useI18n();
+  const projectActionsContext = useProjectActionsContext();
   const { git } = useRuntimeAPIs();
   const ensureStatus = useGitStore((state) => state.ensureStatus);
   const fetchStatus = useGitStore((state) => state.fetchStatus);
@@ -246,7 +250,7 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
   // restate the number directly above it.
   const showCostBreakdown = cost !== null && subagentCount > 0 && subagentCost > 0;
   const hasSession = showSession && (contextUsage !== null || cost !== null || Boolean(goalRow));
-  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel);
+  const hasRepository = showRepository && Boolean(branch || changed || prSummary || attentionLabel || projectActionsContext);
 
   useReportWorkStatusPresence('session-repository', hasSession || hasRepository);
 
@@ -297,7 +301,10 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
       repository: hasRepository ? (
         <WorkStatusSection
           title={t('chat.workStatus.section.project')}
-          summary={projectLabel}
+          subject={projectLabel}
+          summary={projectActionsContext?.directory
+            ? <OpenInAppButton directory={projectActionsContext.directory} />
+            : null}
         >
           {attentionLabel ? <WorkStatusCallout>{attentionLabel}</WorkStatusCallout> : null}
 
@@ -398,6 +405,14 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 />
               ) : null}
             </>
+          ) : null}
+
+          {/* Last: the readouts above describe the project, this runs something in it. */}
+          {projectActionsContext ? (
+            <ProjectActionsButton
+              projectRef={projectActionsContext.projectRef}
+              directory={projectActionsContext.directory}
+            />
           ) : null}
         </WorkStatusSection>
       ) : null,

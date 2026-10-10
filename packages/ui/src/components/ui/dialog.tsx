@@ -97,7 +97,7 @@ function DialogContent({
           data-slot="dialog-content"
           data-state-slot="dialog"
           className={cn(
-            "oc-surface-elevated relative pointer-events-auto bg-surface-elevated text-surface-elevated-foreground flex flex-col w-full max-w-lg max-h-full gap-4 rounded-xl border p-6 oc-modal-shadow overflow-y-auto pwa-dialog-content origin-center",
+            "oc-surface-elevated oc-window-corners relative pointer-events-auto bg-surface-elevated text-surface-elevated-foreground flex flex-col w-full max-w-lg max-h-full gap-4 border p-5 oc-modal-shadow overflow-y-auto pwa-dialog-content origin-center",
             "transition-all duration-150 ease-out",
             "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
             "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
@@ -115,7 +115,7 @@ function DialogContent({
         {showCloseButton && (
           <BaseDialog.Close
             data-slot="dialog-close"
-            className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-lg opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+            className="ring-offset-background focus:ring-ring data-[open]:bg-interactive-active data-[open]:text-foreground absolute top-2.5 right-2.5 z-10 inline-flex size-7 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none text-muted-foreground hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
             <Icon name="close"/>
             <span className="sr-only">{t('dialog.common.actions.close')}</span>
@@ -157,7 +157,7 @@ function DialogTitle({
   return (
     <BaseDialog.Title
       data-slot="dialog-title"
-      className={cn("typography-markdown leading-none font-semibold text-foreground", className)}
+      className={cn("typography-ui-header leading-none font-semibold text-foreground", className)}
       {...props}
     />
   )
@@ -170,7 +170,7 @@ function DialogDescription({
   return (
     <BaseDialog.Description
       data-slot="dialog-description"
-      className={cn("text-muted-foreground typography-ui-label", className)}
+      className={cn("text-muted-foreground typography-meta", className)}
       {...props}
     />
   )

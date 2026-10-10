@@ -15,7 +15,6 @@ import {
   SETTINGS_HELPER_CLASS,
   SETTINGS_OPTION_STACK_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
   SettingsCheckboxRow,
   SettingsFieldRow,
   SettingsSection,
@@ -90,7 +89,7 @@ const VariantSelect: React.FC<{
     : variant.charAt(0).toUpperCase() + variant.slice(1));
   return (
     <Select value={selected} onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? null : next)} disabled={variants.length === 0}>
-      <SelectTrigger size={SETTINGS_SELECT_SIZE} className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, className)} aria-label={ariaLabel}>
+      <SelectTrigger className={cn(SETTINGS_SELECT_ROW_TRIGGER_CLASS, className)} aria-label={ariaLabel}>
         <SelectValue>{label(selected)}</SelectValue>
       </SelectTrigger>
       <SelectContent>

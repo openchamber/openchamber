@@ -90,6 +90,7 @@ import { useOpenUntilSettled } from './useOpenUntilSettled';
 import { isEditorEventTarget } from '@/lib/editorFocus';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { ContextPanelHeaderSlotProvider } from './contextPanelHeaderSlot';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
@@ -524,6 +525,7 @@ export const ContextPanel: React.FC = () => {
   // from a previous run otherwise stay asleep, since every loaded tab costs a
   // Chromium process. Once loaded, a tab stays loaded until it is closed.
   const [wokenBrowserTabIds, setWokenBrowserTabIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [headerSlotEl, setHeaderSlotEl] = React.useState<HTMLDivElement | null>(null);
   const wakeBrowserTab = React.useCallback((tabId: string) => {
     setWokenBrowserTabIds((current) => (current.has(tabId) ? current : new Set(current).add(tabId)));
   }, []);
@@ -945,20 +947,20 @@ export const ContextPanel: React.FC = () => {
   }), [activeModeTabs, effectiveDirectory, faviconByOrigin, sessionTitleById, t, tabT]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
-        ? <ContextPanelContent />
+        ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ContextPanelContent /></ContextPanelHeaderSlotProvider>
         : activeTab?.mode === 'git'
-            ? <React.Suspense fallback={null}><GitView isActive={isOpen} /></React.Suspense>
+            ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><GitView isActive={isOpen} /></ContextPanelHeaderSlotProvider></React.Suspense>
             : activeTab?.mode === 'pr'
                 ? <PullRequestView />
             : activeTab?.mode === 'notes'
-                ? <ProjectContextPanel visible={isOpen} />
+                ? <ContextPanelHeaderSlotProvider value={headerSlotEl}><ProjectContextPanel visible={isOpen} /></ContextPanelHeaderSlotProvider>
         : activeTab?.mode === 'plan'
-            ? <React.Suspense fallback={null}><PlanView
+            ? <React.Suspense fallback={null}><ContextPanelHeaderSlotProvider value={headerSlotEl}><PlanView
                 targetPath={activeTab.targetPath}
                 savedProjectPlan={activeTab.projectPlanId && activeTab.projectPlanRef
                   ? { projectRef: activeTab.projectPlanRef, planId: activeTab.projectPlanId }
                   : null}
-              /></React.Suspense>
+              /></ContextPanelHeaderSlotProvider></React.Suspense>
             : null;
 
   const visibleBrowserTabId = isOpen && activeTab?.mode === 'browser' ? activeTab.id : null;
@@ -1085,7 +1087,7 @@ export const ContextPanel: React.FC = () => {
   );
 
   const header = (
-    <header className="flex h-10 items-stretch border-b border-border">
+    <header className="group/panel-header flex min-h-10 items-stretch border-b border-border">
       {isMultiInstanceMode ? (
         <SortableTabsStrip
           items={tabItems}
@@ -1116,7 +1118,8 @@ export const ContextPanel: React.FC = () => {
           tabContextMenu={renderTabContextMenu}
         />
       ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
+        <>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3 group-has-[[data-context-panel-toolbar]]/panel-header:hidden">
           {/* A GitLab project's change requests are merge requests. */}
           {activeTab?.mode === 'pr' && repositoryProvider === 'gitlab'
             ? <Icon name="gitlab" className="h-3.5 w-3.5" />
@@ -1127,8 +1130,11 @@ export const ContextPanel: React.FC = () => {
               : activeTab ? getModeLabel(activeTab.mode, tabT) : null}
           </span>
         </div>
+        {/* The active surface's own toolbar lands here (contextPanelHeaderSlot). */}
+        <div ref={setHeaderSlotEl} className="flex min-w-0 flex-1 items-stretch pl-1.5 empty:hidden" />
+        </>
       )}
-      <div className="flex items-center gap-1 px-1.5">
+      <div className="flex h-10 shrink-0 items-center gap-1 self-start px-1.5">
         {activeTab?.mode === 'browser' ? (
           <Button
             type="button"
@@ -1268,7 +1274,10 @@ export const ContextPanel: React.FC = () => {
         // content is wider than the card's column, so a `scrollIntoView`
         // inside it (the tab strip revealing its active tab on mount)
         // scrolled the slot sideways and dragged the card left, clipped.
-        'flex min-h-0 flex-col overflow-clip bg-background',
+        // The gutter sets the panel apart from the chat as a card of its own
+        // and leaves the card's shadow room on every side the aside clips;
+        // the resize handle sits in the left one.
+        'box-border flex min-h-0 flex-col overflow-clip bg-background pb-2 pl-2 pr-1.5',
         // Right-anchored while expanded: `inset-0` would teleport the left
         // edge instantly (position does not transition), so only the width
         // animates and the panel grows leftwards from its docked position.
@@ -1283,22 +1292,12 @@ export const ContextPanel: React.FC = () => {
       {/* The inline work-status card's host, right-anchored under the panel:
           the card fades out while the panel fades in over it, and back. */}
       <div ref={setWorkStatusHost} className={cn('absolute inset-y-0 right-0 z-0 flex', chatCovered && 'invisible')} />
-      {/* Painted divider instead of border-l: a real border eats 1px of the
-          content box only while collapsed, shifting the header controls by
-          1px between the collapsed and expanded states. */}
       {isOpen && !isExpanded && (
-        <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" />
-      )}
-      {/* Divider between the panel and the icon rail on its right. */}
-      {isOpen && (
-        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
-      )}
-      {isOpen && !isExpanded && (
+        // Straddles the card's left edge (the aside's pl-2 gutter) and spans
+        // only the card's height. Nothing paints on hover or drag: the cursor
+        // says it is draggable, and the card edge itself moves on release.
         <div
-          className={cn(
-            'absolute left-0 top-0 z-50 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
-            isResizing && 'bg-[var(--interactive-border)]'
-          )}
+          className="absolute bottom-2 left-1 top-0 z-50 w-2 cursor-col-resize"
           onPointerDown={handleResizeStart}
           role="separator"
           aria-orientation="vertical"
@@ -1307,7 +1306,11 @@ export const ContextPanel: React.FC = () => {
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col bg-background motion-reduce:transition-none',
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col motion-reduce:transition-none',
+          // A framed card, inset from the chat: its own border and radius rather
+          // than a divider running the height of the window.
+          // Same lift as the work-status card.
+          'overflow-hidden rounded-[10px] border border-border bg-background shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
           // Width animates in sync with the panel (surface switches, resize
           // release); during the drag itself nothing resizes — only the ghost
           // guide line moves.
@@ -1317,7 +1320,10 @@ export const ContextPanel: React.FC = () => {
         // px in the expanded state too: px↔% width changes cannot interpolate,
         // so the header controls would snap instead of riding the animation.
         style={{
-          width: isExpanded ? expandedWidth : 'var(--oc-context-panel-width)',
+          // Less the gutters (pl-2, pr-1.5) the aside reserves for the card.
+          width: isExpanded
+            ? (areaWidth !== null ? `calc(${areaWidth}px - 0.875rem)` : '100%')
+            : 'calc(var(--oc-context-panel-width) - 0.875rem)',
           transitionDuration: `${LAYOUT_ANIMATION_MS}ms`,
           transitionTimingFunction: LAYOUT_ANIMATION_EASING,
         }}
@@ -1393,6 +1399,7 @@ export const ContextPanel: React.FC = () => {
             )}
           >
             <React.Suspense fallback={null}>
+              <ContextPanelHeaderSlotProvider value={activeTab?.id === tab.id ? headerSlotEl : null}>
               <DiffView
                 visible={isOpen && activeTab?.id === tab.id}
                 hideStackedFileSidebar
@@ -1404,22 +1411,27 @@ export const ContextPanel: React.FC = () => {
                 targetFilePath={tab.targetPath}
                 flushContent
               />
+              </ContextPanelHeaderSlotProvider>
             </React.Suspense>
           </div>
         ))}
         {terminalTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'terminal' ? 'block' : 'hidden')}>
-            <TerminalView
-              visible={isOpen && activeTab?.mode === 'terminal'}
-              directory={terminalTab.targetDirectory}
-              onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
-            />
+            <ContextPanelHeaderSlotProvider value={activeTab?.mode === 'terminal' ? headerSlotEl : null}>
+              <TerminalView
+                visible={isOpen && activeTab?.mode === 'terminal'}
+                directory={terminalTab.targetDirectory}
+                onLastTabClosed={() => { if (directoryKey) closeContextPanelTab(directoryKey, terminalTab.id); }}
+              />
+            </ContextPanelHeaderSlotProvider>
           </div>
         ) : null}
         {hasWalkthroughTab ? (
           <div className={cn('absolute inset-0', activeTab?.mode === 'walkthrough' ? 'block' : 'hidden')}>
             <React.Suspense fallback={null}>
-              <WalkthroughView directory={effectiveDirectory} visible={isOpen && activeTab?.mode === 'walkthrough'} />
+              <ContextPanelHeaderSlotProvider value={activeTab?.mode === 'walkthrough' ? headerSlotEl : null}>
+                <WalkthroughView directory={effectiveDirectory} visible={isOpen && activeTab?.mode === 'walkthrough'} />
+              </ContextPanelHeaderSlotProvider>
             </React.Suspense>
           </div>
         ) : null}

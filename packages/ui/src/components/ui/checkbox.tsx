@@ -48,8 +48,10 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
           'transition-[background-color,border-color,box-shadow] duration-200 ease-out',
           // Drive fill directly from React props so the initial paint matches
           // the final state without waiting for Base UI to hydrate data attrs.
+          // Checked state stays neutral: the mark carries it, and the primary
+          // color stays reserved for primary actions.
           isOn
-            ? 'border-[color:color-mix(in_srgb,var(--primary-base)_65%,var(--interactive-border))] bg-transparent shadow-none hover:bg-[var(--interactive-hover)] hover:border-[color:color-mix(in_srgb,var(--primary-base)_75%,var(--interactive-border))]'
+            ? 'border-[color:color-mix(in_srgb,var(--foreground)_60%,var(--interactive-border))] bg-transparent shadow-none hover:bg-[var(--interactive-hover)]'
             : 'border-[var(--choice-border)] bg-transparent shadow-none hover:bg-[var(--interactive-hover)] hover:border-[var(--choice-border)]',
           // focus: transparent offset so parent bg (e.g. sidebar) doesn't create a visible gap
           'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-transparent',
@@ -61,7 +63,7 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         <BaseCheckbox.Indicator
           keepMounted
           className={cn(
-            'flex items-center justify-center text-[var(--primary-text)]',
+            'flex items-center justify-center text-foreground',
             // hide when fully unchecked (no state)
             'data-[unchecked]:hidden',
             iconClassName,

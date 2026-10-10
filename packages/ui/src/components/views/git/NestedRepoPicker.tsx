@@ -46,7 +46,6 @@ export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
       }}
     >
       <SelectTrigger
-        size="sm"
         className="max-w-[13rem] gap-1.5 px-2 py-1"
         aria-label={t('gitView.empty.selectRepositoryPlaceholder')}
       >

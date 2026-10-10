@@ -20,7 +20,6 @@ import {
     SettingsFieldRow,
     SettingsControlGroup,
     SettingsChipGroup,
-    SETTINGS_SELECT_SIZE,
     SETTINGS_NUMBER_INPUT_CLASS,
     SETTINGS_SELECT_ROW_TRIGGER_CLASS,
     SETTINGS_CONTROL_CLUSTER_CLASS,
@@ -1167,7 +1166,7 @@ export const VoiceSettings: React.FC = () => {
                                                     setLocalTtsVoiceId(option.speakerId);
                                                 }}
                                             >
-                                                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.voice.page.field.selectVoicePlaceholder')}>
                                                         {(value) => localTtsVoiceOptions.find((v) => localTtsVoiceKey(v.modelId, v.speakerId) === value)?.label ?? value}
                                                     </SelectValue>
@@ -1190,7 +1189,7 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'openai' && isOpenAIAvailable && (
                                         <>
                                             <Select value={openaiVoice} onValueChange={setOpenaiVoice}>
-                                                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.voice.page.field.selectVoicePlaceholder')} />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -1212,7 +1211,7 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'say' && isSayAvailable && sayVoices.length > 0 && (
                                         <>
                                             <Select value={sayVoice} onValueChange={setSayVoice}>
-                                                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.voice.page.field.selectVoicePlaceholder')} />
                                                 </SelectTrigger>
                                                 <SelectContent>
@@ -1230,7 +1229,7 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
                                         <>
                                             <Select value={browserVoice || '$auto'} onValueChange={(value) => setBrowserVoice(value === '$auto' ? '' : value)}>
-                                                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                                                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                                                     <SelectValue placeholder={t('settings.voice.page.field.auto')} />
                                                 </SelectTrigger>
                                                 <SelectContent>

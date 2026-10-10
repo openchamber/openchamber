@@ -76,7 +76,7 @@ describe("GitHubSettings", () => {
     });
 
     const disconnectedMarkup = renderSettings();
-    expect(disconnectedMarkup).toContain("Not Connected");
+    expect(disconnectedMarkup).toContain("Not connected");
     expect(disconnectedMarkup).toContain("Connect GitHub");
   });
 });

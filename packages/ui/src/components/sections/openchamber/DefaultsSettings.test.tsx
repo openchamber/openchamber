@@ -118,7 +118,6 @@ mock.module('@/components/sections/shared/SettingsSection', () => ({
   SettingsGroupTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   SETTINGS_CUSTOM_TRIGGER_CLASS: '',
   SETTINGS_SELECT_ROW_TRIGGER_CLASS: '',
-  SETTINGS_SELECT_SIZE: 'sm',
   SETTINGS_OPTION_STACK_CLASS: '',
   SETTINGS_FIELDS_STACK_CLASS: '',
 }));

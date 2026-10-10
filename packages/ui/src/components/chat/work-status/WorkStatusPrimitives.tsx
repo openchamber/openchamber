@@ -30,13 +30,18 @@ const HEADING_CLASS = 'text-xs font-semibold text-foreground';
 
 export const WorkStatusSection: React.FC<{
   title: string;
+  /** Names what the section is about, right after the title (the project). */
+  subject?: React.ReactNode;
   /** Aggregate for the whole section; belongs on the heading, not on a row. */
   summary?: React.ReactNode;
   children: React.ReactNode;
-}> = ({ title, summary, children }) => (
+}> = ({ title, subject, summary, children }) => (
   <section className={SECTION_CLASS}>
     <div data-work-status-heading className="mb-0.5 flex items-center gap-2 px-1">
-      <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>{title}</h3>
+      <h3 className={cn(HEADING_CLASS, 'min-w-0 flex-1 truncate')}>
+        {title}
+        {subject ? <span className="ml-1.5 font-normal text-muted-foreground">{subject}</span> : null}
+      </h3>
       {summary !== undefined && summary !== null ? (
         <span className="min-w-0 max-w-[60%] truncate text-right text-xs text-muted-foreground tabular-nums">{summary}</span>
       ) : null}

@@ -186,7 +186,7 @@ export const MainLayout: React.FC = () => {
                     <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                         <Header />
                         <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
-                            <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
+                            <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
                                 <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">
                                     {/* Holds the chat and the context panel together, so its
                                         width does not move when the context panel opens. The
@@ -217,7 +217,7 @@ export const MainLayout: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <div className="border-t border-border" data-page-scroll-lock="true">
+                            <div data-page-scroll-lock="true">
                                 <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                             </div>
                             <ErrorBoundary><GuestHosts /></ErrorBoundary>

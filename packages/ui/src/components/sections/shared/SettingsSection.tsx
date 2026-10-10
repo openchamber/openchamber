@@ -26,7 +26,6 @@ const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[16ch] max-w-[28ch]';
 
 /** Settings select trigger: full column width in stacked cells; capped in field rows via parent. */
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
-export const SETTINGS_SELECT_SIZE = 'settings' as const;
 
 /** Fixed-width select used inside full-width SettingsFieldRow control columns. */
 export const SETTINGS_SELECT_ROW_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;

@@ -208,7 +208,7 @@ subscribes to `currentProviderId` / `currentModelId` for the limits.
 reporting assistant turn is the answer, not a sum across turns.
 
 Which message is "latest" is decided by `findLatestContextFill` in
-`stores/utils/tokenUtils.ts`, shared with the header, VS Code header, mini chat,
+`stores/utils/tokenUtils.ts`, shared with the VS Code header, mini chat,
 mobile metadata and context sidebar. A finished compaction's own record (a
 `compaction` message with `status: 'completed'`) is not a reading: its tokens
 describe the summarizing request,
@@ -379,8 +379,8 @@ settings; an empty list enables everything. Complete settings
 snapshots own this preference; unrelated partial save echoes leave it unchanged.
 
 `workStatusPanelVisible` is separate and transient: the switch can be on while
-layout still refuses the panel. The header and the git rail read it to drop the
-readouts the panel already carries, and it is deliberately not persisted — it
+layout still refuses the panel. The header's project/branch line and the git
+rail read it to drop the readouts the panel already carries, and it is deliberately not persisted — it
 describes the current frame, not a preference.
 
 ## Appearing and disappearing
@@ -440,10 +440,12 @@ Rows that name something the app can already show are buttons:
 
 | Row | Opens |
 |---|---|
-| Context | the context overview (`openContextOverview`), same destination as the header readout |
+| Context | the context overview (`openContextOverview`), same destination as the rail's Context surface |
 | Changes | working-tree diff (`openContextPanelTab`, `diffScope: 'working'`, no target path) |
 | Branch | git surface (`openContextSurface(dir, 'git')`) |
 | Pull request, Checks | PR surface (`openContextSurface(dir, 'pr')`) |
+| App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
+| Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. This row is the only place the control lives — the header no longer carries it — so a project without a repository still gets a Project section |
 | Subagent | that child session's chat tab, read-only |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |

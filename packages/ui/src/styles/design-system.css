@@ -14,8 +14,10 @@
     --oc-wco-right-inset: 0px;
     --oc-wco-titlebar-height: 0px;
     --ui-regular-font-weight: 400;
-    --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
-    --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
+    /* Quiet at rest so a long scroll track does not read as a divider; the
+       hover state still gives a grab target clear contrast. */
+    --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.18);
+    --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.36);
     --padding-scale: 1;
     /* Shared glass surfaces. Semantic surface tokens provide each tint. */
     --oc-glass-blur: 22px;
@@ -29,8 +31,8 @@
     --text-code: 0.75rem;
     --text-ui-header: 0.875rem;
     --text-ui-label: 0.84375rem;
-    --text-meta: 0.8125rem;
-    --text-micro: 0.8125rem;
+    --text-meta: 0.78125rem;
+    --text-micro: 0.75rem;
     --text-settings-page-title: 1.0625rem;
 
     /* Text selection colour shared by native ::selection and the comment overlay */
@@ -70,6 +72,12 @@
     --sidebar-accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
     --sidebar-border: oklch(0.85 0.02 70); /* Warm border */
     --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
+  }
+
+  /* Shortcuts read in the interface font, the way tooltips show them. The
+     preflight's monospace shrinks ⇧/⌥ to specks and spaces "K, H" apart. */
+  kbd {
+    font-family: inherit;
   }
 
   .dark {
@@ -384,6 +392,19 @@
     0 2px 6px -1px rgb(0 0 0 / 0.3),
     0 12px 28px -6px rgb(0 0 0 / 0.45),
     0 32px 72px -12px rgb(0 0 0 / 0.6);
+}
+
+/* Window corners for modal windows. A squircle needs a larger radius than a
+   circular arc to look the same size; it reads as a continuous curve. */
+.oc-window-corners {
+  border-radius: 0.75rem;
+}
+
+@supports (corner-shape: squircle) {
+  .oc-window-corners {
+    corner-shape: squircle;
+    border-radius: 1.25rem;
+  }
 }
 
 /* Voice overlay. Glass inside glass is not glass: a nested backdrop-filter

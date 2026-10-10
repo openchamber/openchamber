@@ -708,8 +708,8 @@ svg.animate-spin {
 
 .dark {
   color-scheme: dark;
-  --oc-scrollbar-thumb: oklch(0.6 0.02 80 / 0.3);
-  --oc-scrollbar-thumb-hover: oklch(0.6 0.02 80 / 0.5);
+  --oc-scrollbar-thumb: oklch(0.6 0.02 80 / 0.18);
+  --oc-scrollbar-thumb-hover: oklch(0.6 0.02 80 / 0.36);
 }
 
 [data-scrollbar="chat"]::-webkit-scrollbar-thumb {
@@ -1104,8 +1104,9 @@ html:not(.dark) .chat-scroll {
     display: none;
   }
 
+  /* Icon only, the button is square: as wide as the 28px row is tall. */
   .diff-toolbar__walkthrough-button {
-    padding-inline: 0.5rem;
+    padding-inline: 0.375rem;
   }
 }
 
@@ -1119,7 +1120,7 @@ html:not(.dark) .chat-scroll {
 
   .diff-toolbar__review-button,
   .diff-toolbar__expand-button {
-    padding-inline: 0.5rem;
+    padding-inline: 0.375rem;
   }
 }
 

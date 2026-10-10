@@ -10,9 +10,11 @@ import { cva } from 'class-variance-authority';
  * call sites may only add layout (width/min-width/max-width, truncation).
  *
  * Sizes:
- * - `sm`      — dense surfaces: chat composer, toolbars, list rows (h-6).
- * - `default` — forms, dialogs, and settings pages (h-8).
- * - `touch`   — mobile value pickers (h-11).
+ * - `default` — every desktop trigger: forms, dialogs, settings, toolbars,
+ *               filter rows (h-7). One height, so pickers in one window never
+ *               disagree; it matches `Button size="sm"`.
+ * - `mobile`  — phone layouts that render the same trigger inline (h-8).
+ * - `touch`   — mobile value pickers opening a sheet (h-11).
  */
 export const dropdownTriggerVariants = cva(
   [
@@ -26,8 +28,8 @@ export const dropdownTriggerVariants = cva(
   {
     variants: {
       size: {
-        sm: "h-6 min-h-6 px-2 [&_svg:not([class*='size-'])]:size-3.5",
-        default: "h-8 min-h-8 px-3 [&_svg:not([class*='size-'])]:size-4",
+        default: "h-7 min-h-7 px-2.5 [&_svg:not([class*='size-'])]:size-4",
+        mobile: "h-8 min-h-8 px-3 [&_svg:not([class*='size-'])]:size-4",
         touch: "h-11 min-h-11 px-3 [&_svg:not([class*='size-'])]:size-4",
       },
     },

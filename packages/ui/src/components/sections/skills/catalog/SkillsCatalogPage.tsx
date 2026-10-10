@@ -398,7 +398,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
       >
       {showModeTabs && (
             <div className="mb-4">
-              <div className="h-10">
+              <div className="h-7">
                 <SortableTabsStrip
                   items={[
                     { id: 'manual', label: t('settings.skills.catalog.page.mode.manual') },

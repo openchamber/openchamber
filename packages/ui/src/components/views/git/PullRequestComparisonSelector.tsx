@@ -31,7 +31,7 @@ export function PullRequestComparisonSelector({ comparison, mobile = false }: {
     if (!next) comparison.setQuery('');
   };
   const selected = comparison.selectedSource;
-  const trigger = <Button variant="outline" className={cn(dropdownTriggerVariants({ size: mobile ? 'default' : 'sm' }), 'min-w-0 max-w-48')}
+  const trigger = <Button variant="outline" className={cn(dropdownTriggerVariants({ size: mobile ? 'mobile' : 'default' }), 'min-w-0 max-w-48')}
     data-mobile-comparison-trigger={mobile || undefined}
     onClick={sheet ? () => changeOpen(true) : undefined}
     aria-haspopup={sheet ? 'dialog' : undefined} aria-expanded={sheet ? open : undefined}

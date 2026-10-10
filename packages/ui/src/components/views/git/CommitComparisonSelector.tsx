@@ -36,7 +36,7 @@ export function CommitComparisonSelector({ commits, selectedHash, loading, error
     else if (!loading) onRefresh();
   };
   const trigger = (
-    <Button variant="outline" className={cn(dropdownTriggerVariants({ size: mobile ? 'default' : 'sm' }), 'min-w-0 max-w-48')}
+    <Button variant="outline" className={cn(dropdownTriggerVariants({ size: mobile ? 'mobile' : 'default' }), 'min-w-0 max-w-48')}
       data-mobile-comparison-trigger={mobile || undefined}
       onClick={useSheet ? () => changeOpen(true) : undefined}
       aria-haspopup={useSheet ? 'dialog' : undefined}

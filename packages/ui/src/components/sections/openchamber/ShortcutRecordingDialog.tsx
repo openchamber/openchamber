@@ -290,12 +290,12 @@ export const ShortcutRecordingDialog: React.FC<ShortcutRecordingDialogProps> = (
         >
           <div className="flex flex-wrap items-center justify-center gap-2">
             {recording.chords.map((chord, index) => (
-              <kbd key={`${chord}-${index}`} className="rounded-md border border-border bg-muted px-3 py-2 typography-ui-label font-mono text-foreground">
+              <kbd key={`${chord}-${index}`} className="rounded-md border border-border bg-muted px-3 py-2 typography-ui-label text-foreground">
                 {formatShortcutForDisplay(chord)}
               </kbd>
             ))}
             {recording.livePreview ? (
-              <kbd className="rounded-md border border-dashed border-border bg-muted px-3 py-2 typography-ui-label font-mono text-muted-foreground">
+              <kbd className="rounded-md border border-dashed border-border bg-muted px-3 py-2 typography-ui-label text-muted-foreground">
                 {formatShortcutForDisplay(recording.livePreview)}
               </kbd>
             ) : null}

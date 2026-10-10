@@ -100,7 +100,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
           <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground/80', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         )}
       </span>
-      <span className={cn('truncate typography-ui-label font-semibold lowercase text-foreground', labelClassName)}>{projectLabel}</span>
+      <span className={cn('truncate typography-ui-label font-semibold text-foreground', labelClassName)}>{projectLabel}</span>
     </>
   );
 };

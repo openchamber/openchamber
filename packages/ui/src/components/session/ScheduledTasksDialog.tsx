@@ -514,7 +514,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
           }
         }}
       >
-        <SelectTrigger size="lg" className="w-full">
+        <SelectTrigger className="w-full">
           {selectedProjectID === CHAT_DRAFT_PROJECT_ID ? (
             <SelectValue>{chatsLabel}</SelectValue>
           ) : selectedProject ? (

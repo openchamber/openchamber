@@ -16,7 +16,7 @@ import { openExternalUrl } from '@/lib/url';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import { SettingsSection, SettingsGroupTitle, SETTINGS_SELECT_SIZE, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsGroupTitle, SETTINGS_FIELD_LABEL_CLASS, SETTINGS_CALLOUT_TITLE_CLASS, SETTINGS_DESCRIPTION_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 
 type TunnelState =
@@ -1333,7 +1333,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[16rem]">
+                <SelectTrigger className="max-w-[16rem]">
                   <SelectValue placeholder={t('settings.openchamber.tunnel.field.providerPlaceholder')}>
                     {getProviderLabel(tunnelProvider)}
                   </SelectValue>
@@ -1393,7 +1393,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[11rem] min-w-0">
+                <SelectTrigger className="max-w-[11rem] min-w-0">
                   <SelectValue className="truncate">
                     {ttlOptionLabel(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
                   </SelectValue>
@@ -1415,7 +1415,7 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger size={SETTINGS_SELECT_SIZE} className="max-w-[11rem] min-w-0">
+                <SelectTrigger className="max-w-[11rem] min-w-0">
                   <SelectValue className="truncate">
                     {ttlOptionLabel(SESSION_TTL_OPTIONS, sessionTtlMs, '28800000')}
                   </SelectValue>
@@ -1776,7 +1776,7 @@ export const TunnelSettings: React.FC = () => {
                       || managedRemoteTunnelPresets.length <= 1
                     }
                   >
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE}>
+                    <SelectTrigger>
                       <SelectValue placeholder={t('settings.openchamber.tunnel.field.selectSavedTunnelPlaceholder')}>
                         {selectedPreset?.name}
                       </SelectValue>

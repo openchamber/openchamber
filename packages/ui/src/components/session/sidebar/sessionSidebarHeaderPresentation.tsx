@@ -36,7 +36,7 @@ export const SessionSidebarActivityHeader: React.FC<{
         className={cn('group flex w-full items-center gap-1 py-2 pl-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', 'pr-3.5')}
         aria-expanded={!collapsed}
       >
-        <span className="typography-ui-label font-semibold lowercase text-foreground">
+        <span className="typography-ui-label font-semibold text-foreground">
           {t(ACTIVITY_TITLE_KEY[activityKey])}
         </span>
         {!forceExpanded ? <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5 text-muted-foreground" /> : null}
@@ -57,7 +57,7 @@ export const SessionSidebarActivityHeader: React.FC<{
           <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
         </span> : null}
       </span>
-      <span className="typography-ui-label font-semibold lowercase text-foreground">
+      <span className="typography-ui-label font-semibold text-foreground">
         {t(ACTIVITY_TITLE_KEY[activityKey])}
       </span>
     </button>

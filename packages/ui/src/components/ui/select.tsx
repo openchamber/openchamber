@@ -135,15 +135,12 @@ function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
 
 function SelectTrigger({
   className,
-  size = "default",
   children,
   asChild,
   onPointerDownCapture,
   onFocusCapture,
   ...props
-}: React.ComponentProps<typeof BaseSelect.Trigger> & AsChildProps & {
-  size?: "sm" | "default" | "lg" | "chip" | "settings"
-}) {
+}: React.ComponentProps<typeof BaseSelect.Trigger> & AsChildProps) {
   const portalContext = React.useContext(SelectPortalContext);
 
   const syncPortalContainer = React.useCallback((target: EventTarget | null) => {
@@ -161,11 +158,9 @@ function SelectTrigger({
   return (
     <BaseSelect.Trigger
       data-slot="select-trigger"
-      data-size={size}
       className={cn(
         // Shared trigger chrome: one source of truth for every dropdown trigger.
-        // Legacy sizes map onto the two canonical ones: sm (dense) / default (forms).
-        dropdownTriggerVariants({ size: size === 'settings' || size === 'lg' ? 'default' : 'sm' }),
+        dropdownTriggerVariants(),
         "w-fit data-[placeholder]:text-muted-foreground aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1 *:data-[slot=select-value]:truncate",
         className
       )}
@@ -327,24 +322,20 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
-  showSelectedBackground = true,
   ...props
-}: React.ComponentProps<typeof BaseSelect.Item> & {
-  showSelectedBackground?: boolean;
-}) {
+}: React.ComponentProps<typeof BaseSelect.Item>) {
   return (
     <BaseSelect.Item
       data-slot="select-item"
       className={cn(
         "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-8 pl-2 typography-ui-label outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
-        showSelectedBackground && "data-[selected]:bg-interactive-selection data-[selected]:text-interactive-selection-foreground",
         className
       )}
       {...props}
     >
       <span className="absolute right-2 flex size-3.5 items-center justify-center">
         <BaseSelect.ItemIndicator>
-          <Icon name="check" className="size-4" />
+          <Icon name="check" className="size-4 text-foreground" />
         </BaseSelect.ItemIndicator>
       </span>
       <BaseSelect.ItemText>{children}</BaseSelect.ItemText>

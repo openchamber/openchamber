@@ -130,7 +130,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
               {categoryActions.map((action) => (
                 <SettingsFieldRow key={action.id} label={t(action.settingsLabelKey)}>
                   <kbd
-                    className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta font-mono text-foreground"
+                    className="min-w-32 rounded-md border border-border bg-muted px-2 py-1 text-center typography-meta text-foreground"
                   >
                     {shortcutDisplay(action)}
                   </kbd>

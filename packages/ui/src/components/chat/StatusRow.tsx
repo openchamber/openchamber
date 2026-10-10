@@ -53,12 +53,12 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       // scroll-to-bottom pill uses).
       style={STATUS_ROW_CONTAINER_STYLE}
     >
-      {/* h-8 matches the turn footer's real row height: its h-8 action
-          buttons define the footer line, with the meta text centered in it. */}
+      {/* 28px, the toolbar control height, shared with the scroll-to-bottom
+          pill that takes over this label away from the live edge. */}
       {/* The glass chip lives here, not on the container: the root above is
           an inline-size query container, whose width ignores its children —
           a shrink-to-fit wrapper around it always collapsed to zero. */}
-      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-8 whitespace-nowrap rounded-full [corner-shape:round] px-3">
+      <div className="oc-glass-popover inline-flex w-max max-w-full items-center gap-2 h-7 whitespace-nowrap rounded-full [corner-shape:round] px-3">
         <div className="flex items-center min-w-0 gap-2 overflow-x-hidden">
           {shouldRenderPlaceholder ? (
             <WorkingPlaceholder
@@ -74,7 +74,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             />
           ) : null}
         </div>
-        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-mr-2 h-6 w-6" /> : null}
+        {onBackground ? <BackgroundWorkButton onClick={onBackground} className="-mr-2.5 h-6 w-6" /> : null}
       </div>
     </div>
   );

@@ -166,7 +166,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
                     disabled={!isReady}
                     className={cn(
-                        dropdownTriggerVariants(),
+                        dropdownTriggerVariants({ size: 'mobile' }),
                         'w-full',
                         className,
                     )}
@@ -204,7 +204,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <DropdownMenuTrigger asChild>
                 <div
                     className={cn(
-                        dropdownTriggerVariants({ size: 'sm' }),
+                        dropdownTriggerVariants(),
                         'min-w-0 w-fit',
                         !isReady && 'opacity-60 cursor-not-allowed',
                         className,

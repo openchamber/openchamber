@@ -1508,7 +1508,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                   variant="ghost"
                   size="sm"
                   onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
-                  className="h-8 w-8 p-0 flex-shrink-0"
+                  className="w-7 p-0 flex-shrink-0"
                   title={t('sidebarFilesTree.actions.newFileTitle')}
                   aria-label={t('sidebarFilesTree.actions.newFileTitle')}
                 >
@@ -1527,7 +1527,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                   variant="ghost"
                   size="sm"
                   onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
-                  className="h-8 w-8 p-0 flex-shrink-0"
+                  className="w-7 p-0 flex-shrink-0"
                   title={t('sidebarFilesTree.actions.newFolderTitle')}
                   aria-label={t('sidebarFilesTree.actions.newFolderTitle')}
                 >
@@ -1547,7 +1547,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                   size="sm"
                   onClick={() => pickFiles(root)}
                   disabled={!root || isUploading}
-                  className="h-8 w-8 p-0 flex-shrink-0"
+                  className="w-7 p-0 flex-shrink-0"
                   title={t('sidebarFilesTree.actions.uploadFilesTitle')}
                   aria-label={t('sidebarFilesTree.actions.uploadFilesTitle')}
                 >
@@ -1562,7 +1562,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex flex-shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="h-8 w-8 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
+              <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="w-7 p-0 flex-shrink-0" title={t('sidebarFilesTree.actions.refreshTitle')} aria-label={t('sidebarFilesTree.actions.refreshTitle')}>
                 <Icon name="refresh" className="h-4 w-4" />
               </Button>
             </span>
@@ -1578,7 +1578,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                 onClick={() => {
                   if (root) collapseAllExpandedPaths(root);
                 }}
-                className="h-8 w-8 p-0 flex-shrink-0"
+                className="w-7 p-0 flex-shrink-0"
                 title={t('sidebarFilesTree.actions.collapseAllTitle')}
                 aria-label={t('sidebarFilesTree.actions.collapseAllTitle')}
               >

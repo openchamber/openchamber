@@ -17,6 +17,8 @@ import { MemorySection } from './MemorySection';
 import { NotesSection } from './NotesSection';
 import { PlansSection } from './PlansSection';
 import { TodosSection } from './TodosSection';
+import { ContextPanelHeaderSlotProvider, ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
+import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { useProjectTodoSend } from './useProjectTodoSend';
 import { fetchSessionKnowledgeSummary, setSessionProjectContextPin, type SessionProjectContextPins } from '@/lib/sessionKnowledgeApi';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -83,6 +85,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   onOpenPlan,
   className,
 }) => {
+  const inPanelHeader = useInContextPanelHeader();
   const { t } = useI18n();
 
   const projectContextId = React.useMemo(() => resolveProjectContextId(projectRef), [projectRef]);
@@ -366,8 +369,41 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     || projectRef.path.split('/').filter(Boolean).pop()
     || projectRef.path;
 
+  // In the context panel the search takes the header's place of the panel's
+  // own label; elsewhere (the mobile drawer) it stays beside the project name.
+  const searchField = (
+    <div className={cn('relative flex-shrink-0', inPanelHeader ? 'w-full max-w-72' : 'w-40')}>
+      <Icon
+        name="search"
+        className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+      />
+      <Input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={t('rightSidebar.contextNotesTodo.search.placeholder')}
+        className={cn('pl-7 pr-7', inPanelHeader ? 'h-7' : 'h-8')}
+      />
+      {query ? (
+        <button
+          type="button"
+          onClick={() => setQuery('')}
+          className="absolute right-1.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('rightSidebar.contextNotesTodo.search.clear')}
+          title={t('rightSidebar.contextNotesTodo.search.clear')}
+        >
+          <Icon name="close" className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className={cn('flex h-full min-h-0 w-full min-w-0 flex-col', className)}>
+      {inPanelHeader ? (
+        <ContextPanelHeaderToolbar>
+          <div className="flex min-w-0 flex-1 items-center pr-1">{searchField}</div>
+        </ContextPanelHeaderToolbar>
+      ) : null}
       {/* Title and search share a row: search is a filter over what is already
           on screen, not a heading, and a full-width field read as the panel's
           primary control. */}
@@ -393,29 +429,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           {projectTitle}
         </h3>
 
-        <div className="relative w-40 flex-shrink-0">
-          <Icon
-            name="search"
-            className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('rightSidebar.contextNotesTodo.search.placeholder')}
-            className="h-8 pl-7 pr-7"
-          />
-          {query ? (
-            <button
-              type="button"
-              onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t('rightSidebar.contextNotesTodo.search.clear')}
-              title={t('rightSidebar.contextNotesTodo.search.clear')}
-            >
-              <Icon name="close" className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-        </div>
+        {inPanelHeader ? null : searchField}
 
       </div>
 
@@ -506,10 +520,14 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
         {activeTab === 'plans' && openPlan && projectRef ? (
           <React.Suspense fallback={null}>
-            <PlanView
-              savedProjectPlan={{ projectRef, planId: openPlan.id }}
-              onNavigatedToChat={() => setOpenPlan(null)}
-            />
+            {/* The panel header belongs to this panel's search; the plan keeps
+                its own title row inside the panel body. */}
+            <ContextPanelHeaderSlotProvider value={null}>
+              <PlanView
+                savedProjectPlan={{ projectRef, planId: openPlan.id }}
+                onNavigatedToChat={() => setOpenPlan(null)}
+              />
+            </ContextPanelHeaderSlotProvider>
           </React.Suspense>
         ) : null}
         </div>

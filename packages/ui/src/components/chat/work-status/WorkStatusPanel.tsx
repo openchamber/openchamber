@@ -228,11 +228,10 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         // Out of the flow entirely, anchored to the chat column's top-right so
         // it reads as a dropdown from the header button. As a flex child it
         // took part in the layout and pushed the transcript, which is the one
-        // thing an overlay must not do. Stronger shadow: it sits on content now.
+        // thing an overlay must not do.
         overlay && [
           'absolute right-3 top-3 z-30 mx-0 my-0',
           'max-h-[calc(100%-1.5rem)]',
-          'shadow-[0_8px_28px_-8px_rgb(0_0_0_/_0.28)]',
         ],
         // When every section is hidden the card keeps its border and background
         // so the settings button stays discoverable — going transparent made the
@@ -242,18 +241,27 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
         !overlay && 'bg-[var(--surface-muted)]/40',
         // A lighter version of the composer's lift: the same shape, but this
         // card is taller, so the composer's spread reads as heavy here.
+        // The overlay keeps it too: a heavier one spread past the chat column,
+        // which clips it where the context panel begins.
         'shadow-[0_2px_8px_-3px_rgb(0_0_0_/_0.08)]',
+        // Last, so it wins over the border and shadow above. Hidden, the
+        // overlay's border and shadow go transparent and transition alongside
+        // the glass fade: see the opacity note below.
+        overlay && !interactive && 'border-transparent shadow-none',
       )}
       style={{
         // Neither form animates its width: inline, the right slot around the
-        // card does; the overlay takes no space from the chat. The overlay
-        // fades and lifts, like the dropdown it reads as; inline, the card
-        // only fades.
+        // card does; the overlay takes no space from the chat. Inline, the
+        // card only fades. The overlay lifts like the dropdown it reads as and
+        // never fades this element: an ancestor below full opacity cuts the
+        // glass layer off from what is behind it, so the card showed clear,
+        // unblurred, for the whole fade and frosted only at the end. The glass
+        // layer fades itself; the border and shadow fade with it.
         width: WORK_STATUS_PANEL_WIDTH,
-        opacity: interactive ? 1 : 0,
+        opacity: overlay || interactive ? 1 : 0,
         transform: overlay ? (visible ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.98)') : undefined,
         transformOrigin: 'top right',
-        transitionProperty: overlay ? 'opacity, transform' : 'opacity',
+        transitionProperty: overlay ? 'transform, box-shadow, border-color' : 'opacity',
         transitionDuration: `${PANEL_TRANSITION_MS}ms`,
         transitionTimingFunction: PANEL_TRANSITION_EASING,
         pointerEvents: interactive ? undefined : 'none',
@@ -264,7 +272,15 @@ export const WorkStatusPanel: React.FC<Props> = ({ sessionId, directory, visible
           is frosted. The glass sits on this inner layer, away from the card's
           shadow: on one element Chromium grows the backdrop-filter layer by
           the shadow's blur and paints a grey band past the card's edge. */}
-      <div className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}>
+      <div
+        className={cn('flex min-h-0 flex-1 flex-col', overlay && 'oc-glass-panel')}
+        style={overlay ? {
+          opacity: interactive ? 1 : 0,
+          transitionProperty: 'opacity',
+          transitionDuration: `${PANEL_TRANSITION_MS}ms`,
+          transitionTimingFunction: PANEL_TRANSITION_EASING,
+        } : undefined}
+      >
       {/* Overlaid rather than placed in flow: the panel has no header of its
           own, and giving it one would cost a row of height on every session. */}
       <button

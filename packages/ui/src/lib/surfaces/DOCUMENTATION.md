@@ -70,6 +70,22 @@ Full-screen extension pages are separate from this rail registry. `contributes.p
    still owns the list and HTTP. VS Code and mobile omit the row. Do not add
    a built-in mode for that guest.
 
+## Panel header
+
+The panel has one header row. A single-instance surface with its own toolbar
+(terminal, diff, walkthrough, plan, git's branch and sync controls, the notes
+search, the context surface's session title) renders that toolbar through
+`ContextPanelHeaderToolbar` (`components/layout/contextPanelHeaderSlot.tsx`)
+instead of stacking a second row under the header: the toolbar replaces the
+mode label and sits beside the fullscreen and close buttons. ContextPanel
+provides the header element only to the surface on screen, so inactive tabs
+and hosts outside the panel (the mobile workspace drawer) get no slot and
+render the toolbar inline as before. A surface nested inside another one that
+owns the header (the plan opened from the notes panel) is given a null slot. The label comes
+back whenever no toolbar is mounted, so empty and loading states stay named.
+Git moves only its first row: identity, pull request and upstream state stay
+in the body below.
+
 No new header buttons: the rail, `openContextSurface`, the composer +
 menu (`contributes.attach`), and New Worktree's guest icons are the entry
 points for opening surfaces or the attach window directly; deep links from

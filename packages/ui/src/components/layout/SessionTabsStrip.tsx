@@ -38,6 +38,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useIsSessionAiRenamePending } from '@/sync/use-session-ai-rename';
 import { useMultiRunMemberIds } from '@/lib/multirun/useMultiRuns';
+import { SessionProjectIcon } from './SessionProjectIcon';
 
 const restrictToXAxis: Modifier = ({ transform }) => ({ ...transform, y: 0 });
 
@@ -196,6 +197,9 @@ const SessionTabItem: React.FC<{
                     overlayVisible && 'pr-10',
                   )}
                   >
+                    {/* Which project the session belongs to, so a strip of
+                        tabs from several projects stays readable. */}
+                    <SessionProjectIcon directory={resolveGlobalSessionDirectory(tab.session)} className="mr-1.5" />
                     <div className={cn(
                       'min-w-0 flex-1 overflow-hidden whitespace-nowrap',
                       !suppressControls && 'session-tab-title',
@@ -401,9 +405,10 @@ export const SessionTabsStrip: React.FC<{
 
   const tabIdsInOrder = React.useMemo(() => tabs.map((tab) => tab.id), [tabs]);
 
-  // A brand-new draft (no session yet) shows as a transient active pill after
-  // the tabs; it becomes a real tab once the first message creates the session.
-  const showDraftPill = !currentSessionId || !tabs.some((tab) => tab.id === currentSessionId);
+  // A draft has no session and so no tab: the strip shows sessions only, and
+  // the draft's first message creates the session and its tab. The pill covers
+  // just the moment a current session has not reached its tab yet.
+  const showPendingTab = Boolean(currentSessionId) && !tabs.some((tab) => tab.id === currentSessionId);
 
   return (
     <div className="flex h-full min-w-0 flex-1 items-center" role="tablist" aria-label={t('header.sessionTabs.stripAria')}>
@@ -438,7 +443,7 @@ export const SessionTabsStrip: React.FC<{
             ))}
           </SortableContext>
         </DndContext>
-        {showDraftPill ? (
+        {showPendingTab ? (
           <div
             role="tab"
             aria-selected

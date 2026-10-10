@@ -42,7 +42,6 @@ import {
   SettingsFieldRow,
   SettingsCheckboxRow,
   SettingsGroupTitle,
-  SETTINGS_SELECT_SIZE,
   SETTINGS_FIELD_LABEL_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -1297,7 +1296,7 @@ export const McpPage: React.FC = () => {
                     autoFocus
                   />
                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger size={SETTINGS_SELECT_SIZE} className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
+                    <SelectTrigger className="!h-7 min-w-0 max-w-full gap-1.5 px-2">
                       <Icon
                         name={draftScope === 'user' ? 'user-3' : 'folder'}
                         className="h-3.5 w-3.5 shrink-0"
@@ -1358,8 +1357,7 @@ export const McpPage: React.FC = () => {
               }}
               layoutMode="fit"
               variant="active-pill"
-              activePillLowercase={false}
-              className="h-10"
+              className="h-7"
             />
 
             {mcpType === 'local' ? (
@@ -1427,7 +1425,6 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          size={SETTINGS_SELECT_SIZE}
                           className="!h-7 w-full max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.protocol')}
                         >
@@ -1520,7 +1517,6 @@ export const McpPage: React.FC = () => {
                         }}
                       >
                         <SelectTrigger
-                          size={SETTINGS_SELECT_SIZE}
                           className="!h-7 w-full max-w-[16rem] px-2"
                           aria-label={t('settings.mcp.page.advanced.codemode')}
                         >

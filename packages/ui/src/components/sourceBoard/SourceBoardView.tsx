@@ -459,7 +459,7 @@ const SourceBoardBody: React.FC<{
     const itemTrigger = (
         <button
             type="button"
-            className={cn(dropdownTriggerVariants({ size: 'default' }), 'shrink-0 gap-1.5')}
+            className={cn(dropdownTriggerVariants(), 'shrink-0 gap-1.5')}
             aria-expanded={listDropdown}
             aria-label={t('sourceBoard.list.toggleAria', { item: itemLabel })}
             data-popup-open={listDropdown ? '' : undefined}
@@ -510,7 +510,7 @@ const SourceBoardBody: React.FC<{
                 intrinsicWidth={!isMobile}
                 // A narrow board names the kinds by icon; the label is the tooltip.
                 iconOnly={narrow}
-                activePillButtonClassName={isMobile ? undefined : narrow ? 'h-7 px-2.5' : 'h-7 px-3'}
+                activePillButtonClassName={isMobile ? undefined : narrow ? 'px-2.5' : 'px-3'}
             />
         </div>
     );

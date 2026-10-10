@@ -5,7 +5,6 @@ import type { IconName } from '@/components/icon/icons';
 import {
   SettingsSection,
   SettingsCheckboxRow,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { Switch } from '@/components/ui/switch';
@@ -190,7 +189,6 @@ export const OpenChamberToolsSettings: React.FC = () => {
               disabled={!agentWebToolEnabled || providerGuests.length === 0}
             >
               <SelectTrigger
-                size={SETTINGS_SELECT_SIZE}
                 className="ml-auto w-auto min-w-0 max-w-[14rem]"
                 aria-label={t('settings.openchamber.tools.browserProvider.aria')}
               >

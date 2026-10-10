@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SETTINGS_HELPER_CLASS, SETTINGS_SELECT_SIZE, SettingsCheckboxRow, SettingsStackedField } from '../shared/SettingsSection';
+import { SETTINGS_HELPER_CLASS, SettingsCheckboxRow, SettingsStackedField } from '../shared/SettingsSection';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -139,7 +139,7 @@ export function ManagedSshCredentials({ selection, disabled = false }: {
   const content = <>
 
     <Select value={selection.value} onValueChange={selection.onChange} disabled={disabled || state.status !== 'ready'}>
-      <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-full" aria-label={t('settings.sourceControl.ssh.title')}>
+      <SelectTrigger className="w-full" aria-label={t('settings.sourceControl.ssh.title')}>
         <SelectValue placeholder={t('settings.sourceControl.ssh.title')}>
           {/* The value is an opaque reference; only the safe label may be shown. */}
           {selectedCredential ? describeCredential(selectedCredential) : undefined}

@@ -14,17 +14,19 @@ import { registerFloatingPanelClearanceReader } from '@/components/chat/composer
 const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }> = ({ onClick, children }) => {
     const { t } = useI18n();
     return (
+        // Sits inside the pill's hairline border, so the pill as a whole is
+        // 28px like the status row it takes over from.
         <button
             type="button"
             onClick={onClick}
             aria-label={t('chat.scrollToBottom.aria')}
-            className="inline-flex h-8 min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-left"
+            className="inline-flex h-[calc(1.75rem-2px)] min-w-0 max-w-full flex-1 items-center rounded-full [corner-shape:round] text-left"
         >
             {/* flex-1 so the icon stays centred when the mobile
-                touch-target floor widens the bare button past 32px;
+                touch-target floor widens the bare button past 28px;
                 with the status label present it collapses back to
-                its 32px basis. */}
-            <span className="flex h-8 w-8 flex-1 shrink-0 basis-8 items-center justify-center text-muted-foreground">
+                its 28px basis. */}
+            <span className="flex h-full w-7 flex-1 shrink-0 basis-7 items-center justify-center text-muted-foreground">
                 <Icon name="arrow-down" className="h-4 w-4" />
             </span>
             {children}
@@ -35,7 +37,7 @@ const ScrollAction: React.FC<{ onClick: () => void; children?: React.ReactNode }
 /**
  * Compact one-line mirror of the status row for the pill: same label and
  * background action, none of the status row's animation machinery (which does
- * not survive being squeezed into a 32px chip). The action is a sibling of the
+ * not survive being squeezed into a 28px chip). The action is a sibling of the
  * scroll button, never inside it.
  */
 const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
@@ -59,11 +61,11 @@ const WorkingPillBody: React.FC<{ onClick: () => void }> = ({ onClick }) => {
     return (
         <>
             <ScrollAction onClick={onClick}>
-                <span className={cn('-ml-px min-w-0 truncate text-sm text-muted-foreground', working.canBackground ? 'pr-1' : 'pr-3')}>
+                <span className={cn('-ml-px min-w-0 truncate text-[13px] leading-4 text-muted-foreground', working.canBackground ? 'pr-1' : 'pr-3')}>
                     {label}
                 </span>
             </ScrollAction>
-            {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className="mr-0.5 h-7 w-7" /> : null}
+            {working.canBackground ? <BackgroundWorkButton onClick={backgroundWork} className="mr-0.5 h-6 w-6" /> : null}
         </>
     );
 };
@@ -99,7 +101,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
                         // lighter than the oc-glass-floating stack.
                         // min-h, not h: the mobile touch-target floor grows
                         // the buttons inside to 36px, and the pill with them.
-                        'oc-glass-popover inline-flex min-h-8 max-w-full items-center rounded-full [corner-shape:round]',
+                        'oc-glass-popover inline-flex min-h-7 max-w-full items-center rounded-full [corner-shape:round]',
                         'border border-black/[0.06] dark:border-white/[0.08]',
                         visible ? 'pointer-events-auto' : 'pointer-events-none',
                     )}

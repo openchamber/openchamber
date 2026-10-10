@@ -5,7 +5,6 @@ import {
   SettingsFieldRow,
   SETTINGS_FIELDS_STACK_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { useI18n } from '@/lib/i18n';
@@ -144,7 +143,6 @@ export function LinearProjectMapping({
           }}
         >
           <SelectTrigger
-            size={SETTINGS_SELECT_SIZE}
             className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
             aria-label={t('settings.integrations.linear.mapping.defaultProject.aria')}
           >
@@ -198,7 +196,6 @@ export function LinearProjectMapping({
                   }}
                 >
                   <SelectTrigger
-                    size={SETTINGS_SELECT_SIZE}
                     className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
                     aria-label={t('settings.integrations.linear.mapping.teams.aria', { team: team.key })}
                   >

@@ -109,7 +109,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
             aria-pressed={isActive}
             data-context-surface={surface.id}
             className={cn(
-              'flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors',
+              'flex h-7 w-7 touch-none select-none items-center justify-center rounded-md transition-colors',
               isActive
                 ? 'text-primary'
                 : 'text-muted-foreground hover:text-foreground',
@@ -325,7 +325,7 @@ export const ContextPanelRail: React.FC = () => {
   return (
     <nav
       aria-label={t('contextRail.aria.rail')}
-      className="flex h-full w-11 flex-shrink-0 flex-col items-center gap-1 bg-background py-2"
+      className="flex h-full w-11 flex-shrink-0 flex-col items-center gap-2 bg-background py-2"
     >
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
@@ -387,7 +387,7 @@ export const ContextPanelRail: React.FC = () => {
             type="button"
             aria-label={t('contextRail.configure.open')}
             onClick={() => setIsSurfacesDialogOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground"
           >
             <Icon name="equalizer-2" className="h-[18px] w-[18px]" />
           </button>

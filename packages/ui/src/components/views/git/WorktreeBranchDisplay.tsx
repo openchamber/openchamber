@@ -67,7 +67,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
 
   if (isEditing) {
     return (
-      <div className="flex items-center gap-2 rounded-md bg-primary/12 px-2 py-1 h-8">
+      <div className="flex items-center gap-2 rounded-md bg-primary/12 px-2 py-1 h-7">
         <form
           className="flex w-full items-center gap-2"
           onSubmit={(e) => {
@@ -114,7 +114,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
   }
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 h-8">
+    <div className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1 h-7">
       <Icon name="git-branch" className="size-4 text-primary shrink-0" />
       <div className="inline-flex min-w-0 max-w-full items-center gap-1">
         <span className="truncate typography-ui-label font-normal text-foreground">

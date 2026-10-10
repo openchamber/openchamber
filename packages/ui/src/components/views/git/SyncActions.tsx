@@ -100,13 +100,12 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   };
 
   return (
-    <div className="inline-flex items-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
+    <div className="inline-flex items-center rounded-md border border-border/60 bg-[var(--surface-elevated)] overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="inline-flex" tabIndex={blocksRebaseSync || detached ? 0 : undefined}>
-            {/* The two halves are plain buttons inside one rounded frame: the
-                shared Button brings its own squircle corners, which made each
-                half read as a separate round button. */}
+            {/* The two halves are plain buttons inside one rounded frame, so
+                they read as one split control. */}
             <button
               type="button"
               onClick={handleSync}

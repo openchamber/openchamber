@@ -51,7 +51,6 @@ type SortableTabsStripProps = {
       stays its accessible name and tooltip. For a row short on width. */
   iconOnly?: boolean;
   animateActivePill?: boolean;
-  activePillLowercase?: boolean;
   /** Position the active-pill indicator with left/top instead of translate3d.
       Use when the strip lives inside an ancestor that transform-animates
       (e.g. a sliding mobile drawer): creating a composited layer mid-slide
@@ -128,7 +127,6 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   activePillButtonClassName,
   inactiveTabsIconOnly = false,
   animateActivePill,
-  activePillLowercase = true,
   nonCompositedIndicator = false,
   intrinsicWidth = false,
   iconOnly = false,
@@ -428,7 +426,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
-          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
+          showPillTrackBackground && 'rounded-lg bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] p-0.5 gap-0.5',
           isScrollable
             ? 'overflow-x-auto scrollbar-none'
             : 'overflow-x-hidden',
@@ -440,7 +438,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {usesActivePillIndicator && pillRect ? (
           <div
             className={cn(
-              'pointer-events-none absolute left-0 top-0 z-0 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)]',
+              'pointer-events-none absolute left-0 top-0 z-0 rounded-md bg-[var(--surface-elevated)]',
               // Lifted card look: hairline edge plus a soft ambient shadow rather
               // than a hard border, so the pill reads as raised above the track.
               'border border-[color-mix(in_srgb,var(--foreground)_7%,transparent)]',
@@ -554,9 +552,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onPointerCancel={usesIndicator ? () => setPressedId(null) : undefined}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-md text-sm font-medium transition-colors duration-150 !min-h-0'
                       : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
-                    usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
                     usesActivePillIndicator
                       ? useIntrinsicPillSizing
@@ -572,7 +569,10 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         ? 'max-w-56 justify-start truncate px-3 text-left'
                         : 'w-full justify-center truncate px-3 text-center',
                     usesActivePillIndicator
-                      ? (activePillButtonClassName ?? (isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-[31px]') : 'h-7'))
+                      // 24px buttons in a 2px-padded track: the switch is
+                      // 28px, as tall as the toolbar controls beside it.
+                      // Callers may add classes (padding) on top.
+                      ? cn(isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-6') : 'h-7', activePillButtonClassName)
                       : null,
                     usesActivePillIndicator
                       ? isActive

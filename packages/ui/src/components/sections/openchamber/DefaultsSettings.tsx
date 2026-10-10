@@ -10,7 +10,6 @@ import {
   SettingsGroupTitle,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
   SETTINGS_OPTION_STACK_CLASS,
   SETTINGS_FIELDS_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -337,7 +336,7 @@ export const DefaultsSettings: React.FC = () => {
               label={t('settings.openchamber.defaults.field.defaultThinking')}
             >
               <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
-                <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                   <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
                     {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
                   </SelectValue>

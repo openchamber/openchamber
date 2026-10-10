@@ -358,7 +358,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                       }}
                     >
                       <SelectTrigger
-                        size="sm"
                         className="gap-1.5"
                       >
                         <Icon name="brain-ai-3"

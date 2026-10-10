@@ -134,61 +134,25 @@ function CommandItem({
   )
 }
 
+/**
+ * A command's shortcut as the shared formatter writes it ("⌘ + ⇧ + N"), in
+ * the same muted interface text tooltips use, so a shortcut looks the same
+ * wherever it appears.
+ */
 function CommandShortcut({
   className,
   ...props
 }: React.ComponentProps<"span">) {
-  const renderKey = (keyLabel: string) => {
-    const normalized = keyLabel.trim().toLowerCase();
-
-    if (normalized === 'ctrl' || normalized === 'control') {
-      return (
-        <span className="text-xs font-medium">
-          ctrl
-        </span>
-      );
-    }
-
-    if (normalized === 'cmd' || normalized === '⌘' || normalized === 'command' || normalized === 'meta') {
-      return <Icon name="command" className="size-3.5" />;
-    }
-
-    if (normalized === 'shift' || normalized === '⇧') {
-      return <Icon name="arrow-up" className="size-3.5" />;
-    }
-
-    return (
-      <span className="text-xs font-medium">
-        {keyLabel}
-      </span>
-    );
-  };
-
-  const shortcutText = typeof props.children === 'string' ? props.children : '';
-
-  const tokens = shortcutText
-    ? shortcutText.split('+').map((token) => token.trim()).filter(Boolean)
-    : [];
-
   return (
     <span
       data-slot="command-shortcut"
       className={cn(
-        "text-muted-foreground ml-auto flex items-center gap-1 typography-meta",
+        "text-muted-foreground ml-auto shrink-0 whitespace-nowrap typography-meta",
         className
       )}
       {...props}
-    >
-      {tokens.length > 0
-        ? tokens.map((token, index) => (
-            <React.Fragment key={`${token}-${index}`}>
-              {index > 0 && <span className="opacity-60 text-xs">+</span>}
-              {renderKey(token)}
-            </React.Fragment>
-          ))
-        : props.children}
-    </span>
-  );
+    />
+  )
 }
 
 export {

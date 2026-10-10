@@ -449,7 +449,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               size="sm"
               onClick={checkAll}
               disabled={isChecking}
-              className="h-10 w-auto justify-center gap-2 rounded-xl px-4"
+              className="w-auto justify-center gap-2"
             >
               {isChecking ? <Icon name="loader" className="size-4 animate-spin" /> : <Icon name="refresh" className="size-4" />}
               {isChecking
@@ -466,7 +466,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
               variant="default"
               size="sm"
               onClick={() => setUpdateDialogOpen(true)}
-              className="h-10 w-auto justify-center gap-2 rounded-xl px-4"
+              className="w-auto justify-center gap-2"
             >
               <Icon name="download" className="size-4" />
               {openChamberUpdateLabel}

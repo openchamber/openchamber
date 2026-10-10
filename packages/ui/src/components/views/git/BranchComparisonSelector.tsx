@@ -34,7 +34,7 @@ export function BranchComparisonSelector({ branches, currentBranch, base, onSele
   const trigger = (
     <Button
       variant="outline"
-      className={cn(dropdownTriggerVariants({ size: mobile ? 'default' : 'sm' }), 'min-w-0 max-w-48')}
+      className={cn(dropdownTriggerVariants({ size: mobile ? 'mobile' : 'default' }), 'min-w-0 max-w-48')}
       data-mobile-comparison-trigger={mobile || undefined}
       aria-label={t('gitView.pr.field.baseBranch')}
       aria-haspopup={useSheet ? 'dialog' : undefined}

@@ -130,7 +130,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
             ))}
           </div>
           <Select value={selectedProject ? selectedProject.id : ALL_PROJECTS} onValueChange={setProjectChoice}>
-            <SelectTrigger size="sm" className="w-fit min-w-[140px] max-w-64" aria-label={t('usageStats.scope.label')}>
+            <SelectTrigger className="w-fit min-w-[140px] max-w-64" aria-label={t('usageStats.scope.label')}>
               <SelectValue>
                 {() => (selectedProject ? projectDisplayName(selectedProject) : t('usageStats.scope.all'))}
               </SelectValue>

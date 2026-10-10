@@ -20,6 +20,9 @@ import {
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { cn } from '@/lib/utils';
+import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
+import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -263,6 +266,7 @@ const resolveProviderAndModel = (
 
 export const ContextPanelContent: React.FC = () => {
   const { t } = useI18n();
+  const inPanelHeader = useInContextPanelHeader();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
@@ -409,12 +413,23 @@ export const ContextPanelContent: React.FC = () => {
 
   return (
     <ScrollableOverlay outerClassName="h-full" className="bg-background">
+      {/* In the context panel the session title names the panel itself, in
+          place of the generic "Context" label. */}
+      {inPanelHeader ? (
+        <ContextPanelHeaderToolbar>
+          <div className="flex min-w-0 flex-1 items-center pl-1.5 pr-1">
+            <span dir="auto" className="truncate typography-ui-label text-foreground" title={viewModel.sessionTitle}>{viewModel.sessionTitle}</span>
+          </div>
+        </ContextPanelHeaderToolbar>
+      ) : null}
       <div className="mx-auto w-full max-w-[52rem] px-5 py-6">
 
         {/* ── Session header ── */}
         <div className="mb-6">
-          <h2 dir="auto" className="typography-ui-header font-semibold text-foreground truncate text-left">{viewModel.sessionTitle}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 typography-micro text-muted-foreground/70">
+          {inPanelHeader ? null : (
+            <h2 dir="auto" className="typography-ui-header font-semibold text-foreground truncate text-left">{viewModel.sessionTitle}</h2>
+          )}
+          <div className={cn(!inPanelHeader && 'mt-1', 'flex flex-wrap items-center gap-x-2 gap-y-0.5 typography-micro text-muted-foreground/70')}>
             <span>{viewModel.providerModel.providerName} / {viewModel.providerModel.modelName}</span>
             {viewModel.createdAt && (
               <>

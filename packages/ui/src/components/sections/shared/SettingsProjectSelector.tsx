@@ -100,7 +100,6 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
         }}
       >
         <SelectTrigger
-          size="settings"
           className="w-full"
           aria-label={t('settings.shared.projectSelector.switchProjectAria')}
           title={t('settings.shared.projectSelector.switchProjectTitle')}

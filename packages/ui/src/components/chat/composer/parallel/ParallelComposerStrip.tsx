@@ -316,7 +316,7 @@ export function ParallelComposerStrip({
         <span className="flex-1" />
         <button
           type="button"
-          className={cn(dropdownTriggerVariants({ size: 'sm' }), 'max-w-[18rem] gap-1.5')}
+          className={cn(dropdownTriggerVariants(), 'max-w-[18rem] gap-1.5')}
           onClick={() => setSettingsOpen(true)}
           aria-label={t('chat.parallel.settings.openAria', { summary })}
         >

@@ -23,7 +23,6 @@ import {
   SettingsStackedField,
   SettingsCheckboxRow,
   SETTINGS_FIELD_LABEL_CLASS,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import {
@@ -641,7 +640,7 @@ const SkillsInstalledPage: React.FC = () => {
                     setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
                   }}
                 >
-                  <SelectTrigger size={SETTINGS_SELECT_SIZE} className="w-fit gap-1.5">
+                  <SelectTrigger className="w-fit gap-1.5">
                     {draftScope === 'user' ? (
                       <Icon name="user-3" className="h-3.5 w-3.5" />
                     ) : (

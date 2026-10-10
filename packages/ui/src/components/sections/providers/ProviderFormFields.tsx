@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_SELECT_SIZE,
 } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
@@ -85,7 +84,7 @@ export const ProviderFormFields: React.FC<ProviderFormFieldsProps> = ({ fields, 
                 setValue(next);
               }}
             >
-              <SelectTrigger size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
+              <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
                 <SelectValue>
                   {(current) => current === TYPED_VALUE
                     ? t('settings.providers.page.auth.field.other')

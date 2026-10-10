@@ -143,7 +143,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     onClick={isReady ? () => setIsMobilePanelOpen(true) : undefined}
                     disabled={!isReady}
                     className={cn(
-                        dropdownTriggerVariants(),
+                        dropdownTriggerVariants({ size: 'mobile' }),
                         'w-full',
                         className
                     )}
@@ -167,7 +167,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                 </button>
             ) : !isReady ? (
                 <div className={cn(
-                    dropdownTriggerVariants({ size: 'sm' }),
+                    dropdownTriggerVariants(),
                     'w-fit opacity-60',
                     className
                 )}>
@@ -180,7 +180,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <div className={cn(
-                            dropdownTriggerVariants({ size: 'sm' }),
+                            dropdownTriggerVariants(),
                             'w-fit cursor-pointer',
                             className
                         )}>
