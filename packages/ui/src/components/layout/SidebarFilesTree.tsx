@@ -49,6 +49,17 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn, getRevealLabelKey } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import {
+  FileTreeChevron,
+  FileTreeFileMarkers,
+  FileTreeFolderBadge,
+  FileTreeIndentGuides,
+} from '@/components/views/files/FileTreeRowParts';
+import {
+  fileTreeRowPaddingLeft,
+  fileTreeRowStateClassName,
+  type FileTreeGitStatus,
+} from '@/components/views/files/fileTreeRow';
 import { Icon } from "@/components/icon/Icon";
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 import { isBrowserClientRuntime, isDesktopLocalOriginActive, openDesktopPath } from '@/lib/desktop';
@@ -221,26 +232,6 @@ const getOrCreateCache = (root: string): FileTreeCache => {
   return created;
 };
 
-const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
-  return <FileTypeIcon filePath={filePath} extension={extension} />;
-};
-
-// --- Git status indicators (matching FilesView) ---
-
-type FileStatus = 'open' | 'modified' | 'git-modified' | 'git-added' | 'git-deleted';
-
-const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
-  const color = {
-    open: 'var(--status-info)',
-    modified: 'var(--status-warning)',
-    'git-modified': 'var(--status-warning)',
-    'git-added': 'var(--status-success)',
-    'git-deleted': 'var(--status-error)',
-  }[status];
-
-  return <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />;
-};
-
 // --- FileRow with context menu (matching FilesView) ---
 
 interface FileRowProps {
@@ -249,7 +240,10 @@ interface FileRowProps {
   isExpanded: boolean;
   isActive: boolean;
   isBrowserClient: boolean;
-  status?: FileStatus | null;
+  depth: number;
+  /** Open in a context panel tab. */
+  isOpen: boolean;
+  status?: FileTreeGitStatus | null;
   badge?: { modified: number; added: number } | null;
   isDropTarget: boolean;
   /** The row being dragged to move it; it is dimmed. */
@@ -283,6 +277,8 @@ const FileRow: React.FC<FileRowProps> = ({
   isExpanded,
   isActive,
   isBrowserClient,
+  depth,
+  isOpen,
   status,
   badge,
   isDropTarget,
@@ -521,6 +517,7 @@ const FileRow: React.FC<FileRowProps> = ({
           onDrop={handleRowDrop}
         />
       )}>
+      <FileTreeIndentGuides depth={depth} />
       <button
         type="button"
         onClick={handleInteraction}
@@ -530,32 +527,24 @@ const FileRow: React.FC<FileRowProps> = ({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
+          'flex w-full items-center gap-1.5 rounded-md py-1 pr-8 text-left transition-colors select-none',
           isDropTarget
-            ? 'bg-interactive-selection ring-2 ring-inset ring-primary'
-            : (isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'),
+            ? 'bg-interactive-selection text-interactive-selection-foreground ring-2 ring-inset ring-primary'
+            : fileTreeRowStateClassName(isActive),
           isDragSource && 'opacity-50'
         )}
+        style={{ paddingLeft: fileTreeRowPaddingLeft(depth) }}
       >
         {isDir ? (
-          isExpanded ? (
-            <Icon name="folder-open" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          ) : (
-            <Icon name="folder-3" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          )
+          <FileTreeChevron expanded={isExpanded} />
         ) : (
-          getFileIcon(node.path, node.extension)
+          <FileTypeIcon filePath={node.path} extension={node.extension} className="ml-0.5 size-3.5" />
         )}
         <span className="min-w-0 flex-1 truncate typography-meta" title={node.path}>
           {node.name}
         </span>
-        {!isDir && status && <FileStatusDot status={status} />}
-        {isDir && badge && (
-          <span className="text-xs flex items-center gap-1 ml-auto mr-1">
-            {badge.modified > 0 && <span className="text-[var(--status-warning)]">M{badge.modified}</span>}
-            {badge.added > 0 && <span className="text-[var(--status-success)]">+{badge.added}</span>}
-          </span>
-        )}
+        {!isDir && <FileTreeFileMarkers isOpen={isOpen} status={status} />}
+        {isDir && badge && <FileTreeFolderBadge badge={badge} />}
       </button>
       {hasMenuActions && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
@@ -602,6 +591,8 @@ const areFileRowPropsEqual = (prev: FileRowProps, next: FileRowProps): boolean =
   && prev.isExpanded === next.isExpanded
   && prev.isActive === next.isActive
   && prev.isBrowserClient === next.isBrowserClient
+  && prev.depth === next.depth
+  && prev.isOpen === next.isOpen
   && prev.status === next.status
   && prev.badge === next.badge
   && prev.isDropTarget === next.isDropTarget
@@ -1093,7 +1084,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   // string comparisons on every render.
 
   const statusByPath = React.useMemo(() => {
-    const map = new Map<string, FileStatus>();
+    const map = new Map<string, FileTreeGitStatus>();
     if (!gitStatus?.files) return map;
     for (const file of gitStatus.files) {
       if (file.index === 'A' || file.working_dir === '?') {
@@ -1131,12 +1122,11 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
     return map;
   }, [gitStatus, root]);
 
-  const getFileStatus = React.useCallback((path: string): FileStatus | null => {
-    if (openContextFilePaths.has(path)) return 'open';
+  const getFileStatus = React.useCallback((path: string): FileTreeGitStatus | null => {
     if (statusByPath.size === 0) return null;
     const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
     return statusByPath.get(relative) ?? null;
-  }, [openContextFilePaths, statusByPath, root]);
+  }, [statusByPath, root]);
 
   const getFolderBadge = React.useCallback((dirPath: string): { modified: number; added: number } | null => {
     if (badgeByDir.size === 0) return null;
@@ -1419,28 +1409,21 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
   function renderTree(dirPath: string, depth: number): React.ReactNode {
     const nodes = childrenByDir[dirPath] ?? [];
 
-    return nodes.map((node, index) => {
+    return nodes.map((node) => {
       const isDir = node.type === 'directory';
       const isExpanded = isDir && expandedPathSet.has(node.path);
       const isActive = selectedPath === node.path;
-      const isLast = index === nodes.length - 1;
 
       return (
-        <li key={node.path} className="relative" data-file-tree-path={isDir ? undefined : node.path}>
-          {depth > 0 && (
-            <>
-              <span className="absolute top-3.5 left-[-12px] w-3 h-px bg-border/40" />
-              {isLast && (
-                <span className="absolute top-3.5 bottom-0 left-[-13px] w-[2px] bg-sidebar/50" />
-              )}
-            </>
-          )}
+        <li key={node.path} data-file-tree-path={isDir ? undefined : node.path}>
           <MemoizedFileRow
             node={node}
             root={root}
             isExpanded={isExpanded}
             isActive={isActive}
             isBrowserClient={isBrowserClient}
+            depth={depth}
+            isOpen={!isDir && openContextFilePaths.has(node.path)}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             isDropTarget={isDir && (dropIndicatorTarget === node.path || moveDropTarget === node.path)}
@@ -1461,9 +1444,13 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
             onMoveDrop={handleMoveDrop}
           />
           {isDir && isExpanded && (
-            <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+            <ul className="flex flex-col">
               {loadErrorsByDir[node.path] ? (
-                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                <li
+                  className="relative flex items-center gap-2 py-1 pr-2 typography-meta text-muted-foreground"
+                  style={{ paddingLeft: fileTreeRowPaddingLeft(depth + 1) }}
+                >
+                  <FileTreeIndentGuides depth={depth + 1} />
                   <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
                   <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
                     <Icon name="refresh" className="h-3.5 w-3.5" />
@@ -1501,7 +1488,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
       {/* The action band matches the file editor's docked toolbar (40px,
           24px buttons) so the two read as one row across the panel. */}
       <div className="flex flex-col border-b border-border/40">
-        <div className="flex h-10 shrink-0 items-center justify-end gap-1 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
+        <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
         {/* New file, new folder and upload share one "+" menu, so the band
             keeps four buttons and fits even the narrowest tree. */}
         {canCreateFile || canCreateFolder || canUpload ? (
@@ -1601,7 +1588,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
       <div className="relative flex-1 min-h-0">
         <ScrollableOverlay
           outerClassName="h-full min-h-0"
-          className={cn('p-2', (dropIndicatorTarget === root || moveDropTarget === root) && 'bg-interactive-selection/10')}
+          className={cn('px-1.5 py-1.5', (dropIndicatorTarget === root || moveDropTarget === root) && 'bg-interactive-selection/10')}
           onDragEnter={handleRootDragOver}
           onDragOver={handleRootDragOver}
           onDragLeave={handleRootDragLeave}
@@ -1639,12 +1626,12 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
                       }
                     }}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
-                      isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors',
+                      fileTreeRowStateClassName(isActive)
                     )}
                     title={node.path}
                   >
-                    {getFileIcon(node.path, node.extension)}
+                    <FileTypeIcon filePath={node.path} extension={node.extension} className="size-3.5" />
                     <span
                       className="min-w-0 flex-1 truncate typography-meta"
                       style={{ direction: 'rtl', textAlign: 'left' }}

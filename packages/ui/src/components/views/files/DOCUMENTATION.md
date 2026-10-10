@@ -71,6 +71,15 @@ offscreen dimensions cannot retain an old font size. Expanded child lists
 sit outside each row's containment, so expansion, scrolling, focus and menus keep
 their existing DOM structure. Reopening still refreshes directory contents.
 
+## Row look
+
+The sidebar tree, `FilesView`'s own tree and the changes tree in `DiffView`
+draw rows from `FileTreeRowParts.tsx`, so the three look the same: flat rows
+indented 12px per level, one faint guide per ancestor level under its
+chevron, a chevron instead of a folder icon, and the git state as a coloured
+letter on the right. A blue dot before the letter marks a file open in a tab;
+it no longer hides the file's git state. Change the look there, not per tree.
+
 ## Refreshing after file changes
 
 The sidebar tree and the phone browser re-list folders when the agent changed

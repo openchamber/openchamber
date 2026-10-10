@@ -103,6 +103,17 @@ import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import {
+  FileTreeChevron,
+  FileTreeFileMarkers,
+  FileTreeFolderBadge,
+  FileTreeIndentGuides,
+} from './files/FileTreeRowParts';
+import {
+  fileTreeRowPaddingLeft,
+  fileTreeRowStateClassName,
+  type FileTreeGitStatus,
+} from './files/fileTreeRow';
 import { Icon } from "@/components/icon/Icon";
 import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -272,20 +283,6 @@ const getDisplayPath = (root: string | null, path: string): string => {
 
 const DEFAULT_IGNORED_DIR_NAMES = new Set(['node_modules']);
 
-type FileStatus = 'open' | 'modified' | 'git-modified' | 'git-added' | 'git-deleted';
-
-const FileStatusDot: React.FC<{ status: FileStatus }> = ({ status }) => {
-  const color = {
-    open: 'var(--status-info)',
-    modified: 'var(--status-warning)',
-    'git-modified': 'var(--status-warning)',
-    'git-added': 'var(--status-success)',
-    'git-deleted': 'var(--status-error)',
-  }[status];
-
-  return <span className="size-2 rounded-full" style={{ backgroundColor: color }} />;
-};
-
 const ScrollingFileName: React.FC<{ name: string }> = ({ name }) => {
   const containerRef = React.useRef<HTMLSpanElement | null>(null);
   const textRef = React.useRef<HTMLSpanElement | null>(null);
@@ -342,10 +339,6 @@ const isDirectoryReadError = (error: unknown): boolean => {
 
 const MAX_CONTENT_POLL_BYTES = 200_000;
 
-const getFileIcon = (filePath: string, extension?: string): React.ReactNode => {
-  return <FileTypeIcon filePath={filePath} extension={extension} />;
-};
-
 const isMarkdownFile = (path: string): boolean => {
   if (!path) return false;
   const lower = path.toLowerCase();
@@ -382,7 +375,10 @@ interface FileRowProps {
   isMobile: boolean;
   isBrowserClient: boolean;
   alwaysShowActions: boolean;
-  status?: FileStatus | null;
+  depth: number;
+  /** Open in a tab of this view. */
+  isOpen: boolean;
+  status?: FileTreeGitStatus | null;
   badge?: { modified: number; added: number } | null;
   permissions: {
     canRename: boolean;
@@ -412,6 +408,8 @@ const FileRow: React.FC<FileRowProps> = ({
   isMobile,
   isBrowserClient,
   alwaysShowActions,
+  depth,
+  isOpen,
   status,
   badge,
   permissions,
@@ -559,23 +557,21 @@ const FileRow: React.FC<FileRowProps> = ({
   return (
     <ContextMenu open={rightClickMenuPath === node.path} onOpenChange={(open) => setRightClickMenuPath(open ? node.path : null)}>
       <ContextMenuTrigger render={<div className="group relative flex items-center" onContextMenu={!isMobile ? handleContextMenu : undefined} />}>
+      <FileTreeIndentGuides depth={depth} />
       <button
         type="button"
         onClick={handleInteraction}
         onContextMenu={!isMobile ? handleContextMenu : undefined}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
-          isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
+          'flex w-full items-center gap-1.5 rounded-md py-1 pr-8 text-left transition-colors select-none',
+          fileTreeRowStateClassName(isActive)
         )}
+        style={{ paddingLeft: fileTreeRowPaddingLeft(depth) }}
       >
         {isDir ? (
-          isExpanded ? (
-            <Icon name="folder-open" className="size-4 flex-shrink-0 text-muted-foreground" />
-          ) : (
-            <Icon name="folder-3" className="size-4 flex-shrink-0 text-muted-foreground" />
-          )
+          <FileTreeChevron expanded={isExpanded} />
         ) : (
-          getFileIcon(node.path, node.extension)
+          <FileTypeIcon filePath={node.path} extension={node.extension} className="ml-0.5 size-3.5" />
         )}
         <span
           className="min-w-0 flex-1 truncate typography-meta"
@@ -583,13 +579,8 @@ const FileRow: React.FC<FileRowProps> = ({
         >
           {node.name}
         </span>
-        {!isDir && status && <FileStatusDot status={status} />}
-        {isDir && badge && (
-          <span className="text-xs flex items-center gap-1 ml-auto mr-1">
-            {badge.modified > 0 && <span className="text-[var(--status-warning)]">M{badge.modified}</span>}
-            {badge.added > 0 && <span className="text-[var(--status-success)]">+{badge.added}</span>}
-          </span>
-        )}
+        {!isDir && <FileTreeFileMarkers isOpen={isOpen} status={status} />}
+        {isDir && badge && <FileTreeFolderBadge badge={badge} />}
       </button>
       {hasMenuActions && (
         <div className={cn(
@@ -2647,14 +2638,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
 
   const openPathSet = React.useMemo(() => new Set(openPaths), [openPaths]);
   const statusIndex = React.useMemo(() => buildFileTreeStatusIndex(treeEnabled ? gitStatus?.files ?? [] : []), [gitStatus?.files, treeEnabled]);
-  const getFileStatus = React.useCallback((path: string): FileStatus | null => {
-    // Check open status
-    if (openPathSet.has(path)) return 'open';
-
-    // Check git status
+  const getFileStatus = React.useCallback((path: string): FileTreeGitStatus | null => {
     const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
     return statusIndex.statusByPath.get(relative) ?? null;
-  }, [openPathSet, statusIndex, root]);
+  }, [statusIndex, root]);
 
   const getFolderBadge = React.useCallback((dirPath: string): { modified: number; added: number } | null => {
     if (!gitStatus?.files) return null;
@@ -2681,22 +2668,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
   function renderTree(dirPath: string, depth: number): React.ReactNode {
     const nodes = childrenByDir[dirPath] ?? [];
 
-    return nodes.map((node, index) => {
+    return nodes.map((node) => {
       const isDir = node.type === 'directory';
       const isExpanded = isDir && expandedPathSet.has(node.path);
       const isActive = selectedFile?.path === node.path;
-      const isLast = index === nodes.length - 1;
 
       return (
-        <li key={node.path} className="relative">
-          {depth > 0 && (
-            <>
-              <span className="absolute top-3.5 left-[-12px] w-3 h-px bg-border/40" />
-              {isLast && (
-                <span className="absolute top-3.5 bottom-0 left-[-13px] w-[2px] bg-background" />
-              )}
-            </>
-          )}
+        <li key={node.path}>
           <FileRow
             node={node}
             root={root}
@@ -2705,6 +2683,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             isMobile={isMobile}
             isBrowserClient={isBrowserClient}
             alwaysShowActions={alwaysShowActions}
+            depth={depth}
+            isOpen={!isDir && openPathSet.has(node.path)}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}
@@ -2721,9 +2701,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             onPickFiles={pickFiles}
           />
           {isDir && isExpanded && (
-            <ul className="flex flex-col gap-1 ml-3 pl-3 border-l border-border/40 relative">
+            <ul className="flex flex-col">
               {loadErrorsByDir[node.path] ? (
-                <li className="flex items-center gap-2 px-2 py-1 typography-meta text-muted-foreground">
+                <li
+                  className="relative flex items-center gap-2 py-1 pr-2 typography-meta text-muted-foreground"
+                  style={{ paddingLeft: fileTreeRowPaddingLeft(depth + 1) }}
+                >
+                  <FileTreeIndentGuides depth={depth + 1} />
                   <span className="min-w-0 flex-1 truncate text-[var(--status-error)]" title={loadErrorsByDir[node.path]}>{loadErrorsByDir[node.path]}</span>
                   <Button variant="ghost" size="xs" className="h-6 gap-1" onClick={() => void refreshDirectory(node.path)}>
                     <Icon name="refresh" className="size-3.5" />
@@ -5016,7 +5000,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
             the context panel's file tree draws beside it, so the two line up. */}
         {selectedFile ? (
-          <div ref={setDockedRowEl} className="flex h-10 min-w-0 shrink-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
+          <div ref={setDockedRowEl} className="flex h-8 min-w-0 shrink-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
             {/* Mobile hosts already show the file name in their own header;
                 a truncated duplicate here just eats toolbar width. */}
             {displaySelectedPath && !isMobile ? (
@@ -5345,11 +5329,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
                     type="button"
                     onClick={() => void handleSelectFile(node)}
                     className={cn(
-                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
-                      isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
+                      'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors',
+                      fileTreeRowStateClassName(isActive)
                     )}
                   >
-                    {getFileIcon(node.path, node.extension)}
+                    <FileTypeIcon filePath={node.path} extension={node.extension} className="size-3.5" />
                     <span
                       className="min-w-0 flex-1 truncate typography-meta"
                       style={{ direction: 'rtl', textAlign: 'left' }}
