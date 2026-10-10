@@ -326,10 +326,11 @@ Cold navigation and prefetch request 100 records (50 on constrained surfaces) an
 Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
 
 Each full app root owns one global polling lifecycle through
-`useGlobalSessionsPolling`. The web/desktop root and VS Code chat root load once
-when mounted and schedule the next refresh 45 seconds after completion, so
-sessions created by another OpenCode process are discovered without relying on
-the sidebar or native tray being visible. Before the first successful global
+`useGlobalSessionsPolling`. The web/desktop root, the desktop Mini Chat window
+root, and the VS Code chat root load once when mounted and schedule the next
+refresh 45 seconds after completion, so sessions created by another OpenCode
+process are discovered without relying on the sidebar or native tray being
+visible. Before the first successful global
 load, failures receive at most three earlier retries after 1, 2, and 4 seconds;
 then the normal cadence continues. Store error status, including a chats-root
 lookup failure, drives recovery because the loader returns retained data on

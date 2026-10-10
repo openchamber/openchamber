@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Window } from 'happy-dom';
@@ -304,5 +305,26 @@ test('the mounted poller recovers real store failure and starts a fresh load on 
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
       else Reflect.deleteProperty(globalThis, name);
     }
+  }
+});
+
+/**
+ * Each window renders its own app root with its own global sessions store,
+ * so every root whose UI lists sessions from that store must start the
+ * polling itself. The Mini Chat window's session switcher once read an
+ * empty store because its root never did (#4643).
+ */
+describe('global session polling root coverage', () => {
+  const rootSources: Array<[string, string]> = [
+    ['App', '../App.tsx'],
+    ['VSCodeApp', '../apps/VSCodeApp.tsx'],
+    ['ElectronMiniChatApp', '../apps/ElectronMiniChatApp.tsx'],
+  ];
+
+  for (const [rootName, sourcePath] of rootSources) {
+    test(`${rootName} mounts useGlobalSessionsPolling`, () => {
+      const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+      expect(source).toContain('useGlobalSessionsPolling(true)');
+    });
   }
 });
