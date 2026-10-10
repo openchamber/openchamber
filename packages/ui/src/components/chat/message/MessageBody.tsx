@@ -1637,12 +1637,17 @@ const AssistantMessageBody = React.memo(({
                     const blob = await fetch(dataUrl).then((response) => response.blob());
                     await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
                 } else {
+                    // Desktop titles the save dialog with the download URL, so a data URL
+                    // would put the whole image in the title.
+                    const blob = await fetch(dataUrl).then((response) => response.blob());
+                    const url = URL.createObjectURL(blob);
                     const link = document.createElement('a');
                     link.download = fileName;
-                    link.href = dataUrl;
+                    link.href = url;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
                 }
 
                 toast.success(t('chat.messageBody.toast.imageSaved'));
