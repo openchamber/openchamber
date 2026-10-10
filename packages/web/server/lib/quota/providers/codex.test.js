@@ -102,4 +102,33 @@ describe('Codex quota windows', () => {
     expect(result.usage.windows.credits.valueLabel).toBe('2675 / 7500 used');
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it('does not report a 401 access-enforcement rejection as an expired session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule', message: 'Unauthorized' } }),
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    // The credential is still valid; the endpoint refused usage access. Saying
+    // "session expired" would send the user to re-authenticate for nothing.
+    expect(result.error).not.toBe('Session expired \u2014 please re-authenticate with OpenAI');
+    expect(result.error).toMatch(/usage|access|not available/i);
+  });
+
+  it('still reports an expired session for a plain 401 without a rejection body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+  });
 });

@@ -6,7 +6,8 @@ import {
   toUsageWindow,
   toNumber,
   toTimestamp,
-  resolveWindowLabel
+  resolveWindowLabel,
+  asNonEmptyString
 } from '../utils/index.js';
 
 export const providerId = 'codex';
@@ -46,14 +47,37 @@ export const fetchQuota = async () => {
     });
 
     if (!response.ok) {
+      // A 401 is not always an expired token. When the endpoint refuses usage
+      // access for a still-valid sign-in it answers with an access-enforcement
+      // body (e.g. `rejected_by_access_enforcement`), which OpenCode's
+      // `chatgpt-token-sharing` sign-in can hit. Saying "session expired" there
+      // sends the user to re-authenticate for a credential that is fine.
+      if (response.status === 401) {
+        const body = await response.json().catch(() => null);
+        const errorType = asNonEmptyString(body?.error?.type);
+        if (errorType === 'rejected_by_access_enforcement') {
+          return buildResult({
+            providerId,
+            providerName,
+            ok: false,
+            configured: true,
+            error: 'Usage is not available for this OpenAI sign-in method; chat still works'
+          });
+        }
+        return buildResult({
+          providerId,
+          providerName,
+          ok: false,
+          configured: true,
+          error: 'Session expired \u2014 please re-authenticate with OpenAI'
+        });
+      }
       return buildResult({
         providerId,
         providerName,
         ok: false,
         configured: true,
-        error: response.status === 401
-          ? 'Session expired \u2014 please re-authenticate with OpenAI'
-          : `API error: ${response.status}`
+        error: `API error: ${response.status}`
       });
     }
 
