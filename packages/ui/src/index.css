@@ -31,6 +31,20 @@
   color: var(--destructive);
 }
 
+.markdown-content .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25em;
+}
+
+/* Keep oversized centered formulas inside the reachable scroll range. */
+.markdown-content .katex-display > .katex {
+  width: max-content;
+  min-width: 100%;
+  text-align: center;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* Hover-revealed row actions cross-fade over a row's right end instead of
