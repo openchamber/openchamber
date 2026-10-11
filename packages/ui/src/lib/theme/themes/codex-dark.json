@@ -1,0 +1,145 @@
+{
+  "metadata": {
+    "id": "codex-dark",
+    "name": "Codex",
+    "variant": "dark",
+    "description": "OpenAI Codex desktop client look: near-black layered grays, the official Codex syntax palette and diff fills.",
+    "version": "1.0.0",
+    "author": "leoporoluo",
+    "tags": [
+      "dark",
+      "codex",
+      "openai",
+      "chatgpt",
+      "palette"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#f3f3f3",
+      "foreground": "#0d0d0d",
+      "hover": "#e8e8e8",
+      "active": "#dcdcdc",
+      "muted": "#f3f3f380"
+    },
+    "surface": {
+      "background": "#181818",
+      "foreground": "#dddddd",
+      "muted": "#1a1c1c",
+      "mutedForeground": "#8f8f8f",
+      "elevated": "#212121",
+      "elevatedForeground": "#ffffff",
+      "subtle": "#1d2123"
+    },
+    "interactive": {
+      "border": "#ffffff1a",
+      "selection": "#303133",
+      "selectionForeground": "#ffffff",
+      "hover": "#ffffff0d",
+      "active": "#ffffff14",
+      "borderHover": "#ffffff26",
+      "borderFocus": "#f3f3f3",
+      "focus": "#f3f3f3",
+      "focusRing": "#f3f3f333",
+      "cursor": "#f3f3f3"
+    },
+    "status": {
+      "error": "#ff7865",
+      "errorBackground": "#ff786529",
+      "errorBorder": "#ff786573",
+      "warning": "#f6c543",
+      "warningBackground": "#f6c54329",
+      "warningBorder": "#f6c54373",
+      "success": "#40c977",
+      "successBackground": "#40c97729",
+      "successBorder": "#40c97773",
+      "info": "#63a8f8",
+      "infoBackground": "#63a8f829",
+      "infoBorder": "#63a8f873"
+    },
+    "syntax": {
+      "base": {
+        "background": "#212121",
+        "comment": "#b9b9b9",
+        "keyword": "#f8a6c8",
+        "string": "#83d197",
+        "number": "#f1a275",
+        "function": "#b897f4",
+        "variable": "#b897f4",
+        "type": "#f1a275",
+        "operator": "#f8a6c8"
+      },
+      "tokens": {
+        "commentDoc": "#b9b9b9",
+        "stringEscape": "#ff7865",
+        "keywordImport": "#f8a6c8",
+        "method": "#b897f4",
+        "variableProperty": "#f1a275",
+        "className": "#f1a275",
+        "boolean": "#f1a275",
+        "constant": "#f1a275",
+        "parameter": "#b897f4",
+        "punctuation": "#dddddd",
+        "tag": "#63a8f8",
+        "tagAttribute": "#f9dc78",
+        "enum": "#b897f4",
+        "decorator": "#63a8f8",
+        "regex": "#83d197"
+      },
+      "highlights": {
+        "diffAdded": "#40c977",
+        "diffAddedBackground": "#40c9773b",
+        "diffRemoved": "#ff7865",
+        "diffRemovedBackground": "#ff78653b",
+        "diffModified": "#ffb677",
+        "diffModifiedBackground": "#ffb6773b",
+        "lineNumber": "#545555",
+        "lineNumberActive": "#dddddd"
+      }
+    },
+    "pr": {
+      "open": "#40c977",
+      "draft": "#8f8f8f",
+      "blocked": "#ffb677",
+      "merged": "#b897f4",
+      "closed": "#ff7865"
+    },
+    "chat": {
+      "background": "#181818",
+      "userMessageBackground": "#303030",
+      "divider": "#303335"
+    },
+    "markdown": {
+      "link": "#63a8f8",
+      "linkHover": "#a4cdfb",
+      "inlineCode": "#dddddd",
+      "inlineCodeBackground": "#262626",
+      "blockquote": "#b9b9b9",
+      "blockquoteBorder": "#303335",
+      "listMarker": "#8f8f8f",
+      "bold": "#ffffff",
+      "italic": "#dddddd",
+      "strikethrough": "#8f8f8f",
+      "hr": "#303335"
+    },
+    "tools": {
+      "border": "#ffffff1a",
+      "icon": "#8f8f8f",
+      "title": "#dddddd",
+      "description": "#8f8f8f",
+      "edit": {
+        "addedBackground": "#40c9773b",
+        "removedBackground": "#ff78653b",
+        "modifiedBackground": "#ffb6773b",
+        "lineNumber": "#545555"
+      }
+    }
+  },
+  "config": {
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}
