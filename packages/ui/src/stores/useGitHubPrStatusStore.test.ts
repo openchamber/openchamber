@@ -1369,6 +1369,25 @@ describe("linked change request summary URL canonicalization (#4541)", () => {
     expect(anchored?.url).toBe(link.url)
   })
 
+  test("owner casing of one PR shares a stable summary reference", () => {
+    // Two sessions can link one PR with different owner casing (`Acme/app` and
+    // `acme/app`); GitHub resolves both to one thread and trackedItemKey
+    // already folds the case. The shared cache signature must fold too, or each
+    // read returns a fresh summary and useSyncExternalStore loops (#185).
+    const key = "runtime-a|github|pull|acme/app#42"
+    const upper = { owner: "Acme", repo: "app", number: 42, url: "https://github.com/Acme/app/pull/42", title: "feature" }
+    const lower = { ...upper, owner: "acme", url: "https://github.com/acme/app/pull/42" }
+    const casingState: GitHubPullRequestLiveSummary = { ...state, owner: "acme", repo: "app", number: 42 }
+    const first = getLinkedChangeRequestVisualSummary(key, upper, casingState, identity)
+    const folded = getLinkedChangeRequestVisualSummary(key, lower, casingState, identity)
+    const again = getLinkedChangeRequestVisualSummary(key, upper, casingState, identity)
+    expect(first).not.toBeNull()
+    expect(folded).toBe(first)
+    expect(again).toBe(first)
+    expect(first?.url).toBe("https://github.com/acme/app/pull/42")
+    expect(first?.repo).toEqual({ owner: "acme", repo: "app" })
+  })
+
   test("canonical URLs keep a self-managed GitHub instance host", () => {
     const gheIdentity = { provider: "github" as const, instance: "https://ghe.acme.example" }
     const summary = getLinkedChangeRequestVisualSummary(

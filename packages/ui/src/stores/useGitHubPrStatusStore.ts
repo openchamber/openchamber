@@ -1625,14 +1625,15 @@ const linkedPrStatus = (
 });
 
 /**
- * The canonical URL of a linked change request. Links shared with a fragment
- * or query (a review anchor like `#pullrequestreview-…`, a notification
- * query) name the same thread, and the summary cache below is shared per
- * tracked item: if two sessions link the same PR with different URL
- * spellings, a summary built from the raw link URL flips the cache signature
- * on every read, the selector result is never referentially stable, and
- * useSyncExternalStore loops until React throws "Maximum update depth
- * exceeded" (#185). Every summary therefore uses the canonical thread URL.
+ * The canonical URL of a linked change request. Hosts treat owner/repo case
+ * insensitively and links may be shared with a fragment or query (a review
+ * anchor like `#pullrequestreview-…`, a notification query); all such
+ * spellings name the same thread. The summary cache below is shared per
+ * tracked item (whose key is already lower-cased), so any spelling that flips
+ * the cache signature yields a fresh object on every read, the selector result
+ * is never referentially stable, and useSyncExternalStore loops until React
+ * throws "Maximum update depth exceeded" (#185). Every summary therefore uses
+ * the canonical, case-folded thread URL.
  */
 const canonicalChangeRequestUrl = (
   link: LinkedGitHubPullRequest,
@@ -1640,11 +1641,11 @@ const canonicalChangeRequestUrl = (
 ): string => {
   if (identity.provider === 'github') {
     const host = instanceHost(identity.instance) ?? 'github.com';
-    return `https://${host}/${link.owner}/${link.repo}/pull/${link.number}`;
+    return `https://${host}/${link.owner.toLowerCase()}/${link.repo.toLowerCase()}/pull/${link.number}`;
   }
   try {
     const parsed = new URL(link.url);
-    return `${parsed.origin}${parsed.pathname}`;
+    return `${parsed.origin}${parsed.pathname.toLowerCase()}`;
   } catch {
     return link.url;
   }
@@ -1660,10 +1661,17 @@ export const getLinkedChangeRequestVisualSummary = (
   link: LinkedGitHubPullRequest,
   summary: GitHubPullRequestLiveSummary,
   identity: SourceControlIdentity,
-): PrVisualSummary | null => getCachedPrSummary(
-  `linked:${cacheKey}`,
-  linkedPrStatus({ ...link, url: canonicalChangeRequestUrl(link, identity) }, summary, identity),
-);
+): PrVisualSummary | null => {
+  // Hosts resolve owner/repo case insensitively and the tracked item key
+  // already lower-cases them: fold the link the same way, or two sessions
+  // linking one PR with different casing would flip the shared cache entry's
+  // signature (via both the repo fields and the URL) on every read.
+  const folded = { ...link, owner: link.owner.toLowerCase(), repo: link.repo.toLowerCase() };
+  return getCachedPrSummary(
+    `linked:${cacheKey}`,
+    linkedPrStatus({ ...folded, url: canonicalChangeRequestUrl(folded, identity) }, summary, identity),
+  );
+};
 
 
 /**
