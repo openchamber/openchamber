@@ -3,6 +3,7 @@ import type { ToastRequest } from '@openchamber/sdk';
 import { toast, type ExternalToast } from 'sonner';
 
 import { GuestToastActions } from '@/components/layout/GuestToastActions';
+import { generateUuid } from '@/lib/uuid';
 
 /** Buttons own only local toast data and remain usable after the guest frame exits. */
 export const showGuestToast = (request: ToastRequest): void => {
@@ -12,7 +13,7 @@ export const showGuestToast = (request: ToastRequest): void => {
     toast[request.kind](request.message);
     return;
   }
-  const id = crypto.randomUUID();
+  const id = generateUuid();
   const options: ExternalToast = {
     id,
     action: <GuestToastActions copyText={copyText} dismiss={dismiss} onDismiss={() => toast.dismiss(id)} />,

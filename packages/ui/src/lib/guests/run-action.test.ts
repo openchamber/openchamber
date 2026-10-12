@@ -65,6 +65,25 @@ describe('guest action execution', () => {
     expect(errors.mock.calls.length).toBe(0);
   });
 
+  test('background actions complete with v4 IDs without crypto.randomUUID', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'randomUUID');
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });
+    try {
+      const pending = runGuestAction(entry, item, t);
+      const request = currentRequest();
+      expect(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(request.id)).toBe(true);
+      expect(request.takeMessage()).toMatchObject({ type: 'action', payload: item });
+      expect(request.takeMessage()).toBeNull();
+      request.complete({ ok: true });
+      await pending;
+      expect(useGuestActionHostStore.getState().requests).toEqual([]);
+      expect(errors.mock.calls.length).toBe(0);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis.crypto, 'randomUUID', descriptor);
+      else Reflect.deleteProperty(globalThis.crypto, 'randomUUID');
+    }
+  });
+
   test('overlapping clicks keep separate items and completion lifetimes', async () => {
     const first = runGuestAction(entry, item, t);
     const firstRequest = currentRequest();

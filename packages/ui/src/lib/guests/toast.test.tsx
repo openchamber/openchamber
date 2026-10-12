@@ -62,6 +62,28 @@ describe('guest toast buttons', () => {
     await act(async () => button.click());
   };
 
+  test('button toasts get distinct v4 IDs without crypto.randomUUID', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'randomUUID');
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });
+    try {
+      const requests: ToastRequest[] = [
+        { kind: 'info', message: 'Copy', copy: true },
+        { kind: 'info', message: 'Dismiss', dismiss: true },
+        { kind: 'info', message: 'Persistent', persistent: true },
+      ];
+      const ids = new Set<string | number | undefined>();
+      for (const request of requests) {
+        const options = await show(request);
+        expect(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(String(options.id))).toBe(true);
+        ids.add(options.id);
+      }
+      expect(ids.size).toBe(requests.length);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis.crypto, 'randomUUID', descriptor);
+      else Reflect.deleteProperty(globalThis.crypto, 'randomUUID');
+    }
+  });
+
   test('Copy keeps a persistent toast open; OK dismisses that toast', async () => {
     const options = await show({ kind: 'info', message: 'Result', copy: true, dismiss: true, persistent: true });
     expect(options.duration).toBe(Infinity);
