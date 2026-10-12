@@ -69,23 +69,24 @@ export const useProjectRepoStatus = (args: Args): void => {
     for (const path of paths) {
       if (!currentPaths.has(path)) paths.delete(path);
     }
-    // Read the paths this sidebar has not populated yet in one scheduled pass:
-    // the reads inside coalesce into a single batch request, so populating a
-    // fresh project list no longer costs one connection per project.
-    const pendingReads: Promise<void>[] = [];
-    for (const path of currentPaths) {
-      if (paths.has(path)) continue;
-      paths.add(path);
-      // A failed read leaves the path unknown; the next list change retries it.
-      const forgetIfUnknown = () => {
-        const state = useGitStore.getState().directories.get(path);
-        if (state?.isGitRepo !== false && !state?.status) paths.delete(path);
-      };
-      pendingReads.push(ensureStatus(path, git).then(forgetIfUnknown, forgetIfUnknown));
-    }
-    if (pendingReads.length > 0) {
-      void runBackgroundNetworkTask(() => Promise.all(pendingReads));
-    }
+    const newPaths = [...currentPaths].filter((path) => !paths.has(path));
+    if (newPaths.length === 0) return;
+    for (const path of newPaths) paths.add(path);
+    // A failed read leaves the path unknown; the next list change retries it.
+    const forgetIfUnknown = (path: string) => {
+      const state = useGitStore.getState().directories.get(path);
+      if (state?.isGitRepo !== false && !state?.status) paths.delete(path);
+    };
+    // Read the paths this sidebar has not populated yet in one scheduled pass.
+    // The prefetch answers every status in one batched request, so the store's
+    // per-project reads after it are cache hits instead of a connection each.
+    void runBackgroundNetworkTask(async () => {
+      await git.prefetchProjectStatuses?.(newPaths);
+      await Promise.all(newPaths.map((path) => ensureStatus(path, git).then(
+        () => forgetIfUnknown(path),
+        () => forgetIfUnknown(path),
+      )));
+    });
   }, [enabled, normalizedProjects, git, gitRuntimeKey, ensureStatus, setProjectRepoStatus]);
 
   // Read isGitRepo from the store-populated state

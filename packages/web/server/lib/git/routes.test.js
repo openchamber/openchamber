@@ -1170,7 +1170,7 @@ describe('batched project reads', () => {
     gitLibraries.observeWorktreeTopology.mockReset();
   });
 
-  it('answers repository, status, and root for many directories in one request', async () => {
+  it('answers repository, status, and root for many directories when asked for them', async () => {
     gitLibraries.isGitRepository.mockImplementation(async (directory) => directory !== '/plain');
     gitLibraries.getStatus.mockImplementation(async (directory) => ({
       isGitRepository: true, branch: `b-${directory}`, files: [], ahead: 0, behind: 0,
@@ -1180,7 +1180,7 @@ describe('batched project reads', () => {
     registerGitRoutes(app);
     const response = createMockResponse();
 
-    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo-a', '/plain', '/repo-b'] } }, response);
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo-a', '/plain', '/repo-b'], fields: ['status', 'root'] } }, response);
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({ projects: [
@@ -1203,10 +1203,39 @@ describe('batched project reads', () => {
     registerGitRoutes(app);
     const response = createMockResponse();
 
-    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/ok', '/broken'] } }, response);
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/ok', '/broken'], fields: ['status', 'root'] } }, response);
 
     expect(response.body.projects[0]).toEqual({ directory: '/ok', isGitRepository: true, status: { isGitRepository: true, branch: 'ok', files: [], ahead: 0, behind: 0 }, root: null });
     expect(response.body.projects[1]).toEqual({ directory: '/broken', isGitRepository: true, status: null, root: null, errors: ['status'] });
+  });
+
+  it('reads no status or root for a caller that only asks whether directories are repositories', async () => {
+    gitLibraries.isGitRepository.mockImplementation(async (directory) => directory !== '/plain');
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo', '/plain'] } }, response);
+
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo', isGitRepository: true },
+      { directory: '/plain', isGitRepository: false },
+    ] });
+    expect(gitLibraries.getStatus).not.toHaveBeenCalled();
+    expect(gitLibraries.resolvePrimaryWorktreeRoot).not.toHaveBeenCalled();
+  });
+
+  it('reads only the primary root when that is the one field asked for', async () => {
+    gitLibraries.isGitRepository.mockResolvedValue(true);
+    gitLibraries.resolvePrimaryWorktreeRoot.mockResolvedValue({ root: '/main' });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo'], fields: ['root'] } }, response);
+
+    expect(response.body).toEqual({ projects: [{ directory: '/repo', isGitRepository: true, root: '/main' }] });
+    expect(gitLibraries.getStatus).not.toHaveBeenCalled();
   });
 
   it('rejects a missing or empty directories array', async () => {

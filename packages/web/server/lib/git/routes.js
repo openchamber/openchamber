@@ -536,53 +536,68 @@ export function registerGitRoutes(app, {
   };
 
   /**
-   * One startup read for many project directories. The sidebar otherwise asks
-   * three questions per project — repository check, status, and primary root —
-   * and every answer is small, so the round trips and headers dominate. This
-   * route answers them together. It stays proxyable into a space because each
-   * question is answerable there on its own.
+   * One read for many project directories. Every entry answers the repository
+   * check; `fields` adds `status` and `root` (primary worktree root) only when
+   * the caller asks for them. A status read runs a dozen Git processes, so a
+   * caller that only needs the cheap answers never pays for one. It stays
+   * proxyable into a space because each question is answerable there on its own.
    */
   app.post('/api/git/projects', async (req, res) => {
     const { isGitRepository, getStatus, resolvePrimaryWorktreeRoot, observeWorktreeTopology } = await getGitLibraries();
+    const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
+    const wantsStatus = fields.includes('status');
+    const wantsRoot = fields.includes('root');
+    const nonRepoEntry = (directory) => {
+      const entry = { directory, isGitRepository: false };
+      if (wantsStatus) entry.status = nonRepoStatusPayload();
+      if (wantsRoot) entry.root = null;
+      return entry;
+    };
     return readProjectBatch(req, res, async (directory) => {
       try {
         const isRepo = await isGitRepository(directory);
         if (!isRepo) {
-          return { directory, isGitRepository: false, status: nonRepoStatusPayload(), root: null };
+          return nonRepoEntry(directory);
         }
 
-        void observeWorktreeTopology(directory);
-
-        const entry = { directory, isGitRepository: true, status: null, root: null };
+        const entry = { directory, isGitRepository: true };
         const failures = [];
-        // Status and primary root are independent reads of the same repository,
-        // so run them together: a directory then costs the slower of the two
-        // instead of their sum. The worker pool above still bounds how many
-        // directories run at once, and the git service bounds status reads.
-        await Promise.all([
-          (async () => {
+        const reads = [];
+        if (wantsStatus) {
+          // Mirror `GET /api/git/status`: a status read is where an externally
+          // added or removed worktree gets noticed.
+          void observeWorktreeTopology(directory);
+          reads.push((async () => {
             try {
               entry.status = await getStatus(directory);
             } catch (error) {
               console.error('Git project batch status failed:', directory, error);
+              entry.status = null;
               failures.push('status');
             }
-          })(),
-          (async () => {
+          })());
+        }
+        if (wantsRoot) {
+          reads.push((async () => {
             try {
-              const resolved = await resolvePrimaryWorktreeRoot(directory);
-              entry.root = typeof resolved?.root === 'string' ? resolved.root : null;
+              entry.root = (await resolvePrimaryWorktreeRoot(directory)).root;
             } catch (error) {
               console.error('Git project batch primary root failed:', directory, error);
+              entry.root = null;
               failures.push('root');
             }
-          })(),
-        ]);
+          })());
+        }
+        // Status and primary root are independent reads of the same repository,
+        // so a directory costs the slower of the two instead of their sum. The
+        // worker pool above bounds how many directories run at once, and the git
+        // service bounds status reads.
+        await Promise.all(reads);
         if (failures.length > 0) entry.errors = failures;
         return entry;
       } catch (error) {
         if (isNonRepoGitError(error)) {
-          return { directory, isGitRepository: false, status: nonRepoStatusPayload(), root: null };
+          return nonRepoEntry(directory);
         }
         console.error('Failed to read git project overview:', directory, error);
         return { directory, error: 'Failed to read project repository' };

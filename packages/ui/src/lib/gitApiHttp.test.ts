@@ -33,6 +33,7 @@ import {
   listGitDirectories,
   listGitWorktrees,
   merge,
+  prefetchProjectStatuses,
   popGitStash,
   rebase,
   removeRemote,
@@ -1787,14 +1788,15 @@ describe('batched project reads', () => {
           directory,
           isGitRepository: true,
           status: { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
-          root: directory,
         })),
       });
     }) as typeof fetch;
     try {
       const directories = ['/batch/proj-a', '/batch/proj-b', '/batch/proj-c', '/batch/proj-d', '/batch/proj-e'];
+      await prefetchProjectStatuses(directories);
+      // The status batch warms both the repository and the status cache, so the
+      // store's per-project reads after it are cache hits.
       const repositories = await Promise.all(directories.map((directory) => checkIsGitRepository(directory)));
-      // The batched check warms the status cache, so these are cache hits.
       const statuses = await Promise.all(directories.map((directory) => getGitStatus(directory)));
       const worktrees = await Promise.all(directories.map((directory) => listGitWorktrees(directory)));
 
@@ -1807,9 +1809,49 @@ describe('batched project reads', () => {
       expect(projectCalls).toHaveLength(1);
       expect(worktreeCalls).toHaveLength(1);
       expect(calls).toHaveLength(2);
-      // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
-      const sent = JSON.parse(String(projectCalls[0].init?.body)) as { directories: string[] };
+      // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories, fields } shape the adapter sent.
+      const sent = JSON.parse(String(projectCalls[0].init?.body)) as { directories: string[]; fields?: string[] };
       expect([...sent.directories].sort()).toEqual([...directories].sort());
+      expect(sent.fields).toEqual(['status']);
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('answers a repository check without asking for status or waiting on a status batch', async () => {
+    installWindowMock();
+    const directory = '/batch/cheap-check-repo';
+    const bodies: Array<{ directories: string[]; fields?: string[] }> = [];
+    let releaseStatus: () => void = () => {};
+    const statusGate = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (_input, init) => {
+      // SAFETY: the request body is this test's own JSON.stringify payload, so it parses to the { directories, fields } shape the adapter sent.
+      const body = JSON.parse(String(init?.body ?? '{}')) as { directories: string[]; fields?: string[] };
+      bodies.push(body);
+      if (body.fields?.includes('status')) {
+        // Hold the status batch: a slow status must not delay the cheap check.
+        await statusGate;
+        return Response.json({ projects: body.directories.map((entry) => ({
+          directory: entry,
+          isGitRepository: true,
+          status: { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
+        })) });
+      }
+      return Response.json({ projects: body.directories.map((entry) => ({ directory: entry, isGitRepository: true })) });
+    }) as typeof fetch;
+    try {
+      const prefetch = prefetchProjectStatuses([directory]);
+      expect(await checkIsGitRepository(directory)).toBe(true);
+
+      const checkBody = bodies.find((body) => body.fields === undefined);
+      expect(checkBody?.directories).toEqual([directory]);
+
+      releaseStatus();
+      await prefetch;
+      expect(bodies).toHaveLength(2);
     } finally {
       restoreMocks();
     }
@@ -1874,7 +1916,6 @@ describe('batched project reads', () => {
             directory,
             isGitRepository: true,
             status: { current: 'stale', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
-            root: directory,
           }],
         });
       }
@@ -1884,14 +1925,14 @@ describe('batched project reads', () => {
       return Response.json({});
     }) as typeof fetch;
     try {
-      const repositoryPromise = checkIsGitRepository(directory);
+      const prefetch = prefetchProjectStatuses([directory]);
       // Let the batch window fire so the request is admitted and held.
       await new Promise((resolve) => setTimeout(resolve, 30));
       const fresh = await getGitStatus(directory, { fresh: true });
       expect(fresh.current).toBe('fresh');
 
       releaseBatch();
-      expect(await repositoryPromise).toBe(true);
+      await prefetch;
 
       // The batch carried 'stale' but landed after the version bump, so it must
       // not overwrite the newer 'fresh' status.

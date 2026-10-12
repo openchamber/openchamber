@@ -1053,6 +1053,12 @@ interface GitWorktreeAPI {
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
   getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus>;
+  /**
+   * Warm the status cache for many directories with one request, so the
+   * per-directory `getGitStatus` reads that follow are cache hits. Runtimes
+   * without a batched status read (VS Code) omit it and read one by one.
+   */
+  prefetchProjectStatuses?(directories: string[]): Promise<void>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitPathDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   getGitRangeDiff?(directory: string, options: GetGitRangeDiffOptions): Promise<GitDiffResponse>;
