@@ -868,3 +868,61 @@ describe("sendCommand context", () => {
     expect(requests.at(-1)?.body).toMatchObject({ name: "review", text: "src" })
   })
 })
+
+describe("directory availability batching", () => {
+  const answerPaths = (request: CapturedRequest) => {
+    const paths = (request.body as { paths: string[] }).paths
+    return json({
+      results: paths.map((path) => path.endsWith("/gone")
+        ? { path, isDirectory: false, reason: "not-found" }
+        : { path, isDirectory: true }),
+    })
+  }
+  const availabilityCalls = () =>
+    requests.filter((request) => request.url.pathname === "/api/fs/directory-stats")
+
+  test("coalesces probes admitted in one window into a single request", async () => {
+    responses.push(answerPaths)
+    const results = await Promise.all([
+      opencodeClient.getDirectoryAvailability("/repo/one"),
+      opencodeClient.getDirectoryAvailability("/repo/two"),
+      opencodeClient.getDirectoryAvailability("/repo/gone"),
+    ])
+    expect(results).toEqual(["available", "available", "missing"])
+    expect(availabilityCalls().length).toBe(1)
+  })
+
+  test("chunks more paths than the server accepts into multiple requests", async () => {
+    responses.push(answerPaths, answerPaths)
+    const directories = Array.from({ length: 250 }, (_, index) => `/repo/chunk-${index}`)
+    const results = await Promise.all(
+      directories.map((directory) => opencodeClient.getDirectoryAvailability(directory)),
+    )
+    expect(results.every((value) => value === "available")).toBe(true)
+    const calls = availabilityCalls()
+    expect(calls.length).toBe(2)
+    for (const call of calls) {
+      expect((call.body as { paths: string[] }).paths.length).toBeLessThanOrEqual(200)
+    }
+  })
+
+  test("reports unknown without a request when the runtime changed before flush", async () => {
+    const pending = [
+      opencodeClient.getDirectoryAvailability("/repo/one"),
+      opencodeClient.getDirectoryAvailability("/repo/two"),
+    ]
+    runtimeKey = "other"
+    const results = await Promise.all(pending)
+    expect(results).toEqual(["unknown", "unknown"])
+    expect(availabilityCalls().length).toBe(0)
+  })
+
+  test("reports unknown when the runtime refuses the probe (VS Code 501)", async () => {
+    responses.push(json({ error: "Directory availability probes are not supported in the VS Code runtime" }, 501))
+    const results = await Promise.all([
+      opencodeClient.getDirectoryAvailability("/repo/one"),
+      opencodeClient.getDirectoryAvailability("/repo/two"),
+    ])
+    expect(results).toEqual(["unknown", "unknown"])
+  })
+})

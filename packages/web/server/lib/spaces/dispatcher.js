@@ -82,6 +82,9 @@ const REFUSED_ACROSS_BOUNDARY_ROUTES = Object.freeze([
   '/api/git/worktrees',
   '/api/git/worktree-type',
   '/api/git/integrate',
+  // The batched worktree read stays out of a space for the same reason
+  // `/api/git/worktrees` does.
+  '/api/git/project-worktrees',
   '/api/fs/preview',
   // Older inside servers answered this one; it stays refused.
   '/api/fs/serve',

@@ -1,4 +1,4 @@
-import { spaceApiPath } from '@/lib/spaces/space-route';
+import { spaceApiPath, spaceIdOfDirectory } from '@/lib/spaces/space-route';
 import { z } from 'zod';
 import type {
   GitStatus,
@@ -795,6 +795,164 @@ function buildUrl(
   return getRuntimeUrlResolver().api(spaceApiPath(path, directory), query);
 }
 
+type ProjectOverviewField = 'repo' | 'status' | 'root' | 'worktrees';
+
+type ProjectOverviewResponse = {
+  directory: string;
+  isGitRepository?: boolean;
+  status?: GitStatus | null;
+  root?: string | null;
+  worktrees?: GitWorktreeInfo[] | null;
+  errors?: string[];
+  error?: string;
+};
+
+type ProjectOverviewWaiter = {
+  field: ProjectOverviewField;
+  resolve: (overview: ProjectOverviewResponse) => void;
+  reject: (error: Error) => void;
+};
+
+type ProjectOverviewBatch = {
+  runtimeKey: string;
+  endpoint: string;
+  waiters: Map<string, ProjectOverviewWaiter[]>;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+// The startup reads — repository check, status, primary root, and worktree
+// list — are a request per project whose responses are tiny, so the round trips
+// and headers dominate. Reads admitted within the same short window share one
+// batched request per endpoint. Worktrees live on their own endpoint because
+// that one is refused across the space boundary, like `/api/git/worktrees`.
+const PROJECT_OVERVIEW_BATCH_WINDOW_MS = 15;
+const PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES = 200;
+
+const projectOverviewEndpoint = (field: ProjectOverviewField): string =>
+  field === 'worktrees' ? `${API_BASE}/project-worktrees` : `${API_BASE}/projects`;
+
+// Batches are keyed by endpoint and routing context. A directory under
+// `/spaces/<id>` is answered by that space's server and a host directory by the
+// host's, and the dispatcher reads the directory from the URL query, never the
+// body, so one request cannot serve a mixed batch. Keying by space id keeps each
+// context in its own batch and `directories[0]` matching every directory the
+// request carries.
+const projectOverviewBatchKey = (endpoint: string, directory: string): string =>
+  `${endpoint}\0${spaceIdOfDirectory(directory) ?? ''}`;
+
+const pendingProjectOverviews = new Map<string, ProjectOverviewBatch>();
+
+const flushProjectOverviews = async (batchKey: string): Promise<void> => {
+  const batch = pendingProjectOverviews.get(batchKey);
+  pendingProjectOverviews.delete(batchKey);
+  if (!batch) return;
+
+  // A runtime switch between admission and flush would send these directories to
+  // the new runtime's base while their context is the old one. Drop the batch
+  // instead of pairing them; callers treat rejection as a failed read and retry.
+  if (batch.runtimeKey !== getRuntimeKey()) {
+    const error = new Error('Runtime changed before project repository batch was sent');
+    for (const waiters of batch.waiters.values()) {
+      for (const waiter of waiters) waiter.reject(error);
+    }
+    return;
+  }
+
+  const directories = [...batch.waiters.keys()];
+  // Capture each directory's status-cache version before the request, so a
+  // mutation that lands while the batch is in flight is not overwritten by the
+  // pre-mutation status the server computed.
+  const statusVersionAtFlush = new Map<string, number>();
+  for (const directory of directories) {
+    statusVersionAtFlush.set(directory, getStatusCacheVersion(batch.runtimeKey, directory));
+  }
+
+  const byDirectory = new Map<string, ProjectOverviewResponse>();
+  // Chunk above the server's per-request cap so every directory is read instead
+  // of the overflow rejecting.
+  const chunks: string[][] = [];
+  for (let index = 0; index < directories.length; index += PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES) {
+    chunks.push(directories.slice(index, index + PROJECT_OVERVIEW_BATCH_MAX_DIRECTORIES));
+  }
+  await Promise.all(chunks.map(async (chunk) => {
+    try {
+      // The batch is single-context (see projectOverviewBatchKey), so the first
+      // directory's URL context matches every directory in the body.
+      const response = await runtimeFetch(buildUrl(batch.endpoint, chunk[0]), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directories: chunk }),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to read project repositories: ${response.statusText}`);
+      }
+      // SAFETY: this shape is produced by this app's own `/api/git/projects` and
+      // `/api/git/project-worktrees` handlers.
+      const payload = await response.json() as { projects?: ProjectOverviewResponse[] } | null;
+      for (const project of payload?.projects ?? []) {
+        byDirectory.set(project.directory, project);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to read project repositories';
+      for (const directory of chunk) {
+        byDirectory.set(directory, { directory, error: message });
+      }
+    }
+  }));
+
+  // Warm the status cache so the store's per-project status read is a cache hit
+  // instead of its own request; the batch already computed the status.
+  for (const [directory, project] of byDirectory) {
+    if (project.status && getStatusCacheVersion(batch.runtimeKey, directory) === statusVersionAtFlush.get(directory)) {
+      gitStatusCache.set(getStatusCacheKey(batch.runtimeKey, directory, undefined), {
+        value: project.status,
+        expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
+      });
+    }
+  }
+
+  for (const [directory, waiters] of batch.waiters) {
+    const overview = byDirectory.get(directory) ?? null;
+    for (const waiter of waiters) {
+      if (!overview) {
+        waiter.reject(new Error('Project repository read missing from batch response'));
+      } else if (overview.error) {
+        waiter.reject(new Error(overview.error));
+      } else if (overview.errors?.includes(waiter.field)) {
+        waiter.reject(new Error(`Failed to read project ${waiter.field}`));
+      } else {
+        waiter.resolve(overview);
+      }
+    }
+  }
+};
+
+const readProjectOverview = (directory: string, field: ProjectOverviewField): Promise<ProjectOverviewResponse> => {
+  const endpoint = projectOverviewEndpoint(field);
+  const runtimeKey = getRuntimeKey();
+  const batchKey = projectOverviewBatchKey(endpoint, directory);
+  const existing = pendingProjectOverviews.get(batchKey);
+  if (existing && existing.runtimeKey !== runtimeKey) {
+    void flushProjectOverviews(batchKey);
+  }
+  let batch = pendingProjectOverviews.get(batchKey);
+  if (!batch) {
+    batch = { runtimeKey, endpoint, waiters: new Map(), timer: null };
+    pendingProjectOverviews.set(batchKey, batch);
+  }
+  const current = batch;
+  return new Promise<ProjectOverviewResponse>((resolve, reject) => {
+    const waiters = current.waiters.get(directory) ?? [];
+    waiters.push({ field, resolve, reject });
+    current.waiters.set(directory, waiters);
+    if (current.timer === null) {
+      current.timer = setTimeout(() => {
+        void flushProjectOverviews(batchKey);
+      }, PROJECT_OVERVIEW_BATCH_WINDOW_MS);
+    }
+  });
+};
+
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
   const key = getDirectoryCacheKey(getRuntimeKey(), directory);
   const now = Date.now();
@@ -809,18 +967,15 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 
   const task = (async () => {
-    const response = await runtimeFetch(buildUrl(`${API_BASE}/check`, directory));
-    if (!response.ok) {
-      throw new Error(`Failed to check git repository: ${response.statusText}`);
-    }
-    const data = await response.json();
-    const isGitRepository = Boolean(data.isGitRepository);
+    const overview = await readProjectOverview(directory, 'repo');
+    const isGitRepository = overview.isGitRepository === true;
     gitRepoCache.set(key, {
       value: isGitRepository,
       expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
     });
     return isGitRepository;
   })();
+
 
   gitRepoInFlight.set(key, task);
   try {
@@ -883,10 +1038,15 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
 
   const task = (async () => {
     const cacheVersion = getStatusCacheVersion(runtimeKey, directory);
+    // Status keeps its own route: light reads pass `mode`, forced reads bypass
+    // the cache, and a single directory is cheap. The startup fan-out is covered
+    // by warming this cache from the batched project read, so a project's status
+    // is already cached before the store reads it.
     const response = await runtimeFetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }
+    // SAFETY: `/api/git/status` is this app's own route; its body is a GitStatus.
     const payload = await response.json() as GitStatus;
     if (getStatusCacheVersion(runtimeKey, directory) === cacheVersion) {
       gitStatusCache.set(key, {
@@ -908,12 +1068,8 @@ export async function getGitStatus(directory: string, options?: { mode?: 'light'
 }
 
 export async function resolveGitPrimaryRoot(directory: string): Promise<{ root: string }> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/primary-root`, directory));
-  if (!response.ok) {
-    throw new Error(`Failed to resolve git primary root: ${response.statusText}`);
-  }
-  const payload = await response.json().catch(() => ({})) as { root?: string };
-  return { root: typeof payload.root === 'string' && payload.root ? payload.root : directory };
+  const overview = await readProjectOverview(directory, 'root');
+  return { root: overview.root ? overview.root : directory };
 }
 
 export async function resolveGitTopLevel(directory: string): Promise<{ root: string }> {
@@ -1362,12 +1518,8 @@ export async function generatePullRequestDescription(
 }
 
 export async function listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]> {
-  const response = await runtimeFetch(buildUrl(`${API_BASE}/worktrees`, directory));
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(error.error || 'Failed to list worktrees');
-  }
-  return response.json();
+  const overview = await readProjectOverview(directory, 'worktrees');
+  return overview.worktrees ?? [];
 }
 
 export async function validateGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult> {

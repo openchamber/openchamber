@@ -2105,6 +2105,46 @@ describe('fs stat directory error handling', () => {
     expect(failure.body).toEqual({ error: 'Failed to stat directory' });
     expect(readdir).not.toHaveBeenCalled();
   });
+
+  it('answers many directory stats in one request, isolating failures per path', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    const enoent = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const stat = vi.fn(async (targetPath) => {
+      if (targetPath === '/gone') throw enoent;
+      if (targetPath === '/file') return { isDirectory: () => false };
+      return { isDirectory: () => true };
+    });
+    registerFsRoutes(app, {
+      os: { homedir: () => '/home/user' },
+      path: path.posix,
+      fsPromises: { realpath: async (targetPath) => targetPath, stat, readdir: vi.fn(async () => []) },
+      spawn: vi.fn(),
+      crypto: { randomUUID: () => 'job-0' },
+      normalizeDirectoryPath: (p) => p,
+      resolveProjectDirectory: async () => ({ directory: '/repo' }),
+      buildAugmentedPath: () => '/usr/bin',
+      resolveGitBinaryForSpawn: () => 'git',
+      openchamberUserConfigRoot: '/home/user/.config',
+    });
+    const handler = getRoute('POST', '/api/fs/directory-stats');
+
+    const response = createMockResponse();
+    await handler({ body: { paths: ['/repo', '/gone', '/file'] } }, response);
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ results: [
+      { path: '/repo', isDirectory: true },
+      { path: '/gone', isDirectory: false, reason: 'not-found' },
+      { path: '/file', isDirectory: false, reason: 'not-directory' },
+    ] });
+
+    const invalid = createMockResponse();
+    await handler({ body: { paths: [] } }, invalid);
+    expect(invalid.statusCode).toBe(400);
+
+    const tooMany = createMockResponse();
+    await handler({ body: { paths: Array.from({ length: 201 }, (_, index) => `/repo-${index}`) } }, tooMany);
+    expect(tooMany.statusCode).toBe(400);
+  });
 });
 
 describe('fs managed chats root', () => {

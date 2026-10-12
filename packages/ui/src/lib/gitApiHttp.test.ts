@@ -8,6 +8,7 @@ import {
   applyGitStash,
   checkoutBranch,
   checkoutCommit,
+  checkIsGitRepository,
   cherryPick,
   continueMerge,
   continueRebase,
@@ -30,6 +31,7 @@ import {
   planNetworkOperation,
   gitPush,
   listGitDirectories,
+  listGitWorktrees,
   merge,
   popGitStash,
   rebase,
@@ -1761,6 +1763,171 @@ describe('gitApiHttp request priority', () => {
 
       expect(calls).toHaveLength(1);
       expect(calls[0].init?.priority).toBe(undefined);
+    } finally {
+      restoreMocks();
+    }
+  });
+});
+
+describe('batched project reads', () => {
+  test('collapses per-project git reads into one request per endpoint', async () => {
+    installWindowMock();
+    const calls: FetchCall[] = [];
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      // SAFETY: the request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
+      const body = JSON.parse(String(init?.body ?? '{}')) as { directories?: string[] };
+      const directories = Array.isArray(body.directories) ? body.directories : [];
+      if (String(input).includes('/api/git/project-worktrees')) {
+        return Response.json({ projects: directories.map((directory) => ({ directory, worktrees: [] })) });
+      }
+      return Response.json({
+        projects: directories.map((directory) => ({
+          directory,
+          isGitRepository: true,
+          status: { current: 'main', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
+          root: directory,
+        })),
+      });
+    }) as typeof fetch;
+    try {
+      const directories = ['/batch/proj-a', '/batch/proj-b', '/batch/proj-c', '/batch/proj-d', '/batch/proj-e'];
+      const repositories = await Promise.all(directories.map((directory) => checkIsGitRepository(directory)));
+      // The batched check warms the status cache, so these are cache hits.
+      const statuses = await Promise.all(directories.map((directory) => getGitStatus(directory)));
+      const worktrees = await Promise.all(directories.map((directory) => listGitWorktrees(directory)));
+
+      expect(repositories).toEqual([true, true, true, true, true]);
+      expect(statuses.map((status) => status.current)).toEqual(['main', 'main', 'main', 'main', 'main']);
+      expect(worktrees).toEqual([[], [], [], [], []]);
+
+      const projectCalls = calls.filter((call) => String(call.input).includes('/api/git/projects'));
+      const worktreeCalls = calls.filter((call) => String(call.input).includes('/api/git/project-worktrees'));
+      expect(projectCalls).toHaveLength(1);
+      expect(worktreeCalls).toHaveLength(1);
+      expect(calls).toHaveLength(2);
+      // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
+      const sent = JSON.parse(String(projectCalls[0].init?.body)) as { directories: string[] };
+      expect([...sent.directories].sort()).toEqual([...directories].sort());
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('keeps host and space directories in separate batches', async () => {
+    installWindowMock();
+    const calls: FetchCall[] = [];
+    const spaceId = 'a'.repeat(12);
+    const hostDirectory = '/batch/host-project';
+    const spaceDirectory = `/spaces/${spaceId}/repo`;
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      // SAFETY: the request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
+      const body = JSON.parse(String(init?.body ?? '{}')) as { directories?: string[] };
+      const directories = Array.isArray(body.directories) ? body.directories : [];
+      return Response.json({
+        projects: directories.map((directory) => ({ directory, isGitRepository: true, root: directory })),
+      });
+    }) as typeof fetch;
+    try {
+      const results = await Promise.all([
+        checkIsGitRepository(hostDirectory),
+        checkIsGitRepository(spaceDirectory),
+      ]);
+      expect(results).toEqual([true, true]);
+
+      const projectCalls = calls.filter((call) => String(call.input).includes('git/projects'));
+      // One URL cannot serve a mixed batch, so the two routing contexts split.
+      expect(projectCalls).toHaveLength(2);
+      const urls = projectCalls.map((call) => String(call.input));
+      expect(urls.some((url) => url.includes(`/api/spaces/${spaceId}/git/projects`))).toBe(true);
+      expect(urls.some((url) => url.includes('/api/git/projects'))).toBe(true);
+      for (const call of projectCalls) {
+        // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
+        const sent = JSON.parse(String(call.init?.body)) as { directories: string[] };
+        const hasSpace = sent.directories.some((entry) => entry.startsWith('/spaces/'));
+        const hasHost = sent.directories.some((entry) => !entry.startsWith('/spaces/'));
+        expect(hasSpace && hasHost).toBe(false);
+      }
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('does not overwrite a newer status cache with a stale batch warm', async () => {
+    installWindowMock();
+    const directory = '/batch/version-guard-repo';
+    let releaseBatch: () => void = () => {};
+    const batchGate = new Promise<void>((resolve) => {
+      releaseBatch = resolve;
+    });
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.includes('/api/git/projects')) {
+        // Hold the batch in flight until the test bumps the status-cache version.
+        await batchGate;
+        return Response.json({
+          projects: [{
+            directory,
+            isGitRepository: true,
+            status: { current: 'stale', tracking: null, ahead: 0, behind: 0, files: [], isClean: true },
+            root: directory,
+          }],
+        });
+      }
+      if (url.includes('/api/git/status')) {
+        return Response.json({ current: 'fresh', tracking: null, ahead: 0, behind: 0, files: [], isClean: true });
+      }
+      return Response.json({});
+    }) as typeof fetch;
+    try {
+      const repositoryPromise = checkIsGitRepository(directory);
+      // Let the batch window fire so the request is admitted and held.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const fresh = await getGitStatus(directory, { fresh: true });
+      expect(fresh.current).toBe('fresh');
+
+      releaseBatch();
+      expect(await repositoryPromise).toBe(true);
+
+      // The batch carried 'stale' but landed after the version bump, so it must
+      // not overwrite the newer 'fresh' status.
+      const after = await getGitStatus(directory);
+      expect(after.current).toBe('fresh');
+    } finally {
+      restoreMocks();
+    }
+  });
+
+  test('chunks more directories than the server accepts into multiple requests', async () => {
+    installWindowMock();
+    const directories = Array.from({ length: 250 }, (_, index) => `/batch/chunk-${index}`);
+    const calls: FetchCall[] = [];
+    // SAFETY: this is a fetch test double; the cast restores the `fetch` signature the test assigns.
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      // SAFETY: the captured request body is this test's own JSON.stringify payload, so it parses to the { directories } shape the adapter sent.
+      const body = JSON.parse(String(init?.body ?? '{}')) as { directories?: string[] };
+      const chunk = body.directories ?? [];
+      return Response.json({
+        projects: chunk.map((directory) => ({ directory, isGitRepository: true, status: null, root: directory })),
+      });
+    }) as typeof fetch;
+    try {
+      const results = await Promise.all(directories.map((directory) => checkIsGitRepository(directory)));
+      expect(results.every(Boolean)).toBe(true);
+      expect(calls.length).toBe(2);
+      let delivered = 0;
+      for (const call of calls) {
+        // SAFETY: as above, the body is this test's own payload.
+        const sent = JSON.parse(String(call.init?.body)) as { directories: string[] };
+        expect(sent.directories.length).toBeLessThanOrEqual(200);
+        delivered += sent.directories.length;
+      }
+      expect(delivered).toBe(250);
     } finally {
       restoreMocks();
     }

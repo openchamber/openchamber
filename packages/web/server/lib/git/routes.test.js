@@ -8,6 +8,7 @@ const gitLibraries = {
   createWorktree: vi.fn(),
   validateWorktreeCreate: vi.fn(),
   getWorktrees: vi.fn(),
+  resolvePrimaryWorktreeRoot: vi.fn(),
   getGlobalIdentity: vi.fn(),
   getCurrentIdentity: vi.fn(),
   getRemoteUrl: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('./index.js', () => ({
   createWorktree: gitLibraries.createWorktree,
   validateWorktreeCreate: gitLibraries.validateWorktreeCreate,
   getWorktrees: gitLibraries.getWorktrees,
+  resolvePrimaryWorktreeRoot: gitLibraries.resolvePrimaryWorktreeRoot,
   getGlobalIdentity: gitLibraries.getGlobalIdentity,
   getCurrentIdentity: gitLibraries.getCurrentIdentity,
   getRemoteUrl: gitLibraries.getRemoteUrl,
@@ -1156,5 +1158,118 @@ describe('legacy git network route binding gate', () => {
       error: 'Git network operations require the planned operation API',
       code: 'GIT_NETWORK_OPERATION_REQUIRED',
     });
+  });
+});
+
+describe('batched project reads', () => {
+  beforeEach(() => {
+    gitLibraries.isGitRepository.mockReset();
+    gitLibraries.getStatus.mockReset();
+    gitLibraries.getWorktrees.mockReset();
+    gitLibraries.resolvePrimaryWorktreeRoot.mockReset();
+    gitLibraries.observeWorktreeTopology.mockReset();
+  });
+
+  it('answers repository, status, and root for many directories in one request', async () => {
+    gitLibraries.isGitRepository.mockImplementation(async (directory) => directory !== '/plain');
+    gitLibraries.getStatus.mockImplementation(async (directory) => ({
+      isGitRepository: true, branch: `b-${directory}`, files: [], ahead: 0, behind: 0,
+    }));
+    gitLibraries.resolvePrimaryWorktreeRoot.mockImplementation(async (directory) => ({ root: `${directory}/root` }));
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/repo-a', '/plain', '/repo-b'] } }, response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo-a', isGitRepository: true, status: { isGitRepository: true, branch: 'b-/repo-a', files: [], ahead: 0, behind: 0 }, root: '/repo-a/root' },
+      { directory: '/plain', isGitRepository: false, status: { isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 }, root: null },
+      { directory: '/repo-b', isGitRepository: true, status: { isGitRepository: true, branch: 'b-/repo-b', files: [], ahead: 0, behind: 0 }, root: '/repo-b/root' },
+    ] });
+    expect(gitLibraries.getStatus).toHaveBeenCalledWith('/repo-a');
+    expect(gitLibraries.getStatus).toHaveBeenCalledWith('/repo-b');
+  });
+
+  it('isolates a failing status to its own directory', async () => {
+    gitLibraries.isGitRepository.mockResolvedValue(true);
+    gitLibraries.getStatus.mockImplementation(async (directory) => {
+      if (directory === '/broken') throw new Error('boom');
+      return { isGitRepository: true, branch: 'ok', files: [], ahead: 0, behind: 0 };
+    });
+    gitLibraries.resolvePrimaryWorktreeRoot.mockResolvedValue({ root: null });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/projects')({ body: { directories: ['/ok', '/broken'] } }, response);
+
+    expect(response.body.projects[0]).toEqual({ directory: '/ok', isGitRepository: true, status: { isGitRepository: true, branch: 'ok', files: [], ahead: 0, behind: 0 }, root: null });
+    expect(response.body.projects[1]).toEqual({ directory: '/broken', isGitRepository: true, status: null, root: null, errors: ['status'] });
+  });
+
+  it('rejects a missing or empty directories array', async () => {
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const handler = getRoute('POST', '/api/git/projects');
+    const missing = createMockResponse();
+    await handler({ body: {} }, missing);
+    expect(missing.statusCode).toBe(400);
+    const empty = createMockResponse();
+    await handler({ body: { directories: [] } }, empty);
+    expect(empty.statusCode).toBe(400);
+  });
+
+  it('lists worktrees for many directories on the worktree endpoint', async () => {
+    gitLibraries.getWorktrees.mockImplementation(async (directory) => [{ path: `${directory}/w`, label: 'w' }]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a', '/repo-b'] } }, response);
+
+    expect(response.body).toEqual({ projects: [
+      { directory: '/repo-a', worktrees: [{ path: '/repo-a/w', label: 'w' }] },
+      { directory: '/repo-b', worktrees: [{ path: '/repo-b/w', label: 'w' }] },
+    ] });
+  });
+
+  it('reports a worktree failure per directory without failing the others', async () => {
+    gitLibraries.getWorktrees.mockImplementation(async (directory) => {
+      if (directory === '/broken') throw new Error('boom');
+      return [];
+    });
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/ok', '/broken'] } }, response);
+
+    expect(response.body.projects[0]).toEqual({ directory: '/ok', worktrees: [] });
+    expect(response.body.projects[1]).toEqual({ directory: '/broken', worktrees: null, errors: ['worktrees'] });
+  });
+
+  it('observes worktree topology for a non-empty batched listing', async () => {
+    gitLibraries.getWorktrees.mockImplementation(async (directory) => [{ path: `${directory}/w`, label: 'w' }]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a'] } }, response);
+
+    expect(gitLibraries.observeWorktreeTopology).toHaveBeenCalledWith('/repo-a');
+    expect(gitLibraries.observeWorktreeTopology).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not observe topology for an empty batched listing', async () => {
+    gitLibraries.getWorktrees.mockResolvedValue([]);
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app);
+    const response = createMockResponse();
+
+    await getRoute('POST', '/api/git/project-worktrees')({ body: { directories: ['/repo-a'] } }, response);
+
+    expect(gitLibraries.observeWorktreeTopology).not.toHaveBeenCalled();
   });
 });

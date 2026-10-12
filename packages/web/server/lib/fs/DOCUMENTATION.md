@@ -16,6 +16,9 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/raw`
     - `GET /api/fs/stat`
     - `GET /api/fs/directory-stat`
+    - `POST /api/fs/directory-stats` — the batched form of `directory-stat`:
+      one request answers `{ results: [{ path, isDirectory, reason? }] }` for
+      many paths with the same reason codes, isolating per-path failures.
     - `POST /api/fs/preview`
     - `GET /api/fs/preview/:grant/:path(*)`
     - `POST /api/fs/write`

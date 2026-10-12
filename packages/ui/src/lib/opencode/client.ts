@@ -491,7 +491,93 @@ type DirectoryAvailability = "available" | "missing" | "unknown"
 type PendingRequestListOptions = {
   directories?: Array<string | null | undefined>
 }
-const directoryProbeErrorSchema = z.object({ reason: z.string().optional(), isDirectory: z.boolean().optional() })
+const directoryStatsSchema = z.object({
+  results: z.array(z.object({
+    path: z.string(),
+    isDirectory: z.boolean().optional(),
+    reason: z.string().optional(),
+  })).optional(),
+})
+
+// `getDirectoryAvailability` runs once per project row at startup, so an
+// unbatched probe costs a round trip and a header set per project for a single
+// boolean. Probes admitted within the same short window share one
+// `/api/fs/directory-stats` request.
+const DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS = 15
+const DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS = 200
+
+let pendingDirectoryAvailability: {
+  runtimeKey: string
+  waiters: Map<string, Array<(value: DirectoryAvailability) => void>>
+  timer: ReturnType<typeof setTimeout> | null
+} | null = null
+
+const flushDirectoryAvailability = async (): Promise<void> => {
+  const batch = pendingDirectoryAvailability
+  pendingDirectoryAvailability = null
+  if (!batch) return
+
+  // A runtime switch between admission and flush would send these paths to the
+  // new runtime; report `unknown` rather than pair old context with a new base.
+  if (batch.runtimeKey !== getRuntimeKey()) {
+    for (const waiters of batch.waiters.values()) {
+      for (const resolve of waiters) resolve("unknown")
+    }
+    return
+  }
+
+  const paths = [...batch.waiters.keys()]
+  // Chunk above the server's per-request cap so every path is read instead of
+  // the whole request failing.
+  const chunks: string[][] = []
+  for (let index = 0; index < paths.length; index += DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS) {
+    chunks.push(paths.slice(index, index + DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS))
+  }
+
+  const results = new Map<string, DirectoryAvailability>()
+  await Promise.all(chunks.map(async (chunk) => {
+    try {
+      const response = await runtimeFetch("/api/fs/directory-stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths: chunk }),
+      })
+      const body = directoryStatsSchema.safeParse(await response.json().catch(() => null)).data
+      for (const entry of body?.results ?? []) {
+        if (entry.isDirectory === true) {
+          results.set(entry.path, "available")
+          continue
+        }
+        const reason = parseFilesystemErrorReason(entry.reason)
+        results.set(entry.path, reason === "not-found" || reason === "not-directory" ? "missing" : "unknown")
+      }
+    } catch {
+      // Transport failure: this chunk's waiters stay `unknown`, matching the single probe.
+    }
+  }))
+
+  for (const [directory, waiters] of batch.waiters) {
+    const value = results.get(directory) ?? "unknown"
+    for (const resolve of waiters) resolve(value)
+  }
+}
+
+const readDirectoryAvailability = (normalized: string): Promise<DirectoryAvailability> => {
+  if (!pendingDirectoryAvailability) {
+    pendingDirectoryAvailability = { runtimeKey: getRuntimeKey(), waiters: new Map(), timer: null }
+  }
+  const batch = pendingDirectoryAvailability
+  return new Promise<DirectoryAvailability>((resolve) => {
+    const waiters = batch.waiters.get(normalized) ?? []
+    waiters.push(resolve)
+    batch.waiters.set(normalized, waiters)
+    if (batch.timer === null) {
+      batch.timer = setTimeout(() => {
+        void flushDirectoryAvailability()
+      }, DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS)
+    }
+  })
+}
 
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/")
 const FS_LIST_CACHE_TTL_MS = 400
@@ -833,24 +919,17 @@ class OpencodeService {
    * Offline, permission, and other transport failures stay `unknown` so callers
    * do not treat a temporary outage as proof the path was deleted.
    *
-   * The probe is OpenChamber's own `/api/fs/directory-stat`, which asks the
-   * server to stat the path without listing its contents. A runtime without
-   * that route (VS Code) answers `unknown`.
+   * The probe is OpenChamber's own `/api/fs/directory-stats`, which asks the
+   * server to stat the paths without listing their contents; probes admitted in
+   * the same short window share one request. A runtime without that route
+   * (VS Code) answers `unknown`.
    */
   async getDirectoryAvailability(directory: string): Promise<DirectoryAvailability> {
     const normalized = this.normalizeCandidatePath(directory)
     if (!normalized) {
       return "unknown"
     }
-    try {
-      const response = await runtimeFetch("/api/fs/directory-stat", { query: { path: normalized } })
-      const body = directoryProbeErrorSchema.safeParse(await response.json().catch(() => null)).data
-      if (response.ok && body?.isDirectory === true) return "available"
-      const reason = parseFilesystemErrorReason(body?.reason)
-      return reason === "not-found" || reason === "not-directory" ? "missing" : "unknown"
-    } catch {
-      return "unknown"
-    }
+    return readDirectoryAvailability(normalized)
   }
 
   // -------------------------------------------------------------------------
