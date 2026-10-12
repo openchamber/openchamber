@@ -277,7 +277,16 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
                         // over CodeMirror's defaults (Enter sends, ArrowUp
                         // walks history, Escape closes a picker).
                         Prec.highest(keymap.of(interceptKeys)),
-                        keymap.of([...standardKeymap, ...historyKeymap]),
+                        keymap.of([
+                            // At a document boundary these commands return false.
+                            // Chromium's native page movement can then scroll
+                            // hidden-overflow ancestors of the empty placeholder.
+                            ...standardKeymap.map((binding) =>
+                                binding.key === 'PageUp' || binding.key === 'PageDown'
+                                    ? { ...binding, preventDefault: true }
+                                    : binding),
+                            ...historyKeymap,
+                        ]),
                         composerLanguage(handlersRef.current.languageContext),
                         composerBidi,
                         editableCompartment.of(
