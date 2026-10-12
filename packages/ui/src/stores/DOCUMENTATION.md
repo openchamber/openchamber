@@ -602,7 +602,10 @@ value came from: a string is an effort chosen in the picker or by the shortcut,
 `null` is an explicit `Default`, and `undefined` is automatic initialization,
 which lets the inherited default apply.
 
-`Default` sends no effort at all. It cannot resolve back to the inherited
+`Default` sends no effort at all: OpenCode's `ModelRef.variant` is an optional
+string and rejects `null`, so `toModelRef` (`lib/opencode/model.ts`) turns the
+`null` into a model reference without a `variant` at every OpenCode call that
+takes one. It cannot resolve back to the inherited
 default: the settings default would take effect again, and the next assistant
 reply echoes that effort back as an explicit choice, so the picker jumps off
 `Default` one message after the user chose it. For the same reason the

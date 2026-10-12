@@ -183,6 +183,14 @@ describe("request fidelity", () => {
     expect(page.cursor).toEqual({ next: "c2" })
   })
 
+  test("a session created on an explicit Default thinking level is created without a variant", async () => {
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: null } }, "/repo/app")
+    expect(requests[0].url.pathname).toBe("/api/session")
+    const { model } = z.object({ model: z.record(z.string(), z.string()) }).parse(requests[0].body)
+    expect(model).toEqual({ id: "gpt-5.6-luna", providerID: "openai" })
+  })
+
   test("releasing a location names its directory, never OpenCode's own", async () => {
     opencodeClient.setDirectory("/repo/current")
     responses.push(noContent())
@@ -423,6 +431,36 @@ describe("sendMessage", () => {
       text: "look",
       files: [{ uri: "data:text/plain;base64,QQ==", name: "notes.md" }],
     })
+  })
+
+  // OpenCode's `ModelRef.variant` is an optional string: a `null` is a 400
+  // ("Expected string at [model][variant]") and the prompt never goes out.
+  test("an explicit Default thinking level switches the model without a variant, never as null", async () => {
+    responses.push(noContent(), json({ id: "msg_3" }))
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      model: { id: "gpt-5.6-luna", providerID: "openai", variant: null },
+      text: "hello",
+      messageId: "msg_3",
+    })
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual([
+      "POST /api/session/ses_1/model",
+      "POST /api/session/ses_1/prompt",
+    ])
+    expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai" } })
+  })
+
+  test("a chosen thinking level travels with the model switch", async () => {
+    responses.push(noContent(), json({ id: "msg_4" }))
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" },
+      text: "hello",
+      messageId: "msg_4",
+    })
+    expect(requests[0].body).toEqual({ model: { id: "gpt-5.6-luna", providerID: "openai", variant: "high" } })
   })
 
   test("refuses to send when the runtime changed underneath the caller", async () => {

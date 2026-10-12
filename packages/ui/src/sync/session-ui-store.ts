@@ -14,7 +14,7 @@
 
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
 import { create } from "zustand"
-import type { Metadata, ModelRef, Part, Session, TextPart } from "@/lib/opencode/model"
+import { isSameModelRef, toModelRef, type Metadata, type ModelRef, type Part, type Session, type TextPart } from "@/lib/opencode/model"
 import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/sessionTypes"
 import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
@@ -150,15 +150,14 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 export function resolveSendSelection(
   sessionId: string,
   directory: string | undefined,
-  desired: { providerID: string; modelID: string; variant?: string; agent?: string },
+  desired: { providerID: string; modelID: string; variant?: string | null; agent?: string },
 ): { model?: ModelRef; agent?: string } {
   const sessions = getDirectoryState(directory)?.session ?? getAllSyncSessions()
   const session = sessions.find((candidate) => candidate.id === sessionId)
-  const model: ModelRef = { providerID: desired.providerID, id: desired.modelID, variant: desired.variant }
-  const modelChanged = !session?.model
-    || session.model.providerID !== model.providerID
-    || session.model.id !== model.id
-    || session.model.variant !== model.variant
+  // Compared in wire form: an explicit `Default` (null) switches the session
+  // off an effort once, then matches the `"default"` OpenCode records for it.
+  const model = toModelRef({ providerID: desired.providerID, id: desired.modelID, variant: desired.variant })
+  const modelChanged = !session?.model || !isSameModelRef(session.model, model)
   const agentChanged = Boolean(desired.agent) && session?.agent !== desired.agent
   return {
     model: modelChanged ? model : undefined,
@@ -175,7 +174,8 @@ export async function routeMessage(params: {
   modelID: string
   agent?: string
   agentMentionName?: string
-  variant?: string
+  /** `null` is an explicit `Default` thinking level. */
+  variant?: string | null
   inputMode?: "normal" | "shell"
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
   additionalParts?: Array<{ text: string; synthetic?: boolean; metadata?: ContextPartMetadata; files?: Array<{ type: "file"; mime: string; url: string; filename: string }>; systemContext?: 'session-knowledge' }>
@@ -479,7 +479,8 @@ export type SessionUIState = {
     attachments?: AttachedFile[],
     agentMentionName?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
-    variant?: string,
+    /** `null` is an explicit `Default` thinking level. */
+    variant?: string | null,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
   ) => Promise<void>
@@ -988,7 +989,7 @@ const resolveVariantToRecord = (
   agentName: string | undefined,
   providerID: string,
   modelID: string,
-  sentVariant: string | undefined,
+  sentVariant: string | null | undefined,
 ): string | null | undefined => {
   const config = useConfigStore.getState()
   const describesThisSend = config.currentProviderId === providerID
@@ -1001,7 +1002,8 @@ export async function materializeOpenDraftSession(selection: {
   providerID: string
   modelID: string
   agent?: string
-  variant?: string
+  /** `null` is an explicit `Default` thinking level. */
+  variant?: string | null
 }, draftOverride?: NewSessionDraftState): Promise<MaterializedDraftSession | null> {
   const store = useSessionUIStore.getState()
   const draft = draftOverride ?? store.newSessionDraft
@@ -1773,7 +1775,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     attachments?: AttachedFile[],
     agentMentionName?: string,
     additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean; metadata?: ContextPartMetadata; systemContext?: 'session-knowledge' }>,
-    variant?: string,
+    /** `null` is an explicit `Default` thinking level. */
+    variant?: string | null,
     inputMode?: "normal" | "shell",
     options?: SendMessageOptions,
   ) => {

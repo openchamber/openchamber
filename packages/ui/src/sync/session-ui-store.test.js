@@ -4,7 +4,9 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionWorktreeStore } from './session-worktree-store';
-import { expandSlashCommandGoalObjective, routeMessage, useSessionUIStore } from './session-ui-store';
+import { expandSlashCommandGoalObjective, resolveSendSelection, routeMessage, useSessionUIStore } from './session-ui-store';
+import { ChildStoreManager } from './child-store';
+import { setSyncRefs } from './sync-refs';
 import { setActionRefs, setOptimisticRefs } from './session-actions';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
@@ -276,6 +278,48 @@ describe('routeMessage directory scoping', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].sessionId).toBe('session-a');
     expect(calls[0].directory).toBe('/session/project');
+  });
+});
+
+describe('resolveSendSelection thinking level', () => {
+  const DIRECTORY = '/repo/variant';
+  const MODEL = { providerID: 'openai', id: 'gpt-5.6-luna' };
+  const seedSession = (model) => {
+    const childStores = new ChildStoreManager();
+    childStores.ensureChild(DIRECTORY, { bootstrap: false }).setState({ session: [{ id: 'ses_variant', model }] });
+    setSyncRefs({}, childStores, DIRECTORY);
+  };
+  afterEach(() => {
+    setSyncRefs({}, new ChildStoreManager(), '');
+  });
+  const desire = (variant) => resolveSendSelection('ses_variant', DIRECTORY, { providerID: 'openai', modelID: MODEL.id, variant });
+
+  // An explicit Default is `null` in UI state; OpenCode rejects a null
+  // variant, so it has to switch the session off its effort without one.
+  test('Default on a session with an effort switches it to the model without a variant', () => {
+    seedSession({ ...MODEL, variant: 'high' });
+    expect(desire(null).model).toEqual(MODEL);
+  });
+
+  test('Default on a session without an effort sends no switch', () => {
+    seedSession(MODEL);
+    expect(desire(null).model).toBeUndefined();
+    expect(desire(undefined).model).toBeUndefined();
+  });
+
+  // OpenCode records a switch without a variant as variant "default"; reading
+  // that back as a difference would switch again before every prompt.
+  test('Default on a session OpenCode recorded as "default" sends no switch', () => {
+    seedSession({ ...MODEL, variant: 'default' });
+    expect(desire(null).model).toBeUndefined();
+    expect(desire(undefined).model).toBeUndefined();
+    expect(desire('high').model).toEqual({ ...MODEL, variant: 'high' });
+  });
+
+  test('a chosen effort switches only when it differs', () => {
+    seedSession({ ...MODEL, variant: 'high' });
+    expect(desire('high').model).toBeUndefined();
+    expect(desire('low').model).toEqual({ ...MODEL, variant: 'low' });
   });
 });
 

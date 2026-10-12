@@ -72,6 +72,34 @@ export type Config = ConfigDocument["info"]
 export type { JsonValue, ModelRef, PermissionRuleset, TokenUsageInfo }
 
 /**
+ * A model choice as the UI holds it. `variant: null` is an explicit `Default`
+ * thinking level (see `stores/DOCUMENTATION.md`), which OpenCode's `ModelRef`
+ * cannot carry: its `variant` is an optional string and a `null` is rejected
+ * with a 400.
+ */
+export type ModelSelection = Omit<ModelRef, "variant"> & { variant?: string | null }
+
+/**
+ * The wire `ModelRef` for a model choice. `Default` sends no effort at all, so
+ * it travels the same as no choice: without a `variant`, which also clears an
+ * effort the session was switched to before.
+ */
+export function toModelRef({ providerID, id, variant }: ModelSelection): ModelRef {
+  return variant ? { providerID, id, variant } : { providerID, id }
+}
+
+/**
+ * Whether a switch to `next` would leave the session on `current`. OpenCode
+ * records a model switched without a variant as variant `"default"`, and
+ * treats the two as the same effort, so they compare equal here too.
+ */
+export function isSameModelRef(current: ModelRef, next: ModelRef): boolean {
+  return current.providerID === next.providerID
+    && current.id === next.id
+    && (current.variant ?? "default") === (next.variant ?? "default")
+}
+
+/**
  * Finds a catalog model by the id a selection holds. `id` is the catalog key
  * that pickers, favorites, and session model refs store; `modelID` is the name
  * sent to the provider API and defaults to `id`. They differ for derived
