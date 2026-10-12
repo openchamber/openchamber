@@ -5080,6 +5080,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               <div className="h-full overflow-auto">
                 <JsonTreeView
                   jsonString={fileContent}
+                  format={selectedFile.path.toLowerCase().endsWith('.jsonc') ? 'jsonc' : 'json'}
                   maxHeight="100%"
                   initiallyExpandedDepth={2}
                 />

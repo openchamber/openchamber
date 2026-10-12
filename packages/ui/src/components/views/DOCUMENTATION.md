@@ -41,6 +41,12 @@ limits must never truncate a writable draft or its dirty-comparison baseline.
 Large code previews render the current draft and hash its full content only
 while previewing, so same-length edits in the middle invalidate cached output.
 
+## JSON tree previews
+
+`FilesView` selects `JsonTreeView`'s JSONC format for `.jsonc` files. That format
+accepts comments and trailing commas for preview without changing the source
+text. `JsonTreeView` defaults to strict JSON parsing for other callers.
+
 ## Pull request comparisons
 
 DiffView, mobile Changes and walkthrough share `PullRequestComparisonSelector`

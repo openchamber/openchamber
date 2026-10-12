@@ -1,4 +1,5 @@
 import React from 'react';
+import stripJsonComments from 'strip-json-comments';
 
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
@@ -7,6 +8,7 @@ import { useI18n } from '@/lib/i18n';
 
 interface JsonTreeViewProps {
   jsonString: string;
+  format?: 'json' | 'jsonc';
   className?: string;
   maxHeight?: string;
   initiallyExpandedDepth?: number;
@@ -14,6 +16,7 @@ interface JsonTreeViewProps {
 
 const JsonTreeView = React.memo(function JsonTreeView({
   jsonString,
+  format = 'json',
   className,
   maxHeight = '100%',
   initiallyExpandedDepth = 2,
@@ -29,14 +32,17 @@ const JsonTreeView = React.memo(function JsonTreeView({
         setParseError(t('jsonTreeView.error.emptyJson'));
         return null;
       }
-      const parsed = JSON.parse(trimmed);
+      const source = format === 'jsonc'
+        ? stripJsonComments(trimmed, { trailingCommas: true })
+        : trimmed;
+      const parsed = JSON.parse(source);
       setParseError(null);
       return parsed;
     } catch (err) {
       setParseError(err instanceof Error ? err.message : t('jsonTreeView.error.invalidJson'));
       return null;
     }
-  }, [jsonString, t]);
+  }, [jsonString, format, t]);
 
   const handleExpandAll = React.useCallback(() => {
     viewerRef.current?.expandAll();
