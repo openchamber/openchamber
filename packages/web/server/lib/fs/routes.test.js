@@ -1743,6 +1743,44 @@ describe('fs git-dirs', () => {
     ]);
   });
 
+  it('finds direct child repositories before an early subtree exhausts the visit cap', async () => {
+    const tree = {
+      '/workspace': [['a-artifacts', 'dir'], ['z-service', 'dir']],
+      '/workspace/a-artifacts': [],
+      '/workspace/z-service': [['.git', 'dir']],
+    };
+    for (let index = 0; index < 120; index += 1) {
+      const name = `output-${index}`;
+      tree['/workspace/a-artifacts'].push([name, 'dir']);
+      tree[`/workspace/a-artifacts/${name}`] = [];
+    }
+    const { handler, readdir } = registerGitDirs(tree);
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([{ path: '/workspace/z-service', name: 'z-service' }]);
+    expect(readdir).toHaveBeenCalledTimes(100);
+  });
+
+  it('returns shallower repositories before deeper ones in deterministic sibling order', async () => {
+    const { handler } = registerGitDirs({
+      '/workspace': [['z-service', 'dir'], ['a-group', 'dir'], ['m-service', 'dir']],
+      '/workspace/a-group': [['nested', 'dir']],
+      '/workspace/a-group/nested': [['.git', 'dir']],
+      '/workspace/m-service': [['.git', 'dir']],
+      '/workspace/z-service': [['.git', 'dir']],
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.body.repositories.map((repo) => repo.path)).toEqual([
+      '/workspace/m-service',
+      '/workspace/z-service',
+      '/workspace/a-group/nested',
+    ]);
+  });
+
   it('treats a .git file (linked worktree) as a repository boundary', async () => {
     const { handler } = registerGitDirs({
       '/workspace': [['worktree', 'dir']],

@@ -416,16 +416,15 @@ const GIT_DIRS_SKIP_LIST = new Set(['node_modules', 'dist', 'build', '.venv', 't
 // group them into one project. Each real directory is walked once, so a link
 // loop or two links to one repository cannot repeat it, and repositories are
 // reported under the path the link gives them inside the project.
+// Breadth-first traversal checks shallow siblings before deeper subtrees can
+// exhaust the visit cap.
 const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxDepth, maxDirs }) => {
   const results = [];
   const walkedRealPaths = new Set();
+  const queue = [{ dir: rootPath, depth: 0 }];
   let visited = 0;
 
-  const walk = async (dir, depth) => {
-    if (visited >= maxDirs) {
-      return;
-    }
-
+  const scanDirectory = async (dir, depth) => {
     let realPath;
     try {
       realPath = await fsPromises.realpath(dir);
@@ -488,14 +487,14 @@ const findGitDirectories = async ({ rootPath, fsPromises, path: pathModule, maxD
 
     subdirectories.sort();
     for (const name of subdirectories) {
-      if (visited >= maxDirs) {
-        break;
-      }
-      await walk(pathModule.join(dir, name), depth + 1);
+      queue.push({ dir: pathModule.join(dir, name), depth: depth + 1 });
     }
   };
 
-  await walk(rootPath, 0);
+  for (let index = 0; index < queue.length && visited < maxDirs; index += 1) {
+    const { dir, depth } = queue[index];
+    await scanDirectory(dir, depth);
+  }
   return results;
 };
 

@@ -37,7 +37,9 @@ Own filesystem API behavior for the web server runtime, including workspace-boun
     - `GET /api/fs/exec/:jobId`
     - `GET /api/fs/list`
     - `GET /api/fs/git-dirs` — shallow nested git repository discovery for the
-      Git tab (depth- and visit-capped readdir walk; `.git` directory, file, or
+      Git tab (breadth-first readdir walk, capped at depth 3 and 100 visited
+      directories so shallow repositories are checked before deeper folders;
+      `.git` directory, file, or
       symlink marks a repository boundary; junk directories are skipped;
       symlinked directories are followed, each real directory walked once,
       and repositories are reported under the link path)
