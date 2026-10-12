@@ -245,6 +245,9 @@
     "tunnelSessionTtlMs": {
       "scope": "instance"
     },
+    "tailscaleHttpsPort": {
+      "scope": "instance"
+    },
     "managedLocalTunnelConfigPath": {
       "scope": "instance"
     },

@@ -118,6 +118,7 @@ function buildTunnelStartReplayCommand({
   port,
   provider,
   mode,
+  tailscaleHttpsPort,
   profileName,
   configPath,
   hostname,
@@ -141,6 +142,9 @@ function buildTunnelStartReplayCommand({
   }
   if (mode) {
     parts.push('--mode', shellQuote(mode));
+  }
+  if (provider === 'tailscale' && Number.isFinite(tailscaleHttpsPort) && tailscaleHttpsPort !== 443) {
+    parts.push('--tailscale-https-port', shellQuote(tailscaleHttpsPort));
   }
   if (typeof configPath === 'string' && configPath.trim().length > 0) {
     parts.push('--config', shellQuote(configPath));

@@ -27,7 +27,9 @@ import { DEFAULT_TUNNEL_PROVIDER_CAPABILITIES } from './lib/cli-tunnel-capabilit
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from '../server/lib/tunnels/types.js';
+import { buildTunnelStartReplayCommand } from './lib/cli-tunnel-utils.js';
 import {
   assertAuthenticatedNetworkExposure,
   commands,
@@ -199,7 +201,14 @@ describe('cli args', () => {
     expect(DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.map((provider) => provider.provider)).toEqual([
       TUNNEL_PROVIDER_CLOUDFLARE,
       TUNNEL_PROVIDER_NGROK,
+      TUNNEL_PROVIDER_TAILSCALE,
     ]);
+    const tailscale = DEFAULT_TUNNEL_PROVIDER_CAPABILITIES.find(
+      (provider) => provider.provider === TUNNEL_PROVIDER_TAILSCALE
+    );
+    expect(tailscale.defaults.mode).toBe('private-network');
+    expect(tailscale.modes.map((mode) => mode.key)).toEqual(['private-network', 'quick']);
+    expect(tailscale.modes.map((mode) => mode.intent)).toEqual(['private-network', 'ephemeral-public']);
   });
 
   it('accepts legacy daemon flags as no-ops', () => {
@@ -642,6 +651,36 @@ describe('cli args', () => {
     expect(parsed.options.hostname).toBe('app.example.com');
     expect(parsed.options.host).toBeUndefined();
   });
+
+  it('accepts Tailscale provider and both supported modes through generic parsing', () => {
+    expect(parseArgs(['tunnel', 'start', '--provider', 'tailscale', '--mode', 'private-network']).options)
+      .toEqual(expect.objectContaining({ provider: 'tailscale', mode: 'private-network' }));
+    expect(parseArgs(['tunnel', 'start', '--provider', 'tailscale', '--mode', 'quick']).options)
+      .toEqual(expect.objectContaining({ provider: 'tailscale', mode: 'quick' }));
+  });
+
+  it('parses any valid Tailscale HTTPS port independent of option order', () => {
+    for (const value of [443, 8443, 10000, 9443]) {
+      const parsed = parseArgs([
+        'tunnel',
+        'start',
+        '--mode',
+        'private-network',
+        '--tailscale-https-port',
+        String(value),
+        '--provider',
+        'tailscale',
+      ]);
+      expect(parsed.options.tailscaleHttpsPort).toBe(value);
+    }
+  });
+
+  it('rejects invalid Tailscale HTTPS port values', () => {
+    for (const value of ['0', '65536', '-1', '8443.5', 'not-a-port']) {
+      expect(() => parseArgs(['tunnel', 'start', '--tailscale-https-port', value]))
+        .toThrow('Invalid value for --tailscale-https-port');
+    }
+  });
 });
 
 describe('cli API target resolution', () => {
@@ -811,16 +850,34 @@ describe('compatibility exports', () => {
     });
   });
 
-  it('includes ngrok in fallback tunnel providers when no server is reachable', async () => {
+  it('includes all fallback tunnel providers when no server is reachable', async () => {
     await withTempOpenChamberDataDir(async () => {
       const port = await allocateLoopbackPort();
-      const output = await captureStdout(async () => {
-        await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
-      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => { throw new Error('offline'); };
+      let output;
+      try {
+        output = await captureStdout(async () => {
+          await commands.tunnel({ json: true, explicitPort: true, port }, 'providers');
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
 
       const body = JSON.parse(output);
       expect(body.source).toBe('fallback');
-      expect(body.providers.map((entry) => entry.provider)).toContain('ngrok');
+      expect(body.providers.map((entry) => entry.provider)).toEqual([
+        TUNNEL_PROVIDER_CLOUDFLARE,
+        TUNNEL_PROVIDER_NGROK,
+        TUNNEL_PROVIDER_TAILSCALE,
+      ]);
+      const tailscale = body.providers.find((entry) => entry.provider === 'tailscale');
+      expect(tailscale).toEqual(expect.objectContaining({
+        defaults: expect.objectContaining({ mode: 'private-network' }),
+      }));
+      expect(tailscale.modes.map((mode) => mode.key)).toEqual(['private-network', 'quick']);
+      expect(tailscale.modes.find((mode) => mode.key === 'private-network').intent).toBe('private-network');
+      expect(tailscale.modes.find((mode) => mode.key === 'quick').intent).toBe('ephemeral-public');
     });
   });
 
@@ -844,6 +901,84 @@ describe('compatibility exports', () => {
         provider: 'ngrok',
         mode: 'quick',
       }));
+      expect(body).not.toHaveProperty('tailscaleHttpsPort');
+    });
+  });
+
+  it('defaults Tailscale dry-run to private-network and preserves quick mode', async () => {
+    const output = await captureStdout(async () => {
+      await commands.tunnel({
+        json: true,
+        dryRun: true,
+        explicitPort: true,
+        port: 3003,
+        provider: 'tailscale',
+      }, 'start');
+    });
+
+    const body = JSON.parse(output);
+    expect(body).toEqual(expect.objectContaining({
+      ok: true,
+      dryRun: true,
+      provider: 'tailscale',
+      mode: 'private-network',
+      tailscaleHttpsPort: 443,
+    }));
+
+    const quickOutput = await captureStdout(async () => {
+      await commands.tunnel({
+        json: true,
+        dryRun: true,
+        explicitPort: true,
+        port: 3003,
+        provider: 'tailscale',
+        mode: 'quick',
+        tailscaleHttpsPort: 8443,
+      }, 'start');
+    });
+
+    const quickBody = JSON.parse(quickOutput);
+    expect(quickBody).toEqual(expect.objectContaining({
+      ok: true,
+      dryRun: true,
+      provider: 'tailscale',
+      mode: 'quick',
+      tailscaleHttpsPort: 8443,
+    }));
+  });
+
+  describe('buildTunnelStartReplayCommand', () => {
+    const baseOptions = {
+      port: 3000,
+      provider: 'tailscale',
+      mode: 'private-network',
+    };
+
+    it.each([
+      ['tailscale', 'private-network', 9443],
+      ['tailscale', 'quick', 8443],
+    ])('formats %s %s with frontend port %s', (provider, mode, tailscaleHttpsPort) => {
+      expect(buildTunnelStartReplayCommand({
+        ...baseOptions,
+        provider,
+        mode,
+        tailscaleHttpsPort,
+      })).toContain(`--tailscale-https-port ${tailscaleHttpsPort}`);
+    });
+
+    it('omits the default Tailscale frontend HTTPS port', () => {
+      expect(buildTunnelStartReplayCommand({
+        ...baseOptions,
+        tailscaleHttpsPort: 443,
+      })).not.toContain('--tailscale-https-port');
+    });
+
+    it('omits the frontend port for non-Tailscale providers', () => {
+      expect(buildTunnelStartReplayCommand({
+        ...baseOptions,
+        provider: 'ngrok',
+        tailscaleHttpsPort: 8443,
+      })).not.toContain('--tailscale-https-port');
     });
   });
 });

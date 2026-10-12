@@ -1,6 +1,6 @@
 import {
   TUNNEL_MODE_QUICK,
-  TUNNEL_PROVIDER_CLOUDFLARE,
+  TUNNEL_PROVIDER_TAILSCALE,
   TunnelServiceError,
   normalizeTunnelStartRequest,
   validateTunnelStartRequest,
@@ -81,11 +81,15 @@ export function createTunnelService({
 
       validateTunnelStartRequest(request, provider.capabilities);
 
-      let publicUrl = provider.resolvePublicUrl(getController());
+      const activeController = getController();
+      let publicUrl = provider.resolvePublicUrl(activeController);
       const activeMode = resolveActiveMode();
       const activeProvider = resolveActiveProvider();
+      const activeTailscalePortChanged = request.provider === TUNNEL_PROVIDER_TAILSCALE
+        && activeProvider === TUNNEL_PROVIDER_TAILSCALE
+        && activeController?.tailscaleHttpsPort !== request.tailscaleHttpsPort;
 
-      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider)) {
+      if (publicUrl && (activeMode !== request.mode || activeProvider !== request.provider || activeTailscalePortChanged)) {
         stop();
         publicUrl = null;
       }
@@ -95,9 +99,7 @@ export function createTunnelService({
         if (!availability?.available) {
           const missingDependencyMessage = typeof availability?.message === 'string' && availability.message.trim().length > 0
             ? availability.message
-            : (request.provider === TUNNEL_PROVIDER_CLOUDFLARE
-              ? getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_CLOUDFLARE).message
-              : `Required dependency for provider '${request.provider}' is missing`);
+            : getTunnelDependencyInstallInfo(request.provider).message;
           throw new TunnelServiceError('missing_dependency', missingDependencyMessage);
         }
 
@@ -121,6 +123,9 @@ export function createTunnelService({
           throw new TunnelServiceError('startup_failed', message);
         }
         controller.provider = request.provider;
+        if (request.provider === TUNNEL_PROVIDER_TAILSCALE) {
+          controller.tailscaleHttpsPort = request.tailscaleHttpsPort;
+        }
         setController(controller);
 
         publicUrl = provider.resolvePublicUrl(controller);
