@@ -66,7 +66,7 @@ describe('SessionTreeItem public behavior', () => {
       const [menuKey, setMenuKey] = React.useState<string | null>(null);
       const rows = [
         { renderContext: 'project' as const, groupDirectory: '/workspace', rowKey: 'project:session:same-session' },
-        { renderContext: 'recent' as const, groupDirectory: '/workspace', rowKey: 'recent:session:same-session' },
+        { renderContext: 'timeline-mixed' as const, groupDirectory: '/workspace', rowKey: 'recent:session:same-session' },
       ];
       return <>{rows.map((context) => <SessionTreeItem
         key={context.renderContext}

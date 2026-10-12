@@ -38,7 +38,7 @@
       "active": "#ffffff1a"
     },
     "status": {
-      "error": "#E06C75",
+      "error": "#e17179",
       "errorForeground": "#1E222A",
       "warning": "#E5C07B",
       "warningForeground": "#1E222A",
@@ -92,7 +92,7 @@
       "merged": "#bb61ef"
     },
     "chat": {
-      "userMessageBackground": "#2a303a",
+      "userMessageBackground": "#223141",
       "divider": "#323848f2",
       "background": "#1E222A"
     },

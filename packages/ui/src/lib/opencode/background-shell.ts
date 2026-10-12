@@ -128,38 +128,60 @@ export const shellCompletionFailed = (completion: ShellCompletion): boolean => (
 // The message only corrects the reading of the error; it must not forbid
 // the command, or an agent keeps avoiding it for the rest of the session.
 
+// Stopping several commands at once writes one note for all of them, so the
+// agent reads a single explanation before the completions arrive together.
+
 const CANCELLATION_METADATA_KEY = "openchamberShellCancellation"
 
 const cancellationMetadataSchema = z.object({
-  [CANCELLATION_METADATA_KEY]: z.object({ shellID: z.string().min(1) }),
+  [CANCELLATION_METADATA_KEY]: z.union([
+    z.object({ shellIDs: z.array(z.string().min(1)).min(1) }),
+    // Notes written before stops were grouped name one shell.
+    z.object({ shellID: z.string().min(1) }).transform((value) => ({ shellIDs: [value.shellID] })),
+  ]),
 })
 
-/** The note that precedes stopping a background command. Model-facing text, never shown in the UI. */
-export function shellCancellationNote(input: { shellID: string; command: string }) {
+export type StoppedShell = { shellID: string; command: string }
+
+/** A command to stop, with the directory its shell runs in. */
+export type ShellToStop = StoppedShell & { shellDirectory: string }
+
+const describeStoppedShell = (shell: StoppedShell): string => `\`${shell.command}\` (shell ID: ${shell.shellID})`
+
+/** The note that precedes stopping background commands of one session. Model-facing text, never shown in the UI. */
+export function shellCancellationNote(shells: readonly [StoppedShell, ...StoppedShell[]]) {
+  const single = shells.length === 1
   return {
-    text: [
-      `The user stopped the background command \`${input.command}\` (shell ID: ${input.shellID}).`,
-      "The completion notice for it that follows reports an error such as Shell.NotFoundError or says that nothing ran.",
-      "That is how the stop shows up: the command did not fail on its own, the user cancelled it.",
-      "Do not start it again just because of that notice. The command itself is fine to run later when the task or the user needs it.",
-    ].join(" "),
-    description: "Background command stopped by the user",
-    metadata: { [CANCELLATION_METADATA_KEY]: { shellID: input.shellID } } satisfies Metadata,
+    text: (single
+      ? [
+        `The user stopped the background command ${describeStoppedShell(shells[0])}.`,
+        "The completion notice for it that follows reports an error such as Shell.NotFoundError or says that nothing ran.",
+        "That is how the stop shows up: the command did not fail on its own, the user cancelled it.",
+        "Do not start it again just because of that notice. The command itself is fine to run later when the task or the user needs it.",
+      ]
+      : [
+        `The user stopped these background commands together: ${shells.map(describeStoppedShell).join(", ")}.`,
+        "The completion notices for them that follow report errors such as Shell.NotFoundError or say that nothing ran.",
+        "That is how the stop shows up: the commands did not fail on their own, the user cancelled them.",
+        "Do not start them again just because of those notices. The commands themselves are fine to run later when the task or the user needs them.",
+      ]).join(" "),
+    description: single ? "Background command stopped by the user" : "Background commands stopped by the user",
+    metadata: { [CANCELLATION_METADATA_KEY]: { shellIDs: shells.map((shell) => shell.shellID) } } satisfies Metadata,
   }
 }
 
-/** The shell a stop note is about, or undefined for any other message. */
-export function readShellCancellation(message: Message): { shellID: string; stoppedAt: number } | undefined {
+/** The shells a stop note is about, or undefined for any other message. */
+export function readShellCancellation(message: Message): { shellIDs: string[]; stoppedAt: number } | undefined {
   if (message.role !== "synthetic") return undefined
   const parsed = cancellationMetadataSchema.safeParse(message.metadata ?? {})
-  return parsed.success ? { shellID: parsed.data[CANCELLATION_METADATA_KEY].shellID, stoppedAt: message.time.created } : undefined
+  return parsed.success ? { shellIDs: parsed.data[CANCELLATION_METADATA_KEY].shellIDs, stoppedAt: message.time.created } : undefined
 }
 
 /** When the user stopped one background command, if they did. */
 export function findShellCancellation(messages: readonly Message[], shellID: string): { stoppedAt: number } | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const cancellation = readShellCancellation(messages[index])
-    if (cancellation?.shellID === shellID) return { stoppedAt: cancellation.stoppedAt }
+    if (cancellation?.shellIDs.includes(shellID)) return { stoppedAt: cancellation.stoppedAt }
   }
   return undefined
 }

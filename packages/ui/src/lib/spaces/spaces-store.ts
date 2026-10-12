@@ -277,16 +277,16 @@ export const getSpaceMark = (spaceId: string): SpaceMark | null => useSpacesStor
  * nothing. False for a host directory, for a space the list does not know, and for one being
  * made, so an unknown state never silences a poll.
  */
-const isStoppedEntry = (entry: SpaceEntry | undefined): boolean => entry?.state === 'exited' || entry?.state === 'missing';
+const isStoppedEntry = (entry: SpaceEntry | undefined): boolean => entry?.state === 'exited' || entry?.state === 'missing' || entry?.state === 'unreachable';
 
 export const isSpaceStopped = (spaceId: string): boolean => isStoppedEntry(useSpacesStore.getState().journey?.get(spaceId));
 
 /**
  * Whether a space's group offers Delete and nothing else: its making failed, here or in a host
  * that quit before the code arrived, or its container is gone. A new session there would open
- * in an empty folder or fail, so the group's "Start a session" stays hidden.
+ * in an empty folder or fail, so the group offers none.
  */
-export const spaceTakesNoNewSession = (entry: SpaceEntry | undefined): boolean => entry?.state === 'failed' || entry?.state === 'missing';
+const spaceTakesNoNewSession = (entry: SpaceEntry | undefined): boolean => entry?.state === 'failed' || entry?.state === 'missing';
 
 export const useSpaceTakesNoNewSession = (spaceId: string | null | undefined): boolean =>
   useSpacesStore((state) => spaceId != null && spaceTakesNoNewSession(state.journey?.get(spaceId)));

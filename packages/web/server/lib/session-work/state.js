@@ -1,12 +1,13 @@
 /**
  * `metadata.openchamber.work`: whether a session is in work and what Jev
  * currently suggests about it; `metadata.openchamber.reviewOffer`: Jev's offer
- * to look over the last turn's changes, which does not depend on work. Every function returns a JSON merge patch for
- * the session metadata store, or null when nothing changes, so the store can
- * decide against the record as it is at write time.
+ * to look over the last turn's changes, which does not depend on work. Every
+ * function returns a JSON merge patch for the session metadata store, or null
+ * when nothing changes, so the store can decide against the record as it is
+ * at write time.
  *
- * The rule the patches keep: Jev only ever opens, the user alone closes. Jev
- * may reopen a session the user closed, but only for a request sent after the
+ * The rule the patches keep: sending a message opens, the user alone closes.
+ * A message reopens a session the user closed, but only one sent after the
  * user closed it.
  */
 import { z } from 'zod';
@@ -14,7 +15,8 @@ import { z } from 'zod';
 const workSchema = z.object({
   state: z.enum(['open', 'done']),
   openedAt: z.number().optional(),
-  openedBy: z.enum(['jev', 'user']).optional(),
+  // `jev` on records from before every sent message opened a session.
+  openedBy: z.enum(['auto', 'jev', 'user']).optional(),
   doneAt: z.number().optional(),
   suggestDoneAt: z.number().optional(),
 });
@@ -27,13 +29,13 @@ export const readWork = (metadata) => metadataSchema.safeParse(metadata).data?.o
 
 const patchOf = (work) => ({ openchamber: { work } });
 
-/** Jev saw a request that starts work, sent at `requestAt`. */
-export const openByJevPatch = (metadata, { requestAt, now }) => {
+/** The user sent a message at `requestAt`. */
+export const openPatch = (metadata, { requestAt, now }) => {
   const work = readWork(metadata);
   if (work?.state === 'open') return null;
-  // Closed after this request was sent: the user's decision stands.
+  // Closed after this message was sent: the user's decision stands.
   if (work?.state === 'done' && Number.isFinite(requestAt) && (work.doneAt ?? 0) >= requestAt) return null;
-  return patchOf({ state: 'open', openedAt: now, openedBy: 'jev', doneAt: null, suggestDoneAt: null });
+  return patchOf({ state: 'open', openedAt: now, openedBy: 'auto', doneAt: null, suggestDoneAt: null });
 };
 
 /** The turn that just ended looks like the end of the work. */

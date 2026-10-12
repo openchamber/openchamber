@@ -130,6 +130,9 @@ function publicInstance(instance) {
 // A token this close to expiring is renewed before it is handed out, so a
 // request never starts with one that dies on the way.
 const REFRESH_MARGIN_MS = 5 * 60_000;
+// Longer than one refresh request may take, so a process waiting on another's
+// renewal sees its result.
+const RENEW_LOCK_WAIT_MS = 15_000;
 
 /**
  * `refreshOAuthToken({ origin, refreshToken })` trades an OAuth refresh token
@@ -191,21 +194,29 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     && Boolean(credential.refreshToken) && credential.expiresAt !== undefined
     && credential.expiresAt - now() < REFRESH_MARGIN_MS;
   const renewals = new Map();
+  const findCredential = (state, origin, credentialId) => state.providers.gitlab.instances[origin]?.credentials
+    .find((candidate) => candidate.credentialId === credentialId) ?? null;
   /**
-   * Renews one OAuth credential when it is about to expire. The network call
-   * runs outside the file lock, once per credential however many readers ask,
-   * and its result is written only if the stored refresh token is still the
-   * one that was spent: another process that renewed first wins. The
-   * credential keeps its id and revision, so bindings pinned to it keep
-   * working. A rejected refresh leaves the credential as it is; the request
-   * that then fails marks it invalid the usual way.
+   * Renews one OAuth credential, once per credential however many readers
+   * ask. GitLab revokes the access token and refresh token a refresh spends,
+   * so two processes sharing this file (the desktop app and a web server)
+   * must never spend the same refresh token: the loser's refresh is refused
+   * and the token the winner stored stops working. Renewal therefore holds a
+   * cross-process lock of its own for the network call, and a process that
+   * waited on it finds the refresh token already replaced and uses the new
+   * one. The credential keeps its id and revision, so bindings pinned to it
+   * keep working. A rejected refresh leaves the credential as it is; the
+   * request that then fails marks it invalid the usual way.
    */
   const renew = (origin, credential) => {
     const key = `${origin}\0${credential.credentialId}`;
     const pending = renewals.get(key);
     if (pending) return pending;
     const spent = credential.refreshToken;
-    const running = (async () => {
+    const running = withSourceControlFileLock(`${filePath}.renew.lock`, async () => {
+      const current = await read((state) => findCredential(state, origin, credential.credentialId));
+      if (current?.status !== 'valid') return false;
+      if (current.refreshToken !== spent) return true;
       let renewed;
       try {
         renewed = await refreshOAuthToken({ origin, refreshToken: spent });
@@ -214,16 +225,15 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
       }
       if (!validText(renewed?.accessToken)) return false;
       return mutate((state) => {
-        const current = state.providers.gitlab.instances[origin]?.credentials
-          .find((candidate) => candidate.credentialId === credential.credentialId);
-        if (!current || current.refreshToken !== spent) return { changed: false, value: false };
-        current.token = renewed.accessToken;
-        if (validText(renewed.refreshToken)) current.refreshToken = renewed.refreshToken;
-        if (Number.isFinite(renewed.expiresIn) && renewed.expiresIn > 0) current.expiresAt = now() + renewed.expiresIn * 1000;
-        else delete current.expiresAt;
+        const stored = findCredential(state, origin, credential.credentialId);
+        if (!stored || stored.refreshToken !== spent) return { changed: false, value: false };
+        stored.token = renewed.accessToken;
+        if (validText(renewed.refreshToken)) stored.refreshToken = renewed.refreshToken;
+        if (Number.isFinite(renewed.expiresIn) && renewed.expiresIn > 0) stored.expiresAt = now() + renewed.expiresIn * 1000;
+        else delete stored.expiresAt;
         return { changed: true, value: true };
       });
-    })().finally(() => { renewals.delete(key); });
+    }, { fsImpl, waitMs: RENEW_LOCK_WAIT_MS }).finally(() => { renewals.delete(key); });
     renewals.set(key, running);
     return running;
   };
@@ -231,7 +241,11 @@ export function createSourceControlAuthStore({ filePath, fsImpl = fs, lockWaitMs
     if (!(refreshOAuthToken instanceof Function)) return;
     const expiring = await read((state) => (state.providers.gitlab.instances[origin]?.credentials ?? [])
       .filter((credential) => (!credentialId || credential.credentialId === credentialId) && needsRenewal(credential)));
-    await Promise.all(expiring.map((credential) => renew(origin, credential)));
+    // A renewal still busy elsewhere leaves this read with the token as stored;
+    // a request it then fails renews on demand.
+    await Promise.all(expiring.map((credential) => renew(origin, credential).catch((error) => {
+      if (error?.code !== 'SOURCE_CONTROL_LOCK_BUSY') throw error;
+    })));
   };
 
   return Object.freeze({

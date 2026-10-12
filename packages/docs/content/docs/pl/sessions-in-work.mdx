@@ -1,19 +1,25 @@
 ---
 title: Sesje w toku
-description: Trzymaj sesje z trwającą pracą na widoku w pasku bocznym, dopóki nie oznaczysz ich jako gotowe.
+description: Trzymaj sesje, nad którymi pracujesz, na widoku w pasku bocznym, dopóki nie oznaczysz ich jako gotowe.
 ---
 
 # Sesje w toku
 
-Pytania, research i szybkie eksperymenty szybko się mnożą, a sesja, w której naprawdę coś naprawiasz, ginie między nimi. Blok **W toku** zbiera takie sesje w jednym miejscu paska bocznego. Sesja zostaje tam, dopóki nie powiesz, że praca jest skończona.
-
-Tym różni się od sekcji „Ostatnie”. „Ostatnie” pokazują wszystko, co zmieniło się w ciągu ostatnich dwóch dni, i odświeżają się same: sesja, którą rano otworzyłeś z ciekawości, tam jest, a poprawka, którą odłożyłeś w poniedziałek, już zniknęła. „W toku” to lista tego, czego jeszcze nie skończyłeś, bez względu na to, jak dawno to otwierałeś.
+Każda sesja, w której wyślesz wiadomość, trafia do bloku **W toku** na górze paska bocznego i zostaje tam, dopóki nie oznaczysz jej jako gotowej, bez względu na to, jak dawno ją otwierałeś. W projektach są wszystkie twoje sesje; W toku zbiera tylko to, czego jeszcze nie skończyłeś.
 
 ## Gdzie go znaleźć
 
-Blok **W toku** jest w pasku bocznym pod czatami i nad „Ostatnimi” (albo nad osią czasu w trybie Timeline). Na telefonie jest w tym samym miejscu listy sesji.
+Blok **W toku** jest w pasku bocznym pod czatami, nad Twoimi projektami albo osią czasu. Na telefonie jest w tym samym miejscu listy sesji.
 
-Sesja w toku przenosi się tam razem ze swoimi podsesjami. Nie pojawia się drugi raz w „Ostatnich”, na osi czasu, w swoim projekcie ani w swoim folderze. Oznacz ją jako gotową, a wróci tam, gdzie była.
+Sesja w toku zostaje też w swoim projekcie i folderze, a na osi czasu pod swoim projektem, więc widzisz ją w dwóch miejscach. Jej podsesje idą razem z nią. Wyszukiwanie pokazuje ją raz, w bloku W toku.
+
+## Jak sesje tam trafiają
+
+Wyślij wiadomość w sesji, a trafi do toku. Dotyczy to każdej sesji projektu, także sesji w worktree.
+
+Sesja oznaczona jako gotowa wraca, gdy wyślesz w niej nową wiadomość.
+
+Czaty, zarchiwizowane sesje, sesje przeglądu i uruchomienia [zaplanowanych zadań](/pl/scheduled-tasks/) nigdy tam nie trafiają; jeśli zrobisz fork uruchomienia, żeby dalej nad nim pracować, fork tam trafi. Podsesje nie trafiają tam same; idą razem ze swoją sesją nadrzędną.
 
 ## Śledź i kończ sesje ręcznie
 
@@ -22,28 +28,16 @@ Sesja w toku przenosi się tam razem ze swoimi podsesjami. Nie pojawia się drug
 
 Na telefonie przesuń wiersz sesji, żeby dostać się do tej samej akcji, albo użyj menu sesji.
 
-W toku może być każda sesja projektu, także sesje w worktree. Podsesje idą razem ze swoją sesją nadrzędną. Czaty nigdy: to zwykłe rozmowy, więc nie mają oka.
-
-## Niech Jev przenosi sesje za Ciebie
-
-Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), nie musisz śledzić sesji sam. Jev czyta każdą wysłaną wiadomość i przenosi sesję do toku, gdy:
-
-- prosisz o zmianę
-- zgłaszasz błąd
-- omawiasz konkretną zmianę, którą zamierzasz wprowadzić
-
-Pytania, wyjaśnienia i research się nie liczą. Jev sprawdza jeszcze raz, gdy agent kończy turę, i tak wyłapuje pracę, która staje się jasna dopiero z odpowiedzi.
-
-Jev tylko przenosi sesje **do** toku. Gdy oznaczysz sesję jako gotową, wróci tam dopiero po nowej prośbie wysłanej później.
+Czaty nie mają oka: to zwykłe rozmowy.
 
 ### „Ta praca wygląda na skończoną.”
 
-Gdy tura wygląda na koniec pracy (podziękowałeś, poprosiłeś o commit, potwierdziłeś, że działa), Jev niczego nie zamyka, tylko zostawia wskazówkę:
+Gdy masz skonfigurowanego [dostawcę klasyfikacji](/pl/classification-providers/), Jev sprawdza każdą turę sesji w toku. Gdy tura wygląda na koniec pracy (podziękowałeś, poprosiłeś o commit, potwierdziłeś, że działa), Jev niczego nie zamyka, tylko zostawia wskazówkę:
 
 - szary ptaszek przy wierszu sesji w pasku bocznym
 - pasek nad polem wiadomości: **Ta praca wygląda na skończoną.** z przyciskiem **Oznacz jako gotowe**
 
-Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością.
+Kliknij **Oznacz jako gotowe**, jeśli Jev ma rację. Jeśli nie, po prostu pracuj dalej: wskazówka zniknie z Twoją następną wiadomością. Bez dostawcy klasyfikacji wskazówki nie ma, a sesje oznaczasz jako gotowe sam.
 
 ## Podsumowanie i podpowiedź następnej wiadomości
 
@@ -58,19 +52,16 @@ Włączysz je i wyłączysz w **Ustawienia → Czat → Wsparcie sesji**.
 
 ## Ustawienia
 
-Otwórz **Ustawienia → Sesje → Sesje w toku**:
+Otwórz **Ustawienia → Sesje → Sesje w toku**. Jest tam jedna opcja, **Pokazuj sesje w toku**, domyślnie włączona. Po jej wyłączeniu wyłącza się cała funkcja: nie ma bloku, a wysłana wiadomość nie przenosi już sesji do toku.
 
-- **Pokazuj sesje w toku:** sam blok; po wyłączeniu sesje zostają tam, gdzie były zawsze
-- **Automatycznie przenoś sesje do toku:** część z Jev; wyłącz, żeby śledzić tylko ręcznie
-
-Obie opcje są domyślnie włączone.
+Żeby ukryć tylko blok, użyj **Pokaż sekcję W toku** w menu widoku paska bocznego.
 
 ## Gdzie to działa
 
-Blok oraz ręczne śledzenie i kończenie działają wszędzie, także w VS Code. Automatyczne przenoszenie, wskazówka „wygląda na skończoną” i filtr Jev dla podsumowań potrzebują serwera OpenChamber, więc działają w aplikacji desktopowej, w aplikacji webowej i na telefonie, ale nie w VS Code.
+Blok oraz ręczne śledzenie i kończenie działają wszędzie, także w VS Code. Przenoszenie sesji do toku po wysłaniu wiadomości, wskazówka „wygląda na skończoną” i filtr Jev dla podsumowań potrzebują serwera OpenChamber, więc działają w aplikacji desktopowej, w aplikacji webowej i na telefonie, ale nie w VS Code. W VS Code śledzisz sesje ręcznie.
 
 ## Powiązane
 
-- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/): skonfiguruj automatyczne śledzenie
+- [Dostawcy klasyfikacji (Jev)](/pl/classification-providers/): skonfiguruj wskazówkę „wygląda na skończoną”
 - [Czaty](/pl/chats/): rozmowy, które nie trafiają do toku
 - [Cele sesji](/pl/session-goals/): niech agent pracuje aż do mety

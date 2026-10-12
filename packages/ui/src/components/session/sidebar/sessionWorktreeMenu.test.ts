@@ -609,11 +609,18 @@ describe('getSessionWorktreeMenuState', () => {
   test('keeps the new worktree action available when refresh fails without cached targets', () => {
     expect(getSessionWorktreeMenuState({
       targets: [],
-      isRefreshing: false,
       loadFailed: true,
     })).toEqual({
       refreshState: 'error',
       showNewWorktreeAction: true,
     });
+  });
+
+  test('says nothing while the targets refresh or once some are listed', () => {
+    expect(getSessionWorktreeMenuState({ targets: [], loadFailed: false }).refreshState).toBeNull();
+    expect(getSessionWorktreeMenuState({
+      targets: [{ metadata: worktree(), isPrimary: true, isCurrent: true }],
+      loadFailed: true,
+    }).refreshState).toBeNull();
   });
 });

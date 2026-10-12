@@ -147,7 +147,7 @@ the session metadata button.
 
 `MobileSessionsSheet` builds its own lists instead of the sidebar row model, so
 each one collapses runs itself: the grouped tree and Recent (`MobileRunRow`) and
-the timeline (`TimelineEntry` of kind `run`, `MobileTimelineList`) put one run
+the timeline (`TimelineEntry` of kind `run`, `MobileTimelineRows`) put one run
 row at the first lane's position, with the lanes' combined activity. Search
 results and the header switcher list lanes as sessions.
 

@@ -201,7 +201,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     return (
         <DropdownMenu open={isReady && isDropdownOpen} onOpenChange={isReady ? setIsDropdownOpen : undefined}>
-            <DropdownMenuTrigger asChild>
+            <DropdownMenuTrigger asChild nativeButton={false}>
                 <div
                     className={cn(
                         dropdownTriggerVariants(),

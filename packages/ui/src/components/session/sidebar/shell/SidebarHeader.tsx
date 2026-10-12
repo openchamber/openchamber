@@ -5,6 +5,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -12,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
-import { useI18n } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import { Button } from '@/components/ui/button';
@@ -25,7 +28,7 @@ import { useUIStore } from '@/stores/useUIStore';
 type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
-  showRecentControls: boolean;
+  showSectionControls: boolean;
   handleOpenDirectoryDialog: () => void;
   /** Whether the issues and pull requests board is offered. */
   showSourceBoard: boolean;
@@ -121,7 +124,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
-    showRecentControls,
+    showSectionControls,
     handleOpenDirectoryDialog,
     showSourceBoard,
     headerActionIconClass,
@@ -151,10 +154,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
 
-  const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
-  const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
   const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
+  const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
+  const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
+  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const worktreeSortOrder = useSessionDisplayStore((state) => state.worktreeSortOrder);
@@ -163,9 +167,130 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setSidebarViewMode = useSessionDisplayStore((state) => state.setSidebarViewMode);
   const projectDisplayMode = useSessionDisplayStore((state) => state.projectDisplayMode);
   const setProjectDisplayMode = useSessionDisplayStore((state) => state.setProjectDisplayMode);
-  const isSingleProjectMode = showProjectDisplayControls && projectDisplayMode === 'single';
   // VS Code has no mode switch and always renders the projects view.
   const timelineView = showProjectDisplayControls && sidebarViewMode === 'timeline';
+  // The timeline always lists every project, so the grouped view's
+  // single-project choice does not apply there.
+  const isSingleProjectMode = showProjectDisplayControls && !timelineView && projectDisplayMode === 'single';
+
+  // One choice per line, rarely touched orders behind submenus that name the
+  // current choice, so the menu stays short: selection first, then the view,
+  // its orders, the sections, and collapse.
+  const checkMark = <Icon name="check" className="h-4 w-4 text-primary" />;
+  const choiceSubmenu = <T extends string>(
+    labelKey: I18nKey,
+    options: readonly (readonly [T, I18nKey])[],
+    current: T,
+    onSelect: (value: T) => void,
+  ) => {
+    const currentLabelKey = options.find(([value]) => value === current)?.[1];
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <span className="flex-1">{t(labelKey)}</span>
+          {currentLabelKey ? <span className="ms-4 text-muted-foreground">{t(currentLabelKey)}</span> : null}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="min-w-[160px]">
+          {options.map(([value, optionLabelKey]) => (
+            <DropdownMenuItem key={value} onClick={() => onSelect(value)} className="flex items-center justify-between">
+              <span>{t(optionLabelKey)}</span>
+              {current === value ? checkMark : null}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  };
+  const toggleItem = (labelKey: I18nKey, checked: boolean, onToggle: () => void) => (
+    <DropdownMenuItem onClick={onToggle} className="flex items-center justify-between">
+      <span>{t(labelKey)}</span>
+      {checked ? checkMark : null}
+    </DropdownMenuItem>
+  );
+  const displayMenuSections: React.ReactNode[] = [
+    <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
+      <Icon name="checkbox-multiple" className="h-4 w-4" />
+      <span>{selectionModeEnabled
+        ? t('sessions.sidebar.header.actions.exitSelection')
+        : t('sessions.sidebar.header.actions.selectSessions')}</span>
+    </DropdownMenuItem>,
+  ];
+  if (showProjectDisplayControls) {
+    displayMenuSections.push(<>
+      <DropdownMenuLabel>{t('sessions.sidebar.header.viewMode.label')}</DropdownMenuLabel>
+      {([
+        ['projects', 'sessions.sidebar.header.viewMode.projects'],
+        ['timeline', 'sessions.sidebar.header.viewMode.timeline'],
+      ] as const).map(([mode, labelKey]) => (
+        <DropdownMenuItem
+          key={mode}
+          onClick={() => {
+            setSidebarViewMode(mode);
+            void updateDesktopSettings({ sidebarViewMode: mode });
+          }}
+          className="flex items-center justify-between"
+        >
+          <span>{t(labelKey)}</span>
+          {sidebarViewMode === mode ? checkMark : null}
+        </DropdownMenuItem>
+      ))}
+    </>);
+  }
+  // The list view keeps projects in the manual order and has no worktree
+  // groups; VS Code groups by workspace only, so it sorts projects alone.
+  if (!timelineView) {
+    displayMenuSections.push(<>
+      {choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
+        ['manual', 'sessions.sidebar.header.projectSort.manual'],
+        ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+        ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
+        ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
+        ['recent', 'sessions.sidebar.header.projectSort.recent'],
+      ] as const, projectSortOrder, (order) => {
+        setProjectSortOrder(order);
+        void updateDesktopSettings({ sidebarProjectSortOrder: order });
+      })}
+      {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.actions.sortWorktrees', [
+        ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
+        ['manual', 'sessions.sidebar.header.projectSort.manual'],
+        ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
+      ] as const, worktreeSortOrder, (order) => {
+        setWorktreeSortOrder(order);
+        void updateDesktopSettings({ sidebarWorktreeSortOrder: order });
+      }) : null}
+      {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
+        ['all', 'sessions.sidebar.header.projectDisplay.all'],
+        ['single', 'sessions.sidebar.header.projectDisplay.single'],
+      ] as const, projectDisplayMode, (mode) => {
+        setProjectDisplayMode(mode);
+        void updateDesktopSettings({ sidebarProjectDisplayMode: mode });
+      }) : null}
+    </>);
+  }
+  if (showSectionControls) {
+    displayMenuSections.push(<>
+      {toggleItem('sessions.sidebar.header.displayMode.showChats', showChatsSection, () => {
+        setShowChatsSection(!showChatsSection);
+        void updateDesktopSettings({ sidebarShowChatsSection: !showChatsSection });
+      })}
+      {sessionWorkEnabled ? toggleItem('sessions.sidebar.header.displayMode.showWork', showWorkSection, () => {
+        setShowWorkSection(!showWorkSection);
+        void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
+      }) : null}
+    </>);
+  }
+  if (!isSingleProjectMode) {
+    displayMenuSections.push(<>
+      <DropdownMenuItem onClick={collapseAll} className="flex items-center gap-2">
+        <Icon name="contract-up-down" className="h-4 w-4" />
+        <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={expandAll} className="flex items-center gap-2">
+        <Icon name="expand-up-down" className="h-4 w-4" />
+        <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
+      </DropdownMenuItem>
+    </>);
+  }
 
   if (hideDirectoryControls) {
     // VS Code: the sidebar is always a single workspace, so project/directory
@@ -309,140 +434,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
               </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                {showProjectDisplayControls ? (
-                  <>
-                    <DropdownMenuLabel>{t('sessions.sidebar.header.viewMode.label')}</DropdownMenuLabel>
-                    {([
-                      ['projects', 'sessions.sidebar.header.viewMode.projects'],
-                      ['timeline', 'sessions.sidebar.header.viewMode.timeline'],
-                    ] as const).map(([mode, labelKey]) => (
-                      <DropdownMenuItem
-                        key={mode}
-                        onClick={() => {
-                          setSidebarViewMode(mode);
-                          void updateDesktopSettings({ sidebarViewMode: mode });
-                        }}
-                        className="flex items-center justify-between"
-                      >
-                        <span>{t(labelKey)}</span>
-                        {sidebarViewMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                      </DropdownMenuItem>
-                    ))}
-                    {timelineView ? null : <DropdownMenuSeparator />}
-                  </>
-                ) : null}
-                {timelineView ? null : <>
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
-                {([
-                  ['manual', 'sessions.sidebar.header.projectSort.manual'],
-                  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-                  ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
-                  ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
-                  ['recent', 'sessions.sidebar.header.projectSort.recent'],
-                ] as const).map(([order, labelKey]) => (
-                  <DropdownMenuItem
-                    key={order}
-                    onClick={() => {
-                      setProjectSortOrder(order);
-                      void updateDesktopSettings({ sidebarProjectSortOrder: order });
-                    }}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t(labelKey)}</span>
-                    {projectSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                  </DropdownMenuItem>
+              <DropdownMenuContent align="end" className="min-w-[200px]">
+                {displayMenuSections.map((section, index) => (
+                  <React.Fragment key={index}>
+                    {index > 0 ? <DropdownMenuSeparator /> : null}
+                    {section}
+                  </React.Fragment>
                 ))}
-                <DropdownMenuSeparator />
-                {/* VS Code groups by workspace only; it has no worktree groups to sort. */}
-                {showProjectDisplayControls ? <>
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortWorktrees')}</DropdownMenuLabel>
-                {([
-                  ['recent', 'sessions.sidebar.header.worktreeSort.recent'],
-                  ['manual', 'sessions.sidebar.header.projectSort.manual'],
-                  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-                ] as const).map(([order, labelKey]) => (
-                  <DropdownMenuItem
-                    key={order}
-                    onClick={() => {
-                      setWorktreeSortOrder(order);
-                      void updateDesktopSettings({ sidebarWorktreeSortOrder: order });
-                    }}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t(labelKey)}</span>
-                    {worktreeSortOrder === order ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                </> : null}
-                {showProjectDisplayControls ? (
-                  <>
-                    <DropdownMenuLabel>{t('sessions.sidebar.header.projectDisplay.label')}</DropdownMenuLabel>
-                    {([
-                      ['all', 'sessions.sidebar.header.projectDisplay.all'],
-                      ['single', 'sessions.sidebar.header.projectDisplay.single'],
-                    ] as const).map(([mode, labelKey]) => (
-                      <DropdownMenuItem
-                        key={mode}
-                        onClick={() => {
-                          setProjectDisplayMode(mode);
-                          void updateDesktopSettings({ sidebarProjectDisplayMode: mode });
-                        }}
-                        className="flex items-center justify-between"
-                      >
-                        <span>{t(labelKey)}</span>
-                        {projectDisplayMode === mode ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
-                </>}
-                {showRecentControls ? (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setShowChatsSection(!showChatsSection);
-                      void updateDesktopSettings({ sidebarShowChatsSection: !showChatsSection });
-                    }}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t('sessions.sidebar.header.displayMode.showChats')}</span>
-                    {showChatsSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                  </DropdownMenuItem>
-                ) : null}
-                {!timelineView && showRecentControls && !isSingleProjectMode ? (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      toggleRecentSection();
-                      void updateDesktopSettings({ sidebarShowRecentSection: !showRecentSection });
-                    }}
-                    className="flex items-center justify-between"
-                  >
-                    <span>{t('sessions.sidebar.header.displayMode.showRecent')}</span>
-                    {showRecentSection ? <Icon name="check" className="h-4 w-4 text-primary" /> : null}
-                  </DropdownMenuItem>
-                ) : null}
-                {!timelineView && !isSingleProjectMode ? (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={collapseAll} className="flex items-center gap-2">
-                      <Icon name="contract-up-down" className="h-4 w-4" />
-                      <span>{t('sessions.sidebar.header.displayMode.collapseAll')}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={expandAll} className="flex items-center gap-2">
-                      <Icon name="expand-up-down" className="h-4 w-4" />
-                      <span>{t('sessions.sidebar.header.displayMode.expandAll')}</span>
-                    </DropdownMenuItem>
-                  </>
-                ) : null}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={toggleSelectionMode} className="flex items-center gap-2">
-                  <Icon name="checkbox-multiple" className="h-4 w-4" />
-                  <span>{selectionModeEnabled
-                    ? t('sessions.sidebar.header.actions.exitSelection')
-                    : t('sessions.sidebar.header.actions.selectSessions')}</span>
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

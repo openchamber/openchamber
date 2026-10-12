@@ -1,6 +1,10 @@
 import type { Theme } from '@/types/theme';
 import type { VSCodeThemePalette } from './adapter';
-import { colorHue, contrastRatio, mixColor, onColor, readableText, withOpacity } from '../color';
+import { colorHue, contrastRatio, mixColor, onColor, readableText, tintColor, withOpacity } from '../color';
+
+// Share of the primary's hue and chroma a user bubble takes on, at the
+// bubble's own lightness. The same chroma reads stronger on a light canvas.
+const BUBBLE_TINT = { dark: 0.16, light: 0.1 } as const;
 
 // Both file imports and live VS Code palettes pass through this policy once.
 export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePalette['colors']>, highContrast = false): void {
@@ -107,10 +111,10 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     const hue = colorHue(seed, canvas);
     return readable(hue !== null && hue >= low && hue <= high ? seed : fallback);
   };
-  status.error = semantic(status.error, dark ? '#e07777' : '#b43b45', 10, 40);
-  status.warning = semantic(status.warning, dark ? '#d6b467' : '#916b17', 65, 100);
-  status.success = semantic(status.success, dark ? '#80b888' : '#357b47', 125, 165);
-  status.info = semantic(status.info, dark ? '#83afe0' : '#366eaa', 230, 275);
+  status.error = semantic(status.error, dark ? '#e07777' : '#b43b45', 0, 35);
+  status.warning = semantic(status.warning, dark ? '#d6b467' : '#916b17', 35, 100);
+  status.success = semantic(status.success, dark ? '#80b888' : '#357b47', 105, 170);
+  status.info = semantic(status.info, dark ? '#83afe0' : '#366eaa', 185, 275);
   for (const role of ['error', 'warning', 'success', 'info'] as const) {
     status[`${role}Foreground`] = onColor(status[role], canvas);
     status[`${role}Background`] = withOpacity(status[role], dark ? 0.16 : 0.12);
@@ -126,7 +130,7 @@ export function adaptVSCodeRoles(theme: Theme, authored: Readonly<VSCodeThemePal
     if (contrast(neutral, base) < surfaceTextFloor) {
       base = toward(canvas, neutral === '#ffffff' ? '#000000' : '#ffffff', (color) => contrast(color, canvas) >= 1.12);
     }
-    chat.userMessageBackground = toward(mixColor(primary.base, base, 0.03, canvas), base,
+    chat.userMessageBackground = toward(tintColor(primary.base, base, BUBBLE_TINT[dark ? 'dark' : 'light'], canvas), base,
       (color) => contrast(color, canvas) >= 1.1 && contrast(neutral, color) >= surfaceTextFloor);
     surfaces.push(chat.userMessageBackground);
     surface.foreground = toward(surface.foreground, neutral, (color) => minimum(color) >= 7);

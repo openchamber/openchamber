@@ -642,6 +642,8 @@ export const createScheduledTasksRuntime = (deps) => {
       const session = await client.session.create({
         title,
         location: { directory },
+        // Marks a run of a task, so it stays out of In work: nobody sent it.
+        metadata: { openchamber: { kind: 'scheduled' } },
         // No model or agent at all: OpenCode picks its own default.
         ...(selection.providerID && selection.modelID ? {
           model: {

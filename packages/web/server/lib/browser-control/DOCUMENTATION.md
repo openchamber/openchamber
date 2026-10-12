@@ -89,13 +89,15 @@ itself; it can only ask and wait.
   Agent work never takes keyboard focus from the user
   (`useWebviewFocusGuard` beside `BrowserPane`): a page may take focus only
   while the user can see it and no agent action is driving it, otherwise focus
-  goes straight back to where it was. `browser.click` and `browser.type` focus
-  the page on purpose, so it can use the clipboard, and return focus when they
-  finish. Before each of them the pane asks the desktop shell
-  (`desktop_browser_keep_page_focused`) to emulate focus for that page, so
-  handing focus back does not blur it and close what the click opened; the
-  emulation stays for the page's lifetime and is skipped while DevTools holds
-  its debugger. `browser.click` replays a mouse click at the element's center
+  goes straight back to where it was. Before `browser.click` and
+  `browser.type` the pane asks the desktop shell
+  (`desktop_browser_keep_page_focused`) to emulate focus for that page: the
+  page then behaves as focused, so pickers stay open and its clipboard calls
+  work, while keyboard focus never leaves the user. The emulation stays for
+  the page's lifetime. When it is unavailable, because DevTools holds the
+  page's debugger, the action gives the page real focus for the script alone
+  (`holdPageFocus`) and returns it before waiting out any load the action
+  started. `browser.click` replays a mouse click at the element's center
   (pointer and mouse down, focus, up, click), since many widgets open on
   mousedown or focus and ignore the click event alone.
   `tabId` is validated and passed through by

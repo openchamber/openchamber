@@ -90,11 +90,11 @@
     },
     "chat": {
       "background": "#eeeeee",
-      "userMessageBackground": "#dbdde1",
+      "userMessageBackground": "#d9e2f0",
       "divider": "#0000001a"
     },
     "markdown": {
-      "link": "#1056d9",
+      "link": "#1158e0",
       "linkHover": "#1052d1",
       "inlineCode": "#0c6c2c",
       "inlineCodeBackground": "#e8e8e8",

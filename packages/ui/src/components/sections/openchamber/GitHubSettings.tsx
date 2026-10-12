@@ -32,6 +32,7 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
   const hasChecked = authEntry?.hasChecked ?? false;
   const refreshStatus = useSourceControlAuthStore((state) => state.refreshStatus);
   const refreshInstances = useSourceControlAuthStore((state) => state.refreshInstances);
+  const setStatus = useSourceControlAuthStore((state) => state.setStatus);
 
   const openExternal = React.useCallback(async (url: string) => {
     await openExternalUrl(url);
@@ -194,6 +195,23 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
     }
   }, [captureRuntime, refreshStatus, sourceControl, t]);
 
+  const switchToAccount = React.useCallback(async (accountId: string) => {
+    const isCurrentRuntime = captureRuntime();
+    setIsBusy(true);
+    try {
+      if (!sourceControl) return;
+      const nextStatus = await sourceControl.authActivate(GITHUB_SOURCE_CONTROL_IDENTITY, accountId);
+      if (isCurrentRuntime()) setStatus(GITHUB_SOURCE_CONTROL_IDENTITY, nextStatus);
+    } catch (error) {
+      if (isCurrentRuntime()) {
+        console.error('Failed to switch GitHub account:', error);
+        toast.error(t('settings.github.page.toast.switchFailed'));
+      }
+    } finally {
+      if (isCurrentRuntime()) setIsBusy(false);
+    }
+  }, [captureRuntime, setStatus, sourceControl, t]);
+
   const removeAccount = React.useCallback(async (accountId: string) => {
     const isCurrentRuntime = captureRuntime();
     setIsBusy(true);
@@ -262,6 +280,12 @@ export const GitHubSettings: React.FC<GitHubSettingsProps> = () => {
               {account.status === 'invalid' ? (
                 <Button size="sm" variant="outline" onClick={startConnect} disabled={isBusy}>
                   {t('settings.sourceControl.actions.reauthenticate')}
+                </Button>
+              ) : null}
+              {/* The gh login is used only after a switch to it; the header switcher is not there while nothing is connected. */}
+              {account.source === 'cli' && !account.current ? (
+                <Button size="sm" variant="outline" onClick={() => void switchToAccount(account.id)} disabled={isBusy}>
+                  {t('settings.sourceControl.actions.use')}
                 </Button>
               ) : null}
               <Button

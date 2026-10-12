@@ -135,7 +135,7 @@ describe('settings runtime', () => {
       sidebarProjectDisplayMode: 'single',
       sidebarViewMode: 'timeline',
       sidebarProjectSortOrder: 'date-added',
-      sidebarShowRecentSection: false,
+      sidebarShowChatsSection: false,
     };
     try {
       await runtime.persistSettings(preferences);

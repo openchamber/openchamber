@@ -473,8 +473,12 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   }
 
   const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
-  const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
+  const storedProjectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const rawSidebarViewMode = useSessionDisplayStore((state) => state.sidebarViewMode);
+  // VS Code keeps the projects view only; the mode switch is hidden there.
+  const sidebarViewMode = isVSCode ? 'projects' : rawSidebarViewMode;
+  // The timeline keeps projects in the user's own order; dragging is its only sort.
+  const projectSortOrder = sidebarViewMode === 'timeline' ? 'manual' : storedProjectSortOrder;
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
 
   const sidebarRenderSources = {
@@ -539,11 +543,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   // The projects view always groups by worktree (parallel-work overview).
   // VS Code has no worktree groups, so it renders the merged per-project list.
   const useGroupedSections = !isVSCode;
-  // VS Code keeps the projects view only; the mode switch is hidden there.
-  const sidebarViewMode = isVSCode ? 'projects' : rawSidebarViewMode;
-  // Zone headers pin themselves in the grouped view, where a project can
-  // scroll for a long time; the flat timeline reads better without them.
-  const stickyZoneHeaders = sidebarViewMode === 'projects';
   const desktopHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed';
   const mobileHeaderActionButtonClass =
@@ -649,7 +648,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       <SidebarHeader
         hideDirectoryControls={hideDirectoryControls}
         showProjectDisplayControls={!isVSCode}
-        showRecentControls={!isVSCode}
+        showSectionControls={!isVSCode}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         // A desktop page: phones have their own shell, VS Code no source pickers.
         showSourceBoard={!mobileVariant && !isVSCode}
@@ -691,7 +690,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           hideDirectoryControls,
           showOnlyMainWorkspace,
           isDesktopShellRuntime,
-          stickyZoneHeaders,
           projectSortOrder,
           sidebarViewMode,
           emptyState,

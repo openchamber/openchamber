@@ -227,6 +227,21 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
     }
   };
 
+  const switchToAccount = async (accountId: string) => {
+    const isCurrentRuntime = captureRuntime();
+    setBusy(true);
+    setOperationFailed(false);
+    setTokenRejected(false);
+    try {
+      const nextStatus = await sourceControl.authActivate(identity, accountId);
+      if (isCurrentRuntime()) setStatus(identity, nextStatus);
+    } catch {
+      if (isCurrentRuntime()) setOperationFailed(true);
+    } finally {
+      if (isCurrentRuntime()) setBusy(false);
+    }
+  };
+
   const toggleCli = async () => {
     if (!cli) return;
     const isCurrentRuntime = captureRuntime();
@@ -304,6 +319,12 @@ const GitLabInstanceItem: React.FC<GitLabInstanceItemProps> = ({ identity, sourc
                 {account.status === 'invalid' && account.source !== 'cli' ? (
                   <Button size="sm" variant="outline" onClick={() => setIsAddingAccount(true)} disabled={busy}>
                     {t('settings.sourceControl.actions.reauthenticate')}
+                  </Button>
+                ) : null}
+                {/* The glab login is used only after a switch to it; the header switcher is not there while nothing is connected. */}
+                {account.source === 'cli' && !account.current ? (
+                  <Button size="sm" variant="outline" onClick={() => void switchToAccount(account.id)} disabled={busy}>
+                    {t('settings.sourceControl.actions.use')}
                   </Button>
                 ) : null}
                 <Button

@@ -37,6 +37,7 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
 import { normalizePath } from "@/lib/pathNormalization"
+import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
 import { isAutoModel } from "@/lib/routing/autoModel"
 import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status"
 import {
@@ -60,7 +61,7 @@ import {
   type Vcs,
 } from "./model"
 import { ascendingId } from "./ids"
-import { runningShellFromWire, shellCancellationNote, type RunningShell } from "./background-shell"
+import { runningShellFromWire, shellCancellationNote, type RunningShell, type ShellToStop } from "./background-shell"
 import { subagentCancellationNote } from "./subagent-run"
 import { toJsonRecord } from "./json"
 import {
@@ -324,6 +325,9 @@ type RuntimeOpencodeClientConfig = {
  * path (since 2.0.15), so it wants the root the `/api` mount hangs off, not
  * the mount itself. Our base URLs name the mount, so drop that last segment.
  */
+const PART_SHELLS_CAPABILITY = "api.message-part-shells.v1"
+const serverCapabilitiesSchema = z.object({ compatibility: z.object({ capabilities: z.array(z.string()) }) })
+
 const toOpencodeClientRoot = (baseUrl: string): string => baseUrl.replace(/\/api\/*$/, "") || "/"
 
 export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpenCodeClient => {
@@ -542,6 +546,9 @@ class OpencodeService {
   private client: OpenCodeClient
   private baseUrl: string
   private scopedClients: Map<string, OpenCodeClient> = new Map()
+  /** Whether each runtime's server shells message pages; absent until known. */
+  private partShellsSupport = new Map<string, boolean>()
+  private partShellsChecks = new Map<string, Promise<void>>()
   private currentDirectory: string | undefined = undefined
   private directoryContextQueue: Promise<void> = Promise.resolve()
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map()
@@ -940,26 +947,76 @@ class OpencodeService {
    * one, so a caller walking history would always need one more empty request
    * to learn it is done. A page shorter than the requested limit is the last
    * page, and its `next` is dropped here so `next` means "more" to callers.
+   *
+   * `partShells` asks the server for finished tool results left out of the
+   * page (`toolContentShells.ts`).
    */
   async getSessionMessages(
     id: string,
-    options?: { limit?: number; cursor?: string; order?: "asc" | "desc" },
+    options?: { limit?: number; cursor?: string; order?: "asc" | "desc"; partShells?: boolean },
     directory?: string | null,
   ): Promise<MessagePage> {
-    const response = await call("message.list", () =>
-      this.clientFor(directory).message.list({
-        sessionID: id,
-        limit: options?.limit,
-        cursor: options?.cursor,
-        order: options?.cursor ? undefined : options?.order,
-      }),
+    const list = (headers?: Record<string, string>) => call("message.list", () =>
+      this.clientFor(directory).message.list(
+        {
+          sessionID: id,
+          limit: options?.limit,
+          cursor: options?.cursor,
+          order: options?.cursor ? undefined : options?.order,
+        },
+        headers ? { headers } : undefined,
+      ),
     )
+    let response: Awaited<ReturnType<typeof list>>
+    if (options?.partShells && this.serverShellsMessagePages()) {
+      try {
+        response = await list({ [PART_SHELLS_HEADER]: PART_SHELLS_VERSION })
+      } catch (error) {
+        // Something between this client and the server (a CORS allow-list, a
+        // proxy) may refuse the header even though the server lists the
+        // capability. When the plain page works, this runtime stops asking.
+        response = await list().catch(() => { throw error })
+        this.partShellsSupport.set(getRuntimeKey(), false)
+      }
+    } else {
+      response = await list()
+    }
     const items = projectMessages(response.data, id).map(({ message, parts }) => ({ info: message, parts }))
     const lastPage = options?.limit !== undefined && items.length < options.limit
     return {
       items,
       cursor: pageCursor({ ...response.cursor, next: lastPage ? undefined : response.cursor.next }),
     }
+  }
+
+  /**
+   * Whether the connected server honours `PART_SHELLS_HEADER`. An older server
+   * on another origin would refuse the unknown header at CORS preflight and
+   * fail the whole page, so the header is sent only to a server that lists the
+   * capability. The answer is learned once per runtime, off the page's path:
+   * pages fetched before it arrives are whole.
+   */
+  /** Starts learning whether this runtime's server shells message pages, so the first session opened can use it. */
+  learnMessagePageShellsSupport(): void {
+    this.serverShellsMessagePages()
+  }
+
+  private serverShellsMessagePages(): boolean {
+    const runtimeKey = getRuntimeKey()
+    const known = this.partShellsSupport.get(runtimeKey)
+    if (known !== undefined) return known
+    if (!this.partShellsChecks.has(runtimeKey)) {
+      const check = runtimeFetch("/api/version", { headers: { Accept: "application/json" }, cache: "no-store" })
+        .then(async (response) => {
+          const parsed = serverCapabilitiesSchema.safeParse(response.ok ? await response.json().catch(() => null) : null)
+          this.partShellsSupport.set(runtimeKey, parsed.success && parsed.data.compatibility.capabilities.includes(PART_SHELLS_CAPABILITY))
+        })
+        // Unreachable is not an answer; the next page asks again.
+        .catch(() => undefined)
+        .finally(() => this.partShellsChecks.delete(runtimeKey))
+      this.partShellsChecks.set(runtimeKey, check)
+    }
+    return false
   }
 
   async getSessionMessage(id: string, messageID: string, directory?: string | null): Promise<{ info: Message; parts: Part[] }> {
@@ -1587,20 +1644,20 @@ class OpencodeService {
   }
 
   /**
-   * Stops a background command the agent started. The agent is told first,
-   * in a note that does not wake it, that the error OpenCode is about to
-   * report is the user's stop (see `shellCancellationNote`); the command is
-   * killed only once the note is in. Throws when either step fails, and
-   * nothing is killed when the note could not be delivered.
+   * Stops background commands one session started. The agent is told first,
+   * in one note that does not wake it, that the errors OpenCode is about to
+   * report are the user's stop (see `shellCancellationNote`); the commands
+   * are killed together only once the note is in, so their completions reach
+   * the agent at about the same time. Throws when the note or any kill
+   * fails; nothing is killed when the note could not be delivered, and a
+   * failed kill leaves the other commands stopped.
    */
-  async stopBackgroundShell(params: {
+  async stopBackgroundShells(params: {
     sessionID: string
     sessionDirectory?: string | null
-    shellID: string
-    shellDirectory: string
-    command: string
+    shells: readonly [ShellToStop, ...ShellToStop[]]
   }): Promise<void> {
-    const note = shellCancellationNote({ shellID: params.shellID, command: params.command })
+    const note = shellCancellationNote(params.shells)
     await call("session.synthetic", () =>
       this.clientFor(params.sessionDirectory).session.synthetic({
         sessionID: params.sessionID,
@@ -1610,7 +1667,11 @@ class OpencodeService {
         resume: false,
       }),
     )
-    await call("shell.remove", () => this.clientFor(params.shellDirectory).shell.remove({ id: params.shellID }))
+    const removals = await Promise.allSettled(params.shells.map((shell) =>
+      call("shell.remove", () => this.clientFor(shell.shellDirectory).shell.remove({ id: shell.shellID })),
+    ))
+    const failure = removals.find((result) => result.status === "rejected")
+    if (failure) throw failure.reason
   }
 
   /**

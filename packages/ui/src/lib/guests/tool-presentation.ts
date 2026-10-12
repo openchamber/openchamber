@@ -155,6 +155,12 @@ export const renderTemplate = (template: string, context: TemplateContext): stri
 
 const TEMPLATE_NEEDS_OUTPUT = /\{output(?:\.|\})/;
 
+/** Whether the rule's header reads the call's output, which a collapsed row then needs. */
+export const guestToolHeaderReadsOutput = (rule: GuestToolRule): boolean => Boolean(
+  (rule.title && TEMPLATE_NEEDS_OUTPUT.test(rule.title))
+  || (rule.subtitle && TEMPLATE_NEEDS_OUTPUT.test(rule.subtitle)),
+);
+
 /** A tool's text output as template data: parsed JSON when it is JSON, else the text. */
 const templateOutputValue = (output: string | undefined): TemplateValue => {
   if (!output) return undefined;
@@ -193,10 +199,7 @@ export const renderGuestToolHeader = (
   rule: GuestToolRule,
   data: { input: ToolStateData | undefined; output: string | undefined; metadata: ToolStateData | undefined },
 ): GuestToolHeader => {
-  const needsOutput = Boolean(
-    (rule.title && TEMPLATE_NEEDS_OUTPUT.test(rule.title))
-    || (rule.subtitle && TEMPLATE_NEEDS_OUTPUT.test(rule.subtitle)),
-  );
+  const needsOutput = guestToolHeaderReadsOutput(rule);
   const context: TemplateContext = {
     input: data.input,
     output: needsOutput ? templateOutputValue(data.output) : undefined,

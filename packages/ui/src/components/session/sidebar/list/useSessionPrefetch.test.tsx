@@ -16,7 +16,7 @@ const session = (id: string): Session => ({
 });
 
 describe('session prefetch demand', () => {
-  test('deduplicates the same nearby session from project and Recent projections', async () => {
+  test('deduplicates the same nearby session from project and In work projections', async () => {
     const dom = installHookTestDom();
     const root = createRoot(dom.container);
     const current = session('current');
@@ -27,7 +27,7 @@ describe('session prefetch demand', () => {
         enabled: true,
         currentSessionId: current.id,
         sortedSessions: [current, nearby],
-        recentSessions: [current, nearby],
+        workSessions: [current, nearby],
         prefetchSession: async ({ sessionID }) => { calls.push(sessionID); },
       });
       return null;

@@ -11,6 +11,9 @@ import { createRegistryToolsSource, readHostToolVersions } from '../tools.js';
 import { SPACE_BASE_IMAGE, createDockerPlace } from './docker.js';
 
 export const LIVE_DOCKER_ENABLED = process.env.OPENCHAMBER_TEST_DOCKER === '1';
+// With `OPENCHAMBER_TEST_DOCKER_HOST=ssh://<machine>` every live suite runs against that machine's
+// daemon through the Docker over SSH place, helpers included; unset, against the local one.
+const LIVE_DOCKER_HOST = process.env.OPENCHAMBER_TEST_DOCKER_HOST || null;
 
 const LISTINGS = [
   ['ps', '--all', '--format', '{{.Names}}'],
@@ -30,16 +33,17 @@ require('node:net').createServer((socket) => { socket.on('error', () => {}); soc
  * The owner also gets a tools volume of its own, so the first create of every live file pays for one fill.
  * `placeWith(toolsSource)` makes another place for the same owner, as a host with other tools would be.
  */
-export function createLiveDockerPlace({ toolsSource = createRegistryToolsSource(readHostToolVersions()) } = {}) {
+export function createLiveDockerPlace({ toolsSource = createRegistryToolsSource(readHostToolVersions()), dockerHost = LIVE_DOCKER_HOST } = {}) {
   const owner = `test-${crypto.randomBytes(6).toString('hex')}`;
-  const placeWith = (source) => createDockerPlace({ runCommand, dockerPath: 'docker', owner, toolsSource: source });
+  const placeWith = (source) => createDockerPlace({ runCommand, dockerPath: 'docker', dockerHost, owner, toolsSource: source });
   const place = placeWith(toolsSource);
   const ownerFilter = ['--filter', `label=${LABEL_MARKER}`, '--filter', `label=${LABEL_OWNER}=${owner}`];
   // Helper containers carry the marker and the owner, so the leftover check sees them. They have no space id.
   const helperLabels = ['--label', `${LABEL_MARKER}=true`, '--label', `${LABEL_OWNER}=${owner}`];
 
+  const hostArgs = dockerHost === null ? [] : ['--host', dockerHost];
   const docker = async (args, options) => {
-    const result = await runCommand('docker', args, options);
+    const result = await runCommand('docker', [...hostArgs, ...args], options);
     expect(result.code, `docker ${args[0]}: ${result.stderr}`).toBe(0);
     return result;
   };

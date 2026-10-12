@@ -17,7 +17,8 @@ type Args = {
   enabled?: boolean;
   currentSessionId: string | null;
   sortedSessions: Session[];
-  recentSessions?: Session[];
+  /** Sessions in work, in their block's order: their neighbours there are prefetched too. */
+  workSessions?: readonly Session[];
   prefetchSession: (target: { directory: string; sessionID: string }) => Promise<void>;
 };
 
@@ -53,7 +54,7 @@ const SessionHoverPrefetchContext = React.createContext<SessionHoverPrefetch | n
 /** Null outside the sidebar's prefetch owner, where rows do not prefetch on hover. */
 export const useSessionHoverPrefetch = (): SessionHoverPrefetch | null => React.useContext(SessionHoverPrefetchContext);
 
-export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSessions, recentSessions = [], prefetchSession }: Args): SessionHoverPrefetch => {
+export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSessions, workSessions = [], prefetchSession }: Args): SessionHoverPrefetch => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   // Timers only a hover asked for; ending the hover may cancel these, never a
   // neighbor prefetch that happens to target the same row.
@@ -190,16 +191,16 @@ export const useSessionPrefetch = ({ enabled = true, currentSessionId, sortedSes
   }, [currentSessionId, enabled, prefetchDisabled, scheduleSessionPrefetch, sortedSessions]);
 
   React.useEffect(() => {
-    if (!enabled || prefetchDisabled || !currentSessionId || recentSessions.length === 0) {
+    if (!enabled || prefetchDisabled || !currentSessionId || workSessions.length === 0) {
       return;
     }
     const timer = window.setTimeout(() => {
-      const currentIndex = recentSessions.findIndex((session) => session.id === currentSessionId);
+      const currentIndex = workSessions.findIndex((session) => session.id === currentSessionId);
       if (currentIndex < 0) return;
-      for (const offset of NEIGHBOR_PREFETCH_OFFSETS) scheduleSessionPrefetch(recentSessions[currentIndex + offset]);
+      for (const offset of NEIGHBOR_PREFETCH_OFFSETS) scheduleSessionPrefetch(workSessions[currentIndex + offset]);
     }, SESSION_PREFETCH_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [currentSessionId, enabled, prefetchDisabled, recentSessions, scheduleSessionPrefetch]);
+  }, [currentSessionId, enabled, prefetchDisabled, workSessions, scheduleSessionPrefetch]);
 
   React.useEffect(() => clearPendingPrefetches, [clearPendingPrefetches]);
 

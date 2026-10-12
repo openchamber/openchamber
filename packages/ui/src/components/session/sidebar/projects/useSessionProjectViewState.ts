@@ -4,7 +4,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { z } from 'zod';
 import { useGroupOrdering } from './useGroupOrdering';
-import { GROUPED_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
+import { SIDEBAR_ACTIVITY_KEYS } from '../sessionSidebarRowModel';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -122,7 +122,7 @@ export const useSessionProjectViewState = ({
     ignoreIntersectionUntil.current = Date.now() + 150;
     groupCollapseDirty.current = true;
     setCollapsedGroups(new Set());
-    setCollapsedActivities((current) => new Set([...current, ...GROUPED_ACTIVITY_KEYS]));
+    setCollapsedActivities((current) => new Set([...current, ...SIDEBAR_ACTIVITY_KEYS]));
     setCollapsedProjects(() => {
       const allIds = new Set(projects.map((project) => project.id));
       try {
@@ -141,7 +141,7 @@ export const useSessionProjectViewState = ({
     setCollapsedGroups(new Set());
     setCollapsedActivities((current) => {
       const next = new Set(current);
-      for (const key of GROUPED_ACTIVITY_KEYS) next.delete(key);
+      for (const key of SIDEBAR_ACTIVITY_KEYS) next.delete(key);
       return next;
     });
     setCollapsedProjects(() => {

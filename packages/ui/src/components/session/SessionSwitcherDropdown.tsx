@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
+import { getSessionActivityTime } from '@/sync/session-ordering';
 import { Menu as BaseMenu } from '@base-ui/react/menu';
 import type { Session } from '@/lib/opencode/model';
 
@@ -241,7 +242,7 @@ function SwitcherRow({ session, depth, variant, secondaryMeta, hasChildren, isEx
   const isStreaming = turnActivity !== null;
   const showUnreadDot = !isStreaming && needsAttention && !isActive;
 
-  const timestamp = session.time?.updated || session.time?.created || Date.now();
+  const timestamp = getSessionActivityTime(session) || Date.now();
   const timeLabel = formatSessionCompactDateLabel(timestamp);
 
   const projectLabel = secondaryMeta?.projectLabel?.trim() || null;

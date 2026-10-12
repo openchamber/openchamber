@@ -211,7 +211,6 @@ const ChatSectionContent: React.FC = () => {
                 'reasoning',
                 'showToolFileIcons',
                 'showTurnChangedFiles',
-                'expandedTools',
                 'collapsibleUserMessages',
                 'stickyUserHeader',
                 'promptNavigatorEnabled',

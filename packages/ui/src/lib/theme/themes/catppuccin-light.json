@@ -38,15 +38,15 @@
       "active": "#00000014"
     },
     "status": {
-      "error": "#d20f39",
-      "errorBackground": "#d20f391f",
-      "errorBorder": "#d20f3959",
-      "warning": "#fe640b",
-      "warningBackground": "#fe640b1f",
-      "warningBorder": "#fe640b59",
-      "success": "#40a02b",
-      "successBackground": "#40a02b1f",
-      "successBorder": "#40a02b59",
+      "error": "#cb0f37",
+      "errorBackground": "#cb0f371f",
+      "errorBorder": "#cb0f3759",
+      "warning": "#af4508",
+      "warningBackground": "#af45081f",
+      "warningBorder": "#af450859",
+      "success": "#2f7520",
+      "successBackground": "#2f75201f",
+      "successBorder": "#2f752059",
       "info": "#1850c1",
       "infoBackground": "#1850c11f",
       "infoBorder": "#1850c159"
@@ -86,7 +86,7 @@
     },
     "chat": {
       "background": "#eff1f5",
-      "userMessageBackground": "#e1e1ea",
+      "userMessageBackground": "#e2def6",
       "divider": "#66677026"
     },
     "markdown": {

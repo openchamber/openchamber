@@ -47,6 +47,28 @@ Everything a client normally sends to the single OpenChamber origin:
 
 The host dispatcher restricts tunneled traffic to explicit path allowlists (one for HTTP, one for WS).
 
+## Response compression
+
+Encrypted frames do not compress, so the tunnel compresses response bodies
+before encryption. The host's loopback `fetch` always asks for `identity`
+(it would decode a gzipped body anyway), and the tunnel client marks each
+request it can gunzip with `x-openchamber-tunnel-accept-encoding: gzip`
+(`TUNNEL_ACCEPT_ENCODING_HEADER` in `protocol.ts`; sent only where
+`DecompressionStream` exists). For such a request the host gzips whole-body
+text responses (JSON, text, XML, SVG) of 1 KB or more and marks them with
+`x-openchamber-tunnel-content-encoding: gzip`; the client strips the marker and
+decodes, so callers see an ordinary response. Event streams, binary types and
+WebSocket messages cross as they are: gzip holds bytes back until its window
+fills, which would delay live events. The marker is stripped before the
+request reaches the server. Negotiation is per request, so a client or host
+without it keeps exchanging plain bodies. On a real session page this cuts
+the bytes a phone downloads through the relay by about 60%.
+
+Compressing before encrypting lets an observer of ciphertext sizes (the relay)
+learn how compressible a response was, the property BREACH exploits. It is the
+same exposure as gzip over HTTPS, which direct clients already get from the
+server's compression middleware.
+
 Request bodies crossing the tunnel are buffered on the host and forwarded to loopback only once the client's `StreamEnd` frame arrives (bodies above ~512 KB stream live instead). A body whose frames were lost in transit therefore never reaches the loopback server as an empty/truncated chunked body — the host aborts the stream and the client sees an ambiguous transport failure it can retry, instead of the loopback server's bare `400` ("Failed to send message (400)" from the mobile app).
 
 ## Downstream flow control

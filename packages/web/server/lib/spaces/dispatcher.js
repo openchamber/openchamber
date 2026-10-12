@@ -239,6 +239,7 @@ export const describeFailure = (error) => {
       return { status: 404, code: 'space_not_found', message: 'There is no such space.' };
     case 'space_not_running':
     case 'space_move_unfinished':
+    case 'place_unreachable':
       return { status: 503, code, message: shortText(error.message) };
     case 'space_token_unreadable':
     case 'space_setup_failed':

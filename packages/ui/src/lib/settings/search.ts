@@ -547,29 +547,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.title',
     descriptionKey: 'settings.openchamber.sessionWork.info',
-    keywords: ['in work', 'in progress', 'track', 'done', 'inbox', 'sidebar', 'jev'],
+    keywords: ['in work', 'in progress', 'track', 'done', 'inbox', 'sidebar', 'recent', 'jev'],
   },
   {
     id: 'sessions.work-enabled',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.field.enabled',
     keywords: ['in work', 'in progress', 'track', 'done', 'sidebar'],
-  },
-  {
-    id: 'sessions.work-auto-open',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.sessionWork.field.autoOpen',
-    descriptionKey: 'settings.openchamber.sessionWork.field.autoOpenInfo',
-    keywords: ['in work', 'automatic', 'jev', 'classification', 'track'],
-    // Jev runs on the OpenChamber server; VS Code has only the manual part.
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
-    id: 'sessions.work-keep-in-group',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.sessionWork.field.keepInGroup',
-    descriptionKey: 'settings.openchamber.sessionWork.field.keepInGroupInfo',
-    keywords: ['in work', 'track', 'project group', 'folder', 'sidebar', 'keep'],
   },
   {
     id: 'sessions.small-model',

@@ -123,7 +123,15 @@ describe("runningShellFromWire", () => {
 })
 
 describe("stopping a background command", () => {
-  const note = shellCancellationNote({ shellID: "sh_1", command: "bun run dev" })
+  const note = shellCancellationNote([{ shellID: "sh_1", command: "bun run dev" }])
+  const noteMessage = (metadata: SyntheticMessage["metadata"]): SyntheticMessage => ({
+    id: "msg_note",
+    sessionID: "ses_1",
+    role: "synthetic",
+    time: { created: 4000 },
+    text: "",
+    metadata,
+  })
 
   test("the note explains the error instead of forbidding the command", () => {
     expect(note.text).toContain("bun run dev")
@@ -144,9 +152,29 @@ describe("stopping a background command", () => {
       description: note.description,
       metadata: note.metadata,
     }
-    expect(readShellCancellation(message)).toEqual({ shellID: "sh_1", stoppedAt: 4000 })
+    expect(readShellCancellation(message)).toEqual({ shellIDs: ["sh_1"], stoppedAt: 4000 })
     expect(readShellCancellation(completion())).toBeUndefined()
     expect(findShellCancellation([completion(), message], "sh_1")).toEqual({ stoppedAt: 4000 })
     expect(findShellCancellation([message], "sh_2")).toBeUndefined()
+  })
+
+  test("commands stopped together share one note that names each of them", () => {
+    const grouped = shellCancellationNote([
+      { shellID: "sh_1", command: "bun run dev" },
+      { shellID: "sh_2", command: "bun run watch" },
+    ])
+    expect(grouped.text).toContain("`bun run dev` (shell ID: sh_1)")
+    expect(grouped.text).toContain("`bun run watch` (shell ID: sh_2)")
+    expect(grouped.text).toContain("fine to run later")
+    expect(/\bnever\b/i.test(grouped.text)).toBe(false)
+    const message = noteMessage(grouped.metadata)
+    expect(findShellCancellation([message], "sh_1")).toEqual({ stoppedAt: 4000 })
+    expect(findShellCancellation([message], "sh_2")).toEqual({ stoppedAt: 4000 })
+  })
+
+  test("a note written before stops were grouped still marks its shell stopped", () => {
+    const message = noteMessage({ openchamberShellCancellation: { shellID: "sh_old" } })
+    expect(readShellCancellation(message)).toEqual({ shellIDs: ["sh_old"], stoppedAt: 4000 })
+    expect(readShellCancellation(noteMessage({ openchamberShellCancellation: { shellIDs: [] } }))).toBeUndefined()
   })
 })

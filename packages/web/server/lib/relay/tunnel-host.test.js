@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import http from 'node:http';
+import { gunzipSync } from 'node:zlib';
 
 import { createTunnelHost, isAllowedRelayWebSocketPath } from './tunnel-host.js';
 import { decodeTunnelFrame, encodeTunnelFrame, encodeJsonPayload, TunnelFrameType } from './tunnel-codec.js';
@@ -143,6 +144,88 @@ describe('tunnel-host HTTP body forwarding', () => {
     expect(received).toBe(true);
     expect(loopback.requests[0].method).toBe('GET');
     await loopback.stop();
+  });
+});
+
+describe('tunnel-host response compression', () => {
+  const LARGE_JSON = JSON.stringify({ items: Array.from({ length: 400 }, (_, i) => ({ id: i, text: 'tool output line '.repeat(4) })) });
+
+  // Serves each path with its own content type, and records the
+  // accept-encoding the loopback request carried.
+  const startTypedLoopback = () =>
+    new Promise((resolve) => {
+      const acceptEncodings = [];
+      const server = http.createServer((req, res) => {
+        acceptEncodings.push(req.headers['accept-encoding']);
+        if (req.url === '/api/event') {
+          res.writeHead(200, { 'content-type': 'text/event-stream' });
+          res.end(`data: ${LARGE_JSON}\n\n`);
+          return;
+        }
+        if (req.url === '/api/small') {
+          res.writeHead(200, { 'content-type': 'application/json', 'content-length': '11' });
+          res.end('{"ok":true}');
+          return;
+        }
+        if (req.url === '/api/binary') {
+          res.writeHead(200, { 'content-type': 'image/png' });
+          res.end(Buffer.alloc(4096, 7));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(LARGE_JSON);
+      });
+      server.listen(0, '127.0.0.1', () => resolve({
+        port: server.address().port,
+        acceptEncodings,
+        stop: () => new Promise((r) => server.close(() => r())),
+      }));
+    });
+
+  const fetchThroughHost = async (path, headers) => {
+    const loopback = await startTypedLoopback();
+    const sentFrames = [];
+    const host = createTunnelHost({
+      connectionId: 'conn-test',
+      getLocalPort: () => loopback.port,
+      sendFrame: async (frame) => { sentFrames.push(decodeTunnelFrame(frame)); },
+      getBufferedAmount: () => 0,
+    });
+    await host.handleFrame(encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
+      method: 'GET', path, query: '', headers,
+    })));
+    await waitFor(() => sentFrames.some((f) => f.frameType === TunnelFrameType.StreamEnd));
+    await loopback.stop();
+    const headFrame = sentFrames.find((f) => f.frameType === TunnelFrameType.HttpResponse);
+    const head = JSON.parse(new TextDecoder().decode(headFrame.payload));
+    const body = Buffer.concat(sentFrames.filter((f) => f.frameType === TunnelFrameType.HttpBody).map((f) => Buffer.from(f.payload)));
+    return { head, body, acceptEncoding: loopback.acceptEncodings[0] };
+  };
+
+  const accepting = { 'X-OpenChamber-Tunnel-Accept-Encoding': 'gzip' };
+
+  test('gzips a JSON body for a client that accepts it', async () => {
+    const { head, body, acceptEncoding } = await fetchThroughHost('/api/session/s/message', accepting);
+    expect(head.headers['x-openchamber-tunnel-content-encoding']).toBe('gzip');
+    expect(body.length).toBeLessThan(LARGE_JSON.length / 4);
+    expect(gunzipSync(body).toString('utf8')).toBe(LARGE_JSON);
+    // Compressed once, here: the loopback server is not asked to gzip, and the
+    // client's own marker never reaches it.
+    expect(acceptEncoding).toBe('identity');
+  });
+
+  test('sends plain bodies to a client that does not ask', async () => {
+    const { head, body, acceptEncoding } = await fetchThroughHost('/api/session/s/message', {});
+    expect(head.headers['x-openchamber-tunnel-content-encoding']).toBeUndefined();
+    expect(body.toString('utf8')).toBe(LARGE_JSON);
+    expect(acceptEncoding).toBe('identity');
+  });
+
+  test('never compresses event streams, small bodies or binary types', async () => {
+    for (const path of ['/api/event', '/api/small', '/api/binary']) {
+      const { head } = await fetchThroughHost(path, accepting);
+      expect(head.headers['x-openchamber-tunnel-content-encoding']).toBeUndefined();
+    }
   });
 });
 

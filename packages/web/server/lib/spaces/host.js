@@ -29,7 +29,7 @@ import { createSpaceEventSources } from './space-events.js';
 import { createSpaceOpenCode } from './space-opencode.js';
 import { createSpaceSessionIndex, mergeSessionLists } from './space-sessions.js';
 import { createSpaceWebSocketForwarder } from './websocket.js';
-import { createDockerPlace } from './places/docker.js';
+import { DOCKER_SSH_PLACE_ID, createDockerPlace } from './places/docker.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { openCommandStream as openCommandStreamProcess, runCommand as runCommandProcess } from './run-command.js';
 import { createSpaceServerChannel } from './space-server.js';
@@ -113,7 +113,8 @@ export function readOrCreateOwner(dataDir) {
 
 /**
  * `dataDir` is the host's data directory, `dockerPath` the docker CLI to run, `colimaPath` the
- * colima CLI or null, used only after a disk clean-up on a Colima machine, and `gitPath` the
+ * colima CLI or null, used only after a disk clean-up on a Colima machine, `sshDockerHost` the
+ * `ssh://<machine>` of the Docker over SSH place or null for none, and `gitPath` the
  * host git that moves code in and out, with `hostEnvironment` as its environment: git starts
  * `docker exec` itself, so the PATH in it must find docker. `place` replaces the Docker place,
  * for the tests; `runCommand` and `openCommandStream` are the two ways this module starts a
@@ -132,6 +133,7 @@ export function createSpacesHost({
   dataDir,
   dockerPath = 'docker',
   colimaPath = null,
+  sshDockerHost = null,
   gitPath = 'git',
   hostEnvironment = process.env,
   listProjectDirectories = async () => [],
@@ -150,35 +152,55 @@ export function createSpacesHost({
   setTimer = setInterval,
   clearTimer = clearInterval,
 }) {
-  const dockerPlace = place ?? createDockerPlace({
-    runCommand,
-    openCommandStream,
-    dockerPath,
-    colimaPath,
-    owner: readOrCreateOwner(dataDir),
-    toolsSource: createRegistryToolsSource(readHostToolVersions()),
-  });
-  const registry = createPlaceRegistry([dockerPlace]);
+  const owner = readOrCreateOwner(dataDir);
+  const toolsSource = createRegistryToolsSource(readHostToolVersions());
+  const dockerPlace = place ?? createDockerPlace({ runCommand, openCommandStream, dockerPath, colimaPath, owner, toolsSource });
+  // The same Docker place on another machine's daemon: the local CLI runs every command there
+  // over SSH, so the image, the tools volume and the spaces' volumes live on that machine.
+  const sshPlace = sshDockerHost === null ? null : createDockerPlace({ runCommand, openCommandStream, dockerPath, dockerHost: sshDockerHost, id: DOCKER_SSH_PLACE_ID, owner, toolsSource });
+  const registry = createPlaceRegistry(sshPlace ? [dockerPlace, sshPlace] : [dockerPlace]);
   registry.seal();
-  const manager = createSpaceManager({ registry });
-  const serverInside = createSpaceServerChannel({ exec: dockerPlace.exec });
-  const gatekeeper = createGatekeeperChannel({ exec: dockerPlace.exec });
-  const git = createHostGit({ runCommand, gitPath, environment: hostEnvironment });
-  const codeIn = createCodeIn({ git, place: dockerPlace });
-  const codeOut = createCodeOut({ git, place: dockerPlace });
   const records = createSpaceRecords({ dataDir, logger });
+  // A space's operations go to the place its record names; the records also list the spaces of a
+  // place that cannot be asked, by name and time, so the user still sees them.
+  const manager = createSpaceManager({
+    registry,
+    locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
+    recall: async () => records.list()
+      .map(({ id, record }) => ({ placeId: record.placeId, id, name: record.name ?? id, project: record.repository === null ? '' : hashProjectDirectory(record.repository), created: record.created ?? '' })),
+  });
+  const serverInside = createSpaceServerChannel({ exec: manager.exec });
+  const gatekeeper = createGatekeeperChannel({ exec: manager.exec });
+  const git = createHostGit({ runCommand, gitPath, environment: hostEnvironment });
+  const codeIn = createCodeIn({ git, place: manager });
+  const codeOut = createCodeOut({ git, place: manager });
 
-  const listSpaces = () => manager.listSpaces({ placeId: dockerPlace.id });
+  const listSpaces = async () => (await manager.listAllSpaces()).spaces;
+  /** The spaces whose place cannot be asked right now, from the last list; nothing is asked of them. */
+  const unreachableIds = async () => new Set((await knownSpaces()).filter((space) => space.state === 'unreachable').map((space) => space.id));
+  // A space on a place that cannot be asked is refused here, at once, for the connection and for
+  // the token read before it: the place's own attempt would wait on the connection to a machine
+  // that is off, once per request.
+  const requireReachable = async (spaceId) => {
+    if ((await unreachableIds()).has(spaceId)) throw new SpaceError('place_unreachable', 'The machine this space runs on cannot be reached.');
+  };
+  const connectReachable = async (spaceId) => {
+    await requireReachable(spaceId);
+    return manager.connect(spaceId);
+  };
   const dispatcher = createSpaceDispatcher({
     logger,
     transport: {
       listSpaceIds: async () => (await listSpaces()).map((space) => space.id),
-      connect: (spaceId) => dockerPlace.connect(spaceId),
-      readToken: (spaceId) => serverInside.readToken(spaceId),
+      connect: connectReachable,
+      readToken: async (spaceId) => {
+        await requireReachable(spaceId);
+        return serverInside.readToken(spaceId);
+      },
     },
   });
 
-  const spaceOpenCode = createSpaceOpenCode({ exec: dockerPlace.exec, requestInside: dispatcher.requestInside });
+  const spaceOpenCode = createSpaceOpenCode({ exec: manager.exec, requestInside: dispatcher.requestInside });
 
   const index = createSpaceSessionIndex({ logger });
   let events = null;
@@ -240,7 +262,7 @@ export function createSpacesHost({
 
   const follow = async () => {
     const ids = await spaceIds();
-    events?.sync(ids);
+    events?.sync(ids, { paused: await unreachableIds() });
   };
   /** The list is read again at once, and the event connections follow it: for a space just made or removed. */
   const refresh = () => {
@@ -269,7 +291,7 @@ export function createSpacesHost({
   });
   const journey = createSpaceJourney({
     manager,
-    place: dockerPlace,
+    places: registry,
     gatekeeper,
     codeIn,
     codeOut,
@@ -335,7 +357,13 @@ export function createSpacesHost({
     if (Array.isArray(hostRecords)) index.observeHostRecords(hostRecords);
     const spaces = await knownSpaces();
     if (spaces.length === 0) return hostPayload;
-    await Promise.all(spaces.map(async ({ id: spaceId }) => {
+    await Promise.all(spaces.map(async ({ id: spaceId, state }) => {
+      // A space whose place cannot be asked keeps its last list, stale, with no attempt made.
+      if (state === 'unreachable') {
+        index.markUnreachable(spaceId);
+        listReadAt.delete(spaceId);
+        return;
+      }
       if (now() - (listReadAt.get(spaceId) ?? -Infinity) < LIST_TTL_MS) return;
       try {
         const { records, complete } = await readSpaceSessions(spaceId);
@@ -374,7 +402,7 @@ export function createSpacesHost({
      * then takes the upgrades under the prefix, and nothing before this call.
      */
     prepareUpgrades: ({ uiAuthController, isRequestOriginAllowed }) => {
-      sockets = createSpaceWebSocketForwarder({ dispatcher, connect: (spaceId) => dockerPlace.connect(spaceId), uiAuthController, isRequestOriginAllowed, logger });
+      sockets = createSpaceWebSocketForwarder({ dispatcher, connect: connectReachable, uiAuthController, isRequestOriginAllowed, logger });
     },
     upgradeHandler: (...args) => sockets?.upgradeHandler(...args),
     /** Follows the spaces: an event connection for each, into the host's hub, and the host's own ids from its events. */

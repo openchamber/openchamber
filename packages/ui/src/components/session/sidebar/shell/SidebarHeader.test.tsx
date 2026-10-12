@@ -10,7 +10,7 @@ import { SidebarHeader } from './SidebarHeader';
 const baseProps = {
   hideDirectoryControls: false,
   showProjectDisplayControls: true,
-  showRecentControls: true,
+  showSectionControls: true,
   handleOpenDirectoryDialog: () => undefined,
   showSourceBoard: true,
   headerActionIconClass: 'h-4.5 w-4.5',

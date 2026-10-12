@@ -39,9 +39,9 @@
       "active": "#ffffff1a"
     },
     "status": {
-      "error": "#BF616A",
-      "errorBackground": "#bf616a29",
-      "errorBorder": "#bf616a73",
+      "error": "#c6747b",
+      "errorBackground": "#c6747b29",
+      "errorBorder": "#c6747b73",
       "warning": "#EBCB8B",
       "warningBackground": "#ebcb8b29",
       "warningBorder": "#ebcb8b73",
@@ -91,7 +91,7 @@
     },
     "chat": {
       "background": "#1a1a1a",
-      "userMessageBackground": "#26292b",
+      "userMessageBackground": "#1e2a36",
       "divider": "#8484841f"
     },
     "markdown": {

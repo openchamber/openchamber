@@ -49,7 +49,6 @@ export type SessionTreeItemProps = SessionTreeItemRenderProps & Pick<SessionNode
   | 'toggleParent'
   | 'setOpenSidebarMenuKey'
   | 'startSessionWorktreeMenuLoad'
-  | 'onEditProject'
 > & {
   allowReselect: boolean;
   onSessionSelected?: (sessionId: string) => void;
@@ -98,7 +97,6 @@ function SessionTreeItemComponent({
   setDeleteSessionConfirm,
   startFolderRename,
   startSessionWorktreeMenuLoad,
-  onEditProject,
   mobileVariant,
   alwaysShowActions,
   renderChildren = true,
@@ -181,7 +179,6 @@ function SessionTreeItemComponent({
         handleDeleteSession={sessionActions.handleDeleteSession}
         handleRestoreSession={sessionActions.handleRestoreSession}
        startSessionWorktreeMenuLoad={startSessionWorktreeMenuLoad}
-       onEditProject={onEditProject}
        mobileVariant={mobileVariant}
        alwaysShowActions={alwaysShowActions}
         pinnedSessionIds={pinnedSessionIds}
@@ -284,7 +281,7 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
     'mobileVariant', 'alwaysShowActions', 'allowReselect',
     'pinnedSessionIds', 'expandedParents', 'deleteSessionConfirm',
     'setEditingId', 'setEditingRowKey', 'setEditTitle', 'toggleParent', 'setOpenSidebarMenuKey',
-    'startSessionWorktreeMenuLoad', 'onEditProject', 'onSessionSelected', 'resetSessionSearch',
+    'startSessionWorktreeMenuLoad', 'onSessionSelected', 'resetSessionSearch',
     'setDeleteSessionConfirm', 'startFolderRename',
   ] as const;
   for (const key of scalarKeys) {

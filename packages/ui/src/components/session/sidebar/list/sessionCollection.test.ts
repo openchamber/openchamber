@@ -2,10 +2,6 @@ import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
 import { opencodeClient } from '@/lib/opencode/client';
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
-import { deriveRecentSessions } from '../recent/activitySections';
-import { applyGlobalSessionStatusEvent, replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import {
   buildActiveSessionNode,
   buildSidebarSessionProjection,
@@ -13,42 +9,7 @@ import {
   partitionSidebarSessions,
   projectSidebarActiveSessions,
   projectSidebarCollection,
-  useRecentSessionCollection,
 } from './sessionCollection';
-
-const installMinimalDom = () => {
-  const descriptors = new Map<string, PropertyDescriptor | undefined>();
-  const setGlobal = (name: string, value: unknown) => {
-    descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
-    Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  };
-  class ElementStub {}
-  const documentStub: Record<string, unknown> = {
-    nodeType: 9, defaultView: globalThis, activeElement: null,
-    addEventListener: () => undefined, removeEventListener: () => undefined,
-  };
-  const container = {
-    nodeType: 1, tagName: 'DIV', nodeName: 'DIV', namespaceURI: 'http://www.w3.org/1999/xhtml', ownerDocument: documentStub,
-    addEventListener: () => undefined, removeEventListener: () => undefined,
-  };
-  documentStub.documentElement = container;
-  documentStub.body = container;
-  setGlobal('document', documentStub);
-  setGlobal('window', globalThis);
-  setGlobal('Element', ElementStub);
-  setGlobal('HTMLElement', ElementStub);
-  setGlobal('HTMLIFrameElement', ElementStub);
-  setGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  return {
-    container: container as unknown as Element,
-    restore: () => {
-      for (const [name, descriptor] of descriptors) {
-        if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-        else Reflect.deleteProperty(globalThis, name);
-      }
-    },
-  };
-};
 
 const session = (id: string, directory: string | null): Session => {
   // SAFETY: Sidebar projection reads only id, directory, and time from session fixtures.
@@ -178,24 +139,7 @@ describe('projectSidebarCollection', () => {
     expect(after.map((entry) => entry.id)).toEqual(['a', 'b']);
   });
 
-  test('keeps project membership independent from Recent active membership', () => {
-    const input = {
-      globalActiveSessions: [session('old-root', '/workspace/a')],
-      liveSessions: [],
-      knownDirectories: new Set(['/workspace/a']),
-      isVSCode: false,
-    };
-    const projectBefore = projectSidebarCollection(input);
-    const recentBefore = deriveRecentSessions(projectBefore, new Set(), 200_000_000);
-    const projectAfter = projectSidebarCollection(input);
-    const recentAfter = deriveRecentSessions(projectAfter, new Set(['old-root']), 200_000_000);
-
-    expect(projectAfter).toEqual(projectBefore);
-    expect(recentBefore).toEqual([]);
-    expect(recentAfter.map((entry) => entry.id)).toEqual(['old-root']);
-  });
-
-  test('keeps managed Chats in a dedicated projection and out of project and Recent ownership', () => {
+  test('keeps managed Chats in a dedicated projection and out of project ownership', () => {
     const managed = session('managed', '/home/.config/openchamber/chats/2026-08-24/session-managed');
     const project = session('project', '/workspace/a');
     const projects = projectSidebarCollection({
@@ -207,8 +151,6 @@ describe('projectSidebarCollection', () => {
 
     expect(projects.map((entry) => entry.id)).toEqual(['project']);
     expect(partitionSidebarSessions([managed, project], false).chatSessions.map((entry) => entry.id)).toEqual(['managed']);
-    expect(deriveRecentSessions(projects, new Set(['managed', 'project']), 200_000_000)
-      .map((entry) => entry.id)).toEqual(['project']);
   });
 
   test('keeps managed Chats out of the VS Code sidebar', () => {
@@ -280,66 +222,6 @@ describe('projectSidebarCollection', () => {
     expect(projection.chatSessions.map((entry) => entry.id)).toEqual(['managed-root', 'managed-child']);
     expect(projection.orderedSessions.map((entry) => entry.id)).toEqual(['managed-root', 'managed-child', 'project-root']);
     expect(projection.childrenMap.get('managed-root')?.map((entry) => entry.id)).toEqual(['managed-child']);
-  });
-
-});
-
-describe('useRecentSessionCollection', () => {
-  test('updates mounted Recent membership when global active status changes', async () => {
-    const dom = installMinimalDom();
-    const root: Root = createRoot(dom.container);
-    const oldSession = { ...session('old-root', '/workspace/a'), time: { created: 1, updated: 1 } };
-    let renderedIds: string[] = [];
-    let renderCount = 0;
-    let timeReadCount = 0;
-    Object.defineProperty(oldSession, 'time', {
-      get: () => {
-        timeReadCount += 1;
-        return { created: 1, updated: 1 };
-      },
-    });
-    timeReadCount = 0;
-    const Harness = () => {
-      renderCount += 1;
-      const recent = useRecentSessionCollection({
-        enabled: true,
-        isVSCode: false,
-        pinnedSessionIds: new Set(),
-        sessionOrderRanks: new Map(),
-        sessions: [oldSession],
-      });
-      renderedIds = recent.map((entry) => entry.id);
-      return null;
-    };
-
-    try {
-      replaceGlobalSessionStatusById(new Map());
-      await act(async () => root.render(React.createElement(Harness)));
-      expect(renderedIds).toEqual([]);
-
-      await act(async () => {
-        applyGlobalSessionStatusEvent('/workspace/a', {
-          type: 'session.status',
-          properties: { sessionID: 'old-root', status: { type: 'busy' } },
-        });
-      });
-      expect(renderedIds).toEqual(['old-root']);
-      const activeRenderCount = renderCount;
-      const activeDeriveOperationCount = timeReadCount;
-
-      await act(async () => {
-        applyGlobalSessionStatusEvent('/other-workspace', {
-          type: 'session.status',
-          properties: { sessionID: 'old-root', status: { type: 'retry', attempt: 2, message: 'waiting', next: 0 } },
-        });
-      });
-      expect(renderCount).toBe(activeRenderCount);
-      expect(timeReadCount).toBe(activeDeriveOperationCount);
-    } finally {
-      await act(async () => root.unmount());
-      replaceGlobalSessionStatusById(new Map());
-      dom.restore();
-    }
   });
 
 });

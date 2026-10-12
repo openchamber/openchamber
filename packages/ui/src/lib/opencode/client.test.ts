@@ -669,6 +669,31 @@ describe("messages and config", () => {
     expect(full.cursor).toEqual({ previous: "p1", next: "n1" })
   })
 
+  test("asks for shelled pages only from a server that lists the capability, and stops when the header is refused", async () => {
+    const pageRequests = () => requests.filter((request) => request.url.pathname === "/api/session/ses_1/message")
+    const learnCapability = async (capabilities: string[]) => {
+      responses.push(json({ compatibility: { capabilities } }))
+      opencodeClient.learnMessagePageShellsSupport()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    runtimeKey = "shells-old-server"
+    await learnCapability(["api.health.v1"])
+    responses.push(json({ data: [], cursor: {} }))
+    await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+    expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual([null])
+
+    requests.length = 0
+    runtimeKey = "shells-refused-header"
+    await learnCapability(["api.message-part-shells.v1"])
+    // The first page's header is refused on the way (CORS, a proxy); the
+    // plain page works, so later pages are plain too.
+    responses.push(new TypeError("Failed to fetch"), json({ data: [], cursor: {} }), json({ data: [], cursor: {} }))
+    await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+    await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
+    expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", null, null])
+  })
+
   test("a cursor is never combined with an order", async () => {
     responses.push(json({ data: [], cursor: {} }))
     await opencodeClient.getSessionMessages("ses_1", { cursor: "abc", order: "asc" })

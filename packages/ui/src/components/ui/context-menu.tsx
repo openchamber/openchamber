@@ -7,6 +7,7 @@ import {
   dropdownMenuPopupClass,
   dropdownMenuSeparatorClass,
 } from "./dropdown-menu.styles";
+import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 
 function ContextMenu({ ...props }: React.ComponentProps<typeof BaseContextMenu.Root>) {
@@ -49,6 +50,7 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
           onKeyDown={handleKeyDown}
         >
           {children}
+          <GlassRedrawGuard />
         </BaseContextMenu.Popup>
       </BaseContextMenu.Positioner>
     </BaseContextMenu.Portal>

@@ -11,9 +11,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SpaceError } from './errors.js';
 import { createSpaceJourney } from './journey.js';
 import { createLoginKeeper } from './login-keeper.js';
-import { ROLE_GATEKEEPER, spaceResourceName } from './labels.js';
+import { ROLE_GATEKEEPER, hashProjectDirectory, spaceResourceName } from './labels.js';
 import { IMAGE_TIMEOUT } from './layout.js';
-import { createSpaceManager } from './manager.js';
+import { PLACE_RETRY_CAP_MS, createSpaceManager } from './manager.js';
 import { createMemoryPlace } from './places/memory-place.js';
 import { createPlaceRegistry } from './places/registry.js';
 import { createSpaceRecords } from './space-records.js';
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 /** A journey on fresh stand-ins. `failAt` names a stand-in step that rejects. */
-const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemoryPlace(), projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
+const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemoryPlace(), morePlaces = [], projects = [PROJECT], historyStatus = 'sent', holdCodeIn = false, holdCodeOut = false, holdIdleSave = false, holdReady = false, holdLoginRow = false, hostEnvironment = {}, hostLogin = null, dataDir = null, archiveChats = null, logger = quiet } = {}) => {
   // With `holdCodeIn`, code in waits until the test lets it go, so a creation stays under way;
   // `holdCodeOut` does the same for the fetch of an apply.
   let releaseCodeIn = () => {};
@@ -103,9 +103,17 @@ const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemory
     applyAsChanges: async (request) => { calls.push(['applyAsChanges', request]); fail('applyAsChanges'); return { status: failAt === 'nothing' ? 'nothing_to_apply' : 'applied', appliedPaths: 3, remembered: true }; },
   };
   const records = createSpaceRecords({ dataDir, logger: quiet });
-  const manager = createSpaceManager({ registry: createPlaceRegistry([place]), now: () => new Date('2026-09-26T10:00:00.000Z') });
+  // The clock of the manager and the journey; a test moves it to get past the manager's pause on a failed place.
+  const clock = { time: Date.parse('2026-09-26T10:00:00.000Z') };
+  const places = createPlaceRegistry([place, ...morePlaces]);
+  const manager = createSpaceManager({
+    registry: places,
+    locate: async (spaceId) => records.read(spaceId).record?.placeId ?? null,
+    recall: async () => records.list().map(({ id, record }) => ({ placeId: record.placeId, id, name: record.name ?? id, project: hashProjectDirectory(record.repository), created: record.created ?? '' })),
+    now: () => new Date(clock.time),
+  });
   const journey = createSpaceJourney({
-    manager, place, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
+    manager, places, gatekeeper, codeIn, codeOut, records, spaceOpenCode, serverInside, restartOpenCodeInside,
     listProjectDirectories: async () => projects,
     archiveChats,
     readHostSecret: (name) => hostEnvironment[name],
@@ -116,9 +124,9 @@ const journeyWith = ({ readHostLogin = null, failAt = null, place = createMemory
     announce: (spaceId, payload) => { events.push({ spaceId, ...payload.properties }); },
     onSpacesChanged: () => { changes.count += 1; },
     logger,
-    now: () => new Date('2026-09-26T10:00:00.000Z'),
+    now: () => new Date(clock.time),
   });
-  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle };
+  return { journey, place, records, calls, events, changes, manager, releaseCodeIn, releaseCodeOut, releaseReady, releaseLoginRow, gatekeeper, dataDir, idle, clock };
 };
 
 const REQUEST = { projectDirectory: PROJECT, name: ' Fix login ', start: 'uncommitted', network: NETWORK };
@@ -206,6 +214,88 @@ describe('the journey: create', () => {
     await expect(journey.createSpace({ ...REQUEST, name: 7 })).rejects.toMatchObject({ code: 'invalid_space_name' });
     expect(events).toEqual([]);
     expect(await place.list()).toEqual([]);
+  });
+});
+
+describe('the journey: two places', () => {
+  const remote = () => createMemoryPlace({ id: 'remote' });
+
+  it('makes a space on the place the request names, remembers it in the record, and routes its actions there', async () => {
+    const second = remote();
+    const { journey, place, records, events } = journeyWith({ morePlaces: [second] });
+    const { id, placeId } = await journey.createSpace({ ...REQUEST, placeId: 'remote' });
+    expect(placeId).toBe('remote');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect(records.read(id).record).toMatchObject({ placeId: 'remote', name: 'Fix login', created: '2026-09-26T10:00:00.000Z' });
+    expect(await place.list()).toEqual([]);
+    expect((await second.list()).map((space) => space.id)).toEqual([id]);
+    expect((await journey.listSpaces())[0]).toMatchObject({ id, placeId: 'remote', state: 'running' });
+    await journey.stopSpace(id);
+    expect((await second.list())[0].state).toBe('exited');
+    await journey.startSpace(id);
+    expect((await second.list())[0].state).toBe('running');
+    expect(await journey.removeSpace(id)).toMatchObject({ removed: true });
+    expect(await second.list()).toEqual([]);
+  });
+
+  it('lists a space whose place is no longer configured as unreachable, and a delete forgets its record and nothing else', async () => {
+    const { journey, records, place } = journeyWith();
+    records.write('c1c2c3d4e5f6', { placeId: 'cluster', name: 'Elsewhere', created: '2026-10-11T10:00:00.000Z', network: { mode: 'open' }, repository: PROJECT, spacePath: '/spaces/c1c2c3d4e5f6/project' });
+    expect((await journey.listSpaces())[0]).toMatchObject({ id: 'c1c2c3d4e5f6', placeId: 'cluster', name: 'Elsewhere', state: 'unreachable' });
+    const gone = await journey.removeSpace('c1c2c3d4e5f6', { allowUnsaved: true });
+    expect(gone).toMatchObject({ removed: false, failures: [{ code: 'place_not_found' }] });
+    expect(records.read('c1c2c3d4e5f6')).toEqual({ status: 'missing', record: null });
+    expect(await journey.listSpaces()).toEqual([]);
+    expect(await place.list()).toEqual([]);
+  });
+
+  it('takes the first place when the request names none, and refuses a place it does not have', async () => {
+    const { journey, place, events } = journeyWith({ morePlaces: [remote()] });
+    const { id, placeId } = await journey.createSpace(REQUEST);
+    expect(placeId).toBe('memory');
+    expect(await until(() => steps(events, id).includes('ready'))).toBe(true);
+    expect((await place.list()).map((space) => space.id)).toEqual([id]);
+    await expect(journey.createSpace({ ...REQUEST, placeId: 'cluster' })).rejects.toMatchObject({ code: 'place_not_found' });
+  });
+
+  it('keeps listing the spaces of a place that cannot be asked, as unreachable, from the records', async () => {
+    const second = remote();
+    const logs = [];
+    const { journey, events, records, clock } = journeyWith({ morePlaces: [second], logger: { warn: (line) => logs.push(line), info: (line) => logs.push(line) } });
+    const local = await journey.createSpace(REQUEST);
+    const away = await journey.createSpace({ ...REQUEST, name: 'On the box', placeId: 'remote' });
+    expect(await until(() => steps(events, local.id).includes('ready') && steps(events, away.id).includes('ready'))).toBe(true);
+    const { list: answer, remove: removal } = second;
+    second.list = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+    second.remove = async () => { throw new SpaceError('place_unreachable', 'box did not answer'); };
+
+    const listed = await journey.listSpaces();
+    expect(listed.map(({ id, placeId, state }) => [id, placeId, state])).toEqual([[local.id, 'memory', 'running'], [away.id, 'remote', 'unreachable']]);
+    expect(listed[1]).toMatchObject({ name: 'On the box', projectDirectory: PROJECT, directory: `/spaces/${away.id}/project`, network: NETWORK, step: null, failure: null, damaged: false });
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    await journey.listSpaces();
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+    expect(records.read(away.id).status).toBe('ok');
+
+    // The switch cannot stop what it cannot reach, and says so.
+    const turned = await journey.stopAllSpaces();
+    expect(turned.stopped).toEqual([{ id: local.id, name: 'Fix login' }]);
+    expect(turned.stillRunning).toEqual([{ id: away.id, name: 'On the box', code: 'place_unreachable', message: 'box did not answer', details: null }]);
+    expect(turned.unknown).toMatchObject({ code: 'place_unreachable' });
+    journey.reopen();
+
+    // A delete while the machine is away removes nothing and keeps the record, so the space stays listed.
+    const refused = await journey.removeSpace(away.id, { allowUnsaved: true });
+    expect(refused).toMatchObject({ removed: false, failures: [{ code: 'place_unreachable' }] });
+    expect(records.read(away.id).status).toBe('ok');
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'unreachable' });
+
+    // Back, once the pause between attempts is over: the place's own list is the truth again.
+    second.list = answer;
+    second.remove = removal;
+    clock.time += PLACE_RETRY_CAP_MS;
+    expect((await journey.listSpaces()).find((space) => space.id === away.id)).toMatchObject({ state: 'running' });
+    expect(logs.filter((line) => line.includes('answers again'))).toHaveLength(1);
   });
 });
 
@@ -373,10 +463,11 @@ describe('the journey: start, stop, remove', () => {
     expect((await place.list()).map((space) => space.state).sort()).toEqual(['exited', 'exited', 'running']);
   });
 
-  it('turns off without the list when the place cannot give one, and says it does not know what runs', async () => {
-    const { journey, place } = await ready();
+  it('turns off without the list when the place cannot give one, reports the spaces it remembers there as not stopped, and says it does not know what else runs', async () => {
+    const { journey, place, id } = await ready();
     place.list = async () => { throw new SpaceError('docker_command_failed', 'docker ps exited 1'); };
-    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [], unknown: { code: 'docker_command_failed', message: 'docker ps exited 1', details: null } });
+    const failure = { code: 'docker_command_failed', message: 'docker ps exited 1', details: null };
+    expect(await journey.stopAllSpaces()).toEqual({ stopped: [], stillRunning: [{ id, name: 'Fix login', ...failure }], unknown: failure });
     await expect(journey.createSpace(REQUEST)).rejects.toMatchObject({ code: 'isolated_spaces_off' });
   });
 

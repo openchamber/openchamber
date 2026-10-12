@@ -43,8 +43,8 @@ test('all App variants retain syntax and diff colors, readable roles and round-t
       assert.ok((contrastRatio(theme.colors.primary.base, theme.colors.surface.muted) ?? 0) >= 4.5, `${source.id}/${mode} primary`);
       assert.ok((contrastRatio(theme.colors.status.info, theme.colors.surface.muted) ?? 0) >= 4.5, `${source.id}/${mode} info`);
       for (const [color, low, high] of [
-        [theme.colors.status.info, 230, 275], [theme.colors.status.success, 125, 165],
-        [theme.colors.status.error, 10, 40], [theme.colors.status.warning, 65, 100],
+        [theme.colors.status.info, 185, 275], [theme.colors.status.success, 105, 170],
+        [theme.colors.status.error, 0, 35], [theme.colors.status.warning, 35, 100],
         [theme.colors.pr?.merged ?? '', 285, 325], [theme.colors.pr?.blocked ?? '', 40, 65],
       ] as const) {
         const hue = colorHue(color, theme.colors.surface.background);
@@ -61,6 +61,24 @@ test('all App variants retain syntax and diff colors, readable roles and round-t
     }
   }
   assert.equal(ids.size, files.length * 2);
+});
+
+test('dark variants keep the authored accent and status seeds', async () => {
+  const { colors } = convertTheme(await load('dracula'), 'dark');
+  assert.equal(colors.primary.base, '#bd93f9');
+  assert.equal(colors.status?.error, '#ff5555');
+  assert.equal(colors.status?.success, '#50fa7b');
+  assert.equal(colors.status?.info, '#8be9fd');
+});
+
+test('authored v2 accents win over the seeds', async () => {
+  // OpenCode's own theme keeps a legacy peach seed but authors a blue accent.
+  const source = await load('oc-2');
+  for (const mode of ['light', 'dark'] as const) {
+    const { colors } = requireTheme(convertTheme(source, mode));
+    const hue = colorHue(colors.primary.base, colors.surface.background)!;
+    assert.ok(hue > 250 && hue < 285, `${mode} primary ${colors.primary.base}`);
+  }
 });
 
 test('v2 overrides drive the canvas and v1 syntax overrides stay exact', async () => {

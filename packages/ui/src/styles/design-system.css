@@ -297,7 +297,7 @@
   .bg-popover,
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-composer {
+  .oc-surface-floating {
     --foreground: var(--surface-elevated-foreground);
     color: var(--foreground);
   }
@@ -331,8 +331,7 @@
      Utilities remain able to opt an individual consumer out. */
   .oc-glass-popover,
 .oc-glass-tooltip,
-.oc-glass-panel,
-.oc-glass-composer {
+.oc-glass-panel {
   background-color: color-mix(in srgb, var(--oc-glass-color) var(--oc-glass-opacity), transparent);
   -webkit-backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
   backdrop-filter: blur(var(--oc-glass-blur)) saturate(var(--oc-glass-saturation));
@@ -352,10 +351,13 @@
   --oc-glass-color: var(--surface-muted);
 }
 
-/* The chat composer floating over the transcript. */
-.oc-glass-composer {
-  --oc-glass-color: var(--surface-elevated);
-  --oc-glass-opacity: var(--oc-glass-popover-opacity);
+/* Surfaces that are always on screen over the moving transcript: the
+   composer and the status and scroll-to-bottom pills. They are opaque: a blur
+   under them is redrawn on every streamed frame, and in a headed streaming run
+   that was most of the GPU process's work. Surfaces shown only for a while
+   (menus, tooltips, the docks above the composer) keep the glass. */
+.oc-surface-floating {
+  background-color: var(--surface-elevated);
 }
 
 .oc-glass-floating {
@@ -481,20 +483,18 @@
   }
 }
 
-/* Voice overlay. Glass inside glass is not glass: a nested backdrop-filter
-   blurs the parent's own content (placeholder, footer icons), not the
-   transcript, so that content read through the overlay. While the overlay is
-   up, the composer's own contents go transparent and exactly one glass
-   surface remains. Desktop: the overlay is mounted inside the glass box, so
-   every box child off the overlay's ancestor chain hides and the box stays
-   the glass. The chain is marked with [data-dictation-chain] and the box
-   with [data-dictating] while the overlay is up: a `:has()` over the box
+/* Voice overlay. While it is up, the composer's own contents (placeholder,
+   footer icons) go transparent so they never read through the overlay, and
+   exactly one surface remains. Desktop: the overlay is mounted inside the
+   box, so every box child off the overlay's ancestor chain hides and the box
+   stays the surface. The chain is marked with [data-dictation-chain] and the
+   box with [data-dictating] while the overlay is up: a `:has()` over the box
    would be re-evaluated for every descendant on each editor keystroke.
    Mobile: the overlay is mounted beside the pill/box in [data-dictation-host],
    so those siblings hide and the overlay's inner [data-dictation-glass]
-   layer is the glass. */
-.oc-glass-composer[data-dictating] > :not([data-dictation-chain]),
-.oc-glass-composer[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
+   layer is the surface. */
+.oc-surface-floating[data-dictating] > :not([data-dictation-chain]),
+.oc-surface-floating[data-dictating] [data-dictation-chain] > :not([data-dictation-chain], .oc-dictation-overlay),
 [data-dictation-host]:has(> .oc-dictation-overlay) > :not(.oc-dictation-overlay) {
   opacity: 0;
 }
@@ -502,6 +502,29 @@
 .oc-glass-backdrop {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+/* Chromium partial-redraw workaround for glass over glass. When a layer
+   leaves the screen (a tooltip closes), Chromium's damage tracker walks the
+   blurred surfaces once, back to front, growing the redrawn rect by each one
+   it touches (cc/trees/damage_tracker.cc). A menu over the composer grows it
+   only after the composer was already passed, so part of the composer's glass
+   keeps a stale blur: a flat rectangle across the menu and tooltip that also
+   hides the menu's shadow. This blurred layer under everything is the first
+   surface of that walk and covers the viewport, so any removal grows the
+   redraw to the whole frame. Other frames keep redrawing in parts. It blurs
+   only the page background, so it is invisible. It exists only while a glass
+   popup is open (GlassRedrawGuard), so streaming with nothing open pays
+   nothing for it. */
+html[data-glass-redraw-guard] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: rgb(0 0 0 / 0.004);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
 }
 
 /* The recap hint floats in the band above the composer; a panel docked
@@ -521,8 +544,7 @@
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel,
-  .oc-glass-composer {
+  .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }
 }
@@ -531,16 +553,19 @@
   .oc-glass-popover,
   .oc-glass-tooltip,
   .oc-glass-panel,
-  .oc-glass-composer,
   .oc-glass-backdrop {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
 
+  /* Without glass there is nothing to repaint stale. */
+  html[data-glass-redraw-guard] body::before {
+    content: none;
+  }
+
   .oc-glass-popover,
   .oc-glass-tooltip,
-  .oc-glass-panel,
-  .oc-glass-composer {
+  .oc-glass-panel {
     background-color: var(--oc-glass-color);
   }
 }

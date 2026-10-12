@@ -48,6 +48,7 @@ import { GuestToolTable } from './GuestToolTable';
 import type { JsonValue } from '@openchamber/sdk';
 import {
     guestToolTableRows,
+    guestToolHeaderReadsOutput,
     renderGuestToolHeader,
     useGuestToolPresentation,
     type GuestToolRule,
@@ -106,6 +107,7 @@ import { toBackgroundSubagentPart, toStoppedSubagentPart, type BackgroundSubagen
 import { findSubagentCancellation, findSubagentRun, readBackgroundSubagentChildID } from '@/lib/opencode/subagent-run';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useBackgroundShellOutput } from './useBackgroundShellOutput';
+import { useToolContentCompletion } from './useToolContentCompletion';
 
 type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
 
@@ -1863,6 +1865,10 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     const iconStyle = isError ? TOOL_ERROR_ICON_STYLE : TOOL_NORMAL_ICON_STYLE;
     const titleStyle = isError ? TOOL_ERROR_TITLE_STYLE : TOOL_NORMAL_TITLE_STYLE;
     const shouldRenderExpandedContent = useDeferredExpandedContent(isExpanded);
+    const contentCompletion = useToolContentCompletion(
+        part,
+        shouldRenderExpandedContent || (presentation !== null && guestToolHeaderReadsOutput(presentation)),
+    );
     // Shell and subagent rows carry their duration: live while they run, final once settled.
     const showsDuration = isShellTool(normalizedPartTool) || isTaskTool;
 
@@ -2077,14 +2083,29 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                         className="relative ms-2 ps-3"
                     >
                         <BlockLine onToggle={() => onToggle(part.id)} topOffset={1} />
-                        <ToolExpandedContent
-                            part={part}
-                            state={state}
-                            currentDirectory={currentDirectory}
-                            isExpanded={isExpanded}
-                            onShowPopup={onShowPopup}
-                            presentation={presentation}
-                        />
+                        {contentCompletion.status === 'whole' ? (
+                            <ToolExpandedContent
+                                part={part}
+                                state={state}
+                                currentDirectory={currentDirectory}
+                                isExpanded={isExpanded}
+                                onShowPopup={onShowPopup}
+                                presentation={presentation}
+                            />
+                        ) : contentCompletion.status === 'loading' ? (
+                            contentCompletion.showProgress ? (
+                                <div className="typography-meta py-1 text-muted-foreground">
+                                    {t('chat.toolPart.content.loading')}
+                                </div>
+                            ) : null
+                        ) : (
+                            <div className="typography-meta flex items-center gap-2 py-1 text-muted-foreground">
+                                <span>{t('chat.toolPart.content.loadFailed')}</span>
+                                <Button variant="ghost" size="xs" onClick={contentCompletion.retry}>
+                                    {t('chat.toolPart.content.retry')}
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 ) : null}
             </div>
@@ -2167,12 +2188,10 @@ const BackgroundShellToolPartContent: React.FC<ToolPartProps & { shellID: string
     const stop = React.useCallback(() => {
         if (!running) return;
         setStopping(true);
-        opencodeClient.stopBackgroundShell({
+        opencodeClient.stopBackgroundShells({
             sessionID: props.part.sessionID,
             sessionDirectory: directory,
-            shellID,
-            shellDirectory: running.directory,
-            command: running.command,
+            shells: [{ shellID, shellDirectory: running.directory, command: running.command }],
         }).catch(() => {
             setStopping(false);
             toast.error(t('chat.toolPart.background.stopFailed'));

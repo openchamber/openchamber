@@ -97,8 +97,8 @@ describe('manual queue projection', () => {
             expect(projection).toEqual([ordinary]);
             expect(projection[0]?.sendConfig).toBe(ordinary.sendConfig);
             const outgoing = buildOutgoingMessage(input({ queued: projection, composerText: 'Typed now' }), deps());
-            expect(outgoing.primaryText).toBe('User follow up');
-            expect(outgoing.additionalParts.map((part) => part.text)).toEqual(['Typed now']);
+            expect(outgoing.primaryText).toBe('User follow up\n\nTyped now');
+            expect(outgoing.additionalParts).toEqual([]);
         });
     }
 
@@ -116,12 +116,12 @@ describe('manual queue projection', () => {
 });
 
 describe('queued messages', () => {
-    test('the oldest becomes primary and the rest follow in order', () => {
+    test('all of them share the visible message, oldest first', () => {
         const result = buildOutgoingMessage(input({
             queued: [{ text: 'first' }, { text: 'second' }, { text: 'third' }],
         }), deps());
-        expect(result.primaryText).toBe('first');
-        expect(result.additionalParts.map((p) => p.text)).toEqual(['second', 'third']);
+        expect(result.primaryText).toBe('first\n\nsecond\n\nthird');
+        expect(result.additionalParts).toEqual([]);
     });
 
     test('the composer text lands after everything queued', () => {
@@ -129,11 +129,20 @@ describe('queued messages', () => {
             queued: [{ text: 'queued' }],
             composerText: 'typed now',
         }), deps());
-        expect(result.primaryText).toBe('queued');
-        expect(result.additionalParts.map((p) => p.text)).toEqual(['typed now']);
+        expect(result.primaryText).toBe('queued\n\ntyped now');
+        expect(result.additionalParts).toEqual([]);
     });
 
-    test('the context a message was queued with follows it, before the next message', () => {
+    test('an attachment-only queued message adds no blank paragraph', () => {
+        const result = buildOutgoingMessage(input({
+            queued: [{ text: '', attachments: [attachment('pic')] }],
+            composerText: 'typed now',
+        }), deps());
+        expect(result.primaryText).toBe('typed now');
+        expect(result.primaryAttachments.map((a) => a.id)).toEqual(['pic']);
+    });
+
+    test('the context each message was queued with is sent in queue order', () => {
         const metadata = { [CONTEXT_METADATA_KEY]: { kind: 'repository-issue' as const, number: 3, title: 'Bug', url: 'https://x/issues/3' } };
         const result = buildOutgoingMessage(input({
             queued: [
@@ -142,8 +151,8 @@ describe('queued messages', () => {
             ],
             composerText: 'typed now',
         }), deps());
-        expect(result.primaryText).toBe('first');
-        expect(result.additionalParts.map((p) => p.text)).toEqual(['issue body', 'use: deploy', 'second', 'typed now']);
+        expect(result.primaryText).toBe('first\n\nsecond\n\ntyped now');
+        expect(result.additionalParts.map((p) => p.text)).toEqual(['issue body', 'use: deploy']);
         expect(result.additionalParts[0]).toEqual({ text: 'issue body', synthetic: true, metadata });
         expect(result.additionalParts[1]).toEqual({ text: 'use: deploy', synthetic: true });
     });
@@ -158,15 +167,17 @@ describe('queued messages', () => {
         expect(result.additionalParts).toEqual([]);
     });
 
-    test('each queued message keeps its own attachments', () => {
+    test('every attachment rides the visible message, in order', () => {
         const result = buildOutgoingMessage(input({
             queued: [
                 { text: 'a', attachments: [attachment('one')] },
                 { text: 'b', attachments: [attachment('two')] },
             ],
+            composerText: 'c',
+            composerAttachments: [attachment('three')],
         }), deps());
-        expect(result.primaryAttachments.map((a) => a.id)).toEqual(['one']);
-        expect(result.additionalParts[0].attachments?.map((a) => a.id)).toEqual(['two']);
+        expect(result.primaryAttachments.map((a) => a.id)).toEqual(['one', 'two', 'three']);
+        expect(result.additionalParts).toEqual([]);
     });
 });
 
@@ -424,10 +435,8 @@ describe('full assembly order', () => {
             ],
         }), deps());
 
-        expect(result.primaryText).toBe('q1');
+        expect(result.primaryText).toBe('q1\n\nq2\n\ntyped /deploy');
         expect(result.additionalParts.map((p) => p.text)).toEqual([
-            'q2',
-            'typed /deploy',
             'synthetic',
             'issue',
             'pr-diff',

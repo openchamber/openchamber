@@ -4482,7 +4482,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             <GoToLineDialog
               open={isGoToLineOpen}
               onOpenChange={setIsGoToLineOpen}
-              view={editorViewRef.current}
+              viewRef={editorViewRef}
               variant="inline"
             />
           </>
@@ -5008,7 +5008,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
         {/* Row 2: Docked editor toolbar. 40px with 24px buttons, the same band
             the context panel's file tree draws beside it, so the two line up. */}
         {selectedFile ? (
-          <div ref={setDockedRowEl} className="flex h-8 min-w-0 shrink-0 items-center gap-3 border-t border-border/40 bg-[var(--surface-subtle)] px-2">
+          <div ref={setDockedRowEl} className="flex h-8 min-w-0 shrink-0 items-center gap-3 border-t border-border/40 px-2">
             {/* Mobile hosts already show the file name in their own header;
                 a truncated duplicate here just eats toolbar width. */}
             {displaySelectedPath && !isMobile ? (
@@ -5165,7 +5165,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
               ref={editorWrapperRef}
             >
               {!isFullscreen && (
-                <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
+                <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} viewRef={editorViewRef} />
               )}
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                 <FilePositionEditor
@@ -5451,7 +5451,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', visible = t
             renderShikiFileView(selectedFile, draftContent, fullscreenViewVirtualizer, restoreFullscreenCodeScroll)
           ) : (
             <div className={cn('relative h-full', shouldMaskEditorForPendingNavigation && 'overflow-hidden')}>
-              <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
+              <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} viewRef={editorViewRef} />
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
               <FilePositionEditor
                 key={`${filePositionKey}:fullscreen`}

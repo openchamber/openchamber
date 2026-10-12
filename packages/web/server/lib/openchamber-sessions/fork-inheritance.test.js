@@ -30,6 +30,8 @@ describe('sourceOwnedLinksPatch', () => {
     expect(sourceOwnedLinksPatch({ openchamber: { kind: 'btw', originalSessionID: 'p', btwBoundaryMessageID: 'm' } }))
       .toEqual({ kind: null, originalSessionID: null, btwBoundaryMessageID: null });
     expect(sourceOwnedLinksPatch({ openchamber: { kind: 'review', originalSessionID: 'p' } })).toBeNull();
+    // A fork of a scheduled run is the user's own work again.
+    expect(sourceOwnedLinksPatch({ openchamber: { kind: 'scheduled' } })).toEqual({ kind: null });
     expect(sourceOwnedLinksPatch(undefined)).toBeNull();
   });
 });

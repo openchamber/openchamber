@@ -43,13 +43,13 @@
       "errorForeground": "#fafafa",
       "errorBackground": "#8a5a5a18",
       "errorBorder": "#8a5a5a40",
-      "warning": "#8a7a5a",
+      "warning": "#7c6d51",
       "warningForeground": "#fafafa",
-      "warningBackground": "#8a7a5a18",
-      "warningBorder": "#8a7a5a40",
-      "success": "#5a7a5a",
-      "successBackground": "#5a7a5a18",
-      "successBorder": "#5a7a5a40",
+      "warningBackground": "#7c6d5118",
+      "warningBorder": "#7c6d5140",
+      "success": "#577757",
+      "successBackground": "#57775718",
+      "successBorder": "#57775740",
       "info": "#5a6a8a",
       "infoForeground": "#fafafa",
       "infoBackground": "#5a6a8a18",
@@ -84,7 +84,7 @@
       "merged": "#8769b6"
     },
     "chat": {
-      "userMessageBackground": "#edeeef",
+      "userMessageBackground": "#eaeef5",
       "divider": "#D9D9D9",
       "background": "#FFFFFF"
     },

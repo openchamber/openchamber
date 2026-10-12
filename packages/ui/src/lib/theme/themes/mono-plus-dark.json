@@ -39,13 +39,13 @@
       "active": "#ffffff1a"
     },
     "status": {
-      "error": "#9e6a6a",
+      "error": "#a47373",
       "errorForeground": "#0a0a0a",
       "warning": "#9e8a6a",
       "warningForeground": "#0a0a0a",
       "success": "#6a8e6a",
       "successForeground": "#0a0a0a",
-      "info": "#6a7e9e",
+      "info": "#6d80a0",
       "infoForeground": "#0a0a0a"
     },
     "syntax": {
@@ -76,7 +76,7 @@
       "merged": "#bda2e8"
     },
     "chat": {
-      "userMessageBackground": "#111214",
+      "userMessageBackground": "#0e1219",
       "divider": "#242424",
       "background": "#000000"
     },

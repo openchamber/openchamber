@@ -5,6 +5,7 @@ import { Select as BaseSelect } from "@base-ui/react/select"
 import type { SelectRootChangeEventDetails } from "@base-ui/react/select";
 
 import { cn } from "@/lib/utils"
+import { GlassRedrawGuard } from "./glass-redraw-guard"
 import { dropdownTriggerVariants } from "@/components/ui/dropdown-trigger"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
 import { Icon } from "@/components/icon/Icon";
@@ -300,6 +301,7 @@ function SelectContent({
           >
             {children}
           </ScrollableOverlay>
+          <GlassRedrawGuard />
         </BaseSelect.Popup>
       </BaseSelect.Positioner>
     </BaseSelect.Portal>

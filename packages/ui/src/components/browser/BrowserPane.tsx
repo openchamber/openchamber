@@ -60,7 +60,7 @@ import {
 import { BrowserEmptyState } from './BrowserEmptyState';
 import { useAnnotationAttach, useAnnotationOverlayLabels } from './useAnnotationAttach';
 import { readEventPayload, useWebviewNavigation } from './useWebviewNavigation';
-import { isStageShown, useWebviewFocusGuard } from './useWebviewFocusGuard';
+import { isStageShown, useWebviewFocusGuard, type HoldPageFocus } from './useWebviewFocusGuard';
 
 export type BrowserPaneProps = {
   initialUrl: string;
@@ -428,6 +428,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   const performControlAction = React.useCallback(async (
     action: string,
     parameters: Record<string, unknown>,
+    holdPageFocus: HoldPageFocus,
   ): Promise<unknown> => {
     const webview = await waitForView();
     if (!webview) throw new Error('The browser panel is not ready');
@@ -559,15 +560,26 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
 
     if (!script) throw new Error(`Unsupported browser action: ${action}`);
 
+    let releasePageFocus = (): void => {};
     if (action === 'browser.click' || action === 'browser.type') {
-      // Focus goes back to the user when the action ends; without this the
-      // page sees that as a blur and closes the picker the click just opened.
-      await invokeDesktopCommand('desktop_browser_keep_page_focused', {
+      // With focus emulated the page behaves as focused, so its pickers stay
+      // open and its clipboard works, while the user keeps typing in the app.
+      // Without it (DevTools holds the debugger) the page takes real focus for
+      // the script alone and gives it back before any load is waited out.
+      const emulated = await invokeDesktopCommand<{ focused: boolean }>('desktop_browser_keep_page_focused', {
         webContentsId: webview.getWebContentsId(),
-      }).catch(() => undefined);
-      webview.focus({ preventScroll: true });
+      }).then((reply) => reply.focused === true).catch(() => false);
+      if (!emulated) {
+        releasePageFocus = holdPageFocus();
+        webview.focus({ preventScroll: true });
+      }
     }
-    const result = await webview.executeJavaScript(script, true);
+    let result: unknown;
+    try {
+      result = await webview.executeJavaScript(script, true);
+    } finally {
+      releasePageFocus();
+    }
     if (!result || typeof result !== 'object') {
       throw new Error('The page returned no result');
     }
@@ -600,10 +612,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
   const [agentDriven, setAgentDriven] = React.useState(false);
   const runControlAction = React.useCallback((action: string, parameters: Record<string, unknown>) => {
     setAgentDriven(true);
-    return guardAgentAction(
-      action === 'browser.click' || action === 'browser.type',
-      () => performControlAction(action, parameters),
-    );
+    return guardAgentAction((holdPageFocus) => performControlAction(action, parameters, holdPageFocus));
   }, [guardAgentAction, performControlAction]);
 
   const describeTab = React.useCallback(() => {

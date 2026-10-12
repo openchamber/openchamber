@@ -34,6 +34,13 @@ const BATCH_ENVELOPE_RESERVED_BYTES = 1 + BATCH_FRAME_LENGTH_BYTES;
 export const MAX_TUNNEL_PAYLOAD_BYTES =
   MAX_PLAINTEXT_FRAME_BYTES - TUNNEL_FRAME_HEADER_BYTES - BATCH_ENVELOPE_RESERVED_BYTES;
 
+// Tunnel body compression, negotiated per request. A client that can gunzip
+// sends the accept header; the host gzips whole-body text responses for it
+// and marks them with the content header. A peer that knows neither sends and
+// receives plain bodies. Mirrored in packages/web/server/lib/relay/tunnel-host.js.
+export const TUNNEL_ACCEPT_ENCODING_HEADER = 'x-openchamber-tunnel-accept-encoding';
+export const TUNNEL_CONTENT_ENCODING_HEADER = 'x-openchamber-tunnel-content-encoding';
+
 export const TunnelFrameType = {
   HttpRequest: 1,
   HttpBody: 2,

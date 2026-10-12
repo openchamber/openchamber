@@ -4530,10 +4530,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     /**
      * Keeps a page the agent works in believing it has focus.
      *
-     * The panel hands keyboard focus back to the user after every agent click,
-     * and a page that sees itself blurred closes what the click opened: custom
-     * selects shut on blur. With focus emulated the page keeps its own focus
-     * while the user's keystrokes still go to the app. Sent before every
+     * Keyboard focus stays with the user while the agent clicks and types, and
+     * a page that sees itself blurred closes what the click opened (custom
+     * selects shut on blur) and is refused the clipboard. With focus emulated
+     * the page keeps its own focus while the user's keystrokes still go to the
+     * app; the pane gives the page real focus only when this fails. Sent before every
      * focusing action, so a page that navigated since gets it again; emulation
      * lives in the debugger session, which therefore stays attached.
      */

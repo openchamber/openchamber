@@ -40,10 +40,10 @@
     },
     "status": {
       "error": "#b7493f",
-      "warning": "#8d6c15",
-      "success": "#5f8d3d",
+      "warning": "#886914",
+      "success": "#517734",
       "successForeground": "#ffffff",
-      "info": "#2d72c4"
+      "info": "#2c6ebd"
     },
     "syntax": {
       "base": {
@@ -77,7 +77,7 @@
       "merged": "#795cbc"
     },
     "chat": {
-      "userMessageBackground": "#eeeae7",
+      "userMessageBackground": "#f7e7e0",
       "divider": "#d8d5d0",
       "background": "#fdfcfa"
     },

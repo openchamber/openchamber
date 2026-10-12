@@ -92,9 +92,8 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
 
     return (
         <div className="flex flex-col">
-            {/* Shadow on the wrapper, never on the glass: see "Floating
-                composer" in composer/DOCUMENTATION.md. The wrapper hugs the
-                box, so the shadow follows the morph's height tween. */}
+            {/* Shadow on the wrapper: the wrapper hugs the box, so the shadow
+                follows the morph's height tween. */}
             <div
                 className={cn(
                     'flex min-w-0 flex-col shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]',
@@ -106,7 +105,7 @@ export function MobilePillComposer(props: MobilePillComposerProps) {
                 // The morph measures and animates this box (see mobileComposerMorph).
                 data-composer-box="true"
                 className={cn(
-                    'oc-glass-composer flex min-w-0 flex-col border border-border/80',
+                    'oc-surface-floating flex min-w-0 flex-col border border-border/80',
                     topRow || bottomRow ? 'rounded-[1.5rem]' : 'rounded-full',
                 )}
             >

@@ -5,7 +5,7 @@ description: Configurez Jev, le petit modèle de classification qui prend des d�
 
 # Fournisseurs de classification (Jev)
 
-Certaines fonctions d’OpenChamber ont besoin d’une décision rapide avant d’agir : cette commande est-elle risquée, de quel type de tâche relève ce prompt, l’utilisateur vient-il de commencer un vrai travail ? C’est Jev, un petit modèle de décision conçu par TypeSafe, qui répond à ces questions. Cette page explique comment donner à OpenChamber l’accès à Jev.
+Certaines fonctions d’OpenChamber ont besoin d’une décision rapide avant d’agir : cette commande est-elle risquée, de quel type de tâche relève ce prompt, ce travail semble-t-il terminé ? C’est Jev, un petit modèle de décision conçu par TypeSafe, qui répond à ces questions. Cette page explique comment donner à OpenChamber l’accès à Jev.
 
 Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seulement un verdict, et OpenChamber agit en conséquence. OpenChamber attend une réponse quatre secondes au plus.
 
@@ -15,10 +15,10 @@ Jev n’écrit jamais de code et ne répond pas dans votre chat. Il renvoie seul
 | --- | --- |
 | [Permissions et filet de sécurité](/fr/permissions/) | L’agent doit-il vous demander avant de lancer cette action ? |
 | [Routage automatique des modèles](/fr/auto-model-routing/) | À laquelle de vos catégories appartient ce prompt ? |
-| [Sessions en cours](/fr/sessions-in-work/) | Venez-vous de demander un vrai travail ? Ce tour ressemble-t-il à sa fin ? |
+| [Sessions en cours](/fr/sessions-in-work/) | Ce tour ressemble-t-il à la fin du travail ? |
 | [Récapitulatif et suggestion du prochain message](/fr/sessions-in-work/) | Un récapitulatif ou une suggestion vaut-il la peine d’être généré après ce tour ? |
 
-Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions ne passent en cours que si vous les y placez vous-même. Les récapitulatifs et les suggestions fonctionnent toujours, simplement sans le filtre.
+Sans fournisseur, le filet de sécurité et Auto sont masqués, et les sessions en cours ne reçoivent pas l’indication « semble terminé ». Les sessions passent quand même en cours quand vous envoyez un message. Les récapitulatifs et les suggestions fonctionnent toujours, simplement sans le filtre.
 
 ## Configuration
 
@@ -96,7 +96,7 @@ Si Jev est lent ou échoue sur une requête, rien ne casse. Chaque fonction a un
 
 - Le filet de sécurité laisse l’action en attente de votre décision.
 - Auto envoie le prompt à votre modèle de repli.
-- Les sessions en cours restent comme elles sont.
+- L’indication « semble terminé » n’apparaît pas sur les sessions en cours.
 - Le récapitulatif et la suggestion sont générés comme si Jev n’existait pas.
 
 ## Ce que Jev voit
@@ -107,7 +107,7 @@ Les requêtes partent du serveur OpenChamber directement vers OpenCode Zen, Open
 
 ## Où ça fonctionne
 
-Jev tourne dans le serveur OpenChamber : il fonctionne donc dans l’application desktop, dans l’application web et sur votre téléphone connecté à l’une des deux. L’extension VS Code parle directement à OpenCode et n’a pas Jev : pas de filet de sécurité, pas d’Auto, et les sessions ne passent en cours qu’à la main.
+Jev tourne dans le serveur OpenChamber : il fonctionne donc dans l’application desktop, dans l’application web et sur votre téléphone connecté à l’une des deux. L’extension VS Code parle directement à OpenCode et n’a pas Jev : pas de filet de sécurité, pas d’Auto, pas d’indication « semble terminé ».
 
 ## Voir aussi
 

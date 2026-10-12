@@ -24,7 +24,8 @@ const DOCUMENT_SYMBOLS_TOGGLE_ATTRIBUTE = 'data-document-symbols-toggle';
 type DocumentSymbolsPanelProps = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    view: EditorView | null;
+    /** A ref, never the view itself; see `GoToLineDialog` for why (react#34840). */
+    viewRef: React.RefObject<EditorView | null>;
 };
 
 /**
@@ -32,8 +33,10 @@ type DocumentSymbolsPanelProps = {
  * type; picking one puts the cursor on its name. Read from the syntax tree
  * when the panel opens, so it describes the file as it is now.
  */
-export function DocumentSymbolsPanel({ open, onOpenChange, view }: DocumentSymbolsPanelProps) {
+export function DocumentSymbolsPanel({ open, onOpenChange, viewRef }: DocumentSymbolsPanelProps) {
     const { t } = useI18n();
+    // The owner re-renders when its editor mounts or goes away.
+    const view = viewRef.current;
     const panelRef = React.useRef<HTMLDivElement | null>(null);
     const [symbols, setSymbols] = React.useState<DocumentSymbol[]>([]);
     const [query, setQuery] = React.useState('');

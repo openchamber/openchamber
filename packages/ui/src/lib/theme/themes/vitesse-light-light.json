@@ -39,8 +39,8 @@
       "active": "#00000014"
     },
     "status": {
-      "error": "#ab5959",
-      "warning": "#a65e2b",
+      "error": "#a85757",
+      "warning": "#a45d2b",
       "success": "#1e754f",
       "info": "#296aa3"
     },
@@ -75,7 +75,7 @@
       "merged": "#5843be"
     },
     "chat": {
-      "userMessageBackground": "#eceeed",
+      "userMessageBackground": "#e7f0eb",
       "divider": "#00000015",
       "background": "#ffffff"
     },

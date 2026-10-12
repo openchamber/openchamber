@@ -6,8 +6,9 @@ export const FILE_TREE_BASE_PADDING_PX = 8;
 
 export type FileTreeGitStatus = 'git-modified' | 'git-added' | 'git-deleted';
 
-export const fileTreeRowPaddingLeft = (depth: number): string =>
-  `${FILE_TREE_BASE_PADDING_PX + depth * FILE_TREE_INDENT_PX}px`;
+/** `basePaddingPx` lets a tree sitting under a differently inset header line up with it. */
+export const fileTreeRowPaddingLeft = (depth: number, basePaddingPx = FILE_TREE_BASE_PADDING_PX): string =>
+  `${basePaddingPx + depth * FILE_TREE_INDENT_PX}px`;
 
 export const fileTreeRowStateClassName = (isActive: boolean): string => (
   isActive

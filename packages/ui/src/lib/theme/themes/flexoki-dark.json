@@ -39,7 +39,7 @@
       "active": "#ffffff1a"
     },
     "status": {
-      "error": "#D14D41",
+      "error": "#d76459",
       "errorForeground": "#171515",
       "errorBackground": "#AF302920",
       "errorBorder": "#AF302950",
@@ -51,7 +51,7 @@
       "successForeground": "#171515",
       "successBackground": "#66800B20",
       "successBorder": "#66800B50",
-      "info": "#4385BE",
+      "info": "#4d8cc1",
       "infoForeground": "#171515",
       "infoBackground": "#205EA620",
       "infoBorder": "#205EA650"
@@ -98,12 +98,12 @@
       "merged": "#8B7EC8"
     },
     "chat": {
-      "userMessageBackground": "#282321",
+      "userMessageBackground": "#312017",
       "divider": "#343331ec",
       "background": "#171515"
     },
     "markdown": {
-      "link": "#4385BE",
+      "link": "#4d8cc1",
       "linkHover": "#205EA6",
       "inlineCode": "#A0AF53",
       "inlineCodeBackground": "#151313",

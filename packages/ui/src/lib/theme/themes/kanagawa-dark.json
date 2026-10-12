@@ -14,16 +14,16 @@
   },
   "colors": {
     "primary": {
-      "base": "#c7dafe",
-      "hover": "#cbddfe",
-      "active": "#d0e0fe",
-      "muted": "#c7dafe80"
+      "base": "#7E9CD8",
+      "hover": "#88a4db",
+      "active": "#93acde",
+      "muted": "#7e9cd880"
     },
     "surface": {
       "background": "#17161e",
       "foreground": "#c2c1c1",
       "muted": "#111119",
-      "mutedForeground": "#909089",
+      "mutedForeground": "#8a8a83",
       "elevated": "#221e28",
       "subtle": "#1d1c24"
     },
@@ -39,18 +39,18 @@
       "active": "#ffffff13"
     },
     "status": {
-      "error": "#feb3a9",
-      "errorBackground": "#feb3a929",
-      "errorBorder": "#feb3a973",
-      "warning": "#f2bf6f",
-      "warningBackground": "#f2bf6f29",
-      "warningBorder": "#f2bf6f73",
-      "success": "#b3d886",
-      "successBackground": "#b3d88629",
-      "successBorder": "#b3d88673",
-      "info": "#afc9fd",
-      "infoBackground": "#afc9fd29",
-      "infoBorder": "#afc9fd73"
+      "error": "#ed5252",
+      "errorBackground": "#ed525229",
+      "errorBorder": "#ed525273",
+      "warning": "#D7A657",
+      "warningBackground": "#d7a65729",
+      "warningBorder": "#d7a65773",
+      "success": "#98BB6C",
+      "successBackground": "#98bb6c29",
+      "successBorder": "#98bb6c73",
+      "info": "#83afe0",
+      "infoBackground": "#83afe029",
+      "infoBorder": "#83afe073"
     },
     "syntax": {
       "base": {
@@ -91,26 +91,26 @@
     },
     "chat": {
       "background": "#17161e",
-      "userMessageBackground": "#26272e",
+      "userMessageBackground": "#1e212e",
       "divider": "#ffffff17"
     },
     "markdown": {
-      "link": "#c7dafe",
-      "linkHover": "#cbddfe",
+      "link": "#7E9CD8",
+      "linkHover": "#88a4db",
       "inlineCode": "#98BB6C",
       "inlineCodeBackground": "#1d1c24",
-      "blockquote": "#909089",
+      "blockquote": "#8a8a83",
       "blockquoteBorder": "#ffffff17",
-      "listMarker": "#c7dafe99",
+      "listMarker": "#7e9cd899",
       "bold": "#c9c8c8",
       "italic": "#c2c1c1",
       "hr": "#ffffff0c"
     },
     "tools": {
       "border": "#ffffff0d",
-      "icon": "#909089",
+      "icon": "#8a8a83",
       "title": "#c2c1c1",
-      "description": "#909089",
+      "description": "#8a8a83",
       "edit": {
         "addedBackground": "#091201",
         "removedBackground": "#230202",

@@ -504,7 +504,7 @@ export function createFlexokiCodeMirrorTheme(
     /* Other occurrences of the word at the cursor or of the selected text */
     '.cm-selectionMatch': {
       backgroundColor: theme.colors.interactive.selection,
-      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.borderFocus}`,
+      boxShadow: `inset 0 0 0 1px ${theme.colors.interactive.border}`,
       borderRadius: '2px',
     },
     // The word at the cursor (or the selection itself) is outlined only, so it

@@ -3,15 +3,16 @@ import type { Metadata, Session } from '@/lib/opencode/model';
 
 /**
  * "In work", stored under `session.metadata.openchamber.work`. The server's
- * session-work runtime opens a session when Jev sees real work start and
- * stamps `suggestDoneAt` when a turn looks like the end of it; the user alone
- * closes. The review offer (`session.metadata.openchamber.reviewOffer`) is
+ * session-work runtime opens a session when the user sends a message in it
+ * and stamps `suggestDoneAt` when Jev says a turn looks like the end of the
+ * work; the user alone closes. The review offer (`session.metadata.openchamber.reviewOffer`) is
  * written by the same runtime but does not depend on work. The shape is owned by `packages/web/server/lib/session-work/state.js`.
  */
 const workSchema = z.object({
   state: z.enum(['open', 'done']),
   openedAt: z.number().optional(),
-  openedBy: z.enum(['jev', 'user']).optional(),
+  // `auto` for a sent message, `user` for Track; `jev` on older records.
+  openedBy: z.enum(['auto', 'jev', 'user']).optional(),
   doneAt: z.number().optional(),
   suggestDoneAt: z.number().optional(),
 });

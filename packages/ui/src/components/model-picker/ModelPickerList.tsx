@@ -87,9 +87,13 @@ const hasTooltipMetadata = (metadata?: ModelMetadata) => {
   );
 };
 
+// The row sits inside the list's padding, so the card's offset from the row
+// has to clear that padding too, or the card covers the picker's edge.
+const ROW_TOOLTIP_OFFSET = 16;
+
 // Card width (max-w-xs) plus its offset from the row. Narrower room on both
 // sides means the card would land on top of the list it describes.
-const ROW_TOOLTIP_ROOM = 320 + 8;
+const ROW_TOOLTIP_ROOM = 320 + ROW_TOOLTIP_OFFSET;
 
 /** The side with room for the details card, or null when neither side has it. */
 const pickRowTooltipSide = (row: Element | null): 'right' | 'left' | null => {
@@ -133,7 +137,7 @@ const ModelPickerRowTooltip: React.FC<{
     <Tooltip delayDuration={0} open={active && side !== null} onOpenChange={() => {}}>
       <TooltipTrigger asChild ref={setTriggerRef}>{children}</TooltipTrigger>
       {active && side ? (
-        <TooltipContent side={side} sideOffset={8} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
+        <TooltipContent side={side} sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
           <div className="flex flex-col gap-2 text-start text-xs">
             {capabilities.length > 0 ? (
               <div className="flex items-center justify-between gap-3 text-muted-foreground">

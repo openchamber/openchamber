@@ -195,11 +195,17 @@ export function WorkingPlaceholder({
   }
 
   const providerLogo = hasProviderLogo && providerLogoSrc ? (
+    // Flex sibling of the label, never an inline rider on the text line: a
+    // tall inline-block drags the line box with it and the label drifts off
+    // the chip's vertical center. As flex children both center independently.
     <img
       src={providerLogoSrc}
       alt=""
       aria-hidden="true"
-      className="animate-status-logo inline-block h-3.5 w-3.5 me-1.5 align-[-2px]"
+      // 16px box like the scroll pill's arrow icon. The padding normalizes
+      // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
+      // so equal boxes and equal paddings also mean equal visible edges.
+      className="animate-status-logo h-4 w-4 shrink-0 p-[1.3px] me-1.5"
       style={{
         filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
       }}
@@ -222,10 +228,8 @@ export function WorkingPlaceholder({
         aria-live="polite"
         aria-label={retryText}
       >
-        <span className="typography-ui-header">
-          {providerLogo}
-          {retryText}
-        </span>
+        {providerLogo}
+        <span className="typography-ui-header">{retryText}</span>
       </div>
     );
   }
@@ -252,10 +256,8 @@ export function WorkingPlaceholder({
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="text-[13px] leading-4">
-        {providerLogo}
-        {label}
-      </span>
+      {providerLogo}
+      <span className="text-[13px] leading-4">{label}</span>
     </div>
   );
 }

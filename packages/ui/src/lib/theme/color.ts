@@ -84,6 +84,28 @@ function oklab(color: Color) {
   };
 }
 
+function fromOklab(lab: { l: number; a: number; b: number }): Color {
+  const l = (lab.l + 0.3963377774 * lab.a + 0.2158037573 * lab.b) ** 3;
+  const m = (lab.l - 0.1055613458 * lab.a - 0.0638541728 * lab.b) ** 3;
+  const s = (lab.l - 0.0894841775 * lab.a - 1.291485548 * lab.b) ** 3;
+  const gamma = (v: number) => 255 * Math.min(1, Math.max(0, v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055));
+  return {
+    r: gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    g: gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    b: gamma(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+    a: 1,
+  };
+}
+
+/** Move a surface toward an accent's hue and chroma while keeping its own
+ * perceptual lightness, so a tint adds color without becoming a brighter patch. */
+export function tintColor(accent: string, surface: string, amount: number, canvas = '#ffffff'): string {
+  const tint = parseColor(accent), base = parseColor(surface), under = parseColor(canvas);
+  if (!tint || !base || !under) return surface;
+  const x = oklab(over(base, under)), y = oklab(over(tint, under));
+  return hexColor(fromOklab({ l: x.l, a: x.a + (y.a - x.a) * amount, b: x.b + (y.b - x.b) * amount }));
+}
+
 /** Perceptual hue/chroma separation after alpha composition; brightness alone
  * must not turn two nearly identical status hues into a distinct pair. */
 export function chromaticDistance(first: string, second: string, background: string, canvas: string): number | null {

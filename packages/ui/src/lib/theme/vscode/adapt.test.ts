@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { importVSCodeTheme } from './import';
 import { buildVSCodeThemeFromPalette } from './adapter';
 import { compactTheme, requireTheme } from '../definition';
-import { colorHue, contrastRatio, withOpacity } from '../color';
+import { chromaticDistance, colorHue, contrastRatio, withOpacity } from '../color';
 import { getDefaultTheme } from '../themes';
 
 test('live and imported palettes share UI policy, without mutating the source', () => {
@@ -41,8 +41,8 @@ test('live and imported palettes share UI policy, without mutating the source', 
     expect(contrastRatio(c.chat?.userMessageBackground ?? '', c.surface.background)).toBeLessThan(1.25);
     expect(contrastRatio(c.syntax.base.background, c.surface.background)).toBeLessThanOrEqual(1.1);
     for (const [color, low, high] of [
-      [c.status.info, 230, 275], [c.status.success, 125, 165],
-      [c.status.error, 10, 40], [c.status.warning, 65, 100],
+      [c.status.info, 185, 275], [c.status.success, 105, 170],
+      [c.status.error, 0, 35], [c.status.warning, 35, 100],
       [c.pr?.merged ?? '', 285, 325], [c.pr?.blocked ?? '', 40, 65],
     ] as const) {
       expect(colorHue(color, c.surface.background)).toBeGreaterThanOrEqual(low);
@@ -50,6 +50,38 @@ test('live and imported palettes share UI policy, without mutating the source', 
     }
     expect(c.pr?.draft).toBe(c.surface.mutedForeground);
     expect(c.status.infoBackground).toBe(withOpacity(c.status.info, type === 'dark' ? 0.16 : 0.12));
+  }
+});
+
+test('authored status shades keep their own tint within each family', () => {
+  // Dracula's cyan info, Gruvbox's olive success, Monokai's pink-red error and
+  // Nord's orange warning are what their authors mean by those states.
+  const { colors } = requireTheme(importVSCodeTheme(JSON.stringify({ colors: {
+    'editor.background': '#151720', 'editor.foreground': '#c1c1c4',
+    'editorInfo.foreground': '#8be9fd', 'testing.iconPassed': '#b8bb26',
+    'editorError.foreground': '#f92672', 'editorWarning.foreground': '#d08770',
+  } }), 'vivid.json'));
+  // Readability may lift a shade, but it stays on the authored hue.
+  for (const [shade, seed] of [
+    [colors.status.info, '#8be9fd'], [colors.status.success, '#b8bb26'],
+    [colors.status.error, '#f92672'], [colors.status.warning, '#d08770'],
+  ] as const) {
+    expect(Math.abs(colorHue(shade, '#151720')! - colorHue(seed, '#151720')!)).toBeLessThan(3);
+  }
+});
+
+test('user bubbles take on the primary hue without becoming a brighter patch', () => {
+  for (const kind of ['dark', 'light'] as const) {
+    const { colors: c } = buildVSCodeThemeFromPalette({ kind, colors: {
+      'editor.background': kind === 'dark' ? '#151720' : '#fafafa',
+      'editor.foreground': kind === 'dark' ? '#c1c1c4' : '#393a34',
+      'button.background': kind === 'dark' ? '#bd93f9' : '#6957d7',
+    } });
+    const bubble = c.chat?.userMessageBackground ?? '', canvas = c.surface.background;
+    // A neutral bubble would sit as far from the primary's hue as the canvas does.
+    expect(chromaticDistance(bubble, c.primary.base, canvas, canvas)! + 0.015)
+      .toBeLessThan(chromaticDistance(canvas, c.primary.base, canvas, canvas)!);
+    expect(contrastRatio(bubble, canvas)).toBeLessThan(1.2);
   }
 });
 

@@ -42,8 +42,15 @@ export const entryName = (entry) => String(entry.Name ?? '').replace(/^\//, '');
 
 export const pause = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
 
-export function createDockerEngine({ runCommand, dockerPath }) {
-  const run = (args, timeoutMs, options = {}) => runCommand(dockerPath, args, { ...options, timeoutMs });
+/**
+ * `dockerHost` is the daemon the CLI talks to, as `docker --host` takes it, or null for the local
+ * one: `ssh://<machine>` makes the local CLI run every command on that machine's daemon over SSH.
+ * `argsFor(args)` is the argv the CLI gets for a command, with that flag first, for a caller that
+ * starts docker itself.
+ */
+export function createDockerEngine({ runCommand, dockerPath, dockerHost = null }) {
+  const argsFor = (args) => (dockerHost === null ? args : ['--host', dockerHost, ...args]);
+  const run = (args, timeoutMs, options = {}) => runCommand(dockerPath, argsFor(args), { ...options, timeoutMs });
 
   const failure = (args, result) => new SpaceError(
     'docker_command_failed',
@@ -122,5 +129,5 @@ export function createDockerEngine({ runCommand, dockerPath }) {
     return failed;
   };
 
-  return { run, docker, failure, inspect, findByLabel, removeOne, removeStoppedContainer, removeByName };
+  return { run, docker, failure, inspect, findByLabel, removeOne, removeStoppedContainer, removeByName, argsFor };
 }

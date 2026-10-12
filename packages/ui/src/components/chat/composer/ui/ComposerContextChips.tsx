@@ -10,8 +10,8 @@
  * before sending.
  *
  * The preview is portaled into `previewHost`, a positioned wrapper outside the
- * glass composer box: the box clips its contents, and glass does not nest
- * (see "Floating composer" in composer/DOCUMENTATION.md).
+ * composer box, which clips its contents (see "Floating composer" in
+ * composer/DOCUMENTATION.md).
  */
 
 import React from 'react';

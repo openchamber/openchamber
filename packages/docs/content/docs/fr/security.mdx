@@ -17,7 +17,7 @@ openchamber --ui-password be-creative-here
 
 Vous pouvez aussi le définir avec la variable d’environnement `OPENCHAMBER_UI_PASSWORD` au lieu de le mettre en ligne de commande. Après connexion, OpenChamber mémorise l’appareil pendant un moment pour ne pas vous le redemander à chaque fois.
 
-Définissez toujours un mot de passe si l’instance est joignable par quelqu’un d’autre — surtout via un [tunnel](/tunnels/) ou internet public.
+Définissez toujours un mot de passe si l’instance est joignable par quelqu’un d’autre — surtout via un [tunnel](/fr/tunnels/) ou internet public.
 
 ## Passkeys
 
@@ -27,14 +27,14 @@ Les passkeys sont liées au mot de passe actuel. Si vous changez ou supprimez le
 
 ## Tokens d’appareil
 
-Les appareils associés via [Connecter un appareil](/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
+Les appareils associés via [Connecter un appareil](/fr/connect-devices/) s’authentifient avec leurs propres tokens par appareil, pas avec le mot de passe UI. Les liens d’association sont à usage unique et expirent s’ils ne sont pas utilisés ; chaque appareil associé est listé dans **Paramètres → Instances distantes → Se connecter à ce serveur**, où vous pouvez révoquer n’importe lequel à tout moment. Les connexions hors du domicile passent par le [Relais privé](/fr/private-relay/), qui est chiffré de bout en bout et ne peut pas lire votre trafic.
 
 ## Avant de l’exposer
 
 - Par défaut, OpenChamber n’écoute que sur votre propre machine (`127.0.0.1`). Écouter plus largement demande un changement volontaire, et vous devriez définir un mot de passe d’abord.
-- Pour vos propres appareils, préférez l’[association](/connect-devices/) avec le [Relais privé](/private-relay/) — rien n’est exposé publiquement du tout.
-- S’il vous faut une URL publique, préférez un [tunnel](/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
-- Si vous placez OpenChamber derrière votre propre serveur HTTPS, consultez [Reverse proxy](/reverse-proxy/).
+- Pour vos propres appareils, préférez l’[association](/fr/connect-devices/) avec le [Relais privé](/fr/private-relay/) — rien n’est exposé publiquement du tout.
+- S’il vous faut une URL publique, préférez un [tunnel](/fr/tunnels/) ou un réseau privé (comme un VPN) plutôt que d’ouvrir un port sur internet.
+- Si vous placez OpenChamber derrière votre propre serveur HTTPS, consultez [Reverse proxy](/fr/reverse-proxy/).
 
 ## Mode entreprise
 
@@ -166,16 +166,16 @@ Pour vérifier que ça a marché, ouvrez Paramètres → Fournisseurs : un avis 
 ### Ce qui change
 
 - Les fournisseurs de modèles viennent uniquement de votre configuration OpenCode. Connecter un fournisseur, s’y identifier, ajouter une clé ou créer un fournisseur personnalisé est désactivé dans OpenChamber ; supprimer ou changer de compte existant fonctionne toujours. Cela ferme seulement l’accès par l’application ; le verrou lui-même, c’est la politique OpenCode décrite plus bas. Se connecter à un serveur MCP de votre configuration OpenCode fonctionne toujours, car cela atteint ce serveur et non un fournisseur de modèles.
-- Les [Fournisseurs de classification (Jev)](/classification-providers/) restent désactivés, y compris un point de terminaison personnalisé que quelqu’un saisit dans les Paramètres. Le filet de sécurité et Auto ne sont pas proposés, et les sessions ne passent en cours qu’à la main. Pour utiliser Jev via votre propre infrastructure, fixez un point de terminaison avec `jev` dans le fichier de politique, ou avec `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` et, s’il en faut une, `OPENCHAMBER_JEV_API_KEY`). Il devient le choix par défaut, on peut toujours le désactiver, et rien d’autre ne peut être choisi.
+- Les [Fournisseurs de classification (Jev)](/fr/classification-providers/) restent désactivés, y compris un point de terminaison personnalisé que quelqu’un saisit dans les Paramètres. Le filet de sécurité et Auto ne sont pas proposés, et les sessions en cours ne reçoivent pas l’indication « semble terminé ». Pour utiliser Jev via votre propre infrastructure, fixez un point de terminaison avec `jev` dans le fichier de politique, ou avec `OPENCHAMBER_JEV_URL` (plus `OPENCHAMBER_JEV_MODEL` et, s’il en faut une, `OPENCHAMBER_JEV_API_KEY`). Il devient le choix par défaut, on peut toujours le désactiver, et rien d’autre ne peut être choisi.
 - La lecture à voix haute via OpenAI est désactivée. Un serveur personnalisé de synthèse vocale ou de transcription doit tourner sur la même machine. Les voix locales et les modèles de dictée locaux continuent de fonctionner.
 - Les notifications push vers les téléphones et les navigateurs ne portent qu’un titre générique comme « Agent response is ready », sans texte de message ni nom de session. Les notifications de bureau restent sur votre machine et gardent le texte complet.
 - Les vérifications de mises à jour continuent, pour que les correctifs de sécurité vous parviennent toujours, mais elles ne transmettent jamais de données d’utilisation, pas même l’identifiant d’installation anonyme.
-- Les [tunnels externes](/tunnels/) (Cloudflare, ngrok) sont désactivés. Un fournisseur de tunnel déchiffre le trafic à sa périphérie et voit chaque requête en clair.
+- Les [tunnels externes](/fr/tunnels/) (Cloudflare, ngrok) sont désactivés. Un fournisseur de tunnel déchiffre le trafic à sa périphérie et voit chaque requête en clair.
 - Les diagrammes `.drawio` s’ouvrent sous forme de texte XML. L’éditeur de diagrammes est une page de diagrams.net, et y ouvrir un diagramme lui transmet le fichier.
 - Les polices d’interface et de code chargées depuis un CDN public reviennent aux polices du système. Votre choix est conservé pour le jour où le mode est désactivé.
-- Le [Relais privé](/private-relay/) ne fonctionne que via votre propre relais. Faites tourner un [relais auto-hébergé](https://github.com/openchamber/openchamber-relay) et pointez OpenChamber dessus avec `relayUrl` dans le fichier de politique ou avec `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. Le relais partagé ne peut pas lire votre trafic non plus, puisqu’il est chiffré de bout en bout, mais le vôtre garde les métadonnées de connexion et l’accès à cette machine à l’intérieur de votre réseau. Sans votre propre relais, aucun appareil ne peut être associé.
-- OpenChamber n’écoute que sur la machine où il tourne. Le réglage de bureau qui permet aux autres appareils du réseau local d’ouvrir l’application est désactivé, et le serveur refuse de démarrer sur une adresse réseau, que ce soit via la CLI (`--host`, `--lan`) ou via l’environnement. Si le fichier de politique apparaît pendant que l’application tourne, les connexions depuis d’autres machines sont coupées jusqu’au prochain démarrage. Autorisez l’accès réseau avec `"allowNetworkAccess": true` dans le fichier de politique, ou avec `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` là où l’environnement active le mode entreprise. Gardez en tête que la connexion passe en HTTP simple, donc sur un réseau partagé n’importe qui peut la lire ; placez un serveur que d’autres atteignent derrière [votre propre HTTPS](/reverse-proxy/).
-- Les [extensions](/extensions/) qui peuvent envoyer des données hors de la machine (celles qui parlent à une API externe, chargent depuis des adresses externes ou font tourner un service en arrière-plan) ne s’installent que depuis un dépôt Git listé dans `allowedExtensions`. Les extensions qui ne font rien de tout cela s’installent comme d’habitude. Une extension installée depuis n’importe où ailleurs reste désactivée, et les Paramètres expliquent pourquoi. La liste contient des URL de dépôts, puisqu’une extension choisit elle-même son nom ; une entrée qui se termine par `/`, comme `https://github.com/acme/`, autorise tous les dépôts en dessous. Sur les machines des personnes qui développent des extensions, `"allowLocalExtensions": true` autorise aussi l’installation depuis un dossier local. Un ZIP reste bloqué dans tous les cas.
+- Le [Relais privé](/fr/private-relay/) ne fonctionne que via votre propre relais. Faites tourner un [relais auto-hébergé](https://github.com/openchamber/openchamber-relay) et pointez OpenChamber dessus avec `relayUrl` dans le fichier de politique ou avec `OPENCHAMBER_RELAY_URL=wss://relay.example.com/ws`. Le relais partagé ne peut pas lire votre trafic non plus, puisqu’il est chiffré de bout en bout, mais le vôtre garde les métadonnées de connexion et l’accès à cette machine à l’intérieur de votre réseau. Sans votre propre relais, aucun appareil ne peut être associé.
+- OpenChamber n’écoute que sur la machine où il tourne. Le réglage de bureau qui permet aux autres appareils du réseau local d’ouvrir l’application est désactivé, et le serveur refuse de démarrer sur une adresse réseau, que ce soit via la CLI (`--host`, `--lan`) ou via l’environnement. Si le fichier de politique apparaît pendant que l’application tourne, les connexions depuis d’autres machines sont coupées jusqu’au prochain démarrage. Autorisez l’accès réseau avec `"allowNetworkAccess": true` dans le fichier de politique, ou avec `OPENCHAMBER_ALLOW_NETWORK_ACCESS=1` là où l’environnement active le mode entreprise. Gardez en tête que la connexion passe en HTTP simple, donc sur un réseau partagé n’importe qui peut la lire ; placez un serveur que d’autres atteignent derrière [votre propre HTTPS](/fr/reverse-proxy/).
+- Les [extensions](/fr/extensions/) qui peuvent envoyer des données hors de la machine (celles qui parlent à une API externe, chargent depuis des adresses externes ou font tourner un service en arrière-plan) ne s’installent que depuis un dépôt Git listé dans `allowedExtensions`. Les extensions qui ne font rien de tout cela s’installent comme d’habitude. Une extension installée depuis n’importe où ailleurs reste désactivée, et les Paramètres expliquent pourquoi. La liste contient des URL de dépôts, puisqu’une extension choisit elle-même son nom ; une entrée qui se termine par `/`, comme `https://github.com/acme/`, autorise tous les dépôts en dessous. Sur les machines des personnes qui développent des extensions, `"allowLocalExtensions": true` autorise aussi l’installation depuis un dossier local. Un ZIP reste bloqué dans tous les cas.
 - Les variables d’environnement de **Paramètres → Général** et de `opencode service set env` n’atteignent pas OpenCode, car l’une d’elles pourrait contenir une clé de fournisseur. Git, le terminal et les actions de projet les reçoivent toujours.
 - Dans l’extension VS Code, la connexion de fournisseurs est désactivée et les vérifications de mises à jour ne transmettent pas de données d’utilisation. Elle n’a de toute façon ni Jev, ni relais, ni tunnels, ni notifications push, ni synthèse vocale dans le cloud.
 
@@ -205,7 +205,7 @@ Les recherches web et les récupérations de pages de l’agent passent aussi pa
 
 ## Pages liées
 
-- [Connecter un appareil](/connect-devices/) — association à usage unique et tokens par appareil
-- [Relais privé](/private-relay/) — accès chiffré de bout en bout depuis n’importe où
-- [Tunnels](/tunnels/) — exposer une URL publique quand il en faut une
-- [Reverse proxy](/reverse-proxy/) — exécuter OpenChamber derrière votre propre serveur
+- [Connecter un appareil](/fr/connect-devices/) — association à usage unique et tokens par appareil
+- [Relais privé](/fr/private-relay/) — accès chiffré de bout en bout depuis n’importe où
+- [Tunnels](/fr/tunnels/) — exposer une URL publique quand il en faut une
+- [Reverse proxy](/fr/reverse-proxy/) — exécuter OpenChamber derrière votre propre serveur

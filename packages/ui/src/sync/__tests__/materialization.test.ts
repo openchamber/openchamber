@@ -419,6 +419,29 @@ describe("materializeSessionSnapshots", () => {
     expect(getStaleRunningToolMessageID(result, "ses_1")).toBe(undefined)
   })
 
+  test("keeps a whole finished call when a page brings its shell, and takes the whole call over a shell", () => {
+    const whole = {
+      id: "prt_1",
+      messageID: "msg_1",
+      sessionID: "ses_1",
+      type: "tool",
+      tool: "read",
+      callID: "call-prt_1",
+      state: { status: "completed", input: { path: "a.ts" }, output: "file body", metadata: {}, time: { start: 1, end: 2 } },
+    } satisfies ToolPart
+    const shell = {
+      ...whole,
+      state: { ...whole.state, output: "", metadata: { openchamberContentShell: { chars: 9 } } },
+    } satisfies ToolPart
+    const info = completedAssistantMessage("msg_1")
+
+    const holdingWhole = materializeSessionSnapshots({ message: { ses_1: [info] }, part: { msg_1: [whole] } }, "ses_1", [{ info, parts: [shell] }])
+    expect(holdingWhole.part.msg_1[0]).toBe(whole)
+
+    const holdingShell = materializeSessionSnapshots({ message: { ses_1: [info] }, part: { msg_1: [shell] } }, "ses_1", [{ info, parts: [whole] }])
+    expect(holdingShell.part.msg_1[0]).toEqual(whole)
+  })
+
   test("preserves state.attachments from existing part when completed snapshot lacks them", () => {
     const livePart = {
       id: "prt_1",

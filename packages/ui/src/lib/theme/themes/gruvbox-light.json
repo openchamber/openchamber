@@ -44,12 +44,12 @@
       "warning": "#805104",
       "warningBackground": "#8051041f",
       "warningBorder": "#80510459",
-      "success": "#337644",
-      "successBackground": "#3376441f",
-      "successBorder": "#33764459",
-      "info": "#356ca7",
-      "infoBackground": "#356ca71f",
-      "infoBorder": "#356ca759"
+      "success": "#4f4c0c",
+      "successBackground": "#4f4c0c1f",
+      "successBorder": "#4f4c0c59",
+      "info": "#013d48",
+      "infoBackground": "#013d481f",
+      "infoBorder": "#013d4859"
     },
     "syntax": {
       "base": {
@@ -90,7 +90,7 @@
     },
     "chat": {
       "background": "#fcf5d7",
-      "userMessageBackground": "#e8e4ca",
+      "userMessageBackground": "#e9ead2",
       "divider": "#0000001a"
     },
     "markdown": {

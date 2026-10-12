@@ -16,12 +16,54 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 jobs:
-  review:
-    name: automation
+  # Every PR event gets a review. A comment command starts the agent on the
+  # repository's model key, so it runs only for people who can push here.
+  gate:
     if: |
       github.event_name == 'pull_request_target' ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review '))) ||
       (github.event_name == 'pull_request_review_comment' && github.event.comment.user.login != 'openchamber-bot[bot]' && (github.event.comment.body == '/oc-review' || startsWith(github.event.comment.body, '/oc-review ') || github.event.comment.body == '@openchamber-bot review' || startsWith(github.event.comment.body, '@openchamber-bot review ')))
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      allowed: ${{ steps.access.outputs.allowed }}
+    steps:
+      - name: Generate access-check token
+        id: app-token
+        if: github.event_name != 'pull_request_target'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.OC_REVIEW_APP_ID }}
+          private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+          permission-metadata: read
+
+      - name: Check commenter access
+        id: access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `author_association` hides private org members, so ask for the
+          # repository permission itself. Maintain reads as write here.
+          permission="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${COMMENTER}/permission" --jq '.permission' 2>/dev/null)" || permission="none"
+          case "$permission" in
+            admin|write) echo "allowed=true" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::notice::${COMMENTER} has ${permission} access; bot commands need write access."
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  review:
+    name: automation
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,6 +74,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Resolve pull request context
         id: pr
@@ -76,6 +119,8 @@ jobs:
             gh pr edit "$PR_NUMBER" "${remove_args[@]}"
           fi
 
+      # The agent never sees this token: the workflow fetches the PR for it and
+      # posts its review (see .opencode/agent/pr-review-bot.md).
       - name: Generate review app token
         id: app-token
         if: steps.pr.outputs.draft == 'false'
@@ -83,6 +128,9 @@ jobs:
         with:
           app-id: ${{ secrets.OC_REVIEW_APP_ID }}
           private-key: ${{ secrets.OC_REVIEW_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
 
       - name: Check review safety
         if: steps.pr.outputs.draft == 'false'
@@ -91,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
-          changed_sensitive_files="$(gh pr diff "$PR_NUMBER" --name-only | grep -E '^(AGENTS\.md|CONTRIBUTING\.md|\.agents/skills/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/workflows/|\.opencode/agent/pr-review\.md$)' || true)"
+          changed_sensitive_files="$(gh pr diff "$PR_NUMBER" --name-only | grep -E '^(AGENTS\.md|CONTRIBUTING\.md|\.agents/skills/|\.github/PULL_REQUEST_TEMPLATE\.md$|\.github/workflows/|\.opencode/agent/|\.opencode/opencode\.json$)' || true)"
 
           if [ -n "$changed_sensitive_files" ]; then
             {
@@ -238,35 +286,67 @@ jobs:
       - name: Install opencode
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
         run: |
-          set -o pipefail
-          install_log="$(mktemp)"
+          version="$(node -p "require('./packages/electron/package.json').opencodeCli.version")"
+          npm install -g "@opencode/cli@${version}"
+          opencode --version
 
-          for attempt in 1 2 3; do
-            echo "Installing OpenCode (attempt $attempt/3)"
-            set +e
-            curl -fsSL --connect-timeout 15 https://opencode.ai/install | bash 2>&1 | tee "$install_log"
-            statuses=("${PIPESTATUS[@]}")
-            curl_status="${statuses[0]}"
-            install_status="${statuses[1]}"
-            set -e
+      - name: Collect pull request context
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          REVIEW_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          context=".oc-context"
+          mkdir -p "$context"
 
-            if [ "$curl_status" -eq 0 ] && [ "$install_status" -eq 0 ]; then
-              rm -f "$install_log"
-              exit 0
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json title,body,author,baseRefName,headRefName,headRefOid,labels,commits,files,reviewDecision,comments,reviews \
+            > "$context/pr.json"
+
+          # Review the HEAD this run was started for, never a moving target.
+          head="$(jq -r '.headRefOid' "$context/pr.json")"
+          if [ "$head" != "$REVIEW_HEAD_SHA" ]; then
+            echo "::warning::PR HEAD moved from $REVIEW_HEAD_SHA to $head before the review started."
+            exit 1
+          fi
+
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$context/pr.patch"
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/comments" --paginate \
+            | jq -s 'add // []' > "$context/review-comments.json"
+
+          # Whole changed files as they stand at the reviewed HEAD, so the agent
+          # reads more than the patch's context lines. Text files up to 1 MB;
+          # deleted files have no HEAD version.
+          mkdir -p "$context/head"
+          jq -r '.files[].path' "$context/pr.json" | while read -r path; do
+            target="$context/head/$path"
+            mkdir -p "$(dirname "$target")"
+            encoded="$(jq -rn --arg path "$path" '$path | split("/") | map(@uri) | join("/")')"
+            if ! gh api -H "Accept: application/vnd.github.raw" \
+              "repos/${GITHUB_REPOSITORY}/contents/${encoded}?ref=${REVIEW_HEAD_SHA}" > "$target" 2>/dev/null; then
+              rm -f "$target"
+              continue
             fi
-
-            if [ "$curl_status" -eq 0 ] && ! grep -Eqi 'failed to fetch version information|connection|network|timed out|temporary failure' "$install_log"; then
-              rm -f "$install_log"
-              exit "$((curl_status || install_status))"
-            fi
-
-            if [ "$attempt" -lt 3 ]; then
-              sleep "$((attempt * 5))"
+            if [ "$(wc -c < "$target")" -gt 1000000 ] || [ "$(file --brief --mime-encoding "$target")" = "binary" ]; then
+              rm -f "$target"
             fi
           done
 
-          rm -f "$install_log"
-          exit "$((curl_status || install_status))"
+          # Issues and pull requests the PR references, such as the one it fixes.
+          mkdir -p "$context/linked"
+          jq -r '.body // ""' "$context/pr.json" \
+            | grep -oE "(#|github\.com/${GITHUB_REPOSITORY}/(issues|pull)/)[0-9]+" \
+            | grep -oE '[0-9]+$' | grep -vx "$PR_NUMBER" | sort -un | head -n 10 \
+            | while read -r number; do
+                gh issue view "$number" --repo "$GITHUB_REPOSITORY" \
+                  --json number,title,body,state,labels,comments,closedAt,url > "$context/linked/${number}.json" 2>/dev/null \
+                  || gh pr view "$number" --repo "$GITHUB_REPOSITORY" \
+                    --json number,title,body,state,labels,comments,closedAt,url > "$context/linked/${number}.json" \
+                  || rm -f "$context/linked/${number}.json"
+              done
+
+          find "$context" -type f | head -n 200
 
       - name: Record review start
         if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
@@ -279,8 +359,6 @@ jobs:
         env:
           REVIEW_TIMEOUT: 30m
           ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_URL: ${{ steps.pr.outputs.url }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
@@ -297,10 +375,12 @@ jobs:
           echo "Review model: ${review_model:-unknown}"
           echo "Review timeout: $REVIEW_TIMEOUT"
 
-          set +e
-          timeout --signal=TERM --kill-after=30s "$REVIEW_TIMEOUT" opencode run --agent pr-review-bot "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review.
+          output="$RUNNER_TEMP/review.jsonl"
 
-          This may be a repeated review request. Before writing a new review, inspect prior PR comments, bot comments, reviews, inline comments, and the commit timeline via GitHub. Compare prior findings against commits pushed after those comments, then only repeat findings that still exist in the current diff/current file state.
+          set +e
+          timeout --signal=TERM --kill-after=30s "$REVIEW_TIMEOUT" opencode run --standalone --format json --agent pr-review-bot -m "$review_model" "A pull request in the OpenChamber repository needs one unified correctness, repository-guidance, contribution-quality, and evidence review. Its data is in .oc-context/.
+
+          This may be a repeated review request. Before writing a new review, inspect prior PR comments, bot comments, reviews, inline comments, and the commit timeline. Compare prior findings against commits pushed after those comments, then only repeat findings that still exist in the current diff/current file state.
 
           Read the base checkout's AGENTS.md and CONTRIBUTING.md. Independently discover every project skill matching the character of the change, read each matching SKILL.md and its task-required references, and apply that guidance to implementation correctness as well as PR readiness. The workflow deliberately provides no skill list.
 
@@ -315,9 +395,15 @@ jobs:
           Author: $PR_AUTHOR
           Base: $PR_BASE_REF
           Head: $PR_HEAD_REPO_OWNER:$PR_HEAD_REF
-          Required reviewed HEAD: $REVIEW_HEAD_SHA"
-          review_status="$?"
+          Required reviewed HEAD: $REVIEW_HEAD_SHA" | tee "$output"
+          review_status="${PIPESTATUS[0]}"
           set -e
+
+          # The agent posts nothing itself: its last message is the review.
+          jq -Rrs '[split("\n")[] | fromjson? | select(.type == "text")] as $texts
+            | ($texts | last | .part.messageID) as $message
+            | [$texts[] | select(.part.messageID == $message) | .part.text] | join("\n\n")' "$output" \
+            > "$RUNNER_TEMP/review-message.md"
 
           review_duration="$(( $(date +%s) - review_started_epoch ))"
           echo "Review duration: ${review_duration}s"
@@ -331,6 +417,25 @@ jobs:
           fi
 
           exit "$review_status"
+
+      - name: Post review
+        if: steps.pr.outputs.draft == 'false' && steps.safety.outputs.safe == 'true' && steps.throttle.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          message="$(cat "$RUNNER_TEMP/review-message.md")"
+          heading='<h3>Code Review Summary</h3>'
+
+          # Without the metadata marker there is no review to post; the verdict
+          # step then marks the run as an automation failure.
+          if [[ "$message" != *"$heading"* || "$message" != *"<!-- oc-review-meta "* ]]; then
+            echo "::error::The review agent ended without a structured review."
+            exit 1
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -f body="${heading}${message#*"$heading"}" > /dev/null
 
       - name: Verify and enforce review verdict
         id: verdict

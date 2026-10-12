@@ -67,6 +67,7 @@ mock.module('@/lib/opencode/client', () => ({
     getDirectory: () => DIRECTORY,
     setDirectory: () => undefined,
     clearConfigCache: () => undefined,
+    learnMessagePageShellsSupport: () => undefined,
     listProjects: async () => [],
     getFilesystemHome: async () => '/home',
     getLocation: async () => ({

@@ -5,7 +5,7 @@ description: Skonfiguruj Jev, mały model klasyfikacji, który podejmuje decyzje
 
 # Dostawcy klasyfikacji (Jev)
 
-Niektóre funkcje OpenChamber potrzebują szybkiej decyzji, zanim zaczną działać: czy to polecenie jest ryzykowne, jakiego rodzaju zadaniem jest ten prompt, czy użytkownik właśnie zabrał się do prawdziwej pracy? Na takie pytania odpowiada Jev, mały model decyzyjny od TypeSafe. Ta strona pokazuje, jak dać OpenChamber dostęp do Jev.
+Niektóre funkcje OpenChamber potrzebują szybkiej decyzji, zanim zaczną działać: czy to polecenie jest ryzykowne, jakiego rodzaju zadaniem jest ten prompt, czy ta praca wygląda na skończoną? Na takie pytania odpowiada Jev, mały model decyzyjny od TypeSafe. Ta strona pokazuje, jak dać OpenChamber dostęp do Jev.
 
 Jev nie pisze kodu i nie odpowiada na Twoim czacie. Zwraca tylko werdykt, a OpenChamber działa zgodnie z nim. Na odpowiedź OpenChamber czeka najwyżej cztery sekundy.
 
@@ -15,10 +15,10 @@ Jev nie pisze kodu i nie odpowiada na Twoim czacie. Zwraca tylko werdykt, a Open
 | --- | --- |
 | [Uprawnienia i siatka bezpieczeństwa](/pl/permissions/) | Czy agent powinien Cię zapytać, zanim wykona to działanie? |
 | [Automatyczny wybór modelu](/pl/auto-model-routing/) | Do której z Twoich kategorii należy ten prompt? |
-| [Sesje w toku](/pl/sessions-in-work/) | Czy właśnie poprosiłeś o prawdziwą pracę? Czy ta tura wygląda na jej koniec? |
+| [Sesje w toku](/pl/sessions-in-work/) | Czy ta tura wygląda na koniec pracy? |
 | [Podsumowanie i podpowiedź następnej wiadomości](/pl/sessions-in-work/) | Czy po tej turze warto wygenerować podsumowanie albo podpowiedź? |
 
-Bez dostawcy siatka bezpieczeństwa i Auto są ukryte, a sesje trafiają do toku tylko wtedy, gdy sam je tam przeniesiesz. Podsumowania i podpowiedzi dalej działają, tylko bez filtra.
+Bez dostawcy siatka bezpieczeństwa i Auto są ukryte, a sesje w toku nie dostają wskazówki „wygląda na skończoną”. Sesje i tak trafiają do toku, gdy wyślesz wiadomość. Podsumowania i podpowiedzi dalej działają, tylko bez filtra.
 
 ## Konfiguracja
 
@@ -96,7 +96,7 @@ Jeśli Jev odpowiada wolno albo zawodzi przy pojedynczym zapytaniu, nic się nie
 
 - Siatka bezpieczeństwa zostawia działanie, żeby czekało na Twoją decyzję.
 - Auto wysyła prompt do Twojego modelu zapasowego.
-- Sesje w toku zostają bez zmian.
+- Wskazówka „wygląda na skończoną” nie pojawia się przy sesjach w toku.
 - Podsumowanie i podpowiedź powstają tak, jakby Jev nie istniał.
 
 ## Co widzi Jev
@@ -107,7 +107,7 @@ Zapytania idą z serwera OpenChamber prosto do OpenCode Zen, OpenRouter, Vercel 
 
 ## Gdzie to działa
 
-Jev działa na serwerze OpenChamber, więc jest dostępny w aplikacji desktopowej, w aplikacji webowej i na telefonie połączonym z którąkolwiek z nich. Rozszerzenie VS Code rozmawia z OpenCode bezpośrednio i nie ma Jev: nie ma tam siatki bezpieczeństwa ani Auto, a sesje trafiają do toku tylko ręcznie.
+Jev działa na serwerze OpenChamber, więc jest dostępny w aplikacji desktopowej, w aplikacji webowej i na telefonie połączonym z którąkolwiek z nich. Rozszerzenie VS Code rozmawia z OpenCode bezpośrednio i nie ma Jev: nie ma tam siatki bezpieczeństwa, Auto ani wskazówki „wygląda na skończoną”.
 
 ## Powiązane
 

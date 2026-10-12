@@ -5,7 +5,7 @@ description: Configura Jev, el pequeño modelo de clasificación que toma decisi
 
 # Proveedores de clasificación (Jev)
 
-Algunas funciones de OpenChamber necesitan una decisión rápida antes de actuar: ¿este comando es arriesgado?, ¿qué tipo de tarea es este prompt?, ¿el usuario acaba de empezar un trabajo de verdad? Esas preguntas las responde Jev, un pequeño modelo de decisión de TypeSafe. Esta página explica cómo darle a OpenChamber acceso a Jev.
+Algunas funciones de OpenChamber necesitan una decisión rápida antes de actuar: ¿este comando es arriesgado?, ¿qué tipo de tarea es este prompt?, ¿este trabajo parece terminado? Esas preguntas las responde Jev, un pequeño modelo de decisión de TypeSafe. Esta página explica cómo darle a OpenChamber acceso a Jev.
 
 Jev nunca escribe código ni responde en tu chat. Solo devuelve un veredicto, y OpenChamber actúa según él. OpenChamber espera la respuesta como mucho cuatro segundos.
 
@@ -15,10 +15,10 @@ Jev nunca escribe código ni responde en tu chat. Solo devuelve un veredicto, y 
 | --- | --- |
 | [Permisos y red de seguridad](/es/permissions/) | ¿Debe el agente preguntarte antes de ejecutar esta acción? |
 | [Enrutamiento automático de modelos](/es/auto-model-routing/) | ¿A cuál de tus categorías pertenece este prompt? |
-| [Sesiones en curso](/es/sessions-in-work/) | ¿Acabas de pedir un trabajo de verdad? ¿Este turno parece su final? |
+| [Sesiones en curso](/es/sessions-in-work/) | ¿Este turno parece el final del trabajo? |
 | [Resumen y sugerencia del próximo mensaje](/es/sessions-in-work/) | ¿Vale la pena generar un resumen o una sugerencia después de este turno? |
 
-Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones solo pasan a en curso cuando las mueves tú. Los resúmenes y las sugerencias siguen funcionando, solo que sin el filtro.
+Sin proveedor, la red de seguridad y Auto quedan ocultos, y las sesiones en curso no reciben la pista «parece terminado». Las sesiones siguen pasando a en curso cuando envías un mensaje. Los resúmenes y las sugerencias siguen funcionando, solo que sin el filtro.
 
 ## Configuración
 
@@ -96,7 +96,7 @@ Si Jev va lento o falla en una solicitud, no se rompe nada. Cada función tiene 
 
 - La red de seguridad deja la acción esperando tu decisión.
 - Auto manda el prompt a tu modelo de respaldo.
-- Las sesiones en curso se quedan como están.
+- No aparece la pista «parece terminado» en las sesiones en curso.
 - El resumen y la sugerencia se generan como si Jev no existiera.
 
 ## Qué ve Jev
@@ -107,7 +107,7 @@ Las solicitudes van del servidor de OpenChamber directamente a OpenCode Zen, Ope
 
 ## Dónde funciona
 
-Jev funciona en el servidor de OpenChamber, así que está disponible en la app de escritorio, en la app web y en tu teléfono conectado a cualquiera de las dos. La extensión de VS Code habla directamente con OpenCode y no tiene Jev: no hay red de seguridad, no hay Auto y las sesiones solo pasan a en curso a mano.
+Jev funciona en el servidor de OpenChamber, así que está disponible en la app de escritorio, en la app web y en tu teléfono conectado a cualquiera de las dos. La extensión de VS Code habla directamente con OpenCode y no tiene Jev: no hay red de seguridad, ni Auto, ni pista «parece terminado».
 
 ## Relacionado
 

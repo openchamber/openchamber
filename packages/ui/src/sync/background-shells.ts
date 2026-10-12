@@ -199,7 +199,7 @@ export const applyBackgroundShellEvents = (rawDirectory: string, payloads: reado
     }
     if (payload.type === 'message.updated') {
       const stopped = readShellCancellation(payload.properties.info);
-      if (stopped) rememberStopNoted(stopped.shellID);
+      if (stopped) stopped.shellIDs.forEach(rememberStopNoted);
       continue;
     }
     const backgroundedID = backgroundedShellID(payload);

@@ -5,6 +5,8 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CollapsedActivityIndicator } from './sidebar/sessions/collapsedActivityIndicator';
+import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
+import { sessionTreeRowPaddingLeft } from './sidebar/sessions/sessionTreeGeometry';
 import type { CollapsedActivityState } from './sidebar/sessions/collapsedActivityState';
 
 interface SessionFolderItemProps<TSessionNode> {
@@ -40,8 +42,10 @@ interface SessionFolderItemProps<TSessionNode> {
   isDropTarget?: boolean;
   /** Create a new session scoped to this folder */
   onNewSession?: () => void;
-  /** Visual indent depth (0 = root folder, 1 = sub-folder) */
+  /** Tree level of the folder row: 0 right under the project, 1 under a worktree. */
   depth?: number;
+  /** False for a folder with nothing in it: no chevron, and it does not toggle. */
+  canExpand?: boolean;
   /** Hide folder action buttons (rename/delete/new) */
   hideActions?: boolean;
   /** Whether folder belongs to archived section */
@@ -71,6 +75,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   isDropTarget = false,
   onNewSession,
   depth = 0,
+  canExpand = true,
   hideActions = false,
   archivedBucket = false,
 }: SessionFolderItemProps<TSessionNode>) => {
@@ -137,27 +142,30 @@ const SessionFolderItemBase = <TSessionNode,>({
   }, [isRenaming]);
 
   const folderIconName = isCollapsed ? 'folder' : 'folder-open';
-  void depth;
+  // An empty folder has nothing to show or hide.
+  const toggleable = !renaming && canExpand;
 
   return (
     <div className="oc-folder">
       {/* Folder header – also acts as a drop zone when droppableRef is provided */}
       <div
         ref={droppableRef}
+        // A file tree folder row: the chevron, then the folder icon and name.
+        style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
         className={cn(
           'group/folder relative flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-md',
           'cursor-pointer',
-          isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
+          isDropTarget ? 'bg-primary/10 ring-1 ring-inset ring-primary/30' : 'hover:bg-interactive-hover/60',
         )}
-        onClick={renaming ? undefined : (event) => {
+        onClick={!toggleable ? undefined : (event) => {
           // SAFETY: this handler is attached to the div rendered directly above.
           (event.currentTarget as HTMLElement).blur();
           onToggle();
         }}
-        role={renaming ? undefined : 'button'}
-        tabIndex={renaming ? undefined : 0}
+        role={!toggleable ? undefined : 'button'}
+        tabIndex={!toggleable ? undefined : 0}
         onKeyDown={
-          renaming
+          !toggleable
             ? undefined
             : (event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -166,12 +174,14 @@ const SessionFolderItemBase = <TSessionNode,>({
                 }
               }
         }
-        aria-label={isCollapsed
+        aria-label={!toggleable ? undefined : isCollapsed
           ? t('sessions.sidebar.folderItem.expandAria', { folderName: folder.name })
           : t('sessions.sidebar.folderItem.collapseAria', { folderName: folder.name })}
       >
+        {/* 2px gaps put the folder name where the titles of its sessions,
+            one level deeper, start. */}
         <div className={cn(
-          'min-w-0 flex items-center gap-1.5 ps-1.5 flex-1',
+          'min-w-0 flex items-center gap-0.5 flex-1',
           archivedBucket
             ? (alwaysShowActions ? 'pe-7' : 'group-hover/folder:pe-7 group-focus-within/folder:pe-7')
             // Actions overlay on hover (new session, rename, delete = three
@@ -179,7 +189,11 @@ const SessionFolderItemBase = <TSessionNode,>({
             // while they are revealed, mirroring session-row behavior.
             : (alwaysShowActions ? 'pe-20' : 'group-hover/folder:pe-20 group-focus-within/folder:pe-20'),
         )}>
-          <Icon name={folderIconName} className={cn('h-3.5 w-3.5 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
+          {canExpand
+            ? <FileTreeChevron expanded={!isCollapsed} />
+            : <span aria-hidden className="size-3.5 flex-shrink-0" />}
+          {/* 12px glyph in the 14px icon slot (mx-px) keeps the name aligned. */}
+          <Icon name={folderIconName} className={cn('mx-px h-3 w-3 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
 
           {renaming ? (
             <form
@@ -239,11 +253,11 @@ const SessionFolderItemBase = <TSessionNode,>({
             <div className="min-w-0 flex items-center gap-1.5 flex-1">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className={cn('typography-ui-label font-semibold truncate', isDropTarget ? 'text-primary' : 'text-muted-foreground')}>
+                  <span className={cn('typography-ui-label font-medium truncate', isDropTarget ? 'text-primary' : 'text-foreground')}>
                     {displayName ?? folder.name}
                   </span>
                 </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8} className="max-w-xs">
+                <TooltipContent side="top" sideOffset={6} className="max-w-xs">
                   {displayName ?? folder.name}
                 </TooltipContent>
               </Tooltip>
@@ -253,11 +267,6 @@ const SessionFolderItemBase = <TSessionNode,>({
               {collapsedActivityState ? (
                 <CollapsedActivityIndicator state={collapsedActivityState} />
               ) : null}
-              {isCollapsed ? (
-                <Icon name="arrow-right-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-              ) : (
-                <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-              )}
             </div>
           )}
 
@@ -298,7 +307,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.folderItem.renameAria', { folderName: folder.name })}
                 >
-                  <Icon name="pencil-ai" className="h-3.5 w-3.5" />
+                  <Icon name="pencil-ai" className="h-3 w-3" />
                 </button>
               ) : null}
               <button
@@ -312,7 +321,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                   ? t('sessions.sidebar.folderItem.deleteArchivedInFolderAria', { folderName: folder.name })
                   : t('sessions.sidebar.folderItem.deleteFolderAria', { folderName: folder.name })}
               >
-                <Icon name="delete-bin" className="h-3.5 w-3.5" />
+                <Icon name="delete-bin" className="h-3 w-3" />
               </button>
             </div>
           </div>

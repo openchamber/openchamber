@@ -2571,6 +2571,11 @@ export function SyncProvider(props: {
   const messageLoader = messageLoaderRef.current
   const messageLoaderDisposalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   messageLoader.configure({ sdk: opencodeClient, runtimeKey })
+  // Asked while the rest of the bootstrap loads, so the first session page
+  // already arrives with its tool results shelled.
+  useEffect(() => {
+    opencodeClient.learnMessagePageShellsSupport()
+  }, [runtimeKey])
   const routingIndexRef = useRef<EventRoutingIndex | null>(null)
   if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
   const routingIndex = routingIndexRef.current
@@ -3493,26 +3498,27 @@ export function useSessionForms(sessionID: string, directory?: string) {
   )
 }
 
-type SessionBlockingRequestCounts = {
-  permissionCount: number
-  formCount: number
+type SessionBlockingRequests = {
+  hasPermission: boolean
+  hasForm: boolean
 }
 
-const EMPTY_SESSION_BLOCKING_REQUEST_COUNTS: SessionBlockingRequestCounts = {
-  permissionCount: 0,
-  formCount: 0,
+const NO_SESSION_BLOCKING_REQUESTS: SessionBlockingRequests = {
+  hasPermission: false,
+  hasForm: false,
 }
 
 /**
- * Count pending permissions and forms across exact session buckets grouped
- * by owning directory. This lets collapsed rows cover hidden descendants
- * without bootstrapping their stores or subscribing to unrelated updates.
+ * Whether any pending permission or form waits in exact session buckets
+ * grouped by owning directory. This lets collapsed rows cover hidden
+ * descendants without bootstrapping their stores or subscribing to unrelated
+ * updates.
  */
-export function useSessionBlockingRequestCounts(
+export function useSessionBlockingRequests(
   scopes: readonly { directory: string; sessionIDs: readonly string[] }[],
-): SessionBlockingRequestCounts {
+): SessionBlockingRequests {
   // Runtime only: the current directory is not an input here, and reading the
-  // directory-bearing context would re-render every sidebar row that counts
+  // directory-bearing context would re-render every sidebar row that shows
   // blocking requests whenever the user switches projects.
   const { childStores } = useSyncRuntime()
   const scopedStores = React.useMemo(() => scopes.map((scope) => ({
@@ -3525,22 +3531,22 @@ export function useSessionBlockingRequestCounts(
       for (const scope of scopes) childStores.unpin(scope.directory)
     }
   }, [childStores, scopes])
-  const snapshotRef = useRef(EMPTY_SESSION_BLOCKING_REQUEST_COUNTS)
+  const snapshotRef = useRef(NO_SESSION_BLOCKING_REQUESTS)
   const getSnapshot = React.useCallback(() => {
-    let permissionCount = 0
-    let formCount = 0
+    let hasPermission = false
+    let hasForm = false
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms } = store.getState()
       for (const sessionID of sessionIDs) {
-        permissionCount += permissions[sessionID]?.length ?? 0
-        formCount += forms[sessionID]?.length ?? 0
+        hasPermission ||= Boolean(permissions[sessionID]?.length)
+        hasForm ||= Boolean(forms[sessionID]?.length)
       }
     }
     const previous = snapshotRef.current
-    if (previous.permissionCount === permissionCount && previous.formCount === formCount) {
+    if (previous.hasPermission === hasPermission && previous.hasForm === hasForm) {
       return previous
     }
-    const next = { permissionCount, formCount }
+    const next = { hasPermission, hasForm }
     snapshotRef.current = next
     return next
   }, [scopedStores])

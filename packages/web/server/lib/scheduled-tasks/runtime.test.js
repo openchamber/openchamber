@@ -343,6 +343,8 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     await runtime.runNow('proj', 'task-1');
     runtime.stop();
 
+    // The run is marked, so it stays out of In work.
+    expect(posts.find((post) => post.pathname === '/api/session')?.body.metadata).toEqual({ openchamber: { kind: 'scheduled' } });
     const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/'));
     expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'synthetic', 'prompt']);
     expect(dispatch[0].body).toMatchObject({ text: 'Project background', resume: false });

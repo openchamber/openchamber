@@ -71,7 +71,17 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
   const elevated = mixColor(color('v2-background-bg-layer-01'), canvas, 1);
   const foreground = color('v2-text-text-base');
   const selection = color('v2-background-bg-layer-03');
-  const accent = color('v2-text-text-accent');
+  // Derived dark v2 text tokens are pale tints that wash out buttons and status
+  // dots, so dark keeps the seeds unless the theme authors the token itself;
+  // the shared adaptation still lifts colors to a readable shade. Light tokens
+  // are already deep, saturated shades.
+  const seeds = source[mode].palette ?? source[mode].seeds;
+  const authored = (token: string) => source[mode].v2Overrides?.[token] !== undefined;
+  const accentColor = (seed: string, token: string) => (dark && !authored(token) ? seed : color(token));
+  // An authored accent fill is the theme's button color, e.g. OpenCode's blue.
+  const accent = authored('v2-background-bg-accent')
+    ? color('v2-background-bg-accent')
+    : accentColor(seeds.primary, 'v2-text-text-accent');
   const palette = {
     'chat.list.background': canvas,
     'foreground': foreground,
@@ -91,17 +101,16 @@ export function convertTheme(source: SourceTheme, mode: Mode): ThemeDefinition {
     'toolbar.activeBackground': color('v2-overlay-simple-overlay-pressed'),
     'list.activeSelectionBackground': selection,
     'list.activeSelectionForeground': readableText(foreground, selection, canvas),
-    // Primary also paints small activity indicators; use the text accent.
     'button.background': accent,
     'button.foreground': onColor(accent, canvas),
-    'button.hoverBackground': color('v2-text-text-accent-hover'),
+    'button.hoverBackground': dark ? accent : color('v2-text-text-accent-hover'),
     'textLink.foreground': accent,
-    'editorError.foreground': color('v2-state-fg-danger'),
+    'editorError.foreground': accentColor(seeds.error, 'v2-state-fg-danger'),
     'editorError.background': color('v2-state-bg-danger'),
-    'editorWarning.foreground': color('v2-state-fg-warning'),
+    'editorWarning.foreground': accentColor(seeds.warning, 'v2-state-fg-warning'),
     'editorWarning.background': color('v2-state-bg-warning'),
-    'testing.iconPassed': color('v2-state-fg-success'),
-    'editorInfo.foreground': color('v2-state-fg-info'),
+    'testing.iconPassed': accentColor(seeds.success, 'v2-state-fg-success'),
+    'editorInfo.foreground': accentColor(seeds.info, 'v2-state-fg-info'),
     'editorInfo.background': color('v2-state-bg-info'),
     'gitDecoration.addedResourceForeground': color('syntax-diff-add'),
     'gitDecoration.deletedResourceForeground': color('syntax-diff-delete'),

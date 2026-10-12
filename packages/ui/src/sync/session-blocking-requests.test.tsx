@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { OpenCode } from '@opencode/client'
 import { opencodeClient } from '@/lib/opencode/client'
 import type { FormRequest, PermissionRequest } from '@/lib/opencode/model'
-import { SyncProvider, useDirectoryStore, useSessionBlockingRequestCounts } from './sync-context'
+import { SyncProvider, useDirectoryStore, useSessionBlockingRequests } from './sync-context'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
 
 // The provider has no current directory to bootstrap; the two scoped stores
@@ -37,7 +37,7 @@ type ProbeStores = {
 }
 
 let stores: ProbeStores | null = null
-let renderedCounts: { permissionCount: number; formCount: number } | null = null
+let rendered: { hasPermission: boolean; hasForm: boolean } | null = null
 let renderCount = 0
 
 /**
@@ -55,18 +55,9 @@ const CountsProbe = ({ includeChild }: { includeChild: boolean }) => {
         { directory: CHILD_DIR, sessionIDs: ['child'] },
       ]
     : [{ directory: PARENT_DIR, sessionIDs: ['parent'] }]), [includeChild])
-  renderedCounts = useSessionBlockingRequestCounts(scopes)
+  rendered = useSessionBlockingRequests(scopes)
   renderCount += 1
   return null
-}
-
-const seedPermissions = async () => {
-  await act(async () => {
-    stores!.parent.setState({ permission: { parent: [permission('parent-permission', 'parent')] } })
-    stores!.child.setState({
-      permission: { child: [permission('child-permission-1', 'child'), permission('child-permission-2', 'child')] },
-    })
-  })
 }
 
 const withProbe = async (includeChild: boolean, assert: () => Promise<void>) => {
@@ -83,7 +74,7 @@ const withProbe = async (includeChild: boolean, assert: () => Promise<void>) => 
   const projects = spyOn(opencodeClient, 'listProjects').mockResolvedValue([])
   const root = createRoot(dom.container)
   stores = null
-  renderedCounts = null
+  rendered = null
   renderCount = 0
   try {
     await act(async () => root.render(
@@ -104,17 +95,17 @@ const withProbe = async (includeChild: boolean, assert: () => Promise<void>) => 
   }
 }
 
-describe('useSessionBlockingRequestCounts', () => {
+describe('useSessionBlockingRequests', () => {
   test('rolls a hidden cross-directory subagent permission up to its collapsed parent (#2247)', async () => {
     await withProbe(true, async () => {
-      // An unbootstrapped store contributes zero rather than inventing a count.
-      expect(renderedCounts).toEqual({ permissionCount: 0, formCount: 0 })
+      // An unbootstrapped store contributes nothing rather than inventing a request.
+      expect(rendered).toEqual({ hasPermission: false, hasForm: false })
 
-      await seedPermissions()
+      await act(async () => stores!.child.setState({ permission: { child: [permission('child-permission', 'child')] } }))
 
-      // 1 own + 2 hidden in another directory store, delivered through the
-      // permission sidecar channel rather than a re-render of the whole tree.
-      expect(renderedCounts?.permissionCount).toBe(3)
+      // Delivered through the permission sidecar channel rather than a
+      // re-render of the whole tree.
+      expect(rendered?.hasPermission).toBe(true)
 
       const previousRenders = renderCount
       await act(async () => stores!.child.setState({
@@ -123,28 +114,30 @@ describe('useSessionBlockingRequestCounts', () => {
       expect(renderCount).toBe(previousRenders)
 
       await act(async () => stores!.child.setState({ permission: { child: [] } }))
-      expect(renderedCounts?.permissionCount).toBe(1)
+      expect(rendered?.hasPermission).toBe(false)
     })
   })
 
-  test('keeps an expanded parent count scoped to the parent row', async () => {
+  test('keeps an expanded parent scoped to the parent row', async () => {
     await withProbe(false, async () => {
-      await seedPermissions()
+      await act(async () => stores!.child.setState({ permission: { child: [permission('child-permission', 'child')] } }))
+      expect(rendered?.hasPermission).toBe(false)
 
-      expect(renderedCounts?.permissionCount).toBe(1)
+      await act(async () => stores!.parent.setState({ permission: { parent: [permission('parent-permission', 'parent')] } }))
+      expect(rendered?.hasPermission).toBe(true)
     })
   })
 
-  test('counts forms and permissions independently for the same scopes', async () => {
+  test('tracks forms and permissions independently, and more of the same kind does not re-render', async () => {
     await withProbe(true, async () => {
-      await act(async () => {
-        stores!.child.setState({
-          permission: { child: [permission('child-permission', 'child')] },
-          form: { child: [form('child-form-1', 'child'), form('child-form-2', 'child')] },
-        })
-      })
+      await act(async () => stores!.child.setState({ form: { child: [form('child-form-1', 'child')] } }))
+      expect(rendered).toEqual({ hasPermission: false, hasForm: true })
 
-      expect(renderedCounts).toEqual({ permissionCount: 1, formCount: 2 })
+      const previousRenders = renderCount
+      await act(async () => stores!.child.setState({
+        form: { child: [form('child-form-1', 'child'), form('child-form-2', 'child')] },
+      }))
+      expect(renderCount).toBe(previousRenders)
     })
   })
 })

@@ -607,12 +607,10 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
           const shell = useBackgroundShellsStore.getState().byId.get(shellId);
           if (!shell) throw new HostRequestError('NOT_FOUND', 'That shell is not running.');
           const session = useGlobalSessionsStore.getState().entityById.get(shell.sessionID);
-          await opencodeClient.stopBackgroundShell({
+          await opencodeClient.stopBackgroundShells({
             sessionID: shell.sessionID,
             sessionDirectory: session?.directory ?? shell.directory,
-            shellID: shell.id,
-            shellDirectory: shell.directory,
-            command: shell.command,
+            shells: [{ shellID: shell.id, shellDirectory: shell.directory, command: shell.command }],
           });
           return { stopped: true as const };
         },

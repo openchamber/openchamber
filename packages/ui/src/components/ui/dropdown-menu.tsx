@@ -6,6 +6,7 @@ import { Icon } from "@/components/icon/Icon";
 import { shortcutRegistry } from "@/lib/shortcuts";
 import { handleDropdownNavigationKey } from "./dropdown-navigation";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
+import { GlassRedrawGuard } from "./glass-redraw-guard"
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -185,6 +186,7 @@ function DropdownMenuContent({
           onKeyDown={handleKeyDown}
         >
           {children}
+          <GlassRedrawGuard />
         </BaseMenu.Popup>
       </BaseMenu.Positioner>
     </BaseMenu.Portal>
@@ -353,6 +355,7 @@ function DropdownMenuSubContent({
           onKeyDown={handleKeyDown}
         >
           {children}
+          <GlassRedrawGuard />
         </BaseMenu.Popup>
       </BaseMenu.Positioner>
     </BaseMenu.Portal>

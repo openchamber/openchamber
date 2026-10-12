@@ -153,10 +153,12 @@ describe('Catppuccin built-in palettes', () => {
         mutedForeground: '#616274',
         elevated: '#e5e7eb',
       },
+      // Latte's peach and green fall below 4.6:1 on its canvas, so the UI
+      // status shades are darkened along their hue; syntax keeps the originals.
       status: {
-        error: '#d20f39',
-        warning: '#fe640b',
-        success: '#40a02b',
+        error: '#cb0f37',
+        warning: '#af4508',
+        success: '#2f7520',
         info: '#1850c1',
       },
       mergedPr: '#8839ef',

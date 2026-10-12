@@ -60,6 +60,12 @@ if (shouldIgnoreLoopbackConnectionLimit({
 })) {
   app.commandLine.appendSwitch('ignore-connections-limit', '127.0.0.1');
 }
+// Development only: lets a debugger or an agent attach to the dev window over
+// CDP. Chromium binds the port to loopback.
+const devRemoteDebuggingPort = String(process.env.OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT || '').trim();
+if (isDev && /^\d+$/.test(devRemoteDebuggingPort)) {
+  app.commandLine.appendSwitch('remote-debugging-port', devRemoteDebuggingPort);
+}
 protocol.registerSchemesAsPrivileged([
   {
     scheme: UI_PROTOCOL,

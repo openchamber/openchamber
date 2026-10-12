@@ -44,15 +44,15 @@
       "error": "#CE0606",
       "errorBackground": "#FFE8E8",
       "errorBorder": "#CF5B56",
-      "warning": "#F49810",
+      "warning": "#9d620a",
       "warningBackground": "#FFF8DC",
-      "warningBorder": "#F49810",
+      "warningBorder": "#9d620a",
       "success": "#077D18",
       "successBackground": "#E9F5E6",
       "successBorder": "#55A76A",
-      "info": "#389FD6",
+      "info": "#29769f",
       "infoBackground": "#E7F4FB",
-      "infoBorder": "#389FD6"
+      "infoBorder": "#29769f"
     },
     "syntax": {
       "base": {
@@ -105,7 +105,7 @@
       "closed": "#E55765"
     },
     "chat": {
-      "userMessageBackground": "#ebedf2",
+      "userMessageBackground": "#e4eeff",
       "divider": "#E1E4EB",
       "background": "#FFF"
     },

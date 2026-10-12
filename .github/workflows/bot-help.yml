@@ -55,12 +55,12 @@ jobs:
 
           gh issue comment "$ISSUE_NUMBER" --body "<h3>OpenChamber Bot Commands</h3>
 
-          Use one command at the start of a comment. Any text after the command is passed as maintainer focus.
+          Use one command at the start of a comment. Any text after the command is passed as maintainer focus. Commands run only for people with write access to this repository.
 
           - <code>@openchamber-bot review [focus]</code> — review a pull request.
           - <code>@openchamber-bot summarize [focus]</code> — summarize an issue or pull request discussion.
           - <code>@openchamber-bot triage [focus]</code> — triage an issue.
-          - <code>@openchamber-bot reproduce [focus]</code> — attempt to reproduce an issue.
+          - <code>@openchamber-bot reproduce [focus]</code> — trace an issue's cause in the code.
           - <code>@openchamber-bot help</code> — show this help message.
 
           <h4>Examples</h4>

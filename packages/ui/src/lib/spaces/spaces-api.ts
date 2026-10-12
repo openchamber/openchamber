@@ -146,7 +146,9 @@ const spaceEntrySchema = z.object({
   // registered still names; `found` is whether it is there now, null when not looked at. A host
   // before 5e-3 names none.
   projectFolder: z.object({ path: z.string().nullable(), found: z.boolean().nullable() }).default({ path: null, found: null }),
-  state: z.enum(['preparing', 'running', 'exited', 'missing', 'failed']),
+  // `unreachable`: the space is on a place that cannot be asked right now, the machine of a
+  // Docker over SSH place being off among the reasons; the host lists it from its own record.
+  state: z.enum(['preparing', 'running', 'exited', 'missing', 'failed', 'unreachable']),
   // A stopped space that stopped itself after the idle hours, rather than by a hand or a crash.
   stoppedIdle: z.boolean().default(false),
   // The step a creation is at, or `failed` for a creation that failed, in this process or in one

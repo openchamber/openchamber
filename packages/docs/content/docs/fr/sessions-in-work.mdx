@@ -1,19 +1,25 @@
 ---
 title: Sessions en cours
-description: Gardez les sessions où un vrai travail avance bien en vue dans la barre latérale, jusqu’à ce que vous les marquiez comme terminées.
+description: Gardez les sessions sur lesquelles vous travaillez bien en vue dans la barre latérale, jusqu’à ce que vous les marquiez comme terminées.
 ---
 
 # Sessions en cours
 
-Questions, recherches et essais rapides s’accumulent vite, et la session où vous corrigez vraiment quelque chose finit noyée au milieu. Le bloc **En cours** réunit ces sessions à un seul endroit de la barre latérale. Une session y reste jusqu’à ce que vous disiez qu’elle est terminée.
-
-C’est la différence avec « Récent ». « Récent » montre tout ce qui a changé ces deux derniers jours et se renouvelle tout seul : une session ouverte ce matin par curiosité y figure, un correctif mis en pause lundi en a disparu. « En cours », c’est la liste de ce que vous n’avez pas fini, peu importe depuis quand vous ne l’avez pas ouvert.
+Chaque session dans laquelle vous envoyez un message passe dans le bloc **En cours**, en haut de la barre latérale, et y reste jusqu’à ce que vous la marquiez comme terminée, peu importe depuis quand vous ne l’avez pas ouverte. Vos projets gardent toutes vos sessions ; En cours ne contient que ce que vous n’avez pas encore terminé.
 
 ## Où le trouver
 
-Le bloc **En cours** se trouve dans la barre latérale, sous les discussions et au-dessus de « Récent » (ou de la chronologie en mode Timeline). Sur le téléphone, il est au même endroit dans la liste des sessions.
+Le bloc **En cours** se trouve dans la barre latérale, sous les discussions et au-dessus de vos projets ou de la chronologie. Sur le téléphone, il est au même endroit dans la liste des sessions.
 
-Une session en cours y part avec ses sous-sessions. Elle n’apparaît pas une deuxième fois dans « Récent », dans la chronologie, dans son projet ou dans son dossier. Marquez-la comme terminée et elle retourne là où elle était.
+Une session en cours reste aussi dans son projet et dans son dossier, et sous son projet dans la chronologie : vous la voyez donc à deux endroits. Ses sous-sessions la suivent. La recherche ne l’affiche qu’une fois, dans le bloc En cours.
+
+## Comment les sessions y entrent
+
+Envoyez un message dans une session et elle passe en cours. Cela vaut pour toute session de projet, y compris les sessions dans un worktree.
+
+Une session marquée comme terminée revient dès que vous y envoyez un nouveau message.
+
+Les discussions, les sessions archivées, les sessions de revue et les exécutions de [tâches planifiées](/fr/scheduled-tasks/) n’y entrent jamais ; si vous forkez une exécution pour continuer à travailler dessus, le fork y entre. Les sous-sessions n’y entrent pas seules ; elles suivent leur session parente.
 
 ## Suivre et terminer une session à la main
 
@@ -22,28 +28,16 @@ Une session en cours y part avec ses sous-sessions. Elle n’apparaît pas une d
 
 Sur le téléphone, faites glisser la ligne d’une session pour atteindre la même action, ou utilisez le menu de la session.
 
-N’importe quelle session de projet peut être en cours, y compris les sessions dans un worktree. Les sous-sessions suivent leur session parente. Les discussions, jamais : ce sont de simples conversations, elles n’ont donc pas d’œil.
-
-## Laissez Jev placer les sessions pour vous
-
-Avec un [fournisseur de classification](/fr/classification-providers/) configuré, vous n’avez pas à suivre les sessions vous-même. Jev lit chaque message que vous envoyez et place la session en cours quand vous :
-
-- demandez une modification
-- signalez un bug
-- discutez d’une modification concrète que vous vous apprêtez à faire
-
-Les questions, les explications et les recherches ne comptent pas. Jev regarde à nouveau quand l’agent termine un tour, ce qui rattrape le travail qui ne devient clair qu’avec la réponse.
-
-Jev ne fait que placer les sessions **en** cours, jamais l’inverse. Une fois une session marquée comme terminée, seule une nouvelle demande envoyée après la fait revenir.
+Les discussions n’ont pas d’œil : ce sont de simples conversations.
 
 ### « Ce travail semble terminé. »
 
-Quand un tour ressemble à la fin du travail (vous avez dit merci, demandé un commit, confirmé que ça marche), Jev ne ferme rien et laisse une indication :
+Avec un [fournisseur de classification](/fr/classification-providers/) configuré, Jev examine chaque tour d’une session en cours. Quand un tour ressemble à la fin du travail (vous avez dit merci, demandé un commit, confirmé que ça marche), Jev ne ferme rien et laisse une indication :
 
 - une coche grise sur la ligne de la session dans la barre latérale
 - un bandeau au-dessus du champ de saisie : **Ce travail semble terminé.** avec un bouton **Marquer comme terminé**
 
-Cliquez sur **Marquer comme terminé** si Jev a raison. Sinon, continuez simplement : l’indication disparaît avec votre prochain message.
+Cliquez sur **Marquer comme terminé** si Jev a raison. Sinon, continuez simplement : l’indication disparaît avec votre prochain message. Sans fournisseur de classification, il n’y a pas d’indication et vous marquez les sessions comme terminées vous-même.
 
 ## Récapitulatif et suggestion du prochain message
 
@@ -58,19 +52,16 @@ Activez-les ou désactivez-les dans **Paramètres → Chat → Assistance de ses
 
 ## Paramètres
 
-Ouvrez **Paramètres → Sessions → Sessions en cours** :
+Ouvrez **Paramètres → Sessions → Sessions en cours**. Il n’y a qu’un réglage, **Afficher les sessions en cours**, activé par défaut. Désactivé, il coupe toute la fonction : plus de bloc, et envoyer un message ne fait plus passer la session en cours.
 
-- **Afficher les sessions en cours :** le bloc lui-même ; désactivé, les sessions restent là où elles ont toujours été
-- **Placer automatiquement les sessions en cours :** la partie Jev ; désactivez-la pour ne suivre qu’à la main
-
-Les deux sont activés par défaut.
+Pour masquer seulement le bloc, utilisez **Afficher la section en cours** dans le menu d’affichage de la barre latérale.
 
 ## Où ça fonctionne
 
-Le bloc et le suivi manuel fonctionnent partout, VS Code compris. Le placement automatique, l’indication « semble terminé » et le filtre Jev pour les récapitulatifs ont besoin du serveur OpenChamber : ils fonctionnent donc dans l’application desktop, dans l’application web et sur le téléphone, mais pas dans VS Code.
+Le bloc et le suivi manuel fonctionnent partout, VS Code compris. Le passage en cours à l’envoi d’un message, l’indication « semble terminé » et le filtre Jev pour les récapitulatifs ont besoin du serveur OpenChamber : ils fonctionnent donc dans l’application desktop, dans l’application web et sur le téléphone, mais pas dans VS Code. Dans VS Code, vous suivez les sessions à la main.
 
 ## Voir aussi
 
-- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer le suivi automatique
+- [Fournisseurs de classification (Jev)](/fr/classification-providers/) : configurer l’indication « semble terminé »
 - [Discussions](/fr/chats/) : des conversations qui restent hors du travail en cours
 - [Objectifs de session](/fr/session-goals/) : faire travailler l’agent jusqu’à la ligne d’arrivée

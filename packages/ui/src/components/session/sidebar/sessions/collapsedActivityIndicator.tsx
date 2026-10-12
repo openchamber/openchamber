@@ -5,6 +5,7 @@ import type { SessionNode } from '../types';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { useCollapsedSessionActivityState, type CollapsedActivityState } from './collapsedActivityState';
+import { RowMarkTooltip } from './RowMarkTooltip';
 
 // Aggregate rows carry no counters: the elapsed counter is per session and
 // has no meaning for a collapsed group that may hold several running turns,
@@ -24,16 +25,17 @@ export function CollapsedActivityIndicator({
       ? t('sessions.sidebar.session.status.permissionRequired')
       : t('sessions.sidebar.session.status.questionPending');
     return (
-      <span
-        className={cn('inline-flex shrink-0 items-center', state === 'permission' ? 'text-destructive' : 'text-status-info', className)}
-        aria-label={label}
-        title={label}
-      >
-        <Icon name={state === 'permission' ? 'shield' : 'question'} className="h-3 w-3" />
-      </span>
+      <RowMarkTooltip label={label}>
+        <span
+          className={cn('inline-flex shrink-0 items-center', state === 'permission' ? 'text-destructive' : 'text-status-info', className)}
+          aria-label={label}
+        >
+          <Icon name={state === 'permission' ? 'shield' : 'question'} className="h-3 w-3" />
+        </span>
+      </RowMarkTooltip>
     );
   }
-  return <SessionActivityIndicator state={state === 'active' ? 'running' : 'unread'} className={className} />;
+  return <SessionActivityIndicator state={state === 'active' ? 'running' : 'unread'} className={className} tooltip />;
 }
 
 export const CollapsedSessionActivityIndicator: React.FC<{

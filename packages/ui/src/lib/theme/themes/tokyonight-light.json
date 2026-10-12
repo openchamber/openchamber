@@ -90,13 +90,13 @@
     },
     "chat": {
       "background": "#e5e6ea",
-      "userMessageBackground": "#d3d6dd",
+      "userMessageBackground": "#d3dbe8",
       "divider": "#0000001a"
     },
     "markdown": {
-      "link": "#185ab1",
+      "link": "#195cb6",
       "linkHover": "#1757ab",
-      "inlineCode": "#436512",
+      "inlineCode": "#436612",
       "inlineCodeBackground": "#dfe0e4",
       "blockquote": "#4b5472",
       "blockquoteBorder": "#0000001a",

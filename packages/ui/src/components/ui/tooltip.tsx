@@ -2,6 +2,7 @@ import * as React from "react"
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
+import { GlassRedrawGuard } from "./glass-redraw-guard"
 
 const MOBILE_LONG_PRESS_DELAY = 600
 const MOBILE_LONG_PRESS_CLOSE_DELAY = 1600
@@ -287,6 +288,7 @@ function TooltipContent({
             {...props}
           >
             {children}
+            <GlassRedrawGuard />
             {showArrow ? (
               // eslint-disable-next-line no-restricted-syntax -- Base UI reports the popup's side physically
               <BaseTooltip.Arrow className="relative z-50 block h-1.5 w-3 overflow-clip data-[side=bottom]:top-[-6px] data-[side=left]:right-[-9px] data-[side=left]:rotate-90 data-[side=right]:left-[-9px] data-[side=right]:-rotate-90 data-[side=top]:bottom-[-6px] data-[side=top]:rotate-180 before:absolute before:bottom-0 before:left-1/2 before:block before:h-[calc(6px*sqrt(2))] before:w-[calc(6px*sqrt(2))] before:border before:border-border/60 before:bg-[var(--surface-elevated)] before:content-[''] before:[transform:translate(-50%,50%)_rotate(45deg)]" />

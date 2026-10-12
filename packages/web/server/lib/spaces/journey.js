@@ -51,6 +51,8 @@ import { createSpaceSetup, setupCommandsSchema } from './space-setup.js';
 // The four choices of the create dialog, parsed at the boundary. Each field refuses with a code
 // of its own, so the dialog can point at the field.
 const createRequestSchema = z.object({
+  // The place the space is made on; the first configured place, local Docker, unless the dialog says another.
+  placeId: z.string().min(1).optional(),
   projectDirectory: z.string().min(1),
   name: z.string().trim().min(1),
   start: z.enum(['clean', 'uncommitted']).default('uncommitted'),
@@ -60,6 +62,7 @@ const createRequestSchema = z.object({
   setupCommands: setupCommandsSchema.default([]),
 });
 const CREATE_REFUSALS = {
+  placeId: ['place_not_found', 'A space is made on one of the configured places.'],
   projectDirectory: ['project_not_registered', 'A space is made for a project this OpenChamber knows. Add the project first, then create the space.'],
   name: ['invalid_space_name', 'A space needs a name.'],
   start: ['invalid_snapshot_mode', 'A space starts from a clean commit or with the uncommitted changes.'],
@@ -119,6 +122,8 @@ const failureOf = (error) => ({
 });
 
 /**
+ * `manager` is the space manager over every place, which routes a space's operations to the place
+ * it lives on, and `places` the place registry, asked by id for a check, the disk and the image.
  * `listProjectDirectories` answers the host's registered projects; a space is made for one of them
  * and its label carries the project's hash. `announce(spaceId, payload)` enters an event into the
  * host's hub, `onSpacesChanged()` tells the host to read its list again at once. `spaceOpenCode`
@@ -139,7 +144,7 @@ const failureOf = (error) => ({
  */
 export function createSpaceJourney({
   manager,
-  place,
+  places,
   gatekeeper,
   codeIn,
   codeOut,
@@ -178,12 +183,32 @@ export function createSpaceJourney({
   // The project's setup commands inside a space, since 5d-4; each step is announced so the
   // clients read the list again.
   const setup = createSpaceSetup({
-    exec: place.exec,
+    exec: manager.exec,
     records,
     announce: (spaceId) => announce(spaceId, { type: 'openchamber:space-setup', properties: { spaceId, timestamp: now().getTime() } }),
     logger,
     now,
   });
+
+  const requirePlace = (placeId) => {
+    const place = places.get(placeId);
+    if (!place) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
+    return place;
+  };
+
+  // Which places could not be asked at the last list, so a place going away or coming back is
+  // logged once and not at every read of the list.
+  let unavailablePlaces = '';
+  const listAll = async () => {
+    const listed = await manager.listAllSpaces();
+    const names = listed.unavailable.map((entry) => entry.placeId).sort().join(',');
+    if (names !== unavailablePlaces) {
+      for (const { placeId, failure } of listed.unavailable) logger.warn?.(`[spaces] place ${placeId} cannot be asked, its spaces are listed from the records: ${failure?.code ?? failure?.message ?? failure}`);
+      if (names === '') logger.info?.('[spaces] every place answers again');
+      unavailablePlaces = names;
+    }
+    return listed;
+  };
 
   const exclusive = async (spaceId, work) => {
     if (busy.has(spaceId)) throw new SpaceError('space_busy', 'Another action on this space is still running. Wait for it to finish.');
@@ -226,11 +251,17 @@ export function createSpaceJourney({
   /** Removes the space and everything the host kept for it, and says what did not go. */
   const removeEverything = async (spaceId, repository) => {
     const outcome = { removed: false, refsRemoved: null, failures: [] };
+    // The record goes with the space. It stays when the space could not be removed, so a space
+    // whose place cannot be asked keeps its place in the list until the machine answers and the
+    // delete goes through; the one exception is a place that is no longer configured, where
+    // nothing from here can reach the space and the record is all there is to forget.
+    let forgetRecord = true;
     try {
-      await manager.removeSpace({ placeId: place.id, spaceId });
+      await manager.removeSpace({ spaceId });
       outcome.removed = true;
     } catch (error) {
       outcome.failures.push(failureOf(error));
+      forgetRecord = error instanceof SpaceError && error.code === 'place_not_found';
     }
     if (repository) {
       try {
@@ -247,7 +278,7 @@ export function createSpaceJourney({
         }
       }
     }
-    records.remove(spaceId);
+    if (forgetRecord) records.remove(spaceId);
     return outcome;
   };
 
@@ -282,19 +313,20 @@ export function createSpaceJourney({
       });
   };
 
-  const prepare = async (entry, { projectDirectory, name, start, network, setupCommands }) => {
+  const prepare = async (entry, { placeId, projectDirectory, name, start, network, setupCommands }) => {
     let created = false;
     try {
       progress(entry, 'checking_place');
-      const check = await place.check();
+      const check = await requirePlace(placeId).check();
       if (!check.available) throw new SpaceError(check.code, check.message);
       if (network.mode === 'allowlist' && check.hostIsolation !== true) {
         throw new SpaceError('place_cannot_restrict_network', 'This place cannot keep a space away from the machine it runs on, so an allowlist would not hold. Use a newer Docker engine, or choose the open network with that in mind.');
       }
       progress(entry, 'creating');
-      await manager.createSpace({ id: entry.id, placeId: place.id, projectDirectory, name });
+      await manager.createSpace({ id: entry.id, placeId, projectDirectory, name });
       created = true;
-      records.write(entry.id, { network, repository: projectDirectory });
+      // With the place, the name and the time, so the space is still listed while its place cannot be asked.
+      records.write(entry.id, { placeId, name: entry.name, created: entry.created, network, repository: projectDirectory });
       progress(entry, 'setting_network');
       await gatekeeper.setNetwork(entry.id, network);
       progress(entry, 'bringing_code');
@@ -333,12 +365,14 @@ export function createSpaceJourney({
       throw new SpaceError(code, message);
     }
     const { name, start, network, setupCommands } = parsed.data;
+    const placeId = parsed.data.placeId ?? places.list()[0]?.id;
+    requirePlace(placeId);
     const projectDirectory = await requireRegisteredProject(parsed.data.projectDirectory);
     const id = createSpaceId();
     const entry = {
       id,
       name,
-      placeId: place.id,
+      placeId,
       projectDirectory,
       directory: spaceProjectPath(id, projectDirectory),
       created: now().toISOString(),
@@ -349,7 +383,7 @@ export function createSpaceJourney({
       setupTotal: setupCommands.length,
     };
     pending.set(entry.id, entry);
-    void prepare(entry, { projectDirectory, name, start, network, setupCommands });
+    void prepare(entry, { placeId, projectDirectory, name, start, network, setupCommands });
     return describePending(entry);
   };
 
@@ -513,7 +547,7 @@ export function createSpaceJourney({
   const restoreLostGrants = async () => {
     let spaces;
     try {
-      spaces = await manager.listSpaces({ placeId: place.id });
+      ({ spaces } = await listAll());
     } catch (error) {
       logger.warn?.(`[spaces] could not list the spaces to say their grants again: ${error?.code ?? error?.message ?? error}`);
       return;
@@ -573,7 +607,7 @@ export function createSpaceJourney({
     if (!space.damaged) return null;
     if (!space.missing.includes(spaceResourceName(space.id, ROLE_GATEKEEPER))) return 'repairable';
     try {
-      const violations = await place.verify(space.id);
+      const violations = await manager.verify(space.id);
       return violations.some((violation) => violation.check === 'gatekeeper_missing') ? 'gatekeeper_gone' : 'repairable';
     } catch (error) {
       if (error instanceof SpaceError && error.code === 'gatekeeper_missing') return 'gatekeeper_gone';
@@ -619,7 +653,7 @@ export function createSpaceJourney({
    * folder is there now, and is null while a creation is under way or when nothing names it.
    */
   const listSpaces = async ({ access = false } = {}) => {
-    const [spaces, projects] = await Promise.all([manager.listSpaces({ placeId: place.id }), registeredProjects()]);
+    const [{ spaces }, projects] = await Promise.all([listAll(), registeredProjects()]);
     const listed = await Promise.all(spaces.map(async (space) => {
       const projectDirectory = projects.get(space.project) ?? null;
       const { record } = records.read(space.id);
@@ -629,7 +663,7 @@ export function createSpaceJourney({
       // the containers run, the code never arrived, and the user would otherwise send the agent
       // into an empty folder. It is listed as a failed creation, whose one way out is Remove; a
       // creation under way in this process is replaced by its own entry below.
-      const codeNeverArrived = record !== null && record.spacePath === null;
+      const codeNeverArrived = space.state !== 'unreachable' && record !== null && record.spacePath === null;
       return {
         id: space.id,
         name: space.name,
@@ -673,7 +707,7 @@ export function createSpaceJourney({
    */
   const stopStrayGatekeeper = (spaceId) => {
     if (busy.has(spaceId) || strayStops.has(spaceId)) return;
-    const stopping = manager.stopSpace({ placeId: place.id, spaceId })
+    const stopping = manager.stopSpace({ spaceId })
       .catch((error) => {
         logger.warn?.(`[spaces] the gatekeeper beside stopped space ${spaceId} still runs: ${error?.code ?? error?.message ?? error}`);
       })
@@ -697,7 +731,7 @@ export function createSpaceJourney({
     if (closing) throw new SpaceError('isolated_spaces_off', 'Isolated spaces are being turned off.');
     requireNotPending(spaceId);
     await strayStops.get(spaceId);
-    await manager.startSpace({ placeId: place.id, spaceId });
+    await manager.startSpace({ spaceId });
     const { record } = records.read(spaceId);
     let networkRestored = false;
     let grants = { restored: [], needsAccess: [] };
@@ -737,7 +771,7 @@ export function createSpaceJourney({
     } catch (error) {
       logger.warn?.(`[spaces] the server inside space ${spaceId} keeps its token: ${error?.code ?? error?.message ?? error}`);
     }
-    await manager.stopSpace({ placeId: place.id, spaceId });
+    await manager.stopSpace({ spaceId });
     return startUnlocked(spaceId);
   });
 
@@ -875,7 +909,7 @@ export function createSpaceJourney({
 
   const stopSpace = (spaceId) => exclusive(spaceId, async () => {
     requireNotPending(spaceId);
-    await manager.stopSpace({ placeId: place.id, spaceId });
+    await manager.stopSpace({ spaceId });
     onSpacesChanged();
     return requireListed(spaceId);
   });
@@ -893,7 +927,7 @@ export function createSpaceJourney({
     let started = false;
     if (!running && space.state === 'exited') {
       try {
-        await manager.startSpace({ placeId: place.id, spaceId: space.id });
+        await manager.startSpace({ spaceId: space.id });
         running = true;
         started = true;
       } catch (error) {
@@ -904,7 +938,7 @@ export function createSpaceJourney({
       return await archiveChats({ spaceId: space.id, name: space.name, projectDirectory: space.projectDirectory ?? null, running, allowUnsaved });
     } catch (error) {
       if (started) {
-        await manager.stopSpace({ placeId: place.id, spaceId: space.id }).catch((stopError) => {
+        await manager.stopSpace({ spaceId: space.id }).catch((stopError) => {
           logger.warn?.(`[spaces] space ${space.id} started for its chats is still running: ${stopError?.code ?? stopError?.message ?? stopError}`);
         });
       }
@@ -925,7 +959,7 @@ export function createSpaceJourney({
       pending.delete(spaceId);
       // A failed creation whose clean-up failed still has containers; those go now, or the space
       // comes back in the list as damaged. One that was cleaned up has nothing left to remove.
-      const still = (await manager.listSpaces({ placeId: place.id })).some((space) => space.id === spaceId);
+      const still = (await listAll()).spaces.some((space) => space.id === spaceId);
       if (!still) return { id: spaceId, removed: true, refsRemoved: null, failures: [], chats: null };
       return { id: spaceId, ...(await removeEverything(spaceId, waiting.projectDirectory)), chats: null };
     }
@@ -952,8 +986,9 @@ export function createSpaceJourney({
     if (preparing.length > 0) throw new SpaceError('space_preparing', `${preparing.length === 1 ? 'A space is' : `${preparing.length} spaces are`} still being made. Wait for that to finish first.`, { spaces: preparing.map((entry) => entry.id) });
     closing = true;
     let spaces;
+    let unavailable;
     try {
-      spaces = await manager.listSpaces({ placeId: place.id });
+      ({ spaces, unavailable } = await listAll());
     } catch (error) {
       logger.warn?.(`[spaces] turning off without knowing which spaces run: ${error?.code ?? error?.message ?? error}`);
       return { stopped: [], stillRunning: [], unknown: failureOf(error) };
@@ -961,19 +996,26 @@ export function createSpaceJourney({
     const stopped = [];
     const stillRunning = [];
     for (const space of spaces) {
+      // A space on a place that cannot be asked may well run, and nothing from here stops it.
+      if (space.state === 'unreachable') {
+        const failure = unavailable.find((entry) => entry.placeId === space.placeId)?.failure;
+        stillRunning.push({ id: space.id, name: space.name, ...failureOf(failure) });
+        continue;
+      }
       if (space.state !== 'running') {
         // A gatekeeper left by an idle stop goes too, and the space is not counted: it was stopped.
-        if (space.gatekeeperRunning === true && !busy.has(space.id)) await manager.stopSpace({ placeId: place.id, spaceId: space.id }).catch(() => {});
+        if (space.gatekeeperRunning === true && !busy.has(space.id)) await manager.stopSpace({ spaceId: space.id }).catch(() => {});
         continue;
       }
       try {
-        await manager.stopSpace({ placeId: place.id, spaceId: space.id });
+        await manager.stopSpace({ spaceId: space.id });
         stopped.push({ id: space.id, name: space.name });
       } catch (error) {
         stillRunning.push({ id: space.id, name: space.name, ...failureOf(error) });
       }
     }
-    return { stopped, stillRunning };
+    // A place that could not be asked may run spaces the host does not remember: the answer says so.
+    return unavailable.length === 0 ? { stopped, stillRunning } : { stopped, stillRunning, unknown: failureOf(unavailable[0].failure) };
   };
 
   /** The user's idle stop setting, as the settings screen shows it. */
@@ -990,7 +1032,7 @@ export function createSpaceJourney({
     const setting = parsed.data;
     const change = idleStopTurn.then(async () => {
       await saveIdleStop(setting);
-      const spaces = await manager.listSpaces({ placeId: place.id });
+      const { spaces } = await listAll();
       for (const space of spaces) {
         if (space.state === 'running' && !pending.has(space.id)) await writeIdleStop(space.id, setting);
       }
@@ -1000,15 +1042,8 @@ export function createSpaceJourney({
     return change;
   };
 
-  const requirePlace = (placeId) => {
-    if (placeId !== place.id) throw new SpaceError('place_not_found', `There is no place ${placeId}`);
-  };
-
   /** The disk the spaces take on a place, and what a clean-up would free now (journey step 9). */
-  const readDisk = async (placeId) => {
-    requirePlace(placeId);
-    return place.readDisk();
-  };
+  const readDisk = async (placeId) => requirePlace(placeId).readDisk();
 
   /**
    * Removes what OpenChamber can make again on a place, see `places/docker-disk.js`; Docker keeps
@@ -1016,7 +1051,7 @@ export function createSpaceJourney({
    * tools before any container holds them. Answers what was freed, what Docker kept, and the disk after.
    */
   const cleanUpDisk = async (placeId) => {
-    requirePlace(placeId);
+    const place = requirePlace(placeId);
     if (Array.from(pending.values()).some((entry) => entry.state === 'preparing')) {
       throw new SpaceError('space_preparing', 'A space is being made. Clean up when it is ready.');
     }
@@ -1039,7 +1074,7 @@ export function createSpaceJourney({
    * and `imageFailure` says why the image is still absent after a download that failed.
    */
   const pullImage = async (placeId) => {
-    requirePlace(placeId);
+    const place = requirePlace(placeId);
     place.pullImage().catch((error) => { logger.warn?.(`[spaces] the image download failed: ${error.code ?? error.message}`); });
     return place.readDisk();
   };

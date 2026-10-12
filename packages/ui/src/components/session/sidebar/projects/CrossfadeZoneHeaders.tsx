@@ -23,8 +23,7 @@ function getLayoutTop(element: HTMLElement): number {
 
 /** Keep the live controls mounted in one portal while moving its host between
  * the section and the viewport. Only the outgoing animation is a visual copy. */
-export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '', scrollRef, children }: {
-  enabled: boolean;
+export function CrossfadeZoneHeaders({ suspended = false, layoutKey = '', scrollRef, children }: {
   suspended?: boolean;
   layoutKey?: string;
   scrollRef: React.RefObject<HTMLElement | null>;
@@ -43,7 +42,7 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
 
   React.useLayoutEffect(() => {
     const root = scrollRef.current;
-    if (!enabled || suspended || !root) return;
+    if (suspended || !root) return;
     // Keep the viewport layer inside the native scroller so wheel and touch
     // gestures over a pinned header still scroll the list normally.
     const layer = document.createElement('div');
@@ -63,12 +62,19 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
     const moveHost = (entry: HeaderEntry, parent: HostParent) => {
       const focused = document.activeElement;
       const restoreFocus = focused instanceof HTMLElement && entry.host.contains(focused);
+      // Chromium scrolls a moved focused element into view. A header clicked
+      // a moment ago keeps focus, so handing it back to its section above the
+      // viewport threw the list to the top, where it became the pinned header
+      // again; the next wheel step repeated it, and the list would not scroll
+      // until focus left the sidebar. The user's position stays put.
+      const scrollTop = restoreFocus ? root.scrollTop : null;
       if (parent.moveBefore && parent.isConnected && entry.host.isConnected) {
         parent.moveBefore(entry.host, null);
       } else {
         parent.append(entry.host);
       }
       if (restoreFocus) focused.focus({ preventScroll: true });
+      if (scrollTop !== null && root.scrollTop !== scrollTop) root.scrollTop = scrollTop;
     };
     const clearAnimation = () => {
       animation?.cancel();
@@ -182,10 +188,10 @@ export function CrossfadeZoneHeaders({ enabled, suspended = false, layoutKey = '
       }
       layer.remove();
     };
-  }, [enabled, suspended, layoutKey, scrollRef]);
+  }, [suspended, layoutKey, scrollRef]);
 
   return (
-    <HeaderContext.Provider value={enabled ? register : null}>
+    <HeaderContext.Provider value={register}>
       {children}
     </HeaderContext.Provider>
   );

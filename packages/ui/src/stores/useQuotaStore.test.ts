@@ -8,6 +8,8 @@ const fetched: string[] = []
 type StubPayload = { usageDropdownProviders: string[] } | ProviderResult
 let quotaRequestsFail = false
 let quotaFails = false;
+// Holds a quota request open until the test lets it answer.
+let quotaGate: (() => Promise<void>) | null = null
 const json = (body: StubPayload) => new Response(
   JSON.stringify(body),
   { status: 200, headers: { "content-type": "application/json" } },
@@ -26,6 +28,7 @@ mock.module("@/lib/runtime-fetch", () => ({
     fetched.push(path)
     if (quotaRequestsFail) throw new Error("network down")
     if (path.startsWith("/api/config/settings")) return json({ usageDropdownProviders: ["claude"] })
+    if (quotaGate) await quotaGate()
     // A reachable instance reporting a provider failure, which is different
     // from the transport failure `quotaRequestsFail` models.
     if (quotaFails) return json({ providerId: "claude", providerName: "Claude", ok: false, configured: true, error: "authentication failed", usage: null, fetchedAt: 2 })
@@ -149,6 +152,7 @@ describe("A provider-account switch re-reads the trackers", () => {
     fetched.length = 0
     quotaRequestsFail = false
     quotaFails = false
+    quotaGate = null
     useQuotaStore.getState().resetForRuntimeSwitch()
   })
 
@@ -211,5 +215,22 @@ describe("A provider-account switch re-reads the trackers", () => {
     expect(useQuotaStore.getState().refreshErrors.claude).toBeUndefined()
     // Two requests: the switch asked again rather than waiting for the first.
     expect(fetched.filter((path) => path === "/api/quota/claude")).toHaveLength(2)
+  })
+
+  test("the provider stays fetching while the request that superseded another is still out", async () => {
+    const releases: Array<() => void> = []
+    quotaGate = () => new Promise<void>((resolve) => { releases.push(resolve) })
+
+    // The switch aborts the first request, which settles at once while the
+    // replacement is still waiting on the network.
+    const superseded = useQuotaStore.getState().fetchProviderQuota("claude")
+    const afterSwitch = useQuotaStore.getState().fetchProviderQuota("claude", true)
+    expect(await superseded).toBe(false)
+    expect(useQuotaStore.getState().isFetchingProvider.claude).toBe(true)
+
+    while (releases.length === 0) await new Promise((resolve) => setTimeout(resolve, 0))
+    releases[0]()
+    await afterSwitch
+    expect(useQuotaStore.getState().isFetchingProvider.claude).toBe(false)
   })
 })

@@ -119,16 +119,14 @@ describe('BackgroundShellsStrip', () => {
   });
 
   test('stop goes through the shared stop flow, addressed to the session that owns the command', async () => {
-    const stop = spyOn(opencodeClient, 'stopBackgroundShell').mockResolvedValue(undefined);
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
     try {
       await start(shell('sh_child', 'ses_child', 'vite preview'));
       await act(async () => button('Stop')?.click());
       expect(stop.mock.calls).toEqual([[{
         sessionID: 'ses_child',
         sessionDirectory: '/repo',
-        shellID: 'sh_child',
-        shellDirectory: '/repo',
-        command: 'vite preview',
+        shells: [{ shellID: 'sh_child', shellDirectory: '/repo', command: 'vite preview' }],
       }]]);
       expect(button('Stop')?.disabled).toBe(true);
 
@@ -137,6 +135,49 @@ describe('BackgroundShellsStrip', () => {
         applyBackgroundShellEvents('/repo', [{ type: 'shell.ended', properties: { shellID: 'sh_child', end: { kind: 'removed' }, endedAt: 2000 } }]);
       });
       expect(host.innerHTML).toBe('');
+    } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test('stop all stops every command with one call per owning session', async () => {
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockResolvedValue(undefined);
+    try {
+      await start(
+        shell('sh_1', 'ses_root', 'bun run dev'),
+        shell('sh_2', 'ses_root', 'bun run watch'),
+        shell('sh_3', 'ses_child', 'vite preview'),
+      );
+      expect(button('Stop')).toBeUndefined();
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toEqual([
+        [{
+          sessionID: 'ses_root',
+          sessionDirectory: '/repo',
+          shells: [
+            { shellID: 'sh_1', shellDirectory: '/repo', command: 'bun run dev' },
+            { shellID: 'sh_2', shellDirectory: '/repo', command: 'bun run watch' },
+          ],
+        }],
+        [{
+          sessionID: 'ses_child',
+          sessionDirectory: '/repo',
+          shells: [{ shellID: 'sh_3', shellDirectory: '/repo', command: 'vite preview' }],
+        }],
+      ]);
+      expect(button('Stop all')?.disabled).toBe(true);
+    } finally {
+      stop.mockRestore();
+    }
+  });
+
+  test('a failed stop makes its commands stoppable again', async () => {
+    const stop = spyOn(opencodeClient, 'stopBackgroundShells').mockRejectedValue(new Error('offline'));
+    try {
+      await start(shell('sh_1', 'ses_root', 'bun run dev'), shell('sh_2', 'ses_root', 'bun run watch'));
+      await act(async () => button('Stop all')?.click());
+      expect(stop.mock.calls).toHaveLength(1);
+      expect(button('Stop all')?.disabled).toBe(false);
     } finally {
       stop.mockRestore();
     }

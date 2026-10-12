@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
+import { sshHostSchema } from '../spaces/places/ssh-host.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -356,11 +357,11 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_WORKTREE_SORT_ORDER_VALUES.has(candidate.sidebarWorktreeSortOrder)) {
       result.sidebarWorktreeSortOrder = candidate.sidebarWorktreeSortOrder;
     }
-    if (typeof candidate.sidebarShowRecentSection === 'boolean') {
-      result.sidebarShowRecentSection = candidate.sidebarShowRecentSection;
-    }
     if (typeof candidate.sidebarShowChatsSection === 'boolean') {
       result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
+    }
+    if (typeof candidate.sidebarShowWorkSection === 'boolean') {
+      result.sidebarShowWorkSection = candidate.sidebarShowWorkSection;
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -505,14 +506,8 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.sessionWorkEnabled === 'boolean') {
       result.sessionWorkEnabled = candidate.sessionWorkEnabled;
     }
-    if (typeof candidate.sessionWorkAutoOpen === 'boolean') {
-      result.sessionWorkAutoOpen = candidate.sessionWorkAutoOpen;
-    }
     if (typeof candidate.sessionReviewOfferEnabled === 'boolean') {
       result.sessionReviewOfferEnabled = candidate.sessionReviewOfferEnabled;
-    }
-    if (typeof candidate.sessionWorkKeepInGroup === 'boolean') {
-      result.sessionWorkKeepInGroup = candidate.sessionWorkKeepInGroup;
     }
     if (typeof candidate.sessionGoalEnabled === 'boolean') {
       result.sessionGoalEnabled = candidate.sessionGoalEnabled;
@@ -741,6 +736,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (idleStopSchema.safeParse(candidate.isolatedSpacesIdleStop).success) {
       result.isolatedSpacesIdleStop = { ...candidate.isolatedSpacesIdleStop };
     }
+    // The machine of the Docker over SSH place; the empty string takes that place away.
+    const sshHost = sshHostSchema.safeParse(candidate.isolatedSpacesSshHost);
+    if (sshHost.success) result.isolatedSpacesSshHost = sshHost.data;
     if (typeof candidate.openCodeUpdateToastDismissedVersion === 'string') {
       const version = candidate.openCodeUpdateToastDismissedVersion.trim();
       result.openCodeUpdateToastDismissedVersion = version.slice(0, VERSION_STRING_MAX_LENGTH);
@@ -750,12 +748,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.showTurnChangedFiles === 'boolean') {
       result.showTurnChangedFiles = candidate.showTurnChangedFiles;
-    }
-    if (typeof candidate.showExpandedBashTools === 'boolean') {
-      result.showExpandedBashTools = candidate.showExpandedBashTools;
-    }
-    if (typeof candidate.showExpandedEditTools === 'boolean') {
-      result.showExpandedEditTools = candidate.showExpandedEditTools;
     }
     if (typeof candidate.timeFormatPreference === 'string') {
       const mode = candidate.timeFormatPreference.trim();

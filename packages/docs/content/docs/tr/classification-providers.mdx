@@ -5,7 +5,7 @@ description: OpenChamber'ın farklı iş akışlarındaki kararların arkasında
 
 # Sınıflandırma sağlayıcıları (Jev)
 
-Bazı OpenChamber özelliklerinin harekete geçmeden önce hızlı bir karara ihtiyacı vardır: Bu komut riskli mi, bu istem ne tür bir görev, kullanıcı gerçek bir işe yeni mi başladı? Bu soruları TypeSafe'in küçük karar modeli Jev yanıtlar. Bu sayfa, OpenChamber'a Jev erişimini nasıl vereceğinizi anlatır.
+Bazı OpenChamber özelliklerinin harekete geçmeden önce hızlı bir karara ihtiyacı vardır: Bu komut riskli mi, bu istem ne tür bir görev, bu iş tamamlanmış görünüyor mu? Bu soruları TypeSafe'in küçük karar modeli Jev yanıtlar. Bu sayfa, OpenChamber'a Jev erişimini nasıl vereceğinizi anlatır.
 
 Jev asla kod yazmaz ve sohbetinizde yanıt vermez. Yalnızca bir karar döndürür, OpenChamber da ona göre davranır. OpenChamber bir yanıtı en fazla dört saniye bekler.
 
@@ -15,10 +15,10 @@ Jev asla kod yazmaz ve sohbetinizde yanıt vermez. Yalnızca bir karar döndür�
 | --- | --- |
 | [İzinler ve güvenlik ağı](/tr/permissions/) | Ajan bu eylemi çalıştırmadan önce size sormalı mı? |
 | [Otomatik model yönlendirme](/tr/auto-model-routing/) | Bu istem kategorilerinizden hangisine ait? |
-| [Devam eden oturumlar](/tr/sessions-in-work/) | Az önce gerçek bir iş mi istediniz? Bu tur işin sonu gibi mi görünüyor? |
+| [Devam eden oturumlar](/tr/sessions-in-work/) | Bu tur işin sonu gibi mi görünüyor? |
 | [Özet ve sonraki mesaj önerisi](/tr/sessions-in-work/) | Bu turdan sonra bir özet ya da öneri üretmeye değer mi? |
 
-Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, oturumlar da yalnızca siz taşıdığınızda devam edenlere geçer. Özetler ve öneriler çalışmaya devam eder, sadece filtre olmadan.
+Sağlayıcı yoksa güvenlik ağı ve Auto gizlenir, devam eden oturumlarda "tamamlanmış görünüyor" ipucu da çıkmaz. Oturumlar yine de mesaj gönderdiğinizde devam edenlere girer. Özetler ve öneriler çalışmaya devam eder, sadece filtre olmadan.
 
 ## Kurulum
 
@@ -96,7 +96,7 @@ Jev tek bir istekte yavaş kalırsa ya da hata verirse hiçbir şey bozulmaz. He
 
 - Güvenlik ağı eylemi sizin kararınızı beklemeye bırakır.
 - Auto istemi yedek modelinize gönderir.
-- Devam eden oturumlar olduğu gibi kalır.
+- Devam eden oturumlarda "tamamlanmış görünüyor" ipucu çıkmaz.
 - Özet ve öneri, Jev hiç yokmuş gibi üretilir.
 
 ## Jev neyi görür
@@ -107,7 +107,7 @@ Jev konuşmanızdan kısa alıntılar alır: son mesajınızı ve bağlam için 
 
 ## Nerede çalışır
 
-Jev OpenChamber sunucusunda çalışır; yani masaüstü uygulamasında, web uygulamasında ve bunlardan birine bağlı telefonunuzda kullanılabilir. VS Code eklentisi OpenCode ile doğrudan konuşur ve Jev'e sahip değildir: Orada güvenlik ağı ve Auto yoktur, oturumlar da devam edenlere yalnızca elle taşınır.
+Jev OpenChamber sunucusunda çalışır; yani masaüstü uygulamasında, web uygulamasında ve bunlardan birine bağlı telefonunuzda kullanılabilir. VS Code eklentisi OpenCode ile doğrudan konuşur ve Jev'e sahip değildir: Orada güvenlik ağı, Auto ve "tamamlanmış görünüyor" ipucu yoktur.
 
 ## İlgili
 

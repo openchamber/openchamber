@@ -315,7 +315,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'expandedTools' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'fileTreeSide';
+type VisibleSetting = 'sessionAssist' | 'sessionGoal' | 'theme' | 'windowControlsPosition' | 'pwaInstallName' | 'pwaOrientation' | 'mobileKeyboardMode' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'terminalShell' | 'terminalLoginShell' | 'editorFontSize' | 'spacing' | 'scrollbars' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'collapsibleUserMessages' | 'stickyUserHeader' | 'promptNavigatorEnabled' | 'wideChatLayout' | 'codeBlockLineWrap' | 'tableCellWrap' | 'copyMessagesAsPlainText' | 'splitAssistantMessageActions' | 'subagentReadOnlyBanner' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'fileViewerPreview' | 'reasoning' | 'showToolFileIcons' | 'showTurnChangedFiles' | 'followUpBehavior' | 'inputHistoryScope' | 'inputHistoryLimit' | 'messageSearch' | 'terminalQuickKeys' | 'fileEditorKeymap' | 'persistDraft' | 'inputSpellcheck' | 'largeTextPaste' | 'enterToSend' | 'reportUsage' | 'autoSaveEnabled' | 'confirmFileTreeMove' | 'sessionTabs' | 'animatedActivityIndicators' | 'layoutAnimations' | 'fileTreeSide';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.openchamber.desktopNetwork.option.windowControlsLeft' },
@@ -454,10 +454,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const showTurnChangedFiles = useUIStore(state => state.showTurnChangedFiles);
     const setShowTurnChangedFiles = useUIStore(state => state.setShowTurnChangedFiles);
-    const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
-    const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
-    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
-    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const timeFormatPreference = useUIStore(state => state.timeFormatPreference);
     const setTimeFormatPreference = useUIStore(state => state.setTimeFormatPreference);
     const weekStartPreference = useUIStore(state => state.weekStartPreference);
@@ -676,16 +672,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         window.dispatchEvent(new CustomEvent('openchamber:file-viewer-preview-mode-changed', { detail: { enabled } }));
     }, [setSettingsDefaultFileViewerPreview]);
 
-    const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedBashTools(enabled);
-        void updateDesktopSettings({ showExpandedBashTools: enabled });
-    }, [setShowExpandedBashTools]);
-
-    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
-        setShowExpandedEditTools(enabled);
-        void updateDesktopSettings({ showExpandedEditTools: enabled });
-    }, [setShowExpandedEditTools]);
-
     const handleTimeFormatPreferenceChange = React.useCallback((value: 'auto' | '12h' | '24h') => {
         setTimeFormatPreference(value);
         void updateDesktopSettings({ timeFormatPreference: value });
@@ -775,7 +761,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('persistDraft')
         || shouldShow('largeTextPaste')
         || shouldShow('showToolFileIcons')
-        || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('enterToSend');
     const showBehaviorDisplaySettings = shouldShow('chatRenderMode')
@@ -806,8 +791,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('showTurnChangedFiles')
         || (!isMobile && shouldShow('inputSpellcheck'))
         || shouldShow('enterToSend')
-        || shouldShow('reasoning')
-        || shouldShow('expandedTools');
+        || shouldShow('reasoning');
     // First behavior section under the page header should not draw a top border on Chat-only;
     // when Appearance (or earlier sections) already rendered, keep the default divider.
     const behaviorSectionDivider = hasAppearanceSettings || hasLayoutSettings || hasNavigationSettings;
@@ -2009,29 +1993,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                         {showBehaviorFeatureCheckboxes && (
                             <>
-                                {shouldShow('expandedTools') && (
-                                    <SettingsSection
-                                        title={t('settings.openchamber.visual.section.showToolsOpenedByDefault')}
-                                        divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
-                                        contentClassName={SETTINGS_OPTION_STACK_CLASS}
-                                    >
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedBashTools}
-                                            onChange={handleShowExpandedBashToolsChange}
-                                            label={t('settings.openchamber.visual.field.bash')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedBashToolsAria')}
-                                        />
-                                        <SettingsCheckboxRow
-                                            checked={showExpandedEditTools}
-                                            onChange={handleShowExpandedEditToolsChange}
-                                            label={t('settings.openchamber.visual.field.editTools')}
-                                            ariaLabel={t('settings.openchamber.visual.field.showExpandedEditToolsAria')}
-                                        />
-                                    </SettingsSection>
-                                )}
                                 <SettingsSection
                                     title={t('settings.openchamber.visual.section.sessionAssistance')}
                                     settingsItem="chat.session-assistance"
+                                    divider={showBehaviorDisplaySettings || showTransportSection || showBehaviorMessageOptions || behaviorSectionDivider}
                                     contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                 >
                                     <SettingsCheckboxRow

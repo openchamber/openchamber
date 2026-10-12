@@ -5,7 +5,7 @@ description: Set up Jev, the small classification model behind decisions across 
 
 # Classification Providers (Jev)
 
-Some OpenChamber features need a quick decision before they act: is this command risky, what kind of task is this prompt, did the user just start real work? A small decision model called Jev (made by TypeSafe) answers those questions. This page shows how to give OpenChamber access to Jev.
+Some OpenChamber features need a quick decision before they act: is this command risky, what kind of task is this prompt, does this work look done? A small decision model called Jev (made by TypeSafe) answers those questions. This page shows how to give OpenChamber access to Jev.
 
 Jev never writes code or replies in your chat. It only returns a verdict, and OpenChamber acts on it. OpenChamber waits at most four seconds for an answer.
 
@@ -15,10 +15,10 @@ Jev never writes code or replies in your chat. It only returns a verdict, and Op
 | --- | --- |
 | [Permissions & safety net](/permissions/) | Should the agent ask you before running this action? |
 | [Auto model routing](/auto-model-routing/) | Which of your categories does this prompt belong to? |
-| [Sessions in work](/sessions-in-work/) | Did you just ask for real work? Does this turn look like the end of it? |
+| [Sessions in work](/sessions-in-work/) | Does this turn look like the end of the work? |
 | [Session recap and suggestion](/sessions-in-work/#recap-and-next-message-suggestion) | Is a recap or a suggested next message worth generating after this turn? |
 
-Without a provider, the safety net and Auto are hidden, and sessions move into work only when you move them. Recaps and suggestions still work, just without the filter.
+Without a provider, the safety net and Auto are hidden, and sessions in work get no "looks done" hint. Sessions still go into work when you send a message. Recaps and suggestions still work, just without the filter.
 
 ## Set it up
 
@@ -96,7 +96,7 @@ If Jev is slow or fails on a single request, nothing breaks. Each feature has a 
 
 - The safety net keeps the action waiting for you.
 - Auto sends the prompt to your fallback model.
-- Sessions in work stay as they are.
+- No "looks done" hint appears on sessions in work.
 - The recap and suggestion are generated as if Jev didn't exist.
 
 ## What Jev sees
@@ -107,7 +107,7 @@ Requests go from the OpenChamber server straight to OpenCode Zen, OpenRouter, Ve
 
 ## Where it works
 
-Jev runs in the OpenChamber server, so it works in the desktop app, the web app and on your phone connected to either. The VS Code extension talks to OpenCode directly and has no Jev: there's no safety net, no Auto, and sessions move into work only by hand.
+Jev runs in the OpenChamber server, so it works in the desktop app, the web app and on your phone connected to either. The VS Code extension talks to OpenCode directly and has no Jev: there's no safety net, no Auto and no "looks done" hint.
 
 ## Related
 

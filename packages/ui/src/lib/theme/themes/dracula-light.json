@@ -41,9 +41,9 @@
       "error": "#ad1446",
       "errorBackground": "#ad14461f",
       "errorBorder": "#ad144659",
-      "warning": "#896516",
-      "warningBackground": "#8965161f",
-      "warningBorder": "#89651659",
+      "warning": "#9e5a04",
+      "warningBackground": "#9e5a041f",
+      "warningBorder": "#9e5a0459",
       "success": "#167a46",
       "successBackground": "#167a461f",
       "successBorder": "#167a4659",
@@ -90,11 +90,11 @@
     },
     "chat": {
       "background": "#f9f9f4",
-      "userMessageBackground": "#e8e8e7",
+      "userMessageBackground": "#eaebf5",
       "divider": "#0000001a"
     },
     "markdown": {
-      "link": "#6554cf",
+      "link": "#6755d4",
       "linkHover": "#6150c6",
       "inlineCode": "#136b3c",
       "inlineCodeBackground": "#f3f3ee",

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mergeMetadataPatch } from '../openchamber-sessions/session-metadata-store.js';
-import { decideAssist, decideOpen } from './questions.js';
+import { decideAssist } from './questions.js';
 import { createSessionWorkRuntime } from './runtime.js';
 import { createSessionLineage } from '../session-lineage.js';
 
@@ -46,7 +46,7 @@ const makeRuntime = ({ metadata = {}, answers = {}, askError = null, settings = 
   const runtime = createSessionWorkRuntime({
     buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
     getOpenCodeAuthHeaders: () => ({}),
-    getSettings: () => ({ enabled: true, autoOpen: true, reviewOffer: true, ...settings }),
+    getSettings: () => ({ enabled: true, reviewOffer: true, ...settings }),
     classifierEndpoint: async () => endpoint,
     jev,
     readMetadata: async (id) => records.get(id) ?? {},
@@ -73,13 +73,6 @@ afterEach(() => {
 });
 
 describe('session work decisions', () => {
-  it('opens when either measured question passes its threshold', () => {
-    expect(decideOpen({ change: { noul: 0.86 } })).toBe(true);
-    expect(decideOpen({ change: { noul: 0.84 }, toward_change: { noul: 0.91 } })).toBe(true);
-    expect(decideOpen({ change: { noul: 0.84 }, toward_change: { noul: 0.89 } })).toBe(false);
-    expect(decideOpen({})).toBe(false);
-  });
-
   it('keeps an assist field Jev did not answer, and drops only a clear no', () => {
     expect(decideAssist({})).toEqual({ recap: true, suggestion: true });
     expect(decideAssist({ recap: { noul: 0.2 }, next_step: { noul: 0.1 } })).toEqual({ recap: false, suggestion: false });
@@ -88,41 +81,52 @@ describe('session work decisions', () => {
 });
 
 describe('session work runtime: a message was sent', () => {
-  it('asks Jev on the new message with the settled turns as history, and opens the session', async () => {
-    stubOpenCode({ records: [{ id: 'msg_new', type: 'user', text: 'Now fix the header' }, ...settledPair] });
-    const { runtime, jev, records } = makeRuntime({ answers: { change: { noul: 0.95 }, toward_change: { noul: 0.9 } } });
+  it('opens the session on a sent message without asking Jev', async () => {
+    stubOpenCode();
+    const { runtime, jev, records } = makeRuntime();
 
     runtime.processPayload(sent());
     await settle(() => records.get('ses_1').openchamber);
 
-    const [request] = jev.ask.mock.calls[0];
-    expect(request.state.request).toBe('Now fix the header');
-    expect(request.state.history.map((entry) => entry.role)).toEqual(['user', 'assistant']);
-    expect(Object.keys(request.questions)).toEqual(['change', 'toward_change']);
-    expect(records.get('ses_1')).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'jev' } } });
+    expect(jev.ask).not.toHaveBeenCalled();
+    expect(records.get('ses_1')).toMatchObject({ openchamber: { work: { state: 'open', openedBy: 'auto' } } });
   });
 
-  it('does not ask again for a session already in work, or for the same message twice', async () => {
+  it('reopens a session closed before the message was sent, and keeps one closed after it', async () => {
     stubOpenCode();
+    // `sent()` is created at 50.
+    const reopened = makeRuntime({ metadata: { openchamber: { work: { state: 'done', doneAt: 40 } } } });
+    reopened.runtime.processPayload(sent());
+    await settle(() => reopened.records.get('ses_1').openchamber.work.state === 'open');
+    expect(reopened.records.get('ses_1').openchamber.work.state).toBe('open');
+
+    const kept = makeRuntime({ metadata: { openchamber: { work: { state: 'done', doneAt: 60 } } } });
+    kept.runtime.processPayload(sent());
+    await settle(() => kept.updateMetadata.mock.calls.length > 0);
+    expect(kept.records.get('ses_1').openchamber.work.state).toBe('done');
+  });
+
+  it('reads nothing for a session already in work, and handles a message once', async () => {
+    const fetchMock = stubOpenCode();
     const open = makeRuntime({ metadata: { openchamber: { work: { state: 'open' } } } });
     open.runtime.processPayload(sent());
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(open.jev.ask).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(open.updateMetadata).not.toHaveBeenCalled();
 
-    const fresh = makeRuntime({ answers: { change: { noul: 0.1 } } });
+    const fresh = makeRuntime();
     fresh.runtime.processPayload(sent('msg_x'));
     fresh.runtime.processPayload(sent('msg_x'));
-    await settle(() => fresh.jev.ask.mock.calls.length > 0);
+    await settle(() => fresh.updateMetadata.mock.calls.length > 0);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(fresh.jev.ask).toHaveBeenCalledTimes(1);
-    expect(fresh.updateMetadata).not.toHaveBeenCalled();
+    expect(fresh.updateMetadata).toHaveBeenCalledTimes(1);
   });
 
   it('skips a known subsession without reading it, and learns one it had to read', async () => {
     const lineage = createSessionLineage();
     lineage.remember('ses_1', 'ses_parent');
     const fetchMock = stubOpenCode();
-    const known = makeRuntime({ lineage, answers: { change: { noul: 1 } } });
+    const known = makeRuntime({ lineage });
     known.runtime.processPayload(sent());
     expect(await known.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: true } })).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -137,38 +141,39 @@ describe('session work runtime: a message was sent', () => {
     expect(learning.isChild('ses_1')).toBe(true);
   });
 
-  it('asks nothing with auto-open off, without Jev, or in a child, review, or chat session', async () => {
+  it('opens nothing with In work off, or in a child, review, /btw, scheduled, or chat session', async () => {
     for (const setup of [
-      { runtime: { settings: { autoOpen: false } } },
-      { runtime: { endpoint: null } },
+      { runtime: { settings: { enabled: false } } },
       { session: { parentID: 'ses_parent' } },
       { session: { metadata: { openchamber: { kind: 'review', originalSessionID: 'ses_0' } } } },
+      { session: { metadata: { openchamber: { kind: 'btw', originalSessionID: 'ses_0' } } } },
+      { session: { metadata: { openchamber: { kind: 'scheduled' } } } },
       { session: { location: { directory: '/home/me/.config/openchamber/chats/2026-09-27/hello' } } },
     ]) {
       stubOpenCode({ session: setup.session });
-      const { runtime, jev } = makeRuntime({ answers: { change: { noul: 1 } }, ...setup.runtime });
+      const { runtime, updateMetadata } = makeRuntime(setup.runtime);
       runtime.processPayload(sent());
       await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(jev.ask).not.toHaveBeenCalled();
+      expect(updateMetadata).not.toHaveBeenCalled();
       vi.unstubAllGlobals();
     }
   });
 });
 
 describe('session work runtime: a turn ended', () => {
-  it('asks the open questions and the assist questions in one call, and opens on the answer', async () => {
+  it('asks only the assist and review questions for a session not in work, and never opens it', async () => {
     stubOpenCode();
     const { runtime, jev, records } = makeRuntime({
-      answers: { change: { noul: 0.97 }, recap: { noul: 0.9 }, next_step: { noul: 0.1 } },
+      answers: { recap: { noul: 0.9 }, next_step: { noul: 0.1 } },
     });
 
     const gate = await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: true } });
 
     expect(jev.ask).toHaveBeenCalledTimes(1);
-    expect(Object.keys(jev.ask.mock.calls[0][0].questions).sort()).toEqual(['change', 'next_step', 'recap', 'review_ready', 'toward_change']);
+    expect(Object.keys(jev.ask.mock.calls[0][0].questions).sort()).toEqual(['next_step', 'recap', 'review_ready']);
     expect(jev.ask.mock.calls[0][0].state).toMatchObject({ request: 'Implement it', answer: 'Done, try it.' });
     expect(gate).toEqual({ recap: true, suggestion: false });
-    expect(records.get('ses_1')).toMatchObject({ openchamber: { work: { state: 'open' } } });
+    expect(records.get('ses_1')).toEqual({});
   });
 
   it('asks only about the end of the work and a review in a session already in work, and a new turn retires the hint', async () => {
@@ -217,9 +222,9 @@ describe('session work runtime: a turn ended', () => {
     await settle(() => !solo.records.get('ses_1').openchamber?.reviewOffer);
     expect(solo.records.get('ses_1').openchamber).not.toHaveProperty('reviewOffer');
 
-    const off = makeRuntime({ settings: { reviewOffer: false }, answers: { change: { noul: 0.1 } } });
-    await off.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
-    expect(Object.keys(off.jev.ask.mock.calls[0][0].questions)).not.toContain('review_ready');
+    const off = makeRuntime({ settings: { reviewOffer: false }, answers: { recap: { noul: 0.1 } } });
+    await off.runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: true, suggestion: false } });
+    expect(Object.keys(off.jev.ask.mock.calls[0][0].questions)).toEqual(['recap']);
   });
 
   it('drops a late done answer once the next turn started', async () => {
@@ -257,7 +262,7 @@ describe('session work runtime: a turn ended', () => {
     stubOpenCode();
     const { runtime, records } = makeRuntime({
       metadata: { openchamber: { work: { state: 'open', openedAt: 1 } } },
-      answers: { wrap_up: { noul: 0.99 }, change: { noul: 0 } },
+      answers: { wrap_up: { noul: 0.99 } },
     });
     await runtime.evaluateTurnEnd({ sessionId: 'ses_1', directory: '/repo', assist: { recap: false, suggestion: false } });
     expect(records.get('ses_1').openchamber.work.state).toBe('open');

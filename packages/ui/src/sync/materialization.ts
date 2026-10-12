@@ -2,6 +2,7 @@ import type { Message, Part } from "@/lib/opencode/model"
 import { mergeMessages } from "./optimistic"
 import type { SessionMaterializationReason } from "./event-reducer"
 import { sortMessagesChronologically } from "./message-ordering"
+import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 
 const STREAMING_PART_FIELDS = ["text", "output"] as const
 const ACTIVE_TOOL_STATUSES = new Set(["pending", "running"])
@@ -185,6 +186,15 @@ function mergeMaterializedPart(existing: Part | undefined, next: Part): Part {
   if (!existing) return next
 
   if (existing.type === "tool" && next.type === "tool") {
+    // A page carries finished results as shells. The whole call this client
+    // already holds (from the event stream, or a completed message) stays.
+    if (
+      existing.state.status === next.state.status
+      && toolContentShellChars(next) !== null
+      && toolContentShellChars(existing) === null
+    ) {
+      return existing
+    }
     const existingStatus = (existing as { state?: { status?: unknown } }).state?.status
     const nextStatus = (next as { state?: { status?: unknown } }).state?.status
     if (

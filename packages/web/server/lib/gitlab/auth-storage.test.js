@@ -153,6 +153,30 @@ describe('source-control auth storage', () => {
       expect(refresh).toHaveBeenCalledTimes(2);
     });
 
+    it('never spends one refresh token twice when two processes share the file', async () => {
+      const clock = { now: 1_000_000 };
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      const refresh = vi.fn(async () => { await gate; return { accessToken: 'fresh', refreshToken: 'refresh-2', expiresIn: 7200 }; });
+      const { filePath } = await makeStore();
+      const desktop = createSourceControlAuthStore({ filePath, refreshOAuthToken: refresh, now: () => clock.now });
+      const server = createSourceControlAuthStore({ filePath, refreshOAuthToken: refresh, now: () => clock.now });
+      const account = await desktop.setAccount(origin, { token: 'stale', user, source: 'oauth', refreshToken: 'refresh-1', expiresIn: 60 });
+
+      const desktopRead = desktop.readAccount(origin, account.id);
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+      const serverRead = server.readAccount(origin, account.id);
+      const serverRenewal = server.renewAccount(origin, account.id);
+      // Both server calls have read the old refresh token and wait on the renewal lock.
+      await new Promise((resolve) => { setTimeout(resolve, 100); });
+      release();
+
+      await expect(desktopRead).resolves.toMatchObject({ token: 'fresh', refreshToken: 'refresh-2' });
+      await expect(serverRead).resolves.toMatchObject({ token: 'fresh', refreshToken: 'refresh-2' });
+      await expect(serverRenewal).resolves.toBe(true);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
     it('renews on demand after a refused request and survives a reload', async () => {
       const clock = { now: 1_000_000 };
       const refresh = vi.fn(async () => ({ accessToken: 'fresh', refreshToken: 'refresh-2', expiresIn: 7200 }));

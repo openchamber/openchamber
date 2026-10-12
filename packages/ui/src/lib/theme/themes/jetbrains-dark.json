@@ -48,14 +48,14 @@
       "warningForeground": "#1E1F22",
       "warningBackground": "#665014",
       "warningBorder": "#F2C55C",
-      "success": "#57965D",
+      "success": "#639d69",
       "successForeground": "#1E1F22",
       "successBackground": "#253627",
-      "successBorder": "#57965D",
-      "info": "#3592C4",
+      "successBorder": "#639d69",
+      "info": "#4199c8",
       "infoForeground": "#1E1F22",
       "infoBackground": "#243846",
-      "infoBorder": "#3592C4"
+      "infoBorder": "#4199c8"
     },
     "syntax": {
       "base": {
@@ -111,7 +111,7 @@
       "closed": "#DB5C5C"
     },
     "chat": {
-      "userMessageBackground": "#2b2d34",
+      "userMessageBackground": "#252d3f",
       "divider": "#303238",
       "background": "#1E1F22"
     },

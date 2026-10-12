@@ -101,17 +101,32 @@ describe('webview focus guard', () => {
 
   test('a visible page cannot take focus while the agent opens or captures it', async () => {
     stageShown = true;
-    await guardAgentAction(false, async () => {
+    await guardAgentAction(async () => {
       webview.focus();
       expect(document.activeElement).toBe(composer);
     });
     expect(document.activeElement).toBe(composer);
   });
 
-  test('an agent click keeps the page focused while it runs, then returns focus', async () => {
-    await guardAgentAction(true, async () => {
+  test('an action holding page focus keeps the page focused until the action ends', async () => {
+    await guardAgentAction(async (holdPageFocus) => {
+      holdPageFocus();
       webview.focus();
       expect(document.activeElement).toBe(webview);
+    });
+    expect(document.activeElement).toBe(composer);
+  });
+
+  test('releasing the hold returns focus while the action is still running', async () => {
+    stageShown = true;
+    await guardAgentAction(async (holdPageFocus) => {
+      const release = holdPageFocus();
+      webview.focus();
+      release();
+      expect(document.activeElement).toBe(composer);
+      // A load the click started must not take focus back afterwards.
+      webview.focus();
+      expect(document.activeElement).toBe(composer);
     });
     expect(document.activeElement).toBe(composer);
   });
@@ -119,7 +134,9 @@ describe('webview focus guard', () => {
   test('a page the user was already in keeps focus after an agent click', async () => {
     stageShown = true;
     webview.focus();
-    await guardAgentAction(true, async () => {});
+    await guardAgentAction(async (holdPageFocus) => {
+      holdPageFocus();
+    });
     expect(document.activeElement).toBe(webview);
   });
 });

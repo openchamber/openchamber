@@ -199,8 +199,10 @@ export const useQuotaStore = create<QuotaStore>()(
           } finally {
             if (quotaRequests.get(providerId)?.controller === controller) quotaRequests.delete(providerId);
             if (generation === quotaGeneration) {
+              // A superseded request finishes while its replacement still runs;
+              // the provider stays fetching until the replacement settles too.
               set((state) => ({
-                isFetchingProvider: { ...state.isFetchingProvider, [providerId]: false },
+                isFetchingProvider: { ...state.isFetchingProvider, [providerId]: quotaRequests.has(providerId) },
                 isLoading: quotaRequests.size > 0,
               }));
             }

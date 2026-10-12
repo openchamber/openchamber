@@ -91,17 +91,16 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, wo
             {/* The same column that centres the composer, so the pill's left
                 edge lines up exactly with the input frame. */}
             <div className="chat-input-column">
-                {/* The soft shadow lives on this wrapper, away from the glass
-                    pill's backdrop-filter: sharing one element made the
-                    shadow intermittently drop after hide/show cycles. */}
+                {/* The soft shadow lives on this wrapper, apart from the
+                    pill itself. */}
                 <div className="inline-flex max-w-full rounded-full shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.10)] dark:shadow-[0_2px_6px_-2px_rgb(0_0_0_/_0.35)]">
                 <div
                     className={cn(
-                        // Glass material with a hairline real border — much
-                        // lighter than the oc-glass-floating stack.
+                        // Opaque surface with a hairline border, much lighter
+                        // than the oc-glass-floating shadow stack.
                         // min-h, not h: the mobile touch-target floor grows
                         // the buttons inside to 36px, and the pill with them.
-                        'oc-glass-popover inline-flex min-h-7 max-w-full items-center rounded-full [corner-shape:round]',
+                        'oc-surface-floating inline-flex min-h-7 max-w-full items-center rounded-full [corner-shape:round]',
                         'border border-black/[0.06] dark:border-white/[0.08]',
                         visible ? 'pointer-events-auto' : 'pointer-events-none',
                     )}

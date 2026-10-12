@@ -8,9 +8,7 @@ import {
 } from '@/sync/session-ordering';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useSessionPinnedStore } from '@/stores/useSessionPinnedStore';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
-import { deriveRecentSessions } from '../recent/activitySections';
 import { normalizePath } from '../utils';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isBtwSession } from '@/lib/sessionBtwMetadata';
@@ -55,7 +53,6 @@ export const partitionSidebarSessions = (
   return { projectSessions, chatSessions };
 };
 
-const EMPTY_ACTIVE_SESSION_IDS: ReadonlySet<string> = new Set();
 
 const isKnownActiveSessionDirectory = (
   session: Session,
@@ -333,39 +330,4 @@ export const useSessionProjectCollection = ({
     sessions,
     rootSessions: structure.rootSessions,
   };
-};
-
-type UseRecentSessionCollectionArgs = {
-  enabled: boolean;
-  isVSCode: boolean;
-  pinnedSessionIds: Set<string>;
-  sessionOrderRanks: ReadonlyMap<string, number>;
-  sessions: Session[];
-};
-
-// Recent is a separate high-frequency collection view. Its active membership
-// never participates in project ownership or project section projection.
-export const useRecentSessionCollection = ({
-  enabled,
-  isVSCode,
-  pinnedSessionIds,
-  sessionOrderRanks,
-  sessions,
-}: UseRecentSessionCollectionArgs): Session[] => {
-  const activeSessionIdSet = useGlobalSessionStatusStore(
-    React.useCallback(
-      (state) => enabled && !isVSCode ? state.activeSessionIds : EMPTY_ACTIVE_SESSION_IDS,
-      [enabled, isVSCode],
-    ),
-  );
-
-  return React.useMemo(() => {
-    if (!enabled || isVSCode) return [];
-    countSyncPerformance('recentCandidatesVisited', sessions.length);
-    return orderSessionsByLifecycleScopes(
-      deriveRecentSessions(sessions, activeSessionIdSet),
-      pinnedSessionIds,
-      sessionOrderRanks,
-    );
-  }, [activeSessionIdSet, enabled, isVSCode, pinnedSessionIds, sessionOrderRanks, sessions]);
 };

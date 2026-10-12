@@ -116,10 +116,16 @@ export function buildOutgoingMessage(
     input: OutgoingMessageInput,
     deps: OutgoingMessageDeps,
 ): OutgoingMessage {
-    let primaryText = '';
-    let primaryAttachments: AttachedFile[] = [];
+    // Everything the user typed shares the one visible message. OpenCode 2.x
+    // takes a single prompt text and delivers every additional part as a
+    // synthetic message the timeline does not show (#4746).
+    const texts: string[] = [];
+    const primaryAttachments: AttachedFile[] = [];
     let agentMentionName: string | undefined;
     const additionalParts: OutgoingPart[] = [];
+    const addText = (text: string) => {
+        if (text.trim()) texts.push(text);
+    };
 
     const skillNames: string[] = [];
     const noteSkills = (text: string) => {
@@ -142,38 +148,25 @@ export function buildOutgoingMessage(
         return mentions;
     };
 
-    // Queued messages come first, in the order they were queued: the oldest
-    // becomes the primary message so the turn reads chronologically. Each one
-    // is followed by the context it was queued with.
-    input.queued.forEach((queued, index) => {
+    // Queued messages come first, in the order they were queued, so the turn
+    // reads chronologically. The context each was queued with follows it.
+    for (const queued of input.queued) {
         noteAgent(queued.agentMention);
-        const attachments = deps.sanitizeAttachments(queued.attachments);
-
-        if (index === 0) {
-            primaryText = queued.text;
-            primaryAttachments = attachments;
-        } else {
-            additionalParts.push({ text: queued.text, attachments });
-        }
+        addText(queued.text);
+        primaryAttachments.push(...deps.sanitizeAttachments(queued.attachments));
         additionalParts.push(...queuedContextToParts(queued.context ?? []));
-    });
+    }
 
-    // The composer's own text follows, becoming primary only when nothing was
-    // queued ahead of it.
+    // The composer's own text follows everything queued.
     if (input.composerText !== null) {
         const resolved = resolve(input.composerText.replace(/^\n+|\n+$/g, ''));
-        const attachments = [
+        addText(resolved.text);
+        primaryAttachments.push(
             ...deps.sanitizeAttachments(input.composerAttachments),
             ...resolved.attachments,
-        ];
-
-        if (input.queued.length === 0) {
-            primaryText = resolved.text;
-            primaryAttachments = attachments;
-        } else {
-            additionalParts.push({ text: resolved.text, attachments });
-        }
+        );
     }
+    const primaryText = texts.join('\n\n');
 
     // Everything the composer had attached follows its text.
     additionalParts.push(...queuedContextToParts(

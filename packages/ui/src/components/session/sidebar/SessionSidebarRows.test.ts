@@ -5,7 +5,7 @@ import {
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
   sectionSpacingAfter,
-  sessionSidebarRowSizeKey,
+  sessionSidebarRowVirtualKey,
 } from './sessionSidebarVirtualization';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from './types';
@@ -38,14 +38,16 @@ describe('SessionSidebarRows section spacing', () => {
   // SAFETY: spacing reads only the row identity, kind, and position fields.
   const node = (id: string): SessionNode => ({ session: { id, title: id, directory: '/repo', time: { created: 1, updated: 1 } } as Session, children: [], worktree: null });
   const item = (id: string): SessionSidebarActivityItem => ({ node: node(id), projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null });
-  const input = (showRecentSection: boolean): SessionSidebarRowModelArgs => {
+  const input = (withChats: boolean): SessionSidebarRowModelArgs => {
     const sections: ProjectSection[] = [{
       project: { id: 'project-a', normalizedPath: '/repo' },
       groups: [{ id: 'main', label: 'main', branch: null, description: null, isMain: true, worktree: null, directory: '/repo', folderScopeKey: '/repo', sessions: [node('working'), node('other')] }],
     }];
+    const chatGroup = withChats
+      ? { id: 'chats', label: 'Chats', branch: null, description: null, isMain: true, worktree: null, directory: '/chats', folderScopeKey: '/chats', sessions: [node('chat')] }
+      : null;
     return {
-      mode: 'normal', sections, authoritativeSections: sections, chatGroup: null,
-      recentSections: [{ key: 'active-now', items: [item('other')] }], showRecentSection,
+      mode: 'normal', sections, authoritativeSections: sections, chatGroup,
       workItems: [item('working')], workSessionIds: new Set(['working']),
       foldersMap: {}, groupSearchDataByGroup: new WeakMap(), normalizedQuery: '',
       collapsedProjects: new Set(), collapsedGroups: new Set(), collapsedFolders: new Set(), collapsedActivities: new Set(),
@@ -59,25 +61,36 @@ describe('SessionSidebarRows section spacing', () => {
     return sectionSpacingAfter(rows[index - 1], rows[index]);
   };
 
-  test('the last zone above the projects ends with the wide gap while Recent is shown', () => {
-    const rows = buildSessionSidebarRowModel(input(true)).rows;
-    expect(spacingBefore(rows, 'activity-header', 'activity:active-now:header')).toBe('pb-2');
-    expect(spacingBefore(rows, 'project-header')).toBe('pb-6');
+  test('zones and projects open with the same gap', () => {
+    for (const withChats of [true, false]) {
+      const rows = buildSessionSidebarRowModel(input(withChats)).rows;
+      if (withChats) expect(spacingBefore(rows, 'activity-header', 'activity:work:header')).toBe('pb-2');
+      expect(spacingBefore(rows, 'project-header')).toBe('pb-2');
+    }
   });
 
-  test('In work keeps the wide gap above the projects while Recent is hidden', () => {
-    const rows = buildSessionSidebarRowModel(input(false)).rows;
-    expect(spacingBefore(rows, 'project-header')).toBe('pb-6');
-  });
-
-  test('a row that ends a zone is sized apart from its siblings and estimated with its gap', () => {
+  test('a row that ends a section is estimated as its siblings plus its gap', () => {
     const rows = buildSessionSidebarRowModel(input(true)).rows;
     const lastBeforeProjects = rows.findIndex((row) => row.kind === 'project-header') - 1;
-    const sibling = rows.findIndex((row) => row.kind === 'session');
     const last = rows[lastBeforeProjects];
     expect(last.kind).toBe('session');
-    expect(sessionSidebarRowSizeKey(last, rows[lastBeforeProjects + 1]))
-      .not.toBe(sessionSidebarRowSizeKey(rows[sibling], rows[sibling + 1]));
-    expect(estimateSessionSidebarRowSize(last, rows[lastBeforeProjects + 1])).toBe(last.estimateSize + 24);
+    expect(estimateSessionSidebarRowSize(last, rows[lastBeforeProjects + 1])).toBe(last.estimateSize + 8);
+    // A sibling measured mid-section tells its height; the gap is added as measured.
+    expect(estimateSessionSidebarRowSize(last, rows[lastBeforeProjects + 1], { height: 30, gapBySpacing: new Map([['pb-2', 10]]) })).toBe(40);
+    expect(estimateSessionSidebarRowSize(last, undefined, { height: 30 })).toBe(30);
+  });
+
+  test('a header gaining its gap as it closes is a new virtual item, so its old height is not reused', () => {
+    const workHeader = (collapsedActivities: Set<string>) => {
+      const rows = buildSessionSidebarRowModel({ ...input(true), collapsedActivities }).rows;
+      const index = rows.findIndex((row) => row.kind === 'activity-header' && row.activityKey === 'work');
+      return { key: rows[index].key, virtualKey: sessionSidebarRowVirtualKey(rows[index], rows[index + 1]) };
+    };
+    const open = workHeader(new Set());
+    // Closed, the zone is followed by the next section and takes its gap.
+    const closed = workHeader(new Set(['work']));
+
+    expect(closed.key).toBe(open.key);
+    expect(closed.virtualKey).not.toBe(open.virtualKey);
   });
 });

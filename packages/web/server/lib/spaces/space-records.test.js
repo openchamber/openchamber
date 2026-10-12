@@ -26,7 +26,7 @@ describe('space records', () => {
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
 
     const written = records.write(ID, { network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project' });
-    expect(written).toEqual({ version: 1, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
+    expect(written).toEqual({ version: 1, placeId: 'docker', name: null, created: null, network: { mode: 'allowlist', domains: ['api.anthropic.com'] }, repository: '/home/me/project', spacePath: null, base: null, history: 'pending', grants: [], setup: null });
     const file = path.join(dataDir, 'spaces', 'records', `${ID}.json`);
     if (process.platform !== 'win32') expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.readdirSync(path.dirname(file))).toEqual([`${ID}.json`]);
@@ -38,6 +38,7 @@ describe('space records', () => {
     records.remove(ID);
     expect(records.read(ID)).toEqual({ status: 'missing', record: null });
     records.remove(ID);
+    expect(records.list()).toEqual([]);
   });
 
   it('reports a file it cannot read as unreadable, never as a fresh record, and does not write over it', () => {
@@ -130,5 +131,20 @@ describe('space records', () => {
     }
     expect(networkSchema.safeParse({ mode: 'open' }).data).toEqual({ mode: 'open', domains: [] });
     expect(networkSchema.safeParse({ mode: 'all' }).success).toBe(false);
+  });
+  it('lists every readable record with its place, name and time, and reads a record from before there were two places as the local Docker place', () => {
+    const dataDir = temporary();
+    const records = createSpaceRecords({ dataDir, logger: quiet });
+    expect(records.list()).toEqual([]);
+    records.write(ID, { placeId: 'docker-ssh', name: 'On the box', created: '2026-10-11T10:00:00.000Z', network: { mode: 'open' }, repository: '/home/me/project' });
+    // A record a host before this one wrote: no place, no name, no time.
+    fs.writeFileSync(path.join(dataDir, 'spaces', 'records', 'b1b2c3d4e5f6.json'), JSON.stringify({ version: 1, network: { mode: 'open', domains: [] }, repository: '/home/me/other' }));
+    // Not records: a half-written temporary file and a stranger's file.
+    fs.writeFileSync(path.join(dataDir, 'spaces', 'records', 'c1c2c3d4e5f6.json.1.tmp'), '{');
+    fs.writeFileSync(path.join(dataDir, 'spaces', 'records', 'notes.json'), '{}');
+    expect(records.list().map(({ id, record }) => [id, record.placeId, record.name, record.created]).sort()).toEqual([
+      [ID, 'docker-ssh', 'On the box', '2026-10-11T10:00:00.000Z'],
+      ['b1b2c3d4e5f6', 'docker', null, null],
+    ]);
   });
 });

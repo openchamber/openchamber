@@ -23,35 +23,53 @@ export const findFirstVisibleSessionSidebarRowIndex = (
   scrollOffset: number,
 ): number => items.find((item) => item.end > scrollOffset)?.index ?? 0;
 
-const SECTION_SPACING_ESTIMATE = { 'pb-2': 8, 'pb-6': 24 } as const;
+const SECTION_SPACING_ESTIMATE = { 'pb-2': 8, 'pb-1.5': 6 } as const;
 
 type SectionSpacing = keyof typeof SECTION_SPACING_ESTIMATE;
 
 /**
- * Rows that share a kind, surface context and trailing section gap render at
- * the same height, so one measured row tells the size of every unmeasured
- * one. The virtualizer compensates the scroll position whenever a row above
- * the viewport measures differently from its estimate, and that write lands
- * in the middle of the user's scroll gesture.
+ * Rows that share a kind and surface context render at the same height apart
+ * from their trailing section gap, so one measured row tells the size of every
+ * unmeasured one, with whatever gap it ends up having. The virtualizer
+ * compensates the scroll position whenever a row above the viewport measures
+ * differently from its estimate, and that write lands in the middle of the
+ * user's scroll gesture.
  */
-export const sessionSidebarRowSizeKey = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
-  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}:${sectionSpacingAfter(row, nextRow) ?? ''}`
+export const sessionSidebarRowSizeKey = (row: SessionSidebarRow): string => (
+  `${row.kind}:${'renderContext' in row ? row.renderContext : ''}`
 );
 
-export const estimateSessionSidebarRowSize = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): number => {
+/**
+ * The virtualizer's key for a row: its own key plus its trailing section gap.
+ * A header's gap depends on the row after it, so closing or opening the header
+ * changes its height without changing its key; under the plain key the
+ * virtualizer would keep the old measured height until the resize observer
+ * reported back, and the rows below would hop by the gap a frame later. A new
+ * key takes the size estimate above, exact once a row like it was measured.
+ */
+export const sessionSidebarRowVirtualKey = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): string => (
+  `${row.key}|${sectionSpacingAfter(row, nextRow) ?? ''}`
+);
+
+/**
+ * A row's size: the measured height of a row like it (`sessionSidebarRowSizeKey`,
+ * gap excluded) or the model estimate, plus its gap as measured or estimated.
+ */
+export const estimateSessionSidebarRowSize = (
+  row: SessionSidebarRow,
+  nextRow: SessionSidebarRow | undefined,
+  measured: { height?: number; gapBySpacing?: ReadonlyMap<string, number> } = {},
+): number => {
   const spacing = sectionSpacingAfter(row, nextRow);
-  return row.estimateSize + (spacing ? SECTION_SPACING_ESTIMATE[spacing] : 0);
+  const gap = spacing ? measured.gapBySpacing?.get(spacing) ?? SECTION_SPACING_ESTIMATE[spacing] : 0;
+  return (measured.height ?? row.estimateSize) + gap;
 };
 
 export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSidebarRow | undefined): SectionSpacing | undefined => {
-  // The zones above the projects (Chats, In work, Recent) end with a wider
-  // gap, whichever of them happens to be the last one shown.
-  const endsZones = row.key.startsWith('activity:') && nextRow !== undefined && !nextRow.key.startsWith('activity:');
-  if (endsZones && (nextRow.kind === 'project-header' || nextRow.kind === 'group-header')) {
-    return 'pb-6';
-  }
-  const startsSection = nextRow?.kind === 'activity-header'
-    || nextRow?.kind === 'project-header'
-    || (nextRow?.kind === 'group-header' && row.kind !== 'project-header');
-  return startsSection ? 'pb-2' : undefined;
+  // Zones (Chats, In work, Recent) and projects are sections of equal weight,
+  // so each opens with the same gap. A worktree header opens a smaller one
+  // inside its project, so its sessions read as a group of their own.
+  const startsSection = nextRow?.kind === 'activity-header' || nextRow?.kind === 'project-header';
+  if (startsSection) return 'pb-2';
+  return nextRow?.kind === 'group-header' && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

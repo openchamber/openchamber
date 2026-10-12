@@ -54,31 +54,61 @@ const ShellElapsed: React.FC<{ startedAt: number }> = ({ startedAt }) => {
   );
 };
 
-const ShellRow: React.FC<{ shell: TrackedShell; rootSessionId: string; rootDirectory?: string }> = ({ shell, rootSessionId, rootDirectory }) => {
-  const { t } = useI18n();
-  const [stopping, setStopping] = React.useState(false);
-  const fromSubagent = shell.sessionID !== rootSessionId;
+const STOP_BUTTON_CLASS = 'shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error';
 
-  // The same stop the command's row in the chat offers: the agent is told
-  // first, then the command is removed. The row leaves when OpenCode reports
-  // the command ended.
-  const stop = () => {
-    if (stopping) return;
-    setStopping(true);
-    const sessionDirectory = fromSubagent
-      ? useGlobalSessionsStore.getState().entityById.get(shell.sessionID)?.directory ?? shell.directory
-      : rootDirectory;
-    opencodeClient.stopBackgroundShell({
-      sessionID: shell.sessionID,
-      sessionDirectory,
-      shellID: shell.id,
-      shellDirectory: shell.directory,
-      command: shell.command,
-    }).catch(() => {
-      setStopping(false);
-      toast.error(t('chat.toolPart.background.stopFailed'));
-    });
-  };
+/**
+ * Stops commands through the same flow as a command's row in the chat: the
+ * agent is told first, then the commands are removed. Commands of one session
+ * go in one call, so stopping several tells that agent once and its
+ * completions arrive together. A row stays disabled until OpenCode reports
+ * its command ended and it leaves the list.
+ */
+const useStopShells = (rootSessionId: string, rootDirectory: string | undefined) => {
+  const { t } = useI18n();
+  const [stoppingIds, setStoppingIds] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  const stop = React.useCallback((shells: readonly TrackedShell[]) => {
+    const pending = shells.filter((shell) => !stoppingIds.has(shell.id));
+    if (pending.length === 0) return;
+    setStoppingIds((current) => new Set([...current, ...pending.map((shell) => shell.id)]));
+    const bySession = new Map<string, [TrackedShell, ...TrackedShell[]]>();
+    for (const shell of pending) {
+      const group = bySession.get(shell.sessionID);
+      if (group) group.push(shell);
+      else bySession.set(shell.sessionID, [shell]);
+    }
+    for (const [sessionID, [first, ...rest]] of bySession) {
+      const sessionDirectory = sessionID === rootSessionId
+        ? rootDirectory
+        : useGlobalSessionsStore.getState().entityById.get(sessionID)?.directory ?? first.directory;
+      const toStop = (shell: TrackedShell) => ({ shellID: shell.id, shellDirectory: shell.directory, command: shell.command });
+      opencodeClient.stopBackgroundShells({
+        sessionID,
+        sessionDirectory,
+        shells: [toStop(first), ...rest.map(toStop)],
+      }).catch(() => {
+        // A command whose kill went through leaves the list on its own; the
+        // rest become stoppable again.
+        setStoppingIds((current) => {
+          const next = new Set(current);
+          for (const shell of [first, ...rest]) next.delete(shell.id);
+          return next;
+        });
+        toast.error(t('chat.toolPart.background.stopFailed'));
+      });
+    }
+  }, [rootDirectory, rootSessionId, stoppingIds, t]);
+
+  return { stoppingIds, stop };
+};
+
+const ShellRow: React.FC<{
+  shell: TrackedShell;
+  fromSubagent: boolean;
+  stopping: boolean;
+  onStop: (shell: TrackedShell) => void;
+}> = ({ shell, fromSubagent, stopping, onStop }) => {
+  const { t } = useI18n();
 
   return (
     <div className="flex h-10 items-center gap-2 ps-3 pe-1.5">
@@ -106,10 +136,10 @@ const ShellRow: React.FC<{ shell: TrackedShell; rootSessionId: string; rootDirec
         variant="ghost"
         size="sm"
         disabled={stopping}
-        onClick={stop}
+        onClick={() => onStop(shell)}
         onMouseDown={(event) => event.preventDefault()}
         aria-label={t('chat.backgroundShells.stopAria', { command: shell.command })}
-        className="shrink-0 text-status-error/80 hover:bg-transparent hover:text-status-error"
+        className={STOP_BUTTON_CLASS}
       >
         {t('chat.backgroundShells.stop')}
       </Button>
@@ -128,21 +158,34 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
   const shells = useSessionTreeShells(sessionId ?? '');
   const [expanded, setExpanded] = React.useState(false);
   const listId = React.useId();
+  const { stoppingIds, stop } = useStopShells(sessionId ?? '', directory);
+  const stopOne = React.useCallback((shell: TrackedShell) => stop([shell]), [stop]);
 
   if (!sessionId || shells.length === 0) return null;
+
+  const row = (shell: TrackedShell) => (
+    <ShellRow
+      key={shell.id}
+      shell={shell}
+      fromSubagent={shell.sessionID !== sessionId}
+      stopping={stoppingIds.has(shell.id)}
+      onStop={stopOne}
+    />
+  );
 
   if (shells.length === 1) {
     return (
       <div role="group" className="border-b border-border/60" aria-label={t('chat.backgroundShells.aria')}>
-        <ShellRow shell={shells[0]} rootSessionId={sessionId} rootDirectory={directory} />
+        {row(shells[0])}
       </div>
     );
   }
 
-  // The whole header toggles the list, as the queue header does.
+  // The header toggles the list, as the queue header does, and stops every
+  // command in it at once.
   return (
     <div role="group" className="border-b border-border/60" aria-label={t('chat.backgroundShells.aria')}>
-      <div className="flex h-10 items-center ps-3 pe-3">
+      <div className="flex h-10 items-center gap-2 ps-3 pe-1.5">
         <Button
           type="button"
           variant="ghost"
@@ -159,12 +202,21 @@ export const BackgroundShellsStrip: React.FC<BackgroundShellsStripProps> = React
           </span>
           <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
         </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={shells.every((shell) => stoppingIds.has(shell.id))}
+          onClick={() => stop(shells)}
+          onMouseDown={(event) => event.preventDefault()}
+          className={STOP_BUTTON_CLASS}
+        >
+          {t('chat.backgroundShells.stopAll')}
+        </Button>
       </div>
       {expanded ? (
         <div id={listId}>
-          {shells.map((shell) => (
-            <ShellRow key={shell.id} shell={shell} rootSessionId={sessionId} rootDirectory={directory} />
-          ))}
+          {shells.map(row)}
         </div>
       ) : null}
     </div>

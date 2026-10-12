@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
 
@@ -32,18 +33,23 @@ export const SessionActivityIndicator: React.FC<{
   className?: string;
   /** Extra classes for the running kinds only (e.g. the switcher's pulse). */
   runningClassName?: string;
-}> = ({ state, className, runningClassName }) => {
+  /**
+   * Name the state in a tooltip above the mark instead of the native title,
+   * as the sidebar's row marks do.
+   */
+  tooltip?: boolean;
+}> = ({ state, className, runningClassName, tooltip = false }) => {
   const { t } = useI18n();
   const animated = useSessionDisplayStore((s) => s.animatedActivityIndicators);
   const presentation = PRESENTATION[state];
   const label = t(presentation.labelKey);
   const running = state !== 'unread';
 
-  return (
+  const mark = (
     <span
       className={cn('inline-flex shrink-0 items-center justify-center', className)}
       aria-label={label}
-      title={label}
+      title={tooltip ? undefined : label}
       data-session-activity-indicator={state}
     >
       {running && animated ? (
@@ -55,5 +61,12 @@ export const SessionActivityIndicator: React.FC<{
         />
       )}
     </span>
+  );
+  if (!tooltip) return mark;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{mark}</TooltipTrigger>
+      <TooltipContent side="top" sideOffset={6}>{label}</TooltipContent>
+    </Tooltip>
   );
 };

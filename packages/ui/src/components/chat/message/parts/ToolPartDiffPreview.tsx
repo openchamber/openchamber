@@ -6,6 +6,7 @@ import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { DiffViewMode } from '../DiffViewToggle';
 import { PlainDiffFallback } from './PlainDiffFallback';
+import { PIERRE_DIFF_TINT_CSS } from '@/lib/shiki/pierreDiffTint';
 
 // Loaded lazily from ToolPart: this is the only part of the tool card that
 // needs @pierre/diffs' rendering stack (Shiki core + regex engines), so the
@@ -13,6 +14,7 @@ import { PlainDiffFallback } from './PlainDiffFallback';
 // rendered tool diff.
 
 const TOOL_DIFF_UNSAFE_CSS = `
+  ${PIERRE_DIFF_TINT_CSS}
   [data-diff-header],
   [data-diff] {
     [data-separator] {

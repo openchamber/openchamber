@@ -207,5 +207,3 @@ export function missingRequiredKeys(fields: readonly FormField[], values: FormVa
 export function buildFormAnswer(fields: readonly FormField[], values: FormValues): Record<string, FormValue> {
     return evaluateForm(fields, values).answer;
 }
-
-/** Fields a form request actually asks the user to fill in. */

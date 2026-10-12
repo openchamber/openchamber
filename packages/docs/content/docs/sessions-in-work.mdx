@@ -1,19 +1,25 @@
 ---
 title: Sessions in Work
-description: Keep sessions with real work in progress on top of the sidebar until you mark them done.
+description: Keep the sessions you're working in on top of the sidebar until you mark them done.
 ---
 
 # Sessions in Work
 
-Questions, research and quick experiments pile up fast, and the session where you're actually fixing something gets buried among them. The **In work** block keeps those sessions in one place in the sidebar. A session stays there until you say it's done.
-
-That's the difference from Recent. Recent shows whatever changed in the last two days and moves on its own; a session you touched this morning out of curiosity is there, a fix you paused on Monday is gone. In work is the list of things you haven't finished, however long ago you last opened them.
+Every session you send a message in goes into the **In work** block at the top of the sidebar and stays there until you mark it done, however long ago you last opened it. Your projects keep every session you've ever had; In work holds only what you haven't finished.
 
 ## Where to find it
 
-The **In work** block sits in the sidebar under Chats and above Recent (or the timeline, in Timeline mode). On the phone it's in the same place in the sessions list.
+The **In work** block sits in the sidebar under Chats, above your projects or the timeline. On the phone it's in the same place in the sessions list.
 
-A session in work moves there together with its subsessions. It doesn't show up a second time in Recent, the timeline, its project or its folder. Mark it done and it goes back to where it was.
+A session in work also stays in its project and folder, and under its project in the timeline, so you see it in two places. Its subsessions come along with it. Search lists it once, in the In work block.
+
+## How sessions get in
+
+Send a message in a session and it goes into In work. This covers any project session, including sessions in worktrees.
+
+A session you marked done comes back when you send a new message in it.
+
+Chats, archived sessions, review sessions and runs of [scheduled tasks](/scheduled-tasks/) never go in; fork a run to keep working on it, and the fork does. Subsessions don't go in on their own; they come with their parent.
 
 ## Track and finish a session by hand
 
@@ -22,28 +28,16 @@ A session in work moves there together with its subsessions. It doesn't show up 
 
 On the phone, swipe a session row to reach the same action, or use the session menu.
 
-Any project session can be in work, including sessions in worktrees. Subsessions come along with their parent. Chats never do: they're plain conversations, so they don't get the eye.
-
-## Let Jev move sessions in for you
-
-With a [classification provider](/classification-providers/) set up, you don't have to track sessions yourself. Jev reads each message you send and moves the session into work when you:
-
-- ask for a change
-- report a bug
-- discuss a concrete change you're about to make
-
-Questions, explanations and research don't count. Jev looks again when the agent finishes a turn, which catches the work that only becomes clear from the reply.
-
-Jev only ever moves sessions **in**. Once you mark a session done, only a new request sent after that brings it back.
+Chats don't get the eye: they're plain conversations.
 
 ### "This work looks done"
 
-When a turn looks like the end of the work (you said thanks, asked for a commit, confirmed it works), Jev leaves a hint instead of closing anything:
+With a [classification provider](/classification-providers/) set up, Jev checks each turn of a session in work. When a turn looks like the end of the work (you said thanks, asked for a commit, confirmed it works), Jev leaves a hint instead of closing anything:
 
 - a grey check on the session row in the sidebar
 - a strip above the composer: **This work looks done.** with a **Mark done** button
 
-Press **Mark done** if Jev is right. If not, just keep going: the hint disappears with your next message.
+Press **Mark done** if Jev is right. If not, just keep going: the hint disappears with your next message. Without a classification provider there's no hint, and you mark sessions done yourself.
 
 ## Recap and next-message suggestion
 
@@ -58,19 +52,16 @@ Turn them on or off in **Settings → Chat → Session Assistance**.
 
 ## Settings
 
-Open **Settings → Sessions → Sessions in work**:
+Open **Settings → Sessions → Sessions in work**. There's one setting, **Show sessions in work**, on by default. Turn it off and the whole feature is off: no block, and sending a message no longer puts sessions in work.
 
-- **Show sessions in work:** the block itself; turn it off and sessions stay where they always were
-- **Move sessions into work automatically:** the Jev part; turn it off to track only by hand
-
-Both are on by default.
+To hide only the block, use **Show in work section** in the sidebar's display menu.
 
 ## Where it works
 
-The block and the manual track/done work everywhere, VS Code included. Moving sessions in automatically, the "looks done" hint and the Jev filter for recaps need the OpenChamber server, so they work in the desktop app, the web app and on your phone, but not in VS Code.
+The block and the manual track/done work everywhere, VS Code included. Tracking sessions when you send a message, the "looks done" hint and the Jev filter for recaps need the OpenChamber server, so they work in the desktop app, the web app and on your phone, but not in VS Code. In VS Code you track sessions by hand.
 
 ## Related
 
-- [Classification Providers (Jev)](/classification-providers/): set up automatic tracking
+- [Classification Providers (Jev)](/classification-providers/): set up the "looks done" hint
 - [Chats](/chats/): conversations that stay out of work
 - [Session Goals](/session-goals/): keep the agent working toward a finish line

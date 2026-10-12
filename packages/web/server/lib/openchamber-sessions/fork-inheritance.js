@@ -43,6 +43,8 @@ export const sourceOwnedLinksPatch = (metadata) => {
       if (key in namespace) patch[key] = null;
     }
   }
+  // A fork of a scheduled run is the user's own work, In work included.
+  if (namespace.kind === 'scheduled') patch.kind = null;
   // A fork must not pursue the source's goal in parallel: an active goal
   // arrives paused and the user resumes it (same rule as UI forks).
   const goal = namespace.goal;

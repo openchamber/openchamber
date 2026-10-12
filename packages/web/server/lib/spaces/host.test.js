@@ -126,6 +126,10 @@ describe('createSpacesHost', () => {
     hosts.push(host);
     expect(host.places().map((entry) => entry.id)).toEqual(['memory']);
     expect(await host.journey.listSpaces()).toEqual([]);
+    // With a machine named in the settings, the Docker over SSH place stands beside the first one, and no process starts for that either.
+    const withRemote = createSpacesHost({ dataDir: temporary(), place, sshDockerHost: 'ssh://me@box', runCommand: async () => { throw new Error('no process here'); }, logger: { warn: () => {} } });
+    hosts.push(withRemote);
+    expect(withRemote.places().map((entry) => entry.id)).toEqual(['memory', 'docker-ssh']);
     // The slot in index.js calls this whether or not the forwarder exists yet.
     expect(() => host.upgradeHandler({ url: '/api/spaces/a1b2c3d4e5f6/api/event/ws', headers: {} }, { destroy: () => {} }, Buffer.alloc(0))).not.toThrow();
     // The middleware is the dispatcher's: a request outside the prefix passes through.
@@ -327,4 +331,76 @@ describe('createSpacesHost: sessions and events', () => {
     expect(await until(() => space.state.eventStreams.length === 0)).toBe(true);
     space.wsServer.close();
   });
+});
+
+describe('createSpacesHost: a place that cannot be asked', () => {
+  it('keeps the recorded space in the list as unreachable, asks it nothing, keeps its last session list stale, and refuses requests to it at once', async () => {
+    const logs = [];
+    const logger = { warn: (line) => logs.push(line), info: (line) => logs.push(line) };
+    const space = await startSpaceServer({ sessions: [{ id: 'a1', location: { directory: `/spaces/${ID}/repo` } }] });
+    const spaces = new Map([[ID, { port: space.port, running: true, project: hashProjectDirectory('/home/me/project') }]]);
+    const place = fakePlace(spaces);
+    const asked = { connect: 0, exec: 0, list: 0 };
+    const connect = place.connect;
+    place.connect = (spaceId) => { asked.connect += 1; return connect(spaceId); };
+    const exec = place.exec;
+    place.exec = (...args) => { asked.exec += 1; return exec(...args); };
+    const list = place.list;
+    place.list = async () => { asked.list += 1; return list(); };
+    const dataDir = temporary();
+    const host = createSpacesHost({ dataDir, place, logger, setTimer: () => null, clearTimer: () => {}, listProjectDirectories: async () => ['/home/me/project'] });
+    hosts.push(host);
+    // The host wrote this record when it made the space: the place, the name, the time.
+    fs.mkdirSync(path.join(dataDir, 'spaces', 'records'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'spaces', 'records', `${ID}.json`), JSON.stringify({ version: 1, placeId: 'fake', name: 'On the box', created: '2026-10-11T10:00:00.000Z', network: { mode: 'open', domains: [] }, repository: '/home/me/project', spacePath: `/spaces/${ID}/project` }));
+    const hostList = { data: [], cursor: {} };
+    const hub = createGlobalMessageStreamHub({ buildOpenCodeUrl: (p) => `http://127.0.0.1:1${p}`, getOpenCodeAuthHeaders: () => ({}), deltaCoalesceWindowMs: 0, fetchImpl: async () => { throw new Error('no host upstream here'); } });
+    await host.startEvents(hub);
+    expect(await until(() => space.state.eventStreams.length === 1)).toBe(true);
+
+    // Reachable: the list comes from the place and the sessions from inside.
+    expect((await host.mergeSessionList(hostList)).data.map((item) => item.id)).toEqual(['a1']);
+    expect((await host.journey.listSpaces())[0]).toMatchObject({ id: ID, state: 'running' });
+    const connectsWhileUp = asked.connect;
+    expect(connectsWhileUp).toBeGreaterThan(0);
+
+    // The machine goes away: the place cannot list.
+    place.list = async () => { asked.list += 1; throw new SpaceError('place_unreachable', 'box did not answer'); };
+    await sleep(2_100);
+    expect((await host.journey.listSpaces())[0]).toMatchObject({ id: ID, name: 'On the box', state: 'unreachable', placeId: 'fake', projectDirectory: '/home/me/project' });
+    const stale = await host.mergeSessionList(hostList);
+    expect(stale.data.map((item) => item.id)).toEqual(['a1']);
+    expect(stale.spaces).toEqual([{ id: ID, name: 'On the box', state: 'stale', sessions: 1, projectDirectory: '/home/me/project', directory: `/spaces/${ID}/project` }]);
+    // The event connection is let go and not made again while the place is away.
+    space.server.closeAllConnections();
+    await host.startEvents(hub);
+    await sleep(1_500);
+    expect(space.state.eventStreams.length).toBe(0);
+    // Nothing was asked of the space meanwhile: no connection for its sessions, its events or a request.
+    const app = express();
+    app.use(host.middleware);
+    const server = http.createServer(app);
+    servers.push(server);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const refused = await fetch(`http://127.0.0.1:${server.address().port}/api/spaces/${ID}/health`);
+    expect(refused.status).toBe(503);
+    expect(await refused.json()).toMatchObject({ code: 'place_unreachable' });
+    expect(asked.connect).toBe(connectsWhileUp);
+    expect(logs.filter((line) => line.includes('cannot be asked'))).toHaveLength(1);
+
+    // A host that starts while the machine is away holds no token yet, and the token read is refused the same way, before the place is asked.
+    const fresh = createSpacesHost({ dataDir, place, logger, setTimer: () => null, clearTimer: () => {}, listProjectDirectories: async () => ['/home/me/project'] });
+    hosts.push(fresh);
+    const freshApp = express();
+    freshApp.use(fresh.middleware);
+    const freshServer = http.createServer(freshApp);
+    servers.push(freshServer);
+    await new Promise((resolve) => freshServer.listen(0, '127.0.0.1', resolve));
+    const execsBefore = asked.exec;
+    const refusedFresh = await fetch(`http://127.0.0.1:${freshServer.address().port}/api/spaces/${ID}/health`);
+    expect(refusedFresh.status).toBe(503);
+    expect(await refusedFresh.json()).toMatchObject({ code: 'place_unreachable' });
+    expect(asked.exec).toBe(execsBefore);
+    expect(asked.connect).toBe(connectsWhileUp);
+  }, 10_000);
 });

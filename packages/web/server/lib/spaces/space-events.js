@@ -133,16 +133,24 @@ export function createSpaceEventSources({ requestInside, index, hub, logger = co
   };
 
   return {
-    /** Follows the list of spaces: a connection for each new one, none for one that is gone. */
-    sync(spaceIds) {
+    /**
+     * Follows the list of spaces: a connection for each new one, none for one that is gone. A
+     * space in `paused` is kept, with its index, and not connected: its place cannot be asked, and
+     * an attempt would only wait on a machine that is off.
+     */
+    sync(spaceIds, { paused = new Set() } = {}) {
       const wanted = new Set(spaceIds);
       for (const spaceId of Array.from(sources.keys())) {
         if (!wanted.has(spaceId)) {
           stop(spaceId);
           index.forget(spaceId);
+        } else if (paused.has(spaceId)) {
+          stop(spaceId);
         }
       }
-      for (const spaceId of wanted) start(spaceId);
+      for (const spaceId of wanted) {
+        if (!paused.has(spaceId)) start(spaceId);
+      }
     },
     /** For the tests: whether a space has a connection right now. */
     has: (spaceId) => sources.has(spaceId),

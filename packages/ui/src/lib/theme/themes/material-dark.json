@@ -12,16 +12,16 @@
   },
   "colors": {
     "primary": {
-      "base": "#a5e4fe",
-      "hover": "#ace6fe",
-      "active": "#b3e8fe",
-      "muted": "#a5e4fe80"
+      "base": "#82aaff",
+      "hover": "#8cb1ff",
+      "active": "#96b8ff",
+      "muted": "#82aaff80"
     },
     "surface": {
       "background": "#1a252a",
       "foreground": "#cccfd1",
       "muted": "#162126",
-      "mutedForeground": "#8b9da4",
+      "mutedForeground": "#85989f",
       "elevated": "#212c31",
       "subtle": "#202a2f"
     },
@@ -37,15 +37,15 @@
       "active": "#ffffff12"
     },
     "status": {
-      "error": "#fcb3b3",
-      "errorBackground": "#fcb3b329",
-      "errorBorder": "#fcb3b373",
-      "warning": "#f4c05d",
-      "warningBackground": "#f4c05d29",
-      "warningBorder": "#f4c05d73",
-      "success": "#b3d87c",
-      "successBackground": "#b3d87c29",
-      "successBorder": "#b3d87c73",
+      "error": "#f07178",
+      "errorBackground": "#f0717829",
+      "errorBorder": "#f0717873",
+      "warning": "#ffcb6b",
+      "warningBackground": "#ffcb6b29",
+      "warningBorder": "#ffcb6b73",
+      "success": "#c3e88d",
+      "successBackground": "#c3e88d29",
+      "successBorder": "#c3e88d73",
       "info": "#83afe0",
       "infoBackground": "#83afe029",
       "infoBorder": "#83afe073"
@@ -89,26 +89,26 @@
     },
     "chat": {
       "background": "#1a252a",
-      "userMessageBackground": "#273338",
+      "userMessageBackground": "#1f2e3c",
       "divider": "#ffffff16"
     },
     "markdown": {
-      "link": "#a5e4fe",
-      "linkHover": "#ace6fe",
+      "link": "#82aaff",
+      "linkHover": "#8cb1ff",
       "inlineCode": "#c3e88d",
       "inlineCodeBackground": "#202a2f",
-      "blockquote": "#8b9da4",
+      "blockquote": "#85989f",
       "blockquoteBorder": "#ffffff16",
-      "listMarker": "#a5e4fe99",
+      "listMarker": "#82aaff99",
       "bold": "#d2d5d7",
       "italic": "#cccfd1",
       "hr": "#ffffff0b"
     },
     "tools": {
       "border": "#ffffff0c",
-      "icon": "#8b9da4",
+      "icon": "#85989f",
       "title": "#cccfd1",
-      "description": "#8b9da4",
+      "description": "#85989f",
       "edit": {
         "addedBackground": "#0a1201",
         "removedBackground": "#240004",

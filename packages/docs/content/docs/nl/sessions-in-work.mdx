@@ -1,19 +1,25 @@
 ---
 title: Sessies in uitvoering
-description: Houd sessies met lopend werk bovenaan de zijbalk totdat u ze als afgerond markeert.
+description: Houd de sessies waaraan u werkt bovenaan de zijbalk totdat u ze als afgerond markeert.
 ---
 
 # Sessies in uitvoering
 
-Vragen, onderzoek en snelle experimenten stapelen zich op. De sessie waarin u echt iets aan het oplossen bent, raakt dan makkelijk uit beeld. Het blok **In bewerking** houdt die sessies bij elkaar in de zijbalk. Een sessie blijft daar totdat u aangeeft dat ze klaar is.
-
-Dat is het verschil met Recent. Recent toont wat de afgelopen twee dagen is gewijzigd en verandert vanzelf. Een sessie die u vanochtend uit nieuwsgierigheid opende, staat erin; een reparatie die u maandag pauzeerde, is verdwenen. In bewerking toont wat u nog niet hebt afgerond, ongeacht wanneer u het voor het laatst opende.
+Elke sessie waarin u een bericht stuurt, komt in het blok **In bewerking** bovenaan de zijbalk en blijft daar totdat u haar als afgerond markeert, ongeacht wanneer u haar voor het laatst opende. Uw projecten bewaren elke sessie die u ooit had; In bewerking bevat alleen wat u nog niet hebt afgerond.
 
 ## Waar vindt u dit?
 
-Het blok **In bewerking** staat onder Chats en boven Recent, of boven de tijdlijn in de tijdlijnweergave. Op uw telefoon staat het op dezelfde plek in de sessielijst.
+Het blok **In bewerking** staat in de zijbalk onder Chats, boven uw projecten of de tijdlijn. Op uw telefoon staat het op dezelfde plek in de sessielijst.
 
-Een sessie verhuist samen met haar subsessies naar dit blok. Ze verschijnt niet nog eens in Recent, de tijdlijn, haar project of map. Markeer haar als afgerond en ze keert terug naar haar eerdere plek.
+Een sessie in uitvoering blijft ook in haar project en map staan, en in de tijdlijn onder haar project. U ziet haar dus op twee plekken. Haar subsessies komen mee. Zoeken toont haar één keer, in het blok In bewerking.
+
+## Hoe sessies erin komen
+
+Stuur een bericht in een sessie en ze komt in In bewerking. Dat geldt voor elke projectsessie, ook een sessie in een worktree.
+
+Een sessie die u als afgerond hebt gemarkeerd, komt terug zodra u er een nieuw bericht in stuurt.
+
+Chats, gearchiveerde sessies, reviewsessies en runs van [geplande taken](/nl/scheduled-tasks/) komen er nooit in; als u een run forkt om eraan verder te werken, komt de fork er wel in. Subsessies komen er niet op eigen houtje in; ze volgen hun bovenliggende sessie.
 
 ## Zelf een sessie volgen en afronden
 
@@ -22,28 +28,16 @@ Een sessie verhuist samen met haar subsessies naar dit blok. Ze verschijnt niet 
 
 Veeg op uw telefoon over een sessierij om dezelfde actie te bereiken, of gebruik het sessiemenu.
 
-Elke projectsessie kan in uitvoering zijn, ook een sessie in een worktree. Subsessies volgen hun bovenliggende sessie. Chats doen dat nooit: dat zijn gewone gesprekken, dus daarbij verschijnt het oog niet.
-
-## Jev sessies automatisch laten verplaatsen
-
-Met een ingestelde [classificatieprovider](/nl/classification-providers/) hoeft u sessies niet zelf te volgen. Jev leest elk bericht dat u verstuurt en verplaatst de sessie naar In bewerking wanneer u:
-
-- om een wijziging vraagt
-- een fout meldt
-- een concrete wijziging bespreekt die u gaat uitvoeren
-
-Vragen, uitleg en onderzoek tellen niet mee. Jev kijkt opnieuw wanneer de agent een beurt afrondt. Zo wordt ook werk herkend dat pas uit het antwoord blijkt.
-
-Jev verplaatst sessies alleen **naar** het blok. Nadat u een sessie als afgerond hebt gemarkeerd, kan alleen een nieuw verzoek dat u daarna verstuurt haar terugbrengen.
+Bij chats verschijnt het oog niet: dat zijn gewone gesprekken.
 
 ### 'Dit werk lijkt afgerond'
 
-Als een beurt het einde van het werk lijkt te zijn, bijvoorbeeld omdat u bedankt, om een commit vraagt of bevestigt dat het werkt, geeft Jev een aanwijzing in plaats van zelf iets af te sluiten:
+Met een ingestelde [classificatieprovider](/nl/classification-providers/) bekijkt Jev elke beurt van een sessie in uitvoering. Als een beurt het einde van het werk lijkt te zijn, bijvoorbeeld omdat u bedankt, om een commit vraagt of bevestigt dat het werkt, geeft Jev een aanwijzing in plaats van zelf iets af te sluiten:
 
 - een grijs vinkje op de sessierij in de zijbalk
 - een balk boven het invoerveld met **Dit werk lijkt afgerond.** en een knop **Markeer als afgerond**
 
-Klik op **Markeer als afgerond** als Jev gelijk heeft. Zo niet, ga dan gewoon verder. De aanwijzing verdwijnt bij uw volgende bericht.
+Klik op **Markeer als afgerond** als Jev gelijk heeft. Zo niet, ga dan gewoon verder. De aanwijzing verdwijnt bij uw volgende bericht. Zonder classificatieprovider is er geen aanwijzing en markeert u sessies zelf als afgerond.
 
 ## Samenvatting en suggestie voor het volgende bericht
 
@@ -58,19 +52,16 @@ Schakel ze in of uit bij **Instellingen → Chat → Sessieassistentie**.
 
 ## Instellingen
 
-Open **Instellingen → Sessies → Sessies in uitvoering**:
+Open **Instellingen → Sessies → Sessies in uitvoering**. Daar staat één instelling, **Sessies in uitvoering tonen**, die standaard aan staat. Schakelt u die uit, dan staat de hele functie uit: er is geen blok en een verstuurd bericht zet de sessie niet meer in In bewerking.
 
-- **Sessies in uitvoering tonen:** regelt het blok zelf. Als u dit uitschakelt, blijven sessies op hun gebruikelijke plek.
-- **Sessies automatisch naar uitvoering verplaatsen:** regelt de Jev-functie. Schakel dit uit als u alleen zelf wilt volgen.
-
-Beide staan standaard aan.
+Wilt u alleen het blok verbergen, gebruik dan **Sectie In bewerking tonen** in het weergavemenu van de zijbalk.
 
 ## Waar werkt het?
 
-Het blok en handmatig volgen of afronden werken overal, ook in VS Code. Automatisch verplaatsen, de aanwijzing dat werk afgerond lijkt en het Jev-filter voor samenvattingen vereisen de OpenChamber-server. Die werken dus op de desktop, in de webapp en op uw telefoon, maar niet in VS Code.
+Het blok en handmatig volgen of afronden werken overal, ook in VS Code. Een sessie in In bewerking zetten wanneer u een bericht stuurt, de aanwijzing dat werk afgerond lijkt en het Jev-filter voor samenvattingen vereisen de OpenChamber-server. Die werken dus op de desktop, in de webapp en op uw telefoon, maar niet in VS Code. In VS Code volgt u sessies alleen handmatig.
 
 ## Zie ook
 
-- [Classificatieproviders en Jev](/nl/classification-providers/) voor automatisch volgen
+- [Classificatieproviders en Jev](/nl/classification-providers/) voor de aanwijzing dat werk afgerond lijkt
 - [Chats](/nl/chats/) voor gesprekken die buiten het werkoverzicht blijven
 - [Sessiedoelen](/nl/session-goals/) om de agent naar een concreet eindresultaat te laten doorwerken

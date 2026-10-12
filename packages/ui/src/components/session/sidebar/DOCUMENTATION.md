@@ -9,10 +9,11 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
   view state, repository state, and worktree presentation.
 - `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
-- `recent/` owns Recent and managed Chats activity projections.
+- `recent/` owns the In work and timeline row projections and session
+  locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
 - `sessionSidebarRowModel.ts` owns the ordered, mode-neutral projection for
-  Chats, Recent, projects, groups, folders, sessions, status notices, empty
+  Chats, In work, projects, groups, folders, sessions, status notices, empty
   states, and reveal controls. `SessionSidebarRows.tsx` is the shared desktop
   Web, Electron and VS Code sidebar row renderer. Normal and committed-search modes use the same
   model and the same `@tanstack/react-virtual` instance.
@@ -64,7 +65,7 @@ unread. The local Appearance preference `animatedActivityIndicators`
 is off by default. Enabling it swaps every running kind for a stepped spinner,
 even when the OS requests reduced motion; the unread icon stays. Permission/question badges and per-session
 elapsed counters retain their existing precedence and behavior. The display
-store is at version 9: missing preferences inherit the default during hydration,
+store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
 while an explicitly saved choice survives reload.
 
 Full-app active records remain in the collection when their directory is no
@@ -74,28 +75,41 @@ project metadata only when that project's canonical worktree maps to a
 configured project root. This fallback changes display ownership, not the
 session's real directory used for routing. Records with no resolved owner have
 no guaranteed project group. VS Code keeps exact workspace-directory scope and
-does not use the fallback. The mobile sheet, Recent, and Timeline use this
+does not use the fallback. The mobile sheet, In work, and Timeline use this
 same ownership resolver; rows keep the session's own directory while
 taking display ownership (project id, labels) from the index.
 
-Web and desktop show managed Chats before optional Recent activity (off by
-default since the timeline view exists; the display menu toggles it). Chats use
+Web and desktop show managed Chats, then In work, then the projects. There is
+no Recent zone any more (removed 2026-10): In work holds the sessions being
+worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree. In the grouped view its display panel offers the same Recent
-toggle (`sidebarShowRecentSection`, per surface, so the phone and the desktop
-choose separately): a collapsible section under In work with the desktop's
-membership (`useRecentSessionCollection`), subsessions kept for expansion,
-compact rows labelled "project · branch" through `resolveSidebarSessionLocations`
-with the desktop Recent policy (live root branch included, a branch equal to
-the project label hidden; the branch map is held while the drawer closes),
-seven rows before Show more. A session of an isolated space has the space's
-name where the branch goes and `inSpace` set on its location, so the Timeline
-rows of the desktop and the phone, and the Recent tooltip, mark it with the
-container icon the space's group carries, never with the branch icon. The
-timeline never shows Recent. VS Code excludes worktrees and managed
+project tree. Rows that span projects are labelled "project · branch" through
+`resolveSidebarSessionLocations` (live root branch included; the branch map is
+held while the drawer closes). A session of an isolated space has the space's
+name where the branch goes and `inSpace` set on its location, so the timeline
+and In work rows of the desktop and the phone mark it with the container icon
+the space's group carries, never with the branch icon. The phone's timeline
+(`apps/MobileTimelineList.tsx` rows, built by the sheet) mirrors the desktop:
+manual project order with reordering, one header per project over its root
+sessions from every worktree and space, 7 at a time with Show more / Show
+fewer (collapsing a project resets it), two-line rows with a fixed-height
+second line, and the project's icon on that line in In work. The
+phone's Tree view follows the desktop tree: In work uses those
+two-line rows, Chats one-line rows without a gutter, and project sessions are
+tree rows (12px per level, subsession chevron on the left with a
+thumb-sized target, live state on the right) under worktree headers drawn as
+folder rows (chevron, 12px icon, medium-weight label), each opening with a
+small gap. Zone and project labels share the header size and no rule
+separates projects, as zones and projects are sections of equal weight. Its tree starts 32px in
+(`MOBILE_TREE_BASE_PADDING_PX`), so root session titles start where the
+project label does next to the project icon's 32px slot (no tile: a bare
+20px glyph, or a 24px image with rounded corners; zone icons likewise); the phone has no session
+folders. Its display panel offers the In work toggle (`showWorkSection`);
+sessions in work stay under their project in both views. VS Code excludes
+worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
 
@@ -119,7 +133,10 @@ refresh cached boundaries; scrolling only compares those offsets
 and changes the DOM at a zone handoff. An inert, accessibility-hidden snapshot of
 the outgoing header fades over the incoming header for 150 ms. Reduced motion
 skips the fade. Project dragging temporarily returns headers to their sections
-without remounting controls. Reordering refreshes boundaries using layout offsets
+without remounting controls. Only headers of the dragged kind take part in the
+sort: a project moves among project headers, a worktree among the worktree
+headers of its own project, so nothing else shifts under the pointer and a drop
+always lands on a header of the same kind. Reordering refreshes boundaries using layout offsets
 that include virtual positioning but exclude sortable transforms, so settling
 animations cannot leave stale header positions. The sidebar has no separate
 desktop-only top gradient or identity overlay.
@@ -130,7 +147,7 @@ bootstrap work. Selection and activity subscriptions stay session-scoped so a
 structural list update does not make every row observe unrelated streaming
 updates.
 
-Session-row permission and form badges read the relevant directory-store buckets. A collapsed row counts its own pending requests and those of the descendants it hides; an expanded row counts only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. Counting never bootstraps a directory; an unbootstrapped directory contributes zero until live state arrives.
+Session-row permission and form badges read the relevant directory-store buckets and show only whether something waits, without a count: one form can hold many questions, and a number that does not drop as the user answers them reads as wrong. A collapsed row covers its own pending requests and those of the descendants it hides; an expanded row covers only its own. Flat Timeline rows carry badge-only scopes from their full session tree while keeping their rendered node childless, so selection, search, and row nesting do not change. The lookup never bootstraps a directory; an unbootstrapped directory contributes nothing until live state arrives. Mobile rows show the same icon-only badges from the cross-directory index (`apps/usePendingRequests.ts`).
 
 Session menus share `SessionAiRenameMenuItem` with header tabs and the
 single-session header. AI renaming uses the same leading spinner as a worktree
@@ -156,13 +173,14 @@ unchanged so ordinary session updates do not invalidate project sections.
   survivor is no longer a run member and falls back into its worktree group.
 - The row model collapses members into one entry at the first member's
   position (`collapseRunEntries`) in every container: project groups, folders,
-  Recent, Work and Timeline. A run spends one slot of a reveal limit.
+  In work and the timeline's projects. A run spends one slot of a reveal
+  limit.
 - The run row is not a session: it never enters selection or the selection
   pool. Expanded (`runExpansionKey`, same `expandedParents` store) it lists its
   lanes as session rows one level deeper; search forces it open. In Timeline
   it never expands and renders through `SessionTimelineRowBody` like the
-  session rows around it (project and time, title, lane count and model
-  logos); the overview lists the lanes.
+  session rows around it (title, status and time, then the lane count and
+  model logos); the overview lists the lanes.
 - Its activity indicator aggregates the lanes through
   `CollapsedSessionActivityIndicator`. Clicking it opens the run overview
   (`useUIStore.runOverviewKey`); a lane's context menu offers the same.
@@ -177,20 +195,20 @@ metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 
 Sessions in work (`metadata.openchamber.work.state === 'open'`, see
 `packages/web/server/lib/session-work/DOCUMENTATION.md`) render in their own
-`work` activity zone under Chats and above Recent / the timeline, in both view
-modes, while `sessionWorkEnabled` is on. `list/SessionProjectCollection.tsx`
-selects them from the ordered collection (top-level, unarchived, not managed
-Chats, shared lifecycle order) and passes `workItems`, `workSessionIds`, and
-`keepWorkInGroup` (from `sessionWorkKeepInGroup`) to the row model. A session
-in work MOVES: the row model drops it from Recent, the Timeline list, and
-Chats, so it appears once there. By default it also leaves its project group
-and folders; with `keepWorkInGroup` on it stays in its project group and
-folders as well, so it appears in two places. Chats are never in work and offer no Track
-action. An empty zone is not rendered. Rows use
-`renderContext: 'timeline'` in the timeline view and `recent` (project and
-branch shown) in the projects view. Search in the projects view keeps a tree
-whose subsession matches (`sessionTreeMatchesSidebarQuery`): those subsessions
-are nowhere else in the sidebar. The zone counts only sessions that match
+`work` activity zone under Chats and above the projects, in both
+view modes, while `sessionWorkEnabled` is on and the display menu's In work
+toggle (`showWorkSection`, `sidebarShowWorkSection`, per surface, on by
+default) shows it. With the zone hidden its sessions stay in their projects.
+`list/SessionProjectCollection.tsx` selects them from the ordered collection
+(top-level, unarchived, not managed Chats, shared lifecycle order) and passes
+`workItems` and `workSessionIds` to the row model. A session in work also stays
+in its project group and folders, in both views, so it appears in two places.
+Search lists it once, in the work block. Chats are never in work
+and offer no Track action. An empty zone is not rendered. Rows use
+`renderContext: 'timeline-mixed'` in both views: two lines, the project's icon
+before the branch, never expanded, with subsessions feeding the badges. Search
+keeps a root whose subsession matches (`sessionTreeMatchesSidebarQuery`): those
+subsessions are nowhere else in the sidebar. The zone counts only sessions that match
 themselves (`countSessionTreeQueryMatches`), and a group subtracts the trees
 that moved out of it with the same counter its search data used
 (`countSessionSearchMatches`), so one exact id is one match; a group or project
@@ -205,10 +223,10 @@ archive/delete, the menu. Pin/unpin lives in the menu only. Touch layouts (`alwa
 keep Track / Done in the menu. At rest a row in work shows a grey check only
 while Jev's done hint is current (`isDoneSuggested`); the composer shows the
 same hint as a top row (`components/chat/SessionDoneHintRow.tsx`). The
-whole-row tooltip in the projects view shows the current recap. The mobile
+whole-row tooltip shows the current recap, in both views. The mobile
 sheet (`apps/MobileSessionsSheet.tsx`) mirrors it: an "In work" section under
-Chats takes the sessions in work with their subsessions out of the project
-buckets and the timeline, and Track / Done is a swipe action on top-level
+Chats lists the sessions in work, which stay in their project buckets and
+the timeline as well, and Track / Done is a swipe action on top-level
 rows. Mobile swipe actions run left to right by how often they are used on a
 phone, because a short drag exposes the leftmost first: archive, pin (top-level
 rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
@@ -227,61 +245,69 @@ compares `metadata` by reference and `time.idle`, so metadata-only changes
 ## Timeline view
 
 `sidebarViewMode` (profile-scoped, per surface) switches the desktop and web
-sidebar between `projects` and `timeline`. VS Code has no switch and always
-renders `projects`.
+sidebar between `projects` and `timeline`, labelled Tree and List (the same
+pair as the changes file tree). VS Code has no switch and always renders
+`projects`. The display menu opens with Select sessions, then the view, then
+the project sort, worktree sort and project display as submenus that name the
+current choice (Tree only; VS Code keeps the project sort), then the section
+toggles, then Collapse all / Expand all.
 
-- Timeline keeps the managed Chats zone, with an initial reveal of 3 instead of
-  the usual Chats limit. Pinned chats are always shown and never spend that
-  limit, so Show more/Show fewer count only unpinned rows. Chats rows render
-  with `renderContext: 'timeline-chat'`: one line, no left gutter, pin marker
-  and status icon on the right beside the time; the goal glyph and badges ride
-  in the same cluster. Collapsing a zone header resets its
-  Show more state.
+- Chats rows render with `renderContext: 'timeline-chat'` in both views: one
+  line, no left gutter, pin marker and status icon on the right beside the
+  time; the goal glyph and badges ride in the same cluster. Its Show more and
+  empty rows carry `flat`, so they line up with that text. The List view opens
+  Chats with a reveal of 3 instead of the usual Chats limit; pinned chats are
+  always shown there and never spend that limit, so Show more/Show fewer count
+  only unpinned rows. Collapsing a zone header resets its Show more state.
 - Zone collapse state lives in `useSessionProjectViewState` next to project
   collapse and lasts for the mount only. The display menu's Collapse all /
-  Expand all (grouped view only) set every project and the grouped zones
-  (`GROUPED_ACTIVITY_KEYS`: Chats, In work, Recent) together; the timeline's
-  Projects zone keeps its own state. Session folders keep their own collapse
-  state.
-- Zone headers are sticky in the projects view and never in the timeline; there
-  is no user toggle. Timeline zone headers drop the leading icon and use a
-  taller band.
-- Below Chats it renders one `timeline` activity header (a sticky zone header
-  like `chats` and `active-now`) followed by every non-archived root project
-  session from all projects and worktrees in one flat list, in the shared
-  lifecycle order, with pinned sessions floating first. There is no reveal
-  limit: the list is virtualized.
-- Timeline rows carry `renderContext: 'timeline'`, depth 0 and empty children.
-  They never expand, show no chevron, no folders, no project headers, no
-  worktree groups and no Recent projection. Folders are not projected, so the
-  row menu hides `Move to folder`. Their archive/delete actions still
-  cover the full subtree, because `collectSessionSubtreeIds` resolves
-  descendants from the global cache at action time.
+  Expand all set every project and the zones (`SIDEBAR_ACTIVITY_KEYS`: Chats,
+  In work) together, in both views. Session folders keep their own
+  collapse state.
+- Zone and project headers are sticky in both views; there is no user toggle.
+  Timeline zone headers drop the leading icon and use a taller band; its
+  project headers are the grouped view's, with the same hover actions and menu.
+- Below Chats and In work it renders one project
+  header per project followed by that project's non-archived root sessions
+  from every worktree and space, in the shared lifecycle order with pinned
+  sessions first. Projects keep the manual order whatever the stored project
+  sort: dragging a header is the timeline's only sort, and the display menu
+  hides both sort sections. A project reveals 7 sessions, 7 more per Show more
+  (`timelineProjectContainerKey`); collapsing it, from its header or Collapse
+  all, forgets that state, so expanding starts from 7 again. A project without
+  sessions shows its load status, or nothing under its header.
+- Timeline rows carry `renderContext: 'timeline'` (under a project) or
+  `'timeline-mixed'` (In work), depth 0 and empty children. They
+  never expand, show no chevron, no folders and no worktree groups. Folders are
+  not projected, so the row menu hides `Move to folder`. Their archive/delete
+  actions still cover the full subtree, because `collectSessionSubtreeIds`
+  resolves descendants from the global cache at action time.
 - `worktreeIndex.ts` is the shared exact worktree index (normalized keys,
-  project-root exclusion, first-wins dedupe) for Recent/Timeline, project
+  project-root exclusion, first-wins dedupe) for In work and the timeline, project
   grouping, and the session switcher. `recent/sessionLocation.ts` is the single
   owner of a session's project, directory, worktree and branch label: it resolves
   the project through the session ownership index first (managed worktrees live
   outside the project path), falls back to a path-prefix match, and finds the
   containing worktree by longest prefix so a session in `<worktree>/sub` keeps
   that worktree's branch and PR key. Branch labels are live-first: live git
-  status wins over discovered worktree metadata. Recent hides a branch equal to
-  the project label; Timeline shows the branch on every row, using the live
+  status wins over discovered worktree metadata. Every timeline-style row
+  shows the branch, using the live
   project root branch for root-directory sessions and the worktree branch
   otherwise.
-- Recent resolves each root and active descendant against its own directory and
-  owner. Its projection attaches that worktree at every depth, including children
-  under worktree subdirectories; an unresolved worktree stays null. Each visible
-  row also resolves its own tooltip metadata rather than inheriting its parent's
-  branch, preserving the resolver's deliberate branch suppression. The full
-  subtree remains available to archive/delete actions, and managed Chats keep
-  their separate projection.
-- A timeline row's third line ends with its state cluster: goal glyph, PR (or
-  the zombie warning), permission/question badges, provider logo. The goal
-  sits there rather than in the first-line meta because hover actions cover
-  that meta and the running counter owns it during a turn.
-- Search filters Timeline with the same rule as Recent (exact `ses_` id, else
-  title contains) and counts one match per listed row.
+- A timeline row has two lines of fixed height (20px and 16px); the second is
+  rendered even when empty, so rows without a branch match their neighbours
+  and nothing shifts when a branch or badge arrives. The first holds the title and, on the right,
+  the action indicator, pin, done hint, status icon and time (the elapsed
+  counter during a turn); hover actions cover that cluster. The second line
+  holds the branch (or the space's name) and ends with the state cluster: goal
+  glyph, PR (or the zombie warning), permission/question badges, provider
+  logo. In `timeline-mixed` rows it opens with the project's icon, which names
+  the project for assistive tech and on hover. The goal sits on the second line
+  because hover actions cover the first line's meta and the running counter
+  owns it during a turn.
+- Search filters the timeline's projects with the same rule as In work (exact
+  `ses_` id, else title contains), lists every match without reveal limits,
+  hides projects without matches, and counts one match per listed row.
 
 ## Search
 
@@ -308,7 +334,7 @@ The header's page buttons (Issues and PRs, Scheduled tasks, Archive, extension
 pages, Usage in the footer) are toggles: pressed while their page is open, and
 the next click closes it.
 
-Sidebar and Recent queries beginning with `ses_` match only the full session ID,
+Sidebar queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos
 return no matches, without falling back to titles, directories, group labels,
 or folder names. Ancestors remain as tree context for a matching child. A matched
@@ -318,7 +344,7 @@ count toward the result total.
 Search changes model inputs, not renderer ownership. It forces project, group,
 folder, and activity rows open without changing the normal-mode collapse or
 show-more state. Closing search therefore restores the exact prior Chats,
-Recent, project, group, and folder projection.
+In work, project, group, and folder projection.
 ID search does not include archived sessions. `ArchiveView` applies the same
 exact-ID rule to its own archived list. Other queries keep each view's existing
 matching and ordering. Search does not fetch sessions or broaden list membership.
@@ -347,9 +373,31 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   recursively mount descendants in the shared scroller. One preorder ID pool
   plus index ranges supplies hidden descendants to subtree selection without
   copying a descendant array for every ancestor.
-- A row's `depth` is its visual indent, not its tree depth: a folder's sessions
-  and run rows start at 1 so they sit under the folder header, and children add
-  one level from there. Do not read `depth > 0` as "this is a subagent".
+- The grouped view is drawn as a file tree, with the shared parts of the Files
+  and changes trees (`components/views/files/FileTreeRowParts.tsx`,
+  `fileTreeRow.ts`) through `sessions/sessionTreeGeometry.ts`: 6px from the
+  edge (the Files trees use 8px; 6px puts root session titles where the
+  project label starts) plus 12px per level, then a 14px slot and a 6px gap
+  before the text. Unlike the Files trees it draws no level guides: the
+  indent, the worktree gaps and the header weights carry the structure. Tree session rows are a little
+  tighter than timeline rows, and each worktree header opens with a small gap.
+  An empty worktree group or folder (no sessions, no folders, nothing loading)
+  shows no chevron, does not toggle, lists nothing under its header, and is
+  always open: a collapse saved while it had sessions is dropped, so its first
+  new session shows at once. The phone treats empty worktrees the same way. Collapsing a project or a worktree group, from its
+  header or Collapse all, forgets its Show more state. The project
+  header stays the sticky zone band above its tree. Root sessions and the
+  root's folders sit at level 0; worktree, space and archive headers sit at
+  level 0 with their folders and sessions at level 1; a folder's sessions sit
+  one level under the folder, and subsessions one level under their parent.
+  The slot holds the rotating chevron of a folder, a worktree header, a run, or
+  a session with subsessions, and stays empty on other sessions so titles line
+  up. Session rows use the one-line form of `SessionTimelineRowBody`: live
+  state, pin, done hint and time on the right, as on timeline rows. Rows and
+  headers take the same faint hover fill as timeline rows. Show more, empty and
+  status rows carry the level whose text they line up with.
+- A row's `depth` is its tree level as above, not its parentage. Do not read
+  `depth > 0` as "this is a subagent".
 - The existing `ScrollableOverlay` is the sole scroll owner. The shared row
   renderer measures variable-height rows, uses stable occurrence keys, keeps a
   bounded pre-initialization window, and pins editing, focused, and open-menu
@@ -358,8 +406,12 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   without waiting for an unrelated render. Archived groups must not add a
   nested virtualizer.
 - An unmeasured row is estimated at the measured height of a row with the same
-  kind, render context and trailing section gap (`sessionSidebarRowSizeKey`),
-  falling back to the model estimate plus that gap. The virtualizer corrects the
+  kind and render context (`sessionSidebarRowSizeKey`, kept without the
+  trailing section gap) plus its own gap as measured, falling back to the
+  model estimate. The virtualizer keys each row with its gap
+  (`sessionSidebarRowVirtualKey`): a header gains or loses its gap as it
+  closes or opens, and under its plain key the old measured height would hold
+  until the resize observer reported, so the rows below hopped a frame later. The virtualizer corrects the
   scroll position whenever a row above the viewport measures differently from
   its estimate, and those writes land in the middle of a scroll gesture as small
   jumps; rows of one key share a height at any interface font size, so after
@@ -368,6 +420,23 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   first visible virtual index, which keeps the live current and adjacent header
   rows mounted. `CrossfadeZoneHeaders` uses their cached virtual layout offsets
   for the visual handoff. DOM sentinels and intersection observers are not used.
+  The handoff moves the live header, focus included. Chromium scrolls a moved
+  focused element into view, so after a click on a header every handoff threw
+  the list back to that header and the sidebar would not scroll until focus
+  left it; `moveHost` keeps the scroll position across a move that carries
+  focus.
+- Opening and closing a zone, project, worktree, folder or multi-run animates
+  like a reasoning block in the chat (200ms ease-out,
+  `sessionSidebarDisclosure.ts`). The rows are flat virtual rows, so no
+  container changes height: `SessionSidebarRows` compares each new row list
+  with the one last drawn, and when exactly one header changed state with one
+  block of rows right under it, those rows are clipped above a moving boundary
+  and every row after them slides with it. A closed block is drawn as inert
+  ghost rows at its old place until the motion ends; rows sliding in from past
+  the virtual range stay mounted meanwhile. Collapse all, search, Show more and
+  live list changes do not animate, nor does anything under reduced motion.
+  The phone's sessions sheet does the same with a height animation per body
+  (`apps/MobileDisclosure.tsx`).
 - Shift selection and Ctrl/Cmd+A consume the model's logical row order. API
   session IDs are deduplicated only at the action boundary, after hidden
   descendants have been included. Selection is cleared on runtime switch and
@@ -378,7 +447,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   The current session map comes from unfiltered project sections, so collapsing
   a project or entering search cannot hide authority for an existing selection.
 - Rename drafts stay parent-owned, while editing and menu lifecycles are keyed
-  by row occurrence. Duplicate Recent, project, and folder rows never open a
+  by row occurrence. Duplicate In work, project, and folder rows never open a
   second rename input, and the owning occurrence remains mounted through menu
   close completion. `useSessionRowMenuState` keeps the shared open-menu key
   pinned until close completion while a local close request drives the
@@ -398,7 +467,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Single-project flat mode reveals 20 root sessions initially and 20 per Show
   more; Show fewer resets to 20. Chats retains its own default reveal size. Reveal
   controls change the logical list, not the viewport's bounded mounted window.
-- Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. Recent and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with a walk over the global active-plus-archived cache, so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active.
+- Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. In work and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with a walk over the global active-plus-archived cache, so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active.
 - Subsessions belong to the agent run that spawned them, not to the user. They appear only nested under an active parent: the archive (sidebar bucket, auto folders and the Archive page) lists top-level sessions only, an archived subsession or one under an archived parent is hidden rather than promoted to a row of its own, and there is no restore for a subsession; it comes back when its parent is restored. A subsession whose parent is not loaded yet stays visible as a root.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.
@@ -410,17 +479,16 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Unarchiving a session whose directory the server confirms missing (its worktree was removed while it sat in the archive, by this app, by hand or by git) moves it, with its subsessions in that directory, to its project root (`lib/worktrees/relocateRestoredSession.ts`, maintainer decision 2026-10-02). OpenCode cannot run a prompt in a missing directory (it answers 500), while `session.move` works from one and appends a `location-switched` record that tells the model its working directory changed. The project root comes from the same ownership index as grouping (directory first, then OpenCode project metadata), so it survives a restart. A toast names the cause, the missing folder, not an action of this app. An unknown availability answer, an unresolved project or a missing project root leaves the session where it is; a rejected move shows an error toast.
 - Cleanup after a PR merge is opt-in (`mergedWorktreeCleanupEnabled`, Settings → Sessions, off by default; maintainer decision 2026-10-02). `hooks/useMergedWorktreeCleanup.ts` reads the branch PR status the sidebar already keeps fresh for each discovered linked worktree, asking GitHub nothing itself, and `lib/worktrees/mergedWorktreeCleanup.ts` decides: wait while any session there is not confirmed idle, is the open session, or the worktree is the directory on screen; otherwise archive its sessions, and remove the worktree with its local branch only when the checkout is clean and has no commit outside the merged PR's head commit (`head..HEAD` is empty, so a checkout behind a PR that gained commits on the host qualifies). When this clone never fetched that commit, a branch whose upstream it is not ahead of qualifies too; with neither answer the worktree stays. Sessions are archived once per worktree and PR pair (remembered in local storage), so work continued in a kept worktree is never archived again. A kept worktree without sessions is checked again on every pass and removed once nothing there can be lost; sessions in a kept worktree mean the work went on, and it is left alone. It runs on desktop and web only; VS Code has no worktrees and a phone would race the desktop it drives. Only worktrees of projects whose worktrees the sidebar has discovered are covered.
 - CLI/server-created sessions use the low-frequency OpenChamber control event stream to refresh only the created session directory. The same event re-lists the worktrees of the session's project, or of every project when the session's directory is not a project root or a known worktree, so a newly created external worktree gains ownership without a view reload; it does not re-enable broad session or streaming subscriptions.
-- Recent membership includes active root sessions immediately even when their last committed `time.updated` falls outside the 48-hour window. Children and archived sessions remain excluded, and inactive roots remain timestamp-based. The active-ID subscription is disabled while the sidebar is hidden and ignores retry/status detail changes, avoiding streaming-frequency rerenders.
-- A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch. Restore does not change Recent's existing active/48-hour membership rule.
+- A successful restore on the current runtime promotes only the session's ephemeral list-order rank. It does not change timestamps or live status, and it resets on a runtime switch.
 - `useProjectRepoStatus` reads Git status once per project path while the sidebar is visible. A change to the project list that adds no path (collapse, rename, color, last opened) reads nothing; an added project reads only its own status; a failed read is retried on the next list change. Hiding the sidebar or switching runtime starts over.
 - Structural updates rebuild grouped nodes only for projects whose local sessions, worktrees, repository state, branch, or worktree-ordering ranks changed; unchanged project sections preserve references so memoized group/session descendants skip the update wave. The grouping builder therefore keeps its identity across inputs the section cache compares per project: it reads git branches and lifecycle ranks at call time, and keeps the session ownership map while every session's scope directory is unchanged (the ownership index itself is rebuilt on any session-list change). Without a search query every group shares one empty search-data map, so a rebuilt section does not invalidate the others' group headers.
 - Empty successful lists, unresolved loads, and failed loads are separate UI states. Failed groups expose Retry and retain prior data.
 - List loading and workspace initialization have separate states. The spinner follows only the list queue; config, MCP, LSP, and live-state recovery cannot keep a successful empty list spinning. A core initialization failure has a separate localized notice and reuses the retry/native-access actions without clearing loaded sessions.
 - Directory permission failures remain visible even when stale sessions are retained. Flat groups inspect every represented root/worktree directory; local Desktop may open the native picker for the exact failed directory, while other runtimes keep the ordinary Retry action.
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
-- Pending-permission/question row badges fade with the same hover/menu-open rule as the date label, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the badges shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its badges keep fading (`selectRowBadgeVisibilityClass` in `sessions/sessionNodeItemUtils.ts`).
+- Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and fade with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps fading.
 - Hover-revealed actions on session rows, worktree headers and project headers cross-fade over the row's end (the right, or the left in a right-to-left layout); they do not re-lay the row out. What they cover (date, branch, badges, indicators) fades with opacity, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
-- Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx` and close 750 ms after the pointer leaves, so the pointer can travel in. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Timeline rows keep the row tooltip trigger disabled, since an empty row tooltip blocks the badge's.
+- Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx`. The PR badge and header tooltips close 750 ms after the pointer leaves, so the pointer can travel in; the whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
 
 
 ## Project action indicators
@@ -439,7 +507,7 @@ interactive terminals do not indicate activity. This indicates process activity,
 readiness.
 
 Grouped views show the icon on project-root and worktree headers. Flat project views show
-it on the project-root header and on sessions in linked worktrees. Recent shows it on every
+it on the project-root header and on sessions in linked worktrees. In work shows it on every
 session with an active action in its own directory. Archived buckets do not show action
 indicators. Indicators stay inside the existing row/header action-padding boundary, so
 hover, keyboard focus, and always-visible action buttons move them left without hiding them.

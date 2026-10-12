@@ -4,12 +4,10 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
 
-const ACTIVITY_ICON = { work: 'eye', chats: 'chat-4', 'active-now': 'history', timeline: 'folder' } as const;
+const ACTIVITY_ICON = { work: 'eye', chats: 'chat-4' } as const;
 const ACTIVITY_TITLE_KEY = {
   work: 'sessions.sidebar.work.title',
   chats: 'sessions.sidebar.activity.chatsTitle',
-  'active-now': 'sessions.sidebar.activity.recentTitle',
-  timeline: 'sessions.sidebar.activity.timelineTitle',
 } as const;
 
 export const SessionSidebarActivityHeader: React.FC<{
@@ -36,7 +34,7 @@ export const SessionSidebarActivityHeader: React.FC<{
         className={cn('group flex w-full items-center gap-1 py-2 ps-1.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', 'pe-3.5')}
         aria-expanded={!collapsed}
       >
-        <span className="typography-ui-label font-semibold text-foreground">
+        <span className="typography-ui-header font-semibold text-foreground">
           {t(ACTIVITY_TITLE_KEY[activityKey])}
         </span>
         {!forceExpanded ? <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5 text-muted-foreground" /> : null}
@@ -57,7 +55,8 @@ export const SessionSidebarActivityHeader: React.FC<{
           <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
         </span> : null}
       </span>
-      <span className="typography-ui-label font-semibold text-foreground">
+      {/* The size of project headers: zones and projects are sections of equal weight. */}
+      <span className="typography-ui-header font-semibold text-foreground">
         {t(ACTIVITY_TITLE_KEY[activityKey])}
       </span>
     </button>

@@ -177,6 +177,9 @@
     "isolatedSpacesIdleStop": {
       "scope": "instance"
     },
+    "isolatedSpacesSshHost": {
+      "scope": "instance"
+    },
     "agentMemoryFeatureAvailable": {
       "scope": "instance",
       "computed": true
@@ -279,11 +282,11 @@
     "sidebarWorktreeSortOrder": {
       "scope": "profile"
     },
-    "sidebarShowRecentSection": {
+    "sidebarShowChatsSection": {
       "scope": "profile",
       "perSurface": true
     },
-    "sidebarShowChatsSection": {
+    "sidebarShowWorkSection": {
       "scope": "profile",
       "perSurface": true
     },
@@ -358,12 +361,6 @@
       "scope": "profile"
     },
     "showTurnChangedFiles": {
-      "scope": "profile"
-    },
-    "showExpandedBashTools": {
-      "scope": "profile"
-    },
-    "showExpandedEditTools": {
       "scope": "profile"
     },
     "toolJsonViewMode": {
@@ -576,14 +573,6 @@
     "sessionWorkEnabled": {
       "scope": "profile"
     },
-    "sessionWorkAutoOpen": {
-      "scope": "profile",
-      "surfaces": [
-        "web",
-        "desktop",
-        "mobile"
-      ]
-    },
     "sessionReviewOfferEnabled": {
       "scope": "profile",
       "surfaces": [
@@ -591,9 +580,6 @@
         "desktop",
         "mobile"
       ]
-    },
-    "sessionWorkKeepInGroup": {
-      "scope": "profile"
     },
     "sessionGoalEnabled": {
       "scope": "profile"

@@ -52,10 +52,36 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'upgrade',
   'host',
   'content-length',
+  'accept-encoding',
 ]);
 
+// A client that can gunzip asks for compressed bodies with this request
+// header, and a compressed body is marked with the response header. Names
+// mirror `TUNNEL_ACCEPT_ENCODING_HEADER` / `TUNNEL_CONTENT_ENCODING_HEADER` in
+// packages/ui/src/lib/relay/protocol.ts. Clients and hosts without them keep
+// sending plain bodies, so mixed versions interoperate.
+const TUNNEL_ACCEPT_ENCODING_HEADER = 'x-openchamber-tunnel-accept-encoding';
+const TUNNEL_CONTENT_ENCODING_HEADER = 'x-openchamber-tunnel-content-encoding';
+// Below this the gzip framing costs more than it saves (the server's own
+// compression middleware uses the same threshold).
+const COMPRESSION_MIN_BYTES = 1024;
+// Whole-body text formats only. Event streams are excluded: gzip holds bytes
+// back until its window fills, which would delay live events.
+const COMPRESSIBLE_CONTENT_TYPE = /^(?:application\/(?:json|[\w.+-]+\+json|javascript|xml|[\w.+-]+\+xml)|text\/(?!event-stream)[\w.+-]+|image\/svg\+xml)\s*(?:;|$)/i;
+
+const shouldCompressResponse = (request, method, response) => {
+  if (method === 'HEAD' || !response.body) return false;
+  const accepted = Object.entries(request.headers ?? {})
+    .find(([name]) => name.toLowerCase() === TUNNEL_ACCEPT_ENCODING_HEADER)?.[1];
+  if (accepted !== 'gzip') return false;
+  if (!COMPRESSIBLE_CONTENT_TYPE.test(response.headers.get('content-type') ?? '')) return false;
+  const length = Number(response.headers.get('content-length'));
+  return !(Number.isFinite(length) && length > 0 && length < COMPRESSION_MIN_BYTES);
+};
+
 // Response framing headers that no longer apply once the body crosses the
-// tunnel as HttpBody chunks (loopback fetch already decoded content-encoding).
+// tunnel as HttpBody chunks. Loopback asks for identity, and fetch decodes
+// anything encoded regardless; tunnel compression is marked separately.
 const STRIPPED_RESPONSE_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -175,11 +201,15 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
     for (const [name, value] of Object.entries(rawHeaders)) {
       if (typeof name !== 'string' || typeof value !== 'string') continue;
       const lower = name.toLowerCase();
-      if (STRIPPED_REQUEST_HEADERS.has(lower)) continue;
+      if (STRIPPED_REQUEST_HEADERS.has(lower) || lower === TUNNEL_ACCEPT_ENCODING_HEADER) continue;
       if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) continue;
       headers[lower] = value;
     }
     headers['x-openchamber-relay-connection'] = connectionId;
+    // Loopback fetch would decode a gzipped body anyway; asking for identity
+    // spares the server compressing what this host decompresses. Bodies are
+    // compressed once, for the tunnel, when the client accepts it.
+    headers['accept-encoding'] = 'identity';
     // Browser-generated Origin is not visible to the tunnel client. Present the
     // loopback origin being dialed and overwrite any client-supplied value.
     headers.origin = loopbackOrigin;
@@ -224,11 +254,14 @@ export const createTunnelHost = ({ connectionId, getLocalPort, sendFrame, getBuf
       await response.body?.cancel();
       return;
     }
+    const compress = shouldCompressResponse(request, method, response);
+    if (compress) responseHeaders[TUNNEL_CONTENT_ENCODING_HEADER] = 'gzip';
+    const responseBody = compress ? response.body.pipeThrough(new CompressionStream('gzip')) : response.body;
 
     try {
       await sendJson(TunnelFrameType.HttpResponse, streamId, { status: response.status, headers: responseHeaders });
-      if (response.body) {
-        for await (const chunk of response.body) {
+      if (responseBody) {
+        for await (const chunk of responseBody) {
           if (closed || stream.abort.signal.aborted) return;
           const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
           const pieces = chunkPayload(bytes, responseChunkBytes);

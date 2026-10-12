@@ -9,6 +9,7 @@ import {
   type ToolPart,
 } from "@/lib/opencode/model"
 import { Binary } from "./binary"
+import { withoutUnshownResult } from "@/lib/opencode/toolContentShells"
 import type { State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { syncDebug } from "./debug"
@@ -256,7 +257,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
       if (isFinalToolStatus(state.status)) return part
       const start = state.status === "running" ? state.time.start : transition.end
       const attachments = transition.attachments
-      return {
+      return withoutUnshownResult({
         ...part,
         executed: transition.executed,
         state: compact({
@@ -267,12 +268,12 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
           time: { start, end: transition.end },
           attachments,
         }),
-      }
+      })
     }
     case "failed": {
       if (isFinalToolStatus(state.status)) return part
       const start = state.status === "running" ? state.time.start : transition.end
-      return {
+      return withoutUnshownResult({
         ...part,
         executed: transition.executed,
         state: compact({
@@ -283,7 +284,7 @@ function applyToolTransition(part: ToolPart, transition: ToolTransition): ToolPa
           metadata: transition.metadata ?? (state.status === "running" ? state.metadata : undefined),
           time: { start, end: transition.end },
         }),
-      }
+      })
     }
   }
 }

@@ -126,7 +126,7 @@ const finiteTime = (value: unknown): number => (
  * lift a session nobody touched. Sessions migrated from 1.x have no `idle`
  * until their first 2.x turn, so they fall back to `updated`.
  */
-const updatedAt = (session: Session): number => (
+export const getSessionActivityTime = (session: Session): number => (
   finiteTime(session.time?.idle) || finiteTime(session.time?.updated) || finiteTime(session.time?.created)
 );
 
@@ -149,7 +149,7 @@ const baselineRank = (session: Session, pinned: boolean): number => {
   const key = pinned ? 'created' : 'updated';
   const existingRank = existing?.[key];
   if (existingRank !== undefined) return existingRank;
-  const rank = pinned ? createdAt(session) : updatedAt(session);
+  const rank = pinned ? createdAt(session) : getSessionActivityTime(session);
   baselineRankById.set(session.id, { ...existing, [key]: rank });
   return rank;
 };
@@ -169,7 +169,7 @@ export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void
   let baselinesChanged = false;
 
   for (const session of sessions) {
-    const fresh = updatedAt(session);
+    const fresh = getSessionActivityTime(session);
     const liveRank = currentRanks.get(session.id);
     if (liveRank !== undefined) {
       // A live rank frozen BEFORE this newer authoritative stamp is stale —

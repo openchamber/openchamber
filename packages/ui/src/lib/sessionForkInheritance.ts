@@ -13,7 +13,8 @@ import { getSessionGoal } from '@/lib/sessionGoalMetadata';
  *   btw fork (`btwSessionID`), its review session (`reviewSessionID`), and a
  *   btw marker when the source itself is a btw side thread. A fork that kept
  *   them would open the source's btw panel, delete the source's btw fork with
- *   itself, or hide from the sidebar as a btw thread.
+ *   itself, or hide from the sidebar as a btw thread. A scheduled run's marker
+ *   goes too: the fork is the user's own work and belongs in In work.
  * - A file-backed goal objective: the text lives in a server file keyed by the
  *   session id, so the fork has no file of its own until one is copied.
  *
@@ -40,6 +41,8 @@ export function withoutSourceOwnedLinks(metadata: Metadata): Metadata {
     delete next.originalSessionID;
     delete next.btwBoundaryMessageID;
   }
+  // A fork of a scheduled run is the user's own work, In work included.
+  if (next.kind === 'scheduled') delete next.kind;
   // A fork usually tries another path; it must not pursue the source's goal in
   // parallel, so an active goal arrives paused and the user resumes it.
   const goal = asRecord(next.goal);

@@ -5,7 +5,7 @@ description: Stel Jev in, het kleine classificatiemodel dat beslissingen neemt v
 
 # Classificatieproviders en Jev
 
-Sommige functies in OpenChamber moeten eerst een korte afweging maken: is deze opdracht riskant, wat voor taak beschrijft deze prompt, is de gebruiker net met echt werk begonnen? Jev, een klein beslismodel van TypeSafe, beantwoordt die vragen. Op deze pagina stelt u toegang tot Jev in.
+Sommige functies in OpenChamber moeten eerst een korte afweging maken: is deze opdracht riskant, wat voor taak beschrijft deze prompt, lijkt dit werk afgerond? Jev, een klein beslismodel van TypeSafe, beantwoordt die vragen. Op deze pagina stelt u toegang tot Jev in.
 
 Jev schrijft nooit code en antwoordt niet in uw chat. Het geeft alleen een oordeel terug, waarop OpenChamber handelt. OpenChamber wacht maximaal vier seconden op een antwoord.
 
@@ -15,10 +15,10 @@ Jev schrijft nooit code en antwoordt niet in uw chat. Het geeft alleen een oorde
 | --- | --- |
 | [Toestemmingen en vangnet](/nl/permissions/) | Moet de agent u om toestemming vragen voordat deze actie wordt uitgevoerd? |
 | [Automatische modelkeuze](/nl/auto-model-routing/) | In welke van uw categorieën past deze prompt? |
-| [Sessies in uitvoering](/nl/sessions-in-work/) | Hebt u net om echt werk gevraagd? Lijkt deze beurt het einde daarvan? |
+| [Sessies in uitvoering](/nl/sessions-in-work/) | Lijkt deze beurt het einde van het werk? |
 | [Sessiesamenvatting en berichtsuggestie](/nl/sessions-in-work/#samenvatting-en-suggestie-voor-het-volgende-bericht) | Is het zinvol om na deze beurt een samenvatting of een volgend bericht voor te stellen? |
 
-Zonder provider zijn het vangnet en Auto verborgen. Sessies worden dan alleen naar In bewerking verplaatst als u dat zelf doet. Samenvattingen en suggesties blijven werken, maar zonder dit filter.
+Zonder provider zijn het vangnet en Auto verborgen. Sessies in uitvoering krijgen dan geen aanwijzing dat het werk afgerond lijkt. Sessies komen wel nog steeds in In bewerking zodra u een bericht stuurt. Samenvattingen en suggesties blijven werken, maar zonder dit filter.
 
 ## Instellen
 
@@ -96,7 +96,7 @@ Als Jev bij één verzoek traag is of faalt, blijft de app werken. Elke functie 
 
 - Het vangnet laat de actie op uw beslissing wachten.
 - Auto stuurt de prompt naar uw terugvalmodel.
-- Sessies in uitvoering blijven waar ze zijn.
+- Bij sessies in uitvoering verschijnt geen aanwijzing dat het werk afgerond lijkt.
 - De samenvatting en suggestie worden gegenereerd alsof Jev niet beschikbaar is.
 
 ## Wat krijgt Jev te zien?
@@ -107,7 +107,7 @@ Verzoeken gaan rechtstreeks van de OpenChamber-server naar OpenCode Zen, OpenRou
 
 ## Waar werkt het?
 
-Jev draait op de OpenChamber-server. Het werkt dus in de desktopapp, de webapp en op een telefoon die daarmee verbonden is. De VS Code-extensie communiceert rechtstreeks met OpenCode en heeft geen Jev: er is geen vangnet of Auto, en sessies worden alleen handmatig naar In bewerking verplaatst.
+Jev draait op de OpenChamber-server. Het werkt dus in de desktopapp, de webapp en op een telefoon die daarmee verbonden is. De VS Code-extensie communiceert rechtstreeks met OpenCode en heeft geen Jev: er is geen vangnet, geen Auto en geen aanwijzing dat het werk afgerond lijkt.
 
 ## Zie ook
 

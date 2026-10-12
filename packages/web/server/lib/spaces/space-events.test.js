@@ -147,6 +147,23 @@ describe('createSpaceEventSources', () => {
     expect(streams[OTHER][0].destroyed).toBe(true);
   }, 15_000);
 
+  it('keeps a paused space with its index and makes no connection to it until it is let go again', async () => {
+    start();
+    index.acceptSpaceList(ID, [{ id: 'p1', location: { directory: `/spaces/${ID}/repo` } }], { complete: true });
+    sources.sync([ID], { paused: new Set([ID]) });
+    await sleep(300);
+    expect(requests).toEqual([]);
+    expect(sources.has(ID)).toBe(false);
+    expect(index.snapshot().map((entry) => entry.spaceId)).toEqual([ID]);
+    // Connected, then paused: the connection goes and the index stays.
+    sources.sync([ID]);
+    expect(await until(() => streams[ID]?.length === 1)).toBe(true);
+    sources.sync([ID], { paused: new Set([ID]) });
+    expect(await until(() => streams[ID][0].destroyed)).toBe(true);
+    expect(sources.has(ID)).toBe(false);
+    expect(index.snapshot().map((entry) => entry.spaceId)).toEqual([ID]);
+  });
+
   it('keeps trying, quietly, while the space refuses the connection', async () => {
     start();
     refuse = new SpaceError('space_not_running', 'stopped');

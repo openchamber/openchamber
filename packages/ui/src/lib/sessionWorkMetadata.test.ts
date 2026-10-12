@@ -30,6 +30,12 @@ describe('session work metadata', () => {
     expect(isDoneSuggested(session({ openchamber: { work: { state: 'open' } } }))).toBe(false);
   });
 
+  test('reads a record the server opened on a sent message, done hint included', () => {
+    const opened = session({ openchamber: { work: { state: 'open', openedAt: 5, openedBy: 'auto', suggestDoneAt: 150 } } }, 100);
+    expect(getSessionWork(opened)).toMatchObject({ state: 'open', openedBy: 'auto' });
+    expect(isDoneSuggested(opened)).toBe(true);
+  });
+
   test('offers a review under the same freshness rule, in or out of work, and yields to a current done hint', () => {
     expect(isReviewSuggested(session({ openchamber: { reviewOffer: { at: 150 } } }, 100))).toBe(true);
     expect(isReviewSuggested(session({ openchamber: { reviewOffer: { at: 150 } } }, 300))).toBe(false);

@@ -110,7 +110,7 @@ type LoadPerformanceDetails = {
 export type SessionMessagePageSource = {
   getSessionMessages(
     id: string,
-    options?: { limit?: number; cursor?: string; order?: "asc" | "desc" },
+    options?: { limit?: number; cursor?: string; order?: "asc" | "desc"; partShells?: boolean },
     directory?: string | null,
   ): Promise<MessagePage>
 }
@@ -961,7 +961,9 @@ export class SessionMessageLoader {
     try {
       const page = await retry(async () => {
         attempts += 1
-        return this.sdk.getSessionMessages(target.sessionID, { limit, cursor }, target.directory)
+        // Finished tool results arrive as shells; a row that shows one
+        // completes its message (`tool-content-completion.ts`).
+        return this.sdk.getSessionMessages(target.sessionID, { limit, cursor, partShells: true }, target.directory)
       })
       const records = page.items.filter((record) => Boolean(record?.info?.id))
       recordCount = records.length

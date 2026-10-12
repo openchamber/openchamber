@@ -9,6 +9,8 @@ import { createClientHandshake, type EstablishedChannelCrypto } from './handshak
 import {
   RELAY_PROTOCOL_VERSION,
   RelayCloseCode,
+  TUNNEL_ACCEPT_ENCODING_HEADER,
+  TUNNEL_CONTENT_ENCODING_HEADER,
   TunnelFrameType,
   type TunnelHttpRequestPayload,
   type TunnelWsOpenPayload,
@@ -40,6 +42,19 @@ import { getClientPlatform } from '../platform';
 import { version as appVersion } from '../../../package.json';
 
 const EMPTY_PAYLOAD = new Uint8Array(0);
+// WebViews older than DecompressionStream keep receiving plain bodies.
+const canDecompressGzip = typeof DecompressionStream === 'function';
+// DecompressionStream accepts only views over an ArrayBuffer. Tunnel payloads
+// always are (decrypted plaintext); a view over shared memory is copied.
+const gunzipBody = (body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => body
+  .pipeThrough(new TransformStream<Uint8Array, Uint8Array<ArrayBuffer>>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk.buffer instanceof ArrayBuffer
+        ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+        : new Uint8Array(chunk));
+    },
+  }))
+  .pipeThrough(new DecompressionStream('gzip'));
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -811,7 +826,9 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
               });
             }
             responseDelivered = true;
-            resolve(new Response(body, { status: head.status, headers: head.headers }));
+            const { [TUNNEL_CONTENT_ENCODING_HEADER]: contentEncoding, ...headers } = head.headers;
+            if (body && contentEncoding === 'gzip') body = gunzipBody(body);
+            resolve(new Response(body, { status: head.status, headers }));
             if (nullBody) {
               finished = true;
               cleanupStream();
@@ -867,7 +884,7 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
         method: request.method,
         path: request.path,
         query: request.query,
-        headers: request.headers,
+        headers: canDecompressGzip ? { ...request.headers, [TUNNEL_ACCEPT_ENCODING_HEADER]: 'gzip' } : request.headers,
         hasBody: request.body !== null,
       };
       channel.send(encodeTunnelFrame(TunnelFrameType.HttpRequest, streamId, encodeJsonPayload(head)));

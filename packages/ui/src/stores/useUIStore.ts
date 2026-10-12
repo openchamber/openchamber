@@ -987,14 +987,10 @@ interface UIStore {
   streamingAutoFollowEnabled: boolean;
   sessionRecapEnabled: boolean;
   sessionSuggestionEnabled: boolean;
-  /** The "In work" sidebar block and the Track / Done actions. */
+  /** The "In work" sidebar block, the Track / Done actions, and sessions going in on a sent message. */
   sessionWorkEnabled: boolean;
-  /** Let Jev move a session into work when real work starts in it. */
-  sessionWorkAutoOpen: boolean;
   /** Let Jev offer an AI review or a walkthrough after a turn that changed the project. */
   sessionReviewOfferEnabled: boolean;
-  /** Keep a session in work listed under its project group and folders too. */
-  sessionWorkKeepInGroup: boolean;
   sessionGoalEnabled: boolean;
   /** Who checks goal progress; the small model checks when no classification provider can. */
   sessionGoalChecker: SessionGoalChecker;
@@ -1148,8 +1144,6 @@ interface UIStore {
   copyMessagesAsPlainText: boolean;
   showToolFileIcons: boolean;
   showTurnChangedFiles: boolean;
-  showExpandedBashTools: boolean;
-  showExpandedEditTools: boolean;
   timeFormatPreference: TimeFormatPreference;
   weekStartPreference: WeekStartPreference;
   desktopWindowControlsPosition: DesktopWindowControlsPosition;
@@ -1270,9 +1264,7 @@ interface UIStore {
   setSessionRecapEnabled: (value: boolean) => void;
   setSessionSuggestionEnabled: (value: boolean) => void;
   setSessionWorkEnabled: (value: boolean) => void;
-  setSessionWorkAutoOpen: (value: boolean) => void;
   setSessionReviewOfferEnabled: (value: boolean) => void;
-  setSessionWorkKeepInGroup: (value: boolean) => void;
   setSessionGoalEnabled: (value: boolean) => void;
   setSessionGoalChecker: (value: SessionGoalChecker) => void;
   setSessionGoalMaxAutoTurns: (value: number) => void;
@@ -1391,8 +1383,6 @@ interface UIStore {
   setCopyMessagesAsPlainText: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
   setShowTurnChangedFiles: (value: boolean) => void;
-  setShowExpandedBashTools: (value: boolean) => void;
-  setShowExpandedEditTools: (value: boolean) => void;
   setTimeFormatPreference: (value: TimeFormatPreference) => void;
   setWeekStartPreference: (value: WeekStartPreference) => void;
   setDesktopWindowControlsPosition: (value: DesktopWindowControlsPosition) => void;
@@ -1491,9 +1481,7 @@ export const useUIStore = create<UIStore>()(
         sessionRecapEnabled: true,
         sessionSuggestionEnabled: true,
         sessionWorkEnabled: true,
-        sessionWorkAutoOpen: true,
         sessionReviewOfferEnabled: false,
-        sessionWorkKeepInGroup: false,
         sessionGoalEnabled: true,
         sessionGoalChecker: 'small-model',
         sessionGoalMaxAutoTurns: DEFAULT_SESSION_GOAL_MAX_AUTO_TURNS,
@@ -1603,8 +1591,6 @@ export const useUIStore = create<UIStore>()(
         copyMessagesAsPlainText: true,
         showToolFileIcons: true,
         showTurnChangedFiles: false,
-        showExpandedBashTools: false,
-        showExpandedEditTools: false,
         timeFormatPreference: 'auto',
         weekStartPreference: 'auto',
         desktopWindowControlsPosition: 'right',
@@ -2513,16 +2499,8 @@ export const useUIStore = create<UIStore>()(
           set({ sessionWorkEnabled: value });
         },
 
-        setSessionWorkAutoOpen: (value) => {
-          set({ sessionWorkAutoOpen: value });
-        },
-
         setSessionReviewOfferEnabled: (value) => {
           set({ sessionReviewOfferEnabled: value });
-        },
-
-        setSessionWorkKeepInGroup: (value) => {
-          set({ sessionWorkKeepInGroup: value });
         },
 
         setSessionGoalEnabled: (value) => {
@@ -3192,12 +3170,6 @@ export const useUIStore = create<UIStore>()(
         setShowTurnChangedFiles: (value) => {
           set({ showTurnChangedFiles: value });
         },
-        setShowExpandedBashTools: (value) => {
-          set({ showExpandedBashTools: value });
-        },
-        setShowExpandedEditTools: (value) => {
-          set({ showExpandedEditTools: value });
-        },
 
         setTimeFormatPreference: (value) => {
           set({ timeFormatPreference: value });
@@ -3574,9 +3546,7 @@ export const useUIStore = create<UIStore>()(
           sessionRecapEnabled: state.sessionRecapEnabled,
           sessionSuggestionEnabled: state.sessionSuggestionEnabled,
           sessionWorkEnabled: state.sessionWorkEnabled,
-          sessionWorkAutoOpen: state.sessionWorkAutoOpen,
           sessionReviewOfferEnabled: state.sessionReviewOfferEnabled,
-          sessionWorkKeepInGroup: state.sessionWorkKeepInGroup,
           sessionGoalEnabled: state.sessionGoalEnabled,
           sessionGoalChecker: state.sessionGoalChecker,
           sessionGoalMaxAutoTurns: state.sessionGoalMaxAutoTurns,
@@ -3667,8 +3637,6 @@ export const useUIStore = create<UIStore>()(
           copyMessagesAsPlainText: state.copyMessagesAsPlainText,
           showToolFileIcons: state.showToolFileIcons,
           showTurnChangedFiles: state.showTurnChangedFiles,
-          showExpandedBashTools: state.showExpandedBashTools,
-          showExpandedEditTools: state.showExpandedEditTools,
           timeFormatPreference: state.timeFormatPreference,
           weekStartPreference: state.weekStartPreference,
           desktopWindowControlsPosition: state.desktopWindowControlsPosition,

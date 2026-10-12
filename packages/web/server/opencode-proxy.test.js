@@ -753,6 +753,62 @@ describe('OpenCode proxy SSE forwarding', () => {
     });
   });
 
+  it('shells message pages only for clients that ask, and never a single message', async () => {
+    const message = {
+      id: 'msg_1',
+      type: 'assistant',
+      time: { created: 1 },
+      content: [{
+        type: 'tool',
+        id: 'call_1',
+        name: 'read',
+        time: { created: 1, completed: 2 },
+        state: { status: 'completed', input: { path: 'a.ts' }, content: [{ type: 'text', text: 'file body' }], metadata: {} },
+      }],
+    };
+    const upstream = express();
+    upstream.get('/api/session/ses_1/message', (_req, res) => res.json({ data: [message], cursor: {} }));
+    upstream.get('/api/session/ses_1/message/msg_1', (_req, res) => res.json(message));
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: { promises: { realpath: async (value) => value } },
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const base = `http://127.0.0.1:${proxyServer.address().port}`;
+    const asking = { 'x-openchamber-part-shells': 'v1' };
+
+    const shelled = await (await fetch(`${base}/api/session/ses_1/message?limit=50`, { headers: asking })).json();
+    expect(shelled.data[0].content[0].state).toEqual({
+      status: 'completed',
+      input: { path: 'a.ts' },
+      content: [{ type: 'text', text: '' }],
+      metadata: { openchamberContentShell: { chars: 9 } },
+    });
+
+    const plain = await (await fetch(`${base}/api/session/ses_1/message?limit=50`)).json();
+    expect(plain).toEqual({ data: [message], cursor: {} });
+
+    const single = await (await fetch(`${base}/api/session/ses_1/message/msg_1`, { headers: asking })).json();
+    expect(single).toEqual(message);
+  });
+
   it('folds OpenChamber-owned archive state and metadata onto sessions it serves', async () => {
     const upstream = express();
     upstream.get('/api/session', (_req, res) => {

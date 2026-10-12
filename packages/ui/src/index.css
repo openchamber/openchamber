@@ -71,11 +71,11 @@
 }
 
 /* A PR or issue reference coloured by its state (--oc-ref-tint). It is side
-   context, so it rests half-blended into the muted text and takes its full
-   colour on hover or focus, its own or that of an enclosing
-   .oc-ref-tint-scope row. */
+   context, so it rests a little blended into the muted text, its state still
+   plain to read, and takes its full colour on hover or focus, its own or that
+   of an enclosing .oc-ref-tint-scope row. */
 @utility oc-ref-tint {
-  color: color-mix(in oklab, var(--oc-ref-tint) 40%, var(--muted-foreground));
+  color: color-mix(in oklab, var(--oc-ref-tint) 75%, var(--muted-foreground));
 
   &:hover,
   &:focus-visible,

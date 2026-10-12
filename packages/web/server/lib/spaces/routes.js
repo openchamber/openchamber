@@ -82,7 +82,7 @@ const switchBodySchema = z.object({ enabled: z.boolean() });
 
 /**
  * The switch as `index.js` runs it. `getHost()` and `setHost(host)` read and replace the running
- * host, `buildHost()` makes one as the start would, `startHost(host)` connects it, and
+ * host, `buildHost()` makes one as the start would, which may take a moment, `startHost(host)` connects it, and
  * `persist(enabled)` writes the setting. One change runs at a time: a second request waits for
  * the first and then sees what it left, so a double click builds one host and never two.
  */
@@ -126,7 +126,7 @@ export function createSwitchController({ getHost, setHost, buildHost, startHost,
       return { enabled: false, ...outcome };
     }
     await persist(true);
-    const made = buildHost();
+    const made = await buildHost();
     startHost(made);
     setHost(made);
     return { enabled: true, stopped: [], stillRunning: [] };

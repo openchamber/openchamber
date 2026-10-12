@@ -23,6 +23,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { ContextPanelHeaderToolbar } from './contextPanelHeaderSlot';
 import { useInContextPanelHeader } from './contextPanelHeaderSlotContext';
+import { toolContentShellChars } from '@/lib/opencode/toolContentShells';
 
 type SessionMessage = { info: Message; parts: Part[] };
 
@@ -180,7 +181,9 @@ const estimatePartChars = (part: Part, role: 'user' | 'assistant' | 'tool' | 'ot
       toolInputOutputLength
       + estimateTextLength(partRecord.raw)
       + Math.round(estimateTextLength(partRecord.metadata) * 0.25)
-      + Math.round(estimateTextLength(partRecord.state) * 0.1);
+      + Math.round(estimateTextLength(partRecord.state) * 0.1)
+      // A result left out of the page still counts, by the length the server reported.
+      + Math.round((toolContentShellChars(part) ?? 0) * 0.1);
 
     return { user: 0, assistant: 0, tool: toolPayloadLength, other: 0 };
   }

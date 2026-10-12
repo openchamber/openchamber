@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import type { SyncEvent } from "@/lib/opencode/events"
 import type { Message, Part, PermissionRequest, Session } from "@/lib/opencode/model"
+import { toolContentShellChars } from "@/lib/opencode/toolContentShells"
 import { applyDirectoryEvent, reduceGlobalEvent } from "./event-reducer"
 import { INITIAL_STATE, type State } from "./types"
 
@@ -360,6 +361,25 @@ describe("streaming parts", () => {
         properties: { sessionID: "ses_1", part: { ...done, state: { status: "running", input: { command: "ls" }, time: { start: 11 } } } },
       }),
     ).toBe(false)
+  })
+
+  test("a finished read keeps no result, since its row opens the file instead", () => {
+    const draft = state()
+    apply(draft, {
+      type: "message.part.updated",
+      properties: {
+        sessionID: "ses_1",
+        part: { id: "call_r", sessionID: "ses_1", messageID: "msg_a", type: "tool", callID: "call_r", tool: "read", state: { status: "running", input: { path: "a.ts" }, time: { start: 1 } } },
+      },
+    })
+    apply(draft, {
+      type: "message.tool.transition",
+      properties: { sessionID: "ses_1", messageID: "msg_a", partID: "call_r", transition: { kind: "success", output: "file body", executed: true, end: 2 } },
+    })
+    const done = draft.part.msg_a[0]
+    if (done.type !== "tool" || done.state.status !== "completed") throw new Error("expected completed tool")
+    expect(done.state).toEqual({ status: "completed", input: { path: "a.ts" }, output: "", metadata: { openchamberContentShell: { chars: 9 } }, time: { start: 1, end: 2 } })
+    expect(toolContentShellChars(done)).toBe(9)
   })
 
   test("a transition for an unknown call asks for materialization", () => {

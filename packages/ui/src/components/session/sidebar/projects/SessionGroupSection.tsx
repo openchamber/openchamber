@@ -12,6 +12,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { getPrStatusLabel } from '../prStatusLabel';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
+import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
+import { sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useUIStore } from '@/stores/useUIStore';
@@ -70,6 +72,8 @@ export type SessionGroupSectionProps = {
   projectId?: string | null;
   hideGroupLabel?: boolean;
   renderBody?: boolean;
+  /** Nothing to list under the header: it shows no chevron and does not toggle. */
+  isEmpty?: boolean;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   groupSearchDataByGroup: WeakMap<SessionGroup, GroupSearchData>;
@@ -118,7 +122,6 @@ export type SessionGroupSectionProps = {
   | 'setDeleteSessionConfirm'
   | 'startFolderRename'
   | 'startSessionWorktreeMenuLoad'
-  | 'onEditProject'
 >;
 
 const CollapsedFolderActivity: React.FC<{
@@ -302,7 +305,7 @@ const WorktreeDeleteAction = React.memo(function WorktreeDeleteAction({
             ? t('sessions.sidebar.group.actions.deleteGroupAndBranchAria', { label })
             : t('sessions.sidebar.group.actions.deleteGroupAria', { label })}
         >
-          <Icon name="delete-bin" className="h-4 w-4" />
+          <Icon name="delete-bin" className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" sideOffset={4}>
@@ -324,6 +327,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
     projectId,
     hideGroupLabel,
     renderBody = true,
+    isEmpty = false,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     groupSearchDataByGroup,
@@ -926,9 +930,10 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
         : '[--oc-actions-reserve:18px]');
   const headerActionsMaskClass = alwaysShowActions ? undefined : 'group-hover/gh:oc-actions-mask group-focus-within/gh:oc-actions-mask';
   const headerCoveredFadeClass = alwaysShowActions ? undefined : 'transition-opacity group-hover/gh:opacity-0 group-focus-within/gh:opacity-0';
-  // The leading icon cross-fades into the collapse chevron on hover.
-  const headerIconFadeClass = alwaysShowActions ? 'hidden' : 'transition-opacity group-hover/gh:opacity-0';
-  const headerChevronFadeClass = alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 transition-opacity group-hover/gh:opacity-100';
+  // An empty group keeps the chevron's place, so its label stays in line.
+  const headerChevron = isEmpty
+    ? <span aria-hidden className="size-3.5 flex-shrink-0" />
+    : <FileTreeChevron expanded={!isCollapsed} />;
   const groupPrLinks: SidebarRefLink[] = groupPrSummary && groupPrStatusLabel ? [{
     key: `pr:${groupPrSummary.number}`,
     icon: 'git-pull-request',
@@ -1096,31 +1101,34 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
 
   return (
     <><div className={cn('oc-group', worktreeRemoving && 'opacity-60')} aria-busy={worktreeRemoving || undefined}>
-      <div className={cn('oc-ref-tint-scope group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}>
+      <div className={cn('oc-ref-tint-scope group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md hover:bg-interactive-hover/60', 'cursor-pointer')}>
       <Tooltip disabled={groupPrSummary ? !groupPrStatusLabel : !primaryGroupIssue}>
       <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS}>
       <div
         className="min-w-0 flex-1"
-        onClick={() => onToggleCollapsedGroup(groupKey)}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            onToggleCollapsedGroup(groupKey);
-          }
-        }}
-        aria-label={isCollapsed
-          ? t('sessions.sidebar.group.expandAria', { label: group.label })
-          : t('sessions.sidebar.group.collapseAria', { label: group.label })}
-        aria-expanded={!isCollapsed}
+        {...(isEmpty ? {} : {
+          onClick: () => onToggleCollapsedGroup(groupKey),
+          role: 'button',
+          tabIndex: 0,
+          onKeyDown: (event: React.KeyboardEvent) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onToggleCollapsedGroup(groupKey);
+            }
+          },
+          'aria-label': isCollapsed
+            ? t('sessions.sidebar.group.expandAria', { label: group.label })
+            : t('sessions.sidebar.group.collapseAria', { label: group.label }),
+          'aria-expanded': !isCollapsed,
+        })}
       >
         <div
           ref={dragHandleProps?.setActivatorNodeRef}
+          // A file tree folder row at the first level under the project: the
+          // chevron, then the branch (or space, or archive) icon and label.
+          style={{ paddingInlineStart: sessionTreeRowPaddingLeft(0) }}
           className={cn(
-            // ps-1.5 lines the branch icon up with the project-zone header
-            // icon (container ps-2.5 + 6px = band ps-4 past its -ml-2.5).
-            '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden ps-1.5',
+            '@container min-w-0 flex flex-1 items-start gap-1 overflow-hidden',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
@@ -1128,42 +1136,37 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
           <div className={cn('min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden', headerActionsMaskClass)}>
             <p className="typography-ui-label font-normal truncate text-foreground/92">
               {group.isArchivedBucket ? (
-                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                  <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="archive" className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', headerIconFadeClass)} />
-                    <span className={cn(
-                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      headerChevronFadeClass,
-                    )}>
-                      {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-                    </span>
-                  </span>
+                <span className="inline-flex min-w-0 max-w-full items-center gap-0.5">
+                  {headerChevron}
+                  <Icon name="archive" className="mx-px h-3 w-3 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                   {worktreeMissingIndicator}
                   {groupActivityIndicator}
                 </span>
               ) : (!group.isMain || group.worktree) ? (
-                // Worktree sub-header in the flat visual language: slim
-                // folder-style row with a PR-tinted branch icon and PR badge.
-                <span className="flex w-full min-w-0 items-center gap-1.5">
+                // Worktree header: a file tree folder row with a PR-tinted
+                // branch icon and the PR badge on the right.
+                // 2px gaps: chevron, icon and gaps span the 34px a child row
+                // spends on its indent, slot and gap, so the label starts
+                // where the titles of its sessions start.
+                <span className="flex w-full min-w-0 items-center gap-0.5">
+                  {headerChevron}
                   {worktreeRemoving ? (
                     <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center text-muted-foreground" title={t('sessions.sidebar.group.worktreeRemoving')} role="status" aria-label={t('sessions.sidebar.group.worktreeRemoving')}>
                       <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
                     </span>
-                  ) : <span className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                  ) : (
+                    // 12px glyph in the 14px icon slot (mx-px), so the label
+                    // stays aligned with the session titles below.
                     <Icon name={group.space ? 'box-3' : 'git-branch'}
-                      className={cn('h-3.5 w-3.5 shrink-0', groupPrColor ? 'oc-ref-tint' : 'text-muted-foreground', headerIconFadeClass)}
+                      className={cn('mx-px h-3 w-3 shrink-0', groupPrColor ? 'oc-ref-tint' : 'text-muted-foreground')}
                       style={groupPrColor ? refTintStyle(groupPrColor) : undefined}
                       aria-label={group.space ? t('sessions.sidebar.group.space') : undefined}
                     />
-                    <span className={cn(
-                      'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
-                      headerChevronFadeClass,
-                    )}>
-                      {isCollapsed ? <Icon name="arrow-right-s" className="h-3.5 w-3.5" /> : <Icon name="arrow-down-s" className="h-3.5 w-3.5" />}
-                    </span>
-                  </span>}
-                  <span className="min-w-0 truncate typography-ui-label font-semibold text-muted-foreground">
+                  )}
+                  {/* Medium weight at full strength: a group among the normal
+                      session titles under it, a step below project headers. */}
+                  <span className="min-w-0 truncate typography-ui-label font-medium text-foreground">
                     {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </span>
                   {worktreeMissingIndicator}
@@ -1216,6 +1219,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                 </span>
               ) : (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                  {headerChevron}
                   <span className="min-w-0 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                   {groupActivityIndicator}
                 </span>
@@ -1268,7 +1272,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('sessions.sidebar.group.actions.deleteArchivedInGroupAria', { label: group.label })}
                 >
-                  <Icon name="delete-bin" className="h-4 w-4" />
+                  <Icon name="delete-bin" className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.group.actions.deleteArchivedSessions')}</p></TooltipContent>
@@ -1293,7 +1297,7 @@ function SessionGroupSectionBase(props: SessionGroupSectionProps): React.ReactNo
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={t('spaces.group.access.giveAria', { label: group.label })}
                 >
-                  <Icon name="key" className="h-4 w-4" />
+                  <Icon name="key" className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" sideOffset={4}><p>{t('spaces.group.access.give')}</p></TooltipContent>

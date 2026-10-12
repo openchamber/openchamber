@@ -151,6 +151,7 @@ const availableCapabilities = {
 let readCapabilities = async () => availableCapabilities;
 let disconnectedAccountIds: string[] = [];
 let cliDisabledValues: boolean[] = [];
+let activatedAccounts: string[] = [];
 let disconnectAuth: () => Promise<void> = async () => undefined;
 let setCliDisabledAuth: () => Promise<void> = async () => undefined;
 const translate = (key: string) => key;
@@ -227,7 +228,10 @@ const sourceControl = {
     disconnectedAccountIds.push(accountId);
     await disconnectAuth();
   },
-  authActivate: async () => ({ status: 'disconnected' as const, connected: false }),
+  authActivate: async (identity: SourceControlIdentity, accountId: string) => {
+    activatedAccounts.push(`${identity.provider}:${accountId}`);
+    return { status: 'disconnected' as const, connected: false };
+  },
   authSetCliDisabled: async (_identity: SourceControlIdentity, disabled: boolean) => {
     cliDisabledValues.push(disabled);
     await setCliDisabledAuth();
@@ -503,6 +507,7 @@ beforeEach(() => {
   gitLabAuthEntry.isLoading = false;
   disconnectedAccountIds = [];
   cliDisabledValues = [];
+  activatedAccounts = [];
   disconnectAuth = async () => undefined;
   setCliDisabledAuth = async () => undefined;
   completeAuth = async () => ({ status: 'pending' });
@@ -855,6 +860,28 @@ describe('source-control account presentation', () => {
     await click(tree, 'settings.gitlab.actions.disableCli');
     expect(disconnectedAccountIds).toEqual(['account-one']);
     expect(cliDisabledValues).toEqual([true]);
+  });
+
+  test('a CLI login that is not in use can be switched to while the saved account needs authentication', async () => {
+    const oauth = { ...connectedStatus.accounts[0], status: 'invalid' as const, current: false };
+    const cli = { ...oauth, id: 'account-cli', credentialId: 'account-cli', source: 'cli' as const, status: 'valid' as const };
+    gitLabAuthEntry.status = {
+      ...gitLabIdentity,
+      status: 'disconnected',
+      connected: false,
+      accounts: [oauth, cli],
+      cli: { available: true, disabled: false, active: false },
+    };
+    authStoreState.entries.github.status = { provider: 'github', instance: 'github.com', status: 'disconnected', connected: false, accounts: [oauth, cli] };
+
+    const gitlabTree = await renderSettled(GitLabSettingsHarness);
+    await click(gitlabTree, 'settings.sourceControl.actions.use');
+    const githubTree = await renderSettled(GitHubSettingsHarness);
+    await click(githubTree, 'settings.sourceControl.actions.use');
+    expect(activatedAccounts).toEqual(['gitlab:account-cli', 'github:account-cli']);
+
+    gitLabAuthEntry.status = { ...gitLabAuthEntry.status, accounts: [oauth, { ...cli, current: true }] };
+    expect(findButton(await renderSettled(GitLabSettingsHarness), 'settings.sourceControl.actions.use')).toBeNull();
   });
 
   test('groups credentials that belong to the same provider user', async () => {

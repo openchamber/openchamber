@@ -598,6 +598,27 @@ Rules:
 11. Session-scoped ArrowUp and ArrowDown recall merges the visible transcript's user prompts (`useUserMessageHistory`) with the persisted input-history bucket for runtime + normalized directory + session identity. Revert markers hide prompts from the transcript source only; the persisted bucket still recalls them. Global scope reads the persisted runtime bucket alone.
 12. Part arrays preserve authoritative response/event order. Part IDs are identity keys and have the same rollover limitation; identity lookup/removal must not require a part array to be lexically ID-sorted.
 
+Pages the loader reads ask for finished tool results as shells
+(`lib/opencode/toolContentShells.ts`, server side
+`packages/web/server/lib/opencode/message-shells.js`): a completed or failed
+call keeps its status, time, input, metadata and error, and its result text is
+replaced by an `openchamberContentShell` marker in its metadata. The adapter
+sends the request header only to a server that lists
+`api.message-part-shells.v1` among its `/api/version` capabilities, learned
+once per runtime when the sync provider starts; an older server on another
+origin would refuse the unknown header at CORS preflight and fail the page.
+Rows that need the result (an expanded tool, an extension header that reads
+`{output}`) complete the message by id through `tool-content-completion.ts`;
+a failed or empty completion shows a retry, never an empty result. A page's
+shell never replaces a whole call the store already holds
+(`mergeMaterializedPart`), so a tail refresh cannot undo a completion or a
+live call. Every tool row opens on a click, so the client keeps no tool whole;
+file edits and subagent calls are never shelled by the server. Single-message reads are
+always whole, and so are calls arriving by the event stream, except `read` and
+`skill`: their rows open the file in the app and never show the result, so the
+reducer drops it the moment the call finishes (`withoutUnshownResult`), with
+the same marker.
+
 A successful local session creation publishes its session record and calls `SessionMessageLoader.initializeCreatedSession` before selection starts navigation loading. The create response establishes an empty transcript only if no transcript has arrived yet. Initialization supersedes an earlier unresolved history load, preserves any messages or metadata received before the create response, and uses the server-returned directory. Opening that new session needs no history read; forced recovery and later eviction still use normal fetching. Creation responses from a previous runtime cannot select or initialize a session in the current runtime.
 
 Initial loads use smaller requests on constrained VS Code/mobile surfaces and publish the cursor-extended ten-turn window described above. The mounted chat timeline requests one history batch when its pinned viewport is underfilled, when the user scrolls toward history, or when load older is pressed; mobile uses the explicit button. Timeline caches, pending work, prepend snapshots, and stale checks use runtime + directory + session identity so equal session IDs in different worktrees cannot share lifecycle state. Older pages are fetched through the same loader and merged with optimistic records before publication. The same chronology contract applies in the VS Code webview because it consumes this shared loader and sync store; the extension bridge must transport OpenCode records without introducing its own ID-based ordering.
@@ -753,6 +774,18 @@ Examples of global-store updates performed in `session-actions.ts`:
 Sending a message while forms are open cancels them through `dismissOpenFormsForSession`, which removes them from the store before the cancel request so the card disappears at once. A not-found answer keeps them removed. Any other failure puts each form back into the store and session it came from: the agent is still waiting, and no event will return it. The mounted chat's form-only recovery would refetch the open session's own form, but a subagent's form shown in the parent chat has no other path back. Open permissions follow the same rule through `dismissOpenPermissionsForSession`, which rejects them: a not-found answer keeps them removed, any other failure puts each one back. Permissions have no in-chat recovery at all, so without the restore even the open session's own prompt stays hidden until a reconnect. A restored card can belong to a request the server already settled (its response was lost, or another client answered it); any reply from the card then comes back not-found, and `respondToPermission` removes it. The same cleanup applies to its other callers, VS Code auto-accept and the desktop tray's approve action.
 
 ### Restore (unarchive) contract
+
+An explicitly user-initiated composer send restores an archived top-level
+session after OpenCode accepts the prompt or command. Queueing from the
+composer is the same intent: the session is restored once the queue accepts
+the message, so delivery itself never restores anything and the server queue
+has no archive logic. Opening the archive, typing, shell commands, scheduled
+tasks and automated continuations do not restore it. The send captures the
+session's archive timestamp and runtime; a newer archive, manual restore or
+runtime switch supersedes that intent. Restoration uses the existing tree
+action, so archived subsessions come back with the session, and reports
+failure separately from the accepted message, so a restore failure cannot
+cause a duplicate send.
 
 The OpenCode server cannot clear `time.archived` over HTTP: `session.update`
 only applies the field when the payload carries a finite number, so an omitted
@@ -944,7 +977,7 @@ read `useSyncRuntime()`. `useDirectoryStore(directory)` reads the current
 directory through `runtime.currentDirectory` with `useSyncExternalStore`, so a
 consumer that passes its own directory gets a constant snapshot and is not
 re-rendered by a cross-project switch. This is what keeps sidebar rows
-(permissions, form counts, session lookups) out of the switch commit: a
+(pending permissions and forms, session lookups) out of the switch commit: a
 row must not pay for the chat changing directory.
 
 ### Session switch commit
