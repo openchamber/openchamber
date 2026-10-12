@@ -117,6 +117,13 @@ Mixed queues use only ordinary items for manual send; a scheduled-only queue
 cannot trigger an empty composer send. Scheduled items stay visible in the
 queue rows with reorder and remove, but no edit or send action.
 
+In Queue mode, the primary action and Enter also queue while a live subagent
+below the current session is running, even if the parent is idle. The composer
+subscribes to the global active-session index through `useComposerFollowUpActivity`.
+Blocking forms and permissions retain the idle parent's send behavior. Steer
+mode, explicit Ctrl/Cmd+Enter sends, and background shell activity retain their
+existing behavior.
+
 `BackgroundShellsStrip` lists the commands that went to the background (not the ones
 a turn is waiting for, see `background` in `sync/background-shells.ts`) of
 the session and of its

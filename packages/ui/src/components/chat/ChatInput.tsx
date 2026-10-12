@@ -69,6 +69,7 @@ import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
+import { useComposerFollowUpActivity } from './composer/state/useComposerFollowUpActivity';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -1262,6 +1263,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         return run?.status === 'running' && run.runtimeKey === getRuntimeKey();
     }, [currentSessionId]));
 
+    const followUpActivity = useComposerFollowUpActivity(
+        currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, hasPendingForm,
+    );
+
     const handleOpenMobilePanel = React.useCallback((panel: MobileControlsPanel) => {
         if (!isMobile) {
             return;
@@ -2285,7 +2290,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Comment mode owns the composer; its only primary action is attach.
         if (isMobileCommentOpen()) return;
         const inputSnapshot = getCurrentInputSnapshot();
-        const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
+        const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && followUpActivity;
         if (followUpBehavior === 'queue' && canQueue) {
             void handleQueueMessage();
         } else if (followUpBehavior === 'steer' && canQueue) {
@@ -2293,7 +2298,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         } else {
             void handleSubmitRef.current();
         }
-    }, [inputMode, getCurrentInputSnapshot, currentSessionId, currentSessionPhase, autoReviewRunning, followUpBehavior, handleQueueMessage, isBtwActive, isMobileCommentOpen]);
+    }, [inputMode, getCurrentInputSnapshot, currentSessionId, followUpActivity, followUpBehavior, handleQueueMessage, isBtwActive, isMobileCommentOpen]);
 
     // Draft welcome presets: submit immediately.
     const submitPresetPrompt = React.useCallback((text: string, type: 'command' | 'skill') => {
@@ -2521,9 +2526,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         })) {
             e.preventDefault();
 
-            // Queueing / steering only works when there's an existing busy
-            // session (or an active auto-review run).
-            const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && (currentSessionPhase !== 'idle' || autoReviewRunning);
+            // Queueing also waits for a running subagent when its parent is idle.
+            const canQueue = !isBtwActive && inputMode === 'normal' && hasContent && currentSessionId && followUpActivity;
 
             if (followUpBehavior === 'queue') {
                 if (isCtrlEnter || !canQueue) {
