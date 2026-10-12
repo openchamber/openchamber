@@ -294,7 +294,7 @@
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.7",
+    "@types/adm-zip": "^0.6.0",
     "@types/vscode": "^1.85.0",
     "@vitejs/plugin-react": "^5.0.0",
     "@vscode/vsce": "^3.2.1",
