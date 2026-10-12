@@ -81,12 +81,13 @@ import {
 } from '@/lib/reviewFlow';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentColors } from '@/hooks/useAgentColors';
-import { isCapacitorMobileApp } from '@/apps/mobileNativeChrome';
-import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import { WorktreeRequiresGitRepositoryError } from '@/lib/worktrees/worktreeCreate';
-import { buildTurnImageExportSource, cloneMessageImageExportSource, fitMessageImageExportLayout, resolveMessageImageExportPixelRatio, resolveMessageImageExportWidth } from './imageExport';
+import { buildTurnImageExportSource, saveMessageImageExport, resolveMessageImageExportWidth } from './imageExport';
 import { hasTextSelectionInside } from '@/lib/textSelection';
 import { DiffCount } from '@/components/ui/diff-count';
+import { SaveImageMenu } from '../export/SaveImageMenu';
+import { useConversationSelectionStore } from '../export/selectionContext';
+import { conversationSelectionKey } from '../export/selectionStore';
 
 
 const CONTAIN_LAYOUT_STYLE = { contain: 'layout' as const, transform: 'translateZ(0)' };
@@ -625,7 +626,7 @@ const UserMessageBody = React.memo(({ parts, messageCreatedAt, isMobile, alwaysS
     }, [locale, messageCreatedAt, timeFormatPreference]);
     const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
     const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || onToggleContextPin || hasExtraActions) ? (
-        <div className={cn(
+        <div data-message-actions="true" className={cn(
             'group/user-actions flex items-start justify-end',
             // In a sticky turn header (TurnItem) the mobile row is shorter: it
             // stays on screen, and the reply below keeps its own top margin.
@@ -1069,6 +1070,7 @@ interface AssistantMessageActionButtonsProps {
         onClick: () => void | Promise<void>;
     };
     onShareImage: (sourceElement?: HTMLElement | null) => Promise<void>;
+    selectionKey: string;
     ttsText: string;
     // Shared with the message's other reading controls; see useMessageTTS.
     ttsReadingKey?: string;
@@ -1083,6 +1085,7 @@ const AssistantMessageActionButtons = React.memo(({
     onCopyLink,
     reviewTransferAction,
     onShareImage,
+    selectionKey,
     ttsText,
     ttsReadingKey,
     extraActions,
@@ -1092,29 +1095,7 @@ const AssistantMessageActionButtons = React.memo(({
     const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS(ttsReadingKey);
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
-    const [isSharing, setIsSharing] = React.useState(false);
     const [isTransferringReview, setIsTransferringReview] = React.useState(false);
-
-    const handleShareImageClick = React.useCallback(
-        async (event: React.MouseEvent<HTMLButtonElement>) => {
-            event.stopPropagation();
-            event.preventDefault();
-
-            if (isSharing || !hasCopyableText) {
-                return;
-            }
-
-            setIsSharing(true);
-            try {
-            const root = event.currentTarget.closest('[data-message-text-export-root]');
-            const sourceElement = root?.querySelector<HTMLElement>('[data-message-text-export-source]') ?? null;
-            await onShareImage(sourceElement);
-            } finally {
-                setIsSharing(false);
-            }
-        },
-        [hasCopyableText, isSharing, onShareImage]
-    );
 
     const handleReviewTransferClick = React.useCallback(
         async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1196,31 +1177,11 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{reviewTransferAction.tooltip}</TooltipContent>
                 </Tooltip>
             ) : null}
-            {chatSurfaceMode !== 'mini-chat' ? <Tooltip>
-                <TooltipTrigger asChild>
-                    <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        disabled={isSharing || !hasCopyableText}
-                        className={cn(
-                            'h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-ring',
-                            (!hasCopyableText || isSharing) && 'opacity-50'
-                        )}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                            void handleShareImageClick(event);
-                        }}
-                    >
-                        {isSharing ? (
-                            <Icon name="loader-4" className="h-3 w-3 animate-spin" />
-                        ) : (
-                            <Icon name="image-download" className="h-3 w-3" />
-                        )}
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent sideOffset={6}>{isSharing ? t('chat.messageBody.actions.savingImage') : t('chat.messageBody.actions.saveAsImage')}</TooltipContent>
-            </Tooltip> : null}
+            {chatSurfaceMode !== 'mini-chat' ? <SaveImageMenu
+                disabled={!hasCopyableText}
+                selectionKey={selectionKey}
+                onSave={onShareImage}
+            /> : null}
             {chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons && hasCopyableText && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -1283,6 +1244,8 @@ const AssistantMessageBody = React.memo(({
     extraActions,
 }: Omit<MessageBodyProps, 'isUser'>) => {
     const { t, locale } = useI18n();
+    const conversationSelection = useConversationSelectionStore();
+    const exportSelectionKey = conversationSelectionKey('assistant', turnGroupingContext?.turnId ?? messageId);
     const chatSurfaceMode = useChatSurfaceMode();
     const streamPhase = _streamPhase;
     void _allowAnimation;
@@ -1508,146 +1471,14 @@ const AssistantMessageBody = React.memo(({
             const sourceElement = requestedSourceElement ?? messageTextContentRef.current ?? messageContentRef.current;
             if (!sourceElement) return;
 
-            let wrapper: HTMLDivElement | null = null;
             try {
-                // Load the exporter before attaching its temporary clone so a slow
-                // chunk request cannot leave export-only content in the page layout.
-                const { toPng } = await import('html-to-image');
-                const originalElement = sourceElement;
-                const computedStyle = window.getComputedStyle(originalElement);
-                const rootStyle = window.getComputedStyle(document.documentElement);
-                const resolvedBackgroundColor =
-                    rootStyle.getPropertyValue('--surface-background').trim() ||
-                    computedStyle.backgroundColor ||
-                    window.getComputedStyle(document.body).backgroundColor;
-                const paddingSize = 24;
-                // The turn source is built off-screen, so the visible column is the
-                // only element still holding the width the reader saw.
-                const exportWidth = resolveMessageImageExportWidth(messageContentRef.current ?? originalElement);
-
-                wrapper = document.createElement('div');
-                wrapper.setAttribute('data-message-image-export', 'true');
-                wrapper.style.cssText = `
-                    padding: ${paddingSize}px;
-                    ${exportWidth ? `width: ${exportWidth}px; box-sizing: content-box;` : ''}
-                    background-color: ${resolvedBackgroundColor};
-                    display: inline-block;
-                `;
-                // Scrollbars are dead weight in a still image, and hiding them stops
-                // their gutter from clipping the last column of a wide table.
-                const exportStyle = document.createElement('style');
-                exportStyle.textContent = `
-                    [data-message-image-export] * { scrollbar-width: none; }
-                    [data-message-image-export] *::-webkit-scrollbar { display: none; }
-                `;
-                wrapper.appendChild(exportStyle);
-
-                const clone = cloneMessageImageExportSource(originalElement);
-                clone.style.cssText = `
-                    ${computedStyle.cssText}
-                    transform: none;
-                    contain: none;
-                `;
-
-                // A column-width canvas would clip an unwrapped code line behind its
-                // scroll container, so long lines wrap only for the export.
-                const codeWrapRoots = clone.querySelectorAll<HTMLElement>('[data-code-wrap]');
-                codeWrapRoots.forEach((root) => {
-                    root.setAttribute('data-code-wrap', 'true');
-                });
-
-                const actionRows = clone.querySelectorAll<HTMLElement>('[data-message-actions="true"]');
-                actionRows.forEach((row) => {
-                    row.style.display = 'none';
-                });
-                const actionGroups = clone.querySelectorAll<HTMLElement>('[data-message-action-group="true"]');
-                actionGroups.forEach((group) => {
-                    group.style.display = 'none';
-                });
-
-                const timestampElements = clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]');
-                const footerRowsAdjusted = new Set<HTMLElement>();
-                timestampElements.forEach((element) => {
-                    const label = element.getAttribute('aria-label');
-                    const timestamp = label?.replace('Message time:', '').trim();
-                    if (!timestamp || element.textContent?.includes(timestamp)) {
-                        return;
-                    }
-
-                    const timestampText = document.createElement('span');
-                    timestampText.style.marginLeft = '4px';
-                    timestampText.textContent = timestamp;
-                    element.appendChild(timestampText);
-
-                    const metaGroup = element.parentElement;
-                    const footerRow = metaGroup?.parentElement as HTMLElement | null;
-                    if (!footerRow || footerRowsAdjusted.has(footerRow)) {
-                        return;
-                    }
-
-                    footerRow.style.justifyContent = 'flex-start';
-                    footerRowsAdjusted.add(footerRow);
-                });
-
-                wrapper.appendChild(clone);
-                document.body.appendChild(wrapper);
-
-                if (exportWidth) {
-                    // Keep the clone at the column so prose wraps where the reader saw it;
-                    // only the canvas and the clipped blocks grow.
-                    fitMessageImageExportLayout(wrapper, clone, exportWidth);
-                }
-
-                const bounds = wrapper.getBoundingClientRect();
-                const canvasWidth = Math.ceil(bounds.width);
-                const canvasHeight = Math.ceil(bounds.height);
-
-                const dataUrl = await toPng(wrapper, {
-                    quality: 1,
-                    width: canvasWidth,
-                    height: canvasHeight,
-                    pixelRatio: resolveMessageImageExportPixelRatio(canvasWidth, canvasHeight),
-                    backgroundColor: resolvedBackgroundColor,
-                });
-
                 const fileName = `message-${messageId}.png`;
-
-                if (isVSCodeRuntime()) {
-                    const payload = await vscodeApi?.saveImage?.({ fileName, dataUrl }) as { saved?: boolean; canceled?: boolean; error?: string } | undefined;
-                    if (!payload) {
-                        throw new Error('Failed to save image in VS Code');
-                    }
-                    if (payload.saved !== true) {
-                        if (payload.canceled) {
-                            return;
-                        }
-                        throw new Error(payload.error || 'Failed to save image in VS Code');
-                    }
-                } else if (isCapacitorMobileApp()) {
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    await shareFileFromNativeApp(new File([blob], fileName, { type: blob.type || 'image/png' }));
-                } else {
-                    // Desktop titles the save dialog with the download URL, so a data URL
-                    // would put the whole image in the title.
-                    const blob = await fetch(dataUrl).then((response) => response.blob());
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.download = fileName;
-                    link.href = url;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                }
-
-                toast.success(t('chat.messageBody.toast.imageSaved'));
+                const exportWidth = resolveMessageImageExportWidth(messageContentRef.current ?? sourceElement);
+                const result = await saveMessageImageExport(sourceElement, fileName, vscodeApi, exportWidth);
+                if (result === 'saved') toast.success(t('chat.messageBody.toast.imageSaved'));
             } catch (error) {
                 console.error('Failed to generate image:', error);
                 toast.error(t('chat.messageBody.toast.generateImageFailed'));
-            } finally {
-                if (wrapper && wrapper.parentNode) {
-                    wrapper.parentNode.removeChild(wrapper);
-                }
             }
         },
         [messageId, t, vscodeApi]
@@ -1703,12 +1534,13 @@ const AssistantMessageBody = React.memo(({
             onCopyMessage={onCopyMessage}
             onCopyLink={onCopyLink}
             onShareImage={shareShownMessageAsImage}
+            selectionKey={exportSelectionKey}
             ttsText={assistantPlanText}
             ttsReadingKey={messageId}
             reviewTransferAction={reviewTransferAction}
             extraActions={extraActions}
         />
-    ), [assistantPlanText, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareShownMessageAsImage]);
+    ), [assistantPlanText, exportSelectionKey, extraActions, hasCopyableText, isTouchContext, messageId, onCopyLink, onCopyMessage, reviewTransferAction, shareShownMessageAsImage]);
 
     // The turn footer copies the whole turn when the turn has more than this message.
     const onCopyFooter = onCopyTurn ?? onCopyMessage;
@@ -2056,10 +1888,19 @@ const AssistantMessageBody = React.memo(({
         if (!isMiniChatSurface) {
             actions.push({
                 id: 'share-image',
-                label: t('chat.messageBody.actions.saveAsImage'),
+                onPointerRow: true,
+                label: t('chat.export.saveCurrent'),
                 icon: <Icon name="image-download" className="h-3.5 w-3.5" />,
                 disabled: !hasCopyableText,
                 onSelect: () => { void shareTurnAsImage(); },
+            });
+            if (conversationSelection) actions.push({
+                id: 'select-messages',
+                onPointerRow: true,
+                label: t('chat.export.selectMore'),
+                icon: <Icon name="check" className="size-4" />,
+                disabled: !hasCopyableText,
+                onSelect: () => conversationSelection.getState().begin(exportSelectionKey),
             });
         }
         if (!isMiniChatSurface && showMessageTTSButtons && hasCopyableText) {
@@ -2117,7 +1958,7 @@ const AssistantMessageBody = React.memo(({
             }
         }
         return actions;
-    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, currentProjectRef, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
+    }, [assistantPlanText, canUseProjectPlanActions, contextPinPending, contextPinned, conversationSelection, currentProjectRef, exportSelectionKey, extraActions, handleForkClick, handleForkFromHere, handleSaveAsPlanClick, hasCopyableText, isFooterTTSPlaying, isMiniChatSurface, isReviewSessionView, onCopyFooter, onCopyLink, onToggleContextPin, playFooterTTS, reviewTransferAction, shareTurnAsImage, showMessageTTSButtons, stopFooterTTS, t]);
 
     const footerMenuActions = footerSheetActions.filter((action) => !action.onPointerRow);
 
@@ -2126,6 +1967,7 @@ const AssistantMessageBody = React.memo(({
             {onCopyFooter ? (
                 <AssistantCopyButton hasCopyableText={hasCopyableText} isTouchContext={isTouchContext} onCopyMessage={onCopyFooter} />
             ) : null}
+            {!isMiniChatSurface ? <SaveImageMenu disabled={!hasCopyableText} selectionKey={exportSelectionKey} onSave={shareTurnAsImage} /> : null}
             {/* Reading starts from the "more" menu; stopping it should not mean
                 hunting for it there again. */}
             {isFooterTTSPlaying ? (

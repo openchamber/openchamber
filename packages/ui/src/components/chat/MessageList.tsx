@@ -9,6 +9,9 @@ import { isSkippedTimelineMessage, isBackgroundReportEntry, isTimelineNoticeRole
 import { earlierAssistantText } from './lib/turns/earlierAssistantText';
 import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
+import { ConversationSelectionItem } from './export/ConversationSelectionItem';
+import { conversationSelectionKey } from './export/selectionStore';
+import { hasConversationExportContent } from './export/selectedMessages';
 import { turnHeaderCanStick } from './lib/turns/stickyPrompt';
 import { TurnFold, TurnPagesRow } from './components/LiveTurnActivity';
 import { useTurnFoldContexts } from './components/useTurnFold';
@@ -142,6 +145,7 @@ interface MessageListProps {
 }
 
 export interface MessageListHandle {
+    getExportMessages: () => ChatMessageEntry[];
     resolveUiPageMessageId: (messageId: string, partId: string) => string;
     scrollToUiPageRow: (messageId: string) => boolean;
     scrollToTurnId: (turnId: string, options?: { behavior?: ScrollBehavior }) => boolean;
@@ -486,11 +490,13 @@ const TurnRow = React.memo(({
     // Under a fold, a message does not draw the pages the turn hoists.
     const underFold = row.underFold;
     return (
+        <ConversationSelectionItem selectionKey={conversationSelectionKey('assistant', turn.turnId)} role="assistant" eligible={turn.assistantMessages.some((message) => hasConversationExportContent(message.parts))}>
         <div className={cn('relative w-full', row.gapBelow && 'pb-2')} data-turn-row={turn.turnId}>
             {underFold ? (
                 <LiveTurnHoistedPagesContext.Provider value={foldContexts.hoistedPages}>{content}</LiveTurnHoistedPagesContext.Provider>
             ) : content}
         </div>
+        </ConversationSelectionItem>
     );
 });
 
@@ -1425,6 +1431,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return Math.abs(container.scrollTop - before) < 0.5 ? 'aligned' : 'moved';
     }, [anchorRowIndex, findAnchorElement, resolveScrollContainer, revealFoldedMessage, scrollHistoryIndexIntoView]);
 
+    const exportMessagesRef = React.useRef(baseDisplayMessages);
+    exportMessagesRef.current = baseDisplayMessages;
+
     // Installed during layout so a parent's layout effect (session entry
     // restore) already reaches this list, not the one it replaced.
     React.useLayoutEffect(() => {
@@ -1433,6 +1442,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
 
         const handle: MessageListHandle = {
+            getExportMessages: () => exportMessagesRef.current,
             resolveUiPageMessageId: (messageId, partId) => {
                 const { projection: current, defaultActivityExpanded: expanded } = uiPageProjectionRef.current;
                 const turnId = current.indexes.messageToTurnId.get(messageId);

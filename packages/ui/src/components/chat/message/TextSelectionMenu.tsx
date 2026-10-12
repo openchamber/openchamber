@@ -44,6 +44,7 @@ import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/short
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
 import { frameRectInApp, onFrameSelection } from './frameSelection';
 import { captureChatQuoteAnchor, findChatQuoteRoots, findUiRenderQuoteRoot, resolveChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { SelectionActionPanel } from './SelectionActionPanel';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
   DESKTOP_MENU_FALLBACK_WIDTH_PX,
@@ -940,20 +941,14 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     if (commentMode) {
       return commentHighlightOverlay;
     }
-    return createPortal(
-      <div
+    return (
+      <SelectionActionPanel
+        mobile
         ref={menuRef}
         className={cn(
-          'fixed inset-s-3 inset-e-3 bottom-0 z-50 mx-auto max-w-[420px]',
-          'oc-glass-popover oc-glass-floating rounded-2xl',
-          'p-2',
-          'safe-area-bottom',
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
           isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
-        style={{
-          bottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
-        }}
       >
         {/* Without Read, both rows share equal-width columns. With Read, the
             first row sizes tiles by their labels so three fit. Only Comment
@@ -1077,8 +1072,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
             {approvalButton}
           </div>
         </div>
-      </div>,
-      document.body
+      </SelectionActionPanel>
     );
   }
 

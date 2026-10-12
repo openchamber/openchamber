@@ -5,6 +5,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { turnHeaderCanStick } from '../lib/turns/stickyPrompt';
 import type { ChatMessageEntry, Turn } from '../lib/turns/types';
+import { ConversationSelectionItem } from '../export/ConversationSelectionItem';
+import { conversationSelectionKey } from '../export/selectionStore';
+import { isHiddenUserMessage } from '../message/hiddenUserMessage';
 
 interface TurnItemProps {
     turn: Turn;
@@ -53,6 +56,11 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
     );
 
     const hasNotices = Boolean(turn.waitingNotices?.length);
+    const userContent = (
+        <ConversationSelectionItem selectionKey={conversationSelectionKey('user', turn.userMessage.info.id)} role="user" eligible={turn.userMessage.info.role === 'user' && !isHiddenUserMessage(turn.userMessage)}>
+            {renderMessage(turn.userMessage)}
+        </ConversationSelectionItem>
+    );
     return (
         <section
             className={cn(
@@ -75,11 +83,11 @@ const TurnItem: React.FC<TurnItemProps> = ({ turn, renderMessage, gapBelow = fal
                     style={isMobile ? STICKY_HEADER_BACKGROUND_MOBILE : STICKY_HEADER_BACKGROUND_DESKTOP}
                 >
                     <div className="relative z-10">
-                        {renderMessage(turn.userMessage)}
+                        {userContent}
                     </div>
                 </div>
             ) : (
-                renderMessage(turn.userMessage)
+                userContent
             )}
 
             {hasNotices ? (

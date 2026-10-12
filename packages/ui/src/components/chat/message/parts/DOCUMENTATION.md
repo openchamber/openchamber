@@ -199,6 +199,39 @@ run a second Markdown parser. Ordinary code selections copy raw code;
 prose follows the Markdown/plain setting and retains safe rich HTML. The
 desktop `openchamber:copy` event follows the same selection policy.
 
+The image action also opens conversation selection. User messages are selected
+individually; an assistant selection covers all text parts in its visible turn,
+including folded steps and hidden continuations. Tool output and reasoning stay
+out of the export. `chat/export/selectedMessages.ts` collects the records at
+export time, so exporting does not depend on mounted DOM. `selectionMarkdown.ts`
+preserves block structure, closes unfinished fences, and scopes reference links
+and footnotes to each selected message. Inaccessible attachment URLs are replaced
+with a labeled filename. Images use the shared Markdown renderer and the
+shared `saveMessageImageExport` capture/save path.
+
+Selection state belongs to one chat column and is discarded on session,
+directory or runtime navigation. Each selection item subscribes only to its own
+checked state and selection mode; toggling one message does not re-render message
+bodies or re-project the transcript. The virtualized rows of an assistant turn
+share one selection key, so selecting any slice selects the whole reply and
+newly mounted slices reflect the same state. Message controls become inert while the
+selection checkboxes remain keyboard-accessible. Portaled action clicks are
+excluded from message-body toggling. Selection uses a 24px checkbox in a 44px
+gutter and paints selected rows with the selection background across their full
+width and height, including message spacing. The highlight has no rounded
+corners or outer margins, so adjacent selected messages form a continuous band;
+unselected messages interrupt it. The mobile text-selection
+menu and conversation-export toolbar share `message/SelectionActionPanel` for
+their frame and safe-area placement. The export toolbar uses an opaque panel
+and bottom dock, with immediate switching; the text-selection menu keeps its
+glass surface and existing opening transition.
+
+Selection holds the loaded session history against trimming until Cancel or
+navigation. Export reads the list's normalized records, including running
+subagent notices that define turn boundaries, and refuses a partial selection
+if any selected key is no longer available.
+
+
 ### Why image exports keep prose at the visible column width
 
 The export clone keeps the live message column width, including whole-turn
