@@ -258,6 +258,14 @@ describe("background subagent keeps its parent's turn open", () => {
     expect(timing().settledMs.has("parent")).toBe(true)
   })
 
+  test("a caller can resolve nested lineage without changing the display resolver", () => {
+    const parents = new Map([["grandchild", "nested-child"], ["nested-child", "nested-parent"]])
+    const active = new Set(["grandchild"])
+    expect(hasActiveSubagent("nested-parent", active, (id) => parents.get(id))).toBe(true)
+    expect(hasActiveSubagent("nested-parent", active)).toBe(false)
+    expect(hasActiveSubagent("parent", new Set(["child"]))).toBe(true)
+  })
+
   test("a subagent ending while the parent runs again leaves the parent's timer alone", () => {
     applyGlobalSessionStatusEvents("/repo", [busy("parent"), busy("child")])
     applyGlobalSessionStatusEvents("/repo", [idle("parent")])

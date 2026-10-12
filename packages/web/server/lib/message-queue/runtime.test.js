@@ -65,6 +65,11 @@ const createOpenCode = () => {
       const parentID = new URL(url).searchParams.get('parentID');
       return Response.json({ data: (state.children[parentID] ?? []).map((id) => ({ id, parentID })), cursor: {} });
     }
+    if (/^\/api\/session\/[^/]+$/.test(pathname) && method === 'GET') {
+      const id = decodeURIComponent(pathname.split('/').at(-1));
+      const parentID = Object.keys(state.children).find((parent) => state.children[parent].includes(id));
+      return wrapped({ id, parentID });
+    }
     if (pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
     if (pathname === '/api/command') return wrapped(state.commands);
     if (method === 'POST' && (pathname.endsWith('/model') || pathname.endsWith('/agent'))) {
@@ -436,6 +441,48 @@ describe('message queue runtime', () => {
     expect(openCode.state.sent[0].body).toEqual({ text: 'next' });
   });
 
+  it('keeps queued messages until a nested background subagent finishes', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
+    openCode.state.active = { ses_grandchild: { type: 'running' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'first', text: 'first' }));
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'second', text: 'second' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(2);
+
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first']);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'busy' } } });
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent.map((entry) => entry.body.text)).toEqual(['first', 'second']);
+    runtime.stop();
+  });
+
+  it('keeps the queue intact when a nested lineage read fails', async () => {
+    const { runtime, openCode, emit } = createRuntime();
+    runtime.start();
+    openCode.state.children = { [SESSION]: ['ses_child'], ses_child: ['ses_grandchild'] };
+    openCode.state.active = { ses_grandchild: { type: 'running' } };
+    openCode.state.failNext = /\/api\/session\/ses_child$/;
+    await runtime.enqueue(SESSION, DIRECTORY, item());
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(0);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+    openCode.state.active = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.sent).toHaveLength(1);
+    runtime.stop();
+  });
+
   it('does not send into a running turn even when the status event says idle', async () => {
     const { runtime, openCode, emit } = createRuntime({ now: () => 10_000 });
     runtime.start();
@@ -587,12 +634,11 @@ describe('message queue runtime', () => {
     const { runtime, openCode, emit } = createRuntime();
     runtime.start();
     let release;
-    // active map, message tail, the subagent check (active map, children),
+    // active map, message tail, the subagent check (empty active map),
     // model switch, then the prompt itself (held open until released)
     openCode.fetchImpl.mockImplementationOnce(async () => Response.json({ location: {}, data: {} }))
       .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
       .mockImplementationOnce(async () => Response.json({ data: {} }))
-      .mockImplementationOnce(async () => Response.json({ data: [], cursor: {} }))
       .mockImplementationOnce(async () => new Response(null, { status: 204 }))
       .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(new Response(null, { status: 204 })); }));
     const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item());

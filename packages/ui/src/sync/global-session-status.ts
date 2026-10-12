@@ -85,22 +85,22 @@ export const setSessionParentResolver = (resolver: SessionParentResolver): void 
 /** Subagents nest; a deeper chain than this is treated as unrelated. */
 const MAX_SUBAGENT_DEPTH = 8;
 
-const forEachAncestorId = (sessionId: string, visit: (ancestorId: string) => void): void => {
-  let current = resolveSessionParentId(sessionId);
+const forEachAncestorId = (sessionId: string, visit: (ancestorId: string) => void, resolveParentId: SessionParentResolver = resolveSessionParentId): void => {
+  let current = resolveParentId(sessionId);
   for (let depth = 0; current && depth < MAX_SUBAGENT_DEPTH; depth += 1) {
     visit(current);
-    current = resolveSessionParentId(current);
+    current = resolveParentId(current);
   }
 };
 
 /** True when a subagent anywhere below the session is running. */
-export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlySet<string>): boolean => {
+export const hasActiveSubagent = (sessionId: string, activeSessionIds: ReadonlySet<string>, resolveParentId: SessionParentResolver = resolveSessionParentId): boolean => {
   for (const activeId of activeSessionIds) {
     if (activeId === sessionId) continue;
     let found = false;
     forEachAncestorId(activeId, (ancestorId) => {
       if (ancestorId === sessionId) found = true;
-    });
+    }, resolveParentId);
     if (found) return true;
   }
   return false;

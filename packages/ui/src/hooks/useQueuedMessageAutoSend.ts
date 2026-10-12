@@ -7,7 +7,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { queuedContextToParts } from '@/components/chat/composer/submit/buildOutgoingMessage';
-import { getDirectoryState } from '@/sync/sync-refs';
+import { getAllSyncSessionMap, getDirectoryState } from '@/sync/sync-refs';
+import { hasActiveSubagent } from '@/sync/global-session-status';
 import { useDirectorySync } from '@/sync/sync-context';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -207,11 +208,12 @@ export const resolveQueuedSessionStatusType = (
   // A queued message waits for the whole turn: a parent idles while a
   // background subagent works and runs again when OpenCode hands the result
   // back. Mirrors the server queue's subagent gate.
-  const subagentRunning = (state?.session ?? []).some((session) => {
-    if (session.parentID !== sessionId) return false;
-    const childStatus = state?.session_status?.[session.id]?.type;
-    return childStatus === 'busy' || childStatus === 'retry';
-  });
+  const activeSessionIds = new Set(Object.entries(state?.session_status ?? {})
+    .filter(([, status]) => status.type === 'busy' || status.type === 'retry')
+    .map(([id]) => id));
+  const sessionsById = getAllSyncSessionMap();
+  const subagentRunning = activeSessionIds.size > 0
+    && hasActiveSubagent(sessionId, activeSessionIds, (id) => sessionsById.get(id)?.parentID);
   if (subagentRunning) {
     return 'busy';
   }
@@ -233,6 +235,7 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const autoReviewRuns = useAutoReviewStore((state) => state.runsByOriginalSessionID);
   const sessionStatusRecord = useDirectorySync((state) => state.session_status);
+  const sessions = useDirectorySync((state) => state.session);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const queuedSessionIds = React.useMemo(() => {
     const ids = new Set<string>();
@@ -390,5 +393,5 @@ export function useQueuedMessageAutoSend(enabledOrOptions?: boolean | { enabled?
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [enabled, queuedMessages, sessionStatusRecord, trailingMessageSignature, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
+  }, [enabled, queuedMessages, sessionStatusRecord, sessions, trailingMessageSignature, autoReviewRuns, currentDirectory, retryTick, retryScheduler]);
 }

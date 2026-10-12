@@ -253,6 +253,12 @@ failed read keeps what was known and records `loadError` instead of reading as
 "routing is off". See `packages/web/server/lib/routing/DOCUMENTATION.md`.
 
 `messageQueueStore.ts` has two owners, decided by `isServerOwnedMessageQueue()`.
+The VS Code foreground delivery gate holds an idle parent while a live busy or
+retry descendant runs, following up to 8 parent links through the cached sync
+session index. It rechecks on status and session-topology changes. Activity
+comes from the queue directory's live status map; unrelated active trees and
+background shells do not hold delivery. This is a queue-specific exception to
+the own-session send status described in `../sync/DOCUMENTATION.md`.
 On web, desktop, and mobile the server delivers the queue independently of the
 UI. The store projects authoritative snapshots and revisioned session updates.
 Scheduled queue items also retain their `scheduledTask` provenance. An inherited

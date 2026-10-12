@@ -439,7 +439,7 @@ export function createMessageQueueRuntime({
   const hasWorkingSubagents = async (sessionId) => {
     const statuses = await activityProbe.fetchActiveSessionStatuses();
     if (!statuses) return null;
-    return activityProbe.hasWorkingChildren(sessionId, statuses);
+    return activityProbe.hasWorkingDescendants(sessionId, statuses);
   };
 
   const isSessionIdle = async (sessionId, directory) => {
