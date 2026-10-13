@@ -840,6 +840,12 @@ Callers whose confirmation can span a runtime switch may pass an
 
 `unarchiveSession` clears the archive timestamp in the session's existing directory. It never moves the session, including when that directory is missing. Server failure keeps the session archived locally; confirmation updates the global cache and reads fresh live status for an existing child store. A failed status read does not undo a confirmed restore or claim the session is idle. If the runtime switches after confirmation, the status read cannot write into the new runtime, but the confirmed restore still returns success on the captured runtime. `unarchiveSessions` preserves partial results and stops committing when its captured runtime changes.
 
+Composer acceptance restores an archived top-level session with a captured
+archive stamp and submission time. The server conditionally restores that
+stamp and asks the session-work owner to open eligible project sessions. A
+newer Done or archive supersedes this request. Manual restoration carries no
+work transition; automated continuations never request restoration.
+
 ### Deletion runtime guard
 
 Deletion needs this guard more than archiving does. Session IDs are not unique

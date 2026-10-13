@@ -76,6 +76,14 @@ already in work and eligible opens. Each message id is handled once; a session
 already in work reads nothing from OpenCode. No Jev: until 2026-10, Jev judged
 whether a message started work, and every session now counts instead.
 
+An explicit composer send or queue acceptance can precede archive restoration.
+The unarchive request carries the archive stamp and the time captured before
+submission. After confirming that exact restore, the service calls
+`resumeSession`; it rechecks eligibility and opens through the metadata write
+queue. A newer Done or archive keeps its decision. Ordinary restores and
+automated continuations do not invoke this path. A work-write failure leaves
+the confirmed restore intact and never retries the message.
+
 ## When Jev is asked
 
 - A turn ended: session assist calls `evaluateTurnEnd` before it arms its quiet

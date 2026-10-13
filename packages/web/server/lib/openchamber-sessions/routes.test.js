@@ -218,6 +218,23 @@ const createApp = (overrides = {}, options = {}) => {
 };
 
 describe('openchamber session routes', () => {
+  it('opens work only for a confirmed composer restore and keeps restore success after work failure', async () => {
+    const resumeSessionWork = vi.fn(async () => { throw new Error('metadata unavailable'); });
+    const { app, archiveStore } = createApp({ resumeSessionWork });
+    archiveStore.isRestored = (id) => !archiveStore.entries.has(id);
+    await archiveStore.archive(['ses_a'], 10);
+    await request(app).post('/api/openchamber/sessions/unarchive')
+      .send({ ids: ['ses_a'], resume: { archivedAt: 10, requestAt: 50 } }).expect(200);
+    expect(resumeSessionWork).toHaveBeenCalledTimes(1);
+    expect(resumeSessionWork.mock.calls[0][0]).toMatchObject({ sessionId: 'ses_a', requestAt: 50 });
+    await request(app).post('/api/openchamber/sessions/unarchive').send({ ids: ['ses_b'] }).expect(200);
+    archiveStore.failIds(['ses_c']);
+    await request(app).post('/api/openchamber/sessions/unarchive')
+      .send({ ids: ['ses_c'], resume: { archivedAt: 10, requestAt: 50 } }).expect(200);
+    expect(resumeSessionWork).toHaveBeenCalledTimes(1);
+    await request(app).post('/api/openchamber/sessions/unarchive')
+      .send({ ids: ['ses_a'], resume: { archivedAt: 10, requestAt: -1 } }).expect(400);
+  });
   beforeAll(async () => {
     ({ registerOpenChamberSessionRoutes } = await import('./routes.js'));
     ({ createSessionMetadataStore, createOpenCodeSessionMetadata } = await import('./session-metadata-store.js'));

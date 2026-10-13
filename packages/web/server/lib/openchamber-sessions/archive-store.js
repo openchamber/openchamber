@@ -158,9 +158,14 @@ export const createArchiveStore = ({
     return runExclusive(() => applyBatchExclusive(targets, archivedAt));
   };
 
-  const applyBatchExclusive = async (targets, archivedAt) => {
+  const applyBatchExclusive = async (targets, archivedAt, expectedArchivedAt) => {
     const loadResult = await load();
     if (!loadResult.ok || !writable) {
+      return { applied: [], failedIds: targets };
+    }
+    // A migrated OpenCode archive may have no local entry yet. Every newer
+    // OpenChamber archive does, and must supersede the captured submission.
+    if (expectedArchivedAt !== undefined && targets.some((id) => entries.has(id) && entries.get(id) !== expectedArchivedAt)) {
       return { applied: [], failedIds: targets };
     }
 
@@ -210,8 +215,11 @@ export const createArchiveStore = ({
       const { applied, failedIds } = await applyBatch(ids, stamp);
       return { archived: applied.map((id) => ({ id, archivedAt: stamp })), failedIds };
     },
-    unarchive: async (ids) => {
-      const { applied, failedIds } = await applyBatch(ids, null);
+    isRestored: (id) => loaded && entries.get(id) === null,
+    unarchive: async (ids, expectedArchivedAt) => {
+      const targets = asIdList(ids);
+      if (targets.length === 0) return { restored: [], failedIds: [] };
+      const { applied, failedIds } = await runExclusive(() => applyBatchExclusive(targets, null, expectedArchivedAt));
       return { restored: applied.map((id) => ({ id, archivedAt: null })), failedIds };
     },
     filePath,
