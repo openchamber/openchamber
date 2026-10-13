@@ -137,6 +137,12 @@ export const createSessionOwnershipIndex = (
   const canonicalOwnerByOpenCodeProjectId = new Map<string, DirectoryOwner | null>();
   const authoritativeProjectIds = new Set<string>();
   const registerCanonicalOwner = (openCodeProjectId: string, worktree: string | null | undefined): void => {
+    // `global` is OpenCode's catch-all project, not a real project: every
+    // session whose directory resolves to no configured root (non-git
+    // directories, `C:/`, subagent workspaces) shares it. Bridging it to a
+    // configured root would file those unrelated sessions under whichever
+    // project happens to own the id, so it never gets a canonical owner.
+    if (openCodeProjectId === 'global') return;
     const canonicalRoot = normalizePath(worktree ?? null);
     const project = canonicalRoot ? projectByRoot.get(canonicalRoot) : undefined;
     const candidate = project && canonicalRoot ? {

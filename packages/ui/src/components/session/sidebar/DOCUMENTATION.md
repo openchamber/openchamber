@@ -72,12 +72,16 @@ Full-app active records remain in the collection when their directory is no
 longer in known topology, such as a deleted worktree. Grouping first uses exact
 configured project/worktree ownership. It may then use authoritative OpenCode
 project metadata only when that project's canonical worktree maps to a
-configured project root. This fallback changes display ownership, not the
-session's real directory used for routing. Records with no resolved owner have
-no guaranteed project group. VS Code keeps exact workspace-directory scope and
-does not use the fallback. The mobile sheet, In work, and Timeline use this
-same ownership resolver; rows keep the session's own directory while
-taking display ownership (project id, labels) from the index.
+configured project root. OpenCode's catch-all `global` project id is excluded
+from that bridge: it is shared by every session whose directory resolves to no
+configured root (non-git directories, `C:/`, subagent workspaces), so mapping it
+would file unrelated sessions under whichever project owns the id. This fallback
+changes display ownership, not the session's real directory used for routing.
+Records with no resolved owner have no guaranteed project group. VS Code keeps
+exact workspace-directory scope and does not use the fallback. The mobile sheet,
+In work, and Timeline use this same ownership resolver; rows keep the session's
+own directory while taking display ownership (project id, labels) from the
+index.
 
 Web and desktop show managed Chats, then In work, then the projects. There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
