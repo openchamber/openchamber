@@ -4,7 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { formatSessionActivityDuration } from '@/components/session/sessionActivityDurationFormat';
+import { formatCompactDuration } from '@/lib/duration';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
 import { useI18n } from '@/lib/i18n';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -46,7 +46,7 @@ const useSessionTreeShells = (sessionId: string): TrackedShell[] => {
 const ShellElapsed: React.FC<{ startedAt: number }> = ({ startedAt }) => {
   const { t } = useI18n();
   const now = useDurationTickerNow(true, ELAPSED_TICK_MS);
-  const label = formatSessionActivityDuration(now - startedAt, t);
+  const label = formatCompactDuration(now - startedAt, t);
   return (
     <span className="shrink-0 typography-meta tabular-nums text-muted-foreground" title={t('chat.backgroundShells.elapsed', { duration: label })}>
       {label}

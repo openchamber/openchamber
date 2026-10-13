@@ -54,6 +54,7 @@ import {
     type GuestToolRule,
 } from '@/lib/guests/tool-presentation';
 import { useDurationTickerNow } from '@/hooks/useDurationTicker';
+import { formatCompactDuration } from '@/lib/duration';
 import {
     prepareTaskToolOutput,
     readTaskSessionIdFromOutput,
@@ -127,18 +128,14 @@ interface ToolPartProps {
     animateTailText?: boolean;
 }
 
-const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
-    const duration = Math.max(0, (end ?? now) - start);
-    const seconds = duration / 1000;
-
-    const displaySeconds = seconds < 0.05 && end !== undefined ? 0.1 : seconds;
-    return `${displaySeconds.toFixed(1)}s`;
-};
-
 const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
+    const { t } = useI18n();
     const now = useDurationTickerNow(active, 250);
 
-    return <>{formatDuration(start, end, now)}</>;
+    return <>{formatCompactDuration((end ?? now) - start, t, {
+        secondsPrecision: 1,
+        minimumSeconds: end !== undefined ? 0.1 : 0,
+    })}</>;
 };
 
 const deferredToolBodyMounts: Array<{ active: boolean; fn: () => void }> = [];
