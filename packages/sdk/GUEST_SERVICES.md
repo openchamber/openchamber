@@ -214,6 +214,7 @@ Parameters the host sends and `data` the service answers; types are exported fro
 | `browser.snapshot` | `selector?` (scope) | `url`, `title`, `scope`, `scrollY`, `maxScrollY`, `text`, `elements[]`, `viewport`, optional `textTruncated`/`textTotalChars`, `elementsTruncated`/`interactiveElementsOnPage`, `consoleProblems[]` |
 | `browser.click` | `selector?` or `text?` (visible label) | `clicked` (selector), `label`, `url` |
 | `browser.type` | `selector`, `value`, `submit` | `selector`, `url` |
+| `browser.select` | `selector`, exactly one of `label` or `value` | `selector`, selected `label`, selected `value`, `url` |
 | `browser.scroll` | `direction?` (`up`/`down`/`top`/`bottom`) or `selector?` | `scrollY`, `maxScrollY`, `atTop`, `atBottom`, optional `scrolledTo`/`direction` |
 | `browser.back` / `browser.forward` | none | `url`, `title` |
 | `browser.inspect` | `selector` | `selector`, `tag`, `label`, `bounds`, `inViewport`, `styles` (computed, as strings) |
@@ -224,6 +225,8 @@ Parameters the host sends and `data` the service answers; types are exported fro
 Every action may carry `tabId` (`BrowserTabTarget`): an id from the `tabs` your snapshot listed (`[{ id, title, url, active }]`, `active` being the tab the user sees), passed through from the agent untouched. Without it, act on the tab the user sees, except `browser.open`: without `tabId` it opens a new background tab and answers its id as `tabId` (`BrowserOpenData`), so the agent never replaces the user's page. Refuse an id you did not issue with `ok: false`; never act on another tab instead. A provider with one page lists no tabs and refuses every id. `browser.close` is the exception to "the tab the user sees": it closes a tab the agent opened, so without `tabId` it closes the one this caller opened most recently and refuses a tab it did not open.
 
 `viewport` in answers is `{ mode, width, height }` (`mode` may be `custom`; `fill` has `null` sizes). Snapshot `elements` carry `selector`, `tag`, `bounds`, and only the fields that apply (`inViewport`, `type`, `role`, `label`, `disabled`, `missingAccessibleName`). Keep `text` and `elements` bounded yourself; report what was dropped with the truncation fields.
+
+`browser.select` uses exact string matching. It targets native single-value HTML `<select>` elements, rejects custom controls and multiple selects, and refuses disabled selects or matching options. A missing or ambiguous label/value is an error, so the service must leave the page unchanged.
 
 `examples/browser-provider-stub` is a checked-in provider with no browser: one in-memory page that answers every action. Install it to see the dropdown, the routing, and the idle stop before writing a real one.
 

@@ -45,6 +45,7 @@ import {
   buildClickScript,
   buildInspectScript,
   buildScrollScript,
+  buildSelectScript,
   buildSnapshotScript,
   buildTypeScript,
 } from '@/lib/browser/pageActions';
@@ -558,6 +559,12 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
             value: String(parameters.value ?? ''),
             submit: parameters.submit === true,
           });
+        case 'browser.select':
+          return buildSelectScript({
+            selector: String(parameters.selector ?? ''),
+            label: typeof parameters.label === 'string' ? parameters.label : undefined,
+            value: typeof parameters.value === 'string' ? parameters.value : undefined,
+          });
         case 'browser.inspect':
           return buildInspectScript({ selector: String(parameters.selector ?? '') });
         case 'browser.scroll':
@@ -613,7 +620,7 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory: tab
     }
     // A click or a submit commonly starts a navigation; let it land so the
     // agent's next snapshot sees the page the action produced.
-    if (action === 'browser.click' || (action === 'browser.type' && parameters.submit === true)) {
+    if (action === 'browser.click' || action === 'browser.select' || (action === 'browser.type' && parameters.submit === true)) {
       await new Promise((resolve) => setTimeout(resolve, 150));
       await waitForIdle();
     }

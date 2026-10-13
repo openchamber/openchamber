@@ -327,6 +327,55 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
   return { ok: true, selector: cssPath(target), url: String(location.href) };
 `);
 
+export const buildSelectScript = ({ selector, label: optionLabel, value }: { selector: string; label?: string; value?: string }): string => {
+  const hasLabel = optionLabel !== undefined;
+  const hasValue = value !== undefined;
+  const criterion = hasLabel === hasValue ? '' : hasLabel ? 'label' : 'value';
+  return wrap(`
+  var selector = ${JSON.stringify(selector)};
+  var criterion = ${JSON.stringify(criterion)};
+  var wanted = ${JSON.stringify(hasLabel ? optionLabel : value)};
+  if (!criterion) return { ok: false, error: 'browser.select requires exactly one of label or value' };
+
+  var target = null;
+  try { target = document.querySelector(selector); }
+  catch (error) { return { ok: false, error: 'Invalid selector: ' + selector }; }
+  if (!target) return { ok: false, error: 'No element matches ' + selector };
+  if (!(target instanceof window.HTMLSelectElement)) return { ok: false, error: selector + ' is not a native HTML select' };
+  var isDisabled = function (element) {
+    return element.disabled === true || (typeof element.matches === 'function' && element.matches(':disabled'));
+  };
+  if (isDisabled(target)) return { ok: false, error: 'The select ' + selector + ' is disabled' };
+  if (target.multiple) return { ok: false, error: 'Multiple selects are not supported for browser.select' };
+
+  var optionLabel = function (option) {
+    var explicit = option.getAttribute('label');
+    if (explicit !== null) return explicit;
+    return String(option.textContent || '').replace(/\\s+/g, ' ').trim();
+  };
+  var matches = [];
+  for (var i = 0; i < target.options.length; i += 1) {
+    var option = target.options[i];
+    var candidate = criterion === 'label' ? optionLabel(option) : String(option.value);
+    if (candidate === wanted) matches.push(option);
+  }
+  if (matches.length === 0) return { ok: false, error: 'No option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
+  if (matches.length > 1) return { ok: false, error: 'More than one option in ' + selector + ' has the exact ' + criterion + ' ' + wanted };
+  var match = matches[0];
+  if (isDisabled(match)) return { ok: false, error: 'The matching option in ' + selector + ' is disabled' };
+
+  target.scrollIntoView({ block: 'center' });
+  for (var j = 0; j < target.options.length; j += 1) target.options[j].selected = target.options[j] === match;
+  var selected = target.selectedOptions;
+  if (selected.length !== 1 || selected[0] !== match || target.value !== match.value) {
+    return { ok: false, error: 'The option in ' + selector + ' could not be selected' };
+  }
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.dispatchEvent(new Event('change', { bubbles: true }));
+  return { ok: true, selector: cssPath(target), label: optionLabel(match), value: String(target.value), url: String(location.href) };
+`);
+};
+
 /**
  * Scrolling, reported after it has actually happened.
  *

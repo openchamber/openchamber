@@ -112,6 +112,9 @@ itself; it can only ask and wait.
   started. `browser.click` replays a mouse click at the element's center
   (pointer and mouse down, focus, up, click), since many widgets open on
   mousedown or focus and ignore the click event alone.
+  `browser.select` changes a native single-value HTML select by exact label or
+  value, dispatches `input` and `change`, and verifies the selected option
+  before returning.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).

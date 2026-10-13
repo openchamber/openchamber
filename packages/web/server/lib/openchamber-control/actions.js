@@ -64,6 +64,7 @@ export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
   { action: 'browser.snapshot', title: 'Read the open page', description: 'url, title, visible text, interactive elements with selectors, logged errors, and open tabs with their ids and who opened each; selector reads one part' },
   { action: 'browser.click', title: 'Click on the open page', description: 'By selector, or text for a link or button label' },
   { action: 'browser.type', title: 'Type into the open page', description: 'Type value into selector' },
+  { action: 'browser.select', title: 'Select an option on the open page', description: 'One exact option by label or value in the native select matched by selector' },
   { action: 'browser.scroll', title: 'Scroll the open page', description: 'By direction, or to bring selector into view' },
   { action: 'browser.back', title: 'Go back in the browser panel', description: 'No parameters' },
   { action: 'browser.forward', title: 'Go forward in the browser panel', description: 'No parameters' },

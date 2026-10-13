@@ -723,6 +723,19 @@ export const createOpenChamberControlService = (dependencies) => {
       parameters.submit = input.submit === true;
     }
 
+    if (action === 'browser.select') {
+      const selector = asNonEmptyString(input.selector);
+      if (!selector) throw new OpenChamberControlError('selector is required for browser.select', 400);
+      const hasLabel = typeof input.label === 'string';
+      const hasValue = typeof input.value === 'string';
+      if (hasLabel === hasValue) {
+        throw new OpenChamberControlError('browser.select requires exactly one of label or value', 400);
+      }
+      parameters.selector = selector;
+      if (hasLabel) parameters.label = input.label;
+      else parameters.value = input.value;
+    }
+
     if (action === 'browser.scroll') {
       const selector = asNonEmptyString(input.selector);
       const direction = asNonEmptyString(input.direction);

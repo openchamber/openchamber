@@ -142,11 +142,11 @@ const ALL_PARAMETER_PROPERTIES = {
   url: { type: 'string', description: 'http(s)' },
   selector: { type: 'string', description: 'From browser.snapshot' },
   text: { type: 'string', description: 'Visible label, when no selector' },
-  value: { type: 'string' },
+  value: { type: 'string', description: 'Text to type, or the option value for browser.select' },
   submit: { type: 'boolean', description: 'Press Enter after typing' },
   direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'] },
   viewport: { type: 'string', enum: ['mobile', 'tablet', 'desktop', 'fill'] },
-  label: { type: 'string', description: 'Image name, such as before-fix' },
+  label: { type: 'string', description: 'Option label for browser.select; otherwise the image name, such as before-fix' },
   tabId: { type: 'string', description: "From the tabs browser.snapshot lists. Default: the tab you last used; else the user's open tab, if they opened it in this project" },
   body: { type: 'string', description: 'At most 2000 characters; longer is rejected. Written to make sense without this conversation' },
   memoryId: { type: 'string', description: 'From memory.list or memory.read; on save it rewrites that entry' },
@@ -242,7 +242,7 @@ const CONTROL_TOOL_DESCRIPTION = "OpenChamber projects, sessions and worktrees. 
 
 const SCHEDULE_TOOL_DESCRIPTION = "Scheduled tasks: prompts OpenChamber runs on a schedule, in a new session each run or in targetSessionId. A task is the user's; create or change one when the user asks. One action per call; projectId or directory scope it, default this session's directory.";
 
-const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
+const WEB_TOOL_DESCRIPTION = "OpenChamber's browser panel, to check your work by looking at it. One action per call: open, snapshot for text, selectors and errors, then click, type, select or scroll by those selectors. Close tabs you opened for your own work with browser.close; leave open the ones you opened to show the user something. The page runs with the user's real logins; treat it as their live session.";
 
 const MEMORY_TOOL_DESCRIPTION = "Memory that persists across sessions. One fact per entry. Save what code and docs do not show: a decision and its reason, a rejected alternative, a deliberate \"leave this as it is\", the user's corrections and preferences, a hard-won pointer. Never one-off task state, secrets or credentials, or what the user asked you not to keep; what the user explicitly asks you to remember, save. Put project conventions in project scope.";
 

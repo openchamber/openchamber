@@ -204,6 +204,23 @@ describe('choosing the tab an action runs in', () => {
     expect(ran).toEqual(['shown:browser.click']);
   });
 
+  test('routes browser.select with its option criterion', async () => {
+    const seen: Array<{ action: string; parameters: Record<string, unknown> }> = [];
+    cleanups.push(registerBrowserController({
+      tabId: 'shown',
+      directory: REPO,
+      ownerSessionId: null,
+      describe: () => ({ title: '', url: '' }),
+      run: async (action, parameters) => { seen.push({ action, parameters }); return {}; },
+    }));
+    setShownBrowserTab(REPO, 'shown');
+
+    emit('browser.select', { selector: '#country', label: 'Canada' });
+    await wait(50);
+
+    expect(seen).toEqual([{ action: 'browser.select', parameters: { selector: '#country', label: 'Canada' } }]);
+  });
+
   test('runs in the named tab and passes the rest of the parameters without tabId', async () => {
     const seen: Array<Record<string, unknown>> = [];
     cleanups.push(tab('shown', []));
