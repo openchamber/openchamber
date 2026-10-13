@@ -385,6 +385,8 @@ export type {
   BrowserSnapshotData,
   BrowserSnapshotElement,
   BrowserSnapshotParameters,
+  BrowserSelectData,
+  BrowserSelectParameters,
   BrowserTab,
   BrowserTabTarget,
   BrowserTypeData,

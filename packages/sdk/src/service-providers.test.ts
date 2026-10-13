@@ -14,6 +14,12 @@ describe('browser provider contract', () => {
     });
     const scoped = JSON.stringify({ requestId: 'req-2', action: 'browser.back', parameters: {}, context: { directory: '/repo', sessionId: 'ses_1' } });
     expect(readBrowserProviderRequest(scoped)?.context).toEqual({ directory: '/repo', sessionId: 'ses_1' });
+    const select = JSON.stringify({ requestId: 'req-4', action: 'browser.select', parameters: { selector: '#country', label: 'Canada' } });
+    expect(readBrowserProviderRequest(select)).toMatchObject({
+      requestId: 'req-4',
+      action: 'browser.select',
+      parameters: { selector: '#country', label: 'Canada' },
+    });
     const halfScoped = JSON.stringify({ requestId: 'req-3', action: 'browser.back', parameters: {}, context: { directory: '', sessionId: 7 } });
     expect(readBrowserProviderRequest(halfScoped)?.context).toEqual({ directory: null, sessionId: null });
 
@@ -24,8 +30,9 @@ describe('browser provider contract', () => {
     expect(readBrowserProviderRequest(JSON.stringify({ requestId: 'r', action: 'browser.back' }))).toBeNull();
   });
 
-  test('the action list is the tool\'s ten browser actions', () => {
-    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(10);
+  test('the action list is the tool\'s eleven browser actions', () => {
+    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(11);
+    expect(BROWSER_CONTROL_ACTIONS).toContain('browser.select');
     expect(isBrowserControlAction('browser.snapshot')).toBe(true);
     expect(isBrowserControlAction('projects.list')).toBe(false);
   });

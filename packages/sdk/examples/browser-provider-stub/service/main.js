@@ -116,6 +116,7 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.snapshot",
   "browser.click",
   "browser.type",
+  "browser.select",
   "browser.scroll",
   "browser.back",
   "browser.forward",
@@ -286,13 +287,15 @@ var page = {
   forward: [],
   viewport: "fill",
   scrollY: 0,
-  fields: new Map
+  fields: new Map,
+  select: { label: "United States", value: "us" }
 };
 var viewport = () => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
 var elements = () => [
   { selector: "#name", tag: "input", type: "text", label: "Name", bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
+  { selector: "#country", tag: "select", label: "Country", bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: "#save", tag: "button", label: "Save", bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
-  { selector: 'a[href="/about"]', tag: "a", label: "About", bounds: { x: 16, y: 140, width: 60, height: 20 }, inViewport: true }
+  { selector: 'a[href="/about"]', tag: "a", label: "About", bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true }
 ];
 var navigate = (url) => {
   if (page.url !== "about:blank")
@@ -325,7 +328,8 @@ var handle = (request) => {
           scrollY: page.scrollY,
           maxScrollY: 600,
           text: `This page is served by the browser provider stub, not a browser.
-Name: ${page.fields.get("#name") ?? ""}`,
+Name: ${page.fields.get("#name") ?? ""}
+Country: ${page.select.label}`,
           elements: elements(),
           viewport: viewport()
         }
@@ -343,6 +347,21 @@ Name: ${page.fields.get("#name") ?? ""}`,
         return { ok: false, error: `${request.parameters.selector} is not a text field` };
       page.fields.set("#name", request.parameters.value);
       return { ok: true, data: { selector: "#name", url: page.url } };
+    }
+    case "browser.select": {
+      if (request.parameters.selector !== "#country")
+        return { ok: false, error: `No element matches ${request.parameters.selector}` };
+      const options = [
+        { label: "United States", value: "us" },
+        { label: "Canada", value: "ca" }
+      ];
+      const target = options.filter((option) => ("label" in request.parameters) ? option.label === request.parameters.label : option.value === request.parameters.value);
+      if (target.length === 0)
+        return { ok: false, error: "No option matches the exact label or value" };
+      if (target.length > 1)
+        return { ok: false, error: "More than one option matches the exact label or value" };
+      page.select = target[0];
+      return { ok: true, data: { selector: "#country", label: page.select.label, value: page.select.value, url: page.url } };
     }
     case "browser.scroll": {
       const { direction } = request.parameters;
