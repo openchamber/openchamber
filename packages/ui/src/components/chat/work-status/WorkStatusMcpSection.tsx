@@ -8,8 +8,10 @@ import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { toast } from 'sonner';
 import { WorkStatusCollapsibleSection, WorkStatusRow, WorkStatusRowAction } from './WorkStatusPrimitives';
 import { useReportWorkStatusPresence } from './presenceContext';
+import { useMcpDirectory } from '@/components/mcp/useMcpDirectory';
 
 type Props = {
+  sessionId: string | null;
   directory: string | null;
 };
 
@@ -19,11 +21,12 @@ const MCP_STATUS_MAX_AGE_MS = 60_000;
  * MCP servers with their connection switches, reusing the dropdown's own
  * connect/disconnect actions.
  */
-export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
+export const WorkStatusMcpSection: React.FC<Props> = ({ sessionId, directory: selectedDirectory }) => {
   const { t } = useI18n();
+  const directory = useMcpDirectory(true, { sessionId, directory: selectedDirectory });
 
   const mcpStatus = useMcpStore(
-    React.useCallback((state) => state.getStatusForDirectory(directory), [directory]),
+    React.useCallback((state) => directory ? state.getStatusForDirectory(directory) : null, [directory]),
   );
   const ensureMcpFresh = useMcpStore((state) => state.ensureFresh);
   const connect = useMcpStore((state) => state.connect);
@@ -40,6 +43,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   // directory alone and dropped on an instance switch, and two instances can
   // hold the same project path — so the switch itself has to trigger the ask.
   React.useEffect(() => {
+    if (!directory) return;
     void runBackgroundNetworkTask(() => ensureMcpFresh({ directory, silent: true, maxAgeMs: MCP_STATUS_MAX_AGE_MS }));
   }, [directory, ensureMcpFresh, isConnected]);
 
@@ -61,6 +65,7 @@ export const WorkStatusMcpSection: React.FC<Props> = ({ directory }) => {
   }, [t]);
 
   const handleToggle = React.useCallback(async (name: string, next: boolean) => {
+    if (!directory) return;
     // Switching on a server that is waiting for sign-in cannot connect: it only
     // repeats the attempt that produced `needs_auth`. Authorization is the real
     // action, and the dropdown already routes the same switch that way — the
