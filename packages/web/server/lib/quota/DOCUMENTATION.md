@@ -242,6 +242,27 @@ snapshot carries `entitlement`, `remaining`, `unlimited`, and
 - When entitlement/remaining are unusable, fall back to `100 - percent_remaining`.
 - Snapshots other than `premium_interactions` (legacy annual plans) yield zero windows.
 
+**The value label reports credits used, not requests, and uses the same axis as
+VS Code.** Premium interactions are a fractional credit pool, not an integer
+request count: a Business plan mid-cycle reports `entitlement: 60000` with
+`percent_remaining: 65.1` and both `remaining: 39078` and `quota_remaining:
+39078.5`. `remaining` is the integer twin of `quota_remaining`, so it drops the
+half credit the account actually still holds; `quota_remaining` wins when both
+are present. The consumed figure is `entitlement - quota_remaining`, the same
+derivation GitHub's own Copilot panel uses, which for those live numbers gives
+20,921.5 credits spent and a `20,921.5 / 60,000 used` label. An entitlement that
+is unusable for the percent falls back to `entitlement - remaining`, and still no
+label when neither is available.
+
+Reporting the remaining axis instead (`39078 / 60000 left`) contradicted what the
+row's own percent, progress bar, and the used/remaining display toggle reported,
+and stated the opposite of VS Code for the same account at the same moment.
+`credits_used` (20,910 live) is monotonic consumption since the last reset and is
+deliberately not used as the label: it lags `percent_remaining` and would not sum
+to the entitlement. The percent itself keeps using `percent_remaining`, since
+`quota_remaining` and `percent_remaining` are two rounded views of the same
+balance and mixing them in one number is where the old label drifted.
+
 ## OpenRouter key semantics
 
 OpenRouter quota reads `GET <base>/key`, where `<base>` is the provider's configured `baseURL` (`settings.baseURL`, legacy `options.baseURL`, or legacy `api`, folded by `toProviderEntity`; the v2 `providers.openrouter` entry wins, and the v1 `provider.openrouter` entry is read when the v2 one sets no address) read from the merged opencode config layers; with nothing configured or a config read failure, `<base>` falls back to `https://openrouter.ai/api/v1`. A gateway user's key is only valid against that gateway, so the usage lookup must ride the same base as chat. The default endpoint `GET https://openrouter.ai/api/v1/key` is documented as callable with any valid API key. `GET /api/v1/credits` is documented as "Management key required" and is not used. Calling `/credits` with a normal inference key has been observed to return HTTP 200 with `{total_credits:0, total_usage:0}` rather than an error; this behavior is not documented and is why the old implementation silently rendered "$0.00 left · $0.00 spent". A `/credits` fallback for unlimited keys would render the same zeros, so unlimited keys report `usage_monthly` instead.
