@@ -56,20 +56,22 @@ test('the team picker renders while the Linear status has no workspace list', as
   }
 });
 
-test('the repository picker names the chosen repository by its path below the project', async () => {
+test('the repository picker names the chosen repository, or all of them', async () => {
   const { I18nProvider } = await import('@/lib/i18n');
   const { SourceBoardRepositoryPicker } = await import('./SourceBoardPickers');
   const repositories = ['/work/app', '/work/team/api'];
 
   for (const sheet of [false, true]) {
-    await act(async () => {
-      root.render(
-        <I18nProvider>
-          <SourceBoardRepositoryPicker repositories={repositories} selected="/work/team/api" root="/work" onSelect={() => {}} sheet={sheet} />
-        </I18nProvider>,
-      );
-    });
-    expect(host.textContent).toContain('team/api');
-    expect(host.querySelector('button')?.getAttribute('aria-label')).toBe('Repository');
+    for (const [selected, shown] of [['/work/team/api', 'team/api'], [null, 'All repositories']] as const) {
+      await act(async () => {
+        root.render(
+          <I18nProvider>
+            <SourceBoardRepositoryPicker repositories={repositories} selected={selected} root="/work" allAvailable onSelect={() => {}} sheet={sheet} />
+          </I18nProvider>,
+        );
+      });
+      expect(host.textContent).toContain(shown);
+      expect(host.querySelector('button')?.getAttribute('aria-label')).toBe('Repository');
+    }
   }
 });

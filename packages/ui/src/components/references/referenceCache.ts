@@ -13,10 +13,15 @@
 
 import * as React from 'react';
 
+import type { GitHubReferencesAcrossSkip } from '@/lib/api/types';
+
 const FRESH_MS = 60_000;
 
+/** A folder a list over several repositories could not read, and why. */
+export type ListSkip = { directory: string; reason: GitHubReferencesAcrossSkip };
+
 export type ListPage<T> =
-    | { kind: 'page'; items: T[]; cursor: string | null; hasMore: boolean }
+    | { kind: 'page'; items: T[]; cursor: string | null; hasMore: boolean; skipped?: ListSkip[] }
     /** The source answered but cannot list: not connected, or no repo. */
     | { kind: 'unavailable'; reason: 'disconnected' | 'no-repo' };
 
@@ -30,6 +35,8 @@ export type CachedList<T> = {
     loadingMore: boolean;
     /** The last failure, first page or a later one; cleared by the next success. */
     error: string | null;
+    /** Folders the latest page of a list over several repositories left out; empty otherwise. */
+    skipped: ListSkip[];
 };
 
 export type CachedValue<T> =
@@ -153,6 +160,7 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 refreshing: true,
                 loadingMore: false,
                 error: null,
+                skipped: [],
                 cursor: null,
                 fetchedAt: 0,
                 generation,
@@ -179,12 +187,14 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                     hasMore: false,
                     refreshing: false,
                     error: null,
+                    skipped: [],
                     fetchedAt: now(),
                 });
                 return;
             }
             update(key, current, {
                 status: 'ready',
+                skipped: page.skipped ?? [],
                 unavailable: null,
                 items: page.items,
                 cursor: page.cursor,
@@ -219,6 +229,7 @@ export function createListCache<T>(limit = 40, now: () => number = Date.now): Li
                 hasMore: page.hasMore,
                 loadingMore: false,
                 error: null,
+                skipped: page.skipped ?? current.skipped,
             });
         });
     };
@@ -353,7 +364,7 @@ export function useCachedList<T>(
     }, [cache, fetchPage, key]);
 
     return {
-        ...(snapshot ?? { status: 'loading', unavailable: null, items: [], hasMore: false, refreshing: false, loadingMore: false, error: null }),
+        ...(snapshot ?? { status: 'loading', unavailable: null, items: [], hasMore: false, refreshing: false, loadingMore: false, error: null, skipped: [] }),
         loadMore,
         retry,
     };

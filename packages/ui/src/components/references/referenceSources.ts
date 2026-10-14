@@ -13,7 +13,7 @@ import * as React from 'react';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type {
-    GitHubPullReference,
+    SourceControlBindingRead,
     GitHubPullStatus,
     GitHubReference,
     GitHubReferenceDetail,
@@ -29,7 +29,7 @@ import type {
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { GITHUB_SOURCE_CONTROL_IDENTITY, resolveSourceControlIdentity } from '@/lib/source-control/identity';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
-import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import { useRepositoryBinding, useRepositoryBindings } from '@/lib/source-control/repository-binding';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -42,10 +42,24 @@ import {
 
 
 import { fetchGitLabReferenceDetail, fetchGitLabReferencePage } from './gitlabReferences';
+import {
+    NO_ACROSS_CONTEXTS,
+    fetchAcrossPage,
+    ensurePullStatuses,
+    groupPullsByDirectory,
+    needsPullStatus,
+    partitionAcrossContexts,
+    pullStatusKey,
+    type AcrossContexts,
+    type AcrossReference,
+    type PullStatusGroup,
+    type ReadContextState,
+} from './acrossRepositories';
 import { createListCache, createValueCache, useCachedList, useCachedValue, type CachedValue, type ListPage } from './referenceCache';
 import type { LinearReferenceFilter } from './referencePickerItems';
 
 const githubLists = createListCache<GitHubReference>();
+const githubAcrossLists = createListCache<AcrossReference>();
 const linearLists = createListCache<LinearIssueSummary>();
 const linearDetails = createValueCache<LinearIssue>();
 const githubDetails = createValueCache<GitHubReferenceDetail>();
@@ -61,27 +75,65 @@ const BUILT_IN_IDENTITIES: SourceControlIdentity[] = [
  * The project's binding and every host it lives on: the providers it is bound
  * to and the hosts its remotes point at, whether or not an account there works.
  */
+function repositoryHostsOf(read: SourceControlBindingRead | null, knownIdentities: readonly SourceControlIdentity[]): SourceControlIdentity[] {
+    if (!read) return [];
+    const found = new Map<string, SourceControlIdentity>();
+    const add = (identity: SourceControlIdentity) => found.set(getSourceControlAuthKey(identity), identity);
+    for (const provider of read.binding?.providers ?? []) add({ provider: provider.provider, instance: provider.instance });
+    const identities = [...knownIdentities, ...BUILT_IN_IDENTITIES];
+    for (const remote of read.repository.remotes) {
+        const identity = resolveSourceControlIdentity(
+            { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl },
+            identities,
+        );
+        if (identity) add(identity);
+    }
+    return [...found.values()];
+}
+
 function useRepositoryHosts(directory: string | null) {
     const { sourceControl } = useRuntimeAPIs();
     const binding = useRepositoryBinding(directory, sourceControl, Boolean(directory));
     const knownIdentities = useSourceControlAuthStore((state) => state.identities);
-    const hosts = React.useMemo(() => {
-        const read = binding.read;
-        if (!read) return [];
-        const found = new Map<string, SourceControlIdentity>();
-        const add = (identity: SourceControlIdentity) => found.set(getSourceControlAuthKey(identity), identity);
-        for (const provider of read.binding?.providers ?? []) add({ provider: provider.provider, instance: provider.instance });
-        const identities = [...knownIdentities, ...BUILT_IN_IDENTITIES];
-        for (const remote of read.repository.remotes) {
-            const identity = resolveSourceControlIdentity(
-                { name: remote.name, fetchUrl: remote.fetch.displayUrl, pushUrl: remote.push.displayUrl },
-                identities,
-            );
-            if (identity) add(identity);
-        }
-        return [...found.values()];
-    }, [binding.read, knownIdentities]);
+    const hosts = React.useMemo(() => repositoryHostsOf(binding.read, knownIdentities), [binding.read, knownIdentities]);
     return { binding, hosts };
+}
+
+/** The context a folder is read with once its binding and accounts are known: GitHub's, else GitLab's. */
+function pickReadContext(
+    binding: { contexts: readonly SourceControlReadContext[]; status: 'idle' | 'loading' | 'ready' | 'stale' | 'error' },
+    hostPending: boolean,
+): ReadContextState {
+    const context = binding.contexts.find((candidate) => candidate.provider === 'github')
+        ?? binding.contexts.find((candidate) => candidate.provider === 'gitlab')
+        ?? null;
+    if (context) return context;
+    if (binding.status === 'error') return 'missing';
+    return binding.status === 'ready' && !hostPending ? 'missing' : null;
+}
+
+const NO_DIRECTORIES: readonly string[] = [];
+
+/**
+ * The read contexts of several folders at once, for a list across the
+ * repositories under a project folder. `ready` once every folder's context is
+ * known; the GitHub ones are what a search is sent, the rest are left out.
+ */
+function useGitHubReadContexts(directories: readonly string[]): AcrossContexts {
+    const { sourceControl } = useRuntimeAPIs();
+    const bindings = useRepositoryBindings(directories, sourceControl);
+    const knownIdentities = useSourceControlAuthStore((state) => state.identities);
+    const authEntries = useSourceControlAuthStore((state) => state.entries);
+    return React.useMemo(() => {
+        if (directories.length === 0) return NO_ACROSS_CONTEXTS;
+        return partitionAcrossContexts(directories.map((directory, index) => {
+            const binding = bindings[index];
+            if (!binding) return { directory, state: null };
+            const hostPending = repositoryHostsOf(binding.read, knownIdentities)
+                .some((host) => !authEntries[getSourceControlAuthKey(host)]?.hasChecked);
+            return { directory, state: pickReadContext(binding, hostPending) };
+        }));
+    }, [authEntries, bindings, directories, knownIdentities]);
 }
 
 /**
@@ -126,12 +178,7 @@ export function useGitHubReadContext(directory: string | null): SourceControlRea
     const { binding, hosts } = useRepositoryHosts(directory);
     const hostPending = useSourceControlAuthStore((state) => hosts
         .some((host) => !state.entries[getSourceControlAuthKey(host)]?.hasChecked));
-    const context = binding.contexts.find((candidate) => candidate.provider === 'github')
-        ?? binding.contexts.find((candidate) => candidate.provider === 'gitlab')
-        ?? null;
-    if (context) return context;
-    if (binding.status === 'error') return 'missing';
-    return binding.status === 'ready' && !hostPending ? 'missing' : null;
+    return pickReadContext(binding, hostPending);
 }
 
 /**
@@ -242,6 +289,39 @@ export function useGitHubReferenceList(options: {
     return useCachedList(githubLists, key, fetchPage);
 }
 
+const NO_ACROSS_ITEMS: AcrossReference[] = [];
+
+/**
+ * Issues or PRs of every GitHub repository under a project folder, one request
+ * per page (`githubReferencesAcross`). Waits until every folder's context is
+ * known, and its key carries the set of contexts asked, so a change in it
+ * lists again. Folders on GitLab or without a context are not asked; those the
+ * answer skipped come back as `skipped`. `contexts` is what the list was built from.
+ */
+export function useGitHubAcrossReferenceList(options: {
+    enabled: boolean;
+    directories: readonly string[];
+    kind: GitHubReferenceKind;
+    filter: RepositoryReferenceFilter;
+    query: string;
+}) {
+    const { sourceControl } = useRuntimeAPIs();
+    const { enabled, directories, kind, filter, query } = options;
+    const { state, people } = filter;
+    const contexts = useGitHubReadContexts(enabled ? directories : NO_DIRECTORIES);
+    const text = query.trim();
+    const key = enabled && contexts.ready
+        ? JSON.stringify([getRuntimeKey(), contexts.github.map(({ directory, context }) => [directory, readContextCacheKey(context)]), kind, state, people, text])
+        : null;
+    const fetchPage = React.useCallback(async (cursor: string | null): Promise<ListPage<AcrossReference>> => {
+        // Absent where the runtime cannot (VS Code); the board never offers the search there.
+        const search = sourceControl.githubReferencesAcross?.bind(sourceControl);
+        return fetchAcrossPage(search, contexts.github, { kind, state, people, query: text, cursor });
+    }, [contexts.github, kind, people, sourceControl, state, text]);
+    const list = useCachedList(githubAcrossLists, key, fetchPage);
+    return { ...list, items: list.items.length === 0 ? NO_ACROSS_ITEMS : list.items, contexts };
+}
+
 export function useLinearReferenceList(options: {
     enabled: boolean;
     filter: LinearReferenceFilter;
@@ -313,34 +393,22 @@ const githubPullStatuses = createValueCache<GitHubPullStatus | null>(200);
 const PULL_STATUS_BATCH = 10;
 const IDLE: CachedValue<GitHubPullStatus | null> = { status: 'idle' };
 
-/** An open PR, draft or not: its preview shows checks, and a ready one is coloured by them. */
-const needsPullStatus = (reference: GitHubReference): reference is GitHubPullReference => (
-    reference.kind === 'pull' && reference.state === 'open'
-);
-
-const samePull = (status: GitHubPullStatus, pull: GitHubPullReference) => (
-    status.number === pull.number
-    && status.owner.toLowerCase() === pull.sourceRepo.owner.toLowerCase()
-    && status.repo.toLowerCase() === pull.sourceRepo.repo.toLowerCase()
+const pullStatusScope = (group: PullStatusGroup): string => (
+    JSON.stringify([getRuntimeKey(), readContextCacheKey(group.context), group.directory])
 );
 
 /**
- * Checks and mergeability of the open PRs a list shows, asked after the list
- * in batches of a page, so they colour like the sidebar. GitHub only: a GitLab
- * project's items, issues and closed PRs ask nothing and answer `idle`. A ready
- * null is a PR GitHub could not resolve.
+ * Checks and mergeability of the open PRs of each group, asked after the list
+ * in batches of a page, so they colour like the sidebar. A group is a folder
+ * and the GitHub context its PRs are read through; groups are asked
+ * independently. The reader answers `idle` for anything outside them.
  */
-export function useGitHubPullStatuses(directory: string | null, references: readonly GitHubReference[]) {
+function usePullStatusGroups(groups: readonly PullStatusGroup[]) {
     const { sourceControl } = useRuntimeAPIs();
-    const context = useGitHubReadContext(directory);
-    const github = context && context !== 'missing' && context.provider === 'github' ? context : null;
-    const scope = github ? JSON.stringify([getRuntimeKey(), readContextCacheKey(github), directory]) : null;
-    const keyOf = React.useCallback(
-        (pull: GitHubPullReference) => `${scope}|${pull.sourceRepo.owner}/${pull.sourceRepo.repo}#${pull.number}@${pull.headSha}`,
-        [scope],
+    const keys = React.useMemo(
+        () => groups.flatMap((group) => group.pulls.map((pull) => pullStatusKey(pullStatusScope(group), pull))),
+        [groups],
     );
-    const pulls = React.useMemo(() => (scope ? references.filter(needsPullStatus) : []), [references, scope]);
-    const keys = React.useMemo(() => pulls.map(keyOf), [keyOf, pulls]);
 
     // Through the store, not an effect: React reads the version again once it
     // has subscribed, so an answer that lands between a render and its
@@ -353,27 +421,48 @@ export function useGitHubPullStatuses(directory: string | null, references: read
     React.useSyncExternalStore(subscribe, githubPullStatuses.version, githubPullStatuses.version);
 
     React.useEffect(() => {
-        if (!github || pulls.length === 0) return;
-        const byKey = new Map(pulls.map((pull) => [keyOf(pull), pull]));
-        githubPullStatuses.ensureMany(keys, async (batch) => {
-            const asked = batch.flatMap((key) => byKey.get(key) ?? []);
-            const result = await sourceControl.githubPullStatuses(
-                github,
-                asked.map((pull) => ({ owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo, number: pull.number })),
-            );
-            if (!result.connected) throw new Error('GitHub is not connected');
-            const answers = new Map<string, GitHubPullStatus | null>(batch.map((key) => [key, null]));
-            for (const pull of asked) {
-                answers.set(keyOf(pull), result.statuses.find((status) => samePull(status, pull)) ?? null);
-            }
-            return answers;
-        }, PULL_STATUS_BATCH);
-    }, [github, keyOf, keys, pulls, sourceControl]);
+        ensurePullStatuses(
+            githubPullStatuses,
+            groups,
+            pullStatusScope,
+            (context, pulls) => sourceControl.githubPullStatuses(
+                context,
+                pulls.map((pull) => ({ owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo, number: pull.number })),
+            ),
+            PULL_STATUS_BATCH,
+        );
+    }, [groups, sourceControl]);
 
-    return (reference: GitHubReference): CachedValue<GitHubPullStatus | null> => {
-        if (!scope || !needsPullStatus(reference)) return IDLE;
-        return githubPullStatuses.read(keyOf(reference)) ?? IDLE;
+    return (reference: GitHubReference, directory: string | null): CachedValue<GitHubPullStatus | null> => {
+        const group = groups.find((candidate) => candidate.directory === directory);
+        if (!group || !needsPullStatus(reference)) return IDLE;
+        return githubPullStatuses.read(pullStatusKey(pullStatusScope(group), reference)) ?? IDLE;
     };
+}
+
+/**
+ * Checks and mergeability of the open PRs a list shows. GitHub only: a GitLab
+ * project's items, issues and closed PRs ask nothing and answer `idle`. A ready
+ * null is a PR GitHub could not resolve.
+ */
+export function useGitHubPullStatuses(directory: string | null, references: readonly GitHubReference[]) {
+    const context = useGitHubReadContext(directory);
+    const github = context && context !== 'missing' && context.provider === 'github' ? context : null;
+    const groups = React.useMemo(
+        () => (github && directory ? groupPullsByDirectory(references.map((reference) => ({ reference, directory })), partitionAcrossContexts([{ directory, state: github }])) : []),
+        [directory, github, references],
+    );
+    const statusOf = usePullStatusGroups(groups);
+    return (reference: GitHubReference): CachedValue<GitHubPullStatus | null> => statusOf(reference, directory);
+}
+
+/** The same for a list across repositories: each PR is asked through the context of the folder it came from. */
+export function useGitHubPullStatusesAcross(contexts: AcrossContexts, items: readonly AcrossReference[]) {
+    const groups = React.useMemo(
+        () => groupPullsByDirectory(items.map((item) => ({ reference: item, directory: item.directory })), contexts),
+        [contexts, items],
+    );
+    return usePullStatusGroups(groups);
 }
 
 const linearDetailKey = (workspace: string, issueId: string) => JSON.stringify([getRuntimeKey(), workspace, issueId]);

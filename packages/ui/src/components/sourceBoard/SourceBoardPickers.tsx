@@ -172,41 +172,55 @@ export const SourceBoardProjectPicker: React.FC<{
     );
 };
 
+/** One entry of the repository picker: a repository's folder, or null for all of them. */
+type RepositoryEntry = { value: string; repository: string | null; label: string };
+
 /**
- * Which repository under the project's folder the board lists, shown beside
- * the project picker while the folder is not a repository itself.
+ * Which repository under the project's folder the board lists, or all of them
+ * together, shown beside the project picker while the folder is not a
+ * repository itself.
  */
 export const SourceBoardRepositoryPicker: React.FC<{
     repositories: readonly string[];
-    selected: string;
+    /** The listed repository's folder; null while the board lists all of them. */
+    selected: string | null;
     /** The project's folder the repository paths are shown relative to. */
     root: string;
-    onSelect: (repository: string) => void;
+    /** Offers "All repositories" first; not where the runtime cannot list across repositories. */
+    allAvailable: boolean;
+    /** A repository's folder, or null for all of them. */
+    onSelect: (repository: string | null) => void;
     /** The phone shell picks from a bottom sheet, like the project picker. */
     sheet?: boolean;
-}> = ({ repositories, selected, root, onSelect, sheet = false }) => {
+}> = ({ repositories, selected, root, allAvailable, onSelect, sheet = false }) => {
     const { t } = useI18n();
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState('');
-    const [activeId, setActiveId] = React.useState<string | null>(null);
+    const [activeValue, setActiveValue] = React.useState<string | null>(null);
     const searchRef = React.useRef<HTMLInputElement>(null);
     const ariaLabel = t('sourceBoard.repository.label');
     const searchLabel = t('sourceBoard.repository.search');
-    const ranked = React.useMemo(
-        () => (query ? rankByQuery(repositories, query, (repository) => [repositoryLabel(repository, root)]) : [...repositories]),
-        [query, repositories, root],
-    );
-    const effectiveActive = activeId && ranked.includes(activeId) ? activeId : ranked[0] ?? null;
-    const choose = (repository: string) => {
-        onSelect(repository);
+    const allLabel = t('sourceBoard.repository.all');
+    const entries = React.useMemo<RepositoryEntry[]>(() => {
+        const found = query
+            ? rankByQuery([...repositories], query, (repository) => [repositoryLabel(repository, root)])
+            : [...repositories];
+        const repositoryEntries = found.map((repository) => ({ value: `repository:${repository}`, repository, label: repositoryLabel(repository, root) }));
+        return allAvailable && !query ? [{ value: 'all', repository: null, label: allLabel }, ...repositoryEntries] : repositoryEntries;
+    }, [allAvailable, allLabel, query, repositories, root]);
+    const selectedValue = selected === null ? 'all' : `repository:${selected}`;
+    const effectiveActive = activeValue && entries.some((entry) => entry.value === activeValue) ? activeValue : entries[0]?.value ?? null;
+    const choose = (entry: RepositoryEntry) => {
+        onSelect(entry.repository);
         setOpen(false);
+        setQuery('');
     };
     // Not shrink-0 like the project picker: beside it, this is the one that truncates.
     const triggerClass = cn('min-w-0 w-fit justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar);
     const triggerContent = (
         <span className="flex min-w-0 items-center gap-1.5">
             <Icon name="folder-3" className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{repositoryLabel(selected, root)}</span>
+            <span className="truncate">{selected === null ? allLabel : repositoryLabel(selected, root)}</span>
             <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
         </span>
     );
@@ -221,17 +235,17 @@ export const SourceBoardRepositoryPicker: React.FC<{
                     <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
                         <Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-9" />
                         <div className="flex flex-col">
-                            {ranked.length === 0 ? (
+                            {entries.length === 0 ? (
                                 <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
-                            ) : ranked.map((repository) => (
+                            ) : entries.map((entry) => (
                                 <button
-                                    key={repository}
+                                    key={entry.value}
                                     type="button"
                                     className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                    onClick={() => { choose(repository); setQuery(''); }}
+                                    onClick={() => choose(entry)}
                                 >
-                                    <span className="min-w-0 flex-1 truncate">{repositoryLabel(repository, root)}</span>
-                                    {repository === selected ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                                    <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+                                    {entry.value === selectedValue ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
                                 </button>
                             ))}
                         </div>
@@ -247,7 +261,7 @@ export const SourceBoardRepositoryPicker: React.FC<{
             onOpenChange={(next) => {
                 setOpen(next);
                 setQuery('');
-                setActiveId(next ? selected : null);
+                setActiveValue(next ? selectedValue : null);
             }}
             onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}
         >
@@ -257,7 +271,7 @@ export const SourceBoardRepositoryPicker: React.FC<{
             <Popover.Portal>
                 <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
                     <Popover.Popup role="dialog" aria-label={ariaLabel} className={cn(dropdownMenuPopupClass, 'flex w-72 max-w-[calc(100vw-2rem)] flex-col p-0')} initialFocus={false}>
-                        <Command className="min-h-0 flex-1" shouldFilter={false} value={effectiveActive ?? undefined} onValueChange={setActiveId}>
+                        <Command className="min-h-0 flex-1" shouldFilter={false} value={effectiveActive ?? undefined} onValueChange={setActiveValue}>
                             <CommandInput
                                 ref={searchRef}
                                 aria-label={searchLabel}
@@ -275,12 +289,12 @@ export const SourceBoardRepositoryPicker: React.FC<{
                                 }}
                             />
                             <CommandList label={ariaLabel}>
-                                {ranked.length === 0 ? (
+                                {entries.length === 0 ? (
                                     <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
-                                ) : ranked.map((repository) => (
-                                    <CommandItem key={repository} value={repository} onSelect={choose} aria-current={repository === selected ? true : undefined} className="max-w-full">
-                                        <span className="min-w-0 flex-1 truncate">{repositoryLabel(repository, root)}</span>
-                                        {repository === selected ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                                ) : entries.map((entry) => (
+                                    <CommandItem key={entry.value} value={entry.value} onSelect={() => choose(entry)} aria-current={entry.value === selectedValue ? true : undefined} className="max-w-full">
+                                        <span className="min-w-0 flex-1 truncate">{entry.label}</span>
+                                        {entry.value === selectedValue ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
                                     </CommandItem>
                                 ))}
                             </CommandList>

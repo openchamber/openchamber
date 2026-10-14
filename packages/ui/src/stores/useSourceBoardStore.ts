@@ -22,16 +22,22 @@ type SourceBoardChoice = {
    * selection. Ignored once the repository is no longer among the discovered ones.
    */
   repositoryByProject: Record<string, string>;
+  /**
+   * Per project id, whether the board lists every repository under the folder
+   * together (true) or just the one in `repositoryByProject` (false). Absent:
+   * the board's default, all of them unless a single repository was remembered.
+   */
+  allRepositoriesByProject: Record<string, boolean>;
 };
 
-const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', linearTeamId: null, repositoryByProject: {} };
+const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', linearTeamId: null, repositoryByProject: {}, allRepositoriesByProject: {} };
 
 type SourceBoardState = {
   /** Keyed by runtime: project and team ids belong to one server. */
   choices: Record<string, SourceBoardChoice>;
   /** A Linear issue another surface asked the board to show; taken once. */
   linearFocus: string | null;
-  /** Merges `patch` into the choice; `repositoryByProject` entries merge into the existing ones. */
+  /** Merges `patch` into the choice; the per-project maps merge into the existing ones. */
   update: (patch: Partial<SourceBoardChoice>) => void;
   /** Switches to Linear and previews the issue `identifier` names; the caller opens the board. */
   focusLinearIssue: (identifier: string) => void;
@@ -53,6 +59,7 @@ const persistedChoices = z.object({
     linearTeamId: z.string().nullable().catch(null),
     // Absent from data stored before nested repositories were supported.
     repositoryByProject: z.record(z.string(), z.string()).catch({}),
+    allRepositoriesByProject: z.record(z.string(), z.boolean()).catch({}),
   })).catch({}),
   listWidth: z.number().positive().nullable().catch(null).optional(),
 });
@@ -70,7 +77,8 @@ export const useSourceBoardStore = create<SourceBoardState>()(
         const runtimeKey = getRuntimeKey();
         const current = state.choices[runtimeKey] ?? EMPTY_CHOICE;
         const repositoryByProject = { ...current.repositoryByProject, ...patch.repositoryByProject };
-        return { choices: { ...state.choices, [runtimeKey]: { ...current, ...patch, repositoryByProject } } };
+        const allRepositoriesByProject = { ...current.allRepositoriesByProject, ...patch.allRepositoriesByProject };
+        return { choices: { ...state.choices, [runtimeKey]: { ...current, ...patch, repositoryByProject, allRepositoriesByProject } } };
       }),
       focusLinearIssue: (identifier) => {
         get().update({ tab: 'linear', linearTeamId: null });

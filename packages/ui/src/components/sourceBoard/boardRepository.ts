@@ -1,31 +1,46 @@
 import * as React from 'react';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { normalizePath } from '@/lib/pathNormalization';
 import { useGitStore, useIsGitRepo, useNestedRepos, type NestedRepoDiscovery } from '@/stores/useGitStore';
 
 /**
  * The folder the board reads a project's repository from.
  *
  * A project whose root is a repository is read there. A root that is not one
- * but holds repositories is read in one of them. `pending` and `failed` keep
- * the root as `directory`, so a project that is a repository never waits on
- * the discovery, and neither state is taken for "no repositories".
+ * but holds repositories is read in one of them, or in all of them together
+ * (`all`, where the runtime can search across repositories): `directory` is
+ * then the root, and each item brings the repository folder it belongs to.
+ * `pending` and `failed` keep the root as `directory`, so a project that is a
+ * repository never waits on the discovery, and neither state is taken for
+ * "no repositories".
  */
 export type BoardRepository = {
     status: 'pending' | 'failed' | 'ready';
     directory: string | null;
     /** The repositories under a root that is not one itself; empty otherwise. */
     repositories: readonly string[];
+    /** The board lists all of `repositories` together. */
+    all: boolean;
+};
+
+/** What the board remembers for a project's repository: a single one, and whether it lists them all. */
+export type RepositoryChoice = {
+    path: string | null;
+    /** Undefined until chosen; then all repositories unless a single one was remembered. */
+    all: boolean | undefined;
 };
 
 export function resolveBoardRepository(
     root: string | null,
     rootIsGitRepo: boolean | null,
     nestedRepos: NestedRepoDiscovery | undefined,
-    remembered: string | null,
+    choice: RepositoryChoice,
+    /** The runtime can list across repositories (VS Code cannot). */
+    acrossAvailable: boolean,
 ): BoardRepository {
-    if (!root) return { status: 'ready', directory: null, repositories: [] };
-    const atRoot = (status: BoardRepository['status']): BoardRepository => ({ status, directory: root, repositories: [] });
+    if (!root) return { status: 'ready', directory: null, repositories: [], all: false };
+    const atRoot = (status: BoardRepository['status']): BoardRepository => ({ status, directory: root, repositories: [], all: false });
     if (rootIsGitRepo === true) return atRoot('ready');
     if (rootIsGitRepo === null || nestedRepos === undefined) return atRoot('pending');
     if (nestedRepos === null) return atRoot('failed');
@@ -33,8 +48,11 @@ export function resolveBoardRepository(
     if (nestedRepos === 'unsupported') return atRoot('ready');
     const first = nestedRepos[0];
     if (first === undefined) return atRoot('ready');
-    const directory = remembered && nestedRepos.includes(remembered) ? remembered : first;
-    return { status: 'ready', directory, repositories: nestedRepos };
+    if (acrossAvailable && (choice.all ?? choice.path === null)) {
+        return { status: 'ready', directory: root, repositories: nestedRepos, all: true };
+    }
+    const directory = choice.path && nestedRepos.includes(choice.path) ? choice.path : first;
+    return { status: 'ready', directory, repositories: nestedRepos, all: false };
 }
 
 /** A repository's path below the project's root, as the pickers name it. */
@@ -49,6 +67,12 @@ export type PullLinkTarget = {
     appDirectory: string;
     /** The folder the diff and walkthrough views read their request under: the repository they resolve. */
     requestDirectory: string;
+    /**
+     * The key the phone's Changes reads a request under: the normalized folder
+     * the app shows, not the repository (it resolves the repository from the
+     * Git selection itself).
+     */
+    mobileRequestDirectory: string;
     /** The root whose Git selection must move to `requestDirectory` first; null when it already resolves there. */
     selectNestedIn: string | null;
 };
@@ -68,14 +92,18 @@ export function resolvePullLinkTarget(options: {
     ownedCurrentDirectory: string | null;
 }): PullLinkTarget {
     const { projectPath, repository, ownedCurrentDirectory } = options;
+    const target = (appDirectory: string, requestDirectory: string, selectNestedIn: string | null): PullLinkTarget => ({
+        appDirectory,
+        requestDirectory,
+        mobileRequestDirectory: normalizePath(appDirectory) ?? appDirectory,
+        selectNestedIn,
+    });
     if (!repository || repository === projectPath) {
         const directory = ownedCurrentDirectory ?? projectPath;
-        return { appDirectory: directory, requestDirectory: directory, selectNestedIn: null };
+        return target(directory, directory, null);
     }
-    if (ownedCurrentDirectory === repository) {
-        return { appDirectory: repository, requestDirectory: repository, selectNestedIn: null };
-    }
-    return { appDirectory: projectPath, requestDirectory: repository, selectNestedIn: projectPath };
+    if (ownedCurrentDirectory === repository) return target(repository, repository, null);
+    return target(projectPath, repository, projectPath);
 }
 
 /**
@@ -83,8 +111,9 @@ export function resolvePullLinkTarget(options: {
  * screen's discovery without touching its repository selection: the board's
  * choice is its own.
  */
-export function useBoardRepository(root: string | null, remembered: string | null): BoardRepository & { retry: () => void } {
-    const { git } = useRuntimeAPIs();
+export function useBoardRepository(root: string | null, choice: RepositoryChoice): BoardRepository & { retry: () => void } {
+    const { git, sourceControl } = useRuntimeAPIs();
+    const acrossAvailable = Boolean(sourceControl.githubReferencesAcross);
     const rootIsGitRepo = useIsGitRepo(root);
     const nestedRepos = useNestedRepos(root);
     const ensureStatus = useGitStore((state) => state.ensureStatus);
@@ -101,8 +130,8 @@ export function useBoardRepository(root: string | null, remembered: string | nul
         if (root) void ensureNestedRepos(root, { force: true });
     }, [ensureNestedRepos, root]);
     const resolution = React.useMemo(
-        () => resolveBoardRepository(root, rootIsGitRepo, nestedRepos, remembered),
-        [nestedRepos, remembered, root, rootIsGitRepo],
+        () => resolveBoardRepository(root, rootIsGitRepo, nestedRepos, { path: choice.path, all: choice.all }, acrossAvailable),
+        [acrossAvailable, choice.all, choice.path, nestedRepos, root, rootIsGitRepo],
     );
     return { ...resolution, retry };
 }

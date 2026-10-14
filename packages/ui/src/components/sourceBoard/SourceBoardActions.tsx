@@ -18,7 +18,6 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n } from '@/lib/i18n';
-import { normalizePath } from '@/lib/pathNormalization';
 import { cn } from '@/lib/utils';
 import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
@@ -327,7 +326,7 @@ export const SourceBoardPullLinks: React.FC<{
     const open = (surface: 'diff' | 'walkthrough') => {
         const source: PullRequestSource = { kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo } };
         const ui = useUIStore.getState();
-        const { appDirectory, requestDirectory, selectNestedIn } = resolvePullLinkTarget({
+        const { appDirectory, requestDirectory, mobileRequestDirectory, selectNestedIn } = resolvePullLinkTarget({
             projectPath: project.path,
             repository,
             ownedCurrentDirectory: currentDirectory && projectOwnsDirectory(currentDirectory) ? currentDirectory : null,
@@ -338,8 +337,9 @@ export const SourceBoardPullLinks: React.FC<{
         if (selectNestedIn) useGitStore.getState().selectNestedRepo(selectNestedIn, requestDirectory);
         if (surface === 'diff') {
             if (mobile) {
-                // The phone's Changes looks requests up by the normalized folder.
-                usePullRequestSelectionStore.getState().requestDiff(normalizePath(requestDirectory) ?? requestDirectory, source);
+                // The phone's Changes looks requests up by the normalized folder the app
+                // shows and finds the repository through the Git selection moved above.
+                usePullRequestSelectionStore.getState().requestDiff(mobileRequestDirectory, source);
                 onLeave?.();
                 mobile.openChanges();
                 return;

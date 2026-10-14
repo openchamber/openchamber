@@ -103,6 +103,8 @@ type RowProps = {
     /** Null in single-choice mode, where rows have no checkbox. */
     checked: boolean | null;
     diffIncluded: boolean;
+    /** Names the repository on every row, as it does on a fork's upstream items: the list spans several. */
+    showRepository?: boolean;
     now: number;
     onHighlight: () => void;
     onToggle: () => void;
@@ -115,6 +117,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
     highlighted,
     checked,
     diffIncluded,
+    showRepository = false,
     now,
     onHighlight,
     onToggle,
@@ -188,7 +191,7 @@ export const ReferencePickerRow = React.memo(function ReferencePickerRow({
                     {item.source === 'linear' && item.issue.priority && item.issue.priority > 0 ? (
                         <span>{t(LINEAR_PRIORITY_KEYS[item.issue.priority])}</span>
                     ) : null}
-                    {item.source === 'github' && item.reference.sourceRepo.source === 'upstream' ? (
+                    {item.source === 'github' && (showRepository || item.reference.sourceRepo.source === 'upstream') ? (
                         <span className="rounded bg-[var(--status-info-background)] px-1 typography-micro text-[var(--status-info-text)]">
                             {item.reference.sourceRepo.owner}/{item.reference.sourceRepo.repo}
                         </span>

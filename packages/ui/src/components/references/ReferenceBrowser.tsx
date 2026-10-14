@@ -202,7 +202,9 @@ export const ReferenceBrowserList: React.FC<{
     onActivate?: (item: ReferencePickerItem) => void;
     /** After a row is clicked to show it, as when the list closes then. */
     onShow?: () => void;
-}> = ({ browser, label, multiselectable, onOpenSettings, rowSelection, onActivate, onShow }) => {
+    /** A quiet line above the rows, such as the repositories a list across several left out. */
+    notice?: React.ReactNode;
+}> = ({ browser, label, multiselectable, onOpenSettings, rowSelection, onActivate, onShow, notice }) => {
     const { t } = useI18n();
     const { source, sourceStatus, list, items, isGitLab, isMobile, directory, debouncedQuery, githubKind } = browser;
 
@@ -243,7 +245,14 @@ export const ReferenceBrowserList: React.FC<{
         );
     }
     if (source === 'github' && !directory) return centered(t('references.picker.empty.noProject'));
-    if (list.unavailable === 'no-repo') return centered(t('references.picker.empty.noRepo'));
+    if (list.unavailable === 'no-repo') {
+        return (
+            <>
+                {notice}
+                {centered(t('references.picker.empty.noRepo'))}
+            </>
+        );
+    }
     if (list.status === 'loading') {
         return centered(
             <span className="inline-flex items-center gap-2">
@@ -261,6 +270,8 @@ export const ReferenceBrowserList: React.FC<{
         );
     }
     return (
+        <>
+        {notice}
         <div role="listbox" aria-label={label} aria-multiselectable={multiselectable} className="flex flex-col gap-1 p-1.5">
             {list.error ? (
                 <div className="mb-1 flex items-center gap-2 rounded-lg bg-[var(--status-error-background)] px-2.5 py-1.5 typography-meta text-[var(--status-error-text)]">
@@ -276,7 +287,8 @@ export const ReferenceBrowserList: React.FC<{
                     <ReferencePickerRow
                         key={key}
                         item={item}
-                        pullStatus={item.source === 'github' ? readyValue(browser.pullStatusOf(item.reference)) : null}
+                        pullStatus={item.source === 'github' ? readyValue(browser.pullStatusOf(item.reference, item.directory)) : null}
+                        showRepository={browser.across}
                         highlighted={!isMobile && key === browser.effectiveHighlightKey}
                         checked={selection?.checked ?? null}
                         diffIncluded={selection?.diffIncluded ?? false}
@@ -296,5 +308,6 @@ export const ReferenceBrowserList: React.FC<{
                 </div>
             ) : null}
         </div>
+        </>
     );
 };
