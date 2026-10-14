@@ -435,6 +435,17 @@ export function registerGitHubRoutes(app, options = {}) {
     bindingRevision: Number(req.query?.bindingRevision),
     primaryRemote: req.query?.primaryRemote,
   });
+  // Like the single route, only a GitHub binding is ever accepted here,
+  // whatever provider the request names.
+  const validateAcrossReadContext = (context) => options.validateReadContext?.({
+    directory: context.directory,
+    repositoryId: context.repositoryId,
+    provider: 'github',
+    instance: context.instance,
+    accountId: context.accountId,
+    bindingRevision: context.bindingRevision,
+    primaryRemote: context.primaryRemote,
+  });
   const isReadContextError = (error) => error?.code?.startsWith('SOURCE_CONTROL_BINDING_')
     || error?.code?.startsWith('SOURCE_CONTROL_LOCK_')
     || error?.code === 'INVALID_SOURCE_CONTROL_READ_CONTEXT'
@@ -2020,6 +2031,84 @@ export function registerGitHubRoutes(app, options = {}) {
       }
       console.error('Failed to search GitHub references:', error);
       return res.status(500).json({ error: error.message || 'Failed to search GitHub issues and pull requests' });
+    }
+  });
+
+  app.post(canonicalGitHubRoutePath('/references/across'), async (req, res) => {
+    const { readReferencesAcrossRequest, mapReferencesAcross, searchGitHubReferencesAcross } = await import('./reference-search.js');
+    const input = readReferencesAcrossRequest(req.body);
+    if (!input) return res.status(400).json({ error: 'Invalid references request; at most 100 unique contexts are allowed' });
+    if (!options.validateReadContext) return res.status(501).json({ error: 'Bound source control read is unavailable' });
+    const { isGitHubRateLimited, isGitHubRateLimitError, noteGitHubRateLimit } = await import('./rate-limit.js');
+    const { isGraphqlRateLimitError } = await import('./pr-summaries.js');
+    if (isGitHubRateLimited()) return res.status(503).json({ error: 'GitHub rate limited' });
+    const folderFailure = async (error) => {
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) {
+        noteGitHubRateLimit(error);
+        throw error;
+      }
+      if (error?.status === 401) {
+        await invalidateRequestAccount(error);
+        return 'disconnected';
+      }
+      if (isReadContextError(error)) return 'invalid-context';
+      console.error('Failed to search GitHub references across repositories:', { status: error?.status, code: error?.code, name: error?.name });
+      return 'error';
+    };
+    try {
+      const resolveGitHubRepoFromDirectory = options.resolveGitHubRepoFromDirectory
+        ?? (await import('./index.js')).resolveGitHubRepoFromDirectory;
+      const resolveRepoNetwork = options.resolveRepoNetwork
+        ?? (await import('./repo/fork-detection.js')).resolveRepoNetwork;
+      const folders = await mapReferencesAcross(input.contexts, async (context) => {
+        const directory = context.directory;
+        try {
+          const trustedContext = await validateAcrossReadContext(context);
+          if (!trustedContext) return { directory, status: 'invalid-context' };
+          const octokit = (await getOctokitForRead(req, trustedContext))?.octokit;
+          if (!octokit) return { directory, status: 'disconnected' };
+          const { repo } = await resolveGitHubRepoFromDirectory(directory, trustedContext.primaryRemote);
+          if (!repo) return { directory, status: 'no-repo' };
+          const network = await resolveRepoNetwork(octokit, directory, trustedContext.primaryRemote, { strictErrors: true });
+          const repos = requireGitHubRepoNetwork(network, repo) ?? [{ ...repo, source: 'origin' }];
+          return { directory, status: 'included', repo, repos, octokit, trustedContext };
+        } catch (error) {
+          return { directory, status: await folderFailure(error) };
+        }
+      });
+      const accounts = new Map();
+      for (const folder of folders) {
+        if (folder.status !== 'included') continue;
+        // One search per host account: repositories read with different accounts never share a query.
+        const { accountId, instance } = folder.trustedContext;
+        const groupKey = JSON.stringify([instance ?? '', accountId]);
+        if (!accounts.has(groupKey)) accounts.set(groupKey, { accountId, octokit: folder.octokit, folders: [], authority: [], repositories: new Map() });
+        const group = accounts.get(groupKey);
+        group.folders.push(folder);
+        group.authority.push(folder.trustedContext);
+        for (const repo of folder.repos) {
+          const key = `${repo.owner.toLowerCase()}/${repo.repo.toLowerCase()}`;
+          if (!group.repositories.has(key)) group.repositories.set(key, { ...repo, directory: folder.directory });
+        }
+      }
+      const groups = [...accounts.values()].map((group) => ({ ...group, repos: [...group.repositories.values()] }));
+      const page = await searchGitHubReferencesAcross({
+        groups, kind: input.kind, state: input.state ?? 'open', people: input.people ?? 'any',
+        text: input.query?.trim() ?? '', cursor: input.cursor || null,
+        onGroupError: async (group, error) => {
+          const status = await folderFailure(error);
+          for (const folder of group.folders) folder.status = status;
+        },
+      });
+      const repositories = new Map(folders.map((folder) => [folder.directory, folder.status === 'included'
+        ? { directory: folder.directory, status: 'included', repo: folder.repo }
+        : { directory: folder.directory, status: folder.status }]));
+      return res.json({ ...page, repositories: input.directories.map((directory) => repositories.get(directory)) });
+    } catch (error) {
+      if (error?.code === 'INVALID_REFERENCES_CURSOR') return res.status(400).json({ error: error.message });
+      if (isGraphqlRateLimitError(error) || isGitHubRateLimitError(error)) return res.status(503).json({ error: 'GitHub rate limited' });
+      console.error('Failed to search GitHub references across repositories:', { status: error?.status, code: error?.code, name: error?.name });
+      return res.status(500).json({ error: 'Failed to search GitHub issues and pull requests' });
     }
   });
 

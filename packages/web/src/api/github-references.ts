@@ -12,6 +12,7 @@ import type {
   GitHubReferenceDetailResult,
   GitHubReferencesOptions,
   GitHubReferencesResult,
+  GitHubReferencesAcrossResult,
   SourceControlReadContext,
 } from '@openchamber/ui/lib/api/types';
 import type { RuntimeFetchOptions } from '@openchamber/ui/lib/runtime-fetch';
@@ -45,34 +46,36 @@ const referenceFields = {
   sourceRepo: z.object({ owner: z.string(), repo: z.string(), source: z.string() }),
 };
 
+const referenceSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('issue'),
+    ...referenceFields,
+    state: z.enum(['open', 'completed', 'not_planned']),
+  }),
+  z.object({
+    kind: z.literal('pull'),
+    ...referenceFields,
+    state: z.enum(['open', 'closed', 'merged']),
+    draft: z.boolean(),
+    head: z.string(),
+    base: z.string(),
+    headSha: z.string(),
+    headRepo: z.object({
+      owner: z.string(),
+      repo: z.string(),
+      url: z.string(),
+      cloneUrl: z.string().optional(),
+      sshUrl: z.string().optional(),
+    }).nullable(),
+  }),
+]);
+
 const referencesResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
   z.object({
     connected: z.literal(true),
     repo: z.object({ owner: z.string(), repo: z.string(), url: z.string() }).nullable(),
-    items: z.array(z.discriminatedUnion('kind', [
-      z.object({
-        kind: z.literal('issue'),
-        ...referenceFields,
-        state: z.enum(['open', 'completed', 'not_planned']),
-      }),
-      z.object({
-        kind: z.literal('pull'),
-        ...referenceFields,
-        state: z.enum(['open', 'closed', 'merged']),
-        draft: z.boolean(),
-        head: z.string(),
-        base: z.string(),
-        headSha: z.string(),
-        headRepo: z.object({
-          owner: z.string(),
-          repo: z.string(),
-          url: z.string(),
-          cloneUrl: z.string().optional(),
-          sshUrl: z.string().optional(),
-        }).nullable(),
-      }),
-    ])),
+    items: z.array(referenceSchema),
     cursor: z.string().nullable(),
     hasMore: z.boolean(),
     total: z.number(),
@@ -115,6 +118,19 @@ const referenceDetailResultSchema = z.discriminatedUnion('connected', [
     }).nullable(),
   }),
 ]);
+
+const referencesAcrossResultSchema = z.strictObject({
+  items: z.array(referenceSchema.and(z.object({ directory: z.string().min(1) }))),
+  cursor: z.string().nullable(),
+  hasMore: z.boolean(),
+  total: z.number().int().nonnegative(),
+  repositories: z.array(z.union([
+    z.strictObject({ directory: z.string().min(1), status: z.literal('included'),
+      repo: z.strictObject({ owner: z.string(), repo: z.string(), url: z.string() }),
+    }),
+    z.strictObject({ directory: z.string().min(1), status: z.enum(['no-repo', 'disconnected', 'invalid-context', 'error']) }),
+  ])),
+});
 
 const pullStatusesResultSchema = z.discriminatedUnion('connected', [
   z.object({ connected: z.literal(false) }),
@@ -182,6 +198,19 @@ export const fetchGitHubReferenceDetail = async (
   query.set('number', String(item.number));
   const response = await fetch('/api/source-control/github/references/detail', { query, headers: { Accept: 'application/json' } });
   return readPayload(response, referenceDetailResultSchema, 'Failed to load issue or pull request detail');
+};
+
+export const fetchGitHubReferencesAcross = async (
+  fetch: GitHubFetch,
+  contexts: SourceControlReadContext[],
+  options: GitHubReferencesOptions,
+): Promise<GitHubReferencesAcrossResult> => {
+  const response = await fetch('/api/source-control/github/references/across', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contexts, ...options, query: options.query?.trim() }),
+  });
+  return readPayload(response, referencesAcrossResultSchema, 'Failed to load issues and pull requests');
 };
 
 export const fetchGitHubPullStatuses = async (
