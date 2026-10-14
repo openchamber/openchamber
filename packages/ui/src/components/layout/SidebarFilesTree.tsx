@@ -1479,6 +1479,7 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
 
   const hasTree = Boolean(root && childrenByDir[root]);
   const rootLoadError = root ? loadErrorsByDir[root] : null;
+  const isSearchActive = debouncedSearchQuery.trim().length > 0;
   const dropTargetLabel = dropIndicatorTarget ? getDropTargetLabel(root, dropIndicatorTarget) : '';
   const moveDropTargetLabel = moveDropTarget ? getDropTargetLabel(root, moveDropTarget) : '';
   const pendingMoveName = pendingMove ? pendingMove.source.path.slice(pendingMove.source.path.lastIndexOf('/') + 1) : '';
@@ -1600,6 +1601,8 @@ const SidebarFilesTreeContent: React.FC<{ visible: boolean }> = ({ visible }) =>
               <Icon name="loader-4" className="h-4 w-4 animate-spin" />
               {t('sidebarFilesTree.state.searching')}
             </li>
+          ) : isSearchActive && searchResults.length === 0 ? (
+            <li className="px-2 py-1 typography-meta text-muted-foreground">{t('mobile.files.search.empty')}</li>
           ) : searchResults.length > 0 ? (
             searchResults.map((node) => {
               const isActive = selectedPath === node.path;
