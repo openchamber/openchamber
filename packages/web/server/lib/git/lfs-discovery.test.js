@@ -10,6 +10,12 @@ const pointer = (size = 42) => [
 ].join('\n');
 const configOutput = (records) => records.map(([key, value]) => `${key}\n${value}\0`).join('');
 const attributesOutput = (records) => records.map(([path, value]) => `${path}\0filter\0${value}\0`).join('');
+const canonicalFilters = [
+  ['filter.lfs.clean', 'git-lfs clean -- %f'],
+  ['filter.lfs.smudge', 'git-lfs smudge -- %f'],
+  ['filter.lfs.process', 'git-lfs filter-process'],
+  ['filter.lfs.required', 'true'],
+];
 
 const input = (overrides = {}) => ({
   attributesOutput: attributesOutput([['assets/model.bin', 'lfs']]),
@@ -110,6 +116,60 @@ describe('LFS publication discovery', () => {
       [['lfs.pushurl', 'ssh://git@example.com/storage']], [['lfs.pushurl', 'https://user:secret@example.com/storage']],
       [['lfs.customtransfer.bad.path', '/private/command']], [['lfs.standalonetransferagent', 'custom']],
     ]) expect(() => resolveLfsPushConfig({ ...config, effectiveConfigOutput: configOutput(records) })).toThrow();
+  });
+});
+
+describe.each([['checkout', discoverLfs], ['publication', resolveLfsPushConfig]])('LFS configuration validation for %s', (_label, resolve) => {
+  const read = (overrides) => resolve(input({ lfsConfigOutput: '', effectiveConfigOutput: '', ...overrides }));
+
+  it.each([1, 2])('accepts %i copies of canonical effective filters', (copies) => {
+    expect(() => read({ effectiveConfigOutput: configOutput(Array.from({ length: copies }, () => canonicalFilters).flat()) })).not.toThrow();
+  });
+
+  it.each(['filter.lfs.clean', 'filter.lfs.smudge', 'filter.lfs.process'])('rejects conflicting %s values in either order', (key) => {
+    const canonical = canonicalFilters.find(([filter]) => filter === key);
+    for (const records of [[canonical, [key, 'sh -c unsafe']], [[key, 'sh -c unsafe'], canonical]]) {
+      expect(() => read({ effectiveConfigOutput: configOutput(records) }))
+        .toThrow(expect.objectContaining({ code: 'INVALID_LFS_DISCOVERY_INPUT' }));
+    }
+  });
+
+  it.each(['filter.lfs.clean', 'filter.lfs.smudge', 'filter.lfs.process'])('rejects identical unsafe %s values', (key) => {
+    const record = [key, 'sh -c unsafe'];
+    expect(() => read({ effectiveConfigOutput: configOutput([record, record]) }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_LFS_DISCOVERY_INPUT' }));
+  });
+
+  it.each([
+    ['lfs.customtransfer.bad.path', '/tmp/program'],
+    ['lfs.customtransfer.bad.args', '--execute'],
+    ['lfs.standalonetransferagent', 'custom'],
+  ])('rejects %s alongside repeated canonical filters', (key, value) => {
+    expect(() => read({ effectiveConfigOutput: configOutput([...canonicalFilters, ...canonicalFilters, [key, value]]) }))
+      .toThrow(expect.objectContaining({ code: 'UNSAFE_LFS_EXECUTABLE_CONFIG' }));
+  });
+
+  it.each(['lfs.url', 'lfs.pushurl', 'lfs.storage', 'remote.origin.lfsurl'])('keeps duplicate effective %s values strict', (key) => {
+    const record = [key, 'https://example.com/storage'];
+    expect(() => read({ effectiveConfigOutput: configOutput([record, record]) })).toThrow(`contains duplicate ${key}`);
+  });
+
+  it('keeps duplicate committed metadata strict', () => {
+    const record = ['lfs.url', 'https://example.com/storage'];
+    expect(() => read({ lfsConfigOutput: configOutput([record, record]) })).toThrow('contains duplicate lfs.url');
+  });
+
+  it('rejects repeated non-canonical required settings', () => {
+    const record = ['filter.lfs.required', 'false'];
+    expect(() => read({ effectiveConfigOutput: configOutput([record, record]) })).toThrow('contains duplicate filter.lfs.required');
+  });
+
+  it.each([
+    ['filter.lfs.clean\ngit-lfs clean -- %f', 'incomplete'],
+    ['filter.lfs.clean\0', 'malformed'],
+    ['filter.lfs.clean\n\0', 'malformed'],
+  ])('rejects invalid effective config %j', (output, message) => {
+    expect(() => read({ effectiveConfigOutput: output })).toThrow(message);
   });
 });
 

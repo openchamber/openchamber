@@ -38,7 +38,7 @@ const boundedText = (value, maxBytes, label) => {
   return text;
 };
 
-const parseConfig = (value, limits, label) => {
+const parseConfig = (value, limits, label, { allowRepeatedCanonicalFilters = false } = {}) => {
   const text = boundedText(value, limits.maxConfigBytes, label);
   if (!text) return new Map();
   if (!text.endsWith('\0')) throw lfsError(`${label} is incomplete`);
@@ -48,7 +48,10 @@ const parseConfig = (value, limits, label) => {
     if (separator <= 0 || separator === record.length - 1) throw lfsError(`${label} record is malformed`);
     const key = record.slice(0, separator).toLowerCase();
     const configValue = record.slice(separator + 1);
-    if (result.has(key)) throw lfsError(`${label} contains duplicate ${key}`);
+    // Effective Git config reports every layer, including identical LFS installs.
+    const repeatedCanonicalFilter = allowRepeatedCanonicalFilters && result.get(key) === configValue
+      && (SAFE_FILTERS[key] === configValue || key === 'filter.lfs.required' && configValue === 'true');
+    if (result.has(key) && !repeatedCanonicalFilter) throw lfsError(`${label} contains duplicate ${key}`);
     result.set(key, configValue);
   }
   return result;
@@ -321,7 +324,7 @@ const httpsCandidate = (value, gitRemoteUrl) => {
 
 export function resolveLfsPushConfig({ lfsConfigOutput, effectiveConfigOutput, gitRemoteName, gitRemoteUrl }) {
   const committed = parseConfig(lfsConfigOutput, LFS_DISCOVERY_LIMITS, 'Committed LFS configuration');
-  const effective = parseConfig(effectiveConfigOutput, LFS_DISCOVERY_LIMITS, 'Effective LFS configuration');
+  const effective = parseConfig(effectiveConfigOutput, LFS_DISCOVERY_LIMITS, 'Effective LFS configuration', { allowRepeatedCanonicalFilters: true });
   validateExecutableConfig(effective);
   const remoteUrlKey = `remote.${gitRemoteName.toLowerCase()}.lfsurl`;
   for (const key of committed.keys()) {
@@ -384,7 +387,7 @@ export function discoverLfs({
   }
 
   const lfsConfig = parseConfig(lfsConfigOutput, limits, '.lfsconfig output');
-  const effectiveConfig = parseConfig(effectiveConfigOutput, limits, 'Effective LFS config output');
+  const effectiveConfig = parseConfig(effectiveConfigOutput, limits, 'Effective LFS config output', { allowRepeatedCanonicalFilters: true });
   validateExecutableConfig(effectiveConfig);
   for (const key of lfsConfig.keys()) {
     if (key !== 'lfs.url' && key !== `remote.${gitRemoteName.toLowerCase()}.lfsurl`) {
