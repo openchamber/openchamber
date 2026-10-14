@@ -46,7 +46,7 @@ describe('GitHub Copilot quota provider', () => {
   ])('derives the credit label from the same used axis as VS Code on fractional credits for the %s', async (_name, fetchProviderQuota) => {
     // The live Business-plan shape: `remaining` (39078) is the integer twin of
     // `quota_remaining` (39078.5). GitHub's own Copilot panel reports
-    // 20,836.9 / 60,000 used for this plan, and the old label read
+    // 20,921.5 / 60,000 used for this snapshot, and the old label read
     // "39078 / 60000 left".
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse({
       quota_reset_date: '2026-11-01T00:00:00.000Z',

@@ -250,18 +250,23 @@ request count: a Business plan mid-cycle reports `entitlement: 60000` with
 half credit the account actually still holds; `quota_remaining` wins when both
 are present. The consumed figure is `entitlement - quota_remaining`, the same
 derivation GitHub's own Copilot panel uses, which for those live numbers gives
-20,921.5 credits spent and a `20,921.5 / 60,000 used` label. An entitlement that
-is unusable for the percent falls back to `entitlement - remaining`, and still no
-label when neither is available.
+20,921.5 credits spent and a `20,921.5 / 60,000 used` label. An entitlement that is
+unusable for the percent also yields no label, since the label and the percent share
+one derivation.
 
 Reporting the remaining axis instead (`39078 / 60000 left`) contradicted what the
 row's own percent, progress bar, and the used/remaining display toggle reported,
 and stated the opposite of VS Code for the same account at the same moment.
 `credits_used` (20,910 live) is monotonic consumption since the last reset and is
 deliberately not used as the label: it lags `percent_remaining` and would not sum
-to the entitlement. The percent itself keeps using `percent_remaining`, since
-`quota_remaining` and `percent_remaining` are two rounded views of the same
-balance and mixing them in one number is where the old label drifted.
+to the entitlement.
+
+The label is fixed to the used axis, so with the display preference set to
+`remaining` the bar and its caption flip to remaining while the number still reads
+`… used`. That mismatch is accepted deliberately: the Kimi section of this document
+declined a `valueLabel` for exactly this reason, and the label suppressing the
+percent is the defect this change removes, so shipping the percent instead would
+trade a wrong number for no number.
 
 ## OpenRouter key semantics
 
