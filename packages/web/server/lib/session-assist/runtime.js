@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { OpenCode } from '@opencode/client';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { isString } from '../shared/guards.js';
 import { loadAssistContext, newestContentId } from './context.js';
 import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
 
@@ -32,6 +33,22 @@ const GENERATION_TIMEOUT_MS = 120_000;
 // Enough records to look past the idle marker and a couple of switches.
 const TAIL_RECHECK_LIMIT = 8;
 const QUIET_FAILURE_CODES = new Set(['context-too-small', 'output-exhausted']);
+
+/**
+ * A one-line cause for a generation failure: the status, code, and a bounded
+ * message. A bare "generation failed" hides whether this was a cold-start 503,
+ * a provider rejection, or a bug, which is what tells a transient startup
+ * failure from a permanent one.
+ */
+const describeGenerationFailure = (error) => {
+  const parts = [];
+  const status = Number(error?.statusCode);
+  if (Number.isFinite(status)) parts.push(`status ${status}`);
+  const code = isString(error?.code) ? error.code.trim() : '';
+  if (code) parts.push(`code ${code}`);
+  if (error instanceof Error && error.message) parts.push(error.message.slice(0, 300));
+  return parts.join(' | ');
+};
 
 const extractJsonObject = (value) => {
   const text = String(value ?? '').trim();
@@ -202,7 +219,10 @@ export const createSessionAssistRuntime = ({
       });
     } catch (error) {
       if (!signal.aborted && Number(error?.statusCode) !== 404 && !QUIET_FAILURE_CODES.has(error?.code)) {
-        console.warn('[session-assist] generation failed');
+        // Keep the cause: a bare "generation failed" hides whether this was a
+        // cold-start 503, a provider rejection, or a bug, which is exactly what
+        // the operator needs to tell a transient startup from a permanent one.
+        console.warn('[session-assist] generation failed', describeGenerationFailure(error));
       }
       return;
     }
