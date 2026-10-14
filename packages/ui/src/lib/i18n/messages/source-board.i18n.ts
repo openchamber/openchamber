@@ -3,6 +3,9 @@ export const sourceBoardI18n = {
   en: {
     'sourceBoard.title': 'Issues and PRs',
     'sourceBoard.project.label': 'Project',
+    'sourceBoard.repository.label': 'Repository',
+    'sourceBoard.repository.search': 'Search repositories',
+    'sourceBoard.repository.noneFound': 'No repositories found',
     'sourceBoard.team.label': 'Linear team',
     'sourceBoard.team.all': 'All teams',
     'sourceBoard.list.github': 'GitHub issues and pull requests',
@@ -80,6 +83,9 @@ export const sourceBoardI18n = {
   de: {
     'sourceBoard.title': 'Issues und PRs',
     'sourceBoard.project.label': 'Projekt',
+    'sourceBoard.repository.label': 'Repository',
+    'sourceBoard.repository.search': 'Repositories durchsuchen',
+    'sourceBoard.repository.noneFound': 'Keine Repositories gefunden',
     'sourceBoard.team.label': 'Linear-Team',
     'sourceBoard.team.all': 'Alle Teams',
     'sourceBoard.list.github': 'GitHub-Issues und Pull Requests',
@@ -157,6 +163,9 @@ export const sourceBoardI18n = {
   fr: {
     'sourceBoard.title': 'Issues et PR',
     'sourceBoard.project.label': 'Projet',
+    'sourceBoard.repository.label': 'Dépôt',
+    'sourceBoard.repository.search': 'Rechercher des dépôts',
+    'sourceBoard.repository.noneFound': 'Aucun dépôt trouvé',
     'sourceBoard.team.label': 'Équipe Linear',
     'sourceBoard.team.all': 'Toutes les équipes',
     'sourceBoard.list.github': 'Issues et pull requests GitHub',
@@ -234,6 +243,9 @@ export const sourceBoardI18n = {
   nl: {
     'sourceBoard.title': 'Issues en PR’s',
     'sourceBoard.project.label': 'Project',
+    'sourceBoard.repository.label': 'Repository',
+    'sourceBoard.repository.search': 'Repositories zoeken',
+    'sourceBoard.repository.noneFound': 'Geen repositories gevonden',
     'sourceBoard.team.label': 'Linear-team',
     'sourceBoard.team.all': 'Alle teams',
     'sourceBoard.list.github': 'GitHub-issues en pull requests',
@@ -311,6 +323,9 @@ export const sourceBoardI18n = {
   es: {
     'sourceBoard.title': 'Issues y PR',
     'sourceBoard.project.label': 'Proyecto',
+    'sourceBoard.repository.label': 'Repositorio',
+    'sourceBoard.repository.search': 'Buscar repositorios',
+    'sourceBoard.repository.noneFound': 'No se encontraron repositorios',
     'sourceBoard.team.label': 'Equipo de Linear',
     'sourceBoard.team.all': 'Todos los equipos',
     'sourceBoard.list.github': 'Issues y pull requests de GitHub',
@@ -388,6 +403,9 @@ export const sourceBoardI18n = {
   ja: {
     'sourceBoard.title': 'Issue と PR',
     'sourceBoard.project.label': 'プロジェクト',
+    'sourceBoard.repository.label': 'リポジトリ',
+    'sourceBoard.repository.search': 'リポジトリを検索',
+    'sourceBoard.repository.noneFound': 'リポジトリが見つかりません',
     'sourceBoard.team.label': 'Linear チーム',
     'sourceBoard.team.all': 'すべてのチーム',
     'sourceBoard.list.github': 'GitHub の Issue とプルリクエスト',
@@ -465,6 +483,9 @@ export const sourceBoardI18n = {
   'pt-BR': {
     'sourceBoard.title': 'Issues e PRs',
     'sourceBoard.project.label': 'Projeto',
+    'sourceBoard.repository.label': 'Repositório',
+    'sourceBoard.repository.search': 'Pesquisar repositórios',
+    'sourceBoard.repository.noneFound': 'Nenhum repositório encontrado',
     'sourceBoard.team.label': 'Time do Linear',
     'sourceBoard.team.all': 'Todos os times',
     'sourceBoard.list.github': 'Issues e pull requests do GitHub',
@@ -542,6 +563,9 @@ export const sourceBoardI18n = {
   uk: {
     'sourceBoard.title': 'Issues і PR',
     'sourceBoard.project.label': 'Проєкт',
+    'sourceBoard.repository.label': 'Репозиторій',
+    'sourceBoard.repository.search': 'Пошук репозиторіїв',
+    'sourceBoard.repository.noneFound': 'Репозиторії не знайдено',
     'sourceBoard.team.label': 'Команда Linear',
     'sourceBoard.team.all': 'Усі команди',
     'sourceBoard.list.github': 'Issues і pull requests з GitHub',
@@ -619,6 +643,9 @@ export const sourceBoardI18n = {
   ko: {
     'sourceBoard.title': '이슈와 PR',
     'sourceBoard.project.label': '프로젝트',
+    'sourceBoard.repository.label': '저장소',
+    'sourceBoard.repository.search': '저장소 검색',
+    'sourceBoard.repository.noneFound': '저장소를 찾을 수 없습니다',
     'sourceBoard.team.label': 'Linear 팀',
     'sourceBoard.team.all': '모든 팀',
     'sourceBoard.list.github': 'GitHub 이슈와 풀 리퀘스트',
@@ -696,6 +723,9 @@ export const sourceBoardI18n = {
   pl: {
     'sourceBoard.title': 'Issues i PR-y',
     'sourceBoard.project.label': 'Projekt',
+    'sourceBoard.repository.label': 'Repozytorium',
+    'sourceBoard.repository.search': 'Szukaj repozytoriów',
+    'sourceBoard.repository.noneFound': 'Nie znaleziono repozytoriów',
     'sourceBoard.team.label': 'Zespół w Linear',
     'sourceBoard.team.all': 'Wszystkie zespoły',
     'sourceBoard.list.github': 'Issues i pull requesty z GitHuba',
@@ -773,6 +803,9 @@ export const sourceBoardI18n = {
   'zh-CN': {
     'sourceBoard.title': 'Issue 和 PR',
     'sourceBoard.project.label': '项目',
+    'sourceBoard.repository.label': '仓库',
+    'sourceBoard.repository.search': '搜索仓库',
+    'sourceBoard.repository.noneFound': '未找到仓库',
     'sourceBoard.team.label': 'Linear 团队',
     'sourceBoard.team.all': '所有团队',
     'sourceBoard.list.github': 'GitHub 的 Issue 和拉取请求',
@@ -850,6 +883,9 @@ export const sourceBoardI18n = {
   'zh-TW': {
     'sourceBoard.title': 'Issue 與 PR',
     'sourceBoard.project.label': '專案',
+    'sourceBoard.repository.label': '儲存庫',
+    'sourceBoard.repository.search': '搜尋儲存庫',
+    'sourceBoard.repository.noneFound': '找不到儲存庫',
     'sourceBoard.team.label': 'Linear 團隊',
     'sourceBoard.team.all': '所有團隊',
     'sourceBoard.list.github': 'GitHub 的 Issue 與拉取請求',
@@ -927,6 +963,9 @@ export const sourceBoardI18n = {
   tr: {
     'sourceBoard.title': 'Issue’lar ve PR’lar',
     'sourceBoard.project.label': 'Proje',
+    'sourceBoard.repository.label': 'Repository',
+    'sourceBoard.repository.search': 'Repository ara',
+    'sourceBoard.repository.noneFound': 'Repository bulunamadı',
     'sourceBoard.team.label': 'Linear ekibi',
     'sourceBoard.team.all': 'Tüm ekipler',
     'sourceBoard.list.github': 'GitHub issue’ları ve pull request’leri',
@@ -1004,6 +1043,9 @@ export const sourceBoardI18n = {
   ar: {
     'sourceBoard.title': 'المشكلات وطلبات السحب',
     'sourceBoard.project.label': 'المشروع',
+    'sourceBoard.repository.label': 'المستودع',
+    'sourceBoard.repository.search': 'البحث في المستودعات',
+    'sourceBoard.repository.noneFound': 'لم يُعثر على مستودعات',
     'sourceBoard.team.label': 'فريق Linear',
     'sourceBoard.team.all': 'كل الفرق',
     'sourceBoard.list.github': 'مشكلات وطلبات سحب GitHub',
@@ -1081,6 +1123,9 @@ export const sourceBoardI18n = {
   he: {
     'sourceBoard.title': 'בעיות ו-PR',
     'sourceBoard.project.label': 'פרויקט',
+    'sourceBoard.repository.label': 'מאגר',
+    'sourceBoard.repository.search': 'חיפוש מאגרים',
+    'sourceBoard.repository.noneFound': 'לא נמצאו מאגרים',
     'sourceBoard.team.label': 'צוות Linear',
     'sourceBoard.team.all': 'כל הצוותים',
     'sourceBoard.list.github': 'בעיות ובקשות משיכה ב-GitHub',

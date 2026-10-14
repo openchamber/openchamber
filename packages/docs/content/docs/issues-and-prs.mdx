@@ -21,6 +21,8 @@ The board reopens on the project, tab and team you left it on.
 
 Everything sits in one toolbar row. On the left is the project picker, with project icons and a search. Next to it you switch between **Issues**, **Pull requests** and **Linear**. Issues and pull requests come from the project's own host, GitHub or GitLab. A project with neither remote shows only **Linear**.
 
+If a project's folder isn't a Git repository itself but has repositories inside it, a second picker next to the project picker chooses which of them the board lists. It opens on the first one and remembers your choice for each project. The repository you pick here is separate from the one the Git view has selected. Issues, pull requests, comments, labels, reviewers and merging all work on the chosen repository. **New session** still starts in the project's folder. **Changes** and **Walkthrough** switch the Git view to the chosen repository before they open. Starting work in a worktree isn't offered for these items yet.
+
 On **Linear** the project picker becomes a team picker: choose **All teams** or one team. If you've connected more than one Linear workspace, switch workspaces from the same menu. Connecting Linear is covered in [Integrations](/integrations/).
 
 Search takes a title, a number, or a pasted link. The filter menu stays open while you pick, so you can combine filters.

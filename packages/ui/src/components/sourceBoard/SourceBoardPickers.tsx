@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
+import { Input } from '@/components/ui/input';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { LinearTeamMapping, ProjectEntry } from '@/lib/api/types';
@@ -30,6 +32,8 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { rankByQuery } from '@/lib/search/fuzzySearch';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+
+import { repositoryLabel } from './boardRepository';
 
 const projectName = (project: ProjectEntry): string => project.label?.trim() || formatDirectoryName(project.path) || project.path;
 
@@ -157,6 +161,126 @@ export const SourceBoardProjectPicker: React.FC<{
                                     <CommandItem key={project.id} value={project.id} onSelect={choose} aria-current={project.id === selected.id ? true : undefined} className="max-w-full">
                                         <span className="min-w-0 flex-1 truncate"><ProjectLabel project={project} theme={currentTheme} /></span>
                                         {project.id === selected.id ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                                    </CommandItem>
+                                ))}
+                            </CommandList>
+                        </Command>
+                    </Popover.Popup>
+                </Popover.Positioner>
+            </Popover.Portal>
+        </Popover.Root>
+    );
+};
+
+/**
+ * Which repository under the project's folder the board lists, shown beside
+ * the project picker while the folder is not a repository itself.
+ */
+export const SourceBoardRepositoryPicker: React.FC<{
+    repositories: readonly string[];
+    selected: string;
+    /** The project's folder the repository paths are shown relative to. */
+    root: string;
+    onSelect: (repository: string) => void;
+    /** The phone shell picks from a bottom sheet, like the project picker. */
+    sheet?: boolean;
+}> = ({ repositories, selected, root, onSelect, sheet = false }) => {
+    const { t } = useI18n();
+    const [open, setOpen] = React.useState(false);
+    const [query, setQuery] = React.useState('');
+    const [activeId, setActiveId] = React.useState<string | null>(null);
+    const searchRef = React.useRef<HTMLInputElement>(null);
+    const ariaLabel = t('sourceBoard.repository.label');
+    const searchLabel = t('sourceBoard.repository.search');
+    const ranked = React.useMemo(
+        () => (query ? rankByQuery(repositories, query, (repository) => [repositoryLabel(repository, root)]) : [...repositories]),
+        [query, repositories, root],
+    );
+    const effectiveActive = activeId && ranked.includes(activeId) ? activeId : ranked[0] ?? null;
+    const choose = (repository: string) => {
+        onSelect(repository);
+        setOpen(false);
+    };
+    // Not shrink-0 like the project picker: beside it, this is the one that truncates.
+    const triggerClass = cn('min-w-0 w-fit justify-start gap-1 normal-case data-[popup-open]:bg-interactive-hover', TRIGGER_CLASS.toolbar);
+    const triggerContent = (
+        <span className="flex min-w-0 items-center gap-1.5">
+            <Icon name="folder-3" className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{repositoryLabel(selected, root)}</span>
+            <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
+        </span>
+    );
+
+    if (sheet) {
+        return (
+            <>
+                <Button variant="ghost" size="sm" aria-label={ariaLabel} aria-haspopup="dialog" onClick={() => setOpen(true)} className={triggerClass}>
+                    {triggerContent}
+                </Button>
+                <MobileOverlayPanel open={open} title={ariaLabel} onClose={() => { setOpen(false); setQuery(''); }}>
+                    <div className="flex flex-col gap-2 px-3 pb-4 pt-1">
+                        <Input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-9" />
+                        <div className="flex flex-col">
+                            {ranked.length === 0 ? (
+                                <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
+                            ) : ranked.map((repository) => (
+                                <button
+                                    key={repository}
+                                    type="button"
+                                    className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                    onClick={() => { choose(repository); setQuery(''); }}
+                                >
+                                    <span className="min-w-0 flex-1 truncate">{repositoryLabel(repository, root)}</span>
+                                    {repository === selected ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </MobileOverlayPanel>
+            </>
+        );
+    }
+
+    return (
+        <Popover.Root
+            open={open}
+            onOpenChange={(next) => {
+                setOpen(next);
+                setQuery('');
+                setActiveId(next ? selected : null);
+            }}
+            onOpenChangeComplete={(next) => { if (next) searchRef.current?.focus(); }}
+        >
+            <Popover.Trigger render={<Button variant="ghost" size="sm" aria-label={ariaLabel} aria-haspopup="dialog" className={triggerClass} />}>
+                {triggerContent}
+            </Popover.Trigger>
+            <Popover.Portal>
+                <Popover.Positioner side="bottom" align="start" sideOffset={4} className="z-50">
+                    <Popover.Popup role="dialog" aria-label={ariaLabel} className={cn(dropdownMenuPopupClass, 'flex w-72 max-w-[calc(100vw-2rem)] flex-col p-0')} initialFocus={false}>
+                        <Command className="min-h-0 flex-1" shouldFilter={false} value={effectiveActive ?? undefined} onValueChange={setActiveId}>
+                            <CommandInput
+                                ref={searchRef}
+                                aria-label={searchLabel}
+                                placeholder={searchLabel}
+                                value={query}
+                                onValueChange={setQuery}
+                                onKeyDown={(event) => {
+                                    if (isIMECompositionEvent(event)) {
+                                        event.stopPropagation();
+                                        return;
+                                    }
+                                    handleDropdownNavigationKey(event, (navigationKey) => {
+                                        event.currentTarget.dispatchEvent(new KeyboardEvent('keydown', { key: navigationKey, bubbles: true, cancelable: true }));
+                                    });
+                                }}
+                            />
+                            <CommandList label={ariaLabel}>
+                                {ranked.length === 0 ? (
+                                    <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">{t('sourceBoard.repository.noneFound')}</div>
+                                ) : ranked.map((repository) => (
+                                    <CommandItem key={repository} value={repository} onSelect={choose} aria-current={repository === selected ? true : undefined} className="max-w-full">
+                                        <span className="min-w-0 flex-1 truncate">{repositoryLabel(repository, root)}</span>
+                                        {repository === selected ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
                                     </CommandItem>
                                 ))}
                             </CommandList>

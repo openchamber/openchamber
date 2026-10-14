@@ -7,6 +7,10 @@
  * switching it never changes the project the rest of the app shows; only an
  * action that opens something in a project (a session, its changes) moves the
  * app there.
+ *
+ * A project whose folder is not a repository but holds some is read through
+ * one of them, chosen beside the project picker; the board's choice is its
+ * own and leaves the Git screen's selection alone.
  */
 
 import * as React from 'react';
@@ -42,7 +46,8 @@ import { SourceBoardLinearStatus } from './SourceBoardLinearStatus';
 import { SourceBoardReply } from './SourceBoardReply';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
-import { SourceBoardProjectPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
+import { SourceBoardProjectPicker, SourceBoardRepositoryPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
+import { useBoardRepository } from './boardRepository';
 import { usePullAttachments } from './pullAttachments';
 
 const LIST_MIN_WIDTH = 280;
@@ -155,14 +160,19 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         ?? projects.find((entry) => entry.id === activeProjectId)
         ?? projects[0]
         ?? null;
-    const directory = project ? normalizeProjectPath(project.path) : null;
+    const projectRoot = project ? normalizeProjectPath(project.path) : null;
+    // The folder everything below reads from: the project's root, or the
+    // repository under it when the root is not one.
+    const repository = useBoardRepository(projectRoot, project ? choice.repositoryByProject[project.id] ?? null : null);
+    const directory = repository.directory;
     const hostProvider = useRepositoryHostProvider(directory);
     const hasRepository = hostProvider === 'github' || hostProvider === 'gitlab';
     const hasLinear = Boolean(linear);
     const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
+    // Until the folder says whether it holds a repository, Linear is not the answer.
     const tab: SourceBoardTab | null = choice.tab === 'linear' && hasLinear
         ? 'linear'
-        : hasRepository ? 'repository' : hasLinear ? 'linear' : null;
+        : hasRepository ? 'repository' : repository.status === 'pending' ? null : hasLinear ? 'linear' : null;
 
     const linearWorkspaceId = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
     const mapping = useLinearMapping(tab === 'linear' && linearConnected, linearWorkspaceId);
@@ -179,6 +189,16 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
             sheet={layout === 'mobile'}
         />
     ) : null;
+    const repositoryPicker = projectRoot && directory && repository.repositories.length > 0 ? (
+        <SourceBoardRepositoryPicker
+            repositories={repository.repositories}
+            selected={directory}
+            root={projectRoot}
+            onSelect={(repositoryPath) => { if (project) updateChoice({ repositoryByProject: { [project.id]: repositoryPath }, tab: 'repository' }); }}
+            sheet={layout === 'mobile'}
+        />
+    ) : null;
+    const projectScope = <>{projectPicker}{repositoryPicker}</>;
     // On Linear the board lists a team, not a project.
     const scopePicker = tab === 'linear' ? (
         <SourceBoardTeamPicker
@@ -187,7 +207,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
             onSelectTeam={(teamId) => updateChoice({ linearTeamId: teamId })}
             onWorkspaceSwitched={() => updateChoice({ linearTeamId: null })}
         />
-    ) : projectPicker;
+    ) : projectScope;
 
     const selectKind = (kind: SourceBoardKind) => {
         if (kind === 'linear') {
@@ -202,16 +222,30 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         return (
             <>
                 {layout === 'mobile' ? (
-                    <MobileBoardHeader onClose={onClose}>{projectPicker}</MobileBoardHeader>
+                    <MobileBoardHeader onClose={onClose}>{projectScope}</MobileBoardHeader>
                 ) : (
-                    <div className="flex h-12 shrink-0 items-center border-b border-border/60 px-2">{projectPicker}</div>
+                    <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">{projectScope}</div>
                 )}
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
-                    <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
-                    {projects.length > 0 ? (
-                        <Button size="sm" variant="outline" onClick={openIntegrationsSettings}>{t('references.picker.actions.openSettings')}</Button>
-                    ) : null}
-                </div>
+                {repository.status === 'ready' ? (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
+                        <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
+                        {projects.length > 0 ? (
+                            <Button size="sm" variant="outline" onClick={openIntegrationsSettings}>{t('references.picker.actions.openSettings')}</Button>
+                        ) : null}
+                    </div>
+                ) : (
+                    // Looking for the folder's repositories, or unable to: neither says there are none.
+                    <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
+                        {repository.status === 'pending' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
+                        <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
+                        {repository.status === 'failed' ? (
+                            <Button size="sm" variant="outline" onClick={repository.retry}>
+                                <Icon name="refresh" className="size-3.5" />
+                                {t('gitView.empty.retryDiscovery')}
+                            </Button>
+                        ) : null}
+                    </div>
+                )}
             </>
         );
     }
@@ -343,7 +377,10 @@ const SourceBoardBody: React.FC<{
         : project;
     const actionPath = actionProjectEntry ? normalizeProjectPath(actionProjectEntry.path) : null;
     const actionProject: SourceBoardProject | null = actionProjectEntry && actionPath ? { id: actionProjectEntry.id, path: actionPath } : null;
-    const actionContext = useGitHubReadContext(actionProject?.path ?? null);
+    // A Linear issue is read nowhere; an issue or PR is acted on in the repository it was listed from.
+    // An item of a repository under a root that is not one: the project itself is no repository to branch from.
+    const readsNestedRepository = tab === 'repository' && actionPath !== null && directory !== null && directory !== actionPath;
+    const actionContext = useGitHubReadContext(tab === 'linear' ? actionProject?.path ?? null : directory);
     const context: SourceControlReadContext | null = actionContext && actionContext !== 'missing' ? actionContext : null;
 
     const projectOwnsDirectory = React.useCallback((candidate: string | undefined) => {
@@ -377,6 +414,7 @@ const SourceBoardBody: React.FC<{
             onChanged={browser.list.retry}
             startIn={startIn}
             onLeave={onLeave}
+            worktreeAvailable={!readsNestedRepository}
         />
     ) : null;
 
@@ -448,6 +486,7 @@ const SourceBoardBody: React.FC<{
                 <SourceBoardPullLinks
                     pull={previewItem.reference}
                     project={actionProject}
+                    repository={tab === 'repository' ? directory : null}
                     context={context}
                     projectOwnsDirectory={projectOwnsDirectory}
                     currentDirectory={currentDirectory}

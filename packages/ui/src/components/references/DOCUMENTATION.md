@@ -86,6 +86,29 @@ preview's footer holds actions instead of what the agent gets.
 - The repository tab is the project's host only: GitHub or GitLab, whichever
   `useRepositoryHostProvider` names; a project with no supported remote shows
   Linear alone.
+- The board reads one folder, `useBoardRepository` (`sourceBoard/boardRepository.ts`):
+  the project's root when it is a git repository, as always. When the root is
+  not one but repositories lie under it, the board reads one of them, and a
+  second picker beside the project picker (`SourceBoardRepositoryPicker`, a
+  bottom sheet on the phone) chooses it. Discovery is the Git store's
+  (`ensureNestedRepos`), read only: the board never calls `selectNestedRepo`, so
+  its choice (`repositoryByProject`, one repository per project id in the
+  persisted board choice; updates merge into the map, older data reads as
+  empty) is independent of the Git screen's. A remembered repository that is
+  no longer discovered falls back to the first. While the root is probed and
+  the folder searched, a root without a remote shows a loading state instead of
+  the no-remote one; a failed search shows an error with Retry and is never
+  read as "no repositories"; a runtime without discovery (`'unsupported'`)
+  stays at the root. Lists, preview, labels, reviewers, reply, merge and the
+  other writes use the chosen repository's read context. New session and
+  Attach keep the project's root. Changes and Walkthrough of such a PR first
+  move the Git screen's nested selection of the project's root to the chosen
+  repository (`resolvePullLinkTarget`, the one place the board touches it), then
+  key the request by that repository, which is what the diff and walkthrough
+  views resolve; a session already inside the repository is used as it is.
+  Worktree actions (check out a PR, start an issue in a worktree) are not
+  offered for these items: creating one needs the project itself to be a
+  repository.
 - The toolbar is one row: the scope (a project picker with icons and search,
   like the draft composer's; a team picker on Linear, with the workspace in the
   same menu when there is more than one), one switch for Issues, Pull requests
