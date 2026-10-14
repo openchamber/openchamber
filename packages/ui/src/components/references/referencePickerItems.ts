@@ -18,7 +18,8 @@ export type ReferencePickerSource = 'github' | 'linear';
 
 /** One row of the picker, from either source. */
 export type ReferencePickerItem =
-    | { source: 'github'; reference: GitHubReference }
+    /** `directory`: in a list across several repositories, the folder whose read context the item belongs to. */
+    | { source: 'github'; reference: GitHubReference; directory?: string }
     | { source: 'linear'; issue: LinearIssueSummary };
 
 /** A confirmed choice: the item plus what the user set on it in the picker. */

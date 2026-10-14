@@ -18,15 +18,16 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { GitHubPullReference, SourceControlReadContext } from '@/lib/api/types';
 import type { PullRequestSource } from '@/lib/diff/pullRequestDiff';
 import { useI18n } from '@/lib/i18n';
-import { normalizePath } from '@/lib/pathNormalization';
 import { cn } from '@/lib/utils';
 import type { SetStateInput, SourceControlCapabilities } from '@/lib/source-control/types';
 import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { useGitStore } from '@/stores/useGitStore';
 import { usePullRequestSelectionStore } from '@/stores/usePullRequestSelectionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSession } from '@/sync/sync-context';
+import { resolvePullLinkTarget } from './boardRepository';
 import { newMutationKey } from './mutationKey';
 
 /** A project the board acts in: its id and root folder. */
@@ -96,7 +97,9 @@ export const SourceBoardActions: React.FC<{
     startIn?: React.ReactNode;
     /** The phone shell's page closes once a session starts; the desktop page closes on its own. */
     onLeave?: () => void;
-}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave }) => {
+    /** False for an item of a repository under the project's root: a worktree needs the project itself to be one. */
+    worktreeAvailable: boolean;
+}> = ({ item, project, context, onStartWorktree, onChanged, startIn, onLeave, worktreeAvailable }) => {
     const { t } = useI18n();
     const { sourceControl, linear } = useRuntimeAPIs();
     const confirmation = useConfirmDialog();
@@ -279,10 +282,12 @@ export const SourceBoardActions: React.FC<{
                                     <Icon name="chat-new" className="size-4 shrink-0" />
                                     {t('sourceBoard.actions.newSession')}
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => onStartWorktree(project, selectionOf(item))}>
-                                    <Icon name="git-branch" className="size-4 shrink-0" />
-                                    {t(pull ? 'sourceBoard.actions.checkoutWorktree' : 'sourceBoard.actions.newWorktreeSession')}
-                                </DropdownMenuItem>
+                                {worktreeAvailable ? (
+                                    <DropdownMenuItem onSelect={() => onStartWorktree(project, selectionOf(item))}>
+                                        <Icon name="git-branch" className="size-4 shrink-0" />
+                                        {t(pull ? 'sourceBoard.actions.checkoutWorktree' : 'sourceBoard.actions.newWorktreeSession')}
+                                    </DropdownMenuItem>
+                                ) : null}
                             </>
                         ) : null}
                     </DropdownMenuContent>
@@ -309,33 +314,42 @@ const LINK_CLASS = cn(
 export const SourceBoardPullLinks: React.FC<{
     pull: GitHubPullReference;
     project: SourceBoardProject;
+    /** The folder the board reads; a repository under the project's root when the root is not one. */
+    repository: string | null;
     context: SourceControlReadContext;
     projectOwnsDirectory: (directory: string | undefined) => boolean;
     currentDirectory: string | undefined;
     onLeave?: () => void;
-}> = ({ pull, project, context, projectOwnsDirectory, currentDirectory, onLeave }) => {
+}> = ({ pull, project, repository, context, projectOwnsDirectory, currentDirectory, onLeave }) => {
     const { t } = useI18n();
     const mobile = useMobileAppActions();
     const open = (surface: 'diff' | 'walkthrough') => {
         const source: PullRequestSource = { kind: 'pr', number: pull.number, sourceRepo: { owner: pull.sourceRepo.owner, repo: pull.sourceRepo.repo } };
         const ui = useUIStore.getState();
-        const directory = currentDirectory && projectOwnsDirectory(currentDirectory) ? currentDirectory : project.path;
-        if (directory === currentDirectory) ui.closeMainSurfaces();
+        const { appDirectory, requestDirectory, mobileRequestDirectory, selectNestedIn } = resolvePullLinkTarget({
+            projectPath: project.path,
+            repository,
+            ownedCurrentDirectory: currentDirectory && projectOwnsDirectory(currentDirectory) ? currentDirectory : null,
+        });
+        if (appDirectory === currentDirectory) ui.closeMainSurfaces();
         else useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.path });
+        // Only this explicit action moves the Git screen's repository; browsing the board never does.
+        if (selectNestedIn) useGitStore.getState().selectNestedRepo(selectNestedIn, requestDirectory);
         if (surface === 'diff') {
             if (mobile) {
-                // The phone's Changes looks requests up by the normalized folder.
-                usePullRequestSelectionStore.getState().requestDiff(normalizePath(directory) ?? directory, source);
+                // The phone's Changes looks requests up by the normalized folder the app
+                // shows and finds the repository through the Git selection moved above.
+                usePullRequestSelectionStore.getState().requestDiff(mobileRequestDirectory, source);
                 onLeave?.();
                 mobile.openChanges();
                 return;
             }
-            usePullRequestSelectionStore.getState().requestDiff(directory, source);
-            ui.openContextPanelTab(directory, { mode: 'diff', diffScope: 'pr' });
+            usePullRequestSelectionStore.getState().requestDiff(requestDirectory, source);
+            ui.openContextPanelTab(appDirectory, { mode: 'diff', diffScope: 'pr' });
             return;
         }
-        useWalkthroughStore.getState().requestTarget(directory, { source, context });
-        ui.openContextSurface(directory, 'walkthrough');
+        useWalkthroughStore.getState().requestTarget(requestDirectory, { source, context });
+        ui.openContextSurface(appDirectory, 'walkthrough');
     };
     return (
         <span className="inline-flex items-center gap-1">

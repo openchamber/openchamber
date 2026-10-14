@@ -16,15 +16,28 @@ type SourceBoardChoice = {
   tab: SourceBoardTab;
   /** Null lists every team. */
   linearTeamId: string | null;
+  /**
+   * Per project id, the nested repository the board lists while that project's
+   * root is not a repository itself; the board's own, never the Git screen's
+   * selection. Ignored once the repository is no longer among the discovered ones.
+   */
+  repositoryByProject: Record<string, string>;
+  /**
+   * Per project id, whether the board lists every repository under the folder
+   * together (true) or just the one in `repositoryByProject` (false). Absent:
+   * the board's default, all of them unless a single repository was remembered.
+   */
+  allRepositoriesByProject: Record<string, boolean>;
 };
 
-const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', linearTeamId: null };
+const EMPTY_CHOICE: SourceBoardChoice = { projectId: null, tab: 'repository', linearTeamId: null, repositoryByProject: {}, allRepositoriesByProject: {} };
 
 type SourceBoardState = {
   /** Keyed by runtime: project and team ids belong to one server. */
   choices: Record<string, SourceBoardChoice>;
   /** A Linear issue another surface asked the board to show; taken once. */
   linearFocus: string | null;
+  /** Merges `patch` into the choice; the per-project maps merge into the existing ones. */
   update: (patch: Partial<SourceBoardChoice>) => void;
   /** Switches to Linear and previews the issue `identifier` names; the caller opens the board. */
   focusLinearIssue: (identifier: string) => void;
@@ -44,6 +57,9 @@ const persistedChoices = z.object({
     projectId: z.string().nullable().catch(null),
     tab: z.enum(['repository', 'linear']).catch('repository'),
     linearTeamId: z.string().nullable().catch(null),
+    // Absent from data stored before nested repositories were supported.
+    repositoryByProject: z.record(z.string(), z.string()).catch({}),
+    allRepositoriesByProject: z.record(z.string(), z.boolean()).catch({}),
   })).catch({}),
   listWidth: z.number().positive().nullable().catch(null).optional(),
 });
@@ -59,7 +75,10 @@ export const useSourceBoardStore = create<SourceBoardState>()(
       linearFocus: null,
       update: (patch) => set((state) => {
         const runtimeKey = getRuntimeKey();
-        return { choices: { ...state.choices, [runtimeKey]: { ...(state.choices[runtimeKey] ?? EMPTY_CHOICE), ...patch } } };
+        const current = state.choices[runtimeKey] ?? EMPTY_CHOICE;
+        const repositoryByProject = { ...current.repositoryByProject, ...patch.repositoryByProject };
+        const allRepositoriesByProject = { ...current.allRepositoriesByProject, ...patch.allRepositoriesByProject };
+        return { choices: { ...state.choices, [runtimeKey]: { ...current, ...patch, repositoryByProject, allRepositoriesByProject } } };
       }),
       focusLinearIssue: (identifier) => {
         get().update({ tab: 'linear', linearTeamId: null });

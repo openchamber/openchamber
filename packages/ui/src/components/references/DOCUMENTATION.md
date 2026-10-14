@@ -86,6 +86,60 @@ preview's footer holds actions instead of what the agent gets.
 - The repository tab is the project's host only: GitHub or GitLab, whichever
   `useRepositoryHostProvider` names; a project with no supported remote shows
   Linear alone.
+- The board reads one folder, `useBoardRepository` (`sourceBoard/boardRepository.ts`):
+  the project's root when it is a git repository, as always. When the root is
+  not one but repositories lie under it, the board reads one of them, or all of
+  them together, and a second picker beside the project picker
+  (`SourceBoardRepositoryPicker`, a bottom sheet on the phone) chooses.
+  Discovery is the Git store's (`ensureNestedRepos`), read only: the board never
+  calls `selectNestedRepo` for browsing, so its choice is independent of the Git
+  screen's. The choice is per project id in the persisted board choice:
+  `repositoryByProject` (the single repository) and `allRepositoriesByProject`
+  (whether all are listed; absent means all, unless a single repository was
+  remembered before this existed). Updates merge into both maps, older data
+  reads as empty. A remembered repository that is no longer discovered falls
+  back to the first. While the root is probed and the folder searched, a root
+  without a remote shows a loading state instead of the no-remote one; a failed
+  search shows an error with Retry and is never read as "no repositories"; a
+  runtime without discovery (`'unsupported'`) stays at the root.
+- **All repositories** is the picker's first entry and the default for such a
+  folder, offered only where `sourceControl.githubReferencesAcross` exists (not
+  VS Code, which falls back to the first repository). The list, its search
+  (including a pasted link or `#number`, which the server resolves) and paging
+  come from one `githubReferencesAcross` call per page
+  (`useGitHubAcrossReferenceList`) with the read contexts of every nested
+  repository that has a GitHub one, gathered by `useGitHubReadContexts` (one
+  hook over the folders' bindings, `useRepositoryBindings`, not a loop). It
+  waits until every folder's context is known; its cache key carries the set of
+  contexts asked, so a change in it lists again. A GitLab folder or one with no
+  readable context is not sent; one the answer skips (`no-repo`, `disconnected`,
+  `invalid-context`, `error`) is reported with the page (`ListPage.skipped`). A
+  quiet note above the rows (`SourceBoardAcrossNote`) counts the repositories
+  left out of the list, and its menu names them with the reason. Rows name
+  their repository (the upstream-chip pattern, shown on every row). Each item
+  carries `directory`, the folder it was read through, and everything per item
+  uses it: detail (`useGitHubReferenceDetail`), the read context of merge, ready,
+  close or reopen, labels, reviewers, reply and the checks dialog, and Changes
+  and Walkthrough. Open PRs' checks are asked per folder, each group through its
+  own context and in batches, and a group that fails leaves the others
+  (`ensurePullStatuses`). The pure parts are in `references/acrossRepositories.ts`.
+- A GitHub link opened on the board (`repositoryFocus`) from a session in such a
+  folder lists all repositories first (`choiceForFocus`, decided in the board
+  because discovery lives there, so it waits for the probe and discovery and the
+  pinned lookup never runs against a stale single repository), remembers that
+  as the project's choice, and opens the item in its own repository. A root that
+  is a repository, or a runtime without the search, is unchanged.
+- With one repository chosen (or a folder that is one), lists, preview, labels,
+  reviewers, reply, merge and the other writes use that repository's read
+  context. New session and Attach keep the project's root. Changes and
+  Walkthrough of a PR from a repository under a root that is not one first move
+  the Git screen's nested selection of the project's root to that repository
+  (`resolvePullLinkTarget`, the one place the board touches it, for the item's
+  `directory`), then key the request by that repository, which is what the diff
+  and walkthrough views resolve; a session already inside the repository is used
+  as it is. The phone's Changes reads the request under the normalized folder the app shows (`mobileRequestDirectory`), not the repository, and finds the repository through the same Git selection. Worktree actions (check out a PR, start an issue in a worktree) are
+  not offered for these items: creating one needs the project itself to be a
+  repository.
 - The toolbar is one row: the scope (a project picker with icons and search,
   like the draft composer's; a team picker on Linear, with the workspace in the
   same menu when there is more than one), one switch for Issues, Pull requests
