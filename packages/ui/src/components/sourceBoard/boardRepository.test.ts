@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { repositoryLabel, resolveBoardRepository, resolvePullLinkTarget } from './boardRepository';
+import { choiceForFocus, repositoryLabel, resolveBoardRepository, resolvePullLinkTarget, shouldRememberAll } from './boardRepository';
 
 const ROOT = '/work';
 const REPOS = ['/work/app', '/work/api'];
@@ -91,5 +91,39 @@ describe('resolvePullLinkTarget', () => {
     expect(nested.requestDirectory).toBe('/work/api');
     expect(nested.mobileRequestDirectory).toBe('/work');
     expect(resolvePullLinkTarget({ projectPath: ROOT, repository: '/work/api', ownedCurrentDirectory: '/work/app' }).mobileRequestDirectory).toBe(ROOT);
+  });
+});
+
+describe('a link focus on a project', () => {
+  const single = { path: '/work/api', all: false };
+  const resolve = (rootIsGitRepo: boolean | null, repos: string[] | undefined, across: boolean, focusPending: boolean) => (
+    resolveBoardRepository(ROOT, rootIsGitRepo, repos, choiceForFocus(single, focusPending), across)
+  );
+
+  test('lists the folder\'s repositories together, whatever single one was chosen', () => {
+    expect(resolve(false, REPOS, true, true)).toMatchObject({ status: 'ready', directory: ROOT, all: true });
+    expect(resolve(false, REPOS, true, false)).toMatchObject({ directory: '/work/api', all: false });
+  });
+
+  test('leaves a root that is a repository, and a runtime that cannot list across them, as they are', () => {
+    expect(resolve(true, REPOS, true, true)).toEqual({ status: 'ready', directory: ROOT, repositories: [], all: false });
+    expect(resolve(false, REPOS, false, true)).toMatchObject({ directory: '/work/api', all: false });
+  });
+
+  test('is decided once the folder is known, not before', () => {
+    expect(resolve(null, undefined, true, true)).toMatchObject({ status: 'pending', all: false });
+    expect(resolve(false, undefined, true, true)).toMatchObject({ status: 'pending', all: false });
+    expect(resolve(false, REPOS, true, true)).toMatchObject({ status: 'ready', all: true });
+  });
+
+  test('is remembered for the project only when the focus made it list all of them', () => {
+    const all = resolve(false, REPOS, true, true);
+    expect(shouldRememberAll(all, false, true)).toBe(true);
+    expect(shouldRememberAll(all, undefined, true)).toBe(true);
+    expect(shouldRememberAll(all, true, true)).toBe(false);
+    expect(shouldRememberAll(all, false, false)).toBe(false);
+    expect(shouldRememberAll(resolve(true, REPOS, true, true), false, true)).toBe(false);
+    expect(shouldRememberAll(resolve(false, REPOS, false, true), false, true)).toBe(false);
+    expect(shouldRememberAll(resolve(false, undefined, true, true), false, true)).toBe(false);
   });
 });

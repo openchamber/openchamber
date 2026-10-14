@@ -55,6 +55,22 @@ export function resolveBoardRepository(
     return { status: 'ready', directory, repositories: nestedRepos, all: false };
 }
 
+/**
+ * A link to an issue or PR is looked up across the folder's repositories: a
+ * repository focus pending for the project reads as choosing "all", so the
+ * lookup never runs first against a single repository that may not hold the
+ * item. Where the root is a repository, or the runtime cannot list across
+ * repositories, `resolveBoardRepository` ignores it as it ignores any "all".
+ */
+export const choiceForFocus = (choice: RepositoryChoice, focusPending: boolean): RepositoryChoice => (
+    focusPending ? { ...choice, all: true } : choice
+);
+
+/** The focus made the board list all repositories: remember that, as if the user had picked it. */
+export const shouldRememberAll = (resolution: BoardRepository, storedAll: boolean | undefined, focusPending: boolean): boolean => (
+    focusPending && resolution.all && storedAll !== true
+);
+
 /** A repository's path below the project's root, as the pickers name it. */
 export const repositoryLabel = (repository: string, root: string): string => {
     const prefix = `${root}/`;

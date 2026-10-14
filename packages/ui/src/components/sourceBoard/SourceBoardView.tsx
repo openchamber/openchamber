@@ -49,7 +49,7 @@ import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardProjectPicker, SourceBoardRepositoryPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
-import { useBoardRepository } from './boardRepository';
+import { choiceForFocus, shouldRememberAll, useBoardRepository } from './boardRepository';
 import { usePullAttachments } from './pullAttachments';
 
 const NO_REPOSITORIES: readonly string[] = [];
@@ -166,10 +166,18 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     const projectRoot = project ? normalizeProjectPath(project.path) : null;
     // The folder everything below reads from: the project's root, or the
     // repository under it when the root is not one.
-    const repository = useBoardRepository(projectRoot, {
+    // A link another surface asked to show is looked up across the folder's repositories.
+    const focusPending = useSourceBoardStore((state) => state.repositoryFocus !== null);
+    const storedAll = project ? choice.allRepositoriesByProject[project.id] : undefined;
+    const repository = useBoardRepository(projectRoot, choiceForFocus({
         path: project ? choice.repositoryByProject[project.id] ?? null : null,
-        all: project ? choice.allRepositoriesByProject[project.id] : undefined,
-    });
+        all: storedAll,
+    }, focusPending));
+    const projectId = project?.id;
+    const rememberAll = shouldRememberAll(repository, storedAll, focusPending);
+    React.useEffect(() => {
+        if (rememberAll && projectId) updateChoice({ allRepositoriesByProject: { [projectId]: true } });
+    }, [projectId, rememberAll, updateChoice]);
     const directory = repository.directory;
     // Across the repositories under the folder: GitHub's, which is what that search reads.
     const allRepositories = repository.all ? repository.repositories : null;

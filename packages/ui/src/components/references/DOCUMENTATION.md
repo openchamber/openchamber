@@ -123,6 +123,12 @@ preview's footer holds actions instead of what the agent gets.
   and Walkthrough. Open PRs' checks are asked per folder, each group through its
   own context and in batches, and a group that fails leaves the others
   (`ensurePullStatuses`). The pure parts are in `references/acrossRepositories.ts`.
+- A GitHub link opened on the board (`repositoryFocus`) from a session in such a
+  folder lists all repositories first (`choiceForFocus`, decided in the board
+  because discovery lives there, so it waits for the probe and discovery and the
+  pinned lookup never runs against a stale single repository), remembers that
+  as the project's choice, and opens the item in its own repository. A root that
+  is a repository, or a runtime without the search, is unchanged.
 - With one repository chosen (or a folder that is one), lists, preview, labels,
   reviewers, reply, merge and the other writes use that repository's read
   context. New session and Attach keep the project's root. Changes and
