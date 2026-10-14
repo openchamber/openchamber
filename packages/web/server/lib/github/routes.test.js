@@ -143,6 +143,12 @@ describe('POST /api/source-control/github/references/across', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('accepts the first page as the web client sends it, with a null cursor and binding revision 0', async () => {
+    const result = await search([{ ...context('/a'), bindingRevision: 0 }], { state: 'open', people: 'any', query: '', cursor: null }).expect(200);
+    expect(result.body.items).toEqual([expect.objectContaining({ directory: '/a' })]);
+    expect(calls).toHaveLength(1);
+  });
+
   it('rejects malformed composite cursors without searching either account', async () => {
     await search([context('/a'), context('/b', 1)], { cursor: 'invalid!' }).expect(400);
     expect(calls).toHaveLength(0);

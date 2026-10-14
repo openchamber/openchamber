@@ -44,7 +44,8 @@ const acrossRequestSchema = z.strictObject({
   state: z.enum(['open', 'closed', 'merged', 'all']).optional(),
   people: z.enum(['any', 'assigned', 'created', 'reviewRequested']).optional(),
   query: z.string().optional(),
-  cursor: z.string().max(100_000).optional(),
+  // The first page sends no cursor as null, like the single-repository list.
+  cursor: z.string().max(100_000).nullable().optional(),
 });
 
 const invalidAcrossCursor = () => Object.assign(new Error('Invalid references cursor'), { status: 400, code: 'INVALID_REFERENCES_CURSOR' });
