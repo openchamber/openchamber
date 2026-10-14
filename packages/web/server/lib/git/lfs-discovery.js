@@ -50,7 +50,7 @@ const parseConfig = (value, limits, label, { allowRepeatedCanonicalFilters = fal
     const configValue = record.slice(separator + 1);
     // Effective Git config reports every layer, including identical LFS installs.
     const repeatedCanonicalFilter = allowRepeatedCanonicalFilters && result.get(key) === configValue
-      && (SAFE_FILTERS[key] === configValue || key === 'filter.lfs.required' && configValue === 'true');
+      && (SAFE_FILTERS[key] === configValue || (key === 'filter.lfs.required' && configValue === 'true'));
     if (result.has(key) && !repeatedCanonicalFilter) throw lfsError(`${label} contains duplicate ${key}`);
     result.set(key, configValue);
   }
