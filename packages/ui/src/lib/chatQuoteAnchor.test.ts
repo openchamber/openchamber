@@ -3,6 +3,7 @@ import { Window } from 'happy-dom';
 
 import {
     captureChatQuoteAnchor,
+    chatQuoteAnchorSchema,
     legacyChatQuoteAnchor,
     locateChatQuote,
     resolveChatQuoteAnchor,
@@ -67,5 +68,24 @@ describe('chat quote anchors', () => {
         const range = selectText(root, 'text');
         range.collapse(true);
         expect(captureChatQuoteAnchor(root, range)).toBeNull();
+    });
+});
+
+describe('chat quote anchor schema', () => {
+    const base = { text: 'bold', prefix: 'Use ', suffix: ' text', start: 4 };
+
+    test('an anchor saved before pages could be quoted is still valid, and gains no page', () => {
+        const parsed = chatQuoteAnchorSchema.parse(base);
+        expect(parsed).toEqual(base);
+        expect('page' in parsed).toBe(false);
+    });
+
+    test('an anchor in a shown page carries which page', () => {
+        expect(chatQuoteAnchorSchema.parse({ ...base, page: { partId: 'prt_1' } })).toEqual({ ...base, page: { partId: 'prt_1' } });
+    });
+
+    test('a malformed page is rejected rather than read as a message anchor', () => {
+        expect(chatQuoteAnchorSchema.safeParse({ ...base, page: {} }).success).toBe(false);
+        expect(chatQuoteAnchorSchema.safeParse({ ...base, page: 'prt_1' }).success).toBe(false);
     });
 });

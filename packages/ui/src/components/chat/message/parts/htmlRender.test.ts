@@ -62,6 +62,16 @@ describe('buildHtmlRenderDocument', () => {
         expect(document).toContain('window.getSelection()');
     });
 
+    test('answers the host\'s clear, marks and reveal messages, and reports clicks on marks', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        for (const type of ['clear-selection', 'marks', 'reveal', 'mark-click']) {
+            expect(document).toContain(`"openchamber:html-render:${type}"`);
+        }
+        expect(document).toContain('CSS.highlights');
+        expect(document).toContain('::highlight(oc-chat-quote)');
+        expect(document).toContain('--oc-quote-mark');
+    });
+
     test('writes only well-formed variables and strips characters that would close the rule', () => {
         const document = buildHtmlRenderDocument('<p>a</p>', theme);
         expect(document).toContain(':root{color-scheme:dark;--background:#111;--foreground:#eee;--evil:red/stylescript;}');
@@ -103,6 +113,33 @@ describe('readHtmlRenderFrameMessage', () => {
         expect(readHtmlRenderFrameMessage({ data: { type, text: 'a', rect: { ...rect, top: Number.NaN } } })).toBeNull();
         expect(readHtmlRenderFrameMessage({ data: { type, text: 'a', rect: { ...rect, left: 'x' } } })).toBeNull();
         expect(readHtmlRenderFrameMessage({ data: { type, text: 'a'.repeat(20_001), rect } })).toBeNull();
+    });
+
+    test('reads the anchor a selection carries, dropping a malformed one rather than the selection', () => {
+        const type = 'openchamber:html-render:selection';
+        const rect = { top: 4, left: 8, width: 120, height: 18 };
+        const anchor = { text: 'picked words', prefix: 'the ', suffix: ' here', start: 4 };
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'picked words', rect, anchor } }))
+            .toEqual({ kind: 'selection', text: 'picked words', rect, anchor });
+        // Fields beyond the anchor's own (a forged `page`) are dropped.
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'picked words', rect, anchor: { ...anchor, page: { partId: 'x' } } } }))
+            .toEqual({ kind: 'selection', text: 'picked words', rect, anchor });
+        for (const bad of [{ ...anchor, start: -1 }, { ...anchor, text: 5 }, { text: 'a' }, 'nope']) {
+            expect(readHtmlRenderFrameMessage({ data: { type, text: 'picked words', rect, anchor: bad } }))
+                .toEqual({ kind: 'selection', text: 'picked words', rect });
+        }
+        // A cleared selection has no anchor, whatever the page sent.
+        expect(readHtmlRenderFrameMessage({ data: { type, text: '', rect, anchor } })).toEqual({ kind: 'selection', text: '', rect });
+    });
+
+    test('reads a click on a quote mark, or on none', () => {
+        const type = 'openchamber:html-render:mark-click';
+        const rect = { top: 4, left: 8, width: 120, height: 18 };
+        expect(readHtmlRenderFrameMessage({ data: { type, id: 'mark-1', rect } })).toEqual({ kind: 'mark-click', id: 'mark-1', rect });
+        expect(readHtmlRenderFrameMessage({ data: { type, id: '', rect } })).toEqual({ kind: 'mark-click', id: '', rect });
+        expect(readHtmlRenderFrameMessage({ data: { type, rect } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, id: 'm', rect: { ...rect, width: -1 } } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, id: 'm'.repeat(201), rect } })).toBeNull();
     });
 
     test('ignores anything else, including links that are not http(s)', () => {

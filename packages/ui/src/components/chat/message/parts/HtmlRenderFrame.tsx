@@ -13,13 +13,28 @@ import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { ToolPart } from '@/lib/opencode/model';
 import { renderedPage } from '@/lib/opencode/tools';
 import { openExternalUrl } from '@/lib/url';
-import { dispatchFrameSelection } from '../frameSelection';
+import type { ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
+import { useConfigStore } from '@/stores/useConfigStore';
+import { useChatSurfaceMode } from '@/components/chat/useChatSurfaceMode';
+import { dispatchFrameSelection, frameRectInApp } from '../frameSelection';
+import {
+    clearOtherPageSelections,
+    emitPageMarkClick,
+    getPageMarks,
+    registerPageFrame,
+    subscribePageMarks,
+    type PageFrameHandle,
+} from '../pageQuoteBridge';
+import { TextSelectionMenu } from '../TextSelectionMenu';
 import {
     HTML_RENDER_MIN_HEIGHT,
     HTML_RENDER_TOUCH_MAX_HEIGHT,
     buildHtmlRenderDocument,
     clampHtmlRenderHeight,
+    htmlRenderClearSelectionMessage,
     htmlRenderFileName,
+    htmlRenderMarksMessage,
+    htmlRenderRevealMessage,
     htmlRenderTheme,
     htmlRenderThemeMessage,
     readHtmlRenderFrameMessage,
@@ -69,7 +84,11 @@ function replayKeyChord(frame: HTMLIFrameElement, chord: HtmlRenderKeyChord) {
     }
 }
 
+const NO_RECT = { top: 0, left: 0, width: 0, height: 0 };
+
 interface HtmlRenderDocumentProps {
+    /** The `openchamber_render` call this page belongs to: quotes taken in it are anchored to it. */
+    partId: string;
     html: string;
     title: string;
     className?: string;
@@ -83,13 +102,18 @@ interface HtmlRenderDocumentProps {
  * The page in a sandboxed frame. No `allow-same-origin`: the page runs in an
  * opaque origin and cannot reach the app's storage, credentials or DOM. A
  * theme switch is posted to the page instead of rebuilding it, so whatever
- * state its script holds survives.
+ * state its script holds survives. The page's selections, quote marks and
+ * reveals pass through here to the chat (see pageQuoteBridge.ts).
  */
-function HtmlRenderDocument({ html, title, className, style, contained = false, onContentHeight }: HtmlRenderDocumentProps) {
+function HtmlRenderDocument({ partId, html, title, className, style, contained = false, onContentHeight }: HtmlRenderDocumentProps) {
     const theme = useHtmlRenderTheme();
     const [initialTheme] = React.useState(theme);
     const srcDoc = React.useMemo(() => buildHtmlRenderDocument(html, initialTheme, { contained }), [contained, html, initialTheme]);
     const frameRef = React.useRef<HTMLIFrameElement>(null);
+    const handleRef = React.useRef<PageFrameHandle | null>(null);
+    // A reveal that arrives before the page has loaded waits for it.
+    const loadedRef = React.useRef(false);
+    const pendingRevealRef = React.useRef<ChatQuoteAnchor | null>(null);
 
     const postTheme = React.useCallback(() => {
         // An opaque-origin page accepts messages only addressed to any origin.
@@ -97,22 +121,88 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
     }, [theme]);
     React.useEffect(postTheme, [postTheme]);
 
+    const postMarks = React.useCallback(() => {
+        frameRef.current?.contentWindow?.postMessage(htmlRenderMarksMessage(getPageMarks(partId)), '*');
+    }, [partId]);
+    React.useEffect(() => {
+        postMarks();
+        return subscribePageMarks(partId, postMarks);
+    }, [partId, postMarks]);
+
+    const handleLoad = React.useCallback(() => {
+        loadedRef.current = true;
+        postTheme();
+        postMarks();
+        const pending = pendingRevealRef.current;
+        pendingRevealRef.current = null;
+        if (pending) frameRef.current?.contentWindow?.postMessage(htmlRenderRevealMessage(pending), '*');
+    }, [postMarks, postTheme]);
+
+    React.useEffect(() => {
+        const frame = frameRef.current;
+        if (!frame) return;
+        const handle: PageFrameHandle = {
+            partId,
+            frame,
+            reveal: (anchor) => {
+                frame.scrollIntoView({ block: 'center', inline: 'nearest' });
+                if (loadedRef.current) {
+                    frame.contentWindow?.postMessage(htmlRenderRevealMessage(anchor), '*');
+                } else {
+                    pendingRevealRef.current = anchor;
+                }
+            },
+            // The page drops its own selection (which does not echo it back),
+            // and the page's selection menu, told it is gone, closes.
+            clearSelection: () => {
+                frame.contentWindow?.postMessage(htmlRenderClearSelectionMessage(), '*');
+                dispatchFrameSelection(frame, { text: '', rect: NO_RECT, dismiss: true });
+            },
+        };
+        handleRef.current = handle;
+        const unregister = registerPageFrame(handle);
+        return () => {
+            unregister();
+            handleRef.current = null;
+        };
+    }, [partId]);
+
     React.useEffect(() => {
         const handleMessage = (event: MessageEvent) => {
-            if (!frameRef.current || event.source !== frameRef.current.contentWindow) return;
+            const frame = frameRef.current;
+            if (!frame || event.source !== frame.contentWindow) return;
             const message = readHtmlRenderFrameMessage(event);
             if (message?.kind === 'size') onContentHeight?.(message.height);
             if (message?.kind === 'open-link') void openExternalUrl(message.url);
-            if (message?.kind === 'key') replayKeyChord(frameRef.current, message.chord);
+            if (message?.kind === 'key') replayKeyChord(frame, message.chord);
             if (message?.kind === 'selection') {
-                // The menu follows one selection: the app's own highlight goes.
-                if (message.text) window.getSelection()?.removeAllRanges();
-                dispatchFrameSelection(frameRef.current, message);
+                const handle = handleRef.current;
+                if (message.text) {
+                    // The menu follows one selection: the app's own highlight
+                    // goes, and so does the one in any other page.
+                    window.getSelection()?.removeAllRanges();
+                    if (handle) clearOtherPageSelections(handle);
+                }
+                dispatchFrameSelection(frame, {
+                    text: message.text,
+                    rect: message.rect,
+                    anchor: message.anchor ? { ...message.anchor, page: { partId } } : undefined,
+                    clear: handle?.clearSelection,
+                });
+            }
+            if (message?.kind === 'mark-click') {
+                emitPageMarkClick({
+                    partId,
+                    markId: message.id,
+                    measure: () => frameRectInApp(frame, message.rect),
+                    // In the full-screen dialog the popover must render inside it to be usable.
+                    portalTarget: frame.closest<HTMLElement>('[data-slot="dialog-content"]'),
+                });
             }
         };
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onContentHeight]);
+    }, [onContentHeight, partId]);
 
     return (
         <iframe
@@ -120,7 +210,7 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
             title={title}
             srcDoc={srcDoc}
             sandbox="allow-scripts allow-forms"
-            onLoad={postTheme}
+            onLoad={handleLoad}
             className={className}
             // A frame whose color scheme differs from the page's own paints an
             // opaque canvas; matching it keeps the page on the chat background.
@@ -134,18 +224,55 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
  * tall as it needs. The dialog grows with it up to the window and the page
  * scrolls inside past that, so a short page leaves no empty half-screen.
  */
-function FullscreenPage({ html, title, initialHeight }: { html: string; title: string; initialHeight: number }) {
+function FullscreenPage({ partId, messageId, html, title, initialHeight }: { partId: string; messageId: string; html: string; title: string; initialHeight: number }) {
     const [height, setHeight] = React.useState(initialHeight);
     const handleContentHeight = React.useCallback((contentHeight: number) => setHeight(Math.ceil(contentHeight)), []);
     return (
-        <div className="flex min-h-0 flex-col px-5 pb-5">
+        <PageSelectionScope messageId={messageId} className="flex min-h-0 flex-col px-5 pb-5">
             <HtmlRenderDocument
+                partId={partId}
                 html={html}
                 title={title}
                 className="block min-h-0 w-full shrink border-0 bg-transparent"
                 style={{ height }}
                 contained
                 onContentHeight={handleContentHeight}
+            />
+        </PageSelectionScope>
+    );
+}
+
+/**
+ * Wraps a page with the selection menu for the text selected in it. Every page
+ * owns its menu, so the page works wherever it is drawn: in its message, hoisted
+ * into the live turn (outside any message body), or full screen in a dialog.
+ * The menu attributes the selection to `messageId`, the message that owns the
+ * `openchamber_render` call.
+ */
+function PageSelectionScope({
+    messageId,
+    className,
+    style,
+    partId,
+    children,
+}: {
+    messageId: string;
+    className?: string;
+    style?: React.CSSProperties;
+    partId?: string;
+    children: React.ReactNode;
+}) {
+    const scopeRef = React.useRef<HTMLDivElement>(null);
+    const chatSurfaceMode = useChatSurfaceMode();
+    const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    return (
+        <div ref={scopeRef} className={className} style={style} data-html-render={partId}>
+            {children}
+            <TextSelectionMenu
+                containerRef={scopeRef}
+                readingKey={messageId}
+                canReadAloud={chatSurfaceMode !== 'mini-chat' && showMessageTTSButtons}
+                frameSelections
             />
         </div>
     );
@@ -156,11 +283,13 @@ export function ShownPage({ part }: { part: ToolPart }) {
     const page = part.state.status === 'completed'
         ? renderedPage(part.tool, part.state.input, part.state.metadata)
         : null;
-    return page ? <HtmlRenderFrame partId={part.id} html={page.html} title={page.title} /> : null;
+    return page ? <HtmlRenderFrame partId={part.id} messageId={part.messageID} html={page.html} title={page.title} /> : null;
 }
 
 interface HtmlRenderFrameProps {
     partId: string;
+    /** The message the call belongs to; selections and quotes in the page are attributed to it. */
+    messageId: string;
     html: string;
     title: string;
 }
@@ -171,7 +300,7 @@ interface HtmlRenderFrameProps {
  * scrolls inside it (on a touch screen it never does: see
  * HTML_RENDER_TOUCH_MAX_HEIGHT); full screen and download sit in the corner.
  */
-export function HtmlRenderFrame({ partId, html, title }: HtmlRenderFrameProps) {
+export function HtmlRenderFrame({ partId, messageId, html, title }: HtmlRenderFrameProps) {
     const { t } = useI18n();
     const theme = useHtmlRenderTheme();
     const [height, setHeight] = React.useState(() => rememberedHeights.get(partId) ?? HTML_RENDER_MIN_HEIGHT);
@@ -215,8 +344,9 @@ export function HtmlRenderFrame({ partId, html, title }: HtmlRenderFrameProps) {
     }, [html, t, theme, title]);
 
     return (
-        <div className="group/html-render relative my-2" style={{ height }} data-html-render={partId}>
+        <PageSelectionScope messageId={messageId} partId={partId} className="group/html-render relative my-2" style={{ height }}>
             <HtmlRenderDocument
+                partId={partId}
                 html={html}
                 title={title}
                 className="block size-full border-0 bg-transparent"
@@ -249,11 +379,11 @@ export function HtmlRenderFrame({ partId, html, title }: HtmlRenderFrameProps) {
                     <Dialog open={fullscreen} onOpenChange={setFullscreen}>
                         <DialogContent className="max-w-[min(72rem,100%)] gap-0 overflow-hidden bg-background p-0">
                             <DialogTitle className="truncate px-5 py-4 pe-12">{title}</DialogTitle>
-                            {fullscreen ? <FullscreenPage html={html} title={title} initialHeight={height} /> : null}
+                            {fullscreen ? <FullscreenPage partId={partId} messageId={messageId} html={html} title={title} initialHeight={height} /> : null}
                         </DialogContent>
                     </Dialog>
                 </>
             )}
-        </div>
+        </PageSelectionScope>
     );
 }
