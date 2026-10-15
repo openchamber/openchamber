@@ -14,6 +14,7 @@ import {
   fetchAntigravityQuotaSummary
 } from './api.js';
 import { transformSummary, transformModels } from './transforms.js';
+import { resolveCliProxyAuth, fetchCliProxyQuota } from './cliproxy.js';
 
 export { isConfigured } from './auth.js';
 
@@ -22,6 +23,9 @@ export const providerName = 'Antigravity';
 
 export const fetchQuota = async () => {
   const auth = resolveAntigravityAuth();
+  // Preserve the accounts file's precedence and token-refresh behavior.
+  const proxy = auth ? null : resolveCliProxyAuth();
+  if (proxy) return fetchCliProxyQuota(proxy, { providerId, providerName });
   if (!auth) {
     return buildResult({
       providerId,

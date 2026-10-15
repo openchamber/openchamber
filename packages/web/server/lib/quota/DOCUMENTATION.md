@@ -134,6 +134,64 @@ Antigravity reports dual-layer quota for Google Cloud Code / Antigravity IDE acc
 - **Bottleneck prioritization**: when a group's weekly limit is exhausted or more constrained than its 5-hour limit, the weekly window is prioritized first in the model's window map.
 - **Runtime parity**: `packages/web/server/lib/quota/providers/antigravity/` and `packages/vscode/src/quotaProviders.ts` (`fetchAntigravityQuota`) implement the same summary parsing, fallback chain, and bottleneck ordering — keep them in sync.
 
+### CLIProxyAPI-managed Antigravity accounts
+
+The web server also supports a loopback CLIProxyAPI management endpoint as an
+Antigravity account source. An existing `antigravity-accounts.json` keeps
+precedence. The connector does not change the native account path, the Google
+provider, or the summary transforms.
+
+- Set `OC_ANTIGRAVITY_PROXY_URL` and `OC_ANTIGRAVITY_PROXY_KEY` in the server's
+  environment. The key accepts `{env:NAME}` and `{file:path}` references.
+- Alternatively, set `OC_ANTIGRAVITY_PROXY_CONFIG` to an EasyCLIProxyAPI
+  `config.toml`. The reader accepts top-level scalar settings before the first
+  table, including `host`, `port`, `tls` and `management-secret-key`. This is a
+  limited EasyCLIProxyAPI config reader, not support for arbitrary CLIProxyAPI
+  YAML configurations. Missing/unreadable settings leave the source unavailable.
+- On Windows, without explicit settings, the source discovers the newest
+  `%LOCALAPPDATA%/Programs/EasyCLIProxyAPI/EasyCLIProxyAPI-v*/config.toml`.
+  `OC_ANTIGRAVITY_PROXY=off` disables the source, including discovery.
+- Only HTTP(S) on `127.0.0.1`, `localhost` or `[::1]` is accepted. URL credentials
+  and non-loopback hosts are rejected. Redirects are never followed. A wildcard
+  bind in the TOML file is contacted through `127.0.0.1`. `localhost` is normalized
+  to `127.0.0.1`, including for circuit-breaker identity.
+- Each refresh lists `/v0/management/auth-files`, excludes disabled/non-Antigravity
+  records, and selects the first ready account. Set
+  `OC_ANTIGRAVITY_PROXY_ACCOUNT` to an email or `auth_index` to select one
+  explicitly. A missing selection is an error. The email is the plan label;
+  this account need not be the account currently serving the proxy's chat traffic.
+- The summary RPC uses `/v0/management/api-call` with the stock Google origins
+  and headers and the literal `Bearer $TOKEN$` placeholder. CLIProxyAPI owns token
+  substitution and refresh. The connector never reads OAuth files or calls the
+  token endpoint. Management HTTP 200 is unwrapped before checking Google status.
+- The source exposes aggregate rows in `usage.windows`, one 5-hour/weekly pair
+  per quota group, including `Gemini 5-Hour`, `Gemini Weekly`,
+  `Claude & GPT 5-Hour` and `Claude & GPT Weekly` when supplied. It does not fetch
+  or display individual models. Missing summary windows are a failed refresh.
+- Requests have a 20-second total cap inside the UI's 30-second timeout, with
+  5-second discovery and 12-second per-RPC limits. For diagnostics,
+  `OC_ANTIGRAVITY_PROXY_DEADLINE_MS` can shorten the total cap.
+- A rejected management key is sent once per origin/key version during the
+  server process lifetime. Key rotation permits a new attempt. A reported ban
+  suppresses requests until its wait expires, even after key rotation. Restarting
+  OpenChamber clears this in-memory protection. CLIProxyAPI bans an address for
+  30 minutes after 5 rejected keys, so do not restart repeatedly with a bad key.
+  Management requests are serialized per origin and queued callers retain their
+  own deadlines. Rejection/ban protection latches from HTTP headers even if the
+  body is oversized or interrupted; an unreadable ban uses a 30-minute wait.
+- Management secrets remain server-side. Errors contain fixed messages and HTTP
+  status only; response bodies, tokens, project IDs and account file paths are
+  never logged or returned. The account email is intentionally returned as the
+  plan label. No credential files are written.
+
+Web, Electron and mobile clients connected to this server share the connector.
+Loopback is relative to that server machine. The VS Code extension's standalone
+quota implementation is unchanged and does not discover CLIProxyAPI accounts.
+The integration tests run against a fake loopback proxy in a separate Node
+process, isolated from real credential paths. Run them directly with
+`node --test packages/web/server/lib/quota/providers/antigravity/cliproxy.integration.mjs`;
+the Vitest wrapper includes them in the web test command.
+
 ## MiniMax M3 / Token Plan migration
 
 In 2025/2026 MiniMax rebranded "Coding Plan" to "Token Plan" alongside the M3 model release. The API underwent breaking changes:
