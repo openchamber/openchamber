@@ -162,6 +162,10 @@ const handle = (request: BrowserProviderRequest): BrowserProviderResult => {
     case 'browser.resize':
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case 'browser.close':
+      // One page, no tabs: there is nothing to close, and the provider must
+      // not claim a close it did not do.
+      return { ok: false, error: 'This browser has a single page and no tabs; there is nothing to close.' };
   }
 };
 

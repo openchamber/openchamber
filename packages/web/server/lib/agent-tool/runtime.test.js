@@ -329,6 +329,7 @@ describe('managed agent tool runtime', () => {
     const controlActions = tool.openchamber.input.properties.action.oneOf.map((entry) => entry.const);
     const webActions = tool.openchamber_web.input.properties.action.oneOf.map((entry) => entry.const);
     expect(webActions).toContain('browser.open');
+    expect(webActions).toContain('browser.close');
     expect(controlActions).not.toContain('browser.open');
     expect(webActions).not.toContain('session.create');
 

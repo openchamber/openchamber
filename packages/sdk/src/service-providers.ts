@@ -23,6 +23,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.inspect',
   'browser.capture',
   'browser.resize',
+  'browser.close',
 ] as const;
 export type BrowserControlAction = (typeof BROWSER_CONTROL_ACTIONS)[number];
 
@@ -56,6 +57,7 @@ export type BrowserScrollParameters = BrowserTabTarget & { selector?: string; di
 export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
 export type BrowserResizeParameters = BrowserTabTarget & { viewport: BrowserViewportMode };
+export type BrowserCloseParameters = BrowserTabTarget;
 
 /**
  * Where an action came from: the project the agent works in and the chat it
@@ -81,6 +83,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.inspect'; parameters: BrowserInspectParameters }
   | { action: 'browser.capture'; parameters: BrowserCaptureParameters }
   | { action: 'browser.resize'; parameters: BrowserResizeParameters }
+  | { action: 'browser.close'; parameters: BrowserCloseParameters }
 );
 
 export type BrowserViewportSummary = {
@@ -172,6 +175,12 @@ export type BrowserCaptureData = {
   viewport: BrowserViewportSummary;
 };
 export type BrowserResizeData = { viewport: BrowserViewportSummary };
+/**
+ * A closed tab: what the provider or panel actually removed. `tabId` names it
+ * when the provider has tabs; a provider with a single page refuses the action
+ * rather than reporting a close it did not do.
+ */
+export type BrowserCloseData = { closed: true; tabId?: string };
 
 export type BrowserProviderData =
   | BrowserOpenData
@@ -182,7 +191,8 @@ export type BrowserProviderData =
   | BrowserNavigationData
   | BrowserInspectData
   | BrowserCaptureData
-  | BrowserResizeData;
+  | BrowserResizeData
+  | BrowserCloseData;
 
 /**
  * What the service answers. `error` is read by the agent, so it should say

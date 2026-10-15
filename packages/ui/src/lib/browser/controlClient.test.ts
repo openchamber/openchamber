@@ -34,6 +34,7 @@ mock.module('@/lib/openchamberEvents', () => ({
 }));
 
 const {
+  registerBrowserCloser,
   registerBrowserController,
   registerBrowserOpener,
   registerSleepingBrowserTab,
@@ -522,5 +523,100 @@ describe('tabs that have not loaded their page yet', () => {
 
     expect(posted[0]?.ok).toBe(false);
     expect(posted[0]?.error).toContain('could not be loaded');
+  });
+});
+
+/**
+ * Closing is panel state, and only a tab the calling session opened may be
+ * closed. The user's own tab and another session's tab are refused, however
+ * they are reached.
+ */
+describe('closing a tab the session opened', () => {
+  beforeEach(resetRequests);
+
+  afterEach(() => {
+    while (cleanups.length > 0) cleanups.pop()?.();
+  });
+
+  const sessionA: RequestContext = { directory: '/repo-a', sessionId: 'ses_a' };
+
+  /** A panel closer that records what it was asked to remove. */
+  const closer = () => {
+    const closed: Array<{ directory: string; tabId: string }> = [];
+    const cleanup = registerBrowserCloser((directory, tabId) => {
+      closed.push({ directory, tabId });
+      return true;
+    });
+    return { closed, cleanup };
+  };
+
+  test('closes the session\'s own tab, not the one the user sees', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    setShownBrowserTab('/repo-a', 'mine');
+    const { closed, cleanup } = closer();
+    cleanups.push(cleanup);
+
+    emit('browser.close', {}, sessionA);
+    await wait(50);
+
+    expect(closed).toEqual([{ directory: '/repo-a', tabId: 'tab-a' }]);
+    expect(posted[0]).toEqual({ requestId: 'req-1', ok: true, data: { closed: true, tabId: 'tab-a' } });
+  });
+
+  test('closes a named tab the session opened', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    cleanups.push(tab('tab-a2', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+    const { closed, cleanup } = closer();
+    cleanups.push(cleanup);
+
+    emit('browser.close', { tabId: 'tab-a' }, sessionA);
+    await wait(50);
+
+    expect(closed).toEqual([{ directory: '/repo-a', tabId: 'tab-a' }]);
+    expect(posted[0]?.data).toEqual({ closed: true, tabId: 'tab-a' });
+  });
+
+  test("never closes the user's tab, even when it is the one on screen", async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('mine', ran, { directory: '/repo-a' }));
+    setShownBrowserTab('/repo-a', 'mine');
+    const { closed, cleanup } = closer();
+    cleanups.push(cleanup);
+
+    emit('browser.close', {}, sessionA);
+    // Past the head start a client holding the session's own tab gets.
+    await wait(600);
+
+    expect(closed).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('never close a tab the user opened');
+  });
+
+  test('refuses to close a tab another session opened, named by tabId', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-b', ran, { directory: '/repo-a', ownerSessionId: 'ses_b' }));
+    const { closed, cleanup } = closer();
+    cleanups.push(cleanup);
+
+    emit('browser.close', { tabId: 'tab-b' }, sessionA);
+    await wait(50);
+
+    expect(closed).toEqual([]);
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('was not opened by this session');
+  });
+
+  test('says there is no browser to close a tab in when none is registered', async () => {
+    const ran: string[] = [];
+    cleanups.push(tab('tab-a', ran, { directory: '/repo-a', ownerSessionId: 'ses_a' }));
+
+    emit('browser.close', { tabId: 'tab-a' }, sessionA);
+    await wait(50);
+
+    expect(posted[0]?.ok).toBe(false);
+    expect(posted[0]?.error).toContain('no browser here to close a tab in');
   });
 });

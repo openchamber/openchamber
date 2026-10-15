@@ -66,6 +66,11 @@ itself; it can only ask and wait.
   never navigates an existing tab: the registered opener (`ContextPanel`,
   `useUIStore.openAgentBrowserTab`) makes a new background tab in the calling
   session's project, owned by that session, and the answer carries its `tabId`.
+  `browser.close` removes a tab the calling session opened. Closing is panel
+  state rather than a page action, so the panel registers a closer the way it
+  registers the opener; without `tabId` the session closes its own most recent
+  tab, and a tab the user or another session opened is refused, never closed,
+  even when an action without `tabId` would otherwise have used it.
   `ContextPanel` keeps agent tabs of every project mounted (or registered as
   sleeping), so a session keeps working its page while the user looks at
   another project; the user's own tabs in other projects unload with their

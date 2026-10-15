@@ -719,6 +719,27 @@ describe('browser capture', () => {
   });
 });
 
+describe('browser close', () => {
+  const createCloseService = () => {
+    const request = vi.fn(async () => ({ closed: true, tabId: 'tab-1' }));
+    const { service } = createService({ browserControl: { request } });
+    return { service, request };
+  };
+
+  it('forwards the tab the agent named, trimmed', async () => {
+    const { service, request } = createCloseService();
+    const result = await service.execute('browser.close', { tabId: ' tab-1 ' }, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.close', { tabId: 'tab-1' }, expect.anything());
+    expect(result).toEqual({ closed: true, tabId: 'tab-1' });
+  });
+
+  it('forwards a close with no tab, so the browser closes the session\'s own', async () => {
+    const { service, request } = createCloseService();
+    await service.execute('browser.close', {}, '/repo');
+    expect(request).toHaveBeenCalledWith('browser.close', {}, expect.anything());
+  });
+});
+
 describe('returning a dispatched session result', () => {
   const createReturningService = (overrides = {}) => {
     const dispatchResults = { register: vi.fn(async () => ({ id: 'dispatch-1' })) };
