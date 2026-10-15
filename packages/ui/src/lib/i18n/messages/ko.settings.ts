@@ -2590,4 +2590,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name}을(를) 다시 활성화했습니다',
   'settings.agents.sidebar.toast.disableFailed': '에이전트를 비활성화하지 못했습니다. 설정 파일에 쓸 수 없습니다',
   'settings.agents.sidebar.toast.enableFailed': '에이전트를 활성화하지 못했습니다. 설정 파일에 쓸 수 없습니다',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "프롬프트 기록 검색",
+
 } as const;

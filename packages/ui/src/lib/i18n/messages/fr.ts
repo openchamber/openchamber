@@ -3792,4 +3792,14 @@ export const dict = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Cette tâche a déjà une exécution en cours',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Cette tâche attend déjà dans la file et s’exécutera dès qu’une place se libère',
   'chat.modelControls.agentFavoriteAdd': 'Ajouter aux favoris. Avec des favoris, Tab ne passe que par eux',
+   'chat.promptHistorySearch.title': "Rechercher dans l'historique des prompts",
+  'chat.promptHistorySearch.searchPlaceholder': "Rechercher les prompts mémorisés",
+   'chat.promptHistorySearch.close': "Fermer la recherche dans l'historique des prompts",
+  'chat.promptHistorySearch.empty': "Aucun prompt à rechercher pour le moment",
+  'chat.promptHistorySearch.noMatches': "Aucun prompt correspondant",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} pièce jointe",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} pièces jointes",
+  'chat.promptHistorySearch.hint': "↑ ↓ pour parcourir · Enter pour charger · Esc pour fermer",
+   'helpDialog.item.searchPromptHistory': "Rechercher dans l'historique des prompts (saisie du chat)",
+
 } as const;

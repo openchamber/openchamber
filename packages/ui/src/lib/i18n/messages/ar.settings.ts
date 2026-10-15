@@ -2567,4 +2567,6 @@ export const settingsDict = {
   ...extensionCatalogI18n.ar,
   ...guestIntegrationsI18n.ar,
   ...extensionsSettingsI18n.ar,
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "البحث في سجل المطالبات",
+
 } as const;

@@ -3794,4 +3794,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Esta tarefa já tem uma execução em andamento',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Esta tarefa já está na fila e será executada quando houver uma vaga',
   'chat.modelControls.agentFavoriteAdd': 'Adicionar aos favoritos. Com favoritos, o Tab alterna só entre eles',
+  'chat.promptHistorySearch.title': "Pesquisar histórico de prompts",
+  'chat.promptHistorySearch.searchPlaceholder': "Pesquisar prompts lembrados",
+  'chat.promptHistorySearch.close': "Fechar pesquisa do histórico de prompts",
+  'chat.promptHistorySearch.empty': "Ainda não há prompts para pesquisar",
+  'chat.promptHistorySearch.noMatches': "Nenhum prompt correspondente",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} anexo",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} anexos",
+  'chat.promptHistorySearch.hint': "↑ ↓ para navegar · Enter para carregar · Esc para fechar",
+  'helpDialog.item.searchPromptHistory': "Pesquisar histórico de prompts (entrada de chat)",
+
 };

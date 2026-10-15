@@ -2590,4 +2590,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} を再び有効にしました',
   'settings.agents.sidebar.toast.disableFailed': 'エージェントを無効にできませんでした。設定ファイルに書き込めませんでした',
   'settings.agents.sidebar.toast.enableFailed': 'エージェントを有効にできませんでした。設定ファイルに書き込めませんでした',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "プロンプト履歴を検索",
+
 } as const;

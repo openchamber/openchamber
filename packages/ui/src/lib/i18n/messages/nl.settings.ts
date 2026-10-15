@@ -2580,4 +2580,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} is weer ingeschakeld',
   'settings.agents.sidebar.toast.disableFailed': 'De agent kon niet worden uitgeschakeld: het configuratiebestand kon niet worden geschreven',
   'settings.agents.sidebar.toast.enableFailed': 'De agent kon niet worden ingeschakeld: het configuratiebestand kon niet worden geschreven',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Promptgeschiedenis doorzoeken",
+
 } as const;

@@ -2590,4 +2590,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '已重新启用 {name}',
   'settings.agents.sidebar.toast.disableFailed': '无法停用代理：无法写入其配置文件',
   'settings.agents.sidebar.toast.enableFailed': '无法启用代理：无法写入其配置文件',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "搜索提示历史记录",
+
 } as const;

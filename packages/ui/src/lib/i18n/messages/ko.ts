@@ -3793,4 +3793,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': '이 작업은 이미 실행 중입니다',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': '이 작업은 이미 대기열에 있으며 자리가 나면 실행됩니다',
   'chat.modelControls.agentFavoriteAdd': '즐겨찾기에 추가. 즐겨찾기가 있으면 Tab은 그 안에서만 전환합니다',
+  'chat.promptHistorySearch.title': "프롬프트 기록 검색",
+  'chat.promptHistorySearch.searchPlaceholder': "기억된 프롬프트 검색",
+  'chat.promptHistorySearch.close': "프롬프트 기록 검색 닫기",
+  'chat.promptHistorySearch.empty': "검색할 프롬프트가 아직 없습니다",
+  'chat.promptHistorySearch.noMatches': "일치하는 프롬프트가 없습니다",
+  'chat.promptHistorySearch.attachmentsSingle': "첨부 파일 {count}개",
+  'chat.promptHistorySearch.attachmentsPlural': "첨부 파일 {count}개",
+  'chat.promptHistorySearch.hint': "↑ ↓ 탐색 · Enter 불러오기 · Esc 닫기",
+  'helpDialog.item.searchPromptHistory': "프롬프트 기록 검색(채팅 입력)",
+
 };

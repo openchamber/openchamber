@@ -83,6 +83,12 @@ export const HelpDialog: React.FC = () => {
           icon: "ai-agent",
         },
         {
+          id: 'search_prompt_history',
+          keys: '',
+          descriptionKey: 'helpDialog.item.searchPromptHistory',
+          icon: 'history',
+        },
+        {
           id: 'open_model_selector',
           descriptionKey: "helpDialog.item.openModelSelector",
           icon: "ai-generate-2",

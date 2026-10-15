@@ -2567,4 +2567,6 @@ export const settingsDict = {
   ...extensionCatalogI18n.he,
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "חיפוש בהיסטוריית ההנחיות",
+
 } as const;
