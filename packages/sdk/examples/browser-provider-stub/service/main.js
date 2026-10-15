@@ -291,9 +291,13 @@ var page = {
   select: { label: "United States", value: "us" }
 };
 var viewport = () => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
+var selectOptions = () => [
+  { label: "United States", value: "us", selected: page.select.value === "us", disabled: false },
+  { label: "Canada", value: "ca", selected: page.select.value === "ca", disabled: false }
+];
 var elements = () => [
   { selector: "#name", tag: "input", type: "text", label: "Name", bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
-  { selector: "#country", tag: "select", label: "Country", bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
+  { selector: "#country", tag: "select", label: "Country", multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: "#save", tag: "button", label: "Save", bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
   { selector: 'a[href="/about"]', tag: "a", label: "About", bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true }
 ];

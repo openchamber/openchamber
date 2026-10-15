@@ -103,6 +103,13 @@ itself; it can only ask and wait.
   `browser.select` changes a native single-value HTML select by exact label or
   value, dispatches `input` and `change`, and verifies the selected option
   before returning.
+  `browser.snapshot` exposes native select metadata on the corresponding
+  element: `multiple`, plus an `options` list in DOM order containing each
+  option's `label`, `value`, `selected`, and `disabled` state. Text-content
+  labels collapse whitespace and trim like `browser.select`; an explicit
+  `label` attribute is used verbatim. The list is capped at 32 entries and
+  each label/value at 80 characters; `optionsTruncated: true` reports either
+  cap. A selected option outside the cap is not promoted into the result.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).

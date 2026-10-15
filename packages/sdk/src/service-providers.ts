@@ -96,6 +96,13 @@ export type BrowserViewportSummary = {
 
 export type BrowserElementBounds = { x: number; y: number; width: number; height: number };
 
+export type BrowserSnapshotOption = {
+  label: string;
+  value: string;
+  selected: boolean;
+  disabled: boolean;
+};
+
 /** One interactive element of a snapshot; absent fields mean empty or default. */
 export type BrowserSnapshotElement = {
   selector: string;
@@ -106,6 +113,9 @@ export type BrowserSnapshotElement = {
   role?: string;
   label?: string;
   disabled?: true;
+  options?: BrowserSnapshotOption[];
+  optionsTruncated?: boolean;
+  multiple?: boolean;
   missingAccessibleName?: true;
 };
 
