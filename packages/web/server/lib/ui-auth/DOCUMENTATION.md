@@ -35,6 +35,7 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
   - `handlePasskeyAuthenticationVerify(req, res)`
   - `handlePasskeyList(req, res)`
   - `handlePasskeyRevoke(req, res)`
+  - `handlePasskeyRename(req, res)`
   - `handleResetAuth(req, res)`
   - `ensureSessionToken(req, res)`
   - `dispose()`
@@ -45,6 +46,7 @@ Compatibility: upgrading renames the cookie for any explicit-port host, so alrea
   - `getStatus(req)`
   - `listPasskeys(req)`
   - `revokePasskey(req, passkeyId)`
+  - `renamePasskey(req, passkeyId, label)`
   - `clearAllPasskeys()`
   - `beginRegistration(req, { label })`
   - `finishRegistration(payload)`
