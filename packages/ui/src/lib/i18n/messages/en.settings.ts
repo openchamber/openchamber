@@ -2584,4 +2584,6 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} is enabled again',
   'settings.agents.sidebar.toast.disableFailed': 'Couldn\'t disable the agent: its config file could not be written',
   'settings.agents.sidebar.toast.enableFailed': 'Couldn\'t enable the agent: its config file could not be written',
+  'settings.openchamber.keyboardShortcuts.action.search_prompt_history.label': "Search prompt history",
+
 } as const;

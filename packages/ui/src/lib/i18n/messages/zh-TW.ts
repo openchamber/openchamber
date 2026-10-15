@@ -3805,4 +3805,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': '此任務已有一次執行正在進行',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': '此任務已在佇列中等待，有空位時就會執行',
   'chat.modelControls.agentFavoriteAdd': '加入最愛。有最愛時，Tab 只在最愛之間切換',
+  'chat.promptHistorySearch.title': "搜尋提示歷史記錄",
+  'chat.promptHistorySearch.searchPlaceholder': "搜尋已記住的提示",
+  'chat.promptHistorySearch.close': "關閉提示歷史搜尋",
+  'chat.promptHistorySearch.empty': "尚無可搜尋的提示",
+  'chat.promptHistorySearch.noMatches': "沒有相符的提示",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} 個附件",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} 個附件",
+  'chat.promptHistorySearch.hint': "↑ ↓ 瀏覽 · Enter 載入 · Esc 關閉",
+  'helpDialog.item.searchPromptHistory': "搜尋提示歷史記錄（聊天輸入）",
+
 };

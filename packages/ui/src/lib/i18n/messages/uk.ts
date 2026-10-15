@@ -3806,4 +3806,14 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.dialog.toast.alreadyRunning': 'Ця задача вже виконується',
   'sessions.scheduledTasks.dialog.toast.alreadyQueued': 'Ця задача вже чекає в черзі й запуститься, щойно звільниться місце',
   'chat.modelControls.agentFavoriteAdd': 'Додати в обрані. Коли є обрані, Tab перемикає лише між ними',
+  'chat.promptHistorySearch.title': "Пошук в історії запитів",
+  'chat.promptHistorySearch.searchPlaceholder': "Шукати збережені запити",
+  'chat.promptHistorySearch.close': "Закрити пошук в історії запитів",
+  'chat.promptHistorySearch.empty': "Ще немає запитів для пошуку",
+  'chat.promptHistorySearch.noMatches': "Немає відповідних запитів",
+  'chat.promptHistorySearch.attachmentsSingle': "{count} вкладення",
+  'chat.promptHistorySearch.attachmentsPlural': "{count} вкладень",
+  'chat.promptHistorySearch.hint': "↑ ↓ для перегляду · Enter для завантаження · Esc для закриття",
+  'helpDialog.item.searchPromptHistory': "Пошук в історії запитів (поле чату)",
+
 };
