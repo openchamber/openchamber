@@ -344,9 +344,10 @@ export const SETTINGS_REGISTRY = {
 
   // ── Tunnels (instance) ──
   tunnelProvider: field({ scope: 'instance', parse: mapParser(parseNonEmptyTrimmedString, (value) => value.toLowerCase()) }),
-  tunnelMode: field({ scope: 'instance', parse: fromSchema(z.string().transform((value) => value.trim().toLowerCase()).pipe(z.enum(['quick', 'managed-remote', 'managed-local']))) }),
+  tunnelMode: field({ scope: 'instance', parse: fromSchema(z.string().transform((value) => value.trim().toLowerCase()).pipe(z.enum(['quick', 'private-network', 'managed-remote', 'managed-local']))) }),
   tunnelBootstrapTtlMs: field({ scope: 'instance', parse: parseNullableFiniteNumber }),
   tunnelSessionTtlMs: field({ scope: 'instance', parse: parseFiniteNumber }),
+  tailscaleHttpsPort: field({ scope: 'instance', parse: parseIntegerInRange(1, 65535) }),
   managedLocalTunnelConfigPath: field({ scope: 'instance', parse: parseNullableTrimmedPath }),
   managedRemoteTunnelHostname: field({ scope: 'instance', parse: parseTrimmedString }),
   managedRemoteTunnelToken: field({ scope: 'instance', secret: true, parse: parseNullableTrimmedString }),

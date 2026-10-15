@@ -5,6 +5,7 @@ import { isAgentMemoryFeatureAvailable } from '../agent-memory/feature-flag.js';
 import { isPermissionMode } from '../permission-auto-accept/modes.js';
 import { idleStopSchema } from '../spaces/idle-stop.js';
 import { sshHostSchema } from '../spaces/places/ssh-host.js';
+import { normalizeTailscaleHttpsPort } from '../tunnels/types.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -619,6 +620,12 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.tunnelMode === 'string') {
       result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
+    }
+    if (candidate.tailscaleHttpsPort !== undefined) {
+      const port = normalizeTailscaleHttpsPort(candidate.tailscaleHttpsPort);
+      if (port !== null) {
+        result.tailscaleHttpsPort = port;
+      }
     }
     if (candidate.managedLocalTunnelConfigPath === null) {
       result.managedLocalTunnelConfigPath = null;

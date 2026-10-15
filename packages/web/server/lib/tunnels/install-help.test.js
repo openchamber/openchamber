@@ -4,6 +4,7 @@ import { getTunnelDependencyInstallInfo } from './install-help.js';
 import {
   TUNNEL_PROVIDER_CLOUDFLARE,
   TUNNEL_PROVIDER_NGROK,
+  TUNNEL_PROVIDER_TAILSCALE,
 } from './types.js';
 
 describe('getTunnelDependencyInstallInfo', () => {
@@ -37,4 +38,19 @@ describe('getTunnelDependencyInstallInfo', () => {
     expect(info.installCommand).toBe(`Download cloudflared from ${downloadUrl}`);
     expect(info.message).toContain(downloadUrl);
   });
+
+  it('returns Tailscale install guidance across platforms', () => {
+    const macInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_TAILSCALE, 'darwin');
+    expect(macInfo.dependency).toBe('tailscale');
+    expect(macInfo.installCommand).toBe('brew install tailscale');
+
+    const winInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_TAILSCALE, 'win32');
+    expect(winInfo.dependency).toBe('tailscale');
+    expect(winInfo.installCommand).toBe('winget install Tailscale.Tailscale');
+
+    const linuxInfo = getTunnelDependencyInstallInfo(TUNNEL_PROVIDER_TAILSCALE, 'linux');
+    expect(linuxInfo.dependency).toBe('tailscale');
+    expect(linuxInfo.installCommand).toBe('Download Tailscale from https://tailscale.com/download');
+  });
 });
+

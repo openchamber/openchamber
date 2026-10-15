@@ -869,6 +869,7 @@ describe('settings registry gate', () => {
     globalBehaviorPrompt: 'Be brief.', responseStyleEnabled: true, responseStylePreset: 'concise', responseStyleCustomInstructions: 'x',
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
     inputBarOffset: 10,
+    tailscaleHttpsPort: 8443,
     customProviderIcons: { 'campus-llm': 'cloud' },
   };
 
