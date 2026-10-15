@@ -10,7 +10,7 @@ import { resolvePlanRequestOwner } from '@/hooks/useProjectContextOwner';
 import { isRightToLeft, useI18n } from '@/lib/i18n';
 import { resolveProjectContextId } from '@/lib/projectContextApi';
 import { cn } from '@/lib/utils';
-import { registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
+import { registerBrowserCloser, registerBrowserOpener, registerSleepingBrowserTab, setShownBrowserTab } from '@/lib/browser/controlClient';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useGuestsStore } from '@/lib/guests/store';
 import { guestHasSharedSurface, guestSurfaceDocking, type GuestSurfaceDocking } from '@/lib/guests/surfaces';
@@ -339,6 +339,16 @@ export const ContextSurfacePanes: React.FC = () => {
     if (tabId) wakeBrowserTab(tabId);
     return tabId;
   }), [directoryKey, openAgentBrowserTab, wakeBrowserTab]);
+  // Lets an agent close a tab it opened. controlClient has already checked the
+  // tab belongs to the calling session; this only performs the panel close, so
+  // the strip, the zone, and the webview process all settle the way a click on
+  // the tab's own close button does.
+  React.useEffect(() => registerBrowserCloser((directory, tabId) => {
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs;
+    if (!tabs?.some((tab) => tab.id === tabId && tab.mode === 'browser')) return false;
+    closeContextPanelTab(directory, tabId);
+    return true;
+  }), [closeContextPanelTab]);
   // The agent asked for a file to be shown. It opens in front of whatever tab
   // the user had, on purpose: the agent is pointing at a result, and the prior
   // tab is one click away.

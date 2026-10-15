@@ -165,3 +165,9 @@ other.
   used as a path. The result also states how to present the image, because chat
   renders the image paths written in a finished answer below that message —
   saving the file is not what shows it to anyone.
+- `browser.close` removes a browser tab the calling session opened, and is
+  refused for any other tab, including the user's own tab an action without
+  `tabId` might otherwise fall back to (`../browser-control/DOCUMENTATION.md`).
+  Closing is panel state, so the client that owns the tab performs it through a
+  registered closer, not the page view; the server only validates `tabId` and
+  forwards the action like the rest.

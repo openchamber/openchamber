@@ -121,7 +121,8 @@ var BROWSER_CONTROL_ACTIONS = [
   "browser.forward",
   "browser.inspect",
   "browser.capture",
-  "browser.resize"
+  "browser.resize",
+  "browser.close"
 ];
 var BROWSER_PROVIDER_IDLE_MS = 10 * 60000;
 var CONTROL_ACTIONS = new Set(BROWSER_CONTROL_ACTIONS);
@@ -386,6 +387,8 @@ Name: ${page.fields.get("#name") ?? ""}`,
     case "browser.resize":
       page.viewport = request.parameters.viewport;
       return { ok: true, data: { viewport: viewport() } };
+    case "browser.close":
+      return { ok: false, error: "This browser has a single page and no tabs; there is nothing to close." };
   }
 };
 var surface = {

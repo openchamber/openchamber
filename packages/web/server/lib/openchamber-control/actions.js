@@ -51,6 +51,7 @@ export const OPENCHAMBER_WEB_ACTION_DEFINITIONS = Object.freeze([
   { action: 'browser.inspect', title: 'Read how an element renders', description: 'Read the computed styles of the element matched by selector — colours, fonts, spacing, borders — as the page actually renders them' },
   { action: 'browser.capture', title: 'Save a screenshot of the page', description: 'Save what is currently visible in the browser panel as an image file in the project and return its path, so a change can be shown rather than described. Pass label to name it (for example before-fix); the result reports the page, layout and path to reference in your answer' },
   { action: 'browser.resize', title: 'Change the page viewport', description: 'Lay the open page out at a different size; viewport is mobile, tablet, desktop, or fill to use the whole panel' },
+  { action: 'browser.close', title: 'Close a browser tab', description: 'Close a tab this session opened, once you are done with it. Pass tabId from a browser.snapshot; without one it closes this session\'s own most recent tab. It never closes a tab the user opened, even when that is the tab an action without tabId would otherwise use' },
 ]);
 
 export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(

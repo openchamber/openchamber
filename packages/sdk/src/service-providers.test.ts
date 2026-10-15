@@ -24,9 +24,10 @@ describe('browser provider contract', () => {
     expect(readBrowserProviderRequest(JSON.stringify({ requestId: 'r', action: 'browser.back' }))).toBeNull();
   });
 
-  test('the action list is the tool\'s ten browser actions', () => {
-    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(10);
+  test('the action list is the tool\'s eleven browser actions', () => {
+    expect(BROWSER_CONTROL_ACTIONS).toHaveLength(11);
     expect(isBrowserControlAction('browser.snapshot')).toBe(true);
+    expect(isBrowserControlAction('browser.close')).toBe(true);
     expect(isBrowserControlAction('projects.list')).toBe(false);
   });
 

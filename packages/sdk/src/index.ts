@@ -365,6 +365,8 @@ export type {
   BrowserCaptureParameters,
   BrowserClickData,
   BrowserClickParameters,
+  BrowserCloseData,
+  BrowserCloseParameters,
   BrowserConsoleProblem,
   BrowserControlAction,
   BrowserElementBounds,
