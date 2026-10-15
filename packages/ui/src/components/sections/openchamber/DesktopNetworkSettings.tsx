@@ -8,6 +8,8 @@ import {
   getDesktopLaunchAtLogin,
   getDesktopMiniChatGlobalShortcut,
   getDesktopMinimizeToTray,
+  getDesktopTray,
+  setDesktopTray,
   isDesktopLocalOriginActive,
   isDesktopShell,
   restartDesktopApp,
@@ -37,9 +39,6 @@ import { useDesktopQuakeMode } from './useDesktopQuakeMode';
 export const DesktopNetworkSettings: React.FC = () => {
   const { t } = useI18n();
   const isLocalDesktop = isDesktopShell() && isDesktopLocalOriginActive();
-  const isMacDesktop = isLocalDesktop
-    && typeof window !== 'undefined'
-    && window.__OPENCHAMBER_PLATFORM__ === 'darwin';
   const isLinuxDesktop = isLocalDesktop
     && typeof window !== 'undefined'
     && window.__OPENCHAMBER_PLATFORM__ === 'linux';
@@ -60,8 +59,9 @@ export const DesktopNetworkSettings: React.FC = () => {
   const [minimizeToTraySupported, setMinimizeToTraySupported] = React.useState(false);
   const [minimizeToTrayEnabled, setMinimizeToTrayEnabled] = React.useState(false);
   const [isSavingMinimizeToTray, setIsSavingMinimizeToTray] = React.useState(false);
-  const [savedMacMenuBarEnabled, setSavedMacMenuBarEnabled] = React.useState(true);
-  const [draftMacMenuBarEnabled, setDraftMacMenuBarEnabled] = React.useState(true);
+  const [traySupported, setTraySupported] = React.useState(false);
+  const [trayEnabled, setTrayEnabled] = React.useState(true);
+  const [isSavingTray, setIsSavingTray] = React.useState(false);
   const [savedLinuxNativeFrame, setSavedLinuxNativeFrame] = React.useState(false);
   const [draftLinuxNativeFrame, setDraftLinuxNativeFrame] = React.useState(false);
   const [keepAwakeSupported, setKeepAwakeSupported] = React.useState(false);
@@ -114,9 +114,6 @@ export const DesktopNetworkSettings: React.FC = () => {
         setRemovePassword(false);
         setLanAccessActive(data.desktopLanAccessActive === true);
         setLanAccessBlockedReason(data.desktopLanAccessBlockedReason ?? null);
-        const macMenuBarEnabled = data.desktopMacMenuBarEnabled !== false;
-        setSavedMacMenuBarEnabled(macMenuBarEnabled);
-        setDraftMacMenuBarEnabled(macMenuBarEnabled);
         const linuxNativeFrame = data.desktopLinuxNativeFrame === true;
         setSavedLinuxNativeFrame(linuxNativeFrame);
         setDraftLinuxNativeFrame(linuxNativeFrame);
@@ -151,6 +148,29 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
       setLaunchAtLoginSupported(status?.supported === true);
       setLaunchAtLoginEnabled(status?.enabled === true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocalDesktop]);
+
+  React.useEffect(() => {
+    if (!isLocalDesktop) {
+      setTraySupported(false);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const status = await getDesktopTray();
+      if (cancelled) {
+        return;
+      }
+      setTraySupported(status?.supported === true);
+      if (status) {
+        setTrayEnabled(status.enabled);
+      }
     })();
 
     return () => {
@@ -246,7 +266,6 @@ export const DesktopNetworkSettings: React.FC = () => {
   const passwordDirty = nextPassword.length > 0 || removePassword;
   const isDirty = draftValue !== savedValue
     || passwordDirty
-    || draftMacMenuBarEnabled !== savedMacMenuBarEnabled
     || draftLinuxNativeFrame !== savedLinuxNativeFrame;
   const currentPort = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -309,6 +328,38 @@ export const DesktopNetworkSettings: React.FC = () => {
       setIsSavingLaunchAtLogin(false);
     }
   }, [isSavingLaunchAtLogin, launchAtLoginEnabled, launchAtLoginSupported, t]);
+
+  const handleTrayToggle = React.useCallback(async () => {
+    if (!traySupported || isSavingTray) {
+      return;
+    }
+
+    const nextValue = !trayEnabled;
+    setTrayEnabled(nextValue);
+    setIsSavingTray(true);
+    setError(null);
+
+    try {
+      const status = await setDesktopTray(nextValue);
+      if (!status) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.traySaveFailed'));
+      }
+      if (!status.supported) {
+        throw new Error(t('settings.openchamber.desktopNetwork.error.trayUnsupported'));
+      }
+      setTrayEnabled(status.enabled);
+      // Close-to-tray is only available with the icon showing; refresh its
+      // availability after the tray changes.
+      const minimizeStatus = await getDesktopMinimizeToTray();
+      setMinimizeToTraySupported(minimizeStatus?.supported === true);
+      setMinimizeToTrayEnabled(minimizeStatus?.enabled === true);
+    } catch (cause) {
+      setTrayEnabled(!nextValue);
+      setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.traySaveFailed'));
+    } finally {
+      setIsSavingTray(false);
+    }
+  }, [isSavingTray, t, trayEnabled, traySupported]);
 
   const handleMinimizeToTrayToggle = React.useCallback(async () => {
     if (!minimizeToTraySupported || isSavingMinimizeToTray) {
@@ -432,7 +483,6 @@ export const DesktopNetworkSettings: React.FC = () => {
         desktopLanAccessEnabled: draftValue,
         // Omitted when unchanged: the server keeps the password it has.
         ...(nextPassword ? { desktopUiPassword: nextPassword } : removePassword ? { desktopUiPassword: '' } : {}),
-        desktopMacMenuBarEnabled: draftMacMenuBarEnabled,
         desktopLinuxNativeFrame: draftLinuxNativeFrame,
       });
 
@@ -448,7 +498,6 @@ export const DesktopNetworkSettings: React.FC = () => {
       }
       setDraftPassword('');
       setRemovePassword(false);
-      setSavedMacMenuBarEnabled(draftMacMenuBarEnabled);
       setSavedLinuxNativeFrame(draftLinuxNativeFrame);
 
       const restarted = await restartDesktopApp();
@@ -459,7 +508,7 @@ export const DesktopNetworkSettings: React.FC = () => {
       setError(cause instanceof Error ? cause.message : t('settings.openchamber.desktopNetwork.error.saveFailed'));
       setIsSaving(false);
     }
-  }, [draftLinuxNativeFrame, draftMacMenuBarEnabled, draftValue, isDirty, nextPassword, removePassword, t]);
+  }, [draftLinuxNativeFrame, draftValue, isDirty, nextPassword, removePassword, t]);
 
   if (!isLocalDesktop) {
     return null;
@@ -468,7 +517,7 @@ export const DesktopNetworkSettings: React.FC = () => {
   return (
     <SettingsSection title={t('settings.openchamber.desktopNetwork.title')}>
       <div className="space-y-3">
-        {(launchAtLoginSupported || isMacDesktop || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported || quake.supported) ? (
+        {(launchAtLoginSupported || traySupported || isLinuxDesktop || minimizeToTraySupported || keepAwakeSupported || miniChatGlobalShortcutSupported || quake.supported) ? (
           <div className={SETTINGS_OPTION_STACK_CLASS}>
             {launchAtLoginSupported ? (
               <SettingsCheckboxRow
@@ -485,18 +534,6 @@ export const DesktopNetworkSettings: React.FC = () => {
               />
             ) : null}
 
-            {isMacDesktop ? (
-              <SettingsCheckboxRow
-                settingsItem="sessions.desktop-mac-menu-bar"
-                checked={draftMacMenuBarEnabled}
-                onChange={setDraftMacMenuBarEnabled}
-                disabled={isLoading || isSaving}
-                label={t('settings.openchamber.desktopNetwork.field.macMenuBar')}
-                info={t('settings.openchamber.desktopNetwork.field.macMenuBarDescription')}
-                ariaLabel={t('settings.openchamber.desktopNetwork.field.macMenuBarAria')}
-              />
-            ) : null}
-
             {isLinuxDesktop ? (
               <SettingsCheckboxRow
                 settingsItem="sessions.desktop-linux-native-frame"
@@ -509,6 +546,21 @@ export const DesktopNetworkSettings: React.FC = () => {
               />
             ) : null}
 
+            {traySupported ? (
+              <SettingsCheckboxRow
+                settingsItem="sessions.desktop-tray"
+                checked={trayEnabled}
+                onChange={(checked) => {
+                  if (checked === trayEnabled) return;
+                  void handleTrayToggle();
+                }}
+                disabled={isSavingTray}
+                label={t('settings.openchamber.desktopNetwork.field.tray')}
+                info={t('settings.openchamber.desktopNetwork.field.trayDescription')}
+                ariaLabel={t('settings.openchamber.desktopNetwork.field.trayAria')}
+              />
+            ) : null}
+
             {minimizeToTraySupported ? (
               <SettingsCheckboxRow
                 settingsItem="sessions.desktop-minimize-to-tray"
@@ -517,7 +569,7 @@ export const DesktopNetworkSettings: React.FC = () => {
                   if (checked === minimizeToTrayEnabled) return;
                   void handleMinimizeToTrayToggle();
                 }}
-                disabled={isSavingMinimizeToTray}
+                disabled={isSavingMinimizeToTray || !trayEnabled}
                 label={t('settings.openchamber.desktopNetwork.field.minimizeToTray')}
                 info={t('settings.openchamber.desktopNetwork.field.minimizeToTrayDescription')}
                 ariaLabel={t('settings.openchamber.desktopNetwork.field.minimizeToTrayAria')}

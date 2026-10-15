@@ -1,6 +1,7 @@
 import React from 'react';
+import { z } from 'zod';
 import type { Session } from '@/lib/opencode/model';
-import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
+import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, TRAY_ENABLED_EVENT } from '@/lib/desktop';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
@@ -37,6 +38,7 @@ import { toast } from '@/components/ui';
 // disabled. That path observes unread state only, without tray polling or quotas.
 
 const TRAY_ACTION_EVENT = 'openchamber:tray-action';
+const trayEnabledChangeDetail = z.object({ enabled: z.boolean() }).partial();
 // Event-driven updates do the real work; this is just a slow safety net.
 const POLL_INTERVAL_MS = 5000;
 const FLUSH_DEBOUNCE_MS = 500;
@@ -415,9 +417,23 @@ const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot
 };
 
 export const useTraySync = (): void => {
+  // The preload flag is fixed at window creation; the settings toggle
+  // broadcasts live changes (and mirrors them onto the flag) so this hook
+  // can resubscribe without a restart.
+  const [trayEnabled, setTrayEnabled] = React.useState(isTrayEnabled);
+
+  React.useEffect(() => {
+    const onTrayEnabledChanged = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail : undefined;
+      const parsed = trayEnabledChangeDetail.safeParse(detail);
+      setTrayEnabled(parsed.success && parsed.data.enabled !== undefined ? parsed.data.enabled : isTrayEnabled());
+    };
+    window.addEventListener(TRAY_ENABLED_EVENT, onTrayEnabledChanged);
+    return () => window.removeEventListener(TRAY_ENABLED_EVENT, onTrayEnabledChanged);
+  }, []);
+
   React.useEffect(() => {
     if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
-    const trayEnabled = isTrayEnabled();
 
     let disposed = false;
     let lastSerialized = '';
@@ -555,10 +571,10 @@ export const useTraySync = (): void => {
       for (const unsub of storeUnsubs.values()) unsub();
       storeUnsubs.clear();
     };
-  }, []);
+  }, [trayEnabled]);
 
   React.useEffect(() => {
-    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !trayEnabled || !canUseElectronDesktopIPC()) return;
     const bridge = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
     const listen = bridge?.listen;
     if (typeof listen !== 'function') return;
@@ -590,5 +606,5 @@ export const useTraySync = (): void => {
         // ignore
       }
     };
-  }, []);
+  }, [trayEnabled]);
 };

@@ -18,7 +18,7 @@ const runtimeHeadersRaw = readArgValue('--openchamber-runtime-headers');
 const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
-const trayEnabled = process.platform !== 'darwin' || readArgValue('--openchamber-tray-enabled') !== '0';
+const trayEnabled = readArgValue('--openchamber-tray-enabled') !== '0';
 // The window has the desktop environment's own title bar, so the page draws no window controls.
 const nativeFrame = readArgValue('--openchamber-native-frame') === '1';
 

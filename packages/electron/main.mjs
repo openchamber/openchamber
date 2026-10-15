@@ -35,7 +35,7 @@ import {
   installPackagedUiRequestHandler,
   installStartupMarkSink,
   isDev,
-  isMacMenuBarEnabled,
+  isTrayEnabled,
   macTrafficLightPosition,
   macosMajorVersion,
   readLoginItemSettings,
@@ -344,8 +344,31 @@ const readDesktopKeepAwakeStatus = () => {
   return { supported: true, enabled, active };
 };
 
+const readDesktopTrayStatus = () => {
+  const supported = process.platform === 'darwin' || process.platform === 'win32' || process.platform === 'linux';
+  return {
+    supported,
+    enabled: supported && isTrayEnabled(),
+  };
+};
+
+// Tears down the native tray/menu bar item without touching the focus
+// listener, so re-enabling recreates the icon on the next setupTray().
+const destroyTray = () => {
+  if (state.trayController) {
+    try {
+      state.trayController.destroy();
+    } catch {
+    }
+    state.trayController = null;
+  }
+};
+
 const readDesktopMinimizeToTrayStatus = () => {
-  const supported = process.platform === 'win32' || process.platform === 'linux';
+  // Close-to-tray needs somewhere to go: with the tray icon off, closing
+  // quits the app, so the background mode reports as unsupported.
+  const trayEnabled = isTrayEnabled();
+  const supported = (process.platform === 'win32' || process.platform === 'linux') && trayEnabled;
   return {
     supported,
     enabled: supported && readSettingsRoot().desktopMinimizeToTrayEnabled === true,
@@ -2573,7 +2596,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       bootOutcome: state.bootOutcome || null,
       relayHostId: rendererRuntimeConfig.relayHostId || '',
       explicitRuntime: runtimeConfig.explicitRuntime === true,
-      trayEnabled: isMacMenuBarEnabled(),
+      trayEnabled: isTrayEnabled(),
     }),
   }));
   browserWindow.__ocLabel = label || nextWindowLabel();
@@ -4432,12 +4455,33 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
 
     case 'desktop_set_minimize_to_tray': {
       if (process.platform !== 'win32' && process.platform !== 'linux') return { supported: false, enabled: false };
+      if (!isTrayEnabled()) return readDesktopMinimizeToTrayStatus();
       const enabled = args.enabled === true;
       await mutateSettingsRoot((root) => {
         root.desktopMinimizeToTrayEnabled = enabled;
       });
       setupTray();
       return readDesktopMinimizeToTrayStatus();
+    }
+
+    case 'desktop_get_tray': {
+      return readDesktopTrayStatus();
+    }
+
+    case 'desktop_set_tray': {
+      if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') {
+        return { supported: false, enabled: false };
+      }
+      const enabled = args.enabled === true;
+      await mutateSettingsRoot((root) => {
+        root.desktopTrayEnabled = enabled;
+        // Mirror the legacy macOS key so older builds read the same choice.
+        root.desktopMacMenuBarEnabled = enabled;
+      });
+      if (enabled) setupTray();
+      else destroyTray();
+      emitToAllWindows('openchamber:tray-enabled-changed', { enabled });
+      return readDesktopTrayStatus();
     }
 
     case 'desktop_get_keep_awake': {
@@ -6021,7 +6065,7 @@ const trayIconAssets = () => {
 
 const setupTray = () => {
   if (!['darwin', 'win32', 'linux'].includes(process.platform) || state.trayController) return;
-  if (process.platform === 'darwin' && readSettingsRoot().desktopMacMenuBarEnabled === false) return;
+  if (!isTrayEnabled()) return;
   const assets = trayIconAssets();
   if (!fs.existsSync(assets.idleIconPath)) {
     log.warn('[electron] tray icon missing, skipping tray setup', { iconPath: assets.idleIconPath });
@@ -6274,7 +6318,12 @@ const scheduleCompileCacheSettle = () => {
 app.whenReady().then(async () => {
   if (wasEarlyWindowClosed()) return;
   const loginItemSettings = readLoginItemSettings();
-  const isBackgroundStart = shouldStartInBackground(loginItemSettings);
+  const wantsBackgroundStart = shouldStartInBackground(loginItemSettings);
+  // Without a tray icon a background start on Windows/Linux leaves no way
+  // back into the app (no window, no taskbar entry), so open the window
+  // instead. macOS keeps its Dock icon, which reopens the app.
+  const isBackgroundStart = wantsBackgroundStart
+    && (process.platform === 'darwin' || isTrayEnabled());
   // The window goes up before anything else so the splash renders while the
   // rest of startup runs. Everything below shares the main thread with the
   // renderer's navigation callbacks, and importing the server module graph

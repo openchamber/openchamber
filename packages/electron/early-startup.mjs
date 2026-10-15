@@ -378,9 +378,15 @@ export const resolveSplashBackgroundColor = (themeSource = nativeTheme.themeSour
     : readSplashColor(settings, 'bgLight', SPLASH_DEFAULTS.bgLight);
 };
 
-export const isMacMenuBarEnabled = () => (
-  process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false
-);
+// Unified tray visibility. `desktopTrayEnabled` is the current key;
+// `desktopMacMenuBarEnabled` is its macOS predecessor and stays as a fallback
+// so installs that toggled the old menu bar setting keep their choice.
+export const isTrayEnabled = () => {
+  const root = readSettingsRoot();
+  if (typeof root.desktopTrayEnabled === 'boolean') return root.desktopTrayEnabled;
+  if (typeof root.desktopMacMenuBarEnabled === 'boolean') return root.desktopMacMenuBarEnabled;
+  return true;
+};
 
 export const resolvePreloadPath = () => (
   isDev ? path.join(__dirname, 'preload.mjs') : path.join(app.getAppPath(), 'preload.mjs')
@@ -397,7 +403,7 @@ export const buildRendererAdditionalArguments = ({
   bootOutcome = null,
   relayHostId = '',
   explicitRuntime = false,
-  trayEnabled = isMacMenuBarEnabled(),
+  trayEnabled = isTrayEnabled(),
   nativeFrame = usesLinuxNativeFrame(),
 } = {}) => [
   `--openchamber-local-origin=${localOrigin}`,

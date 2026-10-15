@@ -416,6 +416,20 @@ describe('settings helpers', () => {
     });
   });
 
+  it('accepts desktopTrayEnabled as a persisted shared setting', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ desktopTrayEnabled: true })).toEqual({
+      desktopTrayEnabled: true,
+    });
+    expect(helpers.sanitizeSettingsUpdate({ desktopTrayEnabled: false })).toEqual({
+      desktopTrayEnabled: false,
+    });
+    expect(helpers.formatSettingsResponse({ desktopTrayEnabled: false })).toMatchObject({
+      desktopTrayEnabled: false,
+    });
+  });
+
   it('accepts desktopMacMenuBarEnabled as a persisted shared setting', () => {
     const helpers = createTestHelpers();
 
@@ -833,7 +847,7 @@ describe('settings registry gate', () => {
     lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode',
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true,
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentToolsCodeMode: true, agentWorktreeMoveWithoutAsking: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',

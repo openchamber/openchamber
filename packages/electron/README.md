@@ -274,7 +274,7 @@ The package supports macOS, Windows, and Linux desktop features. Linux builds in
 
 On Windows and Linux, the General setting persisted as `desktopMinimizeToTrayEnabled` keeps the app running in the tray when the main window is **closed**. Minimize — the in-app control, the native title-bar button, and the taskbar — always performs a normal window minimize, so the taskbar entry stays available.
 
-The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart. While disabled, Desktop skips the native tray controller, tray-specific subscriptions, polling, and quota refresh. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the menu bar item.
+The tray icon itself is controlled by the General "Show the tray icon" setting, persisted as `desktopTrayEnabled` (with the legacy macOS `desktopMacMenuBarEnabled` as a fallback for older installs). It is enabled by default on macOS, Windows, and Linux, and applies immediately without a restart: disabling destroys the native tray controller and stops its session, approval, and usage updates. Dock badges remain independent: unread activity, session membership, and badge preferences still update the Dock through the shared IPC command. Turning off the Dock badge clears its count without enabling the tray icon. On Windows and Linux, closing the main window while the tray icon is off quits the app, and a background (login-item) start opens the main window so the app stays reachable.
 
 ## Bundled OpenCode CLI
 

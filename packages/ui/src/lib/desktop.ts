@@ -194,6 +194,63 @@ type MinimizeToTrayStatus = {
   enabled: boolean;
 };
 
+export const TRAY_ENABLED_EVENT = 'openchamber:tray-enabled-changed';
+
+const trayStatusSchema = z.object({ supported: z.boolean(), enabled: z.boolean() });
+
+type TrayStatus = {
+  supported: boolean;
+  enabled: boolean;
+};
+
+export const getDesktopTray = async (): Promise<TrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const parsed = trayStatusSchema.safeParse(await invokeDesktop('desktop_get_tray'));
+    if (!parsed.success) {
+      return null;
+    }
+    return parsed.data;
+  } catch (error) {
+    console.warn('Failed to get tray status', error);
+    return null;
+  }
+};
+
+export const setDesktopTray = async (enabled: boolean): Promise<TrayStatus | null> => {
+  if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const parsed = trayStatusSchema.safeParse(await invokeDesktop('desktop_set_tray', { enabled }));
+    if (!parsed.success) {
+      return null;
+    }
+    const result = parsed.data;
+    // The preload flag is fixed at window creation, so mirror the live choice
+    // onto this window's copy and tell every tray consumer to re-read it.
+    try {
+      const runtime = getElectronRuntime();
+      if (runtime) runtime.trayEnabled = result.enabled;
+    } catch {
+      // read-only bridge — the broadcast below still reaches listeners
+    }
+    try {
+      window.dispatchEvent(new CustomEvent(TRAY_ENABLED_EVENT, { detail: { enabled: result.enabled } }));
+    } catch {
+      // non-DOM test host — listeners observe the mutated flag instead
+    }
+    return result;
+  } catch (error) {
+    console.warn('Failed to set tray status', error);
+    return null;
+  }
+};
+
 export const getDesktopLaunchAtLogin = async (): Promise<LaunchAtLoginStatus | null> => {
   if (!canUseElectronDesktopIPC() || !isDesktopLocalOriginActive()) {
     return null;

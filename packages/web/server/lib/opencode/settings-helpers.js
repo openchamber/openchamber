@@ -285,6 +285,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {
       result.desktopMinimizeToTrayEnabled = candidate.desktopMinimizeToTrayEnabled;
     }
+    if (typeof candidate.desktopTrayEnabled === 'boolean') {
+      result.desktopTrayEnabled = candidate.desktopTrayEnabled;
+    }
     if (typeof candidate.desktopMacMenuBarEnabled === 'boolean') {
       result.desktopMacMenuBarEnabled = candidate.desktopMacMenuBarEnabled;
     }

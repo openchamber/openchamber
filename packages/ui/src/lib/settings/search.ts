@@ -630,12 +630,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktop && (ctx.isWindows || !ctx.isMac),
   },
   {
-    id: 'sessions.desktop-mac-menu-bar',
+    id: 'sessions.desktop-tray',
     page: 'general',
-    titleKey: 'settings.openchamber.desktopNetwork.field.macMenuBar',
-    descriptionKey: 'settings.openchamber.desktopNetwork.field.macMenuBarDescription',
-    keywords: ['desktop', 'menu bar', 'tray', 'status item', 'macos', 'background'],
-    isAvailable: (ctx) => ctx.isDesktopLocalOrigin && ctx.isMac,
+    titleKey: 'settings.openchamber.desktopNetwork.field.tray',
+    descriptionKey: 'settings.openchamber.desktopNetwork.field.trayDescription',
+    keywords: ['desktop', 'tray', 'system tray', 'menu bar', 'status item', 'background', 'icon', 'macos', 'windows', 'linux'],
+    isAvailable: (ctx) => ctx.isDesktopLocalOrigin,
   },
   {
     id: 'sessions.desktop-linux-native-frame',
