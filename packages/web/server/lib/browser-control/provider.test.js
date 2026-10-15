@@ -114,6 +114,24 @@ describe('browser control router', () => {
     expect(call.granted).toEqual(['service']);
   });
 
+  test('routes browser.select to the selected provider unchanged', async () => {
+    const { router, proxied } = createRouter({
+      serviceAnswer: {
+        status: 200,
+        body: JSON.stringify({ ok: true, data: { selector: '#country', label: 'Canada', value: 'ca', url: 'https://example.test/' } }),
+      },
+    });
+
+    await expect(router.request('browser.select', { selector: '#country', label: 'Canada' })).resolves.toEqual({
+      selector: '#country',
+      label: 'Canada',
+      value: 'ca',
+      url: 'https://example.test/',
+    });
+    expect(JSON.parse(proxied[0].body).action).toBe('browser.select');
+    expect(JSON.parse(proxied[0].body).parameters).toEqual({ selector: '#country', label: 'Canada' });
+  });
+
   test('a slow page gets the open budget when the caller sets none', async () => {
     const { router, proxied } = createRouter();
     await router.request('browser.open', { url: 'http://a/' });

@@ -17,6 +17,7 @@ export const BROWSER_CONTROL_ACTIONS = [
   'browser.snapshot',
   'browser.click',
   'browser.type',
+  'browser.select',
   'browser.scroll',
   'browser.back',
   'browser.forward',
@@ -52,6 +53,9 @@ export type BrowserOpenParameters = BrowserTabTarget & { url: string; viewport?:
 export type BrowserSnapshotParameters = BrowserTabTarget & { selector?: string };
 export type BrowserClickParameters = BrowserTabTarget & { selector?: string; text?: string };
 export type BrowserTypeParameters = BrowserTabTarget & { selector: string; value: string; submit: boolean };
+export type BrowserSelectParameters = BrowserTabTarget & {
+  selector: string;
+} & ({ label: string; value?: never } | { value: string; label?: never });
 export type BrowserScrollParameters = BrowserTabTarget & { selector?: string; direction?: BrowserScrollDirection };
 export type BrowserInspectParameters = BrowserTabTarget & { selector: string };
 export type BrowserCaptureParameters = BrowserTabTarget & { label?: string };
@@ -75,6 +79,7 @@ export type BrowserProviderRequest = ProviderRequestEnvelope & (
   | { action: 'browser.snapshot'; parameters: BrowserSnapshotParameters }
   | { action: 'browser.click'; parameters: BrowserClickParameters }
   | { action: 'browser.type'; parameters: BrowserTypeParameters }
+  | { action: 'browser.select'; parameters: BrowserSelectParameters }
   | { action: 'browser.scroll'; parameters: BrowserScrollParameters }
   | { action: 'browser.back'; parameters: BrowserTabTarget }
   | { action: 'browser.forward'; parameters: BrowserTabTarget }
@@ -91,6 +96,13 @@ export type BrowserViewportSummary = {
 
 export type BrowserElementBounds = { x: number; y: number; width: number; height: number };
 
+export type BrowserSnapshotOption = {
+  label: string;
+  value: string;
+  selected: boolean;
+  disabled: boolean;
+};
+
 /** One interactive element of a snapshot; absent fields mean empty or default. */
 export type BrowserSnapshotElement = {
   selector: string;
@@ -101,6 +113,9 @@ export type BrowserSnapshotElement = {
   role?: string;
   label?: string;
   disabled?: true;
+  options?: BrowserSnapshotOption[];
+  optionsTruncated?: boolean;
+  multiple?: boolean;
   missingAccessibleName?: true;
 };
 
@@ -144,6 +159,7 @@ export type BrowserConsoleProblem = {
 
 export type BrowserClickData = { clicked: string; label: string; url: string };
 export type BrowserTypeData = { selector: string; url: string };
+export type BrowserSelectData = { selector: string; label: string; value: string; url: string };
 export type BrowserScrollData = {
   scrollY: number;
   maxScrollY: number;
@@ -178,6 +194,7 @@ export type BrowserProviderData =
   | BrowserSnapshotData
   | BrowserClickData
   | BrowserTypeData
+  | BrowserSelectData
   | BrowserScrollData
   | BrowserNavigationData
   | BrowserInspectData
