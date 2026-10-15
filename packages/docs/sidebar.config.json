@@ -586,7 +586,7 @@
         },
         {
           "label": "Chat Input",
-          "link": "/commands-snippets/",
+          "link": "/chat-input/",
           "translations": {
             "nl": "Chatinvoer",
             "uk": "Введення в чаті",
