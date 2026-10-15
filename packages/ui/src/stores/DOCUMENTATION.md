@@ -196,6 +196,13 @@ as a project when the list is empty and warms it on every start, so either path
 used to put the home, or the project just removed, back in the sidebar and
 start OpenCode there on every launch.
 
+Restoring the saved directory through `applyPersistedDirectoryPreferences`
+probes that one path with the host's directory-stats route. A confirmed missing
+path uses `goToNoProjectDirectory` and clears the saved choice. An unavailable
+probe keeps it, including before login. A newer directory, settings snapshot,
+or runtime switch retires the probe; a runtime switch during fallback resolution
+also prevents it from changing the directory or persistence.
+
 Nothing about directories is carried from one host to another (the desktop
 host switcher, a mobile instance switch). Three rules hold that:
 
