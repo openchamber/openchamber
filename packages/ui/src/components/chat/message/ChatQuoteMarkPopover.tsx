@@ -27,6 +27,8 @@ export interface ChatQuoteMarkPopoverProps {
     onEditingChange: (editing: boolean) => void;
     onSave: (text: string) => void;
     onRemove: () => void;
+    /** Where to render: the open modal dialog for a quote in a full-screen page; the body otherwise. */
+    portalTarget?: HTMLElement | null;
 }
 
 export function ChatQuoteMarkPopover({
@@ -37,6 +39,7 @@ export function ChatQuoteMarkPopover({
     onEditingChange,
     onSave,
     onRemove,
+    portalTarget,
 }: ChatQuoteMarkPopoverProps) {
     const { t } = useI18n();
     const [draft, setDraft] = React.useState(comment);
@@ -153,6 +156,6 @@ export function ChatQuoteMarkPopover({
                 </div>
             )}
         </div>,
-        document.body,
+        portalTarget ?? document.body,
     );
 }

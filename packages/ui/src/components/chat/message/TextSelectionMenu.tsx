@@ -28,6 +28,7 @@ import {
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
+import { frameRectInApp, onFrameSelection } from './frameSelection';
 import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
@@ -43,6 +44,12 @@ interface TextSelectionMenuProps {
   // the message's own read-aloud button.
   readingKey: string;
   canReadAloud: boolean;
+  // This menu answers to the selections made in the page frames inside its
+  // container (`openchamber_render`), not to the container's own text. Each
+  // page has its own such menu (HtmlRenderFrame), so a page works wherever it
+  // is drawn: in a message, in the live turn's hoisted pages, or full screen.
+  // `readingKey` is then the id of the message the page belongs to.
+  frameSelections?: boolean;
 }
 
 interface MenuPosition {
@@ -58,14 +65,20 @@ interface SelectionPayload {
   markdownText: string;
   rect: DOMRect;
   messageId: string | null;
-  range: Range;
+  // A selection inside a page frame has no Range: the app cannot reach it, so
+  // `measureRect` re-reads its box from the frame's current position, `anchor`
+  // is the one the page measured, and `clear` drops the page's own highlight.
+  range?: Range;
+  measureRect?: () => DOMRect;
+  anchor?: ChatQuoteAnchor;
+  clear?: () => void;
 }
 
 const normalizeDistilledInsight = (insight: string): string => (
   insight.trim().replace(/^[-*+]\s+/, '').slice(0, PROJECT_NOTE_BODY_MAX_LENGTH)
 );
 
-const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud }) => {
+const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef, readingKey, canReadAloud, frameSelections = false }) => {
   const { t } = useI18n();
   const { isPlaying: isReading, play: playReading, stop: stopReading } = useMessageTTS(readingKey);
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, placement: 'above', show: false });
@@ -168,11 +181,15 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   }, []);
 
   const hideMenu = React.useCallback(() => {
+    const ended = pendingSelectionRef.current;
     pendingSelectionRef.current = null;
     anchorRectRef.current = null;
     activeAddToChatCleanupRef.current?.();
     activeAddToChatCleanupRef.current = null;
     setCommentRects(null);
+    // The menu stops tracking a page's selection: the page drops its highlight
+    // too. After the pending ref is null, so the report this triggers is a no-op.
+    ended?.clear?.();
 
     if (!isMenuVisibleRef.current) {
       return;
@@ -320,9 +337,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
-        const range = pendingSelectionRef.current?.range;
-        if (!range) return;
-        const rect = range.getBoundingClientRect();
+        const pending = pendingSelectionRef.current;
+        const rect = pending?.range?.getBoundingClientRect() ?? pending?.measureRect?.();
+        if (!rect) return;
         anchorRectRef.current = rect;
         const boundary = containerRef.current
           ?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')
@@ -378,6 +395,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
 
     const text = trimSelectionValue(selection.toString());
 
+    // A selection inside a page frame is the one the menu shows; the app's
+    // own selection was cleared for it, and that is no reason to close it.
+    if (!text && pendingSelectionRef.current && !pendingSelectionRef.current.range) {
+      return;
+    }
+
     // Only show if we have text and the selection is within our container
     if (!text) {
       if (!isDraggingRef.current) {
@@ -403,6 +426,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     const anchorElement = range.commonAncestorContainer instanceof Element
       ? range.commonAncestorContainer
       : range.commonAncestorContainer.parentElement;
+    const replaced = pendingSelectionRef.current;
     pendingSelectionRef.current = {
       plainText: text,
       markdownText: rangeToMarkdown(range, text),
@@ -410,6 +434,8 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       messageId: anchorElement?.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
       range: range.cloneRange(),
     };
+    // The app's selection takes over from one a page frame had.
+    replaced?.clear?.();
 
     // Only show menu if we're not currently dragging
     if (!isDraggingRef.current) {
@@ -441,8 +467,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     // Track when dragging stops
     const handleMouseUp = () => {
       isDraggingRef.current = false;
-      // Check if we have a pending selection to show
-      if (pendingSelectionRef.current) {
+      // Check if we have a pending selection to show; one from a page frame
+      // is shown as it arrives, and the app has no selection of its own to check.
+      if (pendingSelectionRef.current?.range) {
         if (mouseUpTimeoutRef.current !== null) {
           window.clearTimeout(mouseUpTimeoutRef.current);
         }
@@ -500,6 +527,40 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     };
   }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
 
+  // A selection made inside a page frame (`openchamber_render`) arrives as an
+  // event from the frame, never through window.getSelection().
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !frameSelections) return;
+    return onFrameSelection(container, (selection, frame) => {
+      const text = trimSelectionValue(selection.text);
+      const isFrameSelection = Boolean(pendingSelectionRef.current && !pendingSelectionRef.current.range);
+      // Another page took the selection over: this menu closes, a comment
+      // in progress included.
+      if (!text && selection.dismiss) {
+        if (isFrameSelection) hideMenu();
+        return;
+      }
+      // An open comment, or the composer's, keeps its quote.
+      if (commentModeRef.current || mobileCommentActiveRef.current) return;
+      if (!text) {
+        if (isFrameSelection) hideMenu();
+        return;
+      }
+      const measureRect = () => frameRectInApp(frame, selection.rect);
+      pendingSelectionRef.current = {
+        plainText: text,
+        markdownText: text,
+        rect: measureRect(),
+        measureRect,
+        messageId: readingKey,
+        anchor: selection.anchor,
+        clear: selection.clear,
+      };
+      showMenu();
+    });
+  }, [containerRef, frameSelections, hideMenu, readingKey, showMenu]);
+
   const handleAddToChat = React.useCallback(() => {
     if (!selectedTextMarkdown) return;
     addMarkdownToChat(selectedTextMarkdown);
@@ -538,8 +599,10 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
   // it reads the whole message text.
   const captureCommentAnchor = React.useCallback((): ChatQuoteAnchor | null => {
     const container = containerRef.current;
-    const range = pendingSelectionRef.current?.range;
-    return container && range ? captureChatQuoteAnchor(container, range) : null;
+    const pending = pendingSelectionRef.current;
+    // A page's selection was anchored by the page, in its own text.
+    if (pending && !pending.range) return pending.anchor ?? null;
+    return container && pending?.range ? captureChatQuoteAnchor(container, pending.range) : null;
   }, [containerRef]);
 
   const openComment = React.useCallback((initialText: string) => {
@@ -859,7 +922,13 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     );
   }
 
-  // Desktop: Show as a popup above the selection
+  // Desktop: Show as a popup above the selection. A page shown full screen
+  // lives in a modal dialog, which keeps everything outside it inert and
+  // behind it: the menu then renders inside the dialog, where it can be used.
+  // The popup has no transform when open, so `fixed` still means the viewport.
+  const menuPortalTarget = (frameSelections
+    ? containerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]')
+    : null) ?? document.body;
   return createPortal(
     <div
       ref={menuRef}
@@ -962,7 +1031,7 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
         </div>
       )}
     </div>,
-    document.body
+    menuPortalTarget
   );
 };
 

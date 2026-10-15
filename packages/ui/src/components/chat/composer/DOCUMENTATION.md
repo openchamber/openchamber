@@ -881,6 +881,8 @@ re-resolved by text and context whenever the marked message re-renders or
 remounts. Offsets only break ties. Quotes sent before anchors existed are
 found only when their text appears once in the message.
 
+A quote taken inside a page the agent showed (`openchamber_render`) has `page: { partId }` in its anchor: its text stream is the page's body, measured and re-found inside the page's frame. The layer does not paint those marks; it publishes them, asks for reveals and hears clicks through `message/pageQuoteBridge.ts` (see `message/parts/DOCUMENTATION.md`).
+
 ## Mobile comment mode
 
 On mobile, "Comment" on a text selection does not open a floating input. The

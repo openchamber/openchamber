@@ -1735,7 +1735,7 @@ const AssistantMessageBody = React.memo(({
                     : null;
                 if (page) {
                     if (!hoistedPages?.has(toolPart.id)) {
-                        rendered.push(<HtmlRenderFrame key={`page-${toolPart.id}`} partId={toolPart.id} html={page.html} title={page.title} />);
+                        rendered.push(<HtmlRenderFrame key={`page-${toolPart.id}`} partId={toolPart.id} messageId={toolPart.messageID} html={page.html} title={page.title} />);
                     }
                     i++;
                     continue;

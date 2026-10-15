@@ -18,6 +18,12 @@
  * Ranges are re-resolved from their anchors whenever a marked message
  * re-renders or remounts in the virtualized list. Runtimes without
  * `CSS.highlights` get the scroll without the highlight.
+ *
+ * A quote taken inside a page the agent showed (`openchamber_render`) has a
+ * `page` in its anchor and lives in the page's frame, out of reach here. Its
+ * marks, reveal and clicks go through `pageQuoteBridge.ts` to the frame, which
+ * paints, scrolls and hit-tests in the page. Its popover opens on click only:
+ * the pointer over a frame is invisible to the app.
  */
 
 import React from 'react';
@@ -30,6 +36,8 @@ import {
 
 import type { ChatQuoteHighlightStore } from '../hooks/chatQuoteHighlightStore';
 import { ChatQuoteMarkPopover } from './ChatQuoteMarkPopover';
+import type { HtmlRenderMark } from './parts/htmlRender';
+import { onPageMarkClick, revealPageMark, setPageMarks } from './pageQuoteBridge';
 
 const MARK_HIGHLIGHT = 'oc-chat-quote';
 const FOCUS_HIGHLIGHT = 'oc-chat-quote-focus';
@@ -39,6 +47,9 @@ const FLASH_DURATION_MS = 1600;
 const POPOVER_OPEN_DELAY_MS = 400;
 const POPOVER_CLOSE_DELAY_MS = 250;
 const CORRIDOR_PADDING_PX = 6;
+// A page's frame may not be mounted yet (or just scrolled into place) when a
+// reveal arrives; it is retried for about this many frames.
+const PAGE_REVEAL_ATTEMPTS = 10;
 
 const supportsHighlights = (): boolean => 'Highlight' in window && 'highlights' in CSS;
 
@@ -88,7 +99,15 @@ function markAtPoint(ranges: Map<string, Range>, x: number, y: number): string |
     return null;
 }
 
-type PopoverState = { markId: string; rect: DOMRect };
+// A mark inside a page's frame has no Range here: its popover opens from the
+// frame's click report, follows the frame through `measure`, and renders in
+// `portal` (the open full-screen dialog) when the page is shown in one.
+type PopoverState = {
+    markId: string;
+    rect: DOMRect;
+    measure?: () => DOMRect;
+    portal?: HTMLElement | null;
+};
 
 export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLayer({
     store,
@@ -107,6 +126,10 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
         focus: { layer: 'focus' } satisfies PaintOwner,
         flash: { layer: 'flash' } satisfies PaintOwner,
     }));
+    // Who publishes this column's marks to the pages' frames.
+    const [pageOwner] = React.useState(() => ({}));
+    const marksRef = React.useRef(marks);
+    marksRef.current = marks;
     const scrollNodeRef = React.useRef(scrollNode);
     scrollNodeRef.current = scrollNode;
     const scrollToMessageRef = React.useRef(scrollToMessage);
@@ -125,6 +148,7 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             const focused: Range[] = [];
             ranges.clear();
             for (const mark of marks) {
+                if (mark.anchor.page) continue;
                 const root = findChatQuoteRoot(scrollNode, mark.messageId);
                 const range = root ? resolveChatQuoteAnchor(root, mark.anchor) : null;
                 if (!range) continue;
@@ -160,6 +184,21 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
         };
     }, [focusedMarkId, marks, owners, scrollNode]);
 
+    // The marks inside pages go to those pages' frames, which paint them.
+    React.useEffect(() => {
+        const byPart = new Map<string, HtmlRenderMark[]>();
+        for (const mark of marks) {
+            const partId = mark.anchor.page?.partId;
+            if (!partId) continue;
+            const forPart = byPart.get(partId) ?? [];
+            forPart.push({ id: mark.id, anchor: mark.anchor, focused: mark.id === focusedMarkId });
+            byPart.set(partId, forPart);
+        }
+        setPageMarks(pageOwner, byPart);
+    }, [focusedMarkId, marks, pageOwner]);
+
+    React.useEffect(() => () => setPageMarks(pageOwner, new Map()), [pageOwner]);
+
     // A flash paints both layers, so it reads as strong as a hovered mark.
     const paintFlash = React.useCallback((ranges: Range[]) => {
         paint(MARK_HIGHLIGHT, owners.flash, ranges);
@@ -173,6 +212,18 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
 
     const reveal = React.useCallback((messageId: string, anchor: ChatQuoteAnchor) => {
         void (async () => {
+            if (anchor.page) {
+                // Bring the message to the page's frame, then let the frame
+                // scroll and flash inside the page. The row may still be
+                // mounting; the controller knowing no such message is no stop.
+                const { partId } = anchor.page;
+                await scrollToMessageRef.current(messageId, { behavior: 'auto' }).catch(() => false);
+                for (let attempt = 0; attempt < PAGE_REVEAL_ATTEMPTS; attempt += 1) {
+                    await nextFrame();
+                    if (revealPageMark(partId, anchor)) return;
+                }
+                return;
+            }
             // Scrolling through the timeline controller releases live follow
             // and mounts the row when the virtualized list dropped it. The
             // controller only knows messages it could place in a turn; a row
@@ -237,6 +288,24 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
         setPopover(null);
         setEditing(false);
     }, [clearTimers]);
+
+    React.useEffect(() => onPageMarkClick((click) => {
+        // A click on no mark closes a page mark's popover; the popover of a
+        // mark in the chat's own text is the pointer's business.
+        if (!click.markId) {
+            if (popoverRef.current?.measure && !editingRef.current) closePopover();
+            return;
+        }
+        // Another column's mark, or one already gone.
+        if (!marksRef.current.some((mark) => mark.id === click.markId)) return;
+        if (popoverRef.current?.markId === click.markId) {
+            closePopover();
+            return;
+        }
+        clearTimers();
+        setEditing(false);
+        setPopover({ markId: click.markId, rect: click.measure(), measure: click.measure, portal: click.portalTarget });
+    }), [clearTimers, closePopover]);
 
     const showPopover = React.useCallback((markId: string) => {
         const range = rangesRef.current.get(markId);
@@ -329,16 +398,17 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
             frame = window.requestAnimationFrame(() => {
                 frame = null;
                 const range = rangesRef.current.get(openMarkId);
-                if (!range) {
+                const rect = range ? range.getBoundingClientRect() : popoverRef.current?.measure?.();
+                if (!rect) {
                     closePopover();
                     return;
                 }
-                const rect = range.getBoundingClientRect();
                 setPopover((current) => (current && current.markId === openMarkId ? { ...current, rect } : current));
             });
         };
         const handlePointerMove = (event: PointerEvent) => {
-            if (event.pointerType !== 'mouse' || editingRef.current) return;
+            // A page mark's popover opened by click stays until a click elsewhere.
+            if (event.pointerType !== 'mouse' || editingRef.current || popoverRef.current?.measure) return;
             if (isInPopoverCorridor(event.clientX, event.clientY)
                 || markAtPoint(rangesRef.current, event.clientX, event.clientY) === openMarkId) {
                 cancelClose();
@@ -370,6 +440,7 @@ export const ChatQuoteHighlightLayer = React.memo(function ChatQuoteHighlightLay
         <ChatQuoteMarkPopover
             ref={popoverElementRef}
             anchorRect={popover.rect}
+            portalTarget={popover.portal}
             comment={openMark.comment}
             editing={editing}
             onEditingChange={setEditing}
