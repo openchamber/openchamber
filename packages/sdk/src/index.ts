@@ -391,6 +391,7 @@ export type {
   BrowserScrollParameters,
   BrowserSnapshotData,
   BrowserSnapshotElement,
+  BrowserSnapshotOption,
   BrowserSnapshotParameters,
   BrowserSelectData,
   BrowserSelectParameters,

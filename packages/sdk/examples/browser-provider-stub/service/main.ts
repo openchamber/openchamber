@@ -25,6 +25,7 @@ import {
   type BrowserProviderResult,
   type BrowserScrollData,
   type BrowserSnapshotElement,
+  type BrowserSnapshotOption,
   type BrowserViewportSummary,
   type SurfaceController,
   type SurfaceInputEvent,
@@ -71,10 +72,15 @@ const page: Page = {
 
 const viewport = (): BrowserViewportSummary => ({ mode: page.viewport, ...VIEWPORTS[page.viewport] });
 
+const selectOptions = (): BrowserSnapshotOption[] => [
+  { label: 'United States', value: 'us', selected: page.select.value === 'us', disabled: false },
+  { label: 'Canada', value: 'ca', selected: page.select.value === 'ca', disabled: false },
+];
+
 // fallow-ignore-next-line code-duplication
 const elements = (): BrowserSnapshotElement[] => [
   { selector: '#name', tag: 'input', type: 'text', label: 'Name', bounds: { x: 16, y: 40, width: 240, height: 32 }, inViewport: true },
-  { selector: '#country', tag: 'select', label: 'Country', bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
+  { selector: '#country', tag: 'select', label: 'Country', multiple: false, options: selectOptions(), bounds: { x: 16, y: 136, width: 240, height: 32 }, inViewport: true },
   { selector: '#save', tag: 'button', label: 'Save', bounds: { x: 16, y: 88, width: 80, height: 32 }, inViewport: true },
   { selector: 'a[href="/about"]', tag: 'a', label: 'About', bounds: { x: 16, y: 188, width: 60, height: 20 }, inViewport: true },
 ];

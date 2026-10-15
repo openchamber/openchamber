@@ -21,6 +21,8 @@ const MAX_TEXT_CHARS = 6_000;
 const MAX_ELEMENTS = 120;
 /** Enough to recognise a control; full labels are what made entries expensive. */
 const MAX_LABEL_CHARS = 80;
+/** Enough to discover a select without letting one control dominate a snapshot. */
+const MAX_OPTION_COUNT = 32;
 /** Longest a scroll waits for paint frames before it reports anyway. */
 const SCROLL_SETTLE_MAX_MS = 100;
 
@@ -32,6 +34,7 @@ const SCROLL_SETTLE_MAX_MS = 100;
 const HELPERS = `
   var MAX_ELEMENTS = ${MAX_ELEMENTS};
   var MAX_LABEL_CHARS = ${MAX_LABEL_CHARS};
+  var MAX_OPTION_COUNT = ${MAX_OPTION_COUNT};
   var visible = function (element) {
     var rect = element.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
@@ -47,6 +50,29 @@ const HELPERS = `
     if (value) return String(value).slice(0, MAX_LABEL_CHARS);
     var placeholder = element.getAttribute('placeholder');
     return placeholder ? placeholder.trim().slice(0, MAX_LABEL_CHARS) : '';
+  };
+  var boundedText = function (value) {
+    var text = String(value);
+    if (text.length <= MAX_LABEL_CHARS) return { value: text, truncated: false };
+    var end = MAX_LABEL_CHARS;
+    var last = text.charCodeAt(end - 1);
+    if (last >= 0xD800 && last <= 0xDBFF) end -= 1;
+    return { value: text.slice(0, end), truncated: true };
+  };
+  var selectOptionLabel = function (option) {
+    var explicit = option.getAttribute('label');
+    if (explicit !== null) return explicit;
+    return String(option.textContent || '').replace(/\\s+/g, ' ').trim();
+  };
+  var isOptionDisabled = function (element) {
+    if (element.disabled === true) return true;
+    if (typeof element.matches === 'function' && element.matches(':disabled')) return true;
+    var parent = element.parentElement;
+    while (parent) {
+      if (parent.tagName === 'OPTGROUP' && parent.disabled === true) return true;
+      parent = parent.parentElement;
+    }
+    return false;
   };
   var isUnique = function (selector) {
     try {
@@ -192,6 +218,24 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
     var labelText = label(element);
     if (labelText) entry.label = labelText;
     if (element.disabled === true) entry.disabled = true;
+    if (element.tagName === 'SELECT') {
+      entry.multiple = element.multiple === true;
+      entry.options = [];
+      var optionList = element.options;
+      for (var optionIndex = 0; optionIndex < optionList.length && optionIndex < MAX_OPTION_COUNT; optionIndex += 1) {
+        var option = optionList[optionIndex];
+        var optionLabelText = boundedText(selectOptionLabel(option));
+        var optionValueText = boundedText(option.value);
+        if (optionLabelText.truncated || optionValueText.truncated) entry.optionsTruncated = true;
+        entry.options.push({
+          label: optionLabelText.value,
+          value: optionValueText.value,
+          selected: option.selected === true,
+          disabled: isOptionDisabled(option)
+        });
+      }
+      if (optionList.length > MAX_OPTION_COUNT) entry.optionsTruncated = true;
+    }
     // Flagged rather than described: reporting the accessible name of every
     // element would cost more than it tells, while its absence on something
     // clickable is a defect worth naming.
