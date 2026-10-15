@@ -63,6 +63,12 @@ describe('buildLinkEntry', () => {
     expect(buildLinkEntry({ url: 'https://gitlab.com/x', title: 'T', kind: 'pull' }, 1).error).toEqual(expect.any(String));
     expect(buildLinkEntry({ url: 'file:///etc/passwd', title: 'T', kind: 'issue' }, 1).error).toEqual(expect.any(String));
     expect(buildLinkEntry(undefined, 1).error).toEqual(expect.any(String));
+    // A non-object link is refused, never parsed here: the agent tool revives
+    // the one stringified shape the transport produces (issue #4591), and this
+    // stays the clear rejection for everything else.
+    expect(buildLinkEntry('{"url":"https://github.com/acme/app/issues/9","title":"T","kind":"issue"}', 1).error).toEqual(expect.any(String));
+    expect(buildLinkEntry(['https://github.com/acme/app/issues/9'], 1).error).toEqual(expect.any(String));
+    expect(buildLinkEntry(null, 1).error).toEqual(expect.any(String));
   });
 });
 

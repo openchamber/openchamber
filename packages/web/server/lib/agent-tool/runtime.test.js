@@ -835,3 +835,64 @@ describe('managed agent tool runtime', () => {
     }
   });
 });
+
+describe('session.link parameter normalization', () => {
+  it('revives a stringified link and leaves every other string alone', async () => {
+    const executeAction = vi.fn(async () => ({ linked: true }));
+    const { runtime, dataDir } = await createRuntime({ executeAction });
+    const prepared = await prepareManagedEnv(runtime, { includeControl: true, includeWeb: false, includeMemory: false });
+    const tools = await loadTools(dataDir, 'link-normalization');
+    const app = express();
+    runtime.registerRoutes(app, express);
+    const server = await new Promise((resolve) => {
+      const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+    });
+    const previousUrl = process.env.OPENCHAMBER_AGENT_TOOL_URL;
+    const previousToken = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    process.env.OPENCHAMBER_AGENT_TOOL_URL = `http://127.0.0.1:${server.address().port}/api/openchamber/agent-tool`;
+    process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = prepared.OPENCHAMBER_AGENT_TOOL_TOKEN;
+    const call = (action, input = {}) => tools.openchamber.execute(
+      { action, ...input },
+      { sessionID: 'ses_caller', progress: async () => {} },
+    );
+    const forwarded = () => executeAction.mock.calls.at(-1)[1];
+    const link = { url: 'https://github.com/acme/app/issues/7', title: 'Crash on save', kind: 'issue', identifier: '#7' };
+    try {
+      // The documented shape, as it arrives from the model: nested objects come
+      // through the transport JSON-stringified (issue #4591).
+      await call('session.link', { parameters: { link: JSON.stringify(link) } });
+      expect(forwarded().link).toEqual(link);
+
+      // A genuine nested object passes through untouched.
+      await call('session.link', { parameters: { link: { ...link } } });
+      expect(forwarded().link).toEqual(link);
+
+      // The bare-name alias behaves the same.
+      await call('link', { parameters: { link: JSON.stringify(link) } });
+      expect(forwarded().link).toEqual(link);
+
+      // Flat fields beside the action still reach the service, and an explicit
+      // parameters object still wins key conflicts.
+      await call('session.link', { url: link.url, title: 'Flat title', kind: 'issue', parameters: { title: 'Nested title' } });
+      expect(forwarded()).toMatchObject({ url: link.url, title: 'Nested title', kind: 'issue' });
+
+      // Parse once, accept only plain objects: stringified nulls, arrays,
+      // scalars, double-encoded objects and malformed JSON arrive exactly as
+      // sent, for the service to reject with its own validation error.
+      for (const value of ['null', '[1,2]', '"text"', '"{\\"url\\":\\"x\\"}"', '{not json']) {
+        await call('session.link', { parameters: { link: value } });
+        expect(forwarded().link).toBe(value);
+      }
+
+      // Free-form strings that merely look like JSON stay text.
+      await call('session.create', { parameters: { title: '[]', prompt: '{"task":"summarize"}' } });
+      expect(forwarded()).toMatchObject({ title: '[]', prompt: '{"task":"summarize"}' });
+    } finally {
+      if (previousUrl === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_URL;
+      else process.env.OPENCHAMBER_AGENT_TOOL_URL = previousUrl;
+      if (previousToken === undefined) delete process.env.OPENCHAMBER_AGENT_TOOL_TOKEN;
+      else process.env.OPENCHAMBER_AGENT_TOOL_TOKEN = previousToken;
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+});
