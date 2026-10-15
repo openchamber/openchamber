@@ -55,6 +55,13 @@ describe('buildHtmlRenderDocument', () => {
         expect(document.match(/name="viewport"/g)).toHaveLength(1);
     });
 
+    test('relays the page\'s selection and its clearing to the host', () => {
+        const document = buildHtmlRenderDocument('<p>a</p>', theme);
+        expect(document).toContain('"openchamber:html-render:selection"');
+        expect(document).toContain('addEventListener("selectionchange"');
+        expect(document).toContain('window.getSelection()');
+    });
+
     test('writes only well-formed variables and strips characters that would close the rule', () => {
         const document = buildHtmlRenderDocument('<p>a</p>', theme);
         expect(document).toContain(':root{color-scheme:dark;--background:#111;--foreground:#eee;--evil:red/stylescript;}');
@@ -75,6 +82,27 @@ describe('readHtmlRenderFrameMessage', () => {
             .toEqual({ kind: 'key', chord });
         // Plain typing never reaches the app's single-key shortcuts.
         expect(readHtmlRenderFrameMessage({ data: { type: 'openchamber:html-render:key', ...chord, metaKey: false } })).toBeNull();
+    });
+
+    test('reads a selection the page reports, trimmed, and its cleared form', () => {
+        const rect = { top: 4, left: 8, width: 120, height: 18 };
+        expect(readHtmlRenderFrameMessage({ data: { type: 'openchamber:html-render:selection', text: '  picked words \n', rect } }))
+            .toEqual({ kind: 'selection', text: 'picked words', rect });
+        const none = { top: 0, left: 0, width: 0, height: 0 };
+        expect(readHtmlRenderFrameMessage({ data: { type: 'openchamber:html-render:selection', text: '', rect: none } }))
+            .toEqual({ kind: 'selection', text: '', rect: none });
+    });
+
+    test('rejects a malformed or oversized selection', () => {
+        const type = 'openchamber:html-render:selection';
+        const rect = { top: 0, left: 0, width: 10, height: 10 };
+        expect(readHtmlRenderFrameMessage({ data: { type, rect } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'a' } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 5, rect } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'a', rect: { ...rect, width: -1 } } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'a', rect: { ...rect, top: Number.NaN } } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'a', rect: { ...rect, left: 'x' } } })).toBeNull();
+        expect(readHtmlRenderFrameMessage({ data: { type, text: 'a'.repeat(20_001), rect } })).toBeNull();
     });
 
     test('ignores anything else, including links that are not http(s)', () => {

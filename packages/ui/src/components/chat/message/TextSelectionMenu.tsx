@@ -28,6 +28,7 @@ import {
 import { rangeToMarkdown, trimSelectionValue, wrapMarkdownSelectionForChat } from './selectionMarkdown';
 import { registerActiveSelectionToolbar } from '@/lib/addSelectionToChat';
 import { collectSelectionOverlayRects } from '@/lib/selectionOverlayRects';
+import { frameSelectionRect, onFrameSelection } from './frameSelection';
 import { captureChatQuoteAnchor, type ChatQuoteAnchor } from '@/lib/chatQuoteAnchor';
 import {
   DESKTOP_MENU_FALLBACK_HEIGHT_PX,
@@ -58,7 +59,11 @@ interface SelectionPayload {
   markdownText: string;
   rect: DOMRect;
   messageId: string | null;
-  range: Range;
+  // A selection inside a page frame has no Range: the app cannot reach it, so
+  // there is no quote highlight or anchor for it, and `measureRect` re-reads
+  // its box from the frame's current position.
+  range?: Range;
+  measureRect?: () => DOMRect;
 }
 
 const normalizeDistilledInsight = (insight: string): string => (
@@ -320,9 +325,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       if (frame !== null) return;
       frame = window.requestAnimationFrame(() => {
         frame = null;
-        const range = pendingSelectionRef.current?.range;
-        if (!range) return;
-        const rect = range.getBoundingClientRect();
+        const pending = pendingSelectionRef.current;
+        const rect = pending?.range?.getBoundingClientRect() ?? pending?.measureRect?.();
+        if (!rect) return;
         anchorRectRef.current = rect;
         const boundary = containerRef.current
           ?.closest('[data-scrollbar="chat"], [data-selection-menu-boundary]')
@@ -377,6 +382,12 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     }
 
     const text = trimSelectionValue(selection.toString());
+
+    // A selection inside a page frame is the one the menu shows; the app's
+    // own selection was cleared for it, and that is no reason to close it.
+    if (!text && pendingSelectionRef.current && !pendingSelectionRef.current.range) {
+      return;
+    }
 
     // Only show if we have text and the selection is within our container
     if (!text) {
@@ -441,8 +452,9 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
     // Track when dragging stops
     const handleMouseUp = () => {
       isDraggingRef.current = false;
-      // Check if we have a pending selection to show
-      if (pendingSelectionRef.current) {
+      // Check if we have a pending selection to show; one from a page frame
+      // is shown as it arrives, and the app has no selection of its own to check.
+      if (pendingSelectionRef.current?.range) {
         if (mouseUpTimeoutRef.current !== null) {
           window.clearTimeout(mouseUpTimeoutRef.current);
         }
@@ -499,6 +511,32 @@ const TextSelectionMenuImpl: React.FC<TextSelectionMenuProps> = ({ containerRef,
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
+
+  // A selection made inside a page frame in this message (`openchamber_render`)
+  // arrives as an event from the frame, never through window.getSelection().
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    return onFrameSelection(container, (selection, frame) => {
+      const text = trimSelectionValue(selection.text);
+      const isFrameSelection = pendingSelectionRef.current && !pendingSelectionRef.current.range;
+      // An open comment, or the composer's, keeps its quote.
+      if (commentModeRef.current || mobileCommentActiveRef.current) return;
+      if (!text) {
+        if (isFrameSelection) hideMenu();
+        return;
+      }
+      const measureRect = () => frameSelectionRect(frame, selection);
+      pendingSelectionRef.current = {
+        plainText: text,
+        markdownText: text,
+        rect: measureRect(),
+        measureRect,
+        messageId: frame.closest('[data-message-id]')?.getAttribute('data-message-id') ?? null,
+      };
+      showMenu();
+    });
+  }, [containerRef, hideMenu, showMenu]);
 
   const handleAddToChat = React.useCallback(() => {
     if (!selectedTextMarkdown) return;

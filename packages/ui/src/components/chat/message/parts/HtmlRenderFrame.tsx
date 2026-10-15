@@ -13,6 +13,7 @@ import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { ToolPart } from '@/lib/opencode/model';
 import { renderedPage } from '@/lib/opencode/tools';
 import { openExternalUrl } from '@/lib/url';
+import { dispatchFrameSelection } from '../frameSelection';
 import {
     HTML_RENDER_MIN_HEIGHT,
     HTML_RENDER_TOUCH_MAX_HEIGHT,
@@ -103,6 +104,11 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
             if (message?.kind === 'size') onContentHeight?.(message.height);
             if (message?.kind === 'open-link') void openExternalUrl(message.url);
             if (message?.kind === 'key') replayKeyChord(frameRef.current, message.chord);
+            if (message?.kind === 'selection') {
+                // The menu follows one selection: the app's own highlight goes.
+                if (message.text) window.getSelection()?.removeAllRanges();
+                dispatchFrameSelection(frameRef.current, message);
+            }
         };
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);

@@ -30,6 +30,9 @@ const THEME_MESSAGE = `${MESSAGE_PREFIX}theme`;
 const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
+const SELECTION_MESSAGE = `${MESSAGE_PREFIX}selection`;
+// The longest selection a page reports; the bootstrap cuts at this length.
+const HTML_RENDER_SELECTION_MAX_LENGTH = 20_000;
 
 export interface HtmlRenderTheme {
     appearance: 'light' | 'dark';
@@ -129,6 +132,12 @@ function themeCss(theme: HtmlRenderTheme): string {
 // is added while the key dispatches, so it runs after every listener the page
 // has and sees whether one of them took the key.
 //
+// The app cannot read a selection inside the frame, so the bootstrap reports
+// it: the selected text and its box in the frame's viewport once it settles (on
+// mouse up, or after a pause for keyboard and touch selections; not while the
+// mouse is down), and an empty text when the selection is gone. The host shows
+// the chat's selection menu from it.
+//
 // A tooltip or popup the page positions itself can stick out past the frame,
 // where the frame cuts it off (on a phone the column is about 360px). Every
 // absolutely or fixed positioned element that is partly inside and partly out
@@ -147,6 +156,11 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-ren
     + `window.addEventListener("keydown",function(e){var t=e.composedPath()[0],f;if(!e.isTrusted||e.isComposing||!(e.metaKey||e.ctrlKey)||/^[acvxyz]$/i.test(e.key)&&!e.altKey||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;`
     + `f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;window.parent.postMessage({type:${JSON.stringify(KEY_MESSAGE)},key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat},"*");};`
     + `window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);`
+    + `var SL="",ST=0,SD=0,SF=function(f){clearTimeout(ST);ST=0;var s=window.getSelection(),t=s?s.toString().trim().slice(0,${HTML_RENDER_SELECTION_MAX_LENGTH}):"",r={top:0,left:0,width:0,height:0},b;`
+    + `if(t&&s.rangeCount){b=s.getRangeAt(0).getBoundingClientRect();r={top:b.top,left:b.left,width:b.width,height:b.height};}else t="";`
+    + `if(t===SL&&!(f&&t))return;SL=t;window.parent.postMessage({type:${JSON.stringify(SELECTION_MESSAGE)},text:t,rect:r},"*");};`
+    + `document.addEventListener("selectionchange",function(){if(SD)return;clearTimeout(ST);ST=setTimeout(SF,200);});`
+    + `document.addEventListener("mousedown",function(){SD=1;},true);document.addEventListener("mouseup",function(){SD=0;clearTimeout(ST);ST=setTimeout(function(){SF(1);},10);},true);`
     + `var P=[],Q=0,N=1,C=function(e){for(var a=e.parentElement;a&&a!==document.body;a=a.parentElement){var o=getComputedStyle(a);if(o.overflowX!=="visible"||o.overflowY!=="visible")return 1;}return 0;},`
     + `W=function(){P=[];var a=document.body?document.body.getElementsByTagName("*"):[];for(var i=0;i<a.length&&i<5000;i++){var p=getComputedStyle(a[i]).position;if((p==="absolute"||p==="fixed")&&!C(a[i]))P.push(a[i]);}},`
     + `F=function(){Q=0;if(N){N=0;W();}var w=document.documentElement.clientWidth;for(var i=0;i<P.length;i++){var e=P[i],x=e.__ocx||0,y=e.__ocy||0,r=e.getBoundingClientRect(),l=r.left-x,g=r.right-x,t=r.top-y,b=r.bottom-y,nx=0,ny=0;if(!r.width&&!r.height)continue;`
@@ -212,15 +226,29 @@ const keyChordSchema = z.object({
 /** A key a page passed on; the host replays it as a keydown of its own. */
 export type HtmlRenderKeyChord = z.infer<typeof keyChordSchema>;
 
+const selectionRectSchema = z.object({
+    top: z.number().finite(),
+    left: z.number().finite(),
+    width: z.number().finite().min(0),
+    height: z.number().finite().min(0),
+});
+
 type HtmlRenderFrameMessage =
     | { kind: 'size'; height: number }
     | { kind: 'open-link'; url: string }
-    | { kind: 'key'; chord: HtmlRenderKeyChord };
+    | { kind: 'key'; chord: HtmlRenderKeyChord }
+    // An empty text means the selection is gone.
+    | { kind: 'selection'; text: string; rect: z.infer<typeof selectionRectSchema> };
 
 const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SIZE_MESSAGE), height: z.number().positive() }),
     z.object({ type: z.literal(OPEN_LINK_MESSAGE), url: z.string().regex(/^https?:\/\//i) }),
     keyChordSchema.extend({ type: z.literal(KEY_MESSAGE) }),
+    z.object({
+        type: z.literal(SELECTION_MESSAGE),
+        text: z.string().max(HTML_RENDER_SELECTION_MAX_LENGTH),
+        rect: selectionRectSchema,
+    }),
 ]);
 
 /** The message a page's bootstrap posted, or null for anything else. */
@@ -230,6 +258,7 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     const message = parsed.data;
     if (message.type === SIZE_MESSAGE) return { kind: 'size', height: message.height };
     if (message.type === OPEN_LINK_MESSAGE) return { kind: 'open-link', url: message.url };
+    if (message.type === SELECTION_MESSAGE) return { kind: 'selection', text: message.text.trim(), rect: message.rect };
     // Only a chord with Cmd or Ctrl: the page never passes plain typing on,
     // and a page that tried to must not reach the app's single-key handling.
     if (!message.metaKey && !message.ctrlKey) return null;

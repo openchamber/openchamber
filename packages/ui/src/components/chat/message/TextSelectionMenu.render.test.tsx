@@ -8,6 +8,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { SyncProvider } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { ChatColumnSessionContext } from '../chatColumnSession';
+import { dispatchFrameSelection } from './frameSelection';
 
 // React DOM probes for a DOM when first imported; give it one, then restore
 // the caller's globals.
@@ -34,12 +35,12 @@ const session = (updated: number, sessionDirectory = directory): Session => ({
 });
 const otherSession = (updated: number): Session => ({ ...session(updated), id: 'session-2' });
 
-const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+const DOM_GLOBAL_NAMES = ['window', 'document', 'navigator', 'Node', 'Element', 'HTMLElement', 'CustomEvent', 'DOMRect', 'localStorage', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const installDom = () => {
   const win = new Window({ url: 'http://localhost' });
   const previous = DOM_GLOBAL_NAMES.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
   const values = { window: win, document: win.document, navigator: win.navigator, Node: win.Node, Element: win.Element,
-    HTMLElement: win.HTMLElement, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
+    HTMLElement: win.HTMLElement, CustomEvent: win.CustomEvent, DOMRect: win.DOMRect, localStorage: win.localStorage, getComputedStyle: win.getComputedStyle.bind(win),
     requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
   for (const name of DOM_GLOBAL_NAMES) Object.defineProperty(globalThis, name, { value: values[name], configurable: true, writable: true });
   const container = document.createElement('div');
@@ -59,7 +60,7 @@ describe('TextSelectionMenu render subscriptions', () => {
   let renders = 0;
   // Bootstrap stays pending, so each test owns the directory store's contents.
   const sdk = OpenCode.make({ baseUrl: 'http://selection.test', fetch: () => new Promise<Response>(() => undefined) });
-  const containerRef = { current: null };
+  const containerRef: React.RefObject<HTMLElement | null> = { current: null };
   const store = () => {
     const result = getSyncChildStores().getChild(directory);
     if (!result) throw new Error('Expected mounted directory store');
@@ -113,5 +114,39 @@ describe('TextSelectionMenu render subscriptions', () => {
     await stage([session(2, '/repo/worktree')]);
 
     expect(renders).toBeGreaterThan(settled);
+  });
+
+  test('a selection a page frame reports opens the menu, and clearing it closes the menu', async () => {
+    const host = document.createElement('div');
+    const frame = document.createElement('iframe');
+    host.appendChild(frame);
+    document.body.appendChild(host);
+    containerRef.current = host;
+    await render();
+    const report = (text: string) => act(async () => {
+      dispatchFrameSelection(frame, { text, rect: { top: 10, left: 20, width: 80, height: 16 } });
+    });
+
+    await report('picked words');
+    expect(document.body.textContent).toContain('Comment');
+
+    await report('');
+    expect(document.body.textContent).not.toContain('Comment');
+    containerRef.current = null;
+  });
+
+  test('a frame outside the menu\'s message does not open it', async () => {
+    const host = document.createElement('div');
+    const otherFrame = document.createElement('iframe');
+    document.body.append(host, otherFrame);
+    containerRef.current = host;
+    await render();
+
+    await act(async () => {
+      dispatchFrameSelection(otherFrame, { text: 'elsewhere', rect: { top: 0, left: 0, width: 10, height: 10 } });
+    });
+
+    expect(document.body.textContent).not.toContain('Comment');
+    containerRef.current = null;
   });
 });
