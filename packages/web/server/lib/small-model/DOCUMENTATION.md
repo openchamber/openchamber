@@ -142,9 +142,18 @@ what generation will do. It may be a **function** of
 as the resolved model allows — they cannot name a number before knowing which
 model they got. The resolved value comes back as `outputTokens`.
 
-`timeoutMs` overrides the 60s default; `signal` aborts a request that is no
-longer wanted. The timeout covers generation, retry waits and structured-output
-retries together.
+Without `timeoutMs`, the deadline derives from the prompt the module actually
+sends: 60 s base plus 40 ms per estimated token (~4 chars/token, the input-clamp
+heuristic), capped at 900 s — the walkthrough ceiling. An explicit `timeoutMs`
+still wins (the walkthrough passes its own per-hunk budget); `signal` aborts a
+request that is no longer wanted. The timeout covers generation, retry waits and
+structured-output retries together. The deadline is a hang guard, not a
+pace-setter: prefill dominates, and issue #5017 measured local-model prefill at
+94-187 tok/s on 4 GB-VRAM hardware (~10.6 ms/token worst observed), so 40 ms/token
+is ~4x headroom that also absorbs the answer decode and one structured-output
+retry. A blown deadline (not caller cancellation) throws `504` with
+`code: 'generation-timeout'`, naming the model and the budget; the route maps it
+to that message instead of the generic "choose another model" text.
 
 OpenCode 2 can reject an explicit model before its cold catalog finishes loading;
 plugin-provided models (Claude Code) stay unavailable for 20-40 s after OpenCode

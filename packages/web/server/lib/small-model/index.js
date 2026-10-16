@@ -15,6 +15,22 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+// The deadline is a hang guard, not a pace-setter: prefill dominates, so the
+// budget scales with the prompt the module actually sends instead of the flat
+// default. Issue #5017 measured local-model prefill at 94-187 tok/s on 4 GB-VRAM
+// hardware, i.e. ~10.6 ms/token worst observed; 40 ms/token is ~4x headroom over
+// that floor, which also absorbs the answer decode and one structured-output
+// retry. The cap matches the walkthrough ceiling (../walkthrough/index.js), the
+// in-repo precedent for size-scaled budgets.
+const TIMEOUT_PER_TOKEN_MS = 40;
+const TIMEOUT_MAX_MS = 900_000;
+
+/** Budget for a prompt of `promptChars` characters (~4 chars/token, as for the input clamp). */
+export const generationBudgetMs = (promptChars) => Math.min(
+  TIMEOUT_MAX_MS,
+  DEFAULT_TIMEOUT_MS + Math.max(0, Math.ceil(Number(promptChars) / 4)) * TIMEOUT_PER_TOKEN_MS,
+);
+
 // Waits between retries of `Model unavailable`, ~31 s in total. Right after
 // OpenCode starts, plugin-provided models (claude-code) stay unavailable for
 // 20-40 s while plugins for the global location load lazily. The rejection
@@ -258,11 +274,16 @@ const extractJsonText = (raw) => {
   }
 };
 
-const requestOptions = ({ timeoutMs, signal }) => {
-  const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS;
-  const signals = [AbortSignal.timeout(timeout)];
-  if (signal) signals.push(signal);
-  return { signal: AbortSignal.any(signals) };
+const requestOptions = ({ timeoutMs, promptChars, signal }) => {
+  // An explicit caller timeout (e.g. the walkthrough's per-hunk budget) wins;
+  // otherwise the deadline derives from the prompt actually sent.
+  const budgetMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : generationBudgetMs(promptChars);
+  const deadline = AbortSignal.timeout(budgetMs);
+  return {
+    budgetMs,
+    deadline,
+    signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
+  };
 };
 
 /**
@@ -315,8 +336,18 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
   if (responseSchema) sections.push(buildSchemaInstruction(responseSchema));
   const fullPrompt = sections.join('\n\n');
 
-  const generationOptions = requestOptions({ timeoutMs, signal });
+  const generationOptions = requestOptions({ timeoutMs, promptChars: fullPrompt.length, signal });
   const unavailableMessage = `Model unavailable: ${resolved.providerID}/${resolved.modelID}`;
+
+  // A blown deadline is a budget problem the user can act on (shorter diff,
+  // faster model), not a bad model choice, so it gets its own code and message.
+  // Detection reads the deadline signal itself: its reason is always the
+  // timeout, while the composed signal's reason propagation varies by runtime.
+  const deadlineError = (cause) => Object.assign(
+    new Error(`${resolved.providerID}/${resolved.modelID} did not finish within the ${Math.round(generationOptions.budgetMs / 1000)}s budget for this prompt size`, { cause }),
+    { statusCode: 504, code: 'generation-timeout', providerID: resolved.providerID, modelID: resolved.modelID },
+  );
+
   const send = async () => {
     const result = await client.generate.text(
       { prompt: fullPrompt, model: { id: resolved.modelID, providerID: resolved.providerID } },
@@ -330,11 +361,15 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
       try {
         return await send();
       } catch (error) {
+        if (generationOptions.deadline.aborted) throw deadlineError(error);
         if (error?._tag !== 'InvalidRequestError' || error.message !== unavailableMessage) throw error;
         // OpenCode 2 can resolve a cold catalog before its models arrive.
         // This rejection precedes provider dispatch; other failures must not retry.
         if (attempt < unavailableRetryDelaysMs.length) {
-          await delay(unavailableRetryDelaysMs[attempt], undefined, { signal: generationOptions.signal });
+          await delay(unavailableRetryDelaysMs[attempt], undefined, { signal: generationOptions.signal })
+            .catch((delayError) => {
+              throw generationOptions.deadline.aborted ? deadlineError(delayError) : delayError;
+            });
           continue;
         }
         throw Object.assign(new Error(unavailableMessage), {

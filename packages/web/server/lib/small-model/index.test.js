@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 const TEMP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'small-model-settings-'));
 process.env.OPENCHAMBER_DATA_DIR = TEMP_DATA_DIR;
 
-const { generateSmallModelText, describeSmallModel, listAuthenticatedProviders, setUnavailableRetryDelaysForTest } = await import('./index.js');
+const { generateSmallModelText, describeSmallModel, listAuthenticatedProviders, setUnavailableRetryDelaysForTest, generationBudgetMs } = await import('./index.js');
 const { configureOpenCodeRuntimeProviders, resetOpenCodeRuntimeProviders } = await import('./client.js');
 
 // A real OpenCode stub over HTTP. The module talks to OpenCode through
@@ -27,6 +27,9 @@ const state = {
   generate: () => ({ text: 'generated' }),
   requests: [],
   generateErrors: [],
+  // Holds each /api/experimental/generate response open, so a client-side
+  // deadline can fire mid-request.
+  generateDelayMs: 0,
 };
 
 const MODEL = (overrides = {}) => ({
@@ -90,6 +93,7 @@ beforeAll(async () => {
         res.writeHead(400, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(error));
       }
+      if (state.generateDelayMs) await new Promise((resolve) => setTimeout(resolve, state.generateDelayMs));
       return send({ location: LOCATION, data: state.generate(body) });
     }
     res.writeHead(404).end('{}');
@@ -112,6 +116,7 @@ beforeEach(() => {
   state.generate = () => ({ text: 'generated' });
   state.requests = [];
   state.generateErrors = [];
+  state.generateDelayMs = 0;
   configureOpenCodeRuntimeProviders({
     buildOpenCodeUrl: (requestPath) => `${baseUrl}${requestPath.startsWith('/') ? requestPath : `/${requestPath}`}`,
     getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
@@ -183,6 +188,18 @@ describe('generateSmallModelText', () => {
     state.generateErrors = [unavailable];
     await expect(generateSmallModelText({ ...options, timeoutMs: 100 })).rejects.toThrow();
     expect(state.requests.filter((entry) => entry.path === '/api/experimental/generate')).toHaveLength(1);
+  });
+
+  it('reports a blown deadline as a 504 generation-timeout naming the model and budget', async () => {
+    state.generateDelayMs = 2_500;
+    // The explicit timeoutMs also proves override: the derived budget for this
+    // small prompt would be ~60 s, so only the caller's 1 s deadline can fire.
+    await expect(generateSmallModelText({ prompt: 'hi', directory: '/proj', timeoutMs: 1_000 }))
+      .rejects.toMatchObject({
+        statusCode: 504,
+        code: 'generation-timeout',
+        message: expect.stringContaining('anthropic/claude-haiku-4-5 did not finish within the 1s budget for this prompt size'),
+      });
   });
 
   it('sends the prompt to /api/generate on the resolved model', async () => {
@@ -436,6 +453,27 @@ describe('oversized input', () => {
 
     await expect(generateSmallModelText({ prompt: 'x'.repeat(300_000), directory: '/proj', onOverflow: 'error' }))
       .rejects.toMatchObject({ availableChars: 60_000 * 4 });
+  });
+});
+
+describe('generationBudgetMs', () => {
+  it('keeps small prompts at the historical 60 s base', () => {
+    expect(generationBudgetMs(0)).toBe(60_000);
+    // A few hundred chars — a title, a commit message without diffs — sits
+    // within a breath of the old flat default.
+    expect(generationBudgetMs(400)).toBe(64_000);
+  });
+
+  it('covers the ~43 KB commit-message diff from issue #5017 (~11k tokens)', () => {
+    // ~490 s: well above the 1.5-2 min prefill the issue measured on 4 GB-VRAM
+    // local models, and far above the flat 60 s that always killed the request.
+    const budget = generationBudgetMs(43_000);
+    expect(budget).toBe(60_000 + 10_750 * 40);
+    expect(budget).toBeGreaterThan(120_000);
+  });
+
+  it('caps at the 900 s walkthrough ceiling', () => {
+    expect(generationBudgetMs(10_000_000)).toBe(900_000);
   });
 });
 
@@ -715,5 +753,44 @@ describe('small model failure response', () => {
       code: 'small-model-unavailable',
     });
     setUnavailableRetryDelaysForTest();
+  });
+
+  const registerWithFailure = (failure) => {
+    let generate;
+    registerSmallModelRoutes({
+      get() {},
+      post(_path, handler) { generate = handler; },
+    }, {
+      getSmallModelService: async () => ({ generateSmallModelText: () => Promise.reject(failure) }),
+    });
+    return generate;
+  };
+
+  const respond = () => {
+    let status;
+    let payload;
+    const response = {
+      status(value) { status = value; return response; },
+      json(value) { payload = value; },
+    };
+    return { response, read: () => ({ status, payload }) };
+  };
+
+  it('surfaces a generation-timeout as its own message with status 504', async () => {
+    const message = 'ollama/qwen2.5:latest did not finish within the 490s budget for this prompt size';
+    const generate = registerWithFailure(Object.assign(new Error(message), { statusCode: 504, code: 'generation-timeout' }));
+    const { response, read } = respond();
+    await generate({ body: { prompt: 'commit' } }, response);
+    expect(read()).toEqual({ status: 504, payload: { error: message, code: 'generation-timeout' } });
+  });
+
+  it('keeps the generic text for other 5xx failures', async () => {
+    const generate = registerWithFailure(Object.assign(new Error('boom'), { statusCode: 500 }));
+    const { response, read } = respond();
+    await generate({ body: { prompt: 'commit' } }, response);
+    expect(read()).toEqual({
+      status: 500,
+      payload: { error: 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.' },
+    });
   });
 });
