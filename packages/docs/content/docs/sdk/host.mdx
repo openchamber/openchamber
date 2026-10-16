@@ -245,7 +245,7 @@ Limits: path up to 1024 characters, content up to 2,000,000 characters, listing 
 const { text } = await host.generate({ prompt: notes, system: "Summarize in one sentence." });
 ```
 
-`prompt` is 1 to 64,000 characters after trim, `system` up to 8,000, `maxOutputTokens` 1 to 4,000. Nothing enters a session and no history is kept; the extension never chooses the model. The call waits up to 90 seconds. No usable Small Model is `NO_MODEL`; a model error is `MODEL_FAILED`. See [Generate text](/sdk/#generate-text).
+`prompt` is 1 to 64,000 characters after trim, `system` up to 8,000, `maxOutputTokens` 1 to 4,000. Nothing enters a session and no history is kept; the extension never chooses the model. The call waits up to 960 seconds. No usable Small Model is `NO_MODEL`; a model error is `MODEL_FAILED`. See [Generate text](/sdk/#generate-text).
 
 ## Error codes
 

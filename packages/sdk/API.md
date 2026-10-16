@@ -165,7 +165,7 @@ Access tokens never appear in `ready` or in request results.
 | `openPopover` | `GuestPopoverRequest` | `Promise<void>` | Open a sandboxed frame outside this frame's bounds, anchored to a rectangle in its viewport. Requires `features.popovers` |
 | `closePopover` | `id, reason?: 'closed' \| 'escape'` | `Promise<void>` | Close this frame's matching opening, or the popover frame itself. A stale id cannot close a replacement |
 | `setPopoverAnchorActive` | `id, active: boolean` | `Promise<void>` | Report anchor pointer/focus activity so the host can allow travel between the anchor and popover |
-| `generate`        | `{ prompt, system?, maxOutputTokens? }` | `Promise<{ text }>`      | One-off text from the user's Small Model (capability `model`). No session, no history; the host picks the model. Waits up to 90 s |
+| `generate`        | `{ prompt, system?, maxOutputTokens? }` | `Promise<{ text }>`      | One-off text from the user's Small Model (capability `model`). No session, no history; the host picks the model. Waits up to 960 s |
 | `reportFileChange` | `{ dirty, edited }`              | `void`                         | File editors only. `dirty` against the last saved version; `edited` when the document itself changed, which holds autosave back until edits stop |
 | `requestFileSave` | —                                 | `void`                         | File editors only. Save now, as Cmd/Ctrl+S does |
 | `reportFileUnsupported` | —                           | `void`                         | File editors only. This file cannot be opened here; the host shows its source and a notice |
@@ -358,7 +358,7 @@ Use `mountPopoverAnchor` from `@openchamber/sdk/ui` for DOM anchors. It measures
 | `generate` prompt / system       | 64 000 / 8 000 |
 | `generate` `maxOutputTokens`     | 4 000     |
 | `generate` answer                | 256 000   |
-| `generate` timeout               | 90 000 ms |
+| `generate` timeout               | 960 000 ms |
 
 
 ---
