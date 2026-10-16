@@ -1152,14 +1152,26 @@ async function updateLinkedIssues(
   linked: boolean,
 ): Promise<Session> {
   const targetDirectory = directory ?? getSessionDirectory(sessionId)
+  // A session no store holds still needs a record for the mirroring, and the
+  // read can fail: taken before the write, a failed read rejects with nothing
+  // landed. The read is display-only — none of the link list comes from the
+  // client — so its ordering is free, and it must not turn into a report of
+  // a link that did land.
+  const heldBeforeRequest = getGlobalSessionSnapshot(sessionId) !== null
+    || findLiveSession(sessionId) !== null
+  const fallbackRecord = heldBeforeRequest
+    ? null
+    : await opencodeClient.getSession(sessionId, targetDirectory)
   const result = await requestSessionLinksUpdate(sessionId, issues, linked, targetDirectory)
   if (result.outcome !== "updated") throw new Error(`session link update failed: ${result.reason}`)
-  // The server answered with the merged metadata; the session record itself
-  // is display-only here. Taken from the stores, or read for a session no
-  // store holds yet — a stale read can no longer corrupt the link list,
-  // since none of it comes from the client.
-  const known = getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId)
-  const record = known ?? await opencodeClient.getSession(sessionId, targetDirectory)
+  // The server answered with the merged metadata; the session record is
+  // display-only here. A session a store holds is mirrored from its snapshot
+  // as the response lands; a store-miss uses the record read before the
+  // request. A stale read can no longer corrupt the link list, since none of
+  // it comes from the client.
+  const record = fallbackRecord
+    ?? (getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId))
+    ?? await opencodeClient.getSession(sessionId, targetDirectory)
   const updated: Session = { ...record, metadata: result.metadata }
   useGlobalSessionsStore.getState().upsertSession(updated)
   const sessionDirectory = updated.directory || targetDirectory

@@ -1083,10 +1083,26 @@ describe("linking items through the server", () => {
 
     const updated = await setLinkedIssue("session-x", "/test/project", issue, true)
 
-    // The read feeds the mirrored record only; the link list is the server's.
+    // The read feeds the mirrored record only, and happens before the request:
+    // the link list is the server's.
     expect(replyCalls.filter((call) => call.method === "session.get")).toHaveLength(1)
+    expect(openchamberRouteRequests).toHaveLength(1)
     expect(updated.metadata).toEqual(metadata)
     expect(updated.id).toBe("session-x")
+  })
+
+  test("rejects before any network write when the display read fails for a session no store holds", async () => {
+    const { setLinkedIssue, addLinkedIssues } = await import("./session-actions")
+
+    // No store holds the session and the client cannot read it: the action
+    // must reject before the links request leaves, so a rejection never
+    // reports a link that landed on the server.
+    await expect(setLinkedIssue("session-never-read", "/test/project", issue, true))
+      .rejects.toThrow("SessionNotFoundError")
+    await expect(addLinkedIssues("session-never-read", "/test/project", [issue]))
+      .rejects.toThrow("SessionNotFoundError")
+    expect(openchamberRouteRequests).toHaveLength(0)
+    expect(globalUpsertedSessions).toEqual([])
   })
 
   test("rejects when the server cannot serve the route, like the callers' catch expects", async () => {
