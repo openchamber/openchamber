@@ -107,7 +107,7 @@ type ReasoningTimelineBlockProps = {
     presentation?: {
         icon: IconName;
         iconClassName?: string;
-        title: string;
+        title: React.ReactNode;
         expandLabel: string;
         collapseLabel: string;
         markdownVariant: MarkdownVariant;
@@ -406,7 +406,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                 onClick={handleToggle}
                 onKeyDown={handleKeyDown}
             >
-                <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div className={cn('flex items-center gap-1.5', presentation ? 'min-w-0 max-w-full' : 'flex-shrink-0')}>
                     <div className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer">
                         <div
                             className={cn(
