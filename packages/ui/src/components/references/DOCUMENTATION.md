@@ -117,9 +117,17 @@ preview's footer holds actions instead of what the agent gets.
   each request is shown once, so the item shown for the previous link never
   answers for a new one. One the host does not know opens in the
   browser, and a Linear identifier Linear cannot read is searched for. The phone opens the found
-  item's preview. Cmd or Ctrl-click, VS Code, a session outside any
-  project, Linear while disconnected and links the board does not list open in
-  the browser. A badge's `+N` does nothing; its tooltip lists the others.
+  item's preview. Cmd or Ctrl-click, VS Code,
+  Linear while disconnected and links the board does not list open in
+  the browser. When the link is boardable but the session's directory
+  resolves to no open project, a plain click falls back to the built-in
+  browser panel of that directory on desktop while `openLinksInBrowserPanel`
+  is on (the same rule as a plain chat link); the panel setting off, the web
+  runtime, and a missing directory keep the system browser. The board reads
+  the session's project from the project root path the sidebar hands it, so a
+  worktree group resolves without its live worktree map
+  (`SessionGroupSection`). A badge's `+N` does nothing; its tooltip lists the
+  others.
 - A PR's review threads read as the comment that opened them with the
   replies under it (`ReferenceCommentItem.thread`); a reply is not an entry of
   its own. A resolved thread folds to one line ("Resolved · N replies") and
