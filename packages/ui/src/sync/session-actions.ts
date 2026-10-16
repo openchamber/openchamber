@@ -36,12 +36,12 @@ import {
 } from "@/lib/sessionReviewMetadata"
 import { withContextObligatoryMessage, type ContextObligatoryMessage } from "@/lib/contextObligatoryMessages"
 import { getBtwOriginalSessionID, getBtwSessionID, isBtwSession, withoutBtwSessionLink } from "@/lib/sessionBtwMetadata"
-import { withLinkedIssue, type LinkedIssue } from "@/lib/linkedIssues"
+import { type LinkedIssue } from "@/lib/linkedIssues"
 import { withSessionWorkState, type SessionWork } from "@/lib/sessionWorkMetadata"
 import { withSessionPinned } from "@/lib/sessionPins"
 import { getImperativeSessionMessageLoader } from "./session-message-loader"
 import { cleanupPersistedSessionState } from "./session-deletion-cleanup"
-import { requestSessionArchiveBatch, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
+import { requestSessionArchiveBatch, requestSessionLinksUpdate, requestSessionMetadataUpdate, requestSessionUnarchiveBatch, type SessionArchiveStamp } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
@@ -1118,28 +1118,66 @@ export async function patchSessionMetadata(
   return updated
 }
 
+/**
+ * Link or unlink one item on a session. The list transform lives on the
+ * OpenChamber server now, decided there from a fresh read inside the
+ * session's write queue: a UI request and an agent's `session.link` can no
+ * longer wipe each other, whichever write lands first.
+ */
 export async function setLinkedIssue(
   sessionId: string,
   directory: string | null | undefined,
   issue: LinkedIssue,
   linked: boolean,
 ): Promise<Session> {
-  return patchSessionMetadata(sessionId, directory, (metadata) =>
-    withLinkedIssue(metadata, issue, linked))
+  return updateLinkedIssues(sessionId, directory, [issue], linked)
 }
 
 /**
- * Link several items in one metadata write. Each write replaces the whole
- * link list, so separate concurrent `setLinkedIssue` calls would keep only
- * the last one's item.
+ * Link several items in one server operation: one write-queue turn applies
+ * all of them, reading and writing the record once.
  */
 export async function addLinkedIssues(
   sessionId: string,
   directory: string | null | undefined,
   issues: readonly LinkedIssue[],
 ): Promise<Session> {
-  return patchSessionMetadata(sessionId, directory, (metadata) =>
-    issues.reduce((current, issue) => withLinkedIssue(current, issue, true), metadata))
+  return updateLinkedIssues(sessionId, directory, issues, true)
+}
+
+async function updateLinkedIssues(
+  sessionId: string,
+  directory: string | null | undefined,
+  issues: readonly LinkedIssue[],
+  linked: boolean,
+): Promise<Session> {
+  const targetDirectory = directory ?? getSessionDirectory(sessionId)
+  // A session no store holds still needs a record for the mirroring, and the
+  // read can fail: taken before the write, a failed read rejects with nothing
+  // landed. The read is display-only — none of the link list comes from the
+  // client — so its ordering is free, and it must not turn into a report of
+  // a link that did land.
+  const heldBeforeRequest = getGlobalSessionSnapshot(sessionId) !== null
+    || findLiveSession(sessionId) !== null
+  const fallbackRecord = heldBeforeRequest
+    ? null
+    : await opencodeClient.getSession(sessionId, targetDirectory)
+  const result = await requestSessionLinksUpdate(sessionId, issues, linked, targetDirectory)
+  if (result.outcome !== "updated") throw new Error(`session link update failed: ${result.reason}`)
+  // The server answered with the merged metadata; the session record is
+  // display-only here. A session a store holds is mirrored from its snapshot
+  // as the response lands; a store-miss uses the record read before the
+  // request. A stale read can no longer corrupt the link list, since none of
+  // it comes from the client.
+  const record = fallbackRecord
+    ?? (getGlobalSessionSnapshot(sessionId) ?? findLiveSession(sessionId))
+    ?? await opencodeClient.getSession(sessionId, targetDirectory)
+  const updated: Session = { ...record, metadata: result.metadata }
+  useGlobalSessionsStore.getState().upsertSession(updated)
+  const sessionDirectory = updated.directory || targetDirectory
+  if (sessionDirectory) registerSessionDirectory(updated.id, sessionDirectory)
+  mirrorSessionIntoLiveStores(updated, sessionDirectory ?? undefined)
+  return updated
 }
 
 /**

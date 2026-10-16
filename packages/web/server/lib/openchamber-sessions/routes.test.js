@@ -154,6 +154,17 @@ const createMemorySessionMetadataStore = () => {
       else entries.set(id, merged);
       return merged;
     },
+    updateSessionMetadata: async (id, decide) => {
+      const current = entries.get(id) ?? {};
+      // A decide returns a merge patch, or null to leave the record alone —
+      // the same contract the real store gives its decides.
+      const patch = decide(current);
+      if (!patch) return { metadata: current, changed: false };
+      const merged = merge(current, patch);
+      if (Object.keys(merged).length === 0) entries.delete(id);
+      else entries.set(id, merged);
+      return { metadata: merged, changed: true };
+    },
   };
 };
 
@@ -459,6 +470,153 @@ describe('openchamber session routes', () => {
       expect(response.body.metadata).toEqual({ openchamber: { goal: { status: 'active' } } });
       // The injected writer owns the store; the route must not write twice.
       await expect(sessionMetadataStore.get('ses_a')).resolves.toEqual({});
+    });
+  });
+
+  describe('session links the UI owns', () => {
+    const agentEntry = {
+      id: 'acme/app#7', number: 7, title: 'Add search', url: 'https://github.com/acme/app/pull/7', kind: 'pull', linkedAt: 5,
+    };
+    const uiEntry = {
+      id: 'linear:ENG-12', identifier: 'ENG-12', title: 'Spec', url: 'https://linear.app/acme/issue/eng-12', kind: 'linear', linkedAt: 9,
+    };
+
+    it('appends to the links already on the record and announces the merged metadata', async () => {
+      const { app, sessionMetadataStore, broadcastGlobalUiEvent } = createApp();
+      // As if an agent's `session.link` had already written this session.
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: [agentEntry] } });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [uiEntry], linked: true, directory: '/repo/app' })
+        .expect(200);
+
+      expect(response.body.metadata.openchamber.linked_issues).toEqual([agentEntry, uiEntry]);
+      await expect(sessionMetadataStore.get('ses_a')).resolves.toEqual(response.body.metadata);
+      expect(broadcastGlobalUiEvent).toHaveBeenCalledWith({
+        type: 'openchamber:session-metadata',
+        properties: { sessionID: 'ses_a', metadata: response.body.metadata },
+      });
+    });
+
+    it('keeps a link an agent made after the UI last read the session', async () => {
+      // The real store over OpenCode: the record the decide step reads is the
+      // one OpenCode holds when the write turn comes — including an agent
+      // link the UI has never seen. The client sends only the operation, so
+      // no snapshot of it can replace that record's list.
+      const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-routes-links-'));
+      const { app } = createApp({
+        sessionMetadataStore: createSessionMetadataStore({
+          dataDir,
+          openCode: createOpenCodeSessionMetadata({
+            buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+            getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
+          }),
+        }),
+      });
+      sessionGetMock.mockImplementation(async ({ sessionID }) => ({
+        id: sessionID,
+        location: { directory: '/repo/app' },
+        // Written by the agent's `session.link` between the UI's last read
+        // and this request.
+        metadata: { openchamber: { linked_issues: [agentEntry] } },
+      }));
+
+      try {
+        const response = await request(app)
+          .post('/api/openchamber/sessions/ses_v1/links')
+          .send({ entries: [uiEntry], linked: true, directory: '/repo/app' })
+          .expect(200);
+
+        expect(response.body.metadata.openchamber.linked_issues).toEqual([agentEntry, uiEntry]);
+        expect(sessionUpdateMock).toHaveBeenCalledWith({
+          sessionID: 'ses_v1',
+          metadata: response.body.metadata,
+        });
+      } finally {
+        fs.rmSync(dataDir, { recursive: true, force: true });
+      }
+    });
+
+    it('refreshes a re-linked entry and keeps the rest of the list', async () => {
+      const { app, sessionMetadataStore } = createApp();
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: [agentEntry, uiEntry] } });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [{ ...agentEntry, title: 'Add search (renamed)' }], linked: true })
+        .expect(200);
+
+      expect(response.body.metadata.openchamber.linked_issues).toEqual([
+        uiEntry,
+        { ...agentEntry, title: 'Add search (renamed)' },
+      ]);
+    });
+
+    it('unlinks by id and by the legacy number-and-address identity', async () => {
+      const legacy = {
+        id: 'team/repo#12', number: 12, title: 'Old', url: ' https://gitlab.com/team/repo/-/issues/12/ ', kind: 'issue', linkedAt: 1,
+      };
+      const { app, sessionMetadataStore } = createApp();
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: [agentEntry, uiEntry, legacy] } });
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({
+          entries: [
+            { id: 'acme/app#7', title: 'Add search', url: 'https://github.com/acme/app/pull/7', kind: 'pull' },
+            { id: 'owner/repo#12', number: 12, title: 'Old', url: 'https://gitlab.com/team/repo/-/issues/12', kind: 'issue' },
+          ],
+          linked: false,
+        })
+        .expect(200);
+
+      expect(response.body.metadata.openchamber.linked_issues).toEqual([uiEntry]);
+    });
+
+    it('applies a batch in one write', async () => {
+      const { app, broadcastGlobalUiEvent } = createApp();
+      const second = { id: 'acme/app#8', number: 8, title: 'Second', url: 'https://github.com/acme/app/issues/8', kind: 'issue', linkedAt: 9 };
+
+      const response = await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [uiEntry, second], linked: true })
+        .expect(200);
+
+      expect(response.body.metadata.openchamber.linked_issues).toEqual([uiEntry, second]);
+      expect(broadcastGlobalUiEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an invalid entry with 400 and writes nothing', async () => {
+      const { app, sessionMetadataStore, broadcastGlobalUiEvent } = createApp();
+      sessionMetadataStore.entries.set('ses_a', { openchamber: { linked_issues: [agentEntry] } });
+
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [{ id: 'x', title: 'No kind', url: 'https://x.dev/1' }], linked: true })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [uiEntry] })
+        .expect(400);
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: 'nope', linked: true })
+        .expect(400);
+
+      await expect(sessionMetadataStore.get('ses_a'))
+        .resolves.toEqual({ openchamber: { linked_issues: [agentEntry] } });
+      expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when the operation changes no entry', async () => {
+      const { app, broadcastGlobalUiEvent } = createApp();
+      await request(app)
+        .post('/api/openchamber/sessions/ses_a/links')
+        .send({ entries: [{ id: 'acme/app#99', number: 99, title: 'T', url: 'https://github.com/acme/app/issues/99', kind: 'issue' }], linked: false })
+        .expect(200, { metadata: {} });
+
+      expect(broadcastGlobalUiEvent).not.toHaveBeenCalled();
     });
   });
 

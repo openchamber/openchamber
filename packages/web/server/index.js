@@ -1686,6 +1686,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   dataDir: OPENCHAMBER_DATA_DIR,
   sessionMetadataStore,
   persistSessionMetadata: persistSessionMetadataPatch,
+  updateSessionMetadata: updateSessionMetadataWith,
   broadcastGlobalUiEvent: broadcastOpenChamberUiEvent,
   resolveAutoSelection: (input) => routingRuntime.resolveAutoSelection(input),
   isAutoReady: async () => (await routingRuntime.describe()).autoReady,

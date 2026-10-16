@@ -22,6 +22,7 @@ import { createArchiveStore } from './archive-store.js';
 import { applyForkInheritance } from './fork-inheritance.js';
 import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './session-metadata-store.js';
+import { buildLinkedIssuesPatch, parseLinkOperation } from './session-linked-issues.js';
 import { createSessionWorktreeMover } from './worktree-move.js';
 
 const asList = (value) => (Array.isArray(value) ? value : []);
@@ -450,6 +451,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     // store, broadcast, and tell the goal loop. Falls back to store+broadcast
     // when it is absent, which is what module tests use.
     persistSessionMetadata = null,
+    // Same story for a write decided from the record at write time (the
+    // session links the UI owns). Falls back to store+broadcast in module
+    // tests.
+    updateSessionMetadata = null,
     createOpenCodeClient = defaultCreateOpenCodeClient,
     createWorktree = createWorktreeDefault,
     getWorktreeBootstrapStatus = getWorktreeBootstrapStatusDefault,
@@ -784,6 +789,45 @@ export const createOpenChamberSessionService = (dependencies) => {
     const id = asNonEmptyString(sessionID);
     if (!id) throw new OpenChamberControlError('a session id is required', 400);
     return { metadata: await sessionMetadataStore.get(id, { directory }) };
+  };
+
+  /**
+   * A metadata change decided from the record as it is when this session's
+   * write turn comes. Like `writeMetadata`, the injected writer owns the
+   * store and the broadcast; the fallback is what module tests use.
+   */
+  const updateMetadata = async (sessionID, decide, directory = '') => {
+    if (updateSessionMetadata !== null) {
+      return updateSessionMetadata(sessionID, decide, { directory });
+    }
+    const result = await sessionMetadataStore.updateSessionMetadata(sessionID, decide, { directory });
+    if (result.changed) broadcastMetadata(sessionID, result.metadata);
+    return result;
+  };
+
+  /**
+   * Link or unlink items on a session the way the UI does (`setLinkedIssue`
+   * and `addLinkedIssues`): the list transform runs against the record as it
+   * is when this session's write turn comes, so a link an agent made while
+   * the request was in flight is read by the decide step instead of being
+   * overwritten by a stale client snapshot. The whole `linked_issues` array
+   * is never accepted from a client. Answers the full metadata afterwards,
+   * like the metadata route.
+   */
+  const setSessionLinks = async (sessionID, payload = {}) => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    // The schema decides what a link operation is; a body of any other shape
+    // is a 400, not something to pre-narrow here.
+    const parsed = parseLinkOperation(payload);
+    if (!parsed.ok) throw new OpenChamberControlError(parsed.error, 400);
+    const directory = asNonEmptyString(payload?.directory) || '';
+    const { metadata } = await updateMetadata(
+      id,
+      (current) => buildLinkedIssuesPatch(current, parsed.entries, parsed.linked),
+      directory,
+    );
+    return { metadata };
   };
 
   const broadcastArchived = (sessionID, archivedAt) => {
@@ -1165,6 +1209,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     sessionMetadataStore,
     setMetadata,
     getMetadata,
+    setSessionLinks,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
     moveToWorktree,
@@ -1235,6 +1280,15 @@ export const registerOpenChamberSessionRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('[OpenChamberSessions] failed to unarchive sessions:', error);
       return sendServiceError(res, error, 'Failed to unarchive sessions');
+    }
+  });
+
+  app.post('/api/openchamber/sessions/:sessionId/links', express.json({ limit: '1mb' }), async (req, res) => {
+    try {
+      return res.json(await service.setSessionLinks(req.params.sessionId, req.body));
+    } catch (error) {
+      console.error('[OpenChamberSessions] failed to update session links:', error);
+      return sendServiceError(res, error, 'Failed to update session links');
     }
   });
 
