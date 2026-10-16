@@ -533,6 +533,27 @@ describe('managed agent tool runtime', () => {
     }
   });
 
+  it('keeps the render tool direct even when Code Mode is asked for', async () => {
+    const { runtime, dataDir } = await createRuntime();
+    await prepareManagedEnv(runtime, {
+      includeControl: true,
+      includeWeb: false,
+      includeMemory: false,
+      includeRender: true,
+      codeMode: true,
+    });
+    const tools = await loadTools(dataDir, 'codemode-render');
+
+    // The chat draws a page from a top-level tool part, and a page that waits
+    // for the user's answer needs the call id only that part carries. Behind
+    // Code Mode the call is a nested `metadata.toolCalls` entry with neither
+    // the part nor the call id, so the page never renders and the answer never
+    // lands. The render tool therefore stays a direct tool; every other tool
+    // still follows the Code Mode setting.
+    expect(tools.openchamber.options).toEqual({ codemode: true });
+    expect(tools.openchamber_render.options).toEqual({ codemode: false });
+  });
+
   it('refuses to inject a plugin with no tools in it', async () => {
     const { runtime } = await createRuntime();
     let failed = false;

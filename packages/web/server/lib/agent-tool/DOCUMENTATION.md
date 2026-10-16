@@ -66,7 +66,14 @@ both settings are `false`.
   size-limited catalog; with a few large MCP servers ours dropped out of it and
   agents concluded the tool did not exist. `agentToolsCodeMode: true` (the
   "Run through Code Mode" checkbox in the same section, off by default) flips
-  all of them to `codemode: true`.
+  all of them to `codemode: true`, except `openchamber_render`.
+- `openchamber_render` stays a direct tool whatever the Code Mode setting says.
+  The chat draws a page from a top-level tool part (`renderedPage` reads
+  `part.tool` and `part.state`), and a page waiting for the user's answer needs
+  the call id only that part carries. Behind Code Mode the call survives only
+  as a nested `metadata.toolCalls` entry, which has neither the part nor the
+  call id, so the page never rendered and its answer never landed while the
+  plugin still told the model the page was shown.
 - The plugin accepts the action's inputs either inside `parameters` or beside
   `action`, because models produce both shapes; an explicit `parameters` object
   wins on a conflict. Rejecting the flattened shape turned a call that plainly

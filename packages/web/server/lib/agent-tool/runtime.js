@@ -322,14 +322,14 @@ const ANSWER_CLOSED_IN_CHAT = String.raw`
  * answer with an empty completion instead of an error, and the `oneOf` branches
  * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => String.raw`    tools.add({
+const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false, directOnly = false }) => String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
       // OpenCode 2 puts a plugin tool behind its Code Mode execute tool
       // unless told otherwise. There the model sees only a size-limited
       // catalog, and with a few large MCP servers ours dropped out of it, so
       // agents concluded the tool did not exist. Direct is the default.
-      options: { codemode: ${codeMode ? 'true' : 'false'} },
+      options: { codemode: ${!directOnly && codeMode ? 'true' : 'false'} },
       input: {
         type: "object",
         properties: {
@@ -455,6 +455,12 @@ const createPluginSource = ({ includeControl, includeWeb, includeMemory, include
       parameters: RENDER_PARAMETER_PROPERTIES,
       codeMode,
       answers: true,
+      // The chat draws a page from a top-level tool part, and a page waiting
+      // for the user's answer needs the call id only that part carries. Behind
+      // Code Mode the call survives only as a nested `metadata.toolCalls` entry
+      // with neither, so the page never renders and the answer never lands.
+      // This tool stays direct whatever the Code Mode setting says.
+      directOnly: true,
     }));
   }
 
