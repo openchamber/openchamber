@@ -515,14 +515,16 @@ something other than "tools available".
 Written by the flows that already attach a thread — sending a message with
 issues, PRs or guest items attached in the composer, and session creation from
 an issue or PR in `NewWorktreeDialog`. There is no manual "link this" control:
-attaching a thread to the work *is* the act of linking it. A message's
-references are written in one metadata patch (`sessionActions.addLinkedIssues`):
-each write replaces the whole list, so one write per item would keep only the
-last.
+attaching a thread to the work *is* the act of linking it. A message's references are written in one server operation
+(`sessionActions.addLinkedIssues`): each operation sends the items to link,
+and the OpenChamber server decides the new list from a fresh read inside the
+session's write queue, so a link an agent made while the request was in flight
+survives it.
 
 Stored in session metadata as a **snapshot** (`lib/linkedIssues.ts`, namespace
-`openchamber.linked_issues`), riding the same `patchSessionMetadata` channel as
-pinned messages. Number, title, url, author and avatar only — the body,
+`openchamber.linked_issues`), persisted through the same server-owned metadata
+store as pinned messages. Number, title, url, author and avatar only — the
+body,
 comments and state belong to GitHub, and mirroring them would mean owning their
 staleness. The stored title can drift; that is the price of a store that never
 needs refreshing. A GitHub row opens github.com. A Linear row opens the

@@ -45,6 +45,10 @@ let unarchiveBatchResponse: MockRouteResponse = {
   status: 404,
   body: { error: 'not found' },
 }
+let linksRouteResponse: MockRouteResponse = {
+  status: 404,
+  body: { error: 'not found' },
+}
 let activeStatusSnapshot: Record<string, SessionStatus> | null = {}
 let readActiveStatusSnapshot: (directory?: string | null) => Promise<Record<string, SessionStatus> | null> = async () => activeStatusSnapshot
 const deletedCleanupIdentities: Array<{ runtimeKey: string; directory: string; sessionId: string }> = []
@@ -277,7 +281,11 @@ mock.module("@/lib/runtime-fetch", () => ({
     const payload = JSON.parse(String(init?.body ?? "{}"))
     openchamberRouteRequests.push({ path, body: payload })
     beforeArchiveRouteResolve?.(path)
-    const answer = path.endsWith("/unarchive") ? unarchiveBatchResponse : archiveBatchResponse
+    const answer = path.endsWith("/unarchive")
+      ? unarchiveBatchResponse
+      : path.endsWith("/links")
+        ? linksRouteResponse
+        : archiveBatchResponse
     return new Response(JSON.stringify(answer.body), {
       status: answer.status,
       headers: { "content-type": "application/json" },
@@ -379,6 +387,7 @@ mock.module("./sync-refs", () => ({
 import { INITIAL_STATE } from "./types"
 import type { DirectoryStore } from "./child-store"
 import type { Message, Part, Session, SessionStatus } from "@/lib/opencode/model"
+import type { LinkedIssue } from "@/lib/linkedIssues"
 import { SESSION_KNOWLEDGE_HEADER } from "@/lib/sessionKnowledgeApi"
 
 type OptimisticAddCall = { sessionID: string; directory?: string | null; message: Message; parts: Part[] }
@@ -843,14 +852,15 @@ describe("confirmed session removal", () => {
   })
 })
 
-describe("archiving a batch through the server", () => {
-  const liveSession = (id: string, metadata?: Record<string, unknown>): Session => ({
-    id,
-    directory: "/test/project",
-    time: { created: 1 },
-    ...(metadata ? { metadata } : {}),
-  } as unknown as Session)
+/** A minimal active-session record: enough for the actions' store mirroring. */
+const liveSession = (id: string, metadata?: Record<string, unknown>): Session => ({
+  id,
+  directory: "/test/project",
+  time: { created: 1 },
+  ...(metadata ? { metadata } : {}),
+} as unknown as Session)
 
+describe("archiving a batch through the server", () => {
   const archivedSession = (id: string) => ({ id, archivedAt: 2 })
 
   beforeEach(() => {
@@ -996,6 +1006,107 @@ describe("archiving a batch through the server", () => {
     expect(result).toEqual({ archivedIds: [], failedIds: ["session-a"] })
     expect(source.getState().session.map((item) => item.id)).toEqual(["session-a"])
     expect(globalUpsertedSessionBatches).toEqual([])
+  })
+})
+
+describe("linking items through the server", () => {
+  const issue: LinkedIssue = {
+    id: "owner/repo#12",
+    number: 12,
+    title: "Rail badge count",
+    url: "https://github.com/owner/repo/issues/12",
+    kind: "issue",
+    author: "someone",
+    linkedAt: 1,
+  }
+  const guestEntry: LinkedIssue = {
+    id: "guest:linear:ENG-1",
+    providerId: "linear",
+    identifier: "ENG-1",
+    title: "Spec",
+    url: "https://linear.app/openchamber/issue/ENG-1",
+    kind: "guest",
+    thread: "issue",
+    linkedAt: 2,
+  }
+
+  beforeEach(() => {
+    replyCalls.length = 0
+    globalUpsertedSessions.length = 0
+    registeredSessionDirectories.length = 0
+    openchamberRouteRequests.length = 0
+    linksRouteResponse = { status: 404, body: { error: "not found" } }
+  })
+
+  test("sends the operation to the links route and mirrors the answer into the stores", async () => {
+    // The metadata is what the server answered, not a list the client computed
+    // from its own read.
+    const metadata = { openchamber: { linked_issues: [issue, guestEntry] } }
+    linksRouteResponse = { status: 200, body: { metadata } }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { setLinkedIssue, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    const updated = await setLinkedIssue("session-a", "/test/project", guestEntry, true)
+
+    expect(openchamberRouteRequests).toHaveLength(1)
+    expect(openchamberRouteRequests[0].path).toBe("/api/openchamber/sessions/session-a/links")
+    expect(openchamberRouteRequests[0].body).toEqual({ entries: [guestEntry], linked: true })
+    // No session read is spent computing the list.
+    expect(replyCalls.filter((call) => call.method === "session.get")).toEqual([])
+    expect(updated.metadata).toEqual(metadata)
+    expect(globalUpsertedSessions).toHaveLength(1)
+    expect(globalUpsertedSessions[0]).toMatchObject({ id: "session-a", metadata })
+    expect(source.getState().session[0]?.metadata).toEqual(metadata)
+    expect(registeredSessionDirectories.some((entry) => entry.sessionID === "session-a" && entry.directory === "/test/project")).toBe(true)
+  })
+
+  test("adds every item of a batch in one request", async () => {
+    const metadata = { openchamber: { linked_issues: [issue, guestEntry] } }
+    linksRouteResponse = { status: 200, body: { metadata } }
+    const source = createStore({}, { session: [liveSession("session-a")] })
+    const { addLinkedIssues, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", source]]), () => "/test/project")
+
+    await addLinkedIssues("session-a", "/test/project", [issue, guestEntry])
+
+    expect(openchamberRouteRequests).toHaveLength(1)
+    expect(openchamberRouteRequests[0].body).toEqual({ entries: [issue, guestEntry], linked: true })
+  })
+
+  test("reads the record only for display when no store holds it yet", async () => {
+    const metadata = { openchamber: { linked_issues: [issue] } }
+    linksRouteResponse = { status: 200, body: { metadata } }
+    const record = liveSession("session-x")
+    sessionRecords.set("session-x", record)
+    const { setLinkedIssue } = await import("./session-actions")
+
+    const updated = await setLinkedIssue("session-x", "/test/project", issue, true)
+
+    // The read feeds the mirrored record only; the link list is the server's.
+    expect(replyCalls.filter((call) => call.method === "session.get")).toHaveLength(1)
+    expect(updated.metadata).toEqual(metadata)
+    expect(updated.id).toBe("session-x")
+  })
+
+  test("rejects when the server cannot serve the route, like the callers' catch expects", async () => {
+    linksRouteResponse = { status: 501, body: { error: "not supported in VS Code" } }
+    const { setLinkedIssue, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", createStore({})]]), () => "/test/project")
+
+    await expect(setLinkedIssue("session-a", "/test/project", issue, true))
+      .rejects.toThrow("session link update failed")
+    expect(globalUpsertedSessions).toEqual([])
+  })
+
+  test("treats a malformed answer as unavailable instead of as a success", async () => {
+    linksRouteResponse = { status: 200, body: { nope: true } }
+    const { setLinkedIssue, setActionRefs } = await import("./session-actions")
+    setActionRefs(createChildStores([["/test/project", createStore({})]]), () => "/test/project")
+
+    await expect(setLinkedIssue("session-a", "/test/project", issue, true))
+      .rejects.toThrow("session link update failed")
+    expect(globalUpsertedSessions).toEqual([])
   })
 })
 
