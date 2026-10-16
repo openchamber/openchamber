@@ -37,6 +37,7 @@ import {
     tryParseJsonOutput,
     coerceToText,
     capToolOutputText,
+    unwrapTextBlocks,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
@@ -46,7 +47,6 @@ import { useDefaultDiffViewMode } from '../useDefaultDiffViewMode';
 import { MinDurationShineText } from './MinDurationShineText';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
-import type { JsonValue } from '@openchamber/sdk';
 import {
     guestToolTableRows,
     guestToolHeaderReadsOutput,
@@ -671,6 +671,8 @@ const JsonToolOutput: React.FC<{
         useUIStore.getState().setToolJsonViewMode(view);
     }, []);
 
+    const textOutput = jsonViewMode === 'summary' ? unwrapTextBlocks(jsonResult.data) : null;
+
     return (
         <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
             <div className="absolute inset-e-2 top-2 z-10 flex items-center gap-1">
@@ -710,7 +712,19 @@ const JsonToolOutput: React.FC<{
                 <CopyToolOutputButton output={renderedOutput} />
             </div>
             {jsonViewMode === 'summary' ? (
-                <JsonSummaryView data={jsonResult.data} />
+                textOutput !== null ? (
+                    <div className="typography-code pe-12 text-muted-foreground/90">
+                        <WorkerHighlightedCode
+                            language="text"
+                            code={textOutput}
+                            style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            codeStyle={CODE_TAG_PROPS.style}
+                            wrap
+                        />
+                    </div>
+                ) : (
+                    <JsonSummaryView data={jsonResult.data} />
+                )
             ) : jsonViewMode === 'formatted' ? (
                 <JsonTreeViewer
                     data={jsonResult.data}
@@ -766,9 +780,7 @@ const ToolScrollableTextOutput: React.FC<{
     if (forcedMode === 'table' && presentation?.columns?.length) {
         // A declared table whose output is not a list falls through to the
         // host's own detection, so the user still sees the raw result.
-        // SAFETY: `tryParseJsonOutput` fills `data` from JSON.parse of the tool
-        // output, so a parsed result is a JSON value.
-        const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data as JsonValue) : null;
+        const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data) : null;
         if (rows) {
             return <GuestToolTable rows={rows} columns={presentation.columns} />;
         }
