@@ -1,3 +1,4 @@
+import { isForeignEditableFocus } from '@/components/views/diffFind/findShortcutClaim';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
@@ -547,9 +548,9 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     };
   }, [diffFind.currentIndex, diffFind.currentMatch, diffFind.isOpen, findRunByKey, handleSelectStop]);
 
-  // mod+f opens the bar only while the walkthrough surface holds focus (or was
-  // last pressed inside it); Escape closes. The editor and chat keep their own.
-  const lastPressedInsideRef = useRef(false);
+  // mod+f opens the bar for the active walkthrough surface; Escape closes. The
+  // shortcut is claimed unless another surface's editable control holds focus
+  // (a file editor, the chat composer), so those keep their own Cmd/Ctrl+F.
   const { isOpen: findOpen, open: openFind, close: closeFind } = diffFind;
   // Bumped on every find-shortcut hit, open or already open, so pressing it
   // again re-focuses and re-selects the query (same contract as the bar).
@@ -566,10 +567,6 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   useEffect(() => {
     if (!visible) return;
     const combo = getEffectiveShortcutCombo('find_in_file', shortcutOverrides);
-    const onPointerDown = (event: PointerEvent) => {
-      // SAFETY: a pointer event target inside the document is a Node.
-      lastPressedInsideRef.current = Boolean(rootRef.current?.contains(event.target as Node));
-    };
     const onKeyDownCapture = (event: KeyboardEvent) => {
       // Escape is claimed in the capture phase, before the zone frame's React
       // capture handler (zoneEscape.ts) turns it into "close the panel". React
@@ -577,8 +574,14 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
       // stops native propagation, so a bubble handler here never sees the key.
       if (!findOpen || event.key !== 'Escape') return;
       if (event.defaultPrevented || isIMECompositionEvent(event)) return;
+      // Claim only when nothing else holds Escape: the keydown lands in the
+      // walkthrough, or no element owns focus at all. A focused element outside
+      // it (a popover, menu or dialog input) keeps its own Escape.
       // SAFETY: a keydown target inside the document is a Node.
-      if (!rootRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      const active = document.activeElement;
+      const nothingHoldsFocus = !active || active === document.body;
+      if (!rootRef.current?.contains(target) && !nothingHoldsFocus) return;
       event.preventDefault();
       event.stopPropagation();
       closeFind();
@@ -586,19 +589,14 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (!eventMatchesShortcut(event, combo)) return;
-      const root = rootRef.current;
-      const focused = document.activeElement;
-      const unfocused = !focused || focused === document.body;
-      if (!root || (unfocused ? !lastPressedInsideRef.current : !root.contains(focused))) return;
+      if (isForeignEditableFocus(document.activeElement, rootRef.current)) return;
       event.preventDefault();
       openFind();
       setFindFocusNonce((nonce) => nonce + 1);
     };
-    window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('keydown', onKeyDownCapture, true);
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('keydown', onKeyDownCapture, true);
       window.removeEventListener('keydown', onKeyDown);
     };

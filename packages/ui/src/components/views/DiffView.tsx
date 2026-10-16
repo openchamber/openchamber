@@ -1,3 +1,4 @@
+import { isForeignEditableFocus } from '@/components/views/diffFind/findShortcutClaim';
 import { isIMECompositionEvent } from '@/lib/ime';
 import React from 'react';
 
@@ -1329,7 +1330,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const diffRootRef = React.useRef<HTMLDivElement | null>(null);
-    const lastPressedInsideDiffRef = React.useRef(false);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
     const viewerRefsRef = React.useRef(new Map<string, PierreDiffViewerHandle | null>());
     const pendingScrollTargetRef = React.useRef<string | null>(null);
@@ -2378,16 +2378,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
         };
     }, [diffFind.currentIndex, diffFind.currentMatch, diffFind.isOpen, expandStackedFile, isTreeMode, scrollToFile]);
 
-    // mod+f opens the bar for the focused diff surface; Escape closes it. The
-    // shortcut is only claimed when focus (or the last press) is inside the
-    // diff, so the editor and chat keep their own Cmd/Ctrl+F.
+    // mod+f opens the bar for the active diff surface; Escape closes it. The
+    // shortcut is claimed unless another surface's editable control holds focus
+    // (a file editor, the chat composer), so those keep their own Cmd/Ctrl+F.
+    // `visible` is the app's "this panel is the active surface" signal.
     React.useEffect(() => {
         if (!visible) return;
         const combo = getEffectiveShortcutCombo('find_in_file', shortcutOverrides);
-        const onPointerDown = (event: PointerEvent) => {
-            // SAFETY: a pointer event target inside the document is a Node.
-            lastPressedInsideDiffRef.current = Boolean(diffRootRef.current?.contains(event.target as Node));
-        };
         // Escape is claimed in the capture phase. The zone frame closes itself on
         // Escape from a React capture handler (zoneEscape.ts), and React attaches
         // that handler to the root container — below `window` — then stops native
@@ -2398,8 +2395,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
         const onKeyDownCapture = (event: KeyboardEvent) => {
             if (!isFindOpen || event.key !== 'Escape') return;
             if (event.defaultPrevented || isIMECompositionEvent(event)) return;
+            // Claim only when nothing else holds Escape: the keydown lands in the
+            // diff, or no element owns focus at all. A focused element outside the
+            // diff (a popover, menu or dialog input) keeps its own Escape.
             // SAFETY: a keydown target inside the document is a Node.
-            if (!diffRootRef.current?.contains(event.target as Node)) return;
+            const target = event.target as Node;
+            const active = document.activeElement;
+            const nothingHoldsFocus = !active || active === document.body;
+            if (!diffRootRef.current?.contains(target) && !nothingHoldsFocus) return;
             event.preventDefault();
             event.stopPropagation();
             closeFind();
@@ -2407,19 +2410,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
         const onKeyDown = (event: KeyboardEvent) => {
             if (event.defaultPrevented) return;
             if (!eventMatchesShortcut(event, combo)) return;
-            const root = diffRootRef.current;
-            const focused = document.activeElement;
-            const unfocused = !focused || focused === document.body;
-            if (!root || (unfocused ? !lastPressedInsideDiffRef.current : !root.contains(focused))) return;
+            if (isForeignEditableFocus(document.activeElement, diffRootRef.current)) return;
             event.preventDefault();
             openFind();
             setFindFocusNonce((nonce) => nonce + 1);
         };
-        window.addEventListener('pointerdown', onPointerDown, true);
         window.addEventListener('keydown', onKeyDownCapture, true);
         window.addEventListener('keydown', onKeyDown);
         return () => {
-            window.removeEventListener('pointerdown', onPointerDown, true);
             window.removeEventListener('keydown', onKeyDownCapture, true);
             window.removeEventListener('keydown', onKeyDown);
         };
