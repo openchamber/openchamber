@@ -14,7 +14,10 @@
 import type { CatalogKind } from "@/lib/opencode/events";
 import { getConfigDirectory, invalidateAgentsLoadCache, useAgentsStore } from "@/stores/useAgentsStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
-import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
+import { invalidateAllSkillsLoads, useSkillsStore } from "@/stores/useSkillsStore";
+import { useProjectsStore } from "@/stores/useProjectsStore";
+import { useUIStore } from "@/stores/useUIStore";
+import { resolveSettingsDirectory } from "@/hooks/useSettingsDirectory";
 import { useSkillsCatalogStore } from "@/stores/useSkillsCatalogStore";
 import { invalidateConfigAgentsLoad, useConfigStore } from "@/stores/useConfigStore";
 import { useMcpConfigStore } from "@/stores/useMcpConfigStore";
@@ -54,10 +57,27 @@ const refreshCommands = async (): Promise<void> => {
   await useCommandsStore.getState().loadCommands();
 };
 
-const refreshSkills = async (): Promise<void> => {
-  invalidateSkillsLoadCache();
+/**
+ * A skill or config change can switch skills on or off in any directory (a
+ * global config file applies to all of them), so every list read so far is
+ * marked stale. Only the directories already open are read now: the one the
+ * app is on, the one Settings shows, and those the event names that have a
+ * list. A read that started before the change is read again before it lands.
+ */
+const refreshSkills = async (eventDirectories: readonly string[] = []): Promise<void> => {
+  const loaded = new Set(invalidateAllSkillsLoads());
+  const ambientDirectory = getConfigDirectory();
+  const { settingsProjectPath } = useUIStore.getState();
+  const { projects, activeProjectId } = useProjectsStore.getState();
+  const settingsDirectory = resolveSettingsDirectory(settingsProjectPath, projects, activeProjectId);
+  const scopedDirectories = Array.from(new Set(
+    [...eventDirectories, settingsDirectory ?? '']
+      .map((directory) => directory.trim())
+      .filter((directory) => loaded.has(directory) && directory !== ambientDirectory),
+  ));
   await Promise.allSettled([
     useSkillsStore.getState().loadSkills(),
+    ...scopedDirectories.map((directory) => useSkillsStore.getState().loadSkills(directory)),
     useSkillsCatalogStore.getState().loadCatalog({ refresh: true }),
   ]);
 };
@@ -139,7 +159,7 @@ export function catalogRefreshTasks(
     case "command":
       return [refreshCommands];
     case "skill":
-      return [refreshSkills];
+      return [() => refreshSkills(eventDirectories)];
     case "plugin":
       return [refreshPlugins];
     // `provider.updated` and `model.updated` (2.0.8) are OpenCode's own
@@ -157,7 +177,7 @@ export function catalogRefreshTasks(
     // opencode.json included), and OpenChamber's own plugin injection lives
     // in one, so the whole set is re-read.
     case "config":
-      return [() => refreshAgents(eventDirectories), refreshCommands, refreshSkills, refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
+      return [() => refreshAgents(eventDirectories), refreshCommands, () => refreshSkills(eventDirectories), refreshMcp, refreshPlugins, refreshProviders, refreshWebSearchIfLoaded];
     // Projects are the sync layer's own slice; nothing in Settings reads them
     // through these stores.
     case "project":

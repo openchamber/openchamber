@@ -4,17 +4,17 @@ import os from 'os';
 import yaml from 'yaml';
 import {
   applyEdits,
-  createScanner,
   findNodeAtLocation,
   modify,
   parse as parseJsonc,
   parseTree,
   printParseErrorCode,
-  SyntaxKind,
 } from 'jsonc-parser';
 import { readSectionEntry, readMcpEntry } from './config-v2.js';
 import { resolveWorktreeDirectory } from './worktree-directory.js';
 import { writeFileAtomic } from './atomic-write.js';
+import { skillIdFromPath } from './skill-policy.js';
+import { arrayItemTextEdits, diffArrayItems, removeNodeEdits } from './jsonc-edits.js';
 
 // ============== PATH CONSTANTS ==============
 
@@ -394,10 +394,19 @@ function deepEqualJsonValue(a, b) {
 }
 
 // Structural diff between the parsed on-disk config and the desired config.
-// Object keys are compared per key (order-insensitive); arrays and scalars are
-// replaced whole. The desired config must already be JSON-normalized (no
-// `undefined` values), so absent keys are the only removal signal.
+// Object keys are compared per key (order-insensitive); an array that only
+// gains items at its end or only loses items is edited item by item, any
+// other array and every scalar is replaced whole. The desired config must
+// already be JSON-normalized (no `undefined` values), so absent keys are the
+// only removal signal.
 function collectConfigEdits(current, next, basePath, edits) {
+  if (Array.isArray(current) && Array.isArray(next)) {
+    const itemEdits = diffArrayItems(current, next, basePath, deepEqualJsonValue);
+    if (itemEdits) {
+      edits.push(...itemEdits);
+      return;
+    }
+  }
   if (!isPlainObject(current) || !isPlainObject(next)) {
     if (!deepEqualJsonValue(current, next)) {
       edits.push({ type: 'set', path: basePath, value: next });
@@ -420,24 +429,11 @@ function collectConfigEdits(current, next, basePath, edits) {
   }
 }
 
-function findSeparatorComma(text, start, end) {
-  if (end <= start) {
-    return -1;
-  }
-  const scanner = createScanner(text, true);
-  scanner.setPosition(start);
-  const token = scanner.scan();
-  const offset = scanner.getTokenOffset();
-  if (token === SyntaxKind.CommaToken && offset < end) {
-    return offset;
-  }
-  return -1;
-}
-
-// Removes exactly the property node plus one adjacent separator comma. The
-// scanner-based comma lookup keeps comments in the surrounding gaps (including
-// commas inside comments), and avoids jsonc-parser's own removal leaving a
-// stray comma when the last property of an object is deleted.
+// Removes exactly the property node plus one adjacent separator comma, and the
+// property's line when nothing else is on it. The scanner-based comma lookup
+// keeps comments in the surrounding gaps (including commas inside comments),
+// and avoids jsonc-parser's own removal leaving a stray comma when the last
+// property of an object is deleted.
 function removePropertyEdits(text, propertyPath) {
   const root = parseTree(text, [], { allowTrailingComma: true });
   const valueNode = findNodeAtLocation(root, propertyPath);
@@ -456,25 +452,12 @@ function removePropertyEdits(text, propertyPath) {
 
   const siblings = objectNode.children;
   const index = siblings.indexOf(propertyNode);
-  const propStart = propertyNode.offset;
-  const propEnd = propertyNode.offset + propertyNode.length;
-  const edits = [{ offset: propStart, length: propEnd - propStart, content: '' }];
-
-  const objectEnd = objectNode.offset + objectNode.length;
   const nextSibling = index < siblings.length - 1 ? siblings[index + 1] : null;
-  const afterGapEnd = nextSibling ? nextSibling.offset : objectEnd - 1;
-  let commaOffset = findSeparatorComma(text, propEnd, afterGapEnd);
-  if (commaOffset === -1) {
-    const previousSibling = index > 0 ? siblings[index - 1] : null;
-    const beforeGapStart = previousSibling
-      ? previousSibling.offset + previousSibling.length
-      : objectNode.offset + 1;
-    commaOffset = findSeparatorComma(text, beforeGapStart, propStart);
-  }
-  if (commaOffset !== -1) {
-    edits.push({ offset: commaOffset, length: 1, content: '' });
-  }
-  return edits;
+  const previousSibling = index > 0 ? siblings[index - 1] : null;
+  return removeNodeEdits(text, propertyNode.offset, propertyNode.offset + propertyNode.length, {
+    nextStart: nextSibling ? nextSibling.offset : objectNode.offset + objectNode.length - 1,
+    previousEnd: previousSibling ? previousSibling.offset + previousSibling.length : objectNode.offset + 1,
+  });
 }
 
 function applyConfigEdits(existingText, edits) {
@@ -487,6 +470,9 @@ function applyConfigEdits(existingText, edits) {
   for (const edit of edits) {
     if (edit.type === 'remove') {
       text = applyEdits(text, removePropertyEdits(text, edit.path));
+    } else if (edit.type === 'insert-item' || edit.type === 'remove-item') {
+      const itemEdits = arrayItemTextEdits(text, edit, formattingOptions.eol);
+      text = applyEdits(text, itemEdits ?? modify(text, edit.path, edit.value, { formattingOptions, isArrayInsertion: true }));
     } else {
       text = applyEdits(text, modify(text, edit.path, edit.value, { formattingOptions }));
     }
@@ -818,7 +804,13 @@ function addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source) {
     return;
   }
 
-  skillsMap.set(name, {
+  // Keyed by OpenCode's id, which policies and skill invocation use, so two
+  // skills sharing a display name both stay listed; a later file still wins
+  // over an earlier one with the same id. A file without a derivable id
+  // falls back to its display name.
+  const id = skillIdFromPath(skillMdPath);
+  skillsMap.set(id ?? `name:${name}`, {
+    id,
     name,
     path: skillMdPath,
     scope,

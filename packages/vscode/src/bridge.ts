@@ -11,6 +11,7 @@ import { handlePermissionAutoAcceptBridgeMessage } from './bridge-permission-aut
 import { createProjectSetupStore, handleProjectSetupBridgeMessage } from './bridge-project-setup-runtime';
 import { createSessionStateStore, getOpenChamberDataDir } from './openchamberSessionState';
 import {
+  createOpenCodePolicyReader,
   fetchOpenCodeSkillsFromApi,
   persistSettings,
   readSettings,
@@ -130,6 +131,7 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         resetMagicPromptOverride,
         resetAllMagicPromptOverrides,
         fetchOpenCodeSkillsFromApi,
+        createOpenCodePolicyReader,
         clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
       },
     );

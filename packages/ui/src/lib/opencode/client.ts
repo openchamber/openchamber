@@ -59,7 +59,6 @@ import {
   type Provider,
   type Session,
   type SessionStatus,
-  type Skill,
   type Vcs,
   toModelRef,
 } from "./model"
@@ -219,18 +218,21 @@ export function normalizeOpencodeError(operation: string, error: unknown): Openc
   return new OpencodeApiError(operation, String(error), { cause: error })
 }
 
+/** One skill a message names: OpenCode's id, and the token the user typed for it. */
+export type SkillAttachmentRef = { id: string; name: string }
+
 /**
- * Skills the user named with `$name`, in order of appearance. They are
+ * Skills the user named with `$name` or `/name`, in order of appearance,
+ * already resolved by the caller to the skills agents can use. They are
  * attached to the prompt by id so OpenCode loads each one with the message,
- * whatever the session is doing; a name that cannot be attached falls back to
- * the instruction the caller builds for it.
+ * whatever the session is doing. Where a skill cannot be attached the caller
+ * builds the instruction that names it instead, and leaves out any skill it
+ * knows is switched off.
  */
 export type SkillMentions = {
-  names: readonly string[]
-  instructionFor: (names: readonly string[]) => string | null
+  skills: readonly SkillAttachmentRef[]
+  instructionFor: (skills: readonly SkillAttachmentRef[]) => string | null
 }
-
-type SkillAttachmentRef = { id: string; name: string }
 
 /** OpenCode rejected a prompt because an attached skill id does not exist. */
 const isSkillNotFound = (error: OpencodeApiError): boolean =>
@@ -1355,20 +1357,19 @@ class OpencodeService {
 
     try {
       await this.applySendSelection(params.id, { model: params.model, agent: params.agent }, params.directory, params.runtimeKey)
-      const skills = await this.resolveSkillMentions(params.skills?.names ?? [], params.directory)
-      const unresolvedInstruction = params.skills?.instructionFor(skills.unresolved) ?? null
+      const attached = params.skills?.skills ?? []
       for (const item of context) {
         await admitSynthetic(item)
       }
-      if (unresolvedInstruction) await admitSynthetic({ text: unresolvedInstruction })
       try {
-        await prompt(skills.attached)
+        await prompt(attached)
       } catch (error) {
-        // The skill list and the prompt are two requests: a skill removed in
-        // between fails preparation before anything is admitted, so the same
-        // message id is safe to send again without the attachment.
-        if (skills.attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
-        const instruction = params.skills?.instructionFor(skills.attached.map((skill) => skill.name)) ?? null
+        // The caller's skill list and the prompt are two requests: a skill
+        // removed or switched off in between fails preparation before
+        // anything is admitted, so the same message id is safe to send again
+        // without the attachment.
+        if (attached.length === 0 || !(error instanceof OpencodeApiError) || !isSkillNotFound(error)) throw error
+        const instruction = params.skills?.instructionFor(attached) ?? null
         if (instruction) await admitSynthetic({ text: instruction })
         await prompt([])
       }
@@ -1954,39 +1955,6 @@ class OpencodeService {
 
   async listCommands(directory?: string | null, signal?: AbortSignal): Promise<Command[]> {
     return call("command.list", () => this.clientFor(directory).command.list(undefined, { signal }).then((r) => r.data))
-  }
-
-  async listSkills(directory?: string | null): Promise<Skill[]> {
-    return call("skill.list", () => this.clientFor(directory).skill.list().then((r) => r.data))
-  }
-
-  /**
-   * Maps the names the composer knows to OpenCode skill ids. The composer's
-   * registry is keyed by name, while a prompt attaches skills by id (the
-   * skill's folder, which a frontmatter `name` can differ from). A name
-   * OpenCode does not list, or a failed list, leaves the name unresolved so
-   * the caller can fall back instead of losing the mention.
-   */
-  private async resolveSkillMentions(
-    names: readonly string[],
-    directory?: string | null,
-  ): Promise<{ attached: SkillAttachmentRef[]; unresolved: string[] }> {
-    if (names.length === 0) return { attached: [], unresolved: [] }
-    let known: Skill[]
-    try {
-      known = await this.listSkills(directory)
-    } catch (error) {
-      console.warn("[opencode] Could not list skills; naming them in an instruction instead:", error)
-      return { attached: [], unresolved: [...names] }
-    }
-    const attached: SkillAttachmentRef[] = []
-    const unresolved: string[] = []
-    for (const name of names) {
-      const match = known.find((skill) => skill.name === name) ?? known.find((skill) => skill.id === name)
-      if (!match) unresolved.push(name)
-      else if (!attached.some((skill) => skill.id === match.id)) attached.push({ id: match.id, name })
-    }
-    return { attached, unresolved }
   }
 
   async listMcpServers(directory?: string | null): Promise<McpServerStatus[]> {

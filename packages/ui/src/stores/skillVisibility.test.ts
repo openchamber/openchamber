@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { filterSkillsByRuntimeFlags, resolveSkillRoot } from './skillVisibility';
 
-const skill = (name: string, path: string) => ({ name, path });
+// The id is the skill's folder, which these fixtures name after the skill.
+const skill = (name: string, path: string) => ({ id: name, name, path });
 
 const AGENTS = (name: string) => skill(name, `/repo/.agents/skills/${name}/SKILL.md`);
 const CLAUDE = (name: string) => skill(name, `/repo/.claude/skills/${name}/SKILL.md`);
@@ -76,6 +77,14 @@ describe('filterSkillsByRuntimeFlags', () => {
     );
     expect(result).toHaveLength(1);
     expect(result[0].path).toContain('.agents');
+  });
+
+  test('keeps two ids that share a display name', () => {
+    const result = filterSkillsByRuntimeFlags([
+      { id: 'deploy-web', name: 'deploy', path: '/repo/.agents/skills/deploy-web/SKILL.md' },
+      { id: 'deploy-api', name: 'deploy', path: '/repo/.agents/skills/deploy-api/SKILL.md' },
+    ], ENABLED);
+    expect(result.map((s) => s.id)).toEqual(['deploy-web', 'deploy-api']);
   });
 
   test('does not let dedup drop a name that only exists under .claude', () => {

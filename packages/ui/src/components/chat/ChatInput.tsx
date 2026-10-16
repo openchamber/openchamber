@@ -110,9 +110,10 @@ import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
+import { knownSkillTokens, resolveSkillMentions } from '@/stores/skillAvailability';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectAvailableSkillsForDirectory, skillFallbackInstruction, useSkillsStore, withoutSwitchedOffQueuedSkills } from '@/stores/useSkillsStore';
 import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -277,11 +278,12 @@ const getFileMentionInputSourceForInsertedText = (insertedText: string): FileMen
 );
 
 /**
- * Skills the user named with `$name`. Matched against the registry's exact
- * casing, since the name is echoed back to the model as a skill to load.
+ * Skills the user named with `$name` (or `$id` where two skills share a
+ * name). Matched against the registry's exact casing, since the name is echoed
+ * back to the model as a skill to load.
  */
-const collectInlineSkillMentions = (text: string, skillNames: Set<string>): string[] =>
-    collectKnownTokenNames(text, '$', skillNames, 'exact');
+const collectInlineSkillMentions = (text: string, skillTokens: Set<string>): string[] =>
+    collectKnownTokenNames(text, '$', skillTokens, 'exact');
 
 /** Which reference picker is open, and for GitHub on which tab. */
 type ReferencePickerState = { source: 'github'; kind?: 'issue' | 'pull' } | { source: 'linear' } | null;
@@ -846,7 +848,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // highlight matching tokens in the composer, the same way confirmed
     // @files are.
     const availableCommands = useCommandsStore((s) => selectCommandsForDirectory(s, currentDirectory));
-    const availableSkills = useSkillsStore((s) => selectSkillsForDirectory(s, currentDirectory));
+    // Only skills agents can use: a switched-off skill's `$name` stays plain text.
+    const availableSkills = useSkillsStore((s) => selectAvailableSkillsForDirectory(s, currentDirectory));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
             'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
@@ -856,7 +859,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         return names;
     }, [availableCommands, isMobile]);
     const knownSkillNames = React.useMemo(
-        () => new Set(availableSkills.map((skill) => skill.name.toLowerCase())),
+        () => new Set([...knownSkillTokens(availableSkills)].map((token) => token.toLowerCase())),
         [availableSkills],
     );
 
@@ -1393,10 +1396,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             extractedMentionAttachments,
             opencodeClient,
         );
-        const availableSkillNames = new Set(
-            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
+        // Checked when queued: a skill switched off since it was typed is not
+        // named. The ids ride along so delivery can check again.
+        const queueSkills = selectAvailableSkillsForDirectory(useSkillsStore.getState(), currentDirectory);
+        const queuedSkillMentions = resolveSkillMentions(
+            queueSkills,
+            collectInlineSkillMentions(sanitizedText, knownSkillTokens(queueSkills)),
         );
-        const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
+        const queuedSkillText = buildSkillMentionInstruction(queuedSkillMentions.map((skill) => skill.name));
+        const skillInstruction = queuedSkillText ? { text: queuedSkillText, skills: queuedSkillMentions } : null;
         // The server and the VS Code auto-send deliver `text` as is, so its
         // snippets expand now; `content` keeps them for editing.
         const textToQueue = await useSnippetsStore.getState().expandText(sanitizedText).catch((error) => {
@@ -1960,16 +1968,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             }
         };
 
-        const availableSkillNames = new Set(
-            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
-        );
+        // Read at send time: a `$skill` typed before the skill was switched
+        // off, or before it was deleted, is not attached.
+        const sendableSkills = selectAvailableSkillsForDirectory(useSkillsStore.getState(), currentDirectory);
+        const sendableSkillTokens = knownSkillTokens(sendableSkills);
 
         // Comments become synthetic context, which the send-time expansion
         // below skips, so their own words expand here.
         const expandedDrafts = await expandCommentSnippets(drafts, useSnippetsStore.getState().expandText);
 
         const outgoing = buildOutgoingMessage({
-            queued: queuedMessagesToSend,
+            // Checked at delivery: a skill switched off while the message
+            // waited is not named in its instruction.
+            queued: queuedMessagesToSend.map((queued) => ({
+                ...queued,
+                context: withoutSwitchedOffQueuedSkills(queued.context ?? [], capturedTarget?.directory ?? currentDirectory),
+            })),
             composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
             composerAttachments: attachedFiles,
             inlineComments: expandedDrafts,
@@ -1990,7 +2004,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 return { text: sanitizedText, attachments };
             },
             sanitizeAttachments: sanitizeAttachmentsForSend,
-            collectSkillNames: (text) => collectInlineSkillMentions(text, availableSkillNames),
+            collectSkillNames: (text) => collectInlineSkillMentions(text, sendableSkillTokens),
         });
 
         let primaryText = outgoing.primaryText;
@@ -2000,10 +2014,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // Skills named inline are attached to the prompt so OpenCode loads
         // them with the message, rather than hoping the model follows a hint.
-        if (skillNames.length > 0) {
+        const skillMentions = resolveSkillMentions(sendableSkills, skillNames);
+        if (skillMentions.length > 0) {
             sendMessageOptions = {
                 ...sendMessageOptions,
-                skills: { names: skillNames, instructionFor: buildSkillMentionInstruction },
+                skills: { skills: skillMentions, instructionFor: skillFallbackInstruction(currentDirectory) },
             };
         }
 
@@ -3190,7 +3205,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         composerRef.current?.focus();
     });
 
-    const handleSkillSelect = useStableHandler((skillName: string) => {
+    const handleSkillSelect = useStableHandler((skillToken: string) => {
         const textarea = composerRef.current;
         const cursorPosition = textarea?.getSelection().start ?? message.length;
         const textBeforeCursor = message.substring(0, cursorPosition);
@@ -3199,11 +3214,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (lastDollarSymbol !== -1) {
             const newMessage =
                 message.substring(0, lastDollarSymbol) +
-                `$${skillName} ` +
+                `$${skillToken} ` +
                 message.substring(cursorPosition);
             setMessage(newMessage);
 
-            const nextCursor = lastDollarSymbol + skillName.length + 2;
+            const nextCursor = lastDollarSymbol + skillToken.length + 2;
             requestAnimationFrame(() => {
                 if (composerRef.current) {
                     composerRef.current.setSelection(nextCursor);

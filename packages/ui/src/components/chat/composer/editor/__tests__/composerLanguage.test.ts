@@ -4,6 +4,8 @@ import { Direction, EditorView } from '@codemirror/view';
 
 import type { ComposerLanguageContext } from '../../language/tokenize';
 import { composerLanguage, setLanguageContext } from '../composerLanguage';
+import { collectKnownTokenNames } from '../../language/prefixTokens';
+import { knownSkillTokens, resolveSkillMentions, skillTokenFor } from '@/stores/skillAvailability';
 
 const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLanguageContext => ({
     inputMode: 'normal',
@@ -192,6 +194,38 @@ describe('composerLanguage — attachment citations', () => {
         const skills = context({ knownSkillNames: new Set(['review-pr']) });
         expect(citationChips(stateWith('$review-pr first', skills))).toEqual([['$review-pr', 'review-pr']]);
         expect(citationChips(stateWith('run $review-pr', skills))).toEqual([['$review-pr', 'review-pr']]);
+    });
+
+    test('the token the $ picker inserts is chipped and sent as that skill', () => {
+        // As ChatInput builds it: the available skills, two sharing a display
+        // name, one whose display name has a space and cannot be typed as one token.
+        const available = [
+            { id: 'beta-one', name: 'Same Name' },
+            { id: 'beta-two', name: 'Same Name' },
+            { id: 'alpha-skill', name: 'Alpha Display' },
+            { id: 'code-audit', name: 'audit' },
+        ];
+        const tokens = knownSkillTokens(available);
+        const ctx = context({ knownSkillNames: new Set([...tokens].map((token) => token.toLowerCase())) });
+        for (const skill of available) {
+            const token = skillTokenFor(available, skill);
+            const doc = `$${token} second turn`;
+            expect(citationChips(stateWith(doc, ctx))).toEqual([[`$${token}`, token]]);
+            const collected = collectKnownTokenNames(doc, '$', tokens, 'exact');
+            expect(resolveSkillMentions(available, collected)).toEqual([{ id: skill.id, name: token }]);
+        }
+        expect(skillTokenFor(available, available[2])).toBe('alpha-skill');
+        expect(skillTokenFor(available, available[3])).toBe('audit');
+    });
+
+    test('a switched-off skill left out of the available list is neither chipped nor sent', () => {
+        const available = [{ id: 'beta-two', name: 'Same Name' }];
+        const tokens = knownSkillTokens(available);
+        const doc = '$beta-one and $beta-two';
+        const ctx = context({ knownSkillNames: new Set(tokens) });
+        expect(citationChips(stateWith(doc, ctx))).toEqual([['$beta-two', 'beta-two']]);
+        expect(resolveSkillMentions(available, collectKnownTokenNames(doc, '$', tokens, 'exact')))
+            .toEqual([{ id: 'beta-two', name: 'beta-two' }]);
     });
 
     test('a skill name after a slash is not a skill', () => {

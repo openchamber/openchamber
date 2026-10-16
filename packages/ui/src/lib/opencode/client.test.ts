@@ -530,11 +530,11 @@ describe("sendMessage", () => {
 })
 
 describe("sendMessage with inline skills", () => {
-  const skillInfo = (id: string, name = id) => ({ id, name, path: `/skills/${id}/SKILL.md`, content: "body" })
-  const instructionFor = (names: readonly string[]) => (names.length ? `use: ${names.join(",")}` : null)
+  type Mention = { id: string; name: string }
+  const instructionFor = (skills: readonly Mention[]) => (skills.length ? `use: ${skills.map((skill) => skill.name).join(",")}` : null)
 
-  test("attaches known skills to the prompt by id, without an instruction", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy"), skillInfo("code-audit", "audit")] }), json({ id: "msg_1" }))
+  test("attaches the skills the caller resolved by id, without a skill list read or an instruction", async () => {
+    responses.push(json({ id: "msg_1" }))
     await opencodeClient.sendMessage({
       id: "ses_1",
       providerID: "openai",
@@ -542,49 +542,20 @@ describe("sendMessage with inline skills", () => {
       messageId: "msg_1",
       delivery: "steer",
       directory: "/repo/app",
-      skills: { names: ["audit", "deploy"], instructionFor },
+      // Two skills share the display name "deploy": the caller names the one it means by id.
+      skills: { skills: [{ id: "code-audit", name: "audit" }, { id: "deploy-api", name: "deploy-api" }], instructionFor },
     })
-    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["GET /api/skill", "POST /api/session/ses_1/prompt"])
-    expect(requests[1].body).toEqual({
+    expect(requests.map((r) => `${r.method} ${r.url.pathname}`)).toEqual(["POST /api/session/ses_1/prompt"])
+    expect(requests[0].body).toEqual({
       id: "msg_1",
       text: "/audit then /deploy",
-      skills: [{ id: "code-audit" }, { id: "deploy" }],
+      skills: [{ id: "code-audit" }, { id: "deploy-api" }],
       delivery: "steer",
     })
   })
 
-  test("names OpenCode does not list fall back to an instruction admitted before the prompt", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ id: "syn_1" }), json({ id: "msg_1" }))
-    await opencodeClient.sendMessage({
-      id: "ses_1",
-      providerID: "openai",
-      text: "x",
-      messageId: "msg_1",
-      skills: { names: ["deploy", "ghost"], instructionFor },
-    })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: ghost", resume: false })
-    expect(requests[2].body).toMatchObject({ skills: [{ id: "deploy" }] })
-  })
-
-  test("a failed skill list still sends, naming every skill in the instruction", async () => {
-    responses.push(json({ _tag: "UnknownError", message: "boom" }, 500), json({ id: "syn_1" }), json({ id: "msg_1" }))
-    await opencodeClient.sendMessage({
-      id: "ses_1",
-      providerID: "openai",
-      text: "x",
-      messageId: "msg_1",
-      skills: { names: ["deploy"], instructionFor },
-    })
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/synthetic", "/api/session/ses_1/prompt"])
-    expect(requests[1].body).toMatchObject({ text: "use: deploy" })
-    const promptBody = requests[2].body
-    expect(typeof promptBody === "object" && promptBody !== null && "skills" in promptBody).toBe(false)
-  })
-
-  test("a skill removed before the prompt resends the same message with the instruction", async () => {
+  test("a skill gone before the prompt resends the same message with the caller's instruction", async () => {
     responses.push(
-      json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }),
       json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
       json({ id: "syn_1" }),
       json({ id: "msg_1" }),
@@ -594,26 +565,42 @@ describe("sendMessage with inline skills", () => {
       providerID: "openai",
       text: "x",
       messageId: "msg_1",
-      skills: { names: ["deploy"], instructionFor },
+      skills: { skills: [{ id: "deploy", name: "deploy" }], instructionFor },
     })
     expect(id).toBe("msg_1")
     expect(requests.map((r) => r.url.pathname)).toEqual([
-      "/api/skill",
       "/api/session/ses_1/prompt",
       "/api/session/ses_1/synthetic",
       "/api/session/ses_1/prompt",
     ])
-    expect(requests[1].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
-    expect(requests[2].body).toMatchObject({ text: "use: deploy" })
-    expect(requests[3].body).toEqual({ id: "msg_1", text: "x" })
+    expect(requests[0].body).toMatchObject({ id: "msg_1", skills: [{ id: "deploy" }] })
+    expect(requests[1].body).toMatchObject({ text: "use: deploy" })
+    expect(requests[2].body).toEqual({ id: "msg_1", text: "x" })
+  })
+
+  test("a skill gone before the prompt names nothing when the caller leaves it out", async () => {
+    // The caller's builder drops a skill it knows is switched off.
+    responses.push(
+      json({ _tag: "InvalidRequestError", message: "Skill not found: deploy", field: "skills" }, 400),
+      json({ id: "msg_1" }),
+    )
+    await opencodeClient.sendMessage({
+      id: "ses_1",
+      providerID: "openai",
+      text: "x",
+      messageId: "msg_1",
+      skills: { skills: [{ id: "deploy", name: "deploy" }], instructionFor: () => null },
+    })
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt", "/api/session/ses_1/prompt"])
+    expect(requests[1].body).toEqual({ id: "msg_1", text: "x" })
   })
 
   test("other prompt rejections are not retried", async () => {
-    responses.push(json({ location: { directory: "/repo/app" }, data: [skillInfo("deploy")] }), json({ _tag: "InvalidRequestError", message: "Attachment too big", field: "files" }, 400))
+    responses.push(json({ _tag: "InvalidRequestError", message: "Attachment too big", field: "files" }, 400))
     await expect(
-      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "x", skills: { names: ["deploy"], instructionFor } }),
+      opencodeClient.sendMessage({ id: "ses_1", providerID: "openai", text: "x", skills: { skills: [{ id: "deploy", name: "deploy" }], instructionFor } }),
     ).rejects.toThrow()
-    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/skill", "/api/session/ses_1/prompt"])
+    expect(requests.map((r) => r.url.pathname)).toEqual(["/api/session/ses_1/prompt"])
   })
 })
 

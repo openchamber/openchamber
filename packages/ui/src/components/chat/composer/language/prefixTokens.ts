@@ -23,6 +23,14 @@
  */
 const TOKEN_NAME = '[A-Za-z0-9][A-Za-z0-9_-]*';
 
+const WHOLE_TOKEN_NAME = new RegExp(`^${TOKEN_NAME}$`);
+
+/**
+ * Whether `name` can be typed after a sigil and read back as one token. A
+ * name with a space or punctuation outside the identifier body cannot.
+ */
+export const isPrefixTokenName = (name: string): boolean => WHOLE_TOKEN_NAME.test(name);
+
 /** Sigils that introduce a prefix token: commands, skills, snippets. */
 export type TokenPrefix = '/' | '$' | '#';
 

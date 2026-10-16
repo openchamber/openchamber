@@ -63,7 +63,9 @@ and OpenChamber resolves the directory itself.
 - `packages/web/server/lib/opencode/model-discovery.js`: bounded custom-provider `/models` discovery and optional models.dev enrichment. It accepts only http(s), does not follow redirects, filters transport headers, never returns credentials, and treats models.dev failure as unenriched success. Edit requests may name the provider so the host can fall back to a stored credential when the form leaves the key blank — the key from OpenCode's credential store or, failing that, the provider's stored config entry (`settings.apiKey`, else the first `env` variable name that is set in the server environment) — but only while the form's base URL still matches the saved one, so a changed URL never receives the stored credential; an explicitly entered replacement key wins.
 - `packages/web/server/lib/opencode/pwa-manifest-routes.js`: PWA manifest route registration with recent-session shortcut resolution and short-lived caching.
 - `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
-- `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
+- `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, skills catalog scan/install flows, and the per-skill switch (`PUT /api/config/skill-policy`).
+- `packages/web/server/lib/opencode/skill-policy.js`: per-skill on/off through OpenCode `integration.use` policies: version-dependent config key, rule ownership, effective state across config documents, and the serialized write. Shared with the VS Code extension host. See "Per-skill switches" below.
+- `packages/web/server/lib/opencode/jsonc-edits.js`: item-level array edits and line-aware node removal for the JSONC config writers in `shared.js` and the VS Code extension host's `opencodeConfig.ts`.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization). With no project stored, the legacy migration turns a stored `lastDirectory` into the first project, except a folder inside the chats roots (`chatRoots` dep, compared lexically and by realpath): with no project open the UI's last directory is usually a chat's, and a chat belongs to no project.
 - `packages/web/server/lib/opencode/settings-helpers.js`: Settings payload sanitization/format helpers runtime for response shaping and persisted merge prep. `lastDirectory: ''` is kept as written: the UI sends it when the last project is removed, and every reader (the warm-up, the legacy last-directory-to-project migration, request directory resolution) treats it as unset.
 - `packages/web/server/lib/opencode/settings-normalization-runtime.js`: path/settings/tunnel normalization and sanitization helpers runtime used by settings/routes/config wiring.
@@ -223,13 +225,13 @@ Hard rules, verified against v2.0.8 (the completion stamp against v2.0.16)
 - `getConfigPaths(workingDirectory)`, `readConfigLayers(workingDirectory)`, `readConfig(workingDirectory)`: Config file operations with layer merging (user, project, custom). `readConfigLayers` isolates `INVALID_JSONC` per layer: a broken file is omitted from the merge (`{}` for that layer only), recorded on `layerErrors`, and does not block valid sibling layers. Writes still refuse to overwrite the broken file.
 - `readConfigFile(filePath)`: Reads one config file. Missing, whitespace-only, and comment-only files return `{}`; a comment-only file is recognized by `ValueExpected` being the only parse error. A `jsonc-parser` error that produces a partial or non-object tree throws `INVALID_JSONC` — partial parse trees must never be treated as authoritative (avoids rewriting a `$schema`-only stub over a full config). Content that yields no JSON value for any other reason (YAML, plain text) also throws instead of reading as empty.
 - `readConfigLayer(filePath)`: Same parse as `readConfigFile`, but isolates `INVALID_JSONC` to `{ config: {}, error }` so plugin/MCP/agent readers can skip one broken layer without aborting valid siblings. Writes still refuse to overwrite the broken file.
-- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally instead of being re-serialized whole, so comments, formatting, and line endings outside the changed values survive; changed arrays are replaced whole, comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite (never an invalid file).
+- `writeConfig(config, filePath)`: Writes config with automatic backup, replacing the file atomically through `writeFileAtomic` so a watcher or a crash never sees a partial config. Refuses to overwrite an existing non-empty file that fails the same JSONC parse check. Existing files are edited structurally instead of being re-serialized whole, so comments, formatting, and line endings outside the changed values survive; an array that only gains items at its end or only loses items is edited item by item (`jsonc-edits.js`, shared with the VS Code writer), any other changed array is replaced whole, and a removed property or item that sat alone on its line takes the line with it, so adding a key or item and removing it again gives back the original text; comment-only files keep their comments with the serialized config appended below, and the edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite (never an invalid file).
 - `getJsonEntrySource(layers, sectionKind, entryName)`: Resolves which config layer provides an entry. `sectionKind` is `agents`, `commands`, `providers`, or `mcp`, and both the v2 and the v1 spelling are searched (v2 wins). The result carries `sectionKey` (the spelling that actually held the entry) and `legacy`, so a writer can rewrite the same file in v2 shape. A failed custom or user layer throws `INVALID_JSONC` instead of treating that file as empty. A failed project layer is skipped so a valid user/custom entry can still be found.
 - `getJsonWriteTarget(layers, preferredScope)`: Determines write target for config updates. Throws `INVALID_JSONC` when the chosen target file is the unparseable layer.
 - `getAncestors(startDir, stopDir)`, `findWorktreeRoot(startDir)`: Git worktree helpers.
 - `isPromptFileReference(value)`, `resolvePromptFilePath(reference)`, `writePromptFile(filePath, content)`: Prompt file reference handling.
-- `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate name, so the order is part of the contract.
-- `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file; `parsed` null (unreadable file) adds nothing.
+- `walkSkillMdFiles(rootDir)`: Async. Recursively finds all SKILL.md files at any depth, following links and skipping a link back to its own ancestor. Sibling directories are read in parallel, at most 8 file-system calls at once, and the result keeps depth-first readdir order: discovery lets a later file win a duplicate OpenCode skill id, and name lookups (`getSkillScope`, `getSkillSources`) take the last file with that display name, so the order is part of the contract.
+- `addSkillFromMdFile(skillsMap, skillMdPath, parsed, scope, source)`: Indexes an already parsed skill file by its OpenCode id (`skillIdFromPath`), so two ids sharing a display name are both listed; a file without a derivable id is keyed by its display name. `parsed` null (unreadable file) adds nothing.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
 - `listSkillSupportingFiles(skillDir)` (async), `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management.
 
@@ -819,6 +821,7 @@ headers }` or v1 `{ npm, options }`. The stored entry is always a
 - Returned API:
   - `registerRoutes(app, routeDependencies)`
   - `hydrateBoundCheckout({ directory, parentDirectory, parentRemoteName })`: resolves the parent repository's current binding authority at call time, then delegates local inspection and any explicit hydration to the runtime's existing Git network-operation service.
+  - `readQueuedSkillPolicy({ directory, ids, names })`: the skill routes' lookup for the message queue (below). Before the skill routes are registered it answers every skill unknown (`{ states: new Map(), inventory: null }`).
 
 ## Public exports (opencode-resolution-runtime.js)
 - `createOpenCodeResolutionRuntime(dependencies)`: creates runtime for OpenCode binary/source snapshot resolution.
@@ -906,7 +909,7 @@ within a ten-minute overall deadline.
 ## Public exports (skill-routes.js)
 - `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
   - Skills config CRUD and metadata under `/api/config/skills*`
-  - `DELETE /api/config/skills/:name` removes every copy of the name, in the project and the user's skill folders. With `scope` (`user`|`project`) and `source` (`opencode`|`claude`|`agents`) in the query it removes only the copy there and fails when that copy is missing; the integrations catalog uninstalls this way so it never removes a same-named skill the user keeps elsewhere
+  - `DELETE /api/config/skills/:name` removes every copy of the name, in the project and the user's skill folders. With `scope` (`user`|`project`) and `source` (`opencode`|`claude`|`agents`) in the query it removes only the folder there, named by `?id=` when given and else by `:name`, and fails when that folder is missing. This location delete never consults the merged list, so it removes the located copy even when OpenCode lists another copy of the id first; provenance follows the `?id=` rule below. The integrations catalog uninstalls this way, with the folder name as id, so it never removes a same-named skill the user keeps elsewhere
   - Skill rename via `PATCH /api/config/skills/:name` with `{ renameTo }` (directory rename preserves `SKILL.md` body and supporting files; restricted to managed skill roots under `.opencode/skills|skill`, `.claude/skills`, and `.agents/skills`)
   - Skill list responses include authoritative `renamable` derived from the same managed-root policy used by rename
   - `GET /api/config/skills` leaves `sources.md.supportingFiles` out: listing every file of every skill cost seconds when a skill bundles a `.venv` or `node_modules`, and no list consumer reads it. `GET /api/config/skills/:name` still returns it
@@ -919,6 +922,160 @@ within a ten-minute overall deadline.
     back to the active project / `lastDirectory` so repository-local
     `.agents/skills` and `.opencode/skills` remain discoverable when the client
     omits `directory`. Requests without any project still list user-scoped skills.
+  - Every listed skill carries `id`, OpenCode's skill id: the `id` OpenCode reports, else the folder of `SKILL.md` (`skillIdFromPath`). The display `name` is the frontmatter `name`. The OpenCode list and the disk scan merge by id, so two ids sharing a display name stay two entries and the copies of one id collapse into the one OpenCode loads; an entry without an id falls back to the name match.
+  - `GET /api/config/skills` also answers `skillPolicy` (below), or `skillPolicy: { error }` when it could not be read; the skill list itself never fails for it.
+  - Selecting by id: `GET`, `PATCH` and `DELETE /api/config/skills/:name` and `GET`, `PUT` and `DELETE /api/config/skills/:name/files/*filePath` take an optional `?id=<OpenCode skill id>` (plus the usual `directory`). With it the route acts on the listed skill with that id and display name `:name` (OpenCode's list, then the disk scan, merged by id), or answers 404 `Skill not found`; it never falls back to another skill sharing the display name. An invalid id answers 400. Without `?id=` every route keeps its display-name lookup (`skill-identity.js` holds the shared selector).
+    - Detail answers `{ name, id, path, sources, scope, source, exists }`; `id` and `path` say which skill was read (also without `?id=`).
+    - `PATCH` edits answer `{ ..., id, path }` of the edited file. With `?id=`, a `targetPath` must be the selected file (409 otherwise); without `?id=`, a `targetPath` must be a listed skill file or a `SKILL.md` under a managed skill root (400 otherwise). A selected skill without a `SKILL.md` (built-in) answers 409.
+    - `PATCH { renameTo }` with `?id=` renames exactly the selected folder, nested group folders included, and sets frontmatter `name`. The folder takes the new name, so the OpenCode id changes to `renameTo`; the answer is `{ name, id, path }` of the renamed file. A new name another skill already uses as display name or id is refused. A switched-off skill stays off under its new id; see "Renaming a switched-off skill" below. The answer also carries `switches` (null when no switch rule was involved).
+    - `DELETE` with `?id=` removes exactly the selected skill's folder: a `SKILL.md` strictly inside a managed skill root, nested groups included, never the root itself (409 outside managed roots). The containment check also follows symlinks: the folder's parent, resolved, must stay inside the resolved root, so a group folder that links out of the root is refused, while a root that is itself a symlink counts as its target. A skill folder that is itself a symlink loses only the link; its target stays. The route checks this up front (`isDeletableSkillPath`) and answers 409 before anything is removed. A location delete without `?id=` and the display-name delete answer 400 `Invalid skill name` for a `:name` that is not one folder name (a decoded `/` or `\`); `.` and `..` never reach the route, because URL parsing removes those segments, and the request answers 404. `deleteSkill` refuses such names too, and every delete removes folders with `removeSkillFolder` in `skill-identity.js`. Other copies of the id and other skills with the display name stay. The install provenance record, keyed by install folder name (the id), is removed only when the disk scan for the request's directory finds no copy of the id left: the user skill roots and that project's roots. The record is one global file with no project field, so a copy in another project is not looked for; removing the record only returns that name's catalog badge to the plain name match. Answers `{ ..., id, path }`. Without `?id=` the legacy delete removes every folder named `:name` in the known locations, as before.
+    - Supporting files resolve only inside the selected skill's folder; a path that leaves it answers 403.
+  - Returns `{ readQueuedSkillPolicy }`, which the message queue calls right before it delivers a queued skill instruction (`message-queue/DOCUMENTATION.md`). `readQueuedSkillPolicy({ directory, ids, names })` answers `{ states, inventory }` for the queued item's own directory:
+    - `states` maps an OpenCode skill id to `enabled` or `disabled`: what `skillPolicy.readState` reports now, else the last state OpenCode reported for that directory and id. An id with neither is left out, which means unknown. The last known states come from the skill list, the switch route and earlier lookups, kept for the 50 directories read most recently; a failed read never replaces them.
+    - `inventory` is the `{ id, name }` list of installed skills (OpenCode's list merged with the disk scan), read only when `names` is not empty, so a name from an instruction queued without ids resolves to every id that has it. It is null when OpenCode's own list could not be read: the disk scan alone misses built-in skills. A skill missing from OpenCode's list never counts as switched off.
+    - It never throws for a failed read.
+
+## Per-skill switches
+`skill-policy.js` turns a skill off with one statement in an OpenCode config file,
+`{ "action": "integration.use", "resource": "skill:<id>", "effect": "deny" }`.
+OpenCode then drops the skill from its registry, from the model's skill list and
+from explicit `session.skill` calls and prompt attachments, live and without a
+restart. The skill files stay where they are. Verified for #3075 against
+isolated OpenCode 2.0.20 through 2.0.30 servers.
+
+- **Config key by version.** 2.0.25 to 2.0.28 enforce only `experimental.policies`;
+  2.0.29 and newer also read top-level `policies`, and the switch writes there.
+  Older servers enforce neither, which is why `MINIMUM_OPENCODE_VERSION` is 2.0.25.
+  The version comes from the running OpenCode (`GET /api/info`) on every write; with
+  no version the write answers 503 and nothing is written.
+- **Id, not name.** The resource is OpenCode's path-derived skill id. One id covers
+  every source copy of a skill, so switching it off removes all of them; a deny that
+  names a display name has no effect in OpenCode, and the route answers 404 for an id
+  no installed skill has. Ids with `*`, `?`, separators or control characters are
+  refused, so an owned statement can match only its own id.
+- **Scopes.** `global` writes the user's OpenCode config (`opencode.json[c]` in the
+  OpenCode config directory), `project` the project config file OpenChamber writes for
+  the directory (`.opencode/opencode.json` first, as for every project write). The
+  skill's own location does not choose the scope. The project scope needs an explicit
+  `directory`; a directory whose project file is the global one has no project scope.
+- **Ownership.** The statement a switch writes carries a provenance key:
+  `{ "action": "integration.use", "resource": "skill:<id>", "effect": "deny", "openchamber": "skill-switch" }`.
+  OpenCode 2.0.25, 2.0.28, 2.0.29 and 2.0.30 accept the key without a normalization
+  diagnostic, still enforce the statement, and serve it back from `GET /api/config`
+  without the key (measured on isolated servers for #3075; a malformed statement on
+  the same setup logs `configuration normalization diagnostic`). Off appends the marked
+  deny to the end of the version's array unless a deny already decides the id in that
+  file (the switch's own, a user's exact deny, or a wildcard); on removes the marked
+  denies for that id and nothing else. A statement without the key is never removed,
+  so a user's own exact deny survives off then on. The key records only what a switch
+  wrote: a switch never adds it to a rule it did not write and never takes over a
+  user's rule, even an identical one. The switch never writes an allow,
+  a wildcard, another action or another file, so a restriction it did not create stays
+  in force. On, and the rename steps below, leave every `policies` list and
+  `experimental` object in place, also when it is now empty: the file cannot tell a
+  list the switch added from one the user wrote empty, and a user's list is never
+  removed. Off then on in a file without a list leaves an empty `"policies": []` (or
+  `"experimental": { "policies": [] }`) behind; JSONC comments and the rest of the
+  layout survive.
+- **Effective state.** OpenCode evaluates config documents reversed and the last
+  matching statement wins, so a global rule beats a project rule in either direction
+  and a root `opencode.json` beats `.opencode/opencode.jsonc`. The effective state is
+  computed from OpenCode's own `GET /api/config` documents for the directory, reading
+  only the arrays the running version enforces: on 2.0.25 to 2.0.28 a top-level
+  `policies` array is ignored. Because served statements lack the provenance key,
+  `decidedBy.owned` is read from the scope's file itself. When that
+  read fails the state is `unknown`; a skill missing from OpenCode's skill list is never
+  taken as switched off (a cold location answers an empty list first). While a scope's
+  own file cannot be parsed (`scopes.<scope>.error`), the state is `unknown` too unless
+  a deny still decides the skill: OpenCode still answers `GET /api/config`, but without
+  that file, so a switch's deny in it is missing and no rule, or an allow, proves
+  nothing. A deny from a file it does serve keeps the skill `disabled`. Queued
+  delivery keeps the last `enabled` or `disabled` through such an `unknown`, on the
+  server (`readQueuedSkillPolicy`) and in the UI (`withoutSwitchedOffQueuedSkills`).
+  Statements
+  from a connected Console workspace are not in `/api/config` and are not shown.
+- **Writes.** Read, change and write of a file run one at a time per process, and the
+  file write is atomic with the usual comment-preserving writer. A failed read or write
+  changes nothing and answers an error. After a write the service reads OpenCode's
+  documents up to 8 times, 250 ms apart, and reports `confirmed: false` until the
+  document OpenCode serves for the file holds the same enforced statements as the
+  file (compared on action, resource and effect); the rule is saved either way.
+
+### Renaming a switched-off skill
+Renaming moves the skill folder, so the OpenCode id changes. The user decided
+(#3075) that a skill a switch turned off stays off under its new id. Only the
+switch's own marked deny moves; user-written rules, wildcards and other files
+stay exactly as they are, so a skill only a user rule turned off comes back on
+under the new id. `renameSkillKeepingSwitches` in `skill-policy.js` runs the
+same steps for both rename routes (`?id=` and by display name) on web and VS
+Code:
+
+1. After the rename's own checks and before anything moves (a `beforeMove`
+   hook inside `renameSkill`), every scope file of the directory is read: the
+   user's global config and the project config the switches write. One that
+   cannot be read stops the rename with 409 and nothing is written or moved.
+   This also blocks renaming a skill no switch turned off while one of those
+   files is unreadable or invalid JSONC; fixing the file allows the rename.
+2. In each of those files holding the switch's deny for the old id, the
+   switch's deny for the new id is appended next to it, in the same array
+   (`experimental.policies` or top-level `policies`), so it keeps the format the
+   old rule was written for. A failed write restores the files already written
+   and stops the rename (500). The deny is written before the folder moves,
+   but OpenCode picks up both changes through file watchers that run
+   asynchronously, so this order is best effort: OpenCode can briefly list the
+   new id before it applies the deny. The rule is in force once OpenCode has
+   reloaded the config.
+3. The folder moves. If the move or the frontmatter write fails, the folder is
+   moved back and the rules from step 2 are taken out again; when the folder
+   cannot be moved back, the new rules stay, so the skill stays off either way.
+4. The old id's switch rule is removed, unless another copy of the old id is
+   still installed (any skill file on disk with that id, `discoverSkills(dir, {
+   allCopies: true })`): that copy keeps the old id and stays off. A failed
+   removal leaves a harmless rule for the old id and is reported, not hidden:
+   the rename still answers 200 with the file in `oldRuleCleanupFailed`, and
+   the Skills page shows a warning that names the file.
+
+The answer's `switches` is `{ carried, oldRuleRemoved, oldRuleKept,
+oldRuleCleanupFailed }`, each a list of `{ scope, path }` (`error` on a failed
+cleanup). Only this directory's two scope files are read: a switch rule for the
+old id in another project's config is not carried. Writes go through the
+switches' one-at-a-time queue, so a switch flipped during a rename keeps its
+rule. The queued-message lookup reads OpenCode's config again on every
+delivery, so it sees the renamed skill as off.
+
+Contract, identical on web (`skill-routes.js`) and VS Code (`api:config/skill-policy`):
+
+- `GET /api/config/skills` adds `skillPolicy`:
+  `{ version, location: 'experimental.policies' | 'policies' | null, writable,
+  effectiveAvailable, scopes: { global: { path, error }, project: { path, error } | null },
+  skills: [{ id, disabledIn: { global, project }, effective, decidedBy }] }`.
+  `skills` is a list with the id as a value, so every valid id, `__proto__` included,
+  reaches the UI: an object keyed by id loses that one in a plain object and in zod's
+  record parser.
+  `disabledIn.<scope>` is whether that scope's file holds the switch's own marked deny. A
+  scope file that does not exist yet reads as an empty config, so it is `false`; it is
+  `null` when the directory has no such scope (`scopes.project` is `null`) or the file
+  could not be read (`scopes.<scope>.error`). `effective` is `enabled`,
+  `disabled` or `unknown` (also while a scope file cannot be parsed and no deny decides,
+  see "Effective state"). `decidedBy` is the deciding statement
+  `{ path, resource, effect, scope: 'global' | 'project' | 'other', owned }` or `null`
+  (no rule: enabled); `owned: false` with `scope` `global` or `project` means a rule the
+  user wrote in that file decides, which the switch will not remove. `skills` also lists
+  ids a scope switches off with a marked deny that no installed
+  skill has any more, so they can still be switched back on. `writable: false` means
+  OpenCode could not be read or does not enforce skill policies.
+- `PUT /api/config/skill-policy` (directory in the query or `x-opencode-directory`),
+  body `{ id, scope: 'global' | 'project', enabled: boolean }`, answers
+  `{ ok: true, id, saved: { scope, path, disabled, changed }, confirmed, state, policy }`
+  with `state` the summary above and `policy` the id's entry. `saved.disabled` is
+  whether the scope's file now holds the switch's own marked deny: switching off a
+  skill a user rule already denies in that file answers `disabled: false, changed: false`
+  and adds nothing. Errors answer
+  `{ ok: false, error: { code, message } }`: 400 `invalid_id`, `invalid_scope`,
+  `invalid_enabled`, `invalid_directory`, `directory_required` (VS Code also
+  `invalid_request`); 404 `unknown_skill`; 409 `unsupported_version`,
+  `scope_unavailable`, `invalid_config`, `read_failed`; 503 `opencode_unavailable`;
+  500 `write_failed`.
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
@@ -963,7 +1120,7 @@ The VS Code extension owns its separate Git and proxy implementation.
 ## Storage and configuration
 - Provider auth: read from the running OpenCode over `GET /api/credential` (2.0.20+); OpenCode 2.x owns credentials.
 - Session archive state: `sessions-archive.json` under the OpenChamber data dir.
-- Session metadata (goal progress, the assist recap, the obligatory-context cursor, pinned notes) lives on the OpenCode session record, written with `PATCH /api/session/{id}` (OpenCode 2.0.15+, the minimum `compatibility.js` enforces). OpenCode replaces the whole object, so `sessionMetadataStore.setSessionMetadata` reads the record, applies the JSON Merge Patch and writes the result, one write per session at a time; a record that cannot be read stops the write. Every reader and writer (routes, goal loop, session assist, session knowledge, obligatory context, notifications) goes through `sessionMetadataStore.get` / `setSessionMetadata`. Older OpenChamber versions kept this state in `sessions-metadata.json` under the data dir. Its entries are the newest metadata their sessions have: the proxy lays them over OpenCode's records, a session's next write pushes its entry, and a sweep after OpenCode starts pushes the rest (a session OpenCode no longer knows is dropped, any other failure waits for the next write or start). The emptied file is renamed to `sessions-metadata.json.migrated`. Archive mutations still run one transaction at a time in the archive store.
+- Session metadata (goal progress, the assist recap, the obligatory-context cursor, pinned notes) lives on the OpenCode session record, written with `PATCH /api/session/{id}` (OpenCode 2.0.15+; `compatibility.js` enforces 2.0.25). OpenCode replaces the whole object, so `sessionMetadataStore.setSessionMetadata` reads the record, applies the JSON Merge Patch and writes the result, one write per session at a time; a record that cannot be read stops the write. Every reader and writer (routes, goal loop, session assist, session knowledge, obligatory context, notifications) goes through `sessionMetadataStore.get` / `setSessionMetadata`. Older OpenChamber versions kept this state in `sessions-metadata.json` under the data dir. Its entries are the newest metadata their sessions have: the proxy lays them over OpenCode's records, a session's next write pushes its entry, and a sweep after OpenCode starts pushes the rest (a session OpenCode no longer knows is dropped, any other failure waits for the next write or start). The emptied file is renamed to `sessions-metadata.json.migrated`. Archive mutations still run one transaction at a time in the archive store.
 - User config: `<config dir>/opencode.json(c)` where the config dir is `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. The v1 `config.json` is not read.
 - Project config: `<workingDirectory>/.opencode/opencode.json(c)` first, else `<workingDirectory>/opencode.json(c)`.
 - Custom config: `OPENCODE_CONFIG` env var path.

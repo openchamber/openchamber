@@ -210,7 +210,8 @@ mock.module("@/stores/useSkillsStore", () => ({
       skillsByDirectory: {},
     }),
   },
-  selectSkillsForDirectory: () => [],
+  selectAvailableSkillsForDirectory: () => [],
+  skillFallbackInstruction: () => () => null,
 }))
 
 mock.module("@/components/ui", () => ({

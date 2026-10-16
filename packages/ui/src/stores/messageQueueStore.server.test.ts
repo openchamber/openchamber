@@ -22,7 +22,8 @@ mock.module("@/lib/runtime-fetch", () => ({
 const desktop = await import("@/lib/desktop")
 mock.module("@/lib/desktop", () => ({ ...desktop, isVSCodeRuntime: () => false }))
 mock.module("@/lib/runtime-switch", () => ({ getRuntimeKey: () => activeRuntimeKey }))
-mock.module("@/lib/persistence", () => ({ updateDesktopSettings: async () => undefined }))
+const persistence = await import("@/lib/persistence")
+mock.module("@/lib/persistence", () => ({ ...persistence, updateDesktopSettings: async () => undefined }))
 
 const {
   applyMessageQueueUpdatedEvent,
@@ -414,6 +415,51 @@ describe("server-owned message queue", () => {
     expect(taken?.attachments?.[0]?.dataUrl).toBe("data:text/plain;base64,aGk=")
     expect(taken?.attachments?.[0]?.file.size).toBe(2)
     expect(useMessageQueueStore.getState().queuedMessages[key]).toBe(undefined)
+  })
+
+  test("a taken message's skill instruction, which the server keeps without ids, is checked by name on delivery", async () => {
+    const { useSkillsStore, withoutSwitchedOffQueuedSkills } = await import("./useSkillsStore")
+    const { buildSkillMentionInstruction } = await import("@/lib/skillMentionInstruction")
+    const deploy = { id: "deploy-api", name: "deploy-api", path: "/repo/.agents/skills/deploy-api/SKILL.md", scope: "project" as const, source: "agents" as const }
+    useSkillsStore.setState({
+      skillsByDirectory: { "/repo": [deploy] },
+      availableSkillsByDirectory: { "/repo": [] },
+      policyByDirectory: {
+        "/repo": {
+          error: null,
+          state: {
+            version: "2.0.29",
+            location: "policies",
+            writable: true,
+            effectiveAvailable: true,
+            scopes: { global: { path: "/config/opencode.json", error: null }, project: null },
+            skills: new Map([
+              ["deploy-api", {
+                disabledIn: { global: true, project: false },
+                effective: "disabled",
+                decidedBy: { path: "/config/opencode.json", resource: "skill:deploy-api", effect: "deny", scope: "global", owned: true },
+              }],
+            ]),
+          },
+        },
+      },
+    })
+    respond = () => json({
+      revision: 9,
+      session: session([]),
+      item: serverItem("q1", "use $deploy-api", {
+        context: [
+          { kind: "context", text: "issue body", metadata: issueMetadata },
+          { kind: "instruction", text: buildSkillMentionInstruction(["deploy-api"]) ?? "" },
+        ],
+      }),
+    })
+    const [taken] = await useMessageQueueStore.getState().takeForSend(target, "q1")
+
+    expect(withoutSwitchedOffQueuedSkills(taken?.context ?? [], target.directory)).toEqual([
+      { kind: "context", text: "issue body", metadata: issueMetadata },
+    ])
+    expect(taken?.text).toBe("use $deploy-api")
   })
 
   test("takeForSend without an id takes everything the server is not already sending", async () => {

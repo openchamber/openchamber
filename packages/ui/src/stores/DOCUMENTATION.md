@@ -291,7 +291,7 @@ context-only messages without carrying full quotes or diffs. VS Code derives
 the same preview from its local full item. Preview text is display-only;
 editing and delivery always use the original content and captured context.
 
-A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/Linear references, pending synthetic parts) plus the skill instruction derived from the text. `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there); `useMessageQueueHoldSync` tells the server to hold a session's queue while a UI-driven auto-review run is going.
+A queued message is captured whole, so whoever delivers it sends exactly what the composer would have: `text` (the content with its agent mention stripped and `@file` mentions already resolved into `attachments`), `agentMention`, and `context` — every chip the composer had attached (inline comments, terminal selections, browser annotations, PR comments/checks, quotes, linked issue/PR/Linear references, pending synthetic parts) plus the skill instruction derived from the text. `QueuedContextPart` distinguishes attached items (restored to the chips when the message is edited) from derived instructions (re-derived on send, never restored; a delivery from the UI drops skills switched off since, see `withoutSwitchedOffQueuedSkills`, and the server's delivery applies the same rules, see `packages/web/server/lib/message-queue/DOCUMENTATION.md`) and from synthetic parts other surfaces handed the composer (restored as pending). Context is captured by `buildComposerContext` and delivered by `queuedContextToParts` (`components/chat/composer/submit/buildOutgoingMessage.ts`), the same functions the composer uses for its own send. Nothing is re-resolved at delivery: the server has no agent list, no confirmed mentions, and no draft store. Messages a previous build left in this browser are uploaded once on the first hydration of a runtime and then dropped from persistence for that runtime (`partialize` skips server-owned runtime keys). VS Code has no server and keeps the local queue with the foreground auto-send hook (`useQueuedMessageAutoSend`, enabled only there); `useMessageQueueHoldSync` tells the server to hold a session's queue while a UI-driven auto-review run is going.
 
 In the local (VS Code) mode the store keeps a queued message until its own send resolves, so between dispatch and resolution the entry is still visible to every reader. Dispatchers must therefore mark the send (`markSending`/`clearSending`) and read `getSendableQueue()` — or filter `sendingIds` themselves — instead of dispatching straight from `queuedMessages`; otherwise a composer submit merges a message the auto-send hook is already delivering and it is sent twice (the window is seconds over a relay). `clearQueue()` retains in-flight entries for the same reason. `sendingIds` is deliberately not persisted: a restart has no in-flight sends, and a stale flag would strand a queued message; in the server-owned mode it mirrors the server's in-flight item. Desktop queues use the configured host id as runtime identity, not the current API URL, because an SSH reconnect allocates a new local forwarding port while the remote host remains the same.
 
@@ -654,6 +654,60 @@ the chat, the session list and the file tree.
 
 Failure is still not empty: a failed load restores that directory's previous
 list rather than clearing it.
+
+Skills are keyed by OpenCode's skill `id`, the folder of `SKILL.md`, which the
+frontmatter `name` can differ from. The server lists one row per id, so two ids
+sharing a display name are two rows, and the source copies of one id are one.
+Selection (`selectedSkillId`), partial-list merges, the runtime-flag dedup and
+local updates all key on the id; `name` is only the label. Calls about one skill
+(detail, edit, rename, delete, supporting files) keep the display name in the
+`/api/config/skills/:name` path and send the id as the `id` query, which the
+server matches exactly and never by name. Edits also send the listed file as
+`targetPath`, and a detail answer whose path is another file's is dropped, so an
+editor never shows one file and saves to another. Delete removes only the file
+OpenCode loads; the list is reloaded afterwards, a lower-priority copy of the
+same id can reappear in it, and the selection stays on an id the list still
+has. The persisted selection moved from `selectedSkillName` to
+`selectedSkillId`; an old saved name is not carried over, so the first start
+after the change opens Settings with no skill selected.
+
+`skillsByDirectory` is the installed inventory: it still holds a skill a policy
+switches off, which Settings lists with its switches. `availableSkillsByDirectory`
+(and its ambient mirror `availableSkills`) is that list minus the skills the
+directory's `skillPolicy` reports `effective: 'disabled'`, derived in
+`commitDirectory` whenever either changes; the composer, the `$` picker, draft
+starters, `/name` routing and the work-status count read it. Only the policy
+says "off" (`stores/skillAvailability.ts`): an `unknown` state, a skill the
+policy does not mention, a cold empty OpenCode list or a failed read keeps a
+skill available. `policyByDirectory` keeps the last state read; a failed policy
+read keeps that state and records the error beside it. A state's `skills` is a
+`Map` by id, read from the server's list, so an id such as `__proto__` is kept.
+
+`lastDecidedByDirectory` holds, per directory and id, the last `enabled` or
+`disabled` any committed policy reported, and is kept through later `unknown`
+answers. Only queued delivery (`withoutSwitchedOffQueuedSkills`) reads it: a
+skill last seen off stays out of a queued instruction while the policy says
+`unknown`, as on the server, and comes back once a read says `enabled`.
+Settings, the composer and the available lists still show `unknown` as
+unknown. A runtime switch clears it.
+
+`setSkillEnabled` writes one scope's switch through `PUT
+/api/config/skill-policy` for an explicit directory, the Settings one, which can
+differ from the app's. One write per skill and directory runs at a time
+(`switchStatus` holds `pending`). Nothing changes before the answer: a failed
+write leaves the shown policy as it was and records `failed` with the server's
+message; a success replaces the skill's policy with the one the server answers,
+and `confirmed: false` records `unconfirmed` until the next fresh policy read
+for that directory. Only a confirmed write re-reads the lists.
+
+Every write here, and every catalog event, bumps a per-directory revision
+(`invalidateSkillsLoadCache`, `invalidateAllSkillsLoads`). A load records the
+revision when its read starts and reads again instead of committing when it
+changed meanwhile, so an answer started before a write or an event never lands
+over it. A global switch bumps every directory read so far; only the open ones
+are read again (`catalogRefresh.ts`: the app's directory, the Settings one and
+those the event names). The ambient mirrors follow the directory the app is on
+when a load commits, not when it started.
 
 ## Selector Rules
 

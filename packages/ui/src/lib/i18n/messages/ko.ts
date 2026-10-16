@@ -19,6 +19,7 @@ import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { skillSwitchesI18n } from './skill-switches.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...environmentI18n.ko,
   ...providersI18n.ko,
   ...mcpGridI18n.ko,
+  ...skillSwitchesI18n.ko,
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',

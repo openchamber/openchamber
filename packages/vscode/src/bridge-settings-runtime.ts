@@ -3,8 +3,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { z } from 'zod';
 import { BUILT_IN_SKILL_LOCATION, type DiscoveredSkill, type SkillScope, type SkillSource } from './opencodeConfig';
 import type { BridgeContext } from './bridge';
+import { readOpenCodeInfo } from '../../web/server/lib/opencode/compatibility.js';
+import {
+  isValidSkillPolicyId,
+  skillIdFromPath,
+  type SkillPolicyOpenCodeReader,
+} from '../../web/server/lib/opencode/skill-policy.js';
 import { filterPersistableSettingsChanges, withoutSecretSettings } from './settings-registry-gate';
 import {
   buildPreferencesFields,
@@ -151,11 +158,14 @@ export const fetchOpenCodeSkillsFromApi = async (
         const location = rawLocation.startsWith('/builtin/') ? BUILT_IN_SKILL_LOCATION : rawLocation;
         const description = typeof item?.description === 'string' ? item.description : '';
         const content = typeof item?.content === 'string' ? item.content : '';
+        // v2 reports the id; derive it from the path for a payload without.
+        const id = isValidSkillPolicyId(item?.id) ? item.id : skillIdFromPath(rawLocation);
         if (!name || !location) {
           return null;
         }
         if (location === BUILT_IN_SKILL_LOCATION) {
           return {
+            id,
             name,
             path: location,
             scope: 'user',
@@ -166,6 +176,7 @@ export const fetchOpenCodeSkillsFromApi = async (
         }
         const inferred = inferSkillScopeAndSourceFromLocation(location, workingDirectory);
         return {
+          id,
           name,
           path: location,
           scope: inferred.scope,
@@ -178,6 +189,33 @@ export const fetchOpenCodeSkillsFromApi = async (
   } catch {
     return null;
   }
+};
+
+const configEntriesSchema = z.array(z.union([
+  z.object({ type: z.literal('document'), path: z.string().optional(), info: z.record(z.string(), z.json()) }),
+  z.object({ type: z.literal('directory'), path: z.string() }),
+]));
+
+/**
+ * Mirror of the web server's skill policy reader (`skill-routes.js`): the
+ * running OpenCode's version and its config documents for a directory. Both
+ * reject when OpenCode cannot be read, so a failure never looks like a
+ * server without policies.
+ */
+export const createOpenCodePolicyReader = (ctx: BridgeContext | undefined): SkillPolicyOpenCodeReader => {
+  const request = async (pathname: string, directory: string | null) => {
+    const apiUrl = ctx?.manager?.getApiUrl();
+    if (!apiUrl) throw new Error('OpenCode is not running');
+    const headers = new Headers({ Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() });
+    if (directory) headers.set('x-opencode-directory', encodeURIComponent(directory));
+    const response = await fetch(new URL(pathname, apiUrl), { headers, signal: AbortSignal.timeout(8_000) });
+    if (!response.ok) throw new Error(`OpenCode answered ${response.status} for ${pathname}`);
+    return response;
+  };
+  return {
+    readVersion: async () => (await readOpenCodeInfo(await request('/api/info', null)))?.version ?? null,
+    readConfigEntries: async (directory) => configEntriesSchema.parse(await (await request('/api/config', directory)).json()),
+  };
 };
 
 // Settings live in two files beside each other (see `settings-files.ts`):

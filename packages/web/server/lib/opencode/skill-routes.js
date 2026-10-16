@@ -1,7 +1,15 @@
 import { OpenCode } from '@opencode/client';
 import { buildAppliedResponse } from './config-mutation-response.js';
-import { OPENCODE_CONFIG_DIR } from './shared.js';
-import { asNonEmptyString } from '../shared/guards.js';
+import { OPENCODE_CONFIG_DIR, readConfigFile, readConfigLayers, writeConfig } from './shared.js';
+import {
+  createSkillPolicyService,
+  handleSkillPolicyWrite,
+  renameSkillKeepingSwitches,
+  isValidSkillPolicyId,
+  skillIdFromPath,
+} from './skill-policy.js';
+import { isSkillFolderName, readSkillIdSelector, selectSkillById } from './skill-identity.js';
+import { asNonEmptyString, isString } from '../shared/guards.js';
 import { appendInstalledSources, isInstalledFromSource, readInstalledSources, removeInstalledSources } from '../skills-catalog/installed-sources.js';
 
 /**
@@ -13,6 +21,9 @@ const isEnvFlagEnabled = (value) => {
   const normalized = value.trim().toLowerCase();
   return normalized.length > 0 && normalized !== '0' && normalized !== 'false';
 };
+
+// Directories whose last known skill policy is kept for queued deliveries.
+const MAX_KNOWN_POLICY_DIRECTORIES = 50;
 
 export const registerSkillRoutes = (app, dependencies) => {
   const {
@@ -34,6 +45,8 @@ export const registerSkillRoutes = (app, dependencies) => {
     createSkill,
     updateSkill,
     deleteSkill,
+    deleteSkillAt,
+    isDeletableSkillPath,
     renameSkill,
     isManagedSkillPath,
     readSkillSupportingFile,
@@ -53,6 +66,16 @@ export const registerSkillRoutes = (app, dependencies) => {
     createHttpsCredentialReference,
     resolveSourceControlAccount,
     credentialResolver,
+    // The global switch writes the user's OpenCode config, the project
+    // switch the project config file OpenChamber writes for the directory.
+    skillPolicyService = createSkillPolicyService({
+      resolveTargets: (directory) => {
+        const { paths } = readConfigLayers(directory);
+        return { global: paths.userPath, project: directory ? paths.projectPath : null };
+      },
+      readConfigFile,
+      writeConfig,
+    }),
   } = dependencies;
 
   const resolveCatalogGitIdentity = async (identityId, source) => {
@@ -193,6 +216,34 @@ export const registerSkillRoutes = (app, dependencies) => {
     return { scope: SKILL_SCOPE.USER, source };
   };
 
+  const makeOpenCodeClient = (workingDirectory) => OpenCode.make({
+    baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
+    headers: {
+      ...getOpenCodeAuthHeaders(),
+      // v2 scopes a request with a header, not a `directory` option, and
+      // rejects non-ASCII header values, so the path is percent-encoded.
+      ...(workingDirectory ? { 'x-opencode-directory': encodeURIComponent(workingDirectory) } : {}),
+    },
+    fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
+  });
+
+  // What the skill policy service reads from the running OpenCode. Both
+  // reject when OpenCode is not running, so a failed read never looks like
+  // a server without policies.
+  const openCodePolicyReader = {
+    readVersion: async () => {
+      if (!getOpenCodePort()) throw new Error('OpenCode is not running');
+      const info = await makeOpenCodeClient(null).server.info();
+      return isString(info?.version) ? info.version : null;
+    },
+    readConfigEntries: async (workingDirectory) => {
+      if (!getOpenCodePort()) throw new Error('OpenCode is not running');
+      const entries = await makeOpenCodeClient(workingDirectory).config.get();
+      if (!Array.isArray(entries)) throw new Error('OpenCode returned a malformed config list');
+      return entries;
+    },
+  };
+
   // Returns null when OpenCode's list could not be read (not running, error,
   // timeout, malformed payload) so callers can tell a failed fetch from a
   // genuinely empty list.
@@ -202,17 +253,7 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     try {
-      const client = OpenCode.make({
-        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        headers: {
-          ...getOpenCodeAuthHeaders(),
-          // v2 scopes a request with a header, not a `directory` option, and
-          // rejects non-ASCII header values, so the path is percent-encoded.
-          ...(workingDirectory ? { 'x-opencode-directory': encodeURIComponent(workingDirectory) } : {}),
-        },
-        fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(8_000) }),
-      });
-
+      const client = makeOpenCodeClient(workingDirectory);
       const response = await client.skill.list();
       const payload = response?.data;
       if (!Array.isArray(payload)) {
@@ -232,11 +273,14 @@ export const registerSkillRoutes = (app, dependencies) => {
           const location = rawLocation.startsWith('/builtin/') ? '<built-in>' : rawLocation;
           const description = typeof item?.description === 'string' ? item.description : '';
           const content = typeof item?.content === 'string' ? item.content : '';
+          // v2 reports the id; derive it from the path for a payload without.
+          const id = isValidSkillPolicyId(item?.id) ? item.id : skillIdFromPath(rawLocation);
           if (!name || !location) {
             return null;
           }
           if (location === '<built-in>') {
             return {
+              id,
               name,
               path: location,
               scope: SKILL_SCOPE.USER,
@@ -247,6 +291,7 @@ export const registerSkillRoutes = (app, dependencies) => {
           }
           const inferred = inferSkillScopeAndSourceFromPath(location, projectAncestors);
           const skill = {
+            id,
             name,
             path: location,
             scope: inferred.scope,
@@ -297,6 +342,152 @@ export const registerSkillRoutes = (app, dependencies) => {
 
     return { directory: null, error: null };
   };
+
+  // The last effective state OpenCode reported per directory and skill id,
+  // from the list, the switch and queued deliveries. A queued delivery that
+  // cannot read the policy uses it, so a skill last seen switched off stays
+  // out. A failed read never replaces it.
+  const knownEffective = new Map(); // directory key → Map(id → 'enabled' | 'disabled')
+  const effectiveKey = (directory) => (directory ? path.resolve(directory) : '');
+  const rememberEffective = (directory, skills) => {
+    const key = effectiveKey(directory);
+    const known = knownEffective.get(key) ?? new Map();
+    for (const { id, effective } of skills) {
+      if (effective === 'enabled' || effective === 'disabled') known.set(id, effective);
+    }
+    // Most recently read last, so the bound drops the directory read longest ago.
+    knownEffective.delete(key);
+    knownEffective.set(key, known);
+    if (knownEffective.size > MAX_KNOWN_POLICY_DIRECTORIES) knownEffective.delete(knownEffective.keys().next().value);
+  };
+
+  // Policy state for the listed skills, keyed by OpenCode skill id. A failure
+  // here answers `{ error }` and leaves the skill list intact.
+  const readSkillPolicyForList = async (directory, skills) => {
+    try {
+      const ids = skills.map((skill) => skill.id).filter(isString);
+      const state = await skillPolicyService.readState({ directory, ids, openCode: openCodePolicyReader });
+      rememberEffective(directory, state.skills);
+      return state;
+    } catch (error) {
+      console.error('Failed to read skill policies:', error);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+
+  // The skills the list shows for a directory: OpenCode's list, then the disk
+  // scan, one entry per OpenCode id.
+  const listSkillInventory = async (directory) => mergeDiscoveredSkills(
+    (await fetchOpenCodeDiscoveredSkills(directory)) ?? [],
+    await discoverSkills(directory),
+  );
+
+  const listInstalledSkillIds = async (directory) => new Set(
+    (await listSkillInventory(directory)).map((skill) => skill.id).filter(isString),
+  );
+
+  /**
+   * For the message queue's delivery: the effective state of the skills a
+   * queued instruction names in the item's `directory`, by id (`ids`) and,
+   * for instructions queued without ids, by display name or id (`names`).
+   *
+   * Answers `{ states, inventory }`. `states` maps an id to `enabled` or
+   * `disabled`: what OpenCode's config says now, else the last state it
+   * reported for that directory; an id it cannot answer is left out
+   * (unknown). `inventory` lists `{ id, name }` of the installed skills when
+   * `names` asked for it, and is null when OpenCode's own skill list could not
+   * be read: the disk scan alone misses built-in skills, so a name cannot be
+   * resolved completely. Never throws for a failed read.
+   */
+  const readQueuedSkillPolicy = async ({ directory, ids, names }) => {
+    const candidateIds = new Set(ids);
+    let inventory = null;
+    if (names.length > 0) {
+      try {
+        const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
+        if (openCodeSkills) {
+          inventory = mergeDiscoveredSkills(openCodeSkills, await discoverSkills(directory))
+            .filter((skill) => isString(skill.id))
+            .map((skill) => ({ id: skill.id, name: skill.name }));
+        }
+      } catch (error) {
+        console.error('Failed to list skills for a queued message:', error);
+      }
+      for (const skill of inventory ?? []) {
+        if (names.includes(skill.name) || names.includes(skill.id)) candidateIds.add(skill.id);
+      }
+    }
+
+    const current = new Map();
+    try {
+      const { skills } = await skillPolicyService.readState({ directory, ids: [...candidateIds], openCode: openCodePolicyReader });
+      rememberEffective(directory, skills);
+      for (const skill of skills) current.set(skill.id, skill.effective);
+    } catch (error) {
+      console.error('Failed to read skill policies for a queued message:', error);
+    }
+    const known = knownEffective.get(effectiveKey(directory));
+    const states = new Map();
+    for (const id of candidateIds) {
+      const effective = current.get(id);
+      const decided = effective === 'enabled' || effective === 'disabled' ? effective : known?.get(id);
+      if (decided) states.set(id, decided);
+    }
+    return { states, inventory };
+  };
+
+  // The name-keyed routes take an optional `?id=` (OpenCode skill id). With it
+  // they act on that exact listed skill or answer 404, never on another skill
+  // with the same display name; without it they keep the display-name lookup.
+  // Answers `{ skill, id }` (`skill` null without `?id=`) or `{ status, error }`.
+  const resolveSelectedSkill = async (req, skillName, directory) => {
+    const { id, error } = readSkillIdSelector(req.query?.id);
+    if (error) return { status: 400, error };
+    if (!id) return { skill: null, id: null };
+    const skill = selectSkillById(await listSkillInventory(directory), id, skillName);
+    return skill ? { skill, id } : { status: 404, error: 'Skill not found' };
+  };
+
+  // The selected skill's sources: the exact `?id=` skill, else the legacy
+  // display-name lookup. Answers `{ sources, skill, id }` or `{ status, error }`.
+  const resolveSkillSources = async (req, skillName, directory) => {
+    const selected = await resolveSelectedSkill(req, skillName, directory);
+    if (selected.error) return selected;
+    const skill = selected.skill ?? (((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
+      .find((entry) => entry.name === skillName) || null);
+    const sources = await getSkillSources(skillName, directory, skill, { id: selected.id });
+    return { sources, skill, id: selected.id ?? skill?.id ?? skillIdFromPath(sources.md.path) };
+  };
+
+  // A `targetPath` without `?id=` must be a listed skill file or a `SKILL.md`
+  // under a managed skill root; it never names an arbitrary file.
+  const isKnownSkillFile = async (directory, targetPath) => {
+    const resolved = path.resolve(targetPath);
+    if (path.basename(resolved) !== 'SKILL.md') return false;
+    const listed = (await listSkillInventory(directory)).some((skill) => isString(skill.path) && path.resolve(skill.path) === resolved);
+    return listed || isManagedSkillPath(resolved, directory);
+  };
+
+  // Switch one skill on or off in one scope: body `{ id, scope, enabled }`,
+  // `id` being OpenCode's skill id. See skill-policy.js for what is written.
+  app.put('/api/config/skill-policy', async (req, res) => {
+    const scope = req.body?.scope;
+    const { directory, error } = scope === 'project'
+      ? await resolveOptionalProjectDirectory(req)
+      : await resolveSkillsDirectory(req);
+    if (error) {
+      return res.status(400).json({ ok: false, error: { code: 'invalid_directory', message: error } });
+    }
+    const result = await handleSkillPolicyWrite({
+      service: skillPolicyService,
+      body: req.body,
+      directory,
+      openCode: openCodePolicyReader,
+      listInstalledSkillIds,
+    });
+    if (result.body.ok && isString(result.body.id)) rememberEffective(directory, [{ id: result.body.id, ...result.body.policy }]);
+    return res.status(result.status).json(result.body);
+  });
 
   app.get('/api/config/skills', async (req, res) => {
     try {
@@ -351,6 +542,7 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (openCodeSkills === null) {
         body.openCodeSkillsUnavailable = true;
       }
+      body.skillPolicy = await readSkillPolicyForList(directory, enrichedSkills);
       res.json(body);
     } catch (error) {
       console.error('Failed to list skills:', error);
@@ -667,12 +859,16 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
-      const sources = await getSkillSources(skillName, directory, discoveredSkill);
+      const resolved = await resolveSkillSources(req, skillName, directory);
+      if (resolved.error) {
+        return res.status(resolved.status).json({ error: resolved.error });
+      }
+      const { sources } = resolved;
 
       res.json({
         name: skillName,
+        id: resolved.id,
+        path: sources.md.path ?? resolved.skill?.path ?? null,
         sources: sources,
         scope: sources.md.scope,
         source: sources.md.source,
@@ -696,9 +892,11 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
-      const sources = await getSkillSources(skillName, directory, discoveredSkill);
+      const resolved = await resolveSkillSources(req, skillName, directory);
+      if (resolved.error) {
+        return res.status(resolved.status).json({ error: resolved.error });
+      }
+      const { sources } = resolved;
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }
@@ -751,29 +949,65 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      if (typeof updates?.renameTo === 'string') {
+      const selected = await resolveSelectedSkill(req, skillName, directory);
+      if (selected.error) {
+        return res.status(selected.status).json({ error: selected.error });
+      }
+      if (selected.skill && !(isString(selected.skill.path) && path.basename(selected.skill.path) === 'SKILL.md' && fs.existsSync(selected.skill.path))) {
+        return res.status(409).json({ error: `Skill "${skillName}" has no SKILL.md file to edit` });
+      }
+
+      if (isString(updates?.renameTo)) {
         const newName = updates.renameTo.trim();
         console.log(`[Server] Renaming skill: ${skillName} -> ${newName}`);
         console.log('[Server] Working directory:', directory);
-        await renameSkill(skillName, newName, directory);
+        // A skill a switch turned off stays off under its new id: the
+        // switch's own deny is carried before the folder moves.
+        const { newPath, switches } = await renameSkillKeepingSwitches({
+          service: skillPolicyService,
+          directory,
+          listSkillFiles: (dir) => discoverSkills(dir, { allCopies: true }),
+          rename: (beforeMove) => renameSkill(skillName, newName, directory, { skillPath: selected.skill?.path ?? null, beforeMove }),
+        });
         // OpenCode 2 watches the skills directories: the renamed folder is
         // picked up like any other write, no restart and no client reload.
+        // The folder took the new name, so the OpenCode id is `newName` now.
         return res.json({
           ...buildAppliedResponse(`Skill renamed to ${newName} successfully.`),
           name: newName,
+          id: skillIdFromPath(newPath),
+          path: newPath ?? null,
+          switches,
         });
+      }
+
+      const requestedTarget = isString(updates?.targetPath) && updates.targetPath.trim()
+        ? path.resolve(updates.targetPath.trim())
+        : null;
+      let targetPath = requestedTarget;
+      if (selected.skill) {
+        if (requestedTarget && requestedTarget !== path.resolve(selected.skill.path)) {
+          return res.status(409).json({ error: 'targetPath does not match the selected skill' });
+        }
+        targetPath = selected.skill.path;
+      } else if (requestedTarget && !(await isKnownSkillFile(directory, requestedTarget))) {
+        return res.status(400).json({ error: 'targetPath is not a known skill file' });
       }
 
       console.log(`[Server] Updating skill: ${skillName}`);
       console.log('[Server] Working directory:', directory);
 
-      await updateSkill(skillName, updates, directory, updates?.targetPath);
-      res.json(buildAppliedResponse(
-        `Skill ${skillName} updated successfully.`,
-      ));
+      const updatedPath = await updateSkill(skillName, updates, directory, targetPath);
+      res.json({
+        ...buildAppliedResponse(`Skill ${skillName} updated successfully.`),
+        id: skillIdFromPath(updatedPath),
+        path: updatedPath ?? null,
+      });
     } catch (error) {
       console.error('[Server] Failed to update skill:', error);
-      res.status(500).json({ error: error.message || 'Failed to update skill' });
+      // A rename stopped to keep a switch (unreadable or unwritable config) carries its status.
+      const status = Number.isInteger(error?.status) ? error.status : 500;
+      res.status(status).json({ error: error.message || 'Failed to update skill' });
     }
   });
 
@@ -790,9 +1024,11 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
-      const sources = await getSkillSources(skillName, directory, discoveredSkill);
+      const resolved = await resolveSkillSources(req, skillName, directory);
+      if (resolved.error) {
+        return res.status(resolved.status).json({ error: resolved.error });
+      }
+      const { sources } = resolved;
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }
@@ -824,9 +1060,11 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      const discoveredSkill = ((await fetchOpenCodeDiscoveredSkills(directory)) ?? [])
-        .find((skill) => skill.name === skillName) || null;
-      const sources = await getSkillSources(skillName, directory, discoveredSkill);
+      const resolved = await resolveSkillSources(req, skillName, directory);
+      if (resolved.error) {
+        return res.status(resolved.status).json({ error: resolved.error });
+      }
+      const { sources } = resolved;
       if (!sources.md.exists || !sources.md.dir) {
         return res.status(404).json({ error: 'Skill not found' });
       }
@@ -854,7 +1092,8 @@ export const registerSkillRoutes = (app, dependencies) => {
         return res.status(400).json({ error });
       }
 
-      // `scope` and `source` together narrow the delete to that one copy.
+      // `scope` and `source` together narrow the delete to the copy in that
+      // one folder, named by the id or, without one, by the display name.
       const scope = asNonEmptyString(req.query.scope);
       const source = asNonEmptyString(req.query.source);
       let location;
@@ -865,7 +1104,63 @@ export const registerSkillRoutes = (app, dependencies) => {
         location = { scope, source };
       }
 
-      deleteSkill(skillName, directory, location);
+      // Install provenance is keyed by the install folder name, the id. It
+      // stays while the disk scan for this directory, the user skill roots
+      // and this project, still finds a copy of the id. Other projects are
+      // not scanned; the record has no project field.
+      const forgetProvenanceOnceGone = async (id) => {
+        if ((await discoverSkills(directory)).some((skill) => skill.id === id)) return;
+        try {
+          removeInstalledSources(id);
+        } catch (error) {
+          console.error('Failed to forget skill install provenance:', error);
+        }
+      };
+
+      if (location) {
+        const { id, error: idError } = readSkillIdSelector(req.query?.id);
+        if (idError) {
+          return res.status(400).json({ error: idError });
+        }
+        // The located folder itself, never the copy OpenCode lists first
+        // under this id: that one may be a same-named skill kept elsewhere.
+        const folderName = id ?? skillName;
+        if (!isSkillFolderName(folderName)) {
+          return res.status(400).json({ error: 'Invalid skill name' });
+        }
+        deleteSkill(folderName, directory, location);
+        await forgetProvenanceOnceGone(folderName);
+        return res.json({
+          ...buildAppliedResponse(`Skill ${skillName} deleted successfully.`),
+          ...(id ? { id } : {}),
+        });
+      }
+
+      const selected = await resolveSelectedSkill(req, skillName, directory);
+      if (selected.error) {
+        return res.status(selected.status).json({ error: selected.error });
+      }
+
+      if (selected.skill) {
+        // Exactly the selected skill's folder, nested groups included; other
+        // copies or skills sharing the display name stay. Refused when the
+        // folder sits outside a managed root, symlinks followed.
+        if (!isString(selected.skill.path) || !isDeletableSkillPath(selected.skill.path, directory)) {
+          return res.status(409).json({ error: `Skill "${skillName}" is outside managed skill directories and cannot be deleted` });
+        }
+        await deleteSkillAt(selected.skill.path, directory);
+        await forgetProvenanceOnceGone(selected.id);
+        return res.json({
+          ...buildAppliedResponse(`Skill ${skillName} deleted successfully.`),
+          id: selected.id,
+          path: selected.skill.path,
+        });
+      }
+
+      if (!isSkillFolderName(skillName)) {
+        return res.status(400).json({ error: 'Invalid skill name' });
+      }
+      deleteSkill(skillName, directory);
       try {
         removeInstalledSources(skillName);
       } catch (error) {
@@ -880,4 +1175,6 @@ export const registerSkillRoutes = (app, dependencies) => {
       res.status(500).json({ error: error.message || 'Failed to delete skill' });
     }
   });
+
+  return { readQueuedSkillPolicy };
 };

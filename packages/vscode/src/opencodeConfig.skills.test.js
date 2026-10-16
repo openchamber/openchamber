@@ -45,3 +45,26 @@ describe('VS Code skill discovery parity', () => {
     expect(sources.md.fields).toEqual(['description', 'instructions']);
   });
 });
+
+describe('VS Code skill merge by OpenCode id', () => {
+  test('keeps ids that share a display name and drops copies of one id, like the web server', () => {
+    const merged = mergeDiscoveredSkills(
+      [
+        { id: 'beta-one', name: 'Same Name', path: '/repo/.opencode/skills/beta-one/SKILL.md', scope: 'project', source: 'opencode' },
+        { id: 'beta-two', name: 'Same Name', path: '/repo/.opencode/skills/beta-two/SKILL.md', scope: 'project', source: 'opencode' },
+        { id: 'dup-skill', name: 'Dup Project', path: '/repo/.opencode/skills/dup-skill/SKILL.md', scope: 'project', source: 'opencode' },
+      ],
+      [
+        { id: 'dup-skill', name: 'Dup Claude', path: '/repo/.claude/skills/dup-skill/SKILL.md', scope: 'project', source: 'claude' },
+        { id: 'disabled-skill', name: 'Same Name', path: '/repo/.opencode/skills/disabled-skill/SKILL.md', scope: 'project', source: 'opencode' },
+      ],
+    );
+
+    expect(merged.map((skill) => [skill.id, skill.name])).toEqual([
+      ['beta-one', 'Same Name'],
+      ['beta-two', 'Same Name'],
+      ['dup-skill', 'Dup Project'],
+      ['disabled-skill', 'Same Name'],
+    ]);
+  });
+});

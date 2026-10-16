@@ -86,7 +86,7 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolveAutoSelection, readQueuedSkillPolicy, now, beforeScheduledTaskSend, onScheduledTaskResult } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
@@ -110,6 +110,7 @@ const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), k
   };
   if (retryDelayMs) options.retryDelayMs = retryDelayMs;
   if (resolveAutoSelection) options.resolveAutoSelection = resolveAutoSelection;
+  if (readQueuedSkillPolicy) options.readQueuedSkillPolicy = readQueuedSkillPolicy;
   if (now) options.now = now;
   const runtime = createMessageQueueRuntime(options);
   return {
@@ -375,6 +376,15 @@ describe('parseQueuedItemInput', () => {
     ]);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'context', text: 'no metadata' }] }))).toThrow(TypeError);
     expect(() => parseQueuedItemInput(item({ context: [{ kind: 'other', text: 'x' }] }))).toThrow(TypeError);
+  });
+
+  it('keeps the skills an instruction names and rejects malformed ones', () => {
+    const skills = [{ id: 'alpha', name: 'Alpha' }, { id: 'beta-one', name: 'Same Name' }];
+    expect(parseQueuedItemInput(item({ context: [{ kind: 'instruction', text: 'names skills', skills }] })).context)
+      .toEqual([{ kind: 'instruction', text: 'names skills', skills }]);
+    for (const malformed of [null, 'alpha', [{ id: 'alpha' }], [{ id: 'skill:*', name: 'Any' }], [{ id: '', name: 'Empty' }]]) {
+      expect(() => parseQueuedItemInput(item({ context: [{ kind: 'instruction', text: 'x', skills: malformed }] }))).toThrow(TypeError);
+    }
   });
 
   it('accepts an item that is only context', () => {
@@ -907,5 +917,160 @@ describe('message queue runtime', () => {
       agents: [{ name: 'reviewer' }],
     });
     expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
+  });
+});
+
+describe('skill instructions switched off after queueing', () => {
+  const instruction = (...names) => `The user explicitly mentioned these skills in their message: ${names.map((name) => `$${name}`).join(', ')}. Use the corresponding skill tool when it is relevant to accomplishing the user's request.`;
+  const comment = { kind: 'context', text: 'Comment on a.ts', metadata: { openchamberContext: { kind: 'code-comment' } } };
+  const attachment = { id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' };
+  const skills = [{ id: 'alpha', name: 'Alpha' }, { id: 'beta-one', name: 'Same Name' }];
+  const idle = { type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } };
+
+  // A stand-in for skill-routes' lookup: the effective state per directory,
+  // changed by the test between queueing and delivery.
+  const createPolicy = () => {
+    const effective = {};
+    const calls = [];
+    const readQueuedSkillPolicy = vi.fn(async ({ directory, ids, names }) => {
+      calls.push({ directory, ids, names });
+      return { states: new Map(Object.entries(effective[directory] ?? {})), inventory: null };
+    });
+    return { effective, calls, readQueuedSkillPolicy };
+  };
+  const syntheticTexts = (openCode) => openCode.state.sent
+    .filter((entry) => entry.path.endsWith('/synthetic'))
+    .map((entry) => entry.body.text);
+
+  it('leaves a skill switched off since queueing out of the server delivery and keeps everything else', async () => {
+    const policy = createPolicy();
+    const itemDirectory = '/repo-worktree';
+    policy.effective[itemDirectory] = { alpha: 'enabled', 'beta-one': 'enabled' };
+    const { runtime, openCode, emit } = createRuntime({ readQueuedSkillPolicy: policy.readQueuedSkillPolicy });
+    runtime.start();
+    openCode.state.active = { [SESSION]: { type: 'running' } };
+    await runtime.enqueue(SESSION, itemDirectory, item({
+      content: 'use $Alpha and $Same Name',
+      text: 'use $Alpha and $Same Name',
+      attachments: [attachment],
+      context: [comment, { kind: 'instruction', text: instruction('Alpha', 'Same Name'), skills }, { kind: 'synthetic', text: 'conflict payload' }],
+    }));
+
+    // Switched off in the item's directory while the session was busy; the
+    // same id stays enabled elsewhere.
+    policy.effective[itemDirectory] = { alpha: 'disabled', 'beta-one': 'enabled' };
+    policy.effective[DIRECTORY] = { alpha: 'enabled' };
+    openCode.state.active = {};
+    emit(idle, itemDirectory);
+    await settle();
+
+    expect(policy.calls).toEqual([{ directory: itemDirectory, ids: ['alpha', 'beta-one'], names: [] }]);
+    expect(openCode.state.sent.map((entry) => entry.body)).toEqual([
+      { text: 'Comment on a.ts', resume: false, metadata: comment.metadata },
+      { text: instruction('Same Name'), resume: false },
+      { text: 'conflict payload', resume: false },
+      { text: 'use $Alpha and $Same Name', files: [{ uri: attachment.dataUrl, name: 'f.txt' }] },
+    ]);
+  });
+
+  it('drops the instruction when every skill it names is switched off', async () => {
+    const policy = createPolicy();
+    policy.effective[DIRECTORY] = { alpha: 'disabled', 'beta-one': 'disabled' };
+    const { runtime, openCode, emit } = createRuntime({ readQueuedSkillPolicy: policy.readQueuedSkillPolicy });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ context: [comment, { kind: 'instruction', text: instruction('Alpha', 'Same Name'), skills }] }));
+    emit(idle);
+    await settle();
+    expect(syntheticTexts(openCode)).toEqual(['Comment on a.ts']);
+    expect(openCode.state.sent.at(-1).body).toEqual({ text: 'follow up' });
+  });
+
+  it('asks again on a retry, so a skill switched back on is named again', async () => {
+    const policy = createPolicy();
+    policy.effective[DIRECTORY] = { alpha: 'disabled' };
+    const { runtime, openCode, emit } = createRuntime({ readQueuedSkillPolicy: policy.readQueuedSkillPolicy, retryDelayMs: () => 20 });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ context: [{ kind: 'instruction', text: instruction('Alpha'), skills: [skills[0]] }] }));
+    openCode.state.failNext = /\/prompt$/;
+    emit(idle);
+    await settle(10);
+    // The first attempt admitted no instruction, then its prompt failed.
+    expect(syntheticTexts(openCode)).toEqual([]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(1);
+
+    policy.effective[DIRECTORY] = { alpha: 'enabled' };
+    await settle(40);
+    expect(syntheticTexts(openCode)).toEqual([instruction('Alpha')]);
+    expect(runtime.sessionSnapshot(SESSION).items).toHaveLength(0);
+  });
+
+  it('checks an instruction queued before ids existed by its names, after a restart', async () => {
+    const dataDir = makeDataDir();
+    // Written by a build that kept only the instruction text.
+    fs.writeFileSync(path.join(dataDir, 'message-queue.json'), JSON.stringify({
+      version: 1,
+      revision: 3,
+      sessions: { [SESSION]: { directory: DIRECTORY, items: [{ id: 'old-1', createdAt: 1, ...item({ context: [{ kind: 'instruction', text: instruction('Alpha', 'Same Name') }] }) }] } },
+    }));
+    const calls = [];
+    const readQueuedSkillPolicy = async (input) => {
+      calls.push(input);
+      return {
+        states: new Map([['alpha', 'disabled'], ['beta-one', 'disabled'], ['beta-two', 'enabled']]),
+        inventory: [{ id: 'alpha', name: 'Alpha' }, { id: 'beta-one', name: 'Same Name' }, { id: 'beta-two', name: 'Same Name' }],
+      };
+    };
+    const { runtime, openCode, connect } = createRuntime({ dataDir, readQueuedSkillPolicy });
+    runtime.start();
+    await runtime.load();
+    connect();
+    await settle();
+    expect(calls).toEqual([{ directory: DIRECTORY, ids: [], names: ['Alpha', 'Same Name'] }]);
+    // Another skill named "Same Name" is still on, so the name stays.
+    expect(syntheticTexts(openCode)).toEqual([instruction('Same Name')]);
+  });
+
+  it('delivers the instruction as captured when the lookup fails or knows nothing', async () => {
+    const part = { kind: 'instruction', text: instruction('Alpha'), skills: [skills[0]] };
+    const failing = createRuntime({ readQueuedSkillPolicy: async () => { throw new Error('lookup broke'); } });
+    failing.runtime.start();
+    await failing.runtime.enqueue(SESSION, DIRECTORY, item({ context: [part] }));
+    failing.emit(idle);
+    await settle();
+    expect(syntheticTexts(failing.openCode)).toEqual([instruction('Alpha')]);
+
+    const unknown = createRuntime({ readQueuedSkillPolicy: async () => ({ states: new Map(), inventory: null }) });
+    unknown.runtime.start();
+    await unknown.runtime.enqueue(SESSION, DIRECTORY, item({ context: [part] }));
+    unknown.emit(idle);
+    await settle();
+    expect(syntheticTexts(unknown.openCode)).toEqual([instruction('Alpha')]);
+  });
+
+  it('keeps the skill ids across persistence and hands them back on take', async () => {
+    const dataDir = makeDataDir();
+    const first = createRuntime({ dataDir });
+    first.runtime.start();
+    first.openCode.state.active = { [SESSION]: { type: 'running' } };
+    const context = [{ kind: 'instruction', text: instruction('Alpha', 'Same Name'), skills }];
+    const { itemId } = await first.runtime.enqueue(SESSION, DIRECTORY, item({ context }));
+    expect(first.runtime.sessionSnapshot(SESSION).items[0]).not.toHaveProperty('context');
+    await first.runtime.flush();
+    first.runtime.stop();
+
+    const second = createRuntime({ dataDir });
+    await second.runtime.load();
+    expect((await second.runtime.take(SESSION, itemId)).item.context).toEqual(context);
+  });
+
+  it('skips the lookup for an item without a skill instruction', async () => {
+    const policy = createPolicy();
+    const { runtime, openCode, emit } = createRuntime({ readQueuedSkillPolicy: policy.readQueuedSkillPolicy });
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ context: [comment, { kind: 'instruction', text: 'hand written note' }] }));
+    emit(idle);
+    await settle();
+    expect(policy.readQueuedSkillPolicy).not.toHaveBeenCalled();
+    expect(syntheticTexts(openCode)).toEqual(['Comment on a.ts', 'hand written note']);
   });
 });

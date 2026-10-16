@@ -85,6 +85,12 @@ export type QueuedContextPart =
         /** Derived from the message text (the skill instruction); re-derived when the text is sent again, so never restored. */
         kind: 'instruction';
         text: string;
+        /**
+         * The skills `text` names, by OpenCode id, so delivery can leave out
+         * one switched off since. Absent on items queued before it existed;
+         * those are checked by the names in `text`.
+         */
+        skills?: Array<{ id: string; name: string }>;
     }
     | {
         /** Handed to the composer by another surface (conflict resolution); restored as pending on edit. */
@@ -177,7 +183,11 @@ const serverContextPartSchema = z.discriminatedUnion('kind', [
         metadata: contextPartMetadataSchema,
         instructions: z.string().optional(),
     }),
-    z.object({ kind: z.literal('instruction'), text: z.string() }),
+    z.object({
+        kind: z.literal('instruction'),
+        text: z.string(),
+        skills: z.array(z.object({ id: z.string(), name: z.string() })).optional(),
+    }),
     z.object({ kind: z.literal('synthetic'), text: z.string() }),
 ]);
 

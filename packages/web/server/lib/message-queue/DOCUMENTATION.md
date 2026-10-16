@@ -14,7 +14,12 @@ UI-side queue and foreground auto-send hook.
 - `runtime.js` — `createMessageQueueRuntime(...)` (state, persistence,
   dispatch loop, event handling) and `registerMessageQueueRoutes(app, runtime)`.
 - `runtime.test.js` — delivery, idleness gates, retries, holds, persistence,
-  concurrency with in-flight sends, slash commands, and project knowledge.
+  concurrency with in-flight sends, slash commands, project knowledge, and
+  skill instructions switched off after queueing.
+- `skill-instruction.js` — the skill instruction template (a JS mirror of
+  `packages/ui/src/lib/skillMentionInstruction.ts`) and
+  `withoutSwitchedOffSkills`, the delivery-time check. `skill-instruction.test.js`
+  runs the mirror and the UI file on the same inputs.
 
 Wiring: created in `server/index.js` after the global event hub and the
 session-knowledge runtime; routes registered in
@@ -47,7 +52,7 @@ send never re-resolves mutable UI state:
   attachments: [{ id, filename, mimeType, size, source, serverPath?, dataUrl }],
   context: [      // what the composer had attached, in send order
     { kind: 'context', text, metadata, instructions? },  // a draft chip or linked issue/PR; metadata is the UI's structured payload
-    { kind: 'instruction', text },                       // derived from the text (skill instruction)
+    { kind: 'instruction', text, skills? },              // derived from the text (skill instruction); skills: [{ id, name }] it names
     { kind: 'synthetic', text },                         // handed to the composer by another surface
   ],
   sendConfig: { providerID, modelID, agent?, variant? }   // required
@@ -60,6 +65,12 @@ synthetic text part, an entry's `instructions` going out as its own part just
 before it and its `metadata` riding the part verbatim so the timeline renders
 the context block back. The payload inside `metadata` is the UI's contract
 (`lib/messages/contextParts.ts`), parsed by the UI on the way back.
+
+An `instruction` entry may carry `skills`, the skills its text names by
+OpenCode id and display name. The server keeps them through the queue file and
+hands them back on a take; an entry with a malformed list (an id OpenCode
+could not have, an empty name) is rejected. Items queued before `skills`
+existed have none and stay valid.
 
 `parseQueuedItemInput` rejects anything the server could not deliver later
 (no text, attachments, or context; missing model; malformed attachment or
@@ -148,7 +159,9 @@ persisted "sending" flag would strand a message forever.
    agent are switched onto the session first (`POST /session/:id/model`,
    `/agent`), because v2 holds both on the session rather than in the body; a
    captured `openchamber/auto` is resolved into a real pair by the routing
-   runtime beforehand. Then the captured context goes ahead as synthetic
+   runtime beforehand. A skill instruction in the context is checked first
+   against the item's own directory (`readQueuedSkillPolicy`, see below).
+   Then the captured context goes ahead as synthetic
    messages (`POST /session/:id/synthetic` with `resume: false`, an attached
    item's metadata riding along), followed by pending project knowledge
    (`sessionKnowledgeRuntime.resolvePendingForSession`, recorded as delivered
@@ -169,6 +182,33 @@ persisted "sending" flag would strand a message forever.
 6. The next item goes out after the next busy → idle cycle.
 
 A 2xx HTML app-shell response is a failed dispatch, not acceptance. The queued item stays persisted and uses the existing retry backoff. Project knowledge is recorded as delivered only after the prompt or command is accepted.
+
+## Skills switched off after queueing
+
+A skill instruction is written when the message is queued. A skill switched
+off (#3075) before the send must not be named to the model, because OpenCode
+refuses to load it. Right before each send attempt, `sendItem` asks
+`readQueuedSkillPolicy` (the skill routes' lookup, wired in `server/index.js`
+through the feature routes runtime) about the skills the item's instructions
+name, in the item's own directory, and `withoutSwitchedOffSkills` applies the
+answer. The rules are the UI's `withoutSwitchedOffQueuedSkills`:
+
+- Only a known `disabled` removes a skill. The lookup falls back to the last
+  state OpenCode reported for that directory when the policy cannot be read
+  now; with neither, the skill is unknown and stays named. A lookup that
+  throws counts as unknown too.
+- An instruction with `skills` is checked by id: another skill with the same
+  display name is not affected. The rest are rebuilt into the same template.
+- An instruction without `skills` (queued before they existed) is checked by
+  the names in its text, and only when the text is exactly what the builder
+  writes. A name stays while any installed skill with that name or id is not
+  switched off, and when the installed skills could not be listed completely.
+- An instruction left naming no skill is dropped.
+- Other context, the message text and attachments are never changed. The
+  stored item is not changed either: every retry checks again, so a skill
+  switched back on before the retry is named again.
+
+An item without a skill instruction makes no lookup.
 
 ## Holds
 

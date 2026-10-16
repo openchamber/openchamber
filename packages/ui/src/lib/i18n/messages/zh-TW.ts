@@ -19,6 +19,7 @@ import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
+import { skillSwitchesI18n } from './skill-switches.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
 
@@ -149,6 +150,7 @@ export const dict: Record<I18nKey, string> = {
   ...environmentI18n['zh-TW'],
   ...providersI18n['zh-TW'],
   ...mcpGridI18n['zh-TW'],
+  ...skillSwitchesI18n['zh-TW'],
   ...pluginsGridI18n['zh-TW'],
   ...integrationsCatalogI18n['zh-TW'],
   'terminalView.actions.attachSelection': '附加所選輸出',

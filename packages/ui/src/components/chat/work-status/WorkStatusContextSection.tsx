@@ -51,7 +51,8 @@ export const WorkStatusContextSection: React.FC<Props> = ({ sessionId, directory
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
   const projects = useProjectsStore((state) => state.projects);
   const isDraft = sessionId === null && newSessionDraft.open;
-  const skills = useSkillsStore((state) => state.skills);
+  // The skills the agent can use here; a switched-off one is not in its context.
+  const skills = useSkillsStore((state) => state.availableSkills);
   const mcpStatus = useMcpStore(
     React.useCallback((state) => state.getStatusForDirectory(directory), [directory]),
   );

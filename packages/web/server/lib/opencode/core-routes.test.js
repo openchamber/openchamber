@@ -203,6 +203,21 @@ describe('core-routes', () => {
     expect(response.body).toEqual({ body: { selection: 'random' } });
   });
 
+  it('should parse JSON bodies for the skill policy route', async () => {
+    const app = express();
+    registerCommonRequestMiddleware(app, { express });
+    app.put('/api/config/skill-policy', (req, res) => {
+      res.json({ body: req.body });
+    });
+
+    const response = await request(app)
+      .put('/api/config/skill-policy')
+      .send({ id: 'deploy', scope: 'global', enabled: false })
+      .expect(200);
+
+    expect(response.body).toEqual({ body: { id: 'deploy', scope: 'global', enabled: false } });
+  });
+
   it('should parse JSON bodies for custom provider upsert routes', async () => {
     const app = express();
     registerCommonRequestMiddleware(app, { express });

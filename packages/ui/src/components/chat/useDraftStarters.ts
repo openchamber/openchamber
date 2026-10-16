@@ -4,6 +4,7 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
+import { resolveSkillToken, skillTokenFor } from '@/stores/skillAvailability';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getProjectDraftStarters, saveProjectDraftStarters, updateSharedProjectSetup, type ProjectDraftStarter } from '@/lib/openchamberConfig';
@@ -68,7 +69,8 @@ export function useDraftStarters(): UseDraftStartersResult {
     const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
     const globalRaw = useUIStore((s) => s.globalDraftStarters);
     const commands = useCommandsStore((s) => s.commands);
-    const skills = useSkillsStore((s) => s.skills);
+    // A pinned skill shows only while agents can use it.
+    const skills = useSkillsStore((s) => s.availableSkills);
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
     const projects = useProjectsStore((s) => s.projects);
 
@@ -116,7 +118,6 @@ export function useDraftStarters(): UseDraftStartersResult {
     }, [ensureLoaded]);
 
     const commandNames = React.useMemo(() => new Set(commands.map((c) => c.name)), [commands]);
-    const skillNames = React.useMemo(() => new Set(skills.map((s) => s.name)), [skills]);
 
     const resolve = React.useCallback((ref: DraftStarterRef, group: StarterGroup, shared = false): ResolvedStarter | null => {
         if (isVSCode && ref.type === 'command' && (ref.name === 'craft-goal' || ref.name === 'schedule-task')) return null;
@@ -129,9 +130,10 @@ export function useDraftStarters(): UseDraftStartersResult {
             if (!commandNames.has(ref.name)) return null;
             return { id: chipId(group, plain), ref: plain, group, label: normalizeStarterLabel(ref.name), icon: COMMAND_FALLBACK_ICON, submitText: `/${ref.name}`, shared };
         }
-        if (!skillNames.has(ref.name)) return null;
-        return { id: chipId(group, plain), ref: plain, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `$${ref.name}`, shared };
-    }, [t, commandNames, skillNames, isVSCode]);
+        const skill = resolveSkillToken(skills, ref.name);
+        if (!skill) return null;
+        return { id: chipId(group, plain), ref: plain, group, label: normalizeStarterLabel(ref.name), icon: SKILL_FALLBACK_ICON, submitText: `$${skillTokenFor(skills, skill)}`, shared };
+    }, [t, commandNames, skills, isVSCode]);
 
     const globalRefs = React.useMemo<readonly DraftStarterRef[]>(
         () => globalRaw ?? DEFAULT_GLOBAL_STARTERS,

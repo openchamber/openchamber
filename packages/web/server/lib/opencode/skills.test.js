@@ -26,6 +26,30 @@ describe('skills', () => {
     ]);
   });
 
+  it('merges by OpenCode skill id, keeping ids that share a display name apart', () => {
+    const merged = mergeDiscoveredSkills(
+      [
+        { id: 'beta-one', name: 'Same Name', path: '/repo/.opencode/skills/beta-one/SKILL.md' },
+        { id: 'beta-two', name: 'Same Name', path: '/repo/.opencode/skills/beta-two/SKILL.md' },
+        { id: 'dup-skill', name: 'Dup Project', path: '/repo/.opencode/skills/dup-skill/SKILL.md' },
+      ],
+      [
+        // Copies OpenCode does not load: same id, other sources and names.
+        { id: 'dup-skill', name: 'Dup Global', path: '/home/u/.config/opencode/skills/dup-skill/SKILL.md' },
+        { id: 'dup-skill', name: 'Dup Claude', path: '/repo/.claude/skills/dup-skill/SKILL.md' },
+        // A skill switched off: OpenCode does not list it, the disk scan does.
+        { id: 'disabled-skill', name: 'Same Name', path: '/repo/.opencode/skills/disabled-skill/SKILL.md' },
+      ],
+    );
+
+    expect(merged.map((skill) => [skill.id, skill.name])).toEqual([
+      ['beta-one', 'Same Name'],
+      ['beta-two', 'Same Name'],
+      ['dup-skill', 'Dup Project'],
+      ['disabled-skill', 'Same Name'],
+    ]);
+  });
+
   it('discovers repository-local .agents skills for the project directory', async () => {
     const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-project-agents-'));
     const skillDir = path.join(tempRoot, '.agents', 'skills', 'repo-local-skill');
@@ -52,12 +76,29 @@ describe('skills', () => {
       const match = discovered.find((skill) => skill.name === 'repo-local-skill');
 
       expect(match).toEqual({
+        id: 'repo-local-skill',
         name: 'repo-local-skill',
         path: skillPath,
         scope: 'project',
         source: 'agents',
         description: 'Repository-local agents skill',
       });
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('discovers two skill folders that share a display name as two OpenCode ids', async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-same-name-'));
+    try {
+      await fsPromises.mkdir(path.join(tempRoot, '.git'));
+      for (const id of ['beta-one', 'beta-two']) {
+        const dir = path.join(tempRoot, '.opencode', 'skills', id);
+        await fsPromises.mkdir(dir, { recursive: true });
+        await fsPromises.writeFile(path.join(dir, 'SKILL.md'), '---\nname: Same Name\ndescription: d\n---\nBody\n', 'utf8');
+      }
+      const discovered = (await discoverSkills(tempRoot)).filter((skill) => skill.name === 'Same Name');
+      expect(discovered.map((skill) => skill.id).sort()).toEqual(['beta-one', 'beta-two']);
     } finally {
       await fsPromises.rm(tempRoot, { recursive: true, force: true });
     }
@@ -560,6 +601,49 @@ describe('skills', () => {
         recursive: true,
         force: true,
       });
+    }
+  });
+
+  it('runs beforeMove after the checks and before the folder moves, and undoes it when the move fails', async () => {
+    const root = await fsPromises.realpath(await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-rename-hook-')));
+    try {
+      await fsPromises.mkdir(path.join(root, '.git'));
+      const skillsDir = path.join(root, '.opencode', 'skills');
+      await fsPromises.mkdir(path.join(skillsDir, 'hook-skill'), { recursive: true });
+      await fsPromises.writeFile(path.join(skillsDir, 'hook-skill', 'SKILL.md'), '---\nname: hook-skill\ndescription: d\n---\nBody\n');
+
+      const seen = [];
+      const newPath = await renameSkill('hook-skill', 'hook-new', root, {
+        beforeMove: async ({ oldPath, newPath: target }) => {
+          seen.push({ oldExists: fs.existsSync(oldPath), newExists: fs.existsSync(target) });
+          return null;
+        },
+      });
+      expect(seen).toEqual([{ oldExists: true, newExists: false }]);
+      expect(newPath).toBe(path.join(skillsDir, 'hook-new', 'SKILL.md'));
+
+      // A refused rename (name already taken) never reaches the hook.
+      await fsPromises.mkdir(path.join(skillsDir, 'other'), { recursive: true });
+      await fsPromises.writeFile(path.join(skillsDir, 'other', 'SKILL.md'), '---\nname: other\ndescription: d\n---\nBody\n');
+      let called = false;
+      await expect(renameSkill('hook-new', 'other', root, { beforeMove: async () => { called = true; return null; } })).rejects.toThrow(/already exists/);
+      expect(called).toBe(false);
+
+      if (process.getuid?.() !== 0) {
+        let undone = false;
+        await fsPromises.chmod(skillsDir, 0o555);
+        try {
+          await expect(renameSkill('hook-new', 'hook-third', root, {
+            beforeMove: async () => ({ undo: async () => { undone = true; } }),
+          })).rejects.toThrow();
+        } finally {
+          await fsPromises.chmod(skillsDir, 0o755);
+        }
+        expect(undone).toBe(true);
+        expect(fs.existsSync(path.join(skillsDir, 'hook-new', 'SKILL.md'))).toBe(true);
+      }
+    } finally {
+      await fsPromises.rm(root, { recursive: true, force: true });
     }
   });
 });

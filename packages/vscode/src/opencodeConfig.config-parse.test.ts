@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  createPluginEntry,
+  deletePluginEntry,
   listPluginEntries,
   updateMcpConfig,
   createMcpConfig,
@@ -402,5 +404,60 @@ describe('opencodeConfig comment-preserving config writes (issue #3587)', () => 
     deleteMcpConfig('y');
 
     assert.equal(fs.readFileSync(configPath, 'utf8'), JSON.stringify({}, null, 2));
+  });
+});
+
+describe('opencodeConfig plugin list edits keep JSONC', () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-vscode-plugin-jsonc-'));
+    fs.mkdirSync(path.join(projectDir, '.opencode'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('adding and removing a project plugin gives back the original text', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    const original = [
+      '{',
+      '  // project plugins',
+      '  "plugins": [',
+      '    "opencode-a", // pinned by the team',
+      '    { "package": "opencode-b", "options": { "level": 2 } }',
+      '  ],',
+      '  "model": "a/b"',
+      '}',
+      '',
+    ].join('\n');
+    fs.writeFileSync(configPath, original, 'utf8');
+
+    createPluginEntry({ spec: 'opencode-c', scope: 'project' }, projectDir);
+    const added = fs.readFileSync(configPath, 'utf8');
+    assert.ok(added.includes('// pinned by the team'));
+    assert.ok(added.includes('// project plugins'));
+    assert.ok(added.includes('"opencode-c"'));
+
+    const created = listPluginEntries(projectDir).find((entry) => entry.spec === 'opencode-c' && entry.scope === 'project');
+    assert.ok(created);
+    deletePluginEntry(created.id, projectDir);
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original);
+  });
+
+  test('removing a plugin from the middle keeps the comments around the others', () => {
+    const configPath = path.join(projectDir, '.opencode', 'opencode.json');
+    fs.writeFileSync(configPath, '{\n  "plugins": [\n    "opencode-a",\n    "opencode-b", // remove me\n    /* last */ "opencode-c"\n  ]\n}\n', 'utf8');
+
+    const target = listPluginEntries(projectDir).find((entry) => entry.spec === 'opencode-b' && entry.scope === 'project');
+    assert.ok(target);
+    deletePluginEntry(target.id, projectDir);
+
+    const raw = fs.readFileSync(configPath, 'utf8');
+    assert.ok(raw.includes('/* last */'));
+    const errors: ParseError[] = [];
+    assert.deepEqual(parseJsonc(raw, errors, { allowTrailingComma: true }), { plugins: ['opencode-a', 'opencode-c'] });
+    assert.equal(errors.length, 0);
   });
 });

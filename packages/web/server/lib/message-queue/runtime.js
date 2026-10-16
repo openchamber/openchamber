@@ -16,7 +16,9 @@ import path from 'path';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { createSessionActivityProbe } from '../opencode/session-activity.js';
+import { isValidSkillPolicyId } from '../opencode/skill-policy.js';
 import { attachmentHint } from '../routing/runtime.js';
+import { queuedSkillReferences, withoutSwitchedOffSkills } from './skill-instruction.js';
 
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
@@ -100,10 +102,28 @@ const parseAttachment = (value) => {
   return attachment;
 };
 
+// The skills an instruction names, by OpenCode id and display name, so the
+// delivery can leave out one switched off since. Null when malformed.
+const parseInstructionSkills = (value) => {
+  const list = asList(value);
+  if (!list) return null;
+  const skills = [];
+  for (const entry of list) {
+    const raw = asRecord(entry);
+    if (!raw || !isValidSkillPolicyId(raw.id) || !asNonEmptyString(raw.name)) return null;
+    skills.push({ id: raw.id, name: raw.name });
+  }
+  return skills;
+};
+
 const parseContextPart = (value) => {
   const raw = asRecord(value);
   if (!raw || !CONTEXT_PART_KINDS.has(raw.kind)) return null;
   const text = asText(raw.text);
+  if (raw.kind === 'instruction' && raw.skills !== undefined) {
+    const skills = parseInstructionSkills(raw.skills);
+    return skills ? { kind: 'instruction', text, skills } : null;
+  }
   if (raw.kind !== 'context') return { kind: raw.kind, text };
   // The metadata is the UI's structured payload; the server only carries it
   // to the prompt, so its shape is the UI's to validate on the way back.
@@ -245,6 +265,10 @@ export function createMessageQueueRuntime({
   // Resolves the `openchamber/auto` sentinel into a real model and agent right
   // before the send; absent means the queue never sees the sentinel.
   resolveAutoSelection = null,
+  // Reads which skills a queued instruction names are switched off in the
+  // item's directory (`readQueuedSkillPolicy` in opencode/skill-routes.js);
+  // absent means instructions go out as captured.
+  readQueuedSkillPolicy = null,
   dataDir,
   fetchImpl = fetch,
   now = Date.now,
@@ -508,12 +532,30 @@ export function createMessageQueueRuntime({
       : [withMetadata];
   };
 
+  /**
+   * The captured context as it goes out now: the skill instruction leaves out
+   * skills the item's directory switched off since the message was queued
+   * (`withoutSwitchedOffSkills`). Checked on every attempt and never written
+   * back, so a skill switched on again before a retry is named again. A
+   * lookup that throws counts as unknown, so the context goes out as captured.
+   */
+  const currentContext = async (sessionId, directory, context) => {
+    const references = queuedSkillReferences(context);
+    if (!readQueuedSkillPolicy || (references.ids.length === 0 && references.names.length === 0)) return context;
+    try {
+      return withoutSwitchedOffSkills(context, await readQueuedSkillPolicy({ directory, ...references }));
+    } catch (error) {
+      console.warn(`[message-queue] skill policy lookup failed for ${sessionId}; the skill instruction goes out as queued:`, error?.message ?? error);
+      return context;
+    }
+  };
+
   const sendItem = async (sessionId, directory, item) => {
     const { providerID, modelID, variant } = item.sendConfig;
     let agent = item.sendConfig.agent;
     let model = { id: modelID, providerID, ...(variant ? { variant } : {}) };
     const promptFiles = item.attachments.map(toPromptFile);
-    const contextMessages = item.context.flatMap(toContextMessages);
+    const contextMessages = (await currentContext(sessionId, directory, item.context)).flatMap(toContextMessages);
 
     // Jev routing, when the queued send named the Auto sentinel. A failure
     // inside resolves to the fallback model; only a missing fallback throws.

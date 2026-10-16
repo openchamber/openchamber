@@ -504,12 +504,19 @@ and the send path reading the same grammar.
   queued, never at delivery — and its context follows it before the next
   queued message.
 - **Skills named with `$name` are attached to the prompt, not hinted at.**
-  `buildOutgoingMessage` reports the composer text's skill names (deduped, in
-  order) as `skillNames`; `ChatInput` hands them to the send as
-  `SkillMentions`, and `opencodeClient.sendMessage` maps each name to its
-  OpenCode skill id (`GET /api/skill`; the id is the skill's folder and can
-  differ from its frontmatter name) and sends them in the prompt's `skills`
-  field. OpenCode then loads each skill's content into that user message. It
+  `buildOutgoingMessage` reports the composer text's skill tokens (deduped, in
+  order) as `skillNames`. `ChatInput` resolves them at send time against the
+  directory's available skills (`selectAvailableSkillsForDirectory`, so a
+  skill switched off since it was typed is not attached) with
+  `resolveSkillMentions` (`stores/skillAvailability.ts`): an id always names
+  its own skill, and a display name names a skill only when no other skill
+  shares it and no skill has it as id. A shared name names nothing. The `$`
+  picker inserts the display name only when it can be typed as one token
+  (`isPrefixTokenName`: letters, digits, `-` and `_`) and names that skill;
+  otherwise it inserts the id, so "Alpha Display" goes in as `$alpha-skill`.
+  The picker searches ids as well as display names. The send gets `SkillMentions` with each
+  skill's OpenCode id (its folder, which can differ from its frontmatter name),
+  and `opencodeClient.sendMessage` sends them in the prompt's `skills` field. OpenCode then loads each skill's content into that user message. It
   rides the prompt's delivery, so a new-session draft (after the session is
   created), a steer while the agent works and a `/btw` fork all activate the
   skill with their own message, never mid-turn. The separate
@@ -518,12 +525,28 @@ and the send path reading the same grammar.
   that turn ahead of the message that asked for it. The skill message it
   creates is hidden in the timeline anyway (`timelineRoles.ts`).
   Fallback to the old hidden instruction ("The user explicitly mentioned
-  these skills…") is per skill and never blocks the send: a name OpenCode
-  does not list, a failed skill list, or a prompt rejected with
-  `Skill not found` (resent once with the same message id, since preparation
-  fails before admission). Queued messages keep the instruction captured at
+  these skills…") is per skill and never blocks the send: a prompt rejected
+  with `Skill not found` is resent once with the same message id, since
+  preparation fails before admission, with an instruction from the caller's
+  builder (`skillFallbackInstruction`). That builder never names a skill the
+  directory's policy switches off: telling the model to use a skill OpenCode
+  refuses to load would only fail later. OpenCode's own deny stays the
+  enforcement. Queued messages keep the instruction captured at
   queue time, because the server and the VS Code auto-send deliver them
-  without the composer's registry. A `$skill` in a message that routes to
+  without the composer's registry. The instruction part carries the ids of
+  the skills it names (`skills`), and the UI's own deliveries, the composer
+  sending taken messages and the VS Code auto-send, pass the context through
+  `withoutSwitchedOffQueuedSkills` first: a skill the session directory's
+  latest policy read switches off, or reports `unknown` after it was last seen
+  off, is left out of the instruction, and an
+  instruction naming none left is dropped. A part without ids (queued before
+  they existed) is checked by the names in its text when that text is one
+  `buildSkillMentionInstruction` wrote; anything else is delivered as
+  captured. The message text, attached context and attachments are never
+  changed. The server keeps `skills` with the queued item and runs the same
+  check on its own delivery on web, desktop and mobile, against the policy
+  OpenCode reports for the item's directory
+  (`packages/web/server/lib/message-queue/DOCUMENTATION.md`). A `$skill` in a message that routes to
   `session.command` (a leading `/command`) keeps the instruction too: that
   route takes no skill attachments. A hand-typed leading `/name` that matches
   a skill and no command still attaches the skill (`session-ui-store`), so the

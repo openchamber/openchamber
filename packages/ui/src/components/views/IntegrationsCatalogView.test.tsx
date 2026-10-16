@@ -198,8 +198,8 @@ test('a needs-auth server shows the sign-in state on its detail page', async () 
 test('a same-named skill outside the catalog folder does not count as installed', async () => {
   useSkillsStore.setState({
     skills: [
-      { name: 'pdf', path: '/home/user/.claude/skills/pdf/SKILL.md', scope: 'user', source: 'claude' },
-      { name: 'pdf', path: '/repo/.agents/skills/pdf/SKILL.md', scope: 'project', source: 'agents' },
+      { id: 'pdf', name: 'pdf', path: '/home/user/.claude/skills/pdf/SKILL.md', scope: 'user', source: 'claude' },
+      { id: 'pdf', name: 'pdf', path: '/repo/.agents/skills/pdf/SKILL.md', scope: 'project', source: 'agents' },
     ],
   });
   await act(async () => root.render(<I18nProvider><IntegrationsCatalogView /></I18nProvider>));
@@ -210,7 +210,7 @@ test('a same-named skill outside the catalog folder does not count as installed'
   await act(async () => useSkillsStore.setState({
     skills: [
       ...useSkillsStore.getState().skills,
-      { name: 'pdf', path: '/home/user/.config/opencode/skills/pdf/SKILL.md', scope: 'user', source: 'opencode' },
+      { id: 'pdf', name: 'pdf', path: '/home/user/.config/opencode/skills/pdf/SKILL.md', scope: 'user', source: 'opencode' },
     ],
   }));
   expect(railText().includes('Installed1')).toBe(true);

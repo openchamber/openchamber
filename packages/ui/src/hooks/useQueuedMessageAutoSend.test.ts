@@ -245,7 +245,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, '/repo');
 
     expect(payload).not.toBeNull();
     expect(payload?.queuedMessageId).toBe('queued-1');
@@ -269,7 +269,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, '/repo');
 
     expect(payload).not.toBeNull();
     expect(payload?.agentMentionName).toBe('Builder');
@@ -307,7 +307,7 @@ describe('buildQueuedAutoSendPayload', () => {
       },
     ];
 
-    const payload = buildQueuedAutoSendPayload(queue);
+    const payload = buildQueuedAutoSendPayload(queue, '/repo');
 
     expect(payload).not.toBeNull();
     expect(payload?.queuedMessageId).toBe('queued-attachments');
@@ -335,7 +335,7 @@ describe('buildQueuedAutoSendPayload', () => {
         createdAt: 1,
         attachments: [attachment],
       },
-    ]);
+    ], '/repo');
 
     expect(payload).not.toBeNull();
     expect(payload?.historySubmissions).toEqual([
@@ -385,7 +385,7 @@ describe('buildQueuedAutoSendPayload', () => {
         text: 'queued message',
         createdAt: 1,
       },
-    ]);
+    ], '/repo');
 
     expect(payload).not.toBeNull();
     await sendQueuedAutoSendPayload({

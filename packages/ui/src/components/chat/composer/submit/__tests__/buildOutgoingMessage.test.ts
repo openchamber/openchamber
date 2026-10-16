@@ -463,7 +463,7 @@ describe('capturing composer context for the queue', () => {
                 { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7', context: 'pr-diff' },
                 { kind: 'linear-issue', identifier: 'ENG-12', title: 'Login', url: 'https://linear.app/x/issue/ENG-12', contextText: 'linear' },
             ],
-        }), 'use: deploy');
+        }), { text: 'use: deploy', skills: [{ id: 'deploy', name: 'deploy' }] });
 
         expect(context.map((part) => part.kind)).toEqual(['context', 'synthetic', 'context', 'context', 'context', 'instruction']);
         expect(context[0]?.kind).toBe('context');
@@ -475,7 +475,8 @@ describe('capturing composer context for the queue', () => {
             text: 'pr-diff',
             metadata: { [CONTEXT_METADATA_KEY]: { kind: 'change-request', provider: 'github', number: 7, title: 'PR', url: 'https://x/pr/7' } },
         });
-        expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy' });
+        // The ids ride along so delivery can check the skills again.
+        expect(context.at(-1)).toEqual({ kind: 'instruction', text: 'use: deploy', skills: [{ id: 'deploy', name: 'deploy' }] });
     });
 
     test('a message queued with instructions before they were dropped still delivers them first', () => {
@@ -498,7 +499,7 @@ describe('capturing composer context for the queue', () => {
         });
         // The skill instruction is the one intended difference: a direct send
         // attaches the skill to the prompt, a queued one carries the instruction.
-        const captured: QueuedContextPart[] = buildComposerContext(input, 'use: deploy');
+        const captured: QueuedContextPart[] = buildComposerContext(input, { text: 'use: deploy', skills: [{ id: 'deploy', name: 'deploy' }] });
         const direct = buildOutgoingMessage({ ...input, queued: [], composerText: 'use /deploy', composerAttachments: [] }, deps());
         expect(queuedContextToParts(captured)).toEqual([...direct.additionalParts, { text: 'use: deploy', synthetic: true }]);
         expect(direct.skillNames).toEqual(['deploy']);

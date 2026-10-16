@@ -1,6 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { skillTokenFor } from '@/stores/skillAvailability';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -9,6 +10,7 @@ import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 import { rankSkillAutocompleteItems } from './skillAutocompleteItems';
 
 interface SkillInfo {
+  id: string;
   name: string;
   scope: string;
   source?: string;
@@ -21,7 +23,8 @@ export interface SkillAutocompleteHandle {
 
 interface SkillAutocompleteProps {
   searchQuery: string;
-  onSkillSelect: (skillName: string) => void;
+  /** Receives the token to insert: the skill's name, or its id when another skill shares the name. */
+  onSkillSelect: (skillToken: string) => void;
   onClose: () => void;
   style?: React.CSSProperties;
 }
@@ -43,7 +46,8 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   // Skills of the directory the composer sends to (session directory, or the
   // Chats root for a chat draft), not of the project the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
-  const skills = useSkillsStore((s) => selectSkillsForDirectory(s, effectiveDirectory));
+  // Only skills agents can use: a switched-off skill is not offered.
+  const skills = useSkillsStore((s) => selectAvailableSkillsForDirectory(s, effectiveDirectory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
 
   React.useEffect(() => {
@@ -110,11 +114,11 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         const safeIndex = ((selectedIndexRef.current % filteredSkills.length) + filteredSkills.length) % filteredSkills.length;
         const skill = filteredSkills[safeIndex];
         if (skill) {
-          onSkillSelect(skill.name);
+          onSkillSelect(skillTokenFor(skills, skill));
         }
       }
     },
-  }), [filteredSkills, onSkillSelect, onClose]);
+  }), [filteredSkills, skills, onSkillSelect, onClose]);
 
   const renderSkill = (skill: SkillInfo, index: number) => {
     const isProject = skill.scope === 'project';
@@ -122,7 +126,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
     return (
       <AutocompleteRowTooltip description={skill.description} active={!isMobile && index === selectedIndex}>
       <div
-        key={`${skill.name}-${skill.scope}`}
+        key={skill.id}
         ref={(el) => {
           itemRefs.current[index] = el;
         }}
@@ -131,7 +135,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
             isMobile ? 'items-center' : 'items-start',
           index === selectedIndex && 'bg-interactive-selection'
         )}
-        onClick={() => onSkillSelect(skill.name)}
+        onClick={() => onSkillSelect(skillTokenFor(skills, skill))}
         onMouseMove={() => {
           keyboardNavigationRef.current = false;
           setSelectedIndex(index);
@@ -140,6 +144,9 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="font-semibold truncate">{skill.name}</span>
+            {skillTokenFor(skills, skill) !== skill.name ? (
+              <span className="typography-micro text-muted-foreground truncate" dir="ltr">{skill.id}</span>
+            ) : null}
             <span className={cn(
               "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0 transition-colors",
               isProject 

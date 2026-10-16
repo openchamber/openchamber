@@ -298,6 +298,8 @@ const getRequestHeaders = (input?: RequestInfo | URL, init?: RequestInit): Recor
   return { ...headersFromRequest, ...headersFromInit };
 };
 
+const skillPolicyReplySchema = z.object({ status: z.number().int(), body: z.json() });
+
 const getRequestDirectoryHint = (url: URL, input?: RequestInfo | URL, init?: RequestInit): string | undefined => {
   const queryDirectory = url.searchParams.get('directory') || undefined;
   if (queryDirectory) return queryDirectory;
@@ -862,6 +864,19 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
+  // Per-skill switch: the host answers the status and body the web route would.
+  if (pathname === '/api/config/skill-policy' && method === 'PUT') {
+    const body = await extractJsonBody(input, init, method);
+    const directory = getRequestDirectoryHint(url, input, init);
+    try {
+      const reply = skillPolicyReplySchema.parse(await sendBridgeMessage('api:config/skill-policy', { body, directory }));
+      return new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ ok: false, error: { code: 'write_failed', message } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   // Skills file operations: /api/config/skills/:name/files/:filePath
   const skillsFilesMatch = pathname.match(/^\/api\/config\/skills\/([^/]+)\/files\/(.+)$/);
   if (skillsFilesMatch) {
@@ -869,12 +884,17 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const filePath = decodeURIComponent(skillsFilesMatch[2]);
     const verb = method;
     const body = await extractJsonBody(input, init, method);
+    // `?id=` selects the skill by OpenCode id; the host reads it as `skillId`.
+    const skillId = url.searchParams.get('id') ?? undefined;
+    const directory = getRequestDirectoryHint(url, input, init);
     try {
-      const data = await sendBridgeMessage('api:config/skills/files', { 
-        method: verb, 
-        name, 
-        filePath, 
-        content: body.content 
+      const data = await sendBridgeMessage('api:config/skills/files', {
+        method: verb,
+        name,
+        filePath,
+        content: body.content,
+        directory,
+        skillId,
       });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
@@ -933,8 +953,9 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
 
   // Skills CRUD: /api/config/skills/:name or /api/config/skills
   if (pathname === '/api/config/skills') {
+    const directory = getRequestDirectoryHint(url, input, init);
     try {
-      const data = await sendBridgeMessage('api:config/skills', { method: 'GET' });
+      const data = await sendBridgeMessage('api:config/skills', { method: 'GET', directory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -947,8 +968,13 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     const name = decodeURIComponent(encodedName);
     const verb = method;
     const body = await extractJsonBody(input, init, method);
+    const skillId = url.searchParams.get('id') ?? undefined;
+    // The located delete's `scope` and `source`; the host validates them.
+    const scope = url.searchParams.get('scope') ?? undefined;
+    const source = url.searchParams.get('source') ?? undefined;
+    const directory = getRequestDirectoryHint(url, input, init);
     try {
-      const data = await sendBridgeMessage('api:config/skills', { method: verb, name, body });
+      const data = await sendBridgeMessage('api:config/skills', { method: verb, name, body, directory, skillId, scope, source });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
