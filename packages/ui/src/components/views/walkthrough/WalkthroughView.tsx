@@ -1,3 +1,4 @@
+import { isIMECompositionEvent } from '@/lib/ime';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,12 @@ import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { cn } from '@/lib/utils';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { DiffFindBar } from '@/components/views/diffFind/DiffFindBar';
+import { useDiffFind, type DiffFindLayout } from '@/components/views/diffFind/useDiffFind';
+import type { DiffFindMatch } from '@/lib/diff/diffFind';
+import type { DiffFindWordRequest, PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
+import { buildFindSources, enumerateFindRuns, UNCOVERED_STOP_ID } from './walkthroughFind';
 import { WalkthroughBlocker } from './WalkthroughBlocker';
 import { WALKTHROUGH_ACTION_CLASS } from './walkthroughAction';
 import { WalkthroughStages } from './WalkthroughStages';
@@ -203,6 +210,7 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
   // top-to-bottom, so `dynamic` resolves to inline here rather than guessing
   // from the window width.
   const renderSideBySide = diffLayoutPreference === 'side-by-side';
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
   const requestedTarget = useWalkthroughStore((state) => state.getRequestedTarget(directory));
   const clearRequestedTarget = useWalkthroughStore((state) => state.clearRequestedTarget);
@@ -438,6 +446,163 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
     },
     [activeStopId, handleSelectStop, view]
   );
+
+  // ----- Find in walkthrough -----
+  // Every run is a search source: one file's consecutive hunks inside one stop.
+  // Two stops that touch one file are two runs with two keys, so their partial
+  // diffs never collide. The hook parses a run lazily, so a closed bar costs
+  // nothing; the layout is part of the source set, so a toggle re-runs matching.
+  const findRuns = useMemo(() => (view ? enumerateFindRuns(view) : []), [view]);
+  const findLayout: DiffFindLayout = renderSideBySide ? 'side-by-side' : 'inline';
+  const findSources = useMemo(() => buildFindSources(findRuns, findLayout), [findLayout, findRuns]);
+  const diffFind = useDiffFind({ sources: findSources });
+
+  const findRunByKey = useMemo(() => new Map(findRuns.map((run) => [run.key, run])), [findRuns]);
+  const findMatchesByRun = useMemo(() => {
+    const map = new Map<string, DiffFindMatch[]>();
+    for (const match of diffFind.matches) {
+      const list = map.get(match.filePath);
+      if (list) list.push(match);
+      else map.set(match.filePath, [match]);
+    }
+    return map;
+  }, [diffFind.matches]);
+
+  const findViewerRefsRef = useRef(new Map<string, PierreDiffViewerHandle>());
+  // Latest find state for the viewer ref callbacks, which fire outside render.
+  const findStateRef = useRef<{
+    isOpen: boolean;
+    currentMatch: DiffFindMatch | null;
+    matchesByRun: ReadonlyMap<string, DiffFindMatch[]>;
+  }>({ isOpen: false, currentMatch: null, matchesByRun: new Map() });
+  findStateRef.current = { isOpen: diffFind.isOpen, currentMatch: diffFind.currentMatch, matchesByRun: findMatchesByRun };
+
+  // Only the run holding the active match is highlighted; every other run clears.
+  const applyFindHighlights = useCallback((key: string, handle: PierreDiffViewerHandle) => {
+    const state = findStateRef.current;
+    const current = state.currentMatch;
+    if (!state.isOpen || !current || current.filePath !== key) {
+      handle.setFindHighlights([], 0);
+      return;
+    }
+    const list = state.matchesByRun.get(key) ?? [];
+    handle.setFindHighlights(list, list.indexOf(current));
+  }, []);
+
+  const registerFindViewerRef = useCallback((key: string, handle: PierreDiffViewerHandle | null) => {
+    if (handle) {
+      findViewerRefsRef.current.set(key, handle);
+      // A viewer that mounts while the bar is closed has nothing to clear.
+      if (findStateRef.current.isOpen) applyFindHighlights(key, handle);
+    } else {
+      findViewerRefsRef.current.delete(key);
+    }
+  }, [applyFindHighlights]);
+
+  useEffect(() => {
+    for (const [key, handle] of findViewerRefsRef.current) applyFindHighlights(key, handle);
+  }, [applyFindHighlights, diffFind.currentIndex, diffFind.isOpen, diffFind.matches]);
+
+  // Moving the active match: bring its stop into view through the existing
+  // stop-level scroll, then ask that run's viewer to center the line. The viewer
+  // may not be mounted or renderable yet, so the line scroll retries on frames.
+  const lastFindKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!diffFind.isOpen) {
+      lastFindKeyRef.current = null;
+      return;
+    }
+    const current = diffFind.currentMatch;
+    if (!current) {
+      lastFindKeyRef.current = null;
+      return;
+    }
+    const key = `${diffFind.currentIndex}:${current.filePath}:${current.side}:${current.lineNumber}:${current.spanStart}`;
+    if (lastFindKeyRef.current === key) return;
+    lastFindKeyRef.current = key;
+
+    const run = findRunByKey.get(current.filePath);
+    // The uncovered tail is addressable like a stop, but it is not one: scroll
+    // to it without touching the active/visited stop state.
+    if (run) {
+      if (run.stopId === UNCOVERED_STOP_ID) setScrollToStopId(UNCOVERED_STOP_ID);
+      else handleSelectStop(run.stopId);
+    }
+
+    let attempts = 0;
+    let frame: number | null = null;
+    let cancelled = false;
+    const tryScroll = () => {
+      frame = null;
+      if (cancelled) return;
+      const handle = findViewerRefsRef.current.get(current.filePath);
+      if (handle?.scrollToLine({ lineNumber: current.lineNumber, side: current.side, align: 'center' })) return;
+      attempts += 1;
+      if (attempts < 30) frame = window.requestAnimationFrame(tryScroll);
+    };
+    frame = window.requestAnimationFrame(tryScroll);
+    return () => {
+      cancelled = true;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [diffFind.currentIndex, diffFind.currentMatch, diffFind.isOpen, findRunByKey, handleSelectStop]);
+
+  // mod+f opens the bar only while the walkthrough surface holds focus (or was
+  // last pressed inside it); Escape closes. The editor and chat keep their own.
+  const lastPressedInsideRef = useRef(false);
+  const { isOpen: findOpen, open: openFind, close: closeFind } = diffFind;
+  // Bumped on every find-shortcut hit, open or already open, so pressing it
+  // again re-focuses and re-selects the query (same contract as the bar).
+  const [findFocusNonce, setFindFocusNonce] = useState(0);
+  const { openWithQuery } = diffFind;
+  // A modifier-click on a word opens find on that word, anchored to the clicked
+  // match so the jump lands on the *next* occurrence (wrapping). The anchor's
+  // filePath is the run key — the identity the sources are keyed by — not the
+  // file path, which would resolve to nothing and fall back to the first match.
+  const handleFindWordRequest = useCallback((runKey: string, request: DiffFindWordRequest) => {
+    openWithQuery(request.word, { filePath: runKey, lineNumber: request.lineNumber, spanStart: request.spanStart });
+    setFindFocusNonce((nonce) => nonce + 1);
+  }, [openWithQuery]);
+  useEffect(() => {
+    if (!visible) return;
+    const combo = getEffectiveShortcutCombo('find_in_file', shortcutOverrides);
+    const onPointerDown = (event: PointerEvent) => {
+      // SAFETY: a pointer event target inside the document is a Node.
+      lastPressedInsideRef.current = Boolean(rootRef.current?.contains(event.target as Node));
+    };
+    const onKeyDownCapture = (event: KeyboardEvent) => {
+      // Escape is claimed in the capture phase, before the zone frame's React
+      // capture handler (zoneEscape.ts) turns it into "close the panel". React
+      // attaches that handler to the root container — below `window` — then
+      // stops native propagation, so a bubble handler here never sees the key.
+      if (!findOpen || event.key !== 'Escape') return;
+      if (event.defaultPrevented || isIMECompositionEvent(event)) return;
+      // SAFETY: a keydown target inside the document is a Node.
+      if (!rootRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeFind();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (!eventMatchesShortcut(event, combo)) return;
+      const root = rootRef.current;
+      const focused = document.activeElement;
+      const unfocused = !focused || focused === document.body;
+      if (!root || (unfocused ? !lastPressedInsideRef.current : !root.contains(focused))) return;
+      event.preventDefault();
+      openFind();
+      setFindFocusNonce((nonce) => nonce + 1);
+    };
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDownCapture, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDownCapture, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [closeFind, findOpen, openFind, shortcutOverrides, visible]);
 
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
@@ -994,15 +1159,32 @@ export const WalkthroughView = ({ directory: rootDirectory, visible = true }: Wa
                 />
               </>
             )}
-            <WalkthroughStream
-              view={view}
-              activeStopId={activeStopId}
-              scrollToStopId={scrollToStopId}
-              onActiveStopChange={handleActiveStopChange}
-              onScrollHandled={() => setScrollToStopId(null)}
-              renderSideBySide={renderSideBySide}
-              wrapLines={wrapLines}
-            />
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              {diffFind.isOpen && (
+                <DiffFindBar
+                  query={diffFind.query}
+                  onQueryChange={diffFind.setQuery}
+                  total={diffFind.matches.length}
+                  currentIndex={diffFind.currentIndex}
+                  isSearching={diffFind.isSearching}
+                  onNext={diffFind.next}
+                  onPrevious={diffFind.previous}
+                  onClose={diffFind.close}
+                  focusNonce={findFocusNonce}
+                />
+              )}
+              <WalkthroughStream
+                view={view}
+                activeStopId={activeStopId}
+                scrollToStopId={scrollToStopId}
+                onActiveStopChange={handleActiveStopChange}
+                onScrollHandled={() => setScrollToStopId(null)}
+                renderSideBySide={renderSideBySide}
+                wrapLines={wrapLines}
+                registerFindViewerRef={registerFindViewerRef}
+                onFindWordRequest={handleFindWordRequest}
+              />
+            </div>
           </>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">

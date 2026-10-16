@@ -9,7 +9,9 @@ import type { WalkthroughStopView, WalkthroughView } from '@/lib/walkthrough/mod
 import type { WalkthroughHunk, WalkthroughStopImportance } from '@/lib/walkthrough/types';
 import { cn } from '@/lib/utils';
 import { WalkthroughHunkRun } from './WalkthroughHunkRun';
+import { findRunKey, UNCOVERED_STOP_ID } from './walkthroughFind';
 import { stopElementId } from './stopElementId';
+import type { DiffFindWordRequest, PierreDiffViewerHandle } from '@/components/views/PierreDiffViewer';
 
 interface WalkthroughStreamProps {
   view: WalkthroughView;
@@ -19,6 +21,10 @@ interface WalkthroughStreamProps {
   onScrollHandled: () => void;
   renderSideBySide: boolean;
   wrapLines: boolean;
+  /** Find-in-walkthrough: register each stop run's rendered viewer handle. */
+  registerFindViewerRef?: (runKey: string, handle: PierreDiffViewerHandle | null) => void;
+  /** Find-in-walkthrough: a modifier-click on a word, tagged with its run. */
+  onFindWordRequest?: (runKey: string, request: DiffFindWordRequest) => void;
 }
 
 // Importance says where to spend attention, not what is wrong: a stop is marked
@@ -91,13 +97,19 @@ const FileHeader = ({ path }: { path: string }) => (
 );
 
 const HunkRuns = ({
+  stopId,
   hunks,
   renderSideBySide,
   wrapLines,
+  registerFindViewerRef,
+  onFindWordRequest,
 }: {
+  stopId: string;
   hunks: WalkthroughHunk[];
   renderSideBySide: boolean;
   wrapLines: boolean;
+  registerFindViewerRef?: (runKey: string, handle: PierreDiffViewerHandle | null) => void;
+  onFindWordRequest?: (runKey: string, request: DiffFindWordRequest) => void;
 }) => {
   const runs = useMemo(() => groupHunksByFile(hunks), [hunks]);
 
@@ -111,6 +123,9 @@ const HunkRuns = ({
             hunks={run.hunks}
             renderSideBySide={renderSideBySide}
             wrapLines={wrapLines}
+            runKey={findRunKey(stopId, index, run.hunks)}
+            registerFindViewerRef={registerFindViewerRef}
+            onFindWordRequest={onFindWordRequest}
           />
         </div>
       ))}
@@ -131,6 +146,8 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   onScrollHandled,
   renderSideBySide,
   wrapLines,
+  registerFindViewerRef,
+  onFindWordRequest,
 }: WalkthroughStreamProps) {
   const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -142,6 +159,12 @@ export const WalkthroughStream = memo(function WalkthroughStream({
   // sidebar showing step 5 while the stream shows step 6.
   const navigatingRef = useRef<string | null>(null);
   const navigationTimerRef = useRef<number | null>(null);
+
+  // Jumping into the uncovered tail has to open it first: its runs are not
+  // mounted while collapsed, so there would be no viewer to scroll inside.
+  useEffect(() => {
+    if (scrollToStopId === UNCOVERED_STOP_ID) setUncoveredOpen(true);
+  }, [scrollToStopId]);
 
   useEffect(() => () => {
     if (navigationTimerRef.current !== null) window.clearTimeout(navigationTimerRef.current);
@@ -236,9 +259,12 @@ export const WalkthroughStream = memo(function WalkthroughStream({
           <StopHeader stopView={stopView} />
           {stopView.hunks.length > 0 ? (
             <HunkRuns
+              stopId={stopView.stop.id}
               hunks={stopView.hunks}
               renderSideBySide={renderSideBySide}
               wrapLines={wrapLines}
+              registerFindViewerRef={registerFindViewerRef}
+              onFindWordRequest={onFindWordRequest}
             />
           ) : (
             <p className="typography-meta px-4 pb-4 text-muted-foreground">
@@ -249,7 +275,7 @@ export const WalkthroughStream = memo(function WalkthroughStream({
       ))}
 
       {view.uncoveredHunks.length > 0 && (
-        <section className="border-b border-border/60">
+        <section id={stopElementId(UNCOVERED_STOP_ID)} className="border-b border-border/60">
           <Button
             type="button"
             variant="ghost"
@@ -276,6 +302,9 @@ export const WalkthroughStream = memo(function WalkthroughStream({
                   hunks={run.hunks}
                   renderSideBySide={renderSideBySide}
                   wrapLines={wrapLines}
+                  runKey={findRunKey(UNCOVERED_STOP_ID, index, run.hunks)}
+                  registerFindViewerRef={registerFindViewerRef}
+                  onFindWordRequest={onFindWordRequest}
                 />
               </div>
             ))}
