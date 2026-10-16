@@ -4,6 +4,12 @@ One directory per Settings page. `shared/` holds the page chrome and controls
 every page is built from; see `.agents/skills/settings-ui-patterns/SKILL.md` for
 which primitive to reach for.
 
+General places `openchamber/DesktopCliSettings` immediately after OpenCode CLI.
+It manages the native macOS/Linux command through local-page-gated desktop IPC,
+with status and manual register/uninstall actions. It is not a server preference
+and adds no settings-registry field. Its `general.desktop-cli` search target has
+the same local desktop and platform guards as the rendered section.
+
 ## Autosave on the OpenCode configuration pages
 
 `agents/`, `commands/`, `skills/`, `mcp/`, `plugins/` and `behavior/` edit files

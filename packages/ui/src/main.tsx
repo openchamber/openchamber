@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './styles/fonts'
 import './styles/katex-css'
 import './index.css'
-import App from './App.tsx'
-import { SessionAuthGate } from './components/auth/SessionAuthGate'
+import { AppRoot } from './AppRoot'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import './lib/debug'
@@ -69,9 +68,7 @@ createRoot(rootElement).render(
     <I18nProvider>
       <ThemeSystemProvider>
         <ThemeProvider>
-          <SessionAuthGate>
-            <App apis={runtimeAPIs} />
-          </SessionAuthGate>
+          <AppRoot apis={runtimeAPIs} />
         </ThemeProvider>
       </ThemeSystemProvider>
     </I18nProvider>

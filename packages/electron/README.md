@@ -122,6 +122,9 @@ IPC results if its endpoint changes while the read is pending.
 | `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles |
 | `main.mjs` | Electron main process, app lifecycle, windows, menus, deep links, native IPC handlers, updates, local server startup |
+| `desktop-cli.mjs` | Manual macOS/Linux command registration, status and uninstall; preserves user commands and maintains the app's private launcher after moves |
+| `desktop-launch.mjs` | Desktop-owned private launcher location and native project-open argument shared by startup and command registration |
+| `project-open.mjs` | Validates absolute local directory launch arguments and queues distinct project-open requests |
 | `electron-host-probe.mjs` | Chromium direct-host probes, identity checks, attempt deadlines, and response cleanup |
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
@@ -144,6 +147,62 @@ IPC results if its endpoint changes while the read is pending.
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
 ## Development
+
+### Terminal project opening
+
+Packaged macOS and Linux launches maintain a private shell launcher at
+`<OpenChamber data directory>/desktop/chamber`. It needs no Node.js install.
+Startup never creates a public command or edits shell configuration. Settings >
+General > Chamber CLI, immediately below OpenCode CLI, shows command status
+and offers Register command and Uninstall command on the local desktop instance.
+Web, VS Code, mobile and Windows do not show this section. Development builds
+show unsupported rather than registering the generic Electron executable.
+
+Registration runs only on a button click, as the logged-in user, and creates a
+public `chamber` link only when no such name exists on PATH or in the
+interactive shell. Existing files and dangling links are preserved. The `.deb`
+and `.rpm` installer scripts leave system CLI links alone.
+
+Registration creates `~/.local/bin/chamber`. Command discovery uses the original
+login-shell PATH, before the backend adds its bundled OpenCode directory to
+the app's process PATH, with AppImage launcher directories removed. An unavailable
+shell PATH reports an error instead of using the app's PATH. When the user bin is absent from the shell PATH,
+registration appends a marked PATH entry for zsh, bash, fish, or POSIX login
+shells. The directory goes after existing PATH entries, so existing commands
+keep their lookup order. Open a new terminal afterwards. Other shells need that directory added
+to PATH manually. The app refreshes only its own private
+launcher, so a moved AppImage is repaired on its next GUI launch.
+
+Manual registration records the public link in
+`<OpenChamber data directory>/desktop/chamber-command.json`, so uninstall can find it
+after PATH changes. Native code serializes registration and uninstall, and
+checks link ownership again before deleting. User commands and replacements
+are never removed. Earlier test builds' managed links still on PATH or in
+`~/.local/bin` are recognized without a record. Uninstall retains the private
+launcher and the shared user-bin PATH entry, which
+may also serve other tools. Relaunching does not register an uninstalled command.
+The former desktop `openchamber` link, its private launcher, and its registration
+record are left untouched. An earlier test build's `chamber` link pointing to
+the former private launcher remains recognizable for manual uninstall, including
+when its record uses the former `command.json` path. Version 1 records remain
+readable for this case, but their PATH configuration flag is not trusted. The
+separate Web CLI keeps its `openchamber` name. Status reads and startup do not
+relocate or register commands.
+
+The desktop-owned command accepts `chamber [directory]`; no directory opens
+the app. The separately installed `openchamber` Web CLI retains its original
+argument parsing, server commands, and no-argument `serve` behavior. Desktop
+project opening belongs to `chamber`. Updating Desktop does not update a
+separately installed CLI.
+
+The desktop launcher passes one absolute `--openchamber-project=` argument through the
+single-instance handoff. A directory launch starts on Local regardless of the
+saved default host. Pending requests are available only to the main window's
+trusted page, stay queued across runtime switches and renderer reloads, and are
+acknowledged after project settings are saved and a project chat draft is open.
+The renderer waits for the local settings snapshot before adding projects.
+An existing project is reused; the command does not create a worktree or send
+a prompt. CLI requests do not add a URL/deep-link handler for local paths.
 
 ### Direct-host probe invariants
 
@@ -230,11 +289,11 @@ That runs, in order:
 2. `prepare:opencode-cli` to download/cache the pinned OpenCode CLI and copy it into `packages/electron/resources/opencode-cli`.
 3. `bundle:main` to create `packages/electron/dist-bundle/{entry,main,early-startup}.mjs`.
 4. `rebuild:native` to rebuild native modules for Electron.
-5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog.
+5. `package.mjs` to compile the SDK and run `electron-builder`; its `afterPack` hook stages the compiled macOS icon asset catalog. SDK compilation also runs when calling this script directly, so packaging does not depend on installation scripts having run.
 
 Build output goes to `packages/electron/dist`.
 
-Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, or the unpacked git helpers are missing.
+Electron Builder copies the `@openchamber/web` workspace package whole, ignoring its `files` field, so `build.files` in `package.json` excludes what the packaged runtime never loads: the web package's `dist` (packaged builds serve `Resources/web-dist` through `OPENCHAMBER_DIST_DIR`), its `src`, configs, tests and stray tarballs; TypeScript sources, source maps and Markdown other than licenses from every dependency; `bun-pty`, which only the Bun runtime imports; luxon builds other than `build/node` (CommonJS, for cron-parser) and `build/es6` (ESM, for the server); and `node-pty` prebuilds other than `${platform}-${arch}` (the Electron-rebuilt `build/Release` binary loads first; `${platform}` is the build host, which matches the target because `rebuild:native` already builds for the host OS). Keep these exclusions in the top-level `files`: Electron Builder treats a platform-level `files` list as its own file set, and one holding only exclusions copies the whole package directory into the archive. The `afterPack` hook then reads the `app.asar` header (`scripts/packaged-app-contents.cjs`) and fails the build when anything outside `node_modules` other than the bundled main files, `preload.mjs` and `package.json` is packed, when the web `dist` is packed, or when the bundled main files, the web server entry and manifest, the SDK manifest and compiled public entries (`dist/index.js`, `dist/schemas.js`, `dist/ui/index.js`), or the unpacked git helpers are missing.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage, a `.deb` and an `.rpm` for the native x64 or arm64 host; the `.rpm` needs `rpmbuild` on the build host.
 

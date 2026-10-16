@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const WEB_PACKAGE = 'node_modules/@openchamber/web';
+const SDK_PACKAGE = 'node_modules/@openchamber/sdk';
 
 // Packaged builds serve the UI from Resources/web-dist (OPENCHAMBER_DIST_DIR),
 // so the web package's own build output is dead weight inside the archive.
@@ -26,6 +27,11 @@ const REQUIRED_FILES = [
   // server/index.js reads the version from the package manifest.
   `${WEB_PACKAGE}/package.json`,
   `${WEB_PACKAGE}/server/index.js`,
+  // The server uses built SDK files; UI source aliases cannot replace these runtime entries.
+  `${SDK_PACKAGE}/package.json`,
+  `${SDK_PACKAGE}/dist/index.js`,
+  `${SDK_PACKAGE}/dist/schemas.js`,
+  `${SDK_PACKAGE}/dist/ui/index.js`,
 ];
 
 // Run by git and ssh as separate processes, so they must exist on disk.
@@ -66,6 +72,7 @@ const readAsarFiles = (asarPath) => {
   }
 };
 
+/** Check archive runtime entries and native helpers, and stop packaging if any are missing. */
 const findPackagedAppContentProblems = (files) => {
   const byPath = new Map(files.map((file) => [file.path, file]));
   const problems = [];

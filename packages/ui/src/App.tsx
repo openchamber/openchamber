@@ -201,6 +201,7 @@ type AppProps = {
   apis: RuntimeAPIs;
 };
 
+/** Mount the shared UI after authentication and compatibility checks pass. */
 function App({ apis }: AppProps) {
   React.useEffect(() => {
     markStartupTrace('App:mounted');

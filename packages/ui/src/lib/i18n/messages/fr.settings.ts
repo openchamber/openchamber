@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2599,4 +2600,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} est de nouveau activé',
   'settings.agents.sidebar.toast.disableFailed': 'Impossible de désactiver l’agent : son fichier de configuration n’a pas pu être écrit',
   'settings.agents.sidebar.toast.enableFailed': 'Impossible d’activer l’agent : son fichier de configuration n’a pas pu être écrit',
+  ...desktopCliI18n['fr'],
 } as const;

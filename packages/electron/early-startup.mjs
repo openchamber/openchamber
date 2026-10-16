@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
 import { isSplashColor } from './remote-page-policy.mjs';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
+import { PROJECT_OPEN_ARG } from './desktop-launch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
@@ -519,6 +520,7 @@ export const wasEarlyWindowClosed = () => earlyWindowClosed;
 
 // Creates and shows the main window on the splash. Called from the entry
 // module the moment Electron is ready; `main.mjs` adopts it later.
+/** Show the startup window first; a directory launch selects Local instead of restoring the default remote instance. */
 export const createEarlyWindow = () => {
   nativeTheme.themeSource = readThemeSource();
   if (shouldUsePackagedUi()) registerPackagedUiScheme();
@@ -526,7 +528,9 @@ export const createEarlyWindow = () => {
   const browserWindow = new BrowserWindow(buildMainWindowOptions({
     bounds,
     backgroundColor: resolveSplashBackgroundColor(),
-    additionalArguments: buildRendererAdditionalArguments(),
+    additionalArguments: buildRendererAdditionalArguments({
+      explicitRuntime: process.argv.some((arg) => arg.startsWith(PROJECT_OPEN_ARG)),
+    }),
   }));
   recordEarlyStartupMark('electron.window.created');
   if (maximized) browserWindow.maximize();

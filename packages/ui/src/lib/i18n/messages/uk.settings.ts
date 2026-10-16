@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2599,4 +2600,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} знову увімкнено',
   'settings.agents.sidebar.toast.disableFailed': 'Не вдалося вимкнути агента: не вийшло записати його конфіг',
   'settings.agents.sidebar.toast.enableFailed': 'Не вдалося увімкнути агента: не вийшло записати його конфіг',
+  ...desktopCliI18n['uk'],
 } as const;

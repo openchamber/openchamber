@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2589,4 +2590,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} is weer ingeschakeld',
   'settings.agents.sidebar.toast.disableFailed': 'De agent kon niet worden uitgeschakeld: het configuratiebestand kon niet worden geschreven',
   'settings.agents.sidebar.toast.enableFailed': 'De agent kon niet worden ingeschakeld: het configuratiebestand kon niet worden geschreven',
+  ...desktopCliI18n['nl'],
 } as const;

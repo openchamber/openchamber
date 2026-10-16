@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2600,4 +2601,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} jest znowu włączony',
   'settings.agents.sidebar.toast.disableFailed': 'Nie udało się wyłączyć agenta: nie można zapisać jego pliku konfiguracji',
   'settings.agents.sidebar.toast.enableFailed': 'Nie udało się włączyć agenta: nie można zapisać jego pliku konfiguracji',
+  ...desktopCliI18n['pl'],
 };

@@ -6,16 +6,21 @@ const { test } = require('node:test');
 const { readAsarFiles, findPackagedAppContentProblems } = require('./packaged-app-contents.cjs');
 
 const web = 'node_modules/@openchamber/web';
+const sdk = 'node_modules/@openchamber/sdk';
+const sdkFiles = ['package.json', 'dist/index.js', 'dist/schemas.js', 'dist/ui/index.js']
+  .map((filePath) => `${sdk}/${filePath}`);
 const helpers = [
   `${web}/server/lib/git/credential-helper.js`,
   `${web}/server/lib/git/ssh-wrapper.js`,
   `${web}/server/lib/git/repository-credential-helper.js`,
 ];
 
+/** A complete package includes the desktop entry, backend, and SDK Node runtime entries. */
 const completeApp = () => [
   ...['dist-bundle/entry.mjs', 'dist-bundle/main.mjs', 'dist-bundle/early-startup.mjs', 'preload.mjs', 'package.json'],
   `${web}/package.json`,
   `${web}/server/index.js`,
+  ...sdkFiles,
 ].map((filePath) => ({ path: filePath, unpacked: false }))
   .concat(helpers.map((filePath) => ({ path: filePath, unpacked: true })));
 
@@ -33,6 +38,13 @@ const writeAsar = (directory, header) => {
 
 test('a complete app has no problems', () => {
   assert.deepEqual(findPackagedAppContentProblems(completeApp()), []);
+});
+
+test('a missing SDK manifest or runtime entry is reported', () => {
+  for (const missing of sdkFiles) {
+    const files = completeApp().filter((file) => file.path !== missing);
+    assert.deepEqual(findPackagedAppContentProblems(files), [`${missing} is missing`]);
+  }
 });
 
 test('the web build output inside the archive is rejected', () => {

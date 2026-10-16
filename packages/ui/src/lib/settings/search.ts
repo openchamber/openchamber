@@ -703,6 +703,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
+    id: 'general.desktop-cli',
+    page: 'general',
+    titleKey: 'settings.desktopCli.title',
+    descriptionKey: 'settings.desktopCli.info',
+    keywords: ['chamber', 'openchamber', 'cli', 'command', 'terminal', 'path', 'register', 'uninstall'],
+    isAvailable: (ctx) => ctx.isDesktop && ctx.isDesktopLocalOrigin && (ctx.isMac || ctx.isLinux),
+  },
+  {
     id: 'sessions.opencode-restart',
     page: 'general',
     titleKey: 'settings.openchamber.opencodeCli.actions.restart',

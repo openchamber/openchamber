@@ -907,6 +907,21 @@ VS Code intentionally has no managed Chats mode. It neither reads nor writes the
 
 ### Remembering the last draft target
 
+Desktop terminal directory launches enter through `hooks/useDesktopProjectOpen`.
+`main.tsx` mounts the listener outside the authentication and compatibility
+gates, so a remote instance's login, connection error, or recovery screen cannot
+block a local directory request.
+The native queue owns the request until the main window confirms it. The hook
+first selects the native local endpoint, waits for an authoritative
+project-settings snapshot, then reuses `useProjectsStore.addProject`
+and awaits settings persistence before closing the settings dialog and calling
+`openNewSessionDraft` with an explicit project target. Runtime changes leave
+unfinished requests queued. The explicit
+draft clears the last-session pointer, so a late launch-restore result cannot
+replace it. This entry is absent on web, VS Code, hosted mobile, and Capacitor.
+Project registration does not wait for OpenCode catalogs: an invalid config in
+the previously selected project must not block opening a different directory.
+
 `session-ui-store.ts` persists the side of the composer's target selector the user last worked on under `oc.chatInput.lastDraftTarget`, so a plain new session reopens there instead of always landing on Chat. The record holds a project id, a directory, and `target`, which is `"chat"`, `"project"`, or `null`.
 
 `null` is what a record written before `target` existed reads as, and it leaves the Chat default in place rather than guessing a side from the directory. A recorded project that no longer exists falls back to Chat the same way. Only a picker choice writes `"chat"` or `"project"`.

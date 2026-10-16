@@ -93,9 +93,14 @@ import {
 } from './linux-app-discovery.mjs';
 import {
   readLinuxAutostartEnabled,
+  resolveLinuxLaunchExecutable,
   setLinuxAutostartEnabled,
 } from './linux-autostart.mjs';
+import { PROJECT_OPEN_ARG } from './desktop-launch.mjs';
+import { stripAppImageLauncherEnv } from '@openchamber/web/server/lib/inherited-env.js';
 import { reconcileAppImageDesktopEntry } from './linux-desktop-entry.mjs';
+import { getDesktopCommandStatus, prepareDesktopLauncher, registerDesktopCommand, unregisterDesktopCommand } from './desktop-cli.mjs';
+import { enqueueProjectOpenArguments } from './project-open.mjs';
 import { unsupportedAppSpecificOpenError, validateLocalPath } from './path-open-utils.mjs';
 import {
   browserPanelPermissionAuditDetails,
@@ -1960,6 +1965,7 @@ const setTaskbarProgress = (value) => {
 };
 
 const pendingDeepLinks = [];
+const pendingProjectOpens = [];
 const PENDING_SESSION_LINK_FALLBACK_MS = 10_000;
 
 // Hands the main window's renderer the session links that arrived before it
@@ -2551,6 +2557,7 @@ const canUseTitleBarOverlay = (browserWindow) => (
 
 // `adopt` hands over the window the entry module created before this module
 // loaded; it is already on the splash and shows itself on ready-to-show.
+/** Create or adopt a native window while preserving its per-window runtime configuration. */
 const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, adopt = null }) => {
   const { bounds, maximized } = adopt
     ? { bounds: null, maximized: adopt.maximized }
@@ -2572,7 +2579,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       requestHeaders: desktopRequestHeaders,
       bootOutcome: state.bootOutcome || null,
       relayHostId: rendererRuntimeConfig.relayHostId || '',
-      explicitRuntime: runtimeConfig.explicitRuntime === true,
+      explicitRuntime: runtimeConfig.explicitRuntime === true || (label === 'main' && pendingProjectOpens.length > 0),
       trayEnabled: isMacMenuBarEnabled(),
     }),
   }));
@@ -2934,10 +2941,21 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   return state.mainWindow;
 };
 
+/** Open the main window, selecting Local for directory requests and the default instance otherwise. */
 const openMainWindow = async () => {
   if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  }
+
+  if (pendingProjectOpens.length > 0 && state.sidecarUrl) {
+    const url = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.localUiUrl || state.sidecarUrl);
+    return activateMainWindow(url, state.localOrigin, { target: 'local', status: 'ok', localAvailable: true }, {
+      apiBaseUrl: state.sidecarUrl,
+      clientToken: readDesktopLocalClientToken(),
+      requestHeaders: {},
+      explicitRuntime: true,
+    });
   }
 
   const config = readDesktopHostsConfig();
@@ -3355,6 +3373,7 @@ const isPlainLocalBoot = () => {
   return !defaultHostId || defaultHostId === LOCAL_HOST_ID;
 };
 
+/** Select the local runtime for directory launches and keep the existing instance selection for ordinary launches. */
 const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
   const hmrApiPort = process.env.OPENCHAMBER_HMR_API_PORT || '3901';
   const hmrUiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5173';
@@ -3402,6 +3421,11 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
   let clientToken = localUrl ? readDesktopLocalClientToken() : '';
   let requestHeaders = {};
   let remoteProbe = null;
+
+  if (pendingProjectOpens.length > 0) {
+    if (!localUrl) throw new Error('Opening a local project requires the local OpenChamber server.');
+    return { initialUrl, localOrigin, localUiUrl, bootOutcome: { target: 'local', status: 'ok', localAvailable }, apiBaseUrl, clientToken, requestHeaders };
+  }
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
   let config = readDesktopHostsConfig();
@@ -4330,8 +4354,28 @@ const closeAllDevTunnels = () => {
   pending.then((client) => client.closeAll()).catch(() => {});
 };
 
+/** Handle an IPC request after native origin checks, restricting access to per-window data. */
 const handleInvoke = async (browserWindow, command, args = {}) => {
   switch (command) {
+    case 'desktop_cli_status':
+    case 'desktop_cli_register':
+    case 'desktop_cli_unregister': {
+      if (!app.isPackaged || !['darwin', 'linux'].includes(process.platform)) return { state: 'unsupported' };
+      const shellEnv = await startShellEnvironmentProbe();
+      if (!shellEnv?.PATH) throw new Error('Cannot read the user shell PATH for command registration.');
+      // Main determines every path; the page can only request status, registration, or removal.
+      const options = {
+        platform: process.platform,
+        // The backend adds its bundled CLI to process.env.PATH; command management uses the original login shell PATH.
+        env: stripAppImageLauncherEnv({ ...process.env, ...shellEnv }),
+        homeDir: os.homedir(),
+        dataDir: path.dirname(settingsFilePath()),
+        executablePath: process.platform === 'linux' ? resolveLinuxLaunchExecutable() : process.execPath,
+      };
+      if (command === 'desktop_cli_register') return registerDesktopCommand(options);
+      if (command === 'desktop_cli_unregister') return unregisterDesktopCommand(options);
+      return getDesktopCommandStatus(options);
+    }
     // The page says whether Cmd/Ctrl+W has a tab of its own to close (a file
     // open in Files). The menu decides in this process, so a page that never
     // reports one, older or remote, keeps closing the window as before.
@@ -5411,6 +5455,24 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (!browserWindow || !state.mainWindow || browserWindow.id !== state.mainWindow.id) return [];
       return takePendingSessionDeepLinks();
 
+    case 'desktop_pending_project_opens':
+      // Only the trusted main window receives directories and local credentials; reading keeps pending requests queued.
+      if (!browserWindow || browserWindow.id !== state.mainWindow?.id || pendingProjectOpens.length === 0) return null;
+      if (!state.sidecarUrl) throw new Error('The local OpenChamber server is unavailable.');
+      return {
+        apiBaseUrl: state.sidecarUrl,
+        clientToken: readDesktopLocalClientToken(),
+        requests: pendingProjectOpens.slice(),
+      };
+
+    case 'desktop_complete_project_open': {
+      if (!browserWindow || browserWindow.id !== state.mainWindow?.id) return false;
+      const index = pendingProjectOpens.findIndex((request) => request.id === args.id);
+      if (index < 0) return false;
+      pendingProjectOpens.splice(index, 1);
+      return true;
+    }
+
     case 'desktop_open_host_session': {
       const runtimeKey = readTrimmedString(args.runtimeKey);
       const sessionId = readTrimmedString(args.sessionId);
@@ -6222,8 +6284,25 @@ const handleOpenUrl = (url) => {
   }
 };
 
+/** Keep directory requests until the local UI confirms completion; remote pages cannot read local directories. */
+const handleProjectOpenLaunch = async (argv) => {
+  if (!await enqueueProjectOpenArguments(pendingProjectOpens, argv)) return false;
+  if (!state.startupResolved) return true;
+  if (!state.mainWindow || state.mainWindow.isDestroyed()) await openMainWindow();
+  if (!isLocalSender(state.mainWindow.webContents)) {
+    await switchToHostById(LOCAL_HOST_ID);
+  }
+  if (state.mainWindow.isMinimized()) state.mainWindow.restore();
+  state.mainWindow.show();
+  state.mainWindow.focus();
+  emitToWindow(state.mainWindow, 'openchamber:project-open-ready');
+  return true;
+};
+
 app.on('second-instance', (_event, argv) => {
-  handleSecondInstance(argv);
+  void handleProjectOpenLaunch(argv).then((handled) => {
+    if (!handled) handleSecondInstance(argv);
+  }).catch((error) => dialog.showErrorBox('OpenChamber', error.message));
 });
 
 app.on('open-url', (event, url) => {
@@ -6234,10 +6313,15 @@ app.on('open-url', (event, url) => {
 // Events the entry module buffered while this module was loading. Replayed
 // once startup has resolved, so a deep link that arrives with the launch
 // cannot start a second backend resolution next to the one in progress.
+/** Replay native events after startup, processing directory requests through the same queue. */
 const replayDeferredAppEvents = () => {
   for (const event of takeDeferredAppEvents()) {
     if (event.type === 'open-url') handleOpenUrl(event.url);
-    else if (event.type === 'second-instance') handleSecondInstance(event.argv);
+    else if (event.type === 'second-instance') {
+      void handleProjectOpenLaunch(event.argv).then((handled) => {
+        if (!handled) handleSecondInstance(event.argv);
+      }).catch((error) => dialog.showErrorBox('OpenChamber', error.message));
+    }
   }
 };
 
@@ -6280,12 +6364,25 @@ app.whenReady().then(async () => {
   // renderer's navigation callbacks, and importing the server module graph
   // blocks it for a few hundred milliseconds.
   const mainWindowShown = isBackgroundStart ? null : showMainWindowWithSplash();
+  try {
+    await enqueueProjectOpenArguments(pendingProjectOpens, process.argv);
+  } catch (error) {
+    dialog.showErrorBox('OpenChamber', error.message);
+  }
+  if (app.isPackaged && (process.platform === 'darwin' || process.platform === 'linux')) {
+    // Startup maintains only the private launcher; it does not register a public command or change PATH or shell configuration.
+    void inheritUserShellEnv().then(() => prepareDesktopLauncher({
+      platform: process.platform,
+      dataDir: path.dirname(settingsFilePath()),
+      executablePath: process.platform === 'linux' ? resolveLinuxLaunchExecutable() : process.execPath,
+    })).catch((error) => log.warn('[electron] private desktop launcher preparation failed', error.message));
+  }
   log.info('[electron] app starting', {
     version: APP_VERSION,
     packaged: app.isPackaged,
     platform: process.platform,
     arch: process.arch,
-    argv: process.argv,
+    argv: process.argv.map((arg) => arg.startsWith(PROJECT_OPEN_ARG) ? `${PROJECT_OPEN_ARG}[redacted]` : arg),
     isBackgroundStart,
     loginItemSettings,
   });

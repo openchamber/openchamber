@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2599,4 +2600,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '已重新启用 {name}',
   'settings.agents.sidebar.toast.disableFailed': '无法停用代理：无法写入其配置文件',
   'settings.agents.sidebar.toast.enableFailed': '无法启用代理：无法写入其配置文件',
+  ...desktopCliI18n['zh-CN'],
 } as const;

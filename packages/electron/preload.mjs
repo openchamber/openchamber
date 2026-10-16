@@ -203,6 +203,8 @@ const desktopBridge = {
 };
 
 if (isLocalPage) {
+  // Only trusted pages can request local directories; remote pages do not receive this bridge method.
+  desktopBridge.pendingProjectOpens = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pending_project_opens', {});
   desktopBridge.pickThemeFile = () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {});
   desktopBridge.relayDevTunnelListen = (handler) => {
     relayDevTunnelHandler = typeof handler === 'function' ? handler : null;

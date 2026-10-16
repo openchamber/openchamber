@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
 
 const env = { ...process.env };
@@ -30,6 +31,22 @@ if (process.platform === 'linux' && !builderArgs.some((argument) => (
 ))) {
   builderArgs.push(`--${targetArchitecture.electronBuilder}`);
 }
+
+// Build the SDK before packaging so workspaces that skipped install scripts still contain the Node runtime files.
+const sdkBuild = spawnSync(bunBinary, ['run', 'build'], {
+  cwd: fileURLToPath(new URL('../../sdk/', import.meta.url)),
+  env,
+  stdio: 'inherit',
+});
+if (sdkBuild.error) {
+  console.error('[electron] failed to build SDK:', sdkBuild.error);
+  process.exit(1);
+}
+if (sdkBuild.signal) {
+  process.kill(process.pid, sdkBuild.signal);
+  process.exit(1);
+}
+if (sdkBuild.status !== 0) process.exit(sdkBuild.status ?? 1);
 
 const child = spawn(bunBinary, ['x', 'electron-builder', ...builderArgs], {
   env,

@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2599,4 +2600,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} を再び有効にしました',
   'settings.agents.sidebar.toast.disableFailed': 'エージェントを無効にできませんでした。設定ファイルに書き込めませんでした',
   'settings.agents.sidebar.toast.enableFailed': 'エージェントを有効にできませんでした。設定ファイルに書き込めませんでした',
+  ...desktopCliI18n['ja'],
 } as const;

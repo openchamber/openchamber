@@ -46,6 +46,7 @@ export type DesktopWindowControlsStyle = 'classic' | 'traffic-lights';
 export type { DesktopSettings } from '@/lib/settings/registry';
 
 type DesktopBridgeGlobal = {
+  pendingProjectOpens?: () => Promise<PendingDesktopProjectOpens>;
   pickThemeFile?: () => Promise<unknown>;
   invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
   openDialog?: (options: Record<string, unknown>) => Promise<unknown>;
@@ -528,6 +529,60 @@ const pendingSessionLinksSchema = z.array(z.object({
 }));
 
 type PendingDesktopSessionLink = { sessionId: string; messageId: string | null };
+
+const pendingProjectOpensSchema = z.object({
+  apiBaseUrl: z.url(),
+  clientToken: z.string(),
+  requests: z.array(z.object({ id: z.string().uuid(), directory: z.string().min(1) })),
+}).nullable();
+
+type PendingDesktopProjectOpens = z.infer<typeof pendingProjectOpensSchema>;
+
+/** Read the main window's pending directory requests; the native boundary restricts local paths and credentials. */
+export const getPendingDesktopProjectOpens = async () => {
+  if (!isDesktopShell()) return null;
+  const readPending = getDesktopBridge()?.pendingProjectOpens;
+  if (!readPending) return null;
+  return pendingProjectOpensSchema.parse(await readPending());
+};
+
+/** Confirm a request after saving the project and opening its draft; unconfirmed requests survive reconnects. */
+export const completeDesktopProjectOpen = async (id: string): Promise<void> => {
+  await invokeDesktop('desktop_complete_project_open', { id });
+};
+
+const desktopCliStatusSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('unsupported') }),
+  z.object({ state: z.literal('missing') }),
+  z.object({ state: z.literal('external'), path: z.string().nullable() }),
+  z.object({ state: z.literal('installed'), path: z.string(), requiresPath: z.boolean() }),
+]);
+
+export type DesktopCliStatus = z.infer<typeof desktopCliStatusSchema>;
+
+/** Offer command management only on local macOS and Linux desktop runtimes. */
+export const canManageDesktopCli = (): boolean => (
+  isDesktopShell() && isDesktopLocalOriginActive()
+  && ['darwin', 'linux'].includes(getElectronPlatform() ?? '')
+);
+
+/** Parse command status at the native boundary; a failed read is not treated as unregistered. */
+export const getDesktopCliStatus = async (): Promise<DesktopCliStatus> => {
+  if (!canManageDesktopCli()) return { state: 'unsupported' };
+  return desktopCliStatusSchema.parse(await invokeDesktop('desktop_cli_status'));
+};
+
+/** Ask the main process to register the command after a click; native logic protects existing user commands. */
+export const registerDesktopCli = async (): Promise<DesktopCliStatus> => {
+  if (!canManageDesktopCli()) return { state: 'unsupported' };
+  return desktopCliStatusSchema.parse(await invokeDesktop('desktop_cli_register'));
+};
+
+/** Request removal only for the app-owned command; the page cannot choose a path to delete. */
+export const unregisterDesktopCli = async (): Promise<DesktopCliStatus> => {
+  if (!canManageDesktopCli()) return { state: 'unsupported' };
+  return desktopCliStatusSchema.parse(await invokeDesktop('desktop_cli_unregister'));
+};
 
 /**
  * Session links (`openchamber://session/...`) that reached the desktop app

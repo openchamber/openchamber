@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2576,4 +2577,5 @@ export const settingsDict = {
   ...extensionCatalogI18n.he,
   ...guestIntegrationsI18n.he,
   ...extensionsSettingsI18n.he,
+  ...desktopCliI18n['he'],
 } as const;

@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2599,4 +2600,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name}을(를) 다시 활성화했습니다',
   'settings.agents.sidebar.toast.disableFailed': '에이전트를 비활성화하지 못했습니다. 설정 파일에 쓸 수 없습니다',
   'settings.agents.sidebar.toast.enableFailed': '에이전트를 활성화하지 못했습니다. 설정 파일에 쓸 수 없습니다',
+  ...desktopCliI18n['ko'],
 } as const;

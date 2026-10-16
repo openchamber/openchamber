@@ -1,3 +1,4 @@
+import { desktopCliI18n } from './desktop-cli.i18n';
 import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
@@ -2590,4 +2591,5 @@ export const settingsDict = {
   'settings.agents.sidebar.toast.agentEnabled': '{name} yeniden etkin',
   'settings.agents.sidebar.toast.disableFailed': 'Ajan devre dışı bırakılamadı: yapılandırma dosyası yazılamadı',
   'settings.agents.sidebar.toast.enableFailed': 'Ajan etkinleştirilemedi: yapılandırma dosyası yazılamadı',
+  ...desktopCliI18n['tr'],
 };
