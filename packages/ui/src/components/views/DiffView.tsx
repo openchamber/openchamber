@@ -1,3 +1,5 @@
+import { isForeignEditableFocus } from '@/components/views/diffFind/findShortcutClaim';
+import { isIMECompositionEvent } from '@/lib/ime';
 import React from 'react';
 
 import { useUIStore, type PendingDiffScope } from '@/stores/useUIStore';
@@ -41,7 +43,7 @@ import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
-import { PierreDiffViewer, type ContextExpansionRequest, type DiffHunkActions } from './PierreDiffViewer';
+import { PierreDiffViewer, type ContextExpansionRequest, type DiffFindWordRequest, type DiffHunkActions, type PierreDiffViewerHandle } from './PierreDiffViewer';
 import { HunkActions, type HunkBusyState, type HunkDiffAction } from './git/HunkActions';
 import { describeChange } from './git/changeStatus';
 import {
@@ -78,6 +80,10 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { getFirstChangedModifiedLineFromPatch } from './diffPatchUtils';
 import { parseDiffFromFile, type FileDiffMetadata } from '@pierre/diffs';
 import { useRepositoryBinding } from '@/lib/source-control/repository-binding';
+import type { DiffFindMatch } from '@/lib/diff/diffFind';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
+import { DiffFindBar } from './diffFind/DiffFindBar';
+import { resolveFindDiff, useDiffFind, type DiffFindSource } from './diffFind/useDiffFind';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -207,6 +213,21 @@ const createTextDiffDataFromPatch = (filePath: string, patch: string, contextMod
         fileDiff: fileDiffFromPatch(filePath, patch),
         contextMode,
     };
+};
+
+/**
+ * Searchable metadata for a file from either a patch-backed diff (its
+ * `fileDiff` is already parsed) or a turn payload's full contents (parsed here).
+ * Binary and submodule entries have no lines to search and resolve to null.
+ */
+const diffDataToFileDiff = (
+    filePath: string,
+    data: { original: string; modified: string; isBinary?: boolean; submodule?: GitSubmoduleState | null; fileDiff?: FileDiffMetadata },
+): FileDiffMetadata | null => {
+    if (data.fileDiff) return data.fileDiff;
+    if (data.isBinary || data.submodule) return null;
+    if (!data.original && !data.modified) return null;
+    return parseDiffFromFile({ name: filePath, contents: data.original }, { name: filePath, contents: data.modified });
 };
 
 const formatDiffTotals = (
@@ -563,6 +584,10 @@ interface InlineDiffViewerProps {
   onExpandContextRequest?: (request: ContextExpansionRequest) => void;
   pendingContextExpansion?: ContextExpansionRequest | null;
   contextLoading?: boolean;
+  /** Find-in-diff handle for this file's rendered diff. */
+  viewerRef?: React.Ref<PierreDiffViewerHandle>;
+  /** Reports a primary-modifier word click so the owner can open find on it. */
+  onFindWordRequest?: (request: DiffFindWordRequest) => void;
 }
 
 const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
@@ -576,6 +601,8 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
   onExpandContextRequest,
   pendingContextExpansion,
   contextLoading,
+  viewerRef,
+  onFindWordRequest,
 }) => {
   const language = React.useMemo(
     () => getLanguageFromExtension(filePath) || 'text',
@@ -603,6 +630,7 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
   return (
     <div className="w-full" style={{ contain: 'layout' }}>
       <PierreDiffViewer
+        ref={viewerRef}
         original={diff.original}
         modified={diff.modified}
         fileDiff={diff.fileDiff}
@@ -616,6 +644,7 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
         onExpandContextRequest={onExpandContextRequest}
         pendingContextExpansion={pendingContextExpansion}
         contextLoading={contextLoading}
+        onFindWordRequest={onFindWordRequest}
       />
     </div>
   );
@@ -660,6 +689,10 @@ interface MultiFileDiffEntryProps {
      * still shows.
      */
     contentRevision?: number;
+    /** Find-in-diff: register this file's rendered viewer handle. */
+    registerViewerRef?: (path: string, handle: PierreDiffViewerHandle | null) => void;
+    /** Reports a primary-modifier word click on `path` so the owner can open find on it. */
+    onFindWordRequest?: (path: string, request: DiffFindWordRequest) => void;
 }
 
 export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -687,6 +720,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     readOnlyActions = false,
     hunkActionsEnabled = false,
     contentRevision = 0,
+    registerViewerRef,
+    onFindWordRequest,
 }) => {
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
@@ -767,6 +802,16 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         sectionRef.current = node;
         registerSectionRef(file.path, node);
     }, [file.path, registerSectionRef]);
+
+    const setViewerRef = React.useCallback((handle: PierreDiffViewerHandle | null) => {
+        registerViewerRef?.(file.path, handle);
+    }, [file.path, registerViewerRef]);
+
+    // Stable per file, so the memoized viewer is not re-rendered by a new
+    // closure on every parent render; `onFindWordRequest` itself is stable.
+    const handleFindWordRequest = React.useCallback((request: DiffFindWordRequest) => {
+        onFindWordRequest?.(file.path, request);
+    }, [file.path, onFindWordRequest]);
 
     const handleOpenChange = React.useCallback((open: boolean) => {
         onExpandedChange(file.path, open);
@@ -1171,6 +1216,8 @@ export const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 onExpandContextRequest={canLoadFullFile ? setContextExpansion : undefined}
                                 pendingContextExpansion={contextExpansion}
                                 contextLoading={contextExpansion !== null && diffData.contextMode !== 'full' && !diffLoadFailure}
+                                viewerRef={setViewerRef}
+                                onFindWordRequest={handleFindWordRequest}
                             />
                         </>
                     ) : null}
@@ -1267,6 +1314,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const setDiffHideWhitespace = useUIStore((state) => state.setDiffHideWhitespace);
     const diffFileListMode = useUIStore((state) => state.diffFileListMode);
     const setDiffFileListMode = useUIStore((state) => state.setDiffFileListMode);
+    const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const sessionMessages = useSessionMessages(activeDiffScope === 'turn' ? currentSessionId ?? '' : '', rootDirectory ?? undefined);
@@ -1281,7 +1329,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const showWalkthroughAction = activeDiffScope !== 'turn' && !isMobileLayout && !isVSCodeRuntime();
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
+    const diffRootRef = React.useRef<HTMLDivElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());
+    const viewerRefsRef = React.useRef(new Map<string, PierreDiffViewerHandle | null>());
     const pendingScrollTargetRef = React.useRef<string | null>(null);
     const pendingScrollFrameRef = React.useRef<number | null>(null);
     const shouldPinAfterAlignRef = React.useRef(false);
@@ -1974,6 +2024,15 @@ export const DiffView: React.FC<DiffViewProps> = ({
         return true;
     }, []);
 
+    // Which side of a file's diff is showing: the scope can force it, otherwise
+    // only the file the user opened on the staged side is staged.
+    const getFileStaged = React.useCallback((path: string) => {
+        if (forcedStaged !== null) {
+            return forcedStaged;
+        }
+        return displayFileStaged && path === displayFile;
+    }, [displayFile, displayFileStaged, forcedStaged]);
+
     React.useEffect(() => {
         const target = pendingScrollTargetRef.current;
         if (!visible || !target) return;
@@ -2165,6 +2224,218 @@ export const DiffView: React.FC<DiffViewProps> = ({
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [displayFile, handleSelectFileAndScroll, isTreeMode, navigationFiles, treeSelectedFile, visible]);
 
+    // ----- Find in diff -----
+    // Files the bar can search. `load` mirrors the viewer's own read: a range
+    // scope reads a file's patch through the same fetchComparisonDiffEntry the
+    // expanded entries use (that call does not write into the range cache, so an
+    // unexpanded file the bar read is fetched again when it is later expanded —
+    // reported, not papered over); the local scopes read the viewer's per-side
+    // diff (see loadFileDiffForFind).
+    const loadFileDiffForFind = React.useCallback(async (filePath: string): Promise<FileDiffMetadata | null> => {
+        if (activeDiffScope === 'turn') {
+            const data = lastTurnDiffData.get(filePath);
+            return resolveFindDiff(data ? diffDataToFileDiff(filePath, data) : null, diffHideWhitespace);
+        }
+        if (activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr') {
+            const entry = comparisonDiffData.get(filePath);
+            if (entry?.status === 'ready') {
+                return resolveFindDiff(diffDataToFileDiff(filePath, entry.data), diffHideWhitespace);
+            }
+            // Reserved or failed: the range cache owns this read; do not duplicate it.
+            if (entry) return null;
+            const result = await fetchComparisonDiffEntry(filePath);
+            return result.status === 'ready'
+                ? resolveFindDiff(diffDataToFileDiff(filePath, result.data), diffHideWhitespace)
+                : null;
+        }
+        if (!effectiveDirectory) return null;
+        // Search exactly the side the viewer renders. `getGitDiff` reads the
+        // unstaged (index -> working tree) side when `staged` is false and the
+        // staged (HEAD -> index) side when it is true — the same read the viewer
+        // does. `getGitFileDiff`'s unstaged read is the combined HEAD -> working
+        // tree diff, a different side, so it must not be searched here. Nothing
+        // is written to the shared diffCache, which holds `getGitFileDiff`
+        // output for the viewer's fallback and the prefetcher.
+        const staged = getFileStaged(filePath);
+        const response = await git.getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
+        const next = { ...createTextDiffDataFromPatch(filePath, response.diff, 'full'), submodule: response.submodule };
+        return resolveFindDiff(diffDataToFileDiff(filePath, next), diffHideWhitespace);
+    }, [activeDiffScope, comparisonDiffData, diffHideWhitespace, effectiveDirectory, fetchComparisonDiffEntry, getFileStaged, git, lastTurnDiffData]);
+
+    // `diffFindSources` must stay identity-stable across renders, so `load`
+    // reads the latest reader through this ref instead of capturing it.
+    const loadFileDiffForFindRef = React.useRef(loadFileDiffForFind);
+    loadFileDiffForFindRef.current = loadFileDiffForFind;
+
+    // `revision` is what the hook re-reads on: hiding whitespace changes the
+    // rendered diff, the side (staged vs working) changes which content is
+    // searched, a live diff's refresh signal moves with an edit, and a range
+    // file moving absent -> loading -> ready changes where its data comes from.
+    // Layout is deliberately excluded. The range map is read through a
+    // scope-gated handle so a non-range scope (where the range cache hands back
+    // a fresh empty Map each render) keeps `sources` identity-stable.
+    const findRangeEntries = activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
+        ? comparisonDiffData
+        : null;
+    // The local read path (all/working/staged) resolves a per-file side; the
+    // range and turn paths ignore it. Gating the side token on this keeps range
+    // `sources` identity-stable when the selected file moves.
+    const findUsesLocalRead = activeDiffScope === 'all' || activeDiffScope === 'working' || activeDiffScope === 'staged';
+    const diffFindSources = React.useMemo<DiffFindSource[]>(
+        () => changedFiles.map((file) => ({
+            filePath: file.path,
+            layout: getLayoutForFile(file),
+            revision: `${diffHideWhitespace ? 'hide' : 'show'}|${findRangeEntries
+                ? findRangeEntries.get(file.path)?.status ?? 'absent'
+                : findUsesLocalRead
+                    ? `${getFileStaged(file.path) ? 'staged' : 'unstaged'}:${workingTreeRevision + (fileDiffRefreshNonce.get(file.path) ?? 0)}`
+                    : 'local'}`,
+            load: () => loadFileDiffForFindRef.current(file.path),
+        })),
+        [changedFiles, diffHideWhitespace, fileDiffRefreshNonce, findRangeEntries, findUsesLocalRead, getFileStaged, getLayoutForFile, workingTreeRevision],
+    );
+
+    const diffFind = useDiffFind({ sources: diffFindSources });
+    const { open: openFind, close: closeFind, isOpen: isFindOpen, openWithQuery: openFindWithQuery } = diffFind;
+    // Bumped on every find-shortcut press; the bar re-selects its query on it.
+    const [findFocusNonce, setFindFocusNonce] = React.useState(0);
+
+    // A Cmd/Ctrl-click on a word opens find on that word and jumps past the
+    // clicked occurrence. Stable so the memoized entries keep their identity.
+    const handleFindWordRequest = React.useCallback((path: string, request: DiffFindWordRequest) => {
+        openFindWithQuery(request.word, { filePath: path, lineNumber: request.lineNumber, spanStart: request.spanStart });
+        setFindFocusNonce((nonce) => nonce + 1);
+    }, [openFindWithQuery]);
+    const findFileMatches = React.useMemo(() => {
+        const map = new Map<string, DiffFindMatch[]>();
+        for (const match of diffFind.matches) {
+            const list = map.get(match.filePath);
+            if (list) list.push(match);
+            else map.set(match.filePath, [match]);
+        }
+        return map;
+    }, [diffFind.matches]);
+
+    // Latest find state for the viewer ref callbacks, which fire outside render.
+    const findStateRef = React.useRef<{ isOpen: boolean; currentMatch: DiffFindMatch | null; fileMatches: ReadonlyMap<string, DiffFindMatch[]> }>({
+        isOpen: false,
+        currentMatch: null,
+        fileMatches: new Map(),
+    });
+    findStateRef.current = { isOpen: diffFind.isOpen, currentMatch: diffFind.currentMatch, fileMatches: findFileMatches };
+
+    const applyFindHighlights = React.useCallback((path: string, handle: PierreDiffViewerHandle) => {
+        const state = findStateRef.current;
+        const current = state.currentMatch;
+        if (!state.isOpen || !current || current.filePath !== path) {
+            handle.setFindHighlights([], 0);
+            return;
+        }
+        const list = state.fileMatches.get(path) ?? [];
+        handle.setFindHighlights(list, list.indexOf(current));
+    }, []);
+
+    const registerViewerRef = React.useCallback((path: string, handle: PierreDiffViewerHandle | null) => {
+        if (handle) {
+            viewerRefsRef.current.set(path, handle);
+            applyFindHighlights(path, handle);
+        } else {
+            viewerRefsRef.current.delete(path);
+        }
+    }, [applyFindHighlights]);
+
+    // Only the active file is highlighted; the rest are cleared.
+    React.useEffect(() => {
+        for (const [path, handle] of viewerRefsRef.current) {
+            if (handle) applyFindHighlights(path, handle);
+        }
+    }, [applyFindHighlights, diffFind.currentIndex, diffFind.isOpen, diffFind.matches]);
+
+    // Moving the active match: expand the file, bring it into view, then ask its
+    // viewer to scroll the line. The viewer may not be mounted yet, so the line
+    // scroll retries until its handle appears.
+    const lastFindScrollKeyRef = React.useRef<string | null>(null);
+    React.useEffect(() => {
+        if (!diffFind.isOpen) {
+            lastFindScrollKeyRef.current = null;
+            return;
+        }
+        const current = diffFind.currentMatch;
+        if (!current) {
+            lastFindScrollKeyRef.current = null;
+            return;
+        }
+        const key = `${diffFind.currentIndex}:${current.filePath}:${current.side}:${current.lineNumber}:${current.spanStart}`;
+        if (lastFindScrollKeyRef.current === key) return;
+        lastFindScrollKeyRef.current = key;
+
+        if (isTreeMode) setDisplayFile(current.filePath);
+        expandStackedFile(current.filePath);
+        scrollToFile(current.filePath);
+
+        let attempts = 0;
+        let frame: number | null = null;
+        let cancelled = false;
+        const tryScroll = () => {
+            frame = null;
+            if (cancelled) return;
+            const handle = viewerRefsRef.current.get(current.filePath);
+            if (handle?.scrollToLine({ lineNumber: current.lineNumber, side: current.side, align: 'center' })) return;
+            attempts += 1;
+            if (attempts < 30) frame = window.requestAnimationFrame(tryScroll);
+        };
+        frame = window.requestAnimationFrame(tryScroll);
+        return () => {
+            cancelled = true;
+            if (frame !== null) window.cancelAnimationFrame(frame);
+        };
+    }, [diffFind.currentIndex, diffFind.currentMatch, diffFind.isOpen, expandStackedFile, isTreeMode, scrollToFile]);
+
+    // mod+f opens the bar for the active diff surface; Escape closes it. The
+    // shortcut is claimed unless another surface's editable control holds focus
+    // (a file editor, the chat composer), so those keep their own Cmd/Ctrl+F.
+    // `visible` is the app's "this panel is the active surface" signal.
+    React.useEffect(() => {
+        if (!visible) return;
+        const combo = getEffectiveShortcutCombo('find_in_file', shortcutOverrides);
+        // Escape is claimed in the capture phase. The zone frame closes itself on
+        // Escape from a React capture handler (zoneEscape.ts), and React attaches
+        // that handler to the root container — below `window` — then stops native
+        // propagation, so a bubble handler on `window` never sees the key. A
+        // native capture listener on `window` runs before the root container, so
+        // it can preventDefault (the zone bails on `defaultPrevented`) and
+        // stopPropagation (the zone never runs) while the bar is open.
+        const onKeyDownCapture = (event: KeyboardEvent) => {
+            if (!isFindOpen || event.key !== 'Escape') return;
+            if (event.defaultPrevented || isIMECompositionEvent(event)) return;
+            // Claim only when nothing else holds Escape: the keydown lands in the
+            // diff, or no element owns focus at all. A focused element outside the
+            // diff (a popover, menu or dialog input) keeps its own Escape.
+            // SAFETY: a keydown target inside the document is a Node.
+            const target = event.target as Node;
+            const active = document.activeElement;
+            const nothingHoldsFocus = !active || active === document.body;
+            if (!diffRootRef.current?.contains(target) && !nothingHoldsFocus) return;
+            event.preventDefault();
+            event.stopPropagation();
+            closeFind();
+        };
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.defaultPrevented) return;
+            if (!eventMatchesShortcut(event, combo)) return;
+            if (isForeignEditableFocus(document.activeElement, diffRootRef.current)) return;
+            event.preventDefault();
+            openFind();
+            setFindFocusNonce((nonce) => nonce + 1);
+        };
+        window.addEventListener('keydown', onKeyDownCapture, true);
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.removeEventListener('keydown', onKeyDownCapture, true);
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }, [closeFind, isFindOpen, openFind, shortcutOverrides, visible]);
+
     // The header toggle picks the layout for every diff from now on: it writes
     // the Appearance setting and drops the per-file choices.
     const handleHeaderLayoutChange = React.useCallback((mode: DiffViewMode) => {
@@ -2256,6 +2527,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 onSelect={handleSelectFile}
                 onExpandedChange={handleStackedEntryExpandedChange}
                 registerSectionRef={registerSectionRef}
+                registerViewerRef={registerViewerRef}
+                onFindWordRequest={handleFindWordRequest}
                 showOpenInEditorAction={showOpenInEditorAction && activeDiffScope !== 'turn'}
                 isOpeningInEditor={openingEditorFilePath === file.path}
                 onOpenInEditor={(filePath, diffData) => {
@@ -2277,14 +2550,6 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 }
             />
         );
-
-
-        const getFileStaged = (path: string) => {
-            if (forcedStaged !== null) {
-                return forcedStaged;
-            }
-            return displayFileStaged && path === displayFile;
-        };
 
         return (
             <div ref={fileTreeLayoutRef} className={cn('flex min-w-0 flex-1 min-h-0 h-full', flushContent ? 'gap-0' : 'gap-3 px-3 pb-3 pt-2')}>
@@ -2331,6 +2596,19 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     </section>
                 )}
                 <div className="relative flex-1 min-w-0 min-h-0 h-full">
+                    {diffFind.isOpen && (
+                        <DiffFindBar
+                            query={diffFind.query}
+                            onQueryChange={diffFind.setQuery}
+                            total={diffFind.matches.length}
+                            currentIndex={diffFind.currentIndex}
+                            isSearching={diffFind.isSearching}
+                            onNext={diffFind.next}
+                            onPrevious={diffFind.previous}
+                            onClose={diffFind.close}
+                            focusNonce={findFocusNonce}
+                        />
+                    )}
                     <ScrollableOverlay
                         ref={diffScrollRef}
                         outerClassName="min-h-0 h-full"
@@ -2478,7 +2756,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     };
 
     return (
-        <div className="flex h-full flex-col overflow-hidden bg-background">
+        <div ref={diffRootRef} className="flex h-full flex-col overflow-hidden bg-background">
             <ContextPanelHeaderToolbar>
             <div ref={toolbarRef} className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'px-3 py-2 bg-background')}>
                 {rootIsGitRepo === false && Array.isArray(nestedRepoOptions) && nestedRepoOptions.length > 0 ? (
