@@ -69,7 +69,8 @@ there.
 ## Board
 
 `components/sourceBoard` is a full page over the chat area, opened from the
-sidebar header (desktop and web, and the phone shell's menu; not VS Code). It
+sidebar header (desktop and web, and the phone shell's menu; not VS Code). A
+git project's menu in the sidebar opens it on that project's repository. It
 uses `useReferenceBrowser` and the shared parts without checkboxes; the
 preview's footer holds actions instead of what the agent gets.
 

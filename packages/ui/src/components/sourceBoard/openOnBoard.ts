@@ -20,6 +20,11 @@ type BoardTarget =
     | { source: 'repository'; kind: GitHubReferenceKind }
     | { source: 'linear'; identifier: string };
 
+const openBoard = (mobile: ReturnType<typeof useMobileAppActions>) => {
+    if (mobile) mobile.openSourceBoard();
+    else useUIStore.getState().setSourceBoardOpen(true);
+};
+
 /** What a link names, as the board lists it; null for anything else. */
 export const boardTargetOfUrl = (url: string): BoardTarget | null => {
     const linear = url.match(LINEAR_ISSUE_URL);
@@ -77,10 +82,23 @@ export function useShowOnBoard() {
             // The link itself is the search: it finds that one item, in its own repository.
             board.focusRepositoryItem(project.id, target.kind, url);
         }
-        if (mobile) mobile.openSourceBoard();
-        else useUIStore.getState().setSourceBoardOpen(true);
+        openBoard(mobile);
         return true;
     }, [linear, mobile]);
+}
+
+/**
+ * Opens the issues and PRs board on a project's repository; null in VS Code,
+ * where there is no board.
+ */
+export function useOpenProjectOnBoard(): ((projectId: string) => void) | null {
+    const mobile = useMobileAppActions();
+
+    const openProjectOnBoard = React.useCallback((projectId: string) => {
+        useSourceBoardStore.getState().update({ projectId, tab: 'repository' });
+        openBoard(mobile);
+    }, [mobile]);
+    return isVSCodeRuntime() ? null : openProjectOnBoard;
 }
 
 /**

@@ -3,8 +3,11 @@ import { Window } from 'happy-dom';
 import { expect, test } from 'bun:test';
 
 const REVEAL_LABEL = /Finder|File Explorer|file manager/i;
+const SOURCE_BOARD_LABEL = /^Issues and PRs$/;
 
-const ProjectItem = ({ onOpenFolder, SortableProjectItem }: { onOpenFolder?: () => void; SortableProjectItem: typeof import('./sortableItems').SortableProjectItem }) => {
+type ProjectMenuOptions = { onOpenFolder?: () => void; isRepo?: boolean; onOpenSourceBoard?: () => void };
+
+const ProjectItem = ({ onOpenFolder, isRepo = false, onOpenSourceBoard, SortableProjectItem }: ProjectMenuOptions & { SortableProjectItem: typeof import('./sortableItems').SortableProjectItem }) => {
   const [openMenuKey, setOpenMenuKey] = React.useState<string | null>(null);
   return (
     <SortableProjectItem
@@ -13,12 +16,13 @@ const ProjectItem = ({ onOpenFolder, SortableProjectItem }: { onOpenFolder?: () 
       projectDescription="/repo"
       projectDirectory="/repo"
       isCollapsed={false}
-      isRepo={false}
+      isRepo={isRepo}
       hideDirectoryControls={false}
       mobileVariant={false}
       alwaysShowActions
       onToggle={() => undefined}
       onNewSession={() => undefined}
+      onOpenSourceBoard={onOpenSourceBoard}
       onOpenFolder={onOpenFolder}
       onRenameStart={() => undefined}
       onClose={() => undefined}
@@ -28,7 +32,7 @@ const ProjectItem = ({ onOpenFolder, SortableProjectItem }: { onOpenFolder?: () 
   );
 };
 
-const renderOpenProjectMenu = async (onOpenFolder?: () => void) => {
+const renderOpenProjectMenu = async (options: ProjectMenuOptions = {}) => {
   const win = new Window({ url: 'http://localhost' });
   const values = { window: win, document: win.document, navigator: win.navigator, localStorage: win.localStorage, requestAnimationFrame: win.requestAnimationFrame.bind(win), cancelAnimationFrame: win.cancelAnimationFrame.bind(win), ResizeObserver: win.ResizeObserver, MutationObserver: win.MutationObserver, Node: win.Node, Element: win.Element, HTMLElement: win.HTMLElement, Event: win.Event, MouseEvent: win.MouseEvent, PointerEvent: win.PointerEvent, KeyboardEvent: win.KeyboardEvent, getComputedStyle: win.getComputedStyle.bind(win), IS_REACT_ACT_ENVIRONMENT: true };
   const previous = new Map(Object.keys(values).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -44,14 +48,16 @@ const renderOpenProjectMenu = async (onOpenFolder?: () => void) => {
   await act(async () => root.render(
     <ThemeSystemProvider>
       <I18nProvider>
-        <ProjectItem onOpenFolder={onOpenFolder} SortableProjectItem={SortableProjectItem} />
+        <ProjectItem {...options} SortableProjectItem={SortableProjectItem} />
       </I18nProvider>
     </ThemeSystemProvider>,
   ));
   const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Project menu"]');
   await act(async () => { trigger?.click(); });
-  const revealItem = () => Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
-    .find((item) => REVEAL_LABEL.test(item.textContent ?? '')) ?? null;
+  const menuItem = (label: RegExp) => Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+    .find((item) => label.test(item.textContent?.trim() ?? '')) ?? null;
+  const revealItem = () => menuItem(REVEAL_LABEL);
+  const sourceBoardItem = () => menuItem(SOURCE_BOARD_LABEL);
   const cleanup = async () => {
     await act(async () => root.unmount());
     for (const [key, descriptor] of previous) {
@@ -60,12 +66,12 @@ const renderOpenProjectMenu = async (onOpenFolder?: () => void) => {
     }
     await win.happyDOM.close();
   };
-  return { revealItem, cleanup };
+  return { revealItem, sourceBoardItem, cleanup };
 };
 
 test('the project menu reveals the project folder when the runtime can', async () => {
   let opened = 0;
-  const menu = await renderOpenProjectMenu(() => { opened += 1; });
+  const menu = await renderOpenProjectMenu({ onOpenFolder: () => { opened += 1; } });
   try {
     const item = menu.revealItem();
     expect(item).not.toBeNull();
@@ -83,5 +89,30 @@ test('the project menu has no reveal entry without a reveal action', async () =>
     expect(menu.revealItem()).toBeNull();
   } finally {
     await menu.cleanup();
+  }
+});
+
+test('a git project menu opens the issues and PRs board', async () => {
+  let opened = 0;
+  const menu = await renderOpenProjectMenu({ isRepo: true, onOpenSourceBoard: () => { opened += 1; } });
+  try {
+    const item = menu.sourceBoardItem();
+    expect(item).not.toBeNull();
+    await act(async () => item?.click());
+    expect(opened).toBe(1);
+  } finally {
+    await menu.cleanup();
+  }
+});
+
+test('the project menu has no issues and PRs entry without the board or a repository', async () => {
+  for (const options of [{ isRepo: true }, { isRepo: false, onOpenSourceBoard: () => undefined }]) {
+    const menu = await renderOpenProjectMenu(options);
+    try {
+      expect(document.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
+      expect(menu.sourceBoardItem()).toBeNull();
+    } finally {
+      await menu.cleanup();
+    }
   }
 });

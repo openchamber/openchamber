@@ -122,6 +122,8 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   onManageWorktrees?: () => void;
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
+  /** The issues and PRs board on this project's repository; absent in VS Code. */
+  onOpenSourceBoard?: () => void;
   onOpenFolder?: () => void;
   onRenameStart: () => void;
   /** Archives the project's sessions except pinned, running and In work ones. */
@@ -157,6 +159,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onNewWorktreeSession,
   onManageWorktrees,
   onManageSpaces,
+  onOpenSourceBoard,
   onOpenFolder,
   onRenameStart,
   onArchiveAll,
@@ -212,6 +215,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onManageSpaces}>
           <Icon name="box-3" className="me-1.5 h-4 w-4" />
           {t('spaces.page.menuItem')}
+        </Item>
+      )}
+      {isRepo && !hideDirectoryControls && onOpenSourceBoard && (
+        <Item onClick={onOpenSourceBoard}>
+          <Icon name="todo" className="me-1.5 h-4 w-4" />
+          {t('sourceBoard.title')}
         </Item>
       )}
       {onOpenFolder && (
