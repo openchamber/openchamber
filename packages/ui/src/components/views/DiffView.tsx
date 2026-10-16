@@ -217,8 +217,8 @@ const createTextDiffDataFromPatch = (filePath: string, patch: string, contextMod
 
 /**
  * Searchable metadata for a file from either a patch-backed diff (its
- * `fileDiff` is already parsed) or a cached full diff (parsed here). Binary and
- * submodule entries have no lines to search and resolve to null.
+ * `fileDiff` is already parsed) or a turn payload's full contents (parsed here).
+ * Binary and submodule entries have no lines to search and resolve to null.
  */
 const diffDataToFileDiff = (
     filePath: string,
@@ -2225,13 +2225,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
     }, [displayFile, handleSelectFileAndScroll, isTreeMode, navigationFiles, treeSelectedFile, visible]);
 
     // ----- Find in diff -----
-    // Files the bar can search. `load` reuses the entry's own read path: a
-    // cached full diff is parsed in place, anything else goes through
-    // getGitFileDiff and lands in the same diffCache, so a later reader does not
-    // re-read it. Range scopes read a file's patch through the same
-    // fetchComparisonDiffEntry the expanded entries use; that call does not
-    // write into the range cache, so an unexpanded file the bar read is fetched
-    // again when it is later expanded (reported, not papered over).
+    // Files the bar can search. `load` mirrors the viewer's own read: a range
+    // scope reads a file's patch through the same fetchComparisonDiffEntry the
+    // expanded entries use (that call does not write into the range cache, so an
+    // unexpanded file the bar read is fetched again when it is later expanded —
+    // reported, not papered over); the local scopes read the viewer's per-side
+    // diff (see loadFileDiffForFind).
     const loadFileDiffForFind = React.useCallback(async (filePath: string): Promise<FileDiffMetadata | null> => {
         if (activeDiffScope === 'turn') {
             const data = lastTurnDiffData.get(filePath);
@@ -2250,13 +2249,18 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 : null;
         }
         if (!effectiveDirectory) return null;
-        const cached = useGitStore.getState().directories.get(effectiveDirectory)?.diffCache.get(filePath);
-        if (cached) return resolveFindDiff(diffDataToFileDiff(filePath, cached), diffHideWhitespace);
-        const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath, staged: getFileStaged(filePath) });
-        const next = { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary, submodule: response.submodule };
-        setDiff(effectiveDirectory, filePath, next, getRuntimeKey());
+        // Search exactly the side the viewer renders. `getGitDiff` reads the
+        // unstaged (index -> working tree) side when `staged` is false and the
+        // staged (HEAD -> index) side when it is true — the same read the viewer
+        // does. `getGitFileDiff`'s unstaged read is the combined HEAD -> working
+        // tree diff, a different side, so it must not be searched here. Nothing
+        // is written to the shared diffCache, which holds `getGitFileDiff`
+        // output for the viewer's fallback and the prefetcher.
+        const staged = getFileStaged(filePath);
+        const response = await git.getGitDiff(effectiveDirectory, { path: filePath, staged, contextLines: DEFAULT_CONTEXT_DIFF_LINES });
+        const next = { ...createTextDiffDataFromPatch(filePath, response.diff, 'full'), submodule: response.submodule };
         return resolveFindDiff(diffDataToFileDiff(filePath, next), diffHideWhitespace);
-    }, [activeDiffScope, comparisonDiffData, diffHideWhitespace, effectiveDirectory, fetchComparisonDiffEntry, getFileStaged, git, lastTurnDiffData, setDiff]);
+    }, [activeDiffScope, comparisonDiffData, diffHideWhitespace, effectiveDirectory, fetchComparisonDiffEntry, getFileStaged, git, lastTurnDiffData]);
 
     // `diffFindSources` must stay identity-stable across renders, so `load`
     // reads the latest reader through this ref instead of capturing it.
@@ -2264,22 +2268,31 @@ export const DiffView: React.FC<DiffViewProps> = ({
     loadFileDiffForFindRef.current = loadFileDiffForFind;
 
     // `revision` is what the hook re-reads on: hiding whitespace changes the
-    // rendered diff, and a range file moving absent -> loading -> ready changes
-    // where its data comes from. Layout is deliberately excluded. The range map
-    // is read through a scope-gated handle so a non-range scope (where the
-    // range cache hands back a fresh empty Map each render) keeps `sources`
-    // identity-stable.
+    // rendered diff, the side (staged vs working) changes which content is
+    // searched, a live diff's refresh signal moves with an edit, and a range
+    // file moving absent -> loading -> ready changes where its data comes from.
+    // Layout is deliberately excluded. The range map is read through a
+    // scope-gated handle so a non-range scope (where the range cache hands back
+    // a fresh empty Map each render) keeps `sources` identity-stable.
     const findRangeEntries = activeDiffScope === 'branch' || activeDiffScope === 'commit' || activeDiffScope === 'pr'
         ? comparisonDiffData
         : null;
+    // The local read path (all/working/staged) resolves a per-file side; the
+    // range and turn paths ignore it. Gating the side token on this keeps range
+    // `sources` identity-stable when the selected file moves.
+    const findUsesLocalRead = activeDiffScope === 'all' || activeDiffScope === 'working' || activeDiffScope === 'staged';
     const diffFindSources = React.useMemo<DiffFindSource[]>(
         () => changedFiles.map((file) => ({
             filePath: file.path,
             layout: getLayoutForFile(file),
-            revision: `${diffHideWhitespace ? 'hide' : 'show'}|${findRangeEntries ? findRangeEntries.get(file.path)?.status ?? 'absent' : 'local'}`,
+            revision: `${diffHideWhitespace ? 'hide' : 'show'}|${findRangeEntries
+                ? findRangeEntries.get(file.path)?.status ?? 'absent'
+                : findUsesLocalRead
+                    ? `${getFileStaged(file.path) ? 'staged' : 'unstaged'}:${workingTreeRevision + (fileDiffRefreshNonce.get(file.path) ?? 0)}`
+                    : 'local'}`,
             load: () => loadFileDiffForFindRef.current(file.path),
         })),
-        [changedFiles, diffHideWhitespace, findRangeEntries, getLayoutForFile],
+        [changedFiles, diffHideWhitespace, fileDiffRefreshNonce, findRangeEntries, findUsesLocalRead, getFileStaged, getLayoutForFile, workingTreeRevision],
     );
 
     const diffFind = useDiffFind({ sources: diffFindSources });

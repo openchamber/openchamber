@@ -1976,6 +1976,13 @@ const PierreDiffViewerBody: React.FC<
         rafId = requestAnimationFrame(() => {
           forceUpdate();
           if (findMatchesRef.current.length > 0) applyFindHighlights();
+          // The pass above re-read the live DOM (applyFindHighlights queries the
+          // current shadow root and walks the current rows), so every record it
+          // queued — its own text splits/merges, which the attribute-based filter
+          // cannot recognise — is already reflected in the highlight state. Drain
+          // those records so the callback cannot re-trigger itself each frame; a
+          // rebuild that lands afterwards still queues fresh records and is handled.
+          observer?.takeRecords();
           rafId = null;
         });
       });
