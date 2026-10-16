@@ -35,7 +35,9 @@ other.
   origin; payload provenance is ignored. Plans are handed out as file paths
   (`list`, and the answer to `save`), never as text: the agent reads a plan
   and makes small edits, such as ticking a step, with its own file tools, and
-  `save` creates or replaces one whole. The actions answer `403` while
+  `save` creates or replaces one whole. `expected` guards a replacement only:
+  a save that carries it without an `id` is a 400, never a silently ignored
+  conflict check. The actions answer `403` while
   `agentKnowledgeToolEnabled` is `false`. `show` checks the plan exists and
   sends `openchamber:plan-open-request` to every connected window, like
   `file.open`; every layout opens the plan the way a click in the Project

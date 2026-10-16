@@ -146,6 +146,19 @@ describe('project knowledge control actions', () => {
   });
 
   it.each([
+    ['note', { kind: 'note', body: 'New note', expected: 'Old note' }, 'createNote'],
+    ['plan', { kind: 'plan', body: '# Release\n\nShip it', expected: '# Release\n' }, 'createPlan'],
+  ])('refuses expected on a %s create before any storage access', async (kind, input, createMethod) => {
+    const { service, runtime } = setup();
+    await expect(service.execute('knowledge.save', input, '/repo', { contextSessionId: 'ses_1' }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('requires an id') });
+    expect(runtime[createMethod]).not.toHaveBeenCalled();
+    expect(runtime.updateNote).not.toHaveBeenCalled();
+    expect(runtime.updatePlan).not.toHaveBeenCalled();
+    expect(runtime.readContext).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['knowledge.delete', { kind: 'memo', id: 'x' }],
     ['knowledge.save', { body: 'No kind' }], ['knowledge.save', { kind: 'note', body: '' }],
     ['knowledge.save', { kind: 'note', body: 'a'.repeat(3001) }],
