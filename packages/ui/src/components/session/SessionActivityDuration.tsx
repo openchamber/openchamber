@@ -6,7 +6,7 @@ import {
   useSessionActivityStartedAt,
   useSessionSettledDurationMs,
 } from '@/sync/session-activity-timing';
-import { formatSessionActivityDuration } from './sessionActivityDurationFormat';
+import { formatCompactDuration } from '@/lib/duration';
 
 /** One update per second: the readout is the animation, at 1 fps instead of 60. */
 const TICK_MS = 1000;
@@ -35,7 +35,7 @@ export const SessionActivityDuration: React.FC<{
   const durationMs = running ? Math.max(0, now - (startedAt ?? now)) : settledMs;
   if (durationMs === undefined) return null;
 
-  const label = formatSessionActivityDuration(durationMs, t);
+  const label = formatCompactDuration(durationMs, t);
   const description = running
     ? t('sessions.sidebar.session.status.activeFor', { duration: label })
     : t('sessions.sidebar.session.status.lastTurnDuration', { duration: label });
