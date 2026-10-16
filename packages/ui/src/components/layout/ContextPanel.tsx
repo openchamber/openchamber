@@ -47,6 +47,7 @@ import { ZoneMoveMenuItems } from './ZoneMoveMenuItems';
 import { beginZoneDrag, cancelZoneDrag, finishZoneDrag, startZoneDragGesture, updateZoneDrag } from './zoneDrag';
 import { setZoneBody, setZoneHeaderSlot } from './zoneHosts';
 import { useOpenUntilSettled } from './useOpenUntilSettled';
+import { measureGitPanelMinimumWidth } from './gitPanelMinimumWidth';
 
 const CONTEXT_PANEL_MIN_WIDTH = 320;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
@@ -77,20 +78,20 @@ const normalizeDirectoryKey = (value: string): string => {
   return normalized;
 };
 
-const clampWidth = (width: number, maxWidth: number): number => {
+const clampWidth = (width: number, maxWidth: number, minimumWidth = CONTEXT_PANEL_MIN_WIDTH): number => {
   if (!Number.isFinite(width)) {
     return CONTEXT_PANEL_DEFAULT_WIDTH;
   }
 
-  return Math.min(maxWidth, Math.max(CONTEXT_PANEL_MIN_WIDTH, Math.round(width)));
+  return Math.min(maxWidth, Math.max(minimumWidth, Math.round(width)));
 };
 
 // Ceiling derived from the space the panel actually shares with the chat:
 // everything except a minimum chat column, never below the panel minimum.
 // Without a measured area there is no ceiling (see `areaWidth` below).
-const maxPanelWidth = (availableWidth: number | null): number => {
+const maxPanelWidth = (availableWidth: number | null, minimumWidth = CONTEXT_PANEL_MIN_WIDTH): number => {
   if (availableWidth === null) return Number.POSITIVE_INFINITY;
-  return Math.max(CONTEXT_PANEL_MIN_WIDTH, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
+  return Math.max(minimumWidth, availableWidth - CONTEXT_CHAT_MIN_WIDTH);
 };
 
 const getRelativePathLabel = (filePath: string | null, directory: string): string => {
@@ -440,6 +441,29 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
   // tree never hides alongside it, so a hidden tree forces the editor back.
   const showsEditor = hasOpenEditorFile && (contextEditorVisible || !contextEditorTreeVisible);
   const activeModeForWidth = activeTab?.mode ?? null;
+  const [gitMinimumWidth, setGitMinimumWidth] = React.useState(CONTEXT_PANEL_MIN_WIDTH);
+  const minimumWidth = activeModeForWidth === 'git' ? gitMinimumWidth : CONTEXT_PANEL_MIN_WIDTH;
+  React.useLayoutEffect(() => {
+    if (!isOpen || isVertical || activeModeForWidth !== 'git' || !headerSlotEl) return;
+    const measure = () => {
+      const toolbar = headerSlotEl.querySelector<HTMLElement>('[data-context-panel-toolbar]');
+      const width = Math.max(CONTEXT_PANEL_MIN_WIDTH, toolbar ? measureGitPanelMinimumWidth(toolbar) : 0);
+      setGitMinimumWidth(width);
+      const savedWidth = useUIStore.getState().contextPanelByDirectory[directoryKey]?.widthByMode.git
+        ?? getContextSurfaceDefaultWidth('git');
+      // Other zones reserve the saved width when deciding how much chat fits.
+      if (savedWidth < width) setContextPanelWidth(directoryKey, 'git', width);
+    };
+    measure();
+    const observer = new MutationObserver(measure);
+    observer.observe(headerSlotEl, { childList: true, characterData: true, subtree: true });
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(headerSlotEl);
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, [activeModeForWidth, directoryKey, headerSlotEl, isOpen, isVertical, setContextPanelWidth]);
   // A side zone without an editor shrinks to the tree; the bottom zone keeps
   // its full width either way.
   const isTreeOnly = !isVertical && activeModeForWidth === 'file' && !showsEditor;
@@ -454,10 +478,10 @@ export const ContextPanel: React.FC<{ zone?: ContextZone }> = ({ zone = 'right' 
     ? contextEditorTreeWidth
     : isVertical
       ? clampHeight(manualSize ?? CONTEXT_PANEL_DEFAULT_HEIGHT, Number.POSITIVE_INFINITY)
-      : clampWidth(manualSize ?? (activeModeForWidth ? getContextSurfaceDefaultWidth(activeModeForWidth) : CONTEXT_PANEL_DEFAULT_WIDTH), Number.POSITIVE_INFINITY);
+      : clampWidth(manualSize ?? (activeModeForWidth ? getContextSurfaceDefaultWidth(activeModeForWidth) : CONTEXT_PANEL_DEFAULT_WIDTH), Number.POSITIVE_INFINITY, minimumWidth);
   const clampSize = React.useCallback((next: number, available: number | null) => (
-    isVertical ? clampHeight(next, maxPanelHeight(available)) : clampWidth(next, maxPanelWidth(available))
-  ), [isVertical]);
+    isVertical ? clampHeight(next, maxPanelHeight(available)) : clampWidth(next, maxPanelWidth(available, minimumWidth), minimumWidth)
+  ), [isVertical, minimumWidth]);
   const chatMinimum = isVertical ? CONTEXT_CHAT_MIN_HEIGHT : CONTEXT_CHAT_MIN_WIDTH;
 
   // The area the zone shares with the chat, as state only while it decides

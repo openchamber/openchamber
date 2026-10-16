@@ -116,6 +116,15 @@ keep the full height). The chat is always the centre and cannot move.
 
 ## Panel header
 
+The Git side panel measures its toolbar with picker labels collapsed and keeps
+that width plus the panel controls as its resize minimum. The branch and
+repository labels truncate as the panel narrows; their icons and chevrons,
+repository menu, and Sync control remain side by side. The minimum is local to
+the visible Git panel and updates when its controls or labels change. A saved
+Git width below that minimum is raised so other zones reserve its actual width.
+Other surfaces retain the 320 px minimum. Mobile hosts render the same shrinking
+repository picker inline and do not inherit the side panel's resize minimum.
+
 The panel has one header row. A single-instance surface with its own toolbar
 (terminal, diff, walkthrough, git's branch and sync controls, the notes
 search, the context surface's session title) renders that toolbar through

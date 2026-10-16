@@ -30,6 +30,22 @@ export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
   repositoryRoot,
 }) => {
   const { t } = useI18n();
+  const labelRef = React.useRef<HTMLSpanElement>(null);
+  const [showLabel, setShowLabel] = React.useState(true);
+
+  React.useLayoutEffect(() => {
+    const label = labelRef.current;
+    if (!label) return;
+    const updateVisibility = () => {
+      // A clipped ellipsis is just a stray dot at icon-only widths.
+      const minimumLabelWidth = Number.parseFloat(getComputedStyle(label).fontSize);
+      setShowLabel(label.getBoundingClientRect().width >= minimumLabelWidth);
+    };
+    updateVisibility();
+    const observer = new ResizeObserver(updateVisibility);
+    observer.observe(label);
+    return () => observer.disconnect();
+  }, []);
 
   const relativePath = (repository: string): string => {
     const rootPrefix = `${repositoryRoot ?? ''}/`;
@@ -46,11 +62,15 @@ export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
       }}
     >
       <SelectTrigger
-        className="max-w-[13rem] gap-1.5 px-2 py-1"
+        className="min-w-[3.875rem] max-w-[13rem] shrink gap-1.5 px-2 py-1"
         aria-label={t('gitView.empty.selectRepositoryPlaceholder')}
       >
         <Icon name="folder-3" className="size-4 text-muted-foreground" />
-        <span className="min-w-0 truncate font-medium text-start">
+        <span
+          ref={labelRef}
+          className="min-w-0 flex-1 truncate font-medium text-start"
+          style={{ visibility: showLabel ? undefined : 'hidden' }}
+        >
           {selectedRepository ? relativePath(selectedRepository) : ''}
         </span>
       </SelectTrigger>

@@ -370,6 +370,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   }
 
   const repositoryOptionsForPicker = (repositoryOptions ?? []).filter(Boolean);
+  const hasRepositoryPicker = repositoryOptionsForPicker.length > 0 && Boolean(onSelectRepository);
 
   const repositoryLink = repositoryLinkFromRemotes(remotes, knownIdentities);
   const hasRepositoryViewItems = Boolean(
@@ -536,26 +537,29 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   );
 
   const branchControls = (
-    <div className="flex min-w-0 flex-1 items-center gap-1">
-      {isWorktreeMode && !isMobile ? (
-        <WorktreeBranchDisplay
-          currentBranch={status.current}
-          onRename={onRenameBranch}
-        />
-      ) : (
-        <BranchSelector
-          directory={directory}
-          currentBranch={status.current}
-          localBranches={localBranches}
-          remoteBranches={remoteBranches}
-          branchInfo={branchInfo}
-          currentBranchAhead={status.ahead}
-          onCheckout={onCheckoutBranch}
-          onCreate={onCreateBranch}
-          switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
-        />
-      )}
-      {repositoryOptionsForPicker.length > 0 && onSelectRepository ? (
+    <div className={cn('flex flex-1 items-center gap-1', hasRepositoryPicker ? 'min-w-[7.875rem]' : 'min-w-0')}>
+      {/* At minimum: two 16 px icons, two 6 px gaps, and 16 px of padding. */}
+      <div className={cn('flex shrink', hasRepositoryPicker ? 'min-w-[3.75rem]' : 'min-w-0')}>
+        {isWorktreeMode && !isMobile ? (
+          <WorktreeBranchDisplay
+            currentBranch={status.current}
+            onRename={onRenameBranch}
+          />
+        ) : (
+          <BranchSelector
+            directory={directory}
+            currentBranch={status.current}
+            localBranches={localBranches}
+            remoteBranches={remoteBranches}
+            branchInfo={branchInfo}
+            currentBranchAhead={status.ahead}
+            onCheckout={onCheckoutBranch}
+            onCreate={onCreateBranch}
+            switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
+          />
+        )}
+      </div>
+      {hasRepositoryPicker && onSelectRepository ? (
         <NestedRepoPicker
           repositories={repositoryOptionsForPicker}
           selectedRepository={selectedRepository ?? null}
