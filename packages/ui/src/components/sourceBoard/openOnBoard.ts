@@ -3,7 +3,7 @@ import * as React from 'react';
 import { useMobileAppActions } from '@/apps/mobileAppContext';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import type { GitHubReferenceKind } from '@/lib/api/types';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { parseChangeRequestReference } from '@/lib/source-control/changeRequestReference';
 import { parseIssueReference } from '@/lib/source-control/issueReference';
@@ -47,25 +47,29 @@ export const isSameRepositoryItemLink = (left: string, right: string): boolean =
 };
 
 /**
- * Shows the issue, PR or Linear issue a link names on the issues and PRs
- * board, in the project of `directory`, selected. False, with nothing opened,
- * for anything the board cannot show here: another kind of link, VS Code, a
- * project that is not open, Linear while it is not connected.
+ * How a plain click on a link ended. `unresolved-project` says the link is
+ * boardable but `directory` resolved to no open project, so another in-app
+ * surface may still show it; `not-showable` says nothing here can.
  */
-export function useShowOnBoard() {
+type BoardAttempt =
+    | 'shown'
+    | 'unresolved-project'
+    | 'not-showable';
+
+function useTryShowOnBoard() {
     const mobile = useMobileAppActions();
     // Read softly: sidebar rows also render where no runtime is provided, and
     // without one a Linear link simply opens in the browser.
     const linear = React.useContext(RuntimeAPIContext)?.linear;
 
-    return React.useCallback((url: string, directory: string | null | undefined): boolean => {
-        if (isVSCodeRuntime()) return false;
+    return React.useCallback((url: string, directory: string | null | undefined): BoardAttempt => {
+        if (isVSCodeRuntime()) return 'not-showable';
         const target = boardTargetOfUrl(url);
-        if (!target) return false;
+        if (!target) return 'not-showable';
 
         const board = useSourceBoardStore.getState();
         if (target.source === 'linear') {
-            if (!linear || useLinearAuthStore.getState().status?.connected !== true) return false;
+            if (!linear || useLinearAuthStore.getState().status?.connected !== true) return 'not-showable';
             board.focusLinearIssue(target.identifier);
         } else {
             const project = resolveProjectForSessionDirectory(
@@ -73,25 +77,55 @@ export function useShowOnBoard() {
                 useSessionUIStore.getState().availableWorktreesByProject,
                 directory ?? null,
             );
-            if (!project) return false;
+            if (!project) return 'unresolved-project';
             // The link itself is the search: it finds that one item, in its own repository.
             board.focusRepositoryItem(project.id, target.kind, url);
         }
         if (mobile) mobile.openSourceBoard();
         else useUIStore.getState().setSourceBoardOpen(true);
-        return true;
+        return 'shown';
     }, [linear, mobile]);
 }
 
 /**
+ * Whether a plain click can show the issue, PR or Linear issue a link names on
+ * the issues and PRs board, in the project of `directory`, selected. False,
+ * with nothing opened, for anything the board cannot show here: another kind
+ * of link, VS Code, a project that is not open, Linear while it is not
+ * connected.
+ */
+export function useShowOnBoard() {
+    const tryShowOnBoard = useTryShowOnBoard();
+
+    return React.useCallback((url: string, directory: string | null | undefined): boolean =>
+        tryShowOnBoard(url, directory) === 'shown', [tryShowOnBoard]);
+}
+
+/**
  * Opens an issue, PR or Linear issue a session is linked to on the board
- * (`useShowOnBoard`). Cmd or Ctrl opens the link itself, as links do; so does
- * anything the board cannot show here.
+ * (`useShowOnBoard`). Cmd or Ctrl opens the link itself, as links do. When the
+ * board refuses the link only because `directory` resolved to no open project,
+ * the built-in browser panel of that directory shows it instead, where a plain
+ * chat link would go; the system browser stays the last resort.
  */
 export function useOpenOnBoard() {
-    const showOnBoard = useShowOnBoard();
+    const tryShowOnBoard = useTryShowOnBoard();
+    const mobile = useMobileAppActions();
 
     return React.useCallback((url: string, directory: string | null | undefined, event?: { metaKey: boolean; ctrlKey: boolean }) => {
-        if (event?.metaKey || event?.ctrlKey || !showOnBoard(url, directory)) void openExternalUrl(url);
-    }, [showOnBoard]);
+        if (event?.metaKey || event?.ctrlKey) {
+            void openExternalUrl(url);
+            return;
+        }
+        const attempt = tryShowOnBoard(url, directory);
+        if (attempt === 'shown') return;
+        // Only the desktop panel can show any site: on the web it is an iframe,
+        // which most sites refuse to load in.
+        const { openLinksInBrowserPanel, openContextPreview } = useUIStore.getState();
+        if (attempt === 'unresolved-project' && openLinksInBrowserPanel && !mobile && isDesktopShell() && directory) {
+            openContextPreview(directory, url);
+            return;
+        }
+        void openExternalUrl(url);
+    }, [mobile, tryShowOnBoard]);
 }
