@@ -102,7 +102,7 @@ describe('isSameRepositoryItemLink', () => {
 describe('useOpenOnBoard', () => {
   const PULL_URL = 'https://github.com/openchamber/openchamber/pull/4500';
   const PROJECT: ProjectEntry = { id: 'proj-1', path: '/repo' };
-  const WORKTREE_DIRECTORY = '/repo/worktrees/feature';
+  const NESTED_DIRECTORY = '/repo/worktrees/feature';
 
   let root: Root;
   let host: HTMLDivElement;
@@ -137,17 +137,20 @@ describe('useOpenOnBoard', () => {
     return hook;
   };
 
-  test('a plain click shows the link on the board of the directory\'s project', async () => {
+  test('a directory nested inside the project resolves to it by path prefix', async () => {
     projects = [PROJECT];
     const openOnBoard = await renderOpenOnBoard();
-    // The worktree map is empty here: the project root resolves by path prefix alone.
-    openOnBoard(PULL_URL, WORKTREE_DIRECTORY);
+    // Not a worktree-map case: a child of the project root resolves by prefix
+    // alone. A worktree outside every project path can only be routed by the
+    // component that passes the project root (SessionGroupSection).
+    openOnBoard(PULL_URL, NESTED_DIRECTORY);
     expect(boardFocus).toEqual([{ projectId: 'proj-1', kind: 'pull', query: PULL_URL }]);
     expect(panelOpens).toEqual([]);
     expect(externalUrls).toEqual([]);
   });
 
-  test('an unresolved project opens the built-in browser panel of the directory when the panel setting is on', async () => {
+  test('a directory under no open project opens the built-in browser panel of the directory when the panel setting is on', async () => {
+    projects = [PROJECT];
     panelSetting = true;
     desktopShell = true;
     const openOnBoard = await renderOpenOnBoard();
@@ -156,7 +159,8 @@ describe('useOpenOnBoard', () => {
     expect(externalUrls).toEqual([]);
   });
 
-  test('an unresolved project with the panel setting off falls back to the system browser', async () => {
+  test('a directory under no open project with the panel setting off falls back to the system browser', async () => {
+    projects = [PROJECT];
     desktopShell = true;
     const openOnBoard = await renderOpenOnBoard();
     openOnBoard(PULL_URL, '/somewhere/unopened');
