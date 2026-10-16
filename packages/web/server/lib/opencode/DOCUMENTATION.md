@@ -16,6 +16,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - The managed OpenCode's environment also carries the user's variables from Settings and from `opencode service set env` (`getUserEnvironment`, see `../environment`), over the inherited environment and under everything OpenChamber sets for OpenCode itself; enterprise mode passes none. `getManagedOpenCodeProcessEnv()` therefore includes them, so a provider key given this way is visible to the credential reader like any other variable OpenCode reports.
 - `packages/web/server/lib/opencode/provider-env-aliases.js`: mirrors known provider credential env aliases into the managed OpenCode process environment (for example `GEMINI_API_KEY` → `GOOGLE_GENERATIVE_AI_API_KEY`) so OpenCode connection detection and the upstream AI SDK agree on the same key names. Canonical implementation shared by web lifecycle and the VS Code managed spawn path (`packages/vscode/src/provider-env-aliases.ts` re-exports this module).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
+- `packages/web/server/lib/opencode/windows-powershell.js`: the Windows PowerShell interpreter the managed OpenCode shell tool will run. It verifies a stable PowerShell 7 install directory by running its `pwsh.exe` (`<ProgramFiles>\PowerShell\7`, its `7-preview` sibling, and the per-user MSI directory under `%LOCALAPPDATA%`), so `server-utils-runtime.js` can put the newest verified one at the front of the managed OpenCode PATH, and reports the interpreter that PATH resolves by name. See "Windows PowerShell resolution" below.
 - `packages/web/server/lib/opencode/env-config.js`: OpenCode-related environment variable parsing and validation (host/port/hostname).
 - `packages/web/server/lib/opencode/hmr-state-runtime.js`: HMR-persistent runtime state initialization, auth-state bootstrap, and HMR sync helpers.
 - `packages/web/server/lib/opencode/bootstrap-runtime.js`: base app bootstrap runtime for status/auth/tts/notification/OpenChamber route wiring.
@@ -414,6 +415,56 @@ ConPTY or Console Window Host behavior.
   - `isExecutable(filePath)`
   - `searchPathFor(binaryName, searchPath?)`: resolves an executable from the supplied PATH value, defaulting to the process PATH.
   - `clearResolvedOpenCodeBinary()`
+
+## Windows PowerShell resolution (#4895)
+
+The shell tool belongs to the OpenCode server, so OpenChamber cannot change how it
+spawns. OpenCode resolves `pwsh` by name through PATH, canonicalizes the result
+once and reuses that absolute path for the life of the process. A Store-installed
+PowerShell 7 answers through the app-execution alias
+`%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`, a reparse point whose target
+embeds the package version under `C:\Program Files\WindowsApps`. A Store upgrade
+renames that folder, every later shell spawn fails with `ERROR_PATH_NOT_FOUND`,
+and the server then falls back to Windows PowerShell 5.1, which reads and writes
+files with the system ANSI code page.
+
+OpenChamber covers the prevention and the visibility; neither repairs that
+in-process cache:
+
+- `server-utils-runtime.js` puts one verified, version-independent PowerShell 7
+  install directory at the front of the managed PATH, where by-name resolution
+  hits a path a Store upgrade cannot move. Other entries keep their order and
+  nothing is duplicated; a directory the resolver did not verify is never added.
+- `lifecycle.js` logs the interpreter the managed PATH resolves to on every
+  managed launch and records it under
+  `lastOpenCodeLaunchDiagnostics.shellInterpreter` as `pwshPath`/`pwshVersion`,
+  `effectivePath`/`effectiveVersion`, `insertedDirectory` and `downgrade`. `/health`
+  and the copied status report therefore name the real shell rather than the
+  intended one. When a PowerShell 7 exists at a stable install or under the user's
+  own profile while the shell resolves to Windows PowerShell 5.1, the same launch
+  logs one warning line. That condition is defensive: the managed PATH reaches
+  every PowerShell 7 install OpenChamber can find for the account, so it holds only
+  when the process environment hides one, and a machine whose only PowerShell is
+  5.1 stays quiet.
+
+Resolution runs before the probe, never through it. A name is expanded to its
+absolute candidates from the PATH being reported on (`getExecutableSearchDirectories`
+from `../tunnels/executable-search.js`, which also knows the WindowsApps alias
+directory), and only those absolute paths are spawned. Handing a bare name to
+`spawnSync` would answer a different question: a bare name is looked up with the
+calling process's PATH and the child `env` block applies only after the lookup, so
+the probe would describe the server's own PATH. The alias used for the downgrade
+check is located from the user profile rather than from `LOCALAPPDATA`, because the
+managed PATH is built from `LOCALAPPDATA` and asking that same source twice could
+never disagree. Probes are cached per process, each is abandoned after two seconds,
+and the whole resolution stops after five, so a hung or quarantined interpreter
+cannot hold the server's event loop for long.
+
+`windows-powershell.js` probes once per process and caches the verification and
+the report. On a machine with only the Store build there is no stable directory
+to prepend, so only the reporting applies there, and a spawn that fails while
+OpenCode reuses its canonicalized path stays with the OpenCode server until
+upstream resolves the interpreter per spawn.
 
 ## Public exports (env-config.js)
 - `resolveOpenCodeEnvConfig(options?)`: resolves and validates OpenCode host/port/hostname environment configuration.

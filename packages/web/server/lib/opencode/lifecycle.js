@@ -138,6 +138,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     buildAugmentedPath,
     buildManagedOpenCodePath,
     getManagedOpenCodeShellEnvSnapshot,
+    // The interpreter the managed shell resolves to, plus a warning when this
+    // machine has a PowerShell 7 the shell does not reach (#4895). Null off
+    // Windows and whenever the resolver cannot answer.
+    getShellInterpreterDiagnostics = () => null,
     getManagedOpenCodeEnv = async () => ({}),
     // Variables from Settings and `opencode service set env` (lib/environment).
     getUserEnvironment = () => ({}),
@@ -404,7 +408,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return parts.length > 0 ? parts.join('\n\n') : 'No stdout/stderr captured';
   };
 
-  const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0 }) => {
+  const createManagedOpenCodeServerProcess = async ({ resolvedBinary, hostname, port, timeout, cwd, env: processEnv, shellEnvKeysCount = 0, shellInterpreter = null }) => {
     let binary = (resolvedBinary || process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     const sourceBinary = binary;
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
@@ -440,6 +444,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       pathEntryCount,
       hasShellEnv: shellEnvKeysCount > 0,
       shellEnvKeysCount,
+      shellInterpreter: shellInterpreter ? shellInterpreter.diagnostics : null,
     };
     console.log('[OpenCode] Launching managed server', state.lastOpenCodeLaunchDiagnostics);
 
@@ -751,6 +756,18 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     } else if (typeof buildAugmentedPath === 'function') {
       envPath = buildAugmentedPath();
     }
+    // Which interpreter the shell tool will actually run. Cheap after the first
+    // call (the resolver caches its probe) and read before the spawn so the
+    // answer describes the PATH this launch is about to use. The summary is the
+    // log line a user can quote; the warning fires only when the machine has a
+    // PowerShell 7 the shell does not reach.
+    const shellInterpreter = getShellInterpreterDiagnostics?.() ?? null;
+    if (shellInterpreter) {
+      console.log(`[OpenCode] ${shellInterpreter.summary}`);
+      if (shellInterpreter.warning) {
+        console.warn(`[OpenCode] ${shellInterpreter.warning}`);
+      }
+    }
     const shellEnv = typeof getManagedOpenCodeShellEnvSnapshot === 'function'
       ? getManagedOpenCodeShellEnvSnapshot() || {}
       : {};
@@ -804,6 +821,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: managedStartupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
+        shellInterpreter,
         env: processEnv,
       });
 

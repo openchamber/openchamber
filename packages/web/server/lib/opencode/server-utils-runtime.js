@@ -1,4 +1,5 @@
 import { registerOpenCodeProxy } from './proxy.js';
+import { isString } from '../shared/guards.js';
 import { pathLooksUserConfigured, mergePathValues } from './path-utils.js';
 
 export const createServerUtilsRuntime = (dependencies) => {
@@ -22,6 +23,9 @@ export const createServerUtilsRuntime = (dependencies) => {
     setOpenCodeNotReadySince,
     clearLastOpenCodeError,
     getLoginShellPath,
+    // A verified PowerShell 7 install directory, or null. Only the Windows
+    // managed PATH uses it; see `prependStablePowerShellDirectory`.
+    getStablePowerShell7Directory = () => null,
     getArchivedSessions = null,
     getMergeSpaceSessionList = null,
     getSpaceEventHub = null,
@@ -139,12 +143,41 @@ export const createServerUtilsRuntime = (dependencies) => {
     return mergePathValues(primaryPath, fallbackPath, path.delimiter);
   };
 
+  // OpenCode resolves the shell interpreter by name through PATH. On Windows a
+  // Store-installed PowerShell 7 answers through the app-execution alias in the
+  // WindowsApps directory, whose target embeds the package version; OpenCode
+  // canonicalizes that once and keeps the absolute path, so a Store upgrade
+  // leaves every later spawn pointing at a folder that no longer exists
+  // (#4895). A verified PowerShell 7 install directory goes in front of the
+  // whole PATH, where by-name resolution hits a path that never changes. The
+  // remaining entries keep their order and nothing is duplicated.
+  let loggedStablePowerShellDirectory = null;
+  const prependStablePowerShellDirectory = (pathValue) => {
+    if (process.platform !== 'win32') {
+      return pathValue;
+    }
+
+    const directory = getStablePowerShell7Directory();
+    if (!isString(directory) || !directory.trim()) {
+      return pathValue;
+    }
+
+    const trimmed = directory.trim();
+    const merged = mergePathValues(trimmed, pathValue, path.delimiter);
+    if (merged !== pathValue && loggedStablePowerShellDirectory !== trimmed) {
+      loggedStablePowerShellDirectory = trimmed;
+      console.log(`[OpenCode] Prepending verified PowerShell 7 directory to the managed PATH: ${trimmed}`);
+    }
+    return merged;
+  };
+
   const buildManagedOpenCodePath = () => {
     const currentPath = getEnvValue('PATH');
     const loginShellPath = getLoginShellPath();
     const basePath = mergePathValues(loginShellPath || '', currentPath, path.delimiter);
+    const toolchainPath = mergePathValues(basePath, buildWindowsManagedToolchainPath(), path.delimiter);
 
-    return mergePathValues(basePath, buildWindowsManagedToolchainPath(), path.delimiter);
+    return prependStablePowerShellDirectory(toolchainPath);
   };
 
   const parseSseDataPayload = (block) => {

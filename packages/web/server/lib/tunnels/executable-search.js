@@ -17,7 +17,13 @@ const normalizeSearchDirectoryKey = (directory, platform) => {
   return platform === 'win32' ? trimmed.toLowerCase() : trimmed;
 };
 
-const getWindowsAppsDirectory = (env) => {
+/**
+ * The per-user app-execution alias directory. It is derived from
+ * `LOCALAPPDATA` when set, so a caller that wants the alias directory of the
+ * user's own profile rather than of the current environment passes a `USERPROFILE`
+ * (and no `LOCALAPPDATA`) instead.
+ */
+export const getWindowsAppsDirectory = (env) => {
   const localAppData = getEnvValue(env, ['LOCALAPPDATA', 'LocalAppData', 'localappdata']);
   if (localAppData) {
     return path.win32.join(localAppData, 'Microsoft', 'WindowsApps');

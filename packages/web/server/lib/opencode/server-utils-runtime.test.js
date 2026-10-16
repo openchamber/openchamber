@@ -14,6 +14,26 @@ const createTempDir = (prefix) => {
   return dir;
 };
 
+// A Windows process environment whose toolchain directories all point at a
+// path that does not exist, so `buildWindowsManagedToolchainPath` contributes
+// nothing and the assertions stay about the stable PowerShell prepend alone.
+const WINDOWS_PATH_DELIMITER = ';';
+
+const windowsEnv = (pathValue) => {
+  const absentRoot = path.join(os.tmpdir(), 'openchamber-absent-windows-env');
+  return {
+    platform: 'win32',
+    env: {
+      PATH: pathValue,
+      USERPROFILE: absentRoot,
+      APPDATA: path.join(absentRoot, 'Roaming'),
+      LOCALAPPDATA: path.join(absentRoot, 'Local'),
+      ProgramFiles: path.join(absentRoot, 'Program Files'),
+      ProgramData: path.join(absentRoot, 'ProgramData'),
+    },
+  };
+};
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -27,10 +47,13 @@ afterEach(() => {
   process.env.PATH = originalPath;
 });
 
-const createRuntime = (loginShellPath, processLike = { platform: 'linux', env: process.env }) => createServerUtilsRuntime({
+// `pathApi` is the path implementation the runtime joins and splits with. A
+// Windows case has to pass `path.win32`, or a `C:\` path joined with the host's
+// delimiter is split on its own drive-letter colons.
+const createRuntime = (loginShellPath, processLike = { platform: 'linux', env: process.env }, getStablePowerShell7Directory = () => null, pathApi = path) => createServerUtilsRuntime({
   fs,
   os,
-  path,
+  path: pathApi,
   process: processLike,
   openCodeReadyGraceMs: 0,
   longRequestTimeoutMs: 0,
@@ -46,6 +69,7 @@ const createRuntime = (loginShellPath, processLike = { platform: 'linux', env: p
   setOpenCodeNotReadySince: () => {},
   clearLastOpenCodeError: () => {},
   getLoginShellPath: () => loginShellPath,
+  getStablePowerShell7Directory,
 });
 
 describe('server utils runtime', () => {
@@ -184,5 +208,59 @@ describe('server utils runtime', () => {
       '/usr/local/bin',
       '/bin',
     ].join(path.delimiter));
+  });
+
+  it('prepends a verified PowerShell 7 directory ahead of the Windows managed PATH', () => {
+    const stableDir = 'C:\\Program Files\\PowerShell\\7';
+    const windowsApps = 'C:\\Users\\Ada\\AppData\\Local\\Microsoft\\WindowsApps';
+    const systemDir = 'C:\\Windows\\System32';
+
+    const runtime = createRuntime(
+      null,
+      windowsEnv([windowsApps, systemDir].join(WINDOWS_PATH_DELIMITER)),
+      () => stableDir,
+      path.win32,
+    );
+
+    expect(runtime.buildManagedOpenCodePath()).toBe([stableDir, windowsApps, systemDir].join(WINDOWS_PATH_DELIMITER));
+  });
+
+  it('leaves the managed PATH alone when the stable directory is already first', () => {
+    const stableDir = 'C:\\Program Files\\PowerShell\\7';
+    const systemDir = 'C:\\Windows\\System32';
+    const managedPath = [stableDir, systemDir].join(WINDOWS_PATH_DELIMITER);
+
+    const runtime = createRuntime(null, windowsEnv(managedPath), () => stableDir, path.win32);
+
+    expect(runtime.buildManagedOpenCodePath()).toBe(managedPath);
+  });
+
+  it('moves an already-present stable directory to the front without duplicating it', () => {
+    const stableDir = 'C:\\Program Files\\PowerShell\\7';
+    const windowsApps = 'C:\\Users\\Ada\\AppData\\Local\\Microsoft\\WindowsApps';
+    const systemDir = 'C:\\Windows\\System32';
+
+    const runtime = createRuntime(
+      null,
+      windowsEnv([windowsApps, stableDir, systemDir].join(WINDOWS_PATH_DELIMITER)),
+      () => stableDir,
+      path.win32,
+    );
+
+    const managedPath = runtime.buildManagedOpenCodePath();
+    expect(managedPath).toBe([stableDir, windowsApps, systemDir].join(WINDOWS_PATH_DELIMITER));
+    expect(managedPath.split(WINDOWS_PATH_DELIMITER).filter((entry) => entry === stableDir)).toHaveLength(1);
+  });
+
+  it('ignores the stable directory off Windows and when none resolved', () => {
+    const stableDir = 'C:\\Program Files\\PowerShell\\7';
+    const currentPath = ['/usr/bin', '/bin'].join(path.delimiter);
+    process.env.PATH = currentPath;
+
+    const onLinux = createRuntime(null, { platform: 'linux', env: { PATH: currentPath } }, () => stableDir);
+    expect(onLinux.buildManagedOpenCodePath()).toBe(currentPath);
+
+    const noStableDirectory = createRuntime(null, windowsEnv('C:\\Windows'), () => null, path.win32);
+    expect(noStableDirectory.buildManagedOpenCodePath()).toBe('C:\\Windows');
   });
 });

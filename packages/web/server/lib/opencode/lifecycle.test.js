@@ -167,6 +167,59 @@ describe('OpenCode lifecycle', () => {
     }
   });
 
+  it('records the managed shell interpreter and warns when the shell misses a PowerShell 7', async () => {
+    spawnMock.mockImplementation(() => {
+      const child = createMockChild();
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false }));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const downgradeDiagnostics = {
+      insertedDirectory: null,
+      pwshPath: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+      pwshVersion: '7.6.7',
+      effectivePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.EXE',
+      effectiveVersion: '5.1.26100.9549',
+      downgrade: true,
+    };
+    const warningText = 'The OpenCode shell runs Windows PowerShell 5.1, but this machine has PowerShell 7.6.7.';
+    const runtime = createRuntime({
+      getShellInterpreterDiagnostics: vi.fn(() => ({
+        summary: 'Shell interpreter: Windows PowerShell 5.1.26100.9549 at powershell.EXE',
+        warning: warningText,
+        diagnostics: downgradeDiagnostics,
+      })),
+    });
+
+    const server = await runtime.startOpenCode();
+    try {
+      expect(runtime.testState.lastOpenCodeLaunchDiagnostics.shellInterpreter).toEqual(downgradeDiagnostics);
+      expect(warnSpy).toHaveBeenCalledWith(`[OpenCode] ${warningText}`);
+    } finally {
+      await server.close();
+    }
+
+    // A machine whose shell really runs PowerShell 7 gets the summary and no warning.
+    warnSpy.mockClear();
+    const quiet = createRuntime({
+      getShellInterpreterDiagnostics: () => ({
+        summary: 'Shell interpreter: PowerShell 7.6.7 at pwsh.exe',
+        warning: null,
+        diagnostics: { ...downgradeDiagnostics, downgrade: false },
+      }),
+    });
+    const quietServer = await quiet.startOpenCode();
+    try {
+      expect(quiet.testState.lastOpenCodeLaunchDiagnostics.shellInterpreter.downgrade).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      await quietServer.close();
+      warnSpy.mockRestore();
+    }
+  });
+
   it('records an authoritative ready terminal event for external startup', async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,

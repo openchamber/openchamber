@@ -369,7 +369,10 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
   }
 
   const isLikelyMac = /Mac OS X|Macintosh/.test(platform);
-  if (isLikelyMac) {
+  // Windows prints this section too: a shell that silently fell back to Windows
+  // PowerShell 5.1 leaves no other trace, and a bug report quotes this block.
+  // Every other platform keeps the macOS-only output it had before.
+  if (isLikelyMac || isWindows) {
     lines.push('');
     lines.push('OpenCode CLI resolution:');
 
@@ -451,6 +454,12 @@ export const buildOpenCodeStatusReport = async (): Promise<string> => {
       lines.push(`- runtime: ${formatLaunchRuntime(formatUnknown(launchDiagnostics.wrapperType, ''), node, bun)}`);
       lines.push(`- PATH entries: ${formatUnknown(launchDiagnostics.pathEntryCount, '(unknown)')}`);
       lines.push(`- shell env: ${formatUnknown(launchDiagnostics.hasShellEnv, '(unknown)')} (${formatUnknown(launchDiagnostics.shellEnvKeysCount, '?')} keys)`);
+      const shellInterpreter = isRecord(launchDiagnostics.shellInterpreter) ? launchDiagnostics.shellInterpreter : null;
+      if (shellInterpreter) {
+        lines.push(`- shell pwsh: ${formatUnknown(shellInterpreter.pwshPath, '(none)')} ${formatUnknown(shellInterpreter.pwshVersion, '(none)')}`);
+        lines.push(`- shell interpreter: ${formatUnknown(shellInterpreter.effectivePath, '(none)')} ${formatUnknown(shellInterpreter.effectiveVersion, '(none)')}${shellInterpreter.downgrade === true ? ' downgrade=yes' : ''}`);
+        lines.push(`- shell PATH prepend: ${formatUnknown(shellInterpreter.insertedDirectory, '(none)')}`);
+      }
     } else {
       lines.push(`- launch-binary: ${configuredLaunchBinary || '(n/a)'}`);
       lines.push(`- launch-wrapper: ${configuredLaunchWrapperType || '(n/a)'}`);
