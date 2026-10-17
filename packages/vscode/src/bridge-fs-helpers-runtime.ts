@@ -212,6 +212,8 @@ const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'logs',
 ]);
 
+const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
+
 const shouldSkipSearchDirectory = (name: string, includeHidden: boolean) => {
   if (!name) {
     return false;
@@ -299,11 +301,19 @@ const searchFilesystemFiles = async (
   const rootUri = vscode.Uri.file(rootPath);
   const queue: vscode.Uri[] = [rootUri];
   const visited = new Set<string>([normalizeFsPath(rootUri.fsPath)]);
-  const collectLimit = matchAll ? limit : Math.max(limit * 3, 200);
+  // An empty query stops at `limit` candidates: any file serves. A query
+  // must keep walking until the tree or the inspected-file ceiling is
+  // reached: weak shallow matches otherwise exhaust a candidate budget
+  // before exact deeper matches are ever visited. Mirrors the web server's
+  // `search.js` ceiling; keep the two in agreement.
   const candidates: Array<{ name: string; path: string; relativePath: string; extension?: string; score: number }> = [];
+  let inspectedFiles = 0;
+  const reachedSearchStop = () => (matchAll
+    ? candidates.length >= limit
+    : inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
   const MAX_CONCURRENCY = 10;
 
-  while (queue.length > 0 && candidates.length < collectLimit) {
+  while (queue.length > 0 && !reachedSearchStop()) {
     if (deadline && Date.now() > deadline) {
       break;
     }
@@ -352,6 +362,7 @@ const searchFilesystemFiles = async (
 
         const relativePath = normalizeFsPath(path.relative(rootPath, absolute) || path.basename(absolute));
         const extension = entryName.includes('.') ? entryName.split('.').pop()?.toLowerCase() : undefined;
+        inspectedFiles += 1;
 
         if (matchAll) {
           candidates.push({
@@ -374,13 +385,13 @@ const searchFilesystemFiles = async (
           }
         }
 
-        if (candidates.length >= collectLimit) {
+        if (reachedSearchStop()) {
           queue.length = 0;
           break;
         }
       }
 
-      if (candidates.length >= collectLimit) {
+      if (reachedSearchStop()) {
         break;
       }
     }

@@ -1,4 +1,5 @@
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
+const FILE_SEARCH_MAX_VISITED_FILES = 10_000;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
   '.git',
@@ -95,7 +96,15 @@ const fuzzyMatchScoreNormalized = (normalizedQuery, candidate) => {
   return score;
 };
 
+export const createGitCheckIgnoreTimeoutMs = () => {
+  const raw = Number(process.env.OPENCHAMBER_GIT_CHECK_IGNORE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  return 2500;
+};
+
 export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinaryForSpawn }) => {
+  const gitCheckIgnoreTimeoutMs = createGitCheckIgnoreTimeoutMs();
+
   const searchFilesystemFiles = async (rootPath, options) => {
     const { limit, query, includeHidden, respectGitignore } = options;
     const includeHiddenEntries = Boolean(includeHidden);
@@ -104,10 +113,17 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
     const queue = [rootPath];
     const visited = new Set([rootPath]);
     const shouldRespectGitignore = respectGitignore !== false;
-    const collectLimit = matchAll ? limit : Math.max(limit * 3, 200);
+    // An empty query stops at `limit` candidates: any file serves. A query
+    // must keep walking until the tree or the inspected-file ceiling is
+    // reached: weak shallow matches otherwise exhaust a candidate budget
+    // before exact deeper matches are ever visited.
     const candidates = [];
+    let inspectedFiles = 0;
+    const reachedSearchStop = () => (matchAll
+      ? candidates.length >= limit
+      : inspectedFiles >= FILE_SEARCH_MAX_VISITED_FILES);
 
-    while (queue.length > 0 && candidates.length < collectLimit) {
+    while (queue.length > 0 && !reachedSearchStop()) {
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
 
       const dirResults = await Promise.all(
@@ -132,9 +148,28 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
               });
 
               let stdout = '';
+              let settled = false;
+              let timeout = null;
+              const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                if (timeout) clearTimeout(timeout);
+                resolve(value);
+              };
+
+              if (gitCheckIgnoreTimeoutMs > 0) {
+                timeout = setTimeout(() => {
+                  try {
+                    child.kill('SIGKILL');
+                  } catch {
+                  }
+                  finish('');
+                }, gitCheckIgnoreTimeoutMs);
+              }
+
               child.stdout.on('data', (data) => { stdout += data.toString(); });
-              child.on('close', () => resolve(stdout));
-              child.on('error', () => resolve(''));
+              child.on('close', () => finish(stdout));
+              child.on('error', () => finish(''));
             });
 
             const ignoredNames = new Set(
@@ -181,6 +216,7 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
 
           const relativePath = normalizeRelativeSearchPath(rootPath, entryPath, path);
           const extension = entryName.includes('.') ? entryName.split('.').pop()?.toLowerCase() : undefined;
+          inspectedFiles += 1;
 
           if (matchAll) {
             candidates.push({
@@ -203,13 +239,13 @@ export const createFsSearchRuntime = ({ fsPromises, path, spawn, resolveGitBinar
             }
           }
 
-          if (candidates.length >= collectLimit) {
+          if (reachedSearchStop()) {
             queue.length = 0;
             break;
           }
         }
 
-        if (candidates.length >= collectLimit) {
+        if (reachedSearchStop()) {
           break;
         }
       }
