@@ -117,15 +117,59 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.textContent).toContain('~6 tok/s');
   });
 
-  test('collapsed remount keeps a usable header and reopening reads fresh data', async () => {
+  test('an initially collapsed section shows response speed once status is authoritative', async () => {
+    await render(false);
+    await act(async () => {
+      useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
+      store().setState({ part: { [assistant.id]: [
+        { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
+      ] } });
+    });
+    await render();
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    await act(async () => store().setState({ sessionStatusReady: true }));
+    expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s');
+    expect(dom.container.textContent).not.toContain('Response');
+    expect(dom.container.textContent).not.toContain('Whole turn');
+    expect(messageRequests).toBe(0);
+  });
+
+  test('a turn completed while collapsed publishes its speed without opening the section', async () => {
+    const completed: AssistantMessage = { ...assistant,
+      get tokens() { tokenReads += 1; return { input: 100, output: 40, reasoning: 10, cache: { read: 40, write: 0 } }; },
+    };
+    await act(async () => {
+      useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
+      store().setState({ session_status: { [sessionId]: { type: 'busy' } } });
+    });
+    tokenReads = 0;
+    await act(async () => store().setState({
+      message: { [sessionId]: [user, completed] },
+      part: { [assistant.id]: [
+        { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
+      ] },
+    }));
+    expect(tokenReads).toBe(0);
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } } }));
+    expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s');
+    expect(dom.container.textContent).not.toContain('Whole turn');
+    expect(messageRequests).toBe(0);
+  });
+
+  test('collapsed remount retains the response headline and reopening reads fresh data', async () => {
+    await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } }, part: { [assistant.id]: [
+      { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
+    ] } }));
     const button = dom.container.querySelector('button');
     if (!button) throw new Error('Expected collapse button');
     await act(async () => button.click());
     await render(false);
     await render();
     expect(dom.container.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
-    expect(dom.container.textContent).toContain('Turn stats');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s');
     expect(dom.container.textContent).not.toContain('Whole turn');
     const reopen = dom.container.querySelector('button');
     if (!reopen) throw new Error('Expected reopen button');
@@ -133,7 +177,7 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(dom.container.textContent).toContain('~6 tok/s');
   });
 
-  test('busy, retry and collapsed updates do not notify records subscribers or aggregate tokens', async () => {
+  test('busy and retry updates do not notify records subscribers or aggregate tokens, expanded or collapsed', async () => {
     await act(async () => store().setState({ session_status: { [sessionId]: { type: 'idle' } } }));
     // Positive control: on idle, part replacement reaches the subscriber and calculator.
     tokenReads = 0;
@@ -142,24 +186,51 @@ describe('mounted turn telemetry with live sync stores', () => {
     expect(tokenReads > 0).toBe(true);
     expect((getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks ?? 0) > 0).toBe(true);
 
-    for (const mode of ['busy', 'retry', 'collapsed'] as const) {
-      await act(async () => {
-        store().setState({ session_status: { [sessionId]: mode === 'retry'
-          ? { type: 'retry', attempt: 1, message: 'retry', next: 0 }
-          : { type: mode === 'busy' ? 'busy' : 'idle' } } });
-        useUIStore.getState().setWorkStatusSectionExpanded('telemetry', mode !== 'collapsed');
-      });
-      resetSyncPerformanceDiagnostics();
-      tokenReads = 0;
-      for (let i = 0; i < 100; i += 1) {
-        await act(async () => store().setState({ part: { [assistant.id]: [{ id: 'text', sessionID: sessionId,
-          messageID: assistant.id, type: 'text', text: String(i), time: { start: 2500 } }] } }));
+    for (const expanded of [true, false]) {
+      for (const mode of ['busy', 'retry'] as const) {
+        await act(async () => {
+          store().setState({ session_status: { [sessionId]: mode === 'retry'
+            ? { type: 'retry', attempt: 1, message: 'retry', next: 0 }
+            : { type: 'busy' } } });
+          useUIStore.getState().setWorkStatusSectionExpanded('telemetry', expanded);
+        });
+        resetSyncPerformanceDiagnostics();
+        tokenReads = 0;
+        for (let i = 0; i < 100; i += 1) {
+          await act(async () => store().setState({ part: { [assistant.id]: [{ id: 'text', sessionID: sessionId,
+            messageID: assistant.id, type: 'text', text: String(i), time: { start: 2500 } }] } }));
+        }
+        expect(tokenReads).toBe(0);
+        expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(0);
+        if (!expanded) expect(dom.container.textContent).toBe('Turn stats');
+        else expect(dom.container.textContent).toContain('~6 tok/s');
       }
-      expect(tokenReads).toBe(0);
-      expect(getSyncPerformanceDiagnostics()?.sessionMessageChangeCallbacks).toBe(0);
-      if (mode === 'collapsed') expect(dom.container.textContent).toBe('Turn stats');
-      else expect(dom.container.textContent).toContain('~6 tok/s');
     }
+  });
+
+  test('collapsed headlines follow corrections and clear on revert, empty history and scope changes', async () => {
+    await act(async () => {
+      useUIStore.getState().setWorkStatusSectionExpanded('telemetry', false);
+      store().setState({ sessionStatusReady: true, part: { [assistant.id]: [
+        { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 5000 } },
+      ] } });
+    });
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~10 tok/s');
+    await act(async () => store().setState({ part: { [assistant.id]: [
+      { id: 'text', type: 'text', sessionID: sessionId, messageID: assistant.id, text: 'Final reply', time: { start: 3000, end: 4000 } },
+    ] } }));
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s');
+    await act(async () => store().setState({ session: [{ ...session, revert: { messageID: user.id } }] }));
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    await act(async () => store().setState({ session: [session] }));
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s');
+    await render(true, '/another-repo');
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    await render();
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats~20 tok/s');
+    await act(async () => store().setState({ message: {} }));
+    expect(dom.container.querySelector('button')?.textContent).toBe('Turn stats');
+    expect(messageRequests).toBe(0);
   });
 
   test('session and directory changes cannot retain another scope, including equal IDs', async () => {

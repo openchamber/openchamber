@@ -115,7 +115,7 @@ which requests only providers enabled for this panel.
 | Subagent blockers | directory `permission` / `question` maps | one subscription covers every child |
 | Usage | `components/usage/usageGroups.ts` over `useQuotaStore` | grouping shared with the mobile popover; presentation is not |
 | Linked threads | `lib/linkedIssues.ts` over session metadata; state from tracked items | written by the flows that attach an issue or PR; a linked PR that is also the checked-out branch's PR shows the branch summary, as its sidebar row does |
-| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed only while expanded and authoritatively idle; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
+| Turn stats | `telemetry.ts` over `useSessionMessageRecords` | computed while authoritatively idle, including when collapsed so the headline stays current; either rate above 5,000 tok/s is reported as unknown (see the two-rate description below) |
 | Goal | `useSessionGoal` | respects the Settings toggle |
 | MCP | `useMcpStore` | connect/disconnect reuses the dropdown's actions |
 | Pinned messages | `getContextObligatoryMessages` + `state.part`, else one `getSessionMessage` read | see below |
@@ -185,9 +185,11 @@ scroller. Tooltips explain the measurement in every locale. The token row uses
 compact input/output arrows; its tooltip gives full counts and explains that
 input excludes cached tokens and output includes reasoning across all steps.
 
-Records subscriptions and aggregation stop while collapsed, busy, retrying, or
-awaiting status authority. Explicit idle events or a successful directory status
-snapshot allow computation. One component-owned committed result keeps the
+Records subscriptions and aggregation stop while busy, retrying, or awaiting
+status authority. Explicit idle events or a successful directory status snapshot
+allow computation even when collapsed: the response-speed headline remains visible
+and updates when a turn completes, after a remount, or when idle records change.
+The collapsed body stays unmounted. One component-owned committed result keeps the
 headline and rows stable during the next active turn. Its identity includes
 runtime, normalized directory and session. Scope changes discard it; fresh empty
 or reverted records clear it. There is no global message-ID cache. Corrections
