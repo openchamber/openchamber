@@ -46,7 +46,13 @@ const describeGenerationFailure = (error) => {
   if (Number.isFinite(status)) parts.push(`status ${status}`);
   const code = isString(error?.code) ? error.code.trim() : '';
   if (code) parts.push(`code ${code}`);
-  if (error instanceof Error && error.message) parts.push(error.message.slice(0, 300));
+  // The small-model service rethrows raw SDK rejections, which are tagged
+  // objects rather than Errors. Read the message from either shape, and keep
+  // the tag when the SDK only carries that.
+  const message = isString(error?.message) ? error.message.trim() : '';
+  if (message) parts.push(message.replace(/\s+/g, ' ').slice(0, 300));
+  const tag = isString(error?._tag) ? error._tag.trim() : '';
+  if (tag) parts.push(`tag ${tag}`);
   return parts.join(' | ');
 };
 
