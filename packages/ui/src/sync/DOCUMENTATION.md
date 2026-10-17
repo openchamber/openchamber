@@ -657,7 +657,12 @@ happened. Before that no-reply notice shows, the session tail is re-read
 from the server (the live stream may have dropped the reply); the notice
 appears only if that read settles with the prompt still last, or fails. Two
 more reads, at 10 and 30 seconds, keep running under the visible notice so a
-late reply still replaces it. Both buffers — session errors and rejected sends — appear in full
+late reply still replaces it. An error the transcript prints on a message is
+classified before it is shown: `lib/messages/assistantError.ts` reads the
+`{ name | type, message }` shape once and names the interruptions — OpenCode's
+`MessageAbortedError` / "Step interrupted" and this client's own `aborted`
+close — as the stop they are, so a deliberate Stop never reads as a failed
+send. Both buffers — session errors and rejected sends — appear in full
 in `__opencodeDebug.statusReport()` together with the managed OpenCode
 process's last error and stderr tail. The diagnostic timeline
 (Ctrl/Cmd+Shift+L, see `lib/diagnostics/DOCUMENTATION.md`) carries them
