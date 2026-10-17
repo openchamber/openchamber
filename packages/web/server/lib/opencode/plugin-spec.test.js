@@ -152,3 +152,48 @@ describe('parsePathSpec', () => {
     });
   });
 });
+
+describe('isGitSpec', () => {
+  test('accepts the hosted shortcuts npm and OpenCode document', () => {
+    expect(spec.isGitSpec('github:acme/opencode-plugin')).toBe(true);
+    expect(spec.isGitSpec('gitlab:acme/opencode-plugin')).toBe(true);
+    expect(spec.isGitSpec('bitbucket:acme/opencode-plugin')).toBe(true);
+    expect(spec.isGitSpec('gist:acme/1a2b3c')).toBe(true);
+  });
+
+  test('accepts a hosted shortcut with a ref and a subdirectory', () => {
+    expect(spec.isGitSpec('github:acme/plugins#main::path:packages/opencode-plugin')).toBe(true);
+  });
+
+  test('accepts the git+ transport forms', () => {
+    expect(spec.isGitSpec('git+https://github.com/acme/opencode-plugin.git#main')).toBe(true);
+    expect(spec.isGitSpec('git+ssh://git@github.com/acme/opencode-plugin.git#main')).toBe(true);
+    expect(spec.isGitSpec('git+file:///srv/plugins/opencode-plugin')).toBe(true);
+    expect(spec.isGitSpec('git://github.com/acme/opencode-plugin.git')).toBe(true);
+  });
+
+  test('does not claim npm specs, paths, or a bare URL', () => {
+    expect(spec.isGitSpec('foo')).toBe(false);
+    expect(spec.isGitSpec('@scope/foo@1.2.3')).toBe(false);
+    expect(spec.isGitSpec('/abs/plugin.js')).toBe(false);
+    expect(spec.isGitSpec('./local.js')).toBe(false);
+    // A bare https URL is not one of the documented git forms.
+    expect(spec.isGitSpec('https://github.com/acme/opencode-plugin.git')).toBe(false);
+  });
+});
+
+describe('parsedKindForSpec', () => {
+  test('classifies a git spec as its own kind, not npm', () => {
+    // Without this a Git spec fell through to the npm branch, which queried
+    // the registry with the literal spec and reported it unreachable.
+    expect(spec.parsedKindForSpec('github:acme/opencode-plugin')).toBe('git');
+    expect(spec.parsedKindForSpec('git+ssh://git@github.com/acme/plugin.git#main')).toBe('git');
+  });
+
+  test('keeps paths and npm specs on their existing kinds', () => {
+    expect(spec.parsedKindForSpec('/abs/plugin.js')).toBe('path');
+    expect(spec.parsedKindForSpec('./local.js')).toBe('path');
+    expect(spec.parsedKindForSpec('@scope/foo@1.2.3')).toBe('npm');
+    expect(spec.parsedKindForSpec('foo')).toBe('npm');
+  });
+});

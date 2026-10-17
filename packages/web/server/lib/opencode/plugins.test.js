@@ -153,7 +153,7 @@ describe('opencode plugins data layer', () => {
   });
 
   test('lists entries from user and project layers with scopes and parsed kinds', () => {
-    writeJson(userConfigPath, { plugin: ['npm-plugin', '/abs/plugin.js', '@scope/pkg@1.0.0'] });
+    writeJson(userConfigPath, { plugin: ['npm-plugin', '/abs/plugin.js', '@scope/pkg@1.0.0', 'github:acme/opencode-plugin'] });
     writeJson(path.join(projectDir, '.opencode', 'opencode.json'), { plugin: ['./local-plugin.js'] });
 
     const entries = plugins.listPluginEntries(projectDir);
@@ -161,6 +161,7 @@ describe('opencode plugins data layer', () => {
       expect.objectContaining({ spec: 'npm-plugin', scope: 'user', kind: 'config', parsedKind: 'npm', sourcePath: userConfigPath }),
       expect.objectContaining({ spec: '/abs/plugin.js', scope: 'user', kind: 'config', parsedKind: 'path', sourcePath: userConfigPath }),
       expect.objectContaining({ spec: '@scope/pkg@1.0.0', scope: 'user', kind: 'config', parsedKind: 'npm', sourcePath: userConfigPath }),
+      expect.objectContaining({ spec: 'github:acme/opencode-plugin', scope: 'user', kind: 'config', parsedKind: 'git', sourcePath: userConfigPath }),
       expect.objectContaining({ spec: './local-plugin.js', scope: 'project', kind: 'config', parsedKind: 'path', sourcePath: path.join(projectDir, '.opencode', 'opencode.json') }),
     ]);
     fs.rmSync(userConfigPath, { force: true });

@@ -2445,6 +2445,7 @@ export const settingsDict = {
   'settings.plugins.sidebar.kind.file': '外掛檔案',
   'settings.plugins.sidebar.kind.package': '外掛套件',
   'settings.plugins.sidebar.kind.npm': 'npm 套件',
+  'settings.plugins.sidebar.kind.git': 'Git 套件',
   'settings.plugins.sidebar.kind.path': '本機路徑',
   'settings.plugins.sidebar.toast.deleteFailed': '刪除外掛失敗',
   'settings.plugins.sidebar.toast.deleted': '外掛「{name}」已刪除',

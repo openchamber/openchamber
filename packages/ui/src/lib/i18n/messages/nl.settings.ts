@@ -1267,6 +1267,7 @@ export const settingsDict = {
   'settings.plugins.sidebar.group.projectEntries': 'Projectconfiguratie',
   'settings.plugins.sidebar.group.projectFiles': 'Pluginbestand voor het project',
   'settings.plugins.sidebar.kind.npm': 'npm-pakket',
+  'settings.plugins.sidebar.kind.git': 'Git-pakket',
   'settings.plugins.sidebar.kind.path': 'Lokaal pad',
   'settings.plugins.sidebar.kind.file': 'Pluginbestand',
   'settings.plugins.sidebar.kind.package': 'Pluginpakket',

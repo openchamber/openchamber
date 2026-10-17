@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 
 import { getNpmInfo as defaultGetNpmInfo } from './npm-registry.js';
-import { isExactSemver as defaultIsExactSemver, isPathSpec as defaultIsPathSpec, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec } from './plugin-spec.js';
+import { isExactSemver as defaultIsExactSemver, parseNpmSpec as defaultParseNpmSpec, parsePathSpec as defaultParsePathSpec, parsedKindForSpec as defaultParsedKindForSpec } from './plugin-spec.js';
 import { buildAppliedResponse } from './config-mutation-response.js';
 
 const ENTRY_EXISTS_CODES = new Set(['ENTRY_EXISTS', 'EEXIST']);
@@ -28,10 +28,8 @@ export const registerPluginRoutes = (app, dependencies) => {
     parseNpmSpec = defaultParseNpmSpec,
     parsePathSpec = defaultParsePathSpec,
     isExactSemver = defaultIsExactSemver,
-    isPathSpec = defaultIsPathSpec,
+    parsedKindForSpec = defaultParsedKindForSpec,
   } = dependencies;
-
-  const parsedKindForSpec = (spec) => (isPathSpec(spec) ? 'path' : 'npm');
 
   const resolveDirectory = async (req, res) => {
     const { directory, error } = await resolveOptionalProjectDirectory(req);
@@ -167,6 +165,14 @@ export const registerPluginRoutes = (app, dependencies) => {
           } catch {
             results.push({ kind: 'path-unreadable', spec, absolutePath });
           }
+          continue;
+        }
+
+        // A Git spec is not an npm package: the registry cannot answer for it,
+        // and querying it would report a working plugin as an unreachable
+        // registry. OpenCode resolves it itself, so there is nothing to check.
+        if (parsedKindForSpec(spec) === 'git') {
+          results.push({ kind: 'git-ok', spec });
           continue;
         }
 

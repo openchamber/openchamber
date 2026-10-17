@@ -1242,6 +1242,7 @@ export const settingsDict = {
   'settings.plugins.sidebar.group.projectEntries': 'Proje yapılandırması',
   'settings.plugins.sidebar.group.projectFiles': 'Proje eklenti dosyası',
   'settings.plugins.sidebar.kind.npm': 'npm paketi',
+  'settings.plugins.sidebar.kind.git': 'Git paketi',
   'settings.plugins.sidebar.kind.path': 'Yerel yol',
   'settings.plugins.sidebar.kind.file': 'Eklenti dosyası',
   'settings.plugins.sidebar.kind.package': 'Eklenti paketi',

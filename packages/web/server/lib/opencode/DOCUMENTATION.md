@@ -533,6 +533,17 @@ Only files in the v2 `plugins/` directory are editable through the plugins
 page; a package directory or a v1 `plugin/` file is listed as a package that
 OpenCode loads and OpenChamber does not touch.
 
+A configured plugin spec is classified by `parsedKindForSpec`
+(`plugin-spec.js`): a filesystem path is `path`, a Git package spec is `git`,
+anything else is `npm`. The Git forms are the ones OpenCode 2 documents — the
+hosted shortcuts (`github:`, `gitlab:`, `bitbucket:`, `gist:`), the `git+`
+transports (`git+https://`, `git+ssh://`, `git+file://`) and bare `git://`,
+each with an optional `#ref` and npm `::path:` subdirectory. A Git spec must
+not reach the npm registry: the registry answers 405 to a name containing a
+colon, which the UI reads as an unreachable registry, and a Git spec has no npm
+version to check for updates. The registry route returns `git-ok` for such a
+spec without querying npm; OpenCode resolves it itself.
+
 The global config directory is what OpenCode 2 uses: `OPENCODE_CONFIG_DIR`
 when set, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. Config
 files are `opencode.json(c)` only: OpenCode 2 no longer discovers the v1-era

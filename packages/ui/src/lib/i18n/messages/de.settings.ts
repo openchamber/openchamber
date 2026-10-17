@@ -1208,6 +1208,7 @@ export const settingsDict = {
   'settings.plugins.sidebar.group.projectEntries': 'Projektkonfiguration',
   'settings.plugins.sidebar.group.projectFiles': 'Projekt-Plugin-Datei',
   'settings.plugins.sidebar.kind.npm': 'npm-Paket',
+  'settings.plugins.sidebar.kind.git': 'Git-Paket',
   'settings.plugins.sidebar.kind.path': 'Lokaler Pfad',
   'settings.plugins.sidebar.kind.file': 'Plugin-Datei',
   'settings.plugins.sidebar.kind.package': 'Plugin-Paket',

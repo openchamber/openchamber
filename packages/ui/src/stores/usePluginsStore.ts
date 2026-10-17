@@ -15,7 +15,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
 export type PluginScope = 'user' | 'project';
-type PluginParsedKind = 'npm' | 'path';
+export type PluginParsedKind = 'npm' | 'path' | 'git';
 
 export interface PluginEntry {
   id: string;
@@ -62,7 +62,9 @@ export type RegistryResult =
   | { kind: 'npm-network'; spec: string; error: string }
   | { kind: 'path-ok'; spec: string; absolutePath: string }
   | { kind: 'path-missing'; spec: string; absolutePath: string }
-  | { kind: 'path-unreadable'; spec: string; absolutePath: string };
+  | { kind: 'path-unreadable'; spec: string; absolutePath: string }
+  /** A Git package spec: OpenCode resolves it itself, so there is nothing to check. */
+  | { kind: 'git-ok'; spec: string };
 
 /**
  * What OpenCode reported for the plugins of one directory and runtime

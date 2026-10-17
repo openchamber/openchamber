@@ -1234,6 +1234,7 @@ export const settingsDict = {
   'settings.plugins.sidebar.group.projectEntries': 'Configuração do projeto',
   'settings.plugins.sidebar.group.projectFiles': 'Arquivo de plugin do projeto',
   'settings.plugins.sidebar.kind.npm': 'pacote npm',
+  'settings.plugins.sidebar.kind.git': 'pacote Git',
   'settings.plugins.sidebar.kind.path': 'Caminho local',
   'settings.plugins.sidebar.kind.file': 'Arquivo de plugin',
   'settings.plugins.sidebar.kind.package': 'Pacote de plugin',
