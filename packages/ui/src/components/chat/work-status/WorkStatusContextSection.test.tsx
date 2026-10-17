@@ -47,7 +47,7 @@ describe('agent-linked threads in the context section', () => {
       </I18nProvider>,
     ));
   };
-  const publish = async (linked: unknown) => {
+  const publish = async (linked: LinkedIssue[]) => {
     const store = getSyncChildStores().getChild(directory);
     if (!store) throw new Error('Expected directory store');
     await act(async () => store.setState({ session: [sessionWith(linked)] }));
