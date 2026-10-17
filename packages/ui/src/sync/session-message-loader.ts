@@ -92,6 +92,8 @@ type LoaderEntry = {
   gapAnchorID: string | null
   /** The session's pending inbox was read into this entry since it was opened. */
   inboxSeeded: boolean
+  /** Ids painted from the inbox; a replacing window must not drop them. */
+  inboxSeededIDs: Set<string>
 }
 
 type FetchedPage = {
@@ -173,6 +175,7 @@ const withoutHistoryOutsideWindow = (
   sessionID: string,
   page: FetchedPage,
   optimistic: ReadonlyMap<string, OptimisticItem>,
+  preserved: ReadonlySet<string>,
 ): DirectoryStore => {
   const messages = state.message[sessionID]
   if (!messages) return state
@@ -180,7 +183,7 @@ const withoutHistoryOutsideWindow = (
   const newestWindowTime = page.session.at(-1)?.time.created ?? Number.NEGATIVE_INFINITY
   const dropped: string[] = []
   const kept = messages.filter((message) => {
-    if (pageIDs.has(message.id) || optimistic.has(message.id) || message.time.created > newestWindowTime) return true
+    if (pageIDs.has(message.id) || optimistic.has(message.id) || preserved.has(message.id) || message.time.created > newestWindowTime) return true
     dropped.push(message.id)
     return false
   })
@@ -812,6 +815,7 @@ export class SessionMessageLoader {
       verifiedEpoch: 0,
       gapAnchorID: null,
       inboxSeeded: false,
+      inboxSeededIDs: new Set(),
     }
     this.entries.set(key, entry)
     return entry
@@ -990,46 +994,52 @@ export class SessionMessageLoader {
     if (!isCurrent()) return
     entry.inboxSeeded = true
     if (items.length === 0) return
-    const current = store.getState()
-    const messages = [...(current.message[target.sessionID] ?? [])]
-    const held = new Set(messages.map((message) => message.id))
-    const parts = { ...current.part }
-    let changed = false
-    for (const item of items) {
-      // A live event (or an earlier seed) already painted this item.
-      if (held.has(item.id)) continue
-      if (item.type !== "user" && item.type !== "synthetic") continue
-      const created = item.time?.created ?? Date.now()
-      if (item.type === "user") {
-        const payload = item.payload as SessionInboxUserPayload
-        messages.push(compact({
-          id: item.id,
-          sessionID: target.sessionID,
-          role: "user",
-          time: { created },
-          metadata: payload.metadata,
-        }) as UserMessage)
-        parts[item.id] = projectUserParts(payload, { sessionID: target.sessionID, messageID: item.id, created })
-      } else {
-        const payload = item.payload as { text: string; description?: string; metadata?: Metadata }
-        messages.push(compact({
-          id: item.id,
-          sessionID: target.sessionID,
-          role: "synthetic",
-          time: { created },
-          text: payload.text,
-          description: payload.description,
-          metadata: payload.metadata,
-        }) as SyntheticMessage)
+    try {
+      const current = store.getState()
+      const messages = [...(current.message[target.sessionID] ?? [])]
+      const held = new Set(messages.map((message) => message.id))
+      const parts = { ...current.part }
+      let changed = false
+      for (const item of items) {
+        // A live event (or an earlier seed) already painted this item.
+        if (held.has(item.id)) continue
+        if (item.type !== "user" && item.type !== "synthetic") continue
+        const created = item.time?.created ?? Date.now()
+        if (item.type === "user") {
+          const payload = item.payload as SessionInboxUserPayload
+          messages.push(compact({
+            id: item.id,
+            sessionID: target.sessionID,
+            role: "user",
+            time: { created },
+            metadata: payload.metadata,
+          }) as UserMessage)
+          parts[item.id] = projectUserParts(payload, { sessionID: target.sessionID, messageID: item.id, created })
+        } else {
+          const payload = item.payload as { text: string; description?: string; metadata?: Metadata }
+          messages.push(compact({
+            id: item.id,
+            sessionID: target.sessionID,
+            role: "synthetic",
+            time: { created },
+            text: payload.text,
+            description: payload.description,
+            metadata: payload.metadata,
+          }) as SyntheticMessage)
+        }
+        entry.inboxSeededIDs.add(item.id)
+        held.add(item.id)
+        changed = true
       }
-      held.add(item.id)
-      changed = true
+      if (!changed) return
+      store.setState({
+        message: { ...current.message, [target.sessionID]: sortMessagesChronologically(messages) },
+        part: parts,
+      })
+    } catch {
+      // A malformed item must not turn an already loaded transcript into an
+      // error; the read succeeded, so this open does not retry it.
     }
-    if (!changed) return
-    store.setState({
-      message: { ...current.message, [target.sessionID]: sortMessagesChronologically(messages) },
-      part: parts,
-    })
   }
 
   /**
@@ -1090,7 +1100,7 @@ export class SessionMessageLoader {
     if (!isCurrent()) return null
     const current = store.getState()
     const echoed = withoutEchoedOptimisticRecords(current, target.sessionID, page, entry.optimistic)
-    const state = mode === "replace" ? withoutHistoryOutsideWindow(echoed, target.sessionID, page, entry.optimistic) : echoed
+    const state = mode === "replace" ? withoutHistoryOutsideWindow(echoed, target.sessionID, page, entry.optimistic, entry.inboxSeededIDs) : echoed
     const merged = mergeOptimisticPage({
       session: page.session,
       part: [...page.partsByMessageID].map(([id, part]) => ({ id, part })),

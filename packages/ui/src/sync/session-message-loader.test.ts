@@ -1100,4 +1100,63 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     loader.dispose()
     childStores.disposeAll()
   })
+
+  test("does not repaint an inbox item a live event already added", async () => {
+    const record = createRecord("session-inbox-dedupe", "msg_history", 1)
+    const pending = {
+      id: "inbox_live",
+      sessionID: "session-inbox-dedupe",
+      time: { created: 5 },
+      type: "user",
+      payload: { text: "steered", files: [], agents: [] },
+      delivery: "steer" as const,
+    }
+    const { childStores, loader } = createLoader(async () => response([record]), async () => [pending])
+    const target = { directory: "/inbox-dedupe", sessionID: "session-inbox-dedupe" }
+
+    loader.optimisticAdd({
+      ...target,
+      message: { id: pending.id, sessionID: target.sessionID, role: "user", time: { created: 5 } } as Message,
+      parts: [],
+    })
+    await loader.ensure(target, { reason: "navigation" })
+
+    const ids = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id) ?? []
+    expect(ids.filter((id) => id === pending.id)).toHaveLength(1)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("re-reads the inbox after a stream gap", async () => {
+    const record = createRecord("session-inbox-refresh", "msg_history", 1)
+    let inboxReads = 0
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => {
+        inboxReads += 1
+        return [
+          {
+            id: "inbox_refresh",
+            sessionID: "session-inbox-refresh",
+            time: { created: 2 },
+            type: "user",
+            payload: { text: "steered", files: [], agents: [] },
+            delivery: "steer",
+          },
+        ]
+      },
+    )
+    const target = { directory: "/inbox-refresh", sessionID: "session-inbox-refresh" }
+
+    await loader.ensure(target, { reason: "navigation" })
+    expect(inboxReads).toBe(1)
+
+    await loader.refreshTail(target, 100)
+
+    expect(inboxReads).toBe(2)
+    const ids = childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id) ?? []
+    expect(ids).toContain("inbox_refresh")
+    loader.dispose()
+    childStores.disposeAll()
+  })
 })
