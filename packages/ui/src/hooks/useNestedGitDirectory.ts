@@ -49,6 +49,8 @@ type RepositoryOptionsInput = {
   rootIsUnborn: boolean;
   nestedRepos: NestedRepoDiscovery | undefined;
   nestedRepoSelection: string | null;
+  /** Repositories whose selection already failed its probe; auto-select skips them. */
+  staleClearedSelections?: ReadonlySet<string> | null;
 };
 
 /**
@@ -56,10 +58,12 @@ type RepositoryOptionsInput = {
  * belongs on the surface. An unborn root lists itself first, so switching to a
  * nested repository stays reversible. A non-repository root lists the
  * discovered repositories once a nested one is selected: auto-select picks the
- * first one, and until that lands resolution is still settling. A stored
- * selection equal to the root is not a nested selection and counts as none.
- * Anything else (established root, failed or unsupported discovery, no
- * repositories) has no choice to offer.
+ * first one, and until that lands resolution is still settling. With nothing
+ * selected it lists them too once every discovered repository was already
+ * stale-cleared: auto-select has no candidate left, so the picker is the only
+ * way to re-pick one. A stored selection equal to the root is not a nested
+ * selection and counts as none. Anything else (established root, failed or
+ * unsupported discovery, no repositories) has no choice to offer.
  */
 export const resolveRepositoryOptions = ({
   root,
@@ -67,16 +71,22 @@ export const resolveRepositoryOptions = ({
   rootIsUnborn,
   nestedRepos,
   nestedRepoSelection,
+  staleClearedSelections,
 }: RepositoryOptionsInput): string[] | null => {
   const repositories = discoveredRepositories(nestedRepos);
   if (!repositories || repositories.length === 0) return null;
   if (rootIsUnborn) {
     return root ? [root, ...repositories] : null;
   }
-  if (rootIsGitRepo === false && nestedRepoSelection && nestedRepoSelection !== root) {
-    return repositories;
-  }
-  return null;
+  if (rootIsGitRepo !== false) return null;
+  const hasSelection = Boolean(nestedRepoSelection && nestedRepoSelection !== root);
+  // With nothing selected, auto-select is about to pick the first repository
+  // that has not failed its probe. Once every one was stale-cleared there is
+  // no candidate left, and the picker is the only way to re-pick one.
+  const everyRepositoryStaleCleared = repositories.every((repository) =>
+    staleClearedSelections?.has(repository),
+  );
+  return hasSelection || everyRepositoryStaleCleared ? repositories : null;
 };
 
 /**
@@ -208,6 +218,7 @@ export const useNestedGitDirectory = (
     rootIsUnborn,
     nestedRepos,
     nestedRepoSelection,
+    staleClearedSelections,
   });
 
   return {

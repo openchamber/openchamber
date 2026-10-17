@@ -73,6 +73,63 @@ describe('resolveRepositoryOptions', () => {
     })).toBeNull();
   });
 
+  test('a non-repository root lists the repositories once every one was stale-cleared', () => {
+    expect(resolveRepositoryOptions({
+      root,
+      rootIsGitRepo: false,
+      rootIsUnborn: false,
+      nestedRepos: { repositories: nested, complete: true },
+      nestedRepoSelection: null,
+      staleClearedSelections: new Set(nested),
+    })).toEqual(nested);
+  });
+
+  test('a non-repository root keeps waiting while an eligible candidate remains', () => {
+    for (const staleClearedSelections of [undefined, null, new Set<string>(), new Set([nested[0]])]) {
+      expect(resolveRepositoryOptions({
+        root,
+        rootIsGitRepo: false,
+        rootIsUnborn: false,
+        nestedRepos: { repositories: nested, complete: true },
+        nestedRepoSelection: null,
+        staleClearedSelections,
+      })).toBeNull();
+    }
+  });
+
+  test('a root-valued selection counts as none when every repository was stale-cleared', () => {
+    expect(resolveRepositoryOptions({
+      root,
+      rootIsGitRepo: false,
+      rootIsUnborn: false,
+      nestedRepos: { repositories: nested, complete: true },
+      nestedRepoSelection: root,
+      staleClearedSelections: new Set(nested),
+    })).toEqual(nested);
+  });
+
+  test('an unborn root still lists itself first when every repository was stale-cleared', () => {
+    expect(resolveRepositoryOptions({
+      root,
+      rootIsGitRepo: true,
+      rootIsUnborn: true,
+      nestedRepos: { repositories: nested, complete: true },
+      nestedRepoSelection: null,
+      staleClearedSelections: new Set(nested),
+    })).toEqual([root, ...nested]);
+  });
+
+  test('an established root has no picker even when every repository was stale-cleared', () => {
+    expect(resolveRepositoryOptions({
+      root,
+      rootIsGitRepo: true,
+      rootIsUnborn: false,
+      nestedRepos: { repositories: nested, complete: true },
+      nestedRepoSelection: null,
+      staleClearedSelections: new Set(nested),
+    })).toBeNull();
+  });
+
   test('an established root has no picker even with a stored selection', () => {
     expect(resolveRepositoryOptions({
       root,
@@ -212,8 +269,9 @@ describe('useNestedGitDirectory resolution flow', () => {
   });
 
   const renderHook = async (directory: string, options: { enabled?: boolean; recheckOnOpen?: boolean } = {}) => {
+    let result: ReturnType<typeof useNestedGitDirectory> | null = null;
     const Harness: React.FC = () => {
-      useNestedGitDirectory(directory, options);
+      result = useNestedGitDirectory(directory, options);
       return null;
     };
     await act(async () => {
@@ -221,6 +279,7 @@ describe('useNestedGitDirectory resolution flow', () => {
         React.createElement(RuntimeAPIContext.Provider, { value: apis }, React.createElement(Harness)),
       );
     });
+    return { current: () => result };
   };
 
   test('re-probes a root cached as unborn when the surface opens', async () => {
@@ -284,6 +343,25 @@ describe('useNestedGitDirectory resolution flow', () => {
     await renderHook('/root');
 
     expect(selections).toEqual([['/root', '/root/nested']]);
+  });
+
+  test('offers the picker when every discovered repository was stale-cleared', async () => {
+    useGitStore.setState({
+      directories: new Map([['/root', createDirectoryState(false, null)]]),
+      nestedReposByRoot: new Map([['/root', { repositories: ['/root/one', '/root/two'], complete: true }]]),
+      staleClearedSelections: new Map([['/root', new Set(['/root/one', '/root/two'])]]),
+    });
+    const selections: Array<[string, string]> = [];
+    useGitStore.setState({
+      selectNestedRepo: (directory, repository) => {
+        selections.push([directory, repository]);
+      },
+    });
+
+    const hook = await renderHook('/root');
+
+    expect(hook.current()?.repositoryOptions).toEqual(['/root/one', '/root/two']);
+    expect(selections).toEqual([]);
   });
 
   test('keeps an existing nested selection untouched', async () => {
