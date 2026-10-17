@@ -1,5 +1,7 @@
-import type { Message, Part } from "@/lib/opencode/model"
-import type { MessagePage } from "@/lib/opencode/client"
+import { compact, type Message, type Metadata, type Part, type SyntheticMessage, type UserMessage } from "@/lib/opencode/model"
+import type { MessagePage, SessionInboxEntry } from "@/lib/opencode/client"
+import { projectUserParts } from "@/lib/opencode/projection"
+import type { SessionInboxUserPayload } from "@opencode/client"
 import type { ChildStoreManager, DirectoryStore } from "./child-store"
 import { retry } from "./retry"
 import { mergeOptimisticPage, type OptimisticItem } from "./optimistic"
@@ -88,6 +90,8 @@ type LoaderEntry = {
    * stale tail refresh joins the cache only through this record.
    */
   gapAnchorID: string | null
+  /** The session's pending inbox was read into this entry since it was opened. */
+  inboxSeeded: boolean
 }
 
 type FetchedPage = {
@@ -113,6 +117,12 @@ export type SessionMessagePageSource = {
     options?: { limit?: number; cursor?: string; order?: "asc" | "desc"; partShells?: boolean },
     directory?: string | null,
   ): Promise<MessagePage>
+  /**
+   * Pending inbox items for one session, when the runtime can read them. A
+   * cold load uses this to repaint messages the live `session.inbox.*` events
+   * added while the client was open.
+   */
+  getSessionInbox?(id: string, directory?: string | null): Promise<readonly SessionInboxEntry[]>
 }
 
 type LoaderConfiguration = {
@@ -402,6 +412,18 @@ export class SessionMessageLoader {
           limit: Math.max(entry.snapshot.limit, store.getState().message[normalized.sessionID]?.length ?? 0),
         })
       }
+      // A prefetched transcript renders without this open reading history, so
+      // the first real open still has to restore the pending inbox.
+      if (options?.reason !== "prefetch" && !entry.inboxSeeded) {
+        const generation = entry.snapshot.generation
+        const sdkEpoch = this.sdkEpoch
+        void this.seedPendingInbox(normalized, entry, store, () => (
+          !this.disposed
+          && this.sdkEpoch === sdkEpoch
+          && entry.snapshot.generation === generation
+          && this.childStores.getChild(normalized.directory) === store
+        ))
+      }
       // The cached transcript renders now; a gap-stale one refreshes behind it.
       if (options?.reason !== "prefetch" && this.revalidateIfStale(normalized)) return Promise.resolve()
       return entry.inflight ?? Promise.resolve()
@@ -423,12 +445,12 @@ export class SessionMessageLoader {
     const startedBeforeOpenCode = this.openCodeStartup.isStarting()
     return this.startLoad(normalized, entry, store, kind, async (isCurrent, performance) => {
       try {
-        await this.loadInitial(normalized, entry, store, isCurrent, performance)
+        await this.loadInitial(normalized, entry, store, isCurrent, performance, kind !== "prefetch")
       } catch (error) {
         if (!startedBeforeOpenCode || entry.snapshot.loadingKind === "prefetch" || !isCurrent()) throw error
         await this.openCodeStartup.waitForConnection()
         if (!isCurrent()) return
-        await this.loadInitial(normalized, entry, store, isCurrent, performance)
+        await this.loadInitial(normalized, entry, store, isCurrent, performance, kind !== "prefetch")
       }
     })
   }
@@ -637,6 +659,7 @@ export class SessionMessageLoader {
         updatedAt: Date.now(),
       })
       this.persistCoverage(normalized, entry.snapshot)
+      await this.seedPendingInbox(normalized, entry, store, isCurrent)
     })
   }
 
@@ -788,6 +811,7 @@ export class SessionMessageLoader {
       // Unknown provenance: confirmed only as of the loader's first epoch.
       verifiedEpoch: 0,
       gapAnchorID: null,
+      inboxSeeded: false,
     }
     this.entries.set(key, entry)
     return entry
@@ -863,6 +887,7 @@ export class SessionMessageLoader {
     store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
     isCurrent: () => boolean,
     performance?: LoadPerformanceDetails,
+    seedInbox = true,
   ): Promise<void> {
     const epoch = this.historyEpoch
     const storeMessageCount = store.getState().message[target.sessionID]?.length ?? 0
@@ -893,6 +918,7 @@ export class SessionMessageLoader {
       updatedAt: Date.now(),
     })
     this.persistCoverage(target, entry.snapshot)
+    if (seedInbox) await this.seedPendingInbox(target, entry, store, isCurrent)
   }
 
   /**
@@ -935,6 +961,75 @@ export class SessionMessageLoader {
       }
     }
     return window
+  }
+
+  /**
+   * Repaints the messages that a session's pending OpenCode inbox items stand
+   * for.
+   *
+   * `session.inbox.enqueued` adds them live, but the inbox is not part of the
+   * message history: a cold load (a refresh, another device, a remounted
+   * route) showed nothing while OpenCode still held the items, and later
+   * admitted every one at once. Best effort — a failed read leaves the loaded
+   * transcript exactly as it was.
+   */
+  private async seedPendingInbox(
+    target: SessionMessageTarget,
+    entry: LoaderEntry,
+    store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    const read = this.sdk.getSessionInbox?.bind(this.sdk)
+    if (!read) return
+    let items: readonly SessionInboxEntry[]
+    try {
+      items = await read(target.sessionID, target.directory)
+    } catch {
+      return
+    }
+    if (!isCurrent()) return
+    entry.inboxSeeded = true
+    if (items.length === 0) return
+    const current = store.getState()
+    const messages = [...(current.message[target.sessionID] ?? [])]
+    const held = new Set(messages.map((message) => message.id))
+    const parts = { ...current.part }
+    let changed = false
+    for (const item of items) {
+      // A live event (or an earlier seed) already painted this item.
+      if (held.has(item.id)) continue
+      if (item.type !== "user" && item.type !== "synthetic") continue
+      const created = item.time?.created ?? Date.now()
+      if (item.type === "user") {
+        const payload = item.payload as SessionInboxUserPayload
+        messages.push(compact({
+          id: item.id,
+          sessionID: target.sessionID,
+          role: "user",
+          time: { created },
+          metadata: payload.metadata,
+        }) as UserMessage)
+        parts[item.id] = projectUserParts(payload, { sessionID: target.sessionID, messageID: item.id, created })
+      } else {
+        const payload = item.payload as { text: string; description?: string; metadata?: Metadata }
+        messages.push(compact({
+          id: item.id,
+          sessionID: target.sessionID,
+          role: "synthetic",
+          time: { created },
+          text: payload.text,
+          description: payload.description,
+          metadata: payload.metadata,
+        }) as SyntheticMessage)
+      }
+      held.add(item.id)
+      changed = true
+    }
+    if (!changed) return
+    store.setState({
+      message: { ...current.message, [target.sessionID]: sortMessagesChronologically(messages) },
+      part: parts,
+    })
   }
 
   /**

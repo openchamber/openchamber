@@ -444,6 +444,19 @@ export type MessagePage = {
   cursor: { previous?: string; next?: string }
 }
 
+/**
+ * One pending item of a session's OpenCode inbox. Only `user` and `synthetic`
+ * items paint a message; `compaction` and `move` are controls.
+ */
+export type SessionInboxEntry = {
+  id: string
+  sessionID: string
+  time: { created: number }
+  type: string
+  payload: unknown
+  delivery: "steer" | "queue"
+}
+
 export type SessionPage = {
   sessions: Session[]
   cursor: { previous?: string; next?: string }
@@ -1079,6 +1092,22 @@ class OpencodeService {
       items,
       cursor: pageCursor({ ...response.cursor, next: lastPage ? undefined : response.cursor.next }),
     }
+  }
+
+  /**
+   * Pending items of one session's OpenCode inbox.
+   *
+   * A prompt steered into a running turn is not part of the message history
+   * until OpenCode admits it, so a client that starts (or restarts) while the
+   * session is busy has to read the inbox to paint those messages again.
+   */
+  async getSessionInbox(
+    id: string,
+    directory?: string | null,
+  ): Promise<readonly SessionInboxEntry[]> {
+    return call("session.inbox.list", () =>
+      this.clientFor(directory).session.inbox.list({ sessionID: id }),
+    )
   }
 
   /**

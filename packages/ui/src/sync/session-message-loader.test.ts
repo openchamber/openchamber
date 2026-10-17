@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { MessagePage } from "@/lib/opencode/client"
+import type { MessagePage, SessionInboxEntry } from "@/lib/opencode/client"
 import type { Message, Part } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader } from "./session-message-loader"
@@ -35,7 +35,10 @@ const failure = (status: number, message: string): never => {
 
 type PageRequest = { sessionID: string; directory?: string; limit?: number; cursor?: string }
 
-const createLoader = (getPage: (input: PageRequest) => Promise<MessagePage>) => {
+const createLoader = (
+  getPage: (input: PageRequest) => Promise<MessagePage>,
+  getInbox?: (sessionID: string, directory?: string | null) => Promise<readonly SessionInboxEntry[]>,
+) => {
   const childStores = new ChildStoreManager()
   const sdk = {
     getSessionMessages: (
@@ -43,6 +46,7 @@ const createLoader = (getPage: (input: PageRequest) => Promise<MessagePage>) => 
       options?: { limit?: number; cursor?: string },
       directory?: string | null,
     ) => getPage({ sessionID, directory: directory ?? undefined, limit: options?.limit, cursor: options?.cursor }),
+    ...(getInbox ? { getSessionInbox: getInbox } : {}),
   }
   const loader = new SessionMessageLoader(childStores, { sdk, runtimeKey: "runtime-a" })
   return { childStores, loader }
@@ -983,6 +987,116 @@ describe("SessionMessageLoader before OpenCode is ready", () => {
     await loader.ensure(target, { reason: "navigation" })
     expect(calls).toBe(1)
     expect(loader.getSnapshot(target).status).toBe("error")
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("repaints pending inbox items a cold load would otherwise hide", async () => {
+    const record = createRecord("session-inbox", "msg_history", 1)
+    const inbox: SessionInboxEntry[] = [
+      {
+        id: "inbox_user",
+        sessionID: "session-inbox",
+        time: { created: 2 },
+        type: "user",
+        payload: { text: "new password", files: [], agents: [] },
+        delivery: "steer",
+      },
+      {
+        id: "inbox_synthetic",
+        sessionID: "session-inbox",
+        time: { created: 3 },
+        type: "synthetic",
+        payload: { text: "plan mode is off" },
+        delivery: "steer",
+      },
+    ]
+    const { childStores, loader } = createLoader(async () => response([record]), async () => inbox)
+    const target = { directory: "/inbox-repo", sessionID: "session-inbox" }
+
+    await loader.ensure(target, { reason: "navigation" })
+
+    const state = childStores.getChild(target.directory)?.getState()
+    expect(state?.message[target.sessionID]?.map((message) => message.id)).toEqual([
+      "msg_history",
+      "inbox_user",
+      "inbox_synthetic",
+    ])
+    const userParts = state?.part.inbox_user ?? []
+    expect(userParts).toHaveLength(1)
+    expect(userParts[0]).toMatchObject({ type: "text", text: "new password" })
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("keeps the loaded transcript when the inbox read fails", async () => {
+    const record = createRecord("session-inbox-error", "msg_history", 1)
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => {
+        throw new Error("inbox unavailable")
+      },
+    )
+    const target = { directory: "/inbox-error", sessionID: "session-inbox-error" }
+
+    await loader.ensure(target, { reason: "navigation" })
+
+    expect(loader.getSnapshot(target).status).toBe("ready")
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]).toEqual([record.info])
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("does not read the inbox for a prefetch", async () => {
+    const record = createRecord("session-inbox-prefetch", "msg_history", 1)
+    let inboxReads = 0
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => {
+        inboxReads += 1
+        return []
+      },
+    )
+    const target = { directory: "/inbox-prefetch", sessionID: "session-inbox-prefetch" }
+
+    await loader.ensure(target, { reason: "prefetch" })
+
+    expect(inboxReads).toBe(0)
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
+  test("seeds the inbox on the first real open after a prefetch", async () => {
+    const record = createRecord("session-prefetch-open", "msg_history", 1)
+    let inboxReads = 0
+    const { childStores, loader } = createLoader(
+      async () => response([record]),
+      async () => {
+        inboxReads += 1
+        return [
+          {
+            id: "inbox_prefetched",
+            sessionID: "session-prefetch-open",
+            time: { created: 2 },
+            type: "user",
+            payload: { text: "steered", files: [], agents: [] },
+            delivery: "steer",
+          },
+        ]
+      },
+    )
+    const target = { directory: "/inbox-prefetch-open", sessionID: "session-prefetch-open" }
+
+    await loader.ensure(target, { reason: "prefetch" })
+    expect(inboxReads).toBe(0)
+    await loader.ensure(target, { reason: "navigation" })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(inboxReads).toBe(1)
+    expect(childStores.getChild(target.directory)?.getState().message[target.sessionID]?.map((message) => message.id)).toEqual([
+      "msg_history",
+      "inbox_prefetched",
+    ])
     loader.dispose()
     childStores.disposeAll()
   })
