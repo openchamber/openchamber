@@ -13,12 +13,12 @@ process.env.OPENCHAMBER_DATA_DIR = temporaryQuotaDataDirectory;
 // Credentials come from the running OpenCode; serve a fixed list so the
 // providers treat themselves as configured and go straight to fetch.
 const key = (integrationID: string): CredentialEntry => ({ id: `cred_${integrationID}`, integrationID, label: 'default', active: true, value: { type: 'key', key: 'test-token' } });
-const oauth = (integrationID: string): CredentialEntry => ({
+const oauth = (integrationID: string, metadata?: { enterpriseUrl?: string }): CredentialEntry => ({
   id: `cred_${integrationID}`,
   integrationID,
   label: 'default',
   active: true,
-  value: { type: 'oauth', methodID: 'test', access: 'test-token', refresh: 'test-refresh', expires: 0 },
+  value: { type: 'oauth', methodID: 'test', access: 'test-token', refresh: 'test-refresh', expires: 0, ...(metadata ? { metadata } : undefined) },
 });
 // The Console sign-in is an `opencode` OAuth credential carrying the Console
 // server and selected organization, not an `opencode-go` service key.
@@ -36,6 +36,7 @@ const consoleOAuth = (overrides: { server?: string; orgID?: string; expires?: nu
     metadata: { server: 'https://opencode.ai/console', orgID: 'org_TESTORG123', ...overrides },
   },
 });
+let copilotEnterpriseUrl: string | undefined;
 const baseCredentialList = (): CredentialEntry[] => [
   oauth('openai'),
   key('cline-pass'),
@@ -48,7 +49,7 @@ const baseCredentialList = (): CredentialEntry[] => [
   key('deepinfra'),
   key('hyper'),
   key('nano-gpt'),
-  oauth('github-copilot'),
+  oauth('github-copilot', copilotEnterpriseUrl ? { enterpriseUrl: copilotEnterpriseUrl } : undefined),
   oauth('anthropic'),
 ];
 configureOpenCodeCredentials({ list: async () => baseCredentialList() });
@@ -102,6 +103,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
+  copilotEnterpriseUrl = undefined;
 });
 
 const stubFetchReturning = (resolver: (url: string, init?: RequestInit) => Promise<unknown>): void => {
@@ -852,6 +854,59 @@ describe('GitHub Copilot quota provider (VS Code parity)', () => {
     assert.deepEqual(Object.keys(result.usage!.windows), ['premium_interactions']);
     assert.ok(Math.abs(result.usage!.windows.premium_interactions!.usedPercent! - 34.87) < 1e-9);
     assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '20,922 / 60,000 used');
+  });
+
+  test('uses the enterprise Copilot API from the active OpenCode login', async () => {
+    copilotEnterpriseUrl = 'https://ghe.example.com/';
+    let requestedUrl = '';
+    stubFetchReturning(async (url) => {
+      requestedUrl = url;
+      return mockResponse({ quota_snapshots: { premium_interactions: { entitlement: 20_000, remaining: 12_000 } } });
+    });
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, true);
+    assert.equal(requestedUrl, 'https://api.ghe.example.com/copilot_internal/user');
+    assert.equal(result.usage!.windows.premium_interactions!.valueLabel, '8,000 / 20,000 used');
+  });
+
+  for (const [label, enterpriseUrl] of [
+    ['credentials in the authority', 'https://user@ghe.example.com/'],
+    ['an explicit port', 'https://ghe.example.com:8443/'],
+    ['a query string', 'https://ghe.example.com/?next=evil.example.com'],
+    ['a non-HTTP scheme', 'file://ghe.example.com/'],
+    ['a host that is not a DNS name', 'ghe_example.com'],
+  ] as const) {
+    test(`refuses ${label} instead of requesting a host derived from it`, async () => {
+      copilotEnterpriseUrl = enterpriseUrl;
+      let requested = false;
+      stubFetchReturning(async () => {
+        requested = true;
+        return mockResponse({});
+      });
+
+      const result = await fetchQuotaForProvider('github-copilot');
+
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'Invalid GitHub Copilot Enterprise URL');
+      assert.equal(requested, false);
+    });
+  }
+
+  test('does not send the credential when enterprise URL metadata is malformed', async () => {
+    copilotEnterpriseUrl = 'https://ghe.example.com/copilot';
+    let requested = false;
+    stubFetchReturning(async () => {
+      requested = true;
+      return mockResponse({});
+    });
+
+    const result = await fetchQuotaForProvider('github-copilot');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Invalid GitHub Copilot Enterprise URL');
+    assert.equal(requested, false);
   });
 
   test('add-on path mirrors the primary window shaping', async () => {

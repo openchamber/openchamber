@@ -82,6 +82,28 @@ export const providerId = 'github-copilot';
 export const providerName = 'GitHub Copilot';
 const aliases = ['github-copilot', 'copilot'];
 
+const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
+
+// A Copilot login on GitHub Enterprise Server carries `enterpriseUrl`, and that
+// server hosts its own quota endpoint. Only a bare origin with a plausible DNS
+// hostname is accepted, so a value that is not a usable host is refused here
+// rather than turned into a request that carries the credential.
+const COPILOT_ENTERPRISE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+
+const copilotUserUrl = (enterpriseUrl) => {
+  const host = `${enterpriseUrl ?? ''}`.trim();
+  if (!host) return 'https://api.github.com/copilot_internal/user';
+
+  const url = new URL(host.includes('://') ? host : `https://${host}`);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+  if (url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+  }
+  if (!COPILOT_ENTERPRISE_HOST.test(url.hostname)) throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+
+  return `https://api.${url.hostname}/copilot_internal/user`;
+};
+
 export const isConfigured = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   return Boolean(entry?.access || entry?.token);
@@ -103,7 +125,7 @@ export const fetchQuota = async () => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,
@@ -161,7 +183,7 @@ export const fetchQuotaAddon = async () => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(copilotUserUrl(entry?.enterpriseUrl), {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,

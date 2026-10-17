@@ -1798,10 +1798,36 @@ const buildCopilotWindows = (payload: Record<string, unknown>) => {
   return windows;
 };
 
+const INVALID_COPILOT_ENTERPRISE_URL = 'Invalid GitHub Copilot Enterprise URL';
+
+// A Copilot login on GitHub Enterprise Server carries `enterpriseUrl`, and that
+// server hosts its own quota endpoint. Only a bare origin with a plausible DNS
+// hostname is accepted, so a value that is not a usable host is refused here
+// rather than turned into a request that carries the credential.
+const COPILOT_ENTERPRISE_HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+
+const copilotUserUrl = (enterpriseUrl: string | undefined): string => {
+  const host = `${enterpriseUrl ?? ''}`.trim();
+  if (!host) return 'https://api.github.com/copilot_internal/user';
+
+  const url = new URL(host.includes('://') ? host : `https://${host}`);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+  if (url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+  }
+  if (!COPILOT_ENTERPRISE_HOST.test(url.hostname)) throw new Error(INVALID_COPILOT_ENTERPRISE_URL);
+
+  return `https://api.${url.hostname}/copilot_internal/user`;
+};
+
 const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
+  // SAFETY: OpenCode stores `enterpriseUrl` on a Copilot credential as a string when the
+  // login targets GitHub Enterprise Server. A value that is not a usable host is refused by
+  // `copilotUserUrl` before any request is made, so it cannot redirect the credential.
+  const enterpriseUrl = entry?.enterpriseUrl as string | undefined;
 
   if (!accessToken) {
     return buildResult({
@@ -1814,7 +1840,7 @@ const fetchCopilotQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(copilotUserUrl(enterpriseUrl), {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,
@@ -1857,6 +1883,10 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   const auth = await readOpenCodeCredentials();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['github-copilot', 'copilot'])) as Record<string, unknown> | null;
   const accessToken = (entry?.access as string | undefined) ?? (entry?.token as string | undefined);
+  // SAFETY: OpenCode stores `enterpriseUrl` on a Copilot credential as a string when the
+  // login targets GitHub Enterprise Server. A value that is not a usable host is refused by
+  // `copilotUserUrl` before any request is made, so it cannot redirect the credential.
+  const enterpriseUrl = entry?.enterpriseUrl as string | undefined;
 
   if (!accessToken) {
     return buildResult({
@@ -1869,7 +1899,7 @@ const fetchCopilotAddonQuota = async (): Promise<ProviderResult> => {
   }
 
   try {
-    const response = await fetch('https://api.github.com/copilot_internal/user', {
+    const response = await fetch(copilotUserUrl(enterpriseUrl), {
       method: 'GET',
       headers: {
         Authorization: `token ${accessToken}`,

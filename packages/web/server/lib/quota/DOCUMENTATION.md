@@ -259,6 +259,14 @@ completion quota are intentionally omitted. Keep
 `packages/web/server/lib/quota/providers/copilot.js` and
 `packages/vscode/src/quotaProviders.ts` in sync.
 
+For github.com, the quota request uses `https://api.github.com/copilot_internal/user`.
+For GitHub Enterprise, it uses `https://api.<enterprise-host>/copilot_internal/user`,
+with the host taken from the `enterpriseUrl` on the active OpenCode Copilot login, so
+the request and the login token only ever reach that server. The accepted value is a
+bare origin whose hostname is a DNS name: credentials, a port, a path, a query, a
+fragment, a non-HTTP scheme, or a hostname that is not a DNS name fail before the
+request is made, and the token is never sent.
+
 The `/copilot_internal/user` endpoint is undocumented; its quota semantics mirror
 what `microsoft/vscode-copilot-chat` consumes (`CopilotUserQuotaInfo`). Each
 snapshot carries `entitlement`, `remaining`, `unlimited`, and
