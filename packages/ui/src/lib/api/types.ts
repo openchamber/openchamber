@@ -230,6 +230,11 @@ export interface GitStatus {
   files: GitStatusFile[];
   isClean: boolean;
   /**
+   * True when HEAD does not resolve (a fresh `git init` with no commits). The
+   * directory is still a repository. Absent on runtimes that do not report it.
+   */
+  unborn?: boolean;
+  /**
    * Per-file line stats split by Git scope. A file with edits in both scopes
    * appears in both maps; the values are never summed into each other.
    */

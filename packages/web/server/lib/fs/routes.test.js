@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mintOutsideFileGrant, registerFsRoutes } from './routes.js';
+import { GIT_DIRS_SKIP_LIST } from './git-directories.js';
 import { createProjectDirectoryRuntime } from '../opencode/project-directory-runtime.js';
 
 const createRouteRegistry = () => {
@@ -1688,7 +1689,7 @@ describe('fs git-dirs', () => {
   });
 
   // tree maps directory path -> [[name, type], ...]
-  const registerGitDirs = (tree, { stat, readdir: readdirOverride, realpath } = {}) => {
+  const registerGitDirs = (tree, { stat, readdir: readdirOverride, realpath, boundary } = {}) => {
     const { app, getRoute } = createRouteRegistry();
     const readdir = readdirOverride ?? vi.fn(async (dirPath) => (tree[dirPath] ?? []).map(([name, type]) => createDirent(name, type)));
     registerFsRoutes(app, {
@@ -1706,6 +1707,12 @@ describe('fs git-dirs', () => {
       buildAugmentedPath: () => '/usr/bin',
       resolveGitBinaryForSpawn: () => 'git',
       openchamberUserConfigRoot: '/home/user/.config',
+      // A `.git` entry in the tree stands for a working repository unless a
+      // test overrides the boundary, the way the Git service classifies the
+      // scanned root before the walk.
+      inspectGitRepositoryBoundary: boundary ?? (async (rootPath) => (
+        (tree[rootPath] ?? []).some(([name]) => name === '.git') ? 'established' : 'none'
+      )),
     });
     return { handler: getRoute('GET', '/api/fs/git-dirs'), readdir };
   };
@@ -1716,7 +1723,7 @@ describe('fs git-dirs', () => {
     return res;
   };
 
-  it('returns an empty list when the root itself is a repository', async () => {
+  it('returns an empty complete list when the root itself is a repository', async () => {
     const { handler, readdir } = registerGitDirs({
       '/workspace': [['.git', 'dir'], ['proj-a', 'dir']],
       '/workspace/proj-a': [['.git', 'dir']],
@@ -1725,8 +1732,44 @@ describe('fs git-dirs', () => {
     const res = await callGitDirs(handler, { path: '/workspace' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ path: '/workspace', repositories: [] });
+    expect(res.body).toEqual({ path: '/workspace', repositories: [], complete: true });
     expect(readdir).toHaveBeenCalledTimes(1);
+  });
+
+  it('descends past an unborn repository at the root', async () => {
+    const { handler } = registerGitDirs({
+      '/workspace': [['.git', 'dir'], ['proj-a', 'dir']],
+      '/workspace/proj-a': [['.git', 'dir']],
+    }, {
+      boundary: async () => 'unborn',
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [{ path: '/workspace/proj-a', name: 'proj-a' }],
+      complete: true,
+    });
+  });
+
+  it('descends past a .git entry that is not a valid repository', async () => {
+    const { handler } = registerGitDirs({
+      '/workspace': [['.git', 'dir'], ['proj-a', 'dir']],
+      '/workspace/proj-a': [['.git', 'dir']],
+    }, {
+      boundary: async () => 'none',
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [{ path: '/workspace/proj-a', name: 'proj-a' }],
+      complete: true,
+    });
   });
 
   it('finds nested repositories with a .git directory', async () => {
@@ -1740,10 +1783,14 @@ describe('fs git-dirs', () => {
     const res = await callGitDirs(handler, { path: '/workspace' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([
-      { path: '/workspace/proj-a', name: 'proj-a' },
-      { path: '/workspace/proj-b', name: 'proj-b' },
-    ]);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [
+        { path: '/workspace/proj-a', name: 'proj-a' },
+        { path: '/workspace/proj-b', name: 'proj-b' },
+      ],
+      complete: true,
+    });
   });
 
   it('finds direct child repositories before an early subtree exhausts the visit cap', async () => {
@@ -1763,6 +1810,9 @@ describe('fs git-dirs', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.repositories).toEqual([{ path: '/workspace/z-service', name: 'z-service' }]);
+    // The visit cap left queued directories unchecked, so the answer is not
+    // a complete scan.
+    expect(res.body.complete).toBe(false);
     expect(readdir).toHaveBeenCalledTimes(100);
   });
 
@@ -1782,6 +1832,7 @@ describe('fs git-dirs', () => {
       '/workspace/z-service',
       '/workspace/a-group/nested',
     ]);
+    expect(res.body.complete).toBe(true);
   });
 
   it('treats a .git file (linked worktree) as a repository boundary', async () => {
@@ -1793,7 +1844,27 @@ describe('fs git-dirs', () => {
     const res = await callGitDirs(handler, { path: '/workspace' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/worktree', name: 'worktree' }]);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [{ path: '/workspace/worktree', name: 'worktree' }],
+      complete: true,
+    });
+  });
+
+  it('treats a .git symlink as a repository boundary', async () => {
+    const { handler } = registerGitDirs({
+      '/workspace': [['linked', 'dir']],
+      '/workspace/linked': [['.git', 'symlink']],
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [{ path: '/workspace/linked', name: 'linked' }],
+      complete: true,
+    });
   });
 
   it('stops descending at repository boundaries', async () => {
@@ -1810,8 +1881,8 @@ describe('fs git-dirs', () => {
     expect(readdir).not.toHaveBeenCalledWith('/workspace/outer/inner', { withFileTypes: true });
   });
 
-  it('does not descend past the depth cap', async () => {
-    const { handler } = registerGitDirs({
+  it('reports a repository boundary at the depth cap as a complete scan', async () => {
+    const { handler, readdir } = registerGitDirs({
       '/workspace': [['a', 'dir']],
       '/workspace/a': [['b', 'dir']],
       '/workspace/a/b': [['c', 'dir']],
@@ -1823,22 +1894,74 @@ describe('fs git-dirs', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.repositories).toEqual([{ path: '/workspace/a/b/c', name: 'c' }]);
+    // Descent into a repository is out of scope by design, so its children are
+    // not an unchecked part of the scan.
+    expect(res.body.complete).toBe(true);
+    expect(readdir).not.toHaveBeenCalledWith('/workspace/a/b/c/d', { withFileTypes: true });
   });
 
-  it('skips junk directories', async () => {
-    const { handler, readdir } = registerGitDirs({
-      '/workspace': [['node_modules', 'dir'], ['dist', 'dir'], ['real', 'dir']],
-      '/workspace/node_modules': [['dep', 'dir']],
-      '/workspace/node_modules/dep': [['.git', 'dir']],
-      '/workspace/dist': [['.git', 'dir']],
-      '/workspace/real': [['.git', 'dir']],
+  it('does not treat a boundary child that cannot be checked as an incomplete scan', async () => {
+    const deniedError = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const { handler } = registerGitDirs({
+      '/workspace': [['a', 'dir']],
+      '/workspace/a': [['b', 'dir']],
+      '/workspace/a/b': [['c', 'dir']],
+      '/workspace/a/b/c': [['.git', 'dir'], ['link', 'symlink']],
+    }, {
+      stat: vi.fn(async (targetPath) => {
+        if (targetPath === '/workspace/a/b/c/link') {
+          throw deniedError;
+        }
+        return { isDirectory: () => true };
+      }),
     });
 
     const res = await callGitDirs(handler, { path: '/workspace' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.repositories).toEqual([{ path: '/workspace/real', name: 'real' }]);
-    expect(readdir).not.toHaveBeenCalledWith('/workspace/node_modules', { withFileTypes: true });
+    expect(res.body.repositories).toEqual([{ path: '/workspace/a/b/c', name: 'c' }]);
+    expect(res.body.complete).toBe(true);
+  });
+
+  it('does not descend past the depth cap and says the scan is incomplete', async () => {
+    const { handler, readdir } = registerGitDirs({
+      '/workspace': [['a', 'dir']],
+      '/workspace/a': [['b', 'dir']],
+      '/workspace/a/b': [['c', 'dir']],
+      '/workspace/a/b/c': [['d', 'dir']],
+      '/workspace/a/b/c/d': [['.git', 'dir']],
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([]);
+    expect(res.body.complete).toBe(false);
+    expect(readdir).not.toHaveBeenCalledWith('/workspace/a/b/c/d', { withFileTypes: true });
+  });
+
+  it('skips every junk directory without making the scan incomplete', async () => {
+    const skipped = [...GIT_DIRS_SKIP_LIST];
+    const tree = {
+      '/workspace': [...skipped.map((name) => [name, 'dir']), ['real', 'dir']],
+      '/workspace/real': [['.git', 'dir']],
+    };
+    for (const name of skipped) {
+      tree[`/workspace/${name}`] = [['.git', 'dir']];
+    }
+    const { handler, readdir } = registerGitDirs(tree);
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      path: '/workspace',
+      repositories: [{ path: '/workspace/real', name: 'real' }],
+      complete: true,
+    });
+    for (const name of skipped) {
+      expect(readdir).not.toHaveBeenCalledWith(`/workspace/${name}`, { withFileTypes: true });
+    }
   });
 
   it('follows symlinked directories and reports repositories under the link path', async () => {
@@ -1859,6 +1982,7 @@ describe('fs git-dirs', () => {
       { path: '/workspace/api', name: 'api' },
       { path: '/workspace/web', name: 'web' },
     ]);
+    expect(res.body.complete).toBe(true);
   });
 
   it('walks each real directory once, so a link loop or a second link to a repository does not repeat it', async () => {
@@ -1940,7 +2064,7 @@ describe('fs git-dirs', () => {
     });
   }
 
-  it('skips unreadable subtrees without failing the scan', async () => {
+  it('skips unreadable subtrees and reports the scan as incomplete', async () => {
     const tree = {
       '/workspace': [['blocked', 'dir'], ['open', 'dir']],
       '/workspace/open': [['.git', 'dir']],
@@ -1959,6 +2083,70 @@ describe('fs git-dirs', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.repositories).toEqual([{ path: '/workspace/open', name: 'open' }]);
+    expect(res.body.complete).toBe(false);
+  });
+
+  it('reports the scan as incomplete when a directory cannot be resolved', async () => {
+    const missingError = Object.assign(new Error('gone'), { code: 'ENOENT' });
+    const { handler } = registerGitDirs({
+      '/workspace': [['blocked', 'dir'], ['open', 'dir']],
+      '/workspace/open': [['.git', 'dir']],
+    }, {
+      realpath: async (targetPath) => {
+        if (targetPath === '/workspace/blocked') {
+          throw missingError;
+        }
+        return targetPath;
+      },
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([{ path: '/workspace/open', name: 'open' }]);
+    expect(res.body.complete).toBe(false);
+  });
+
+  it('reports the scan as incomplete when a symlink target cannot be checked', async () => {
+    const deniedError = Object.assign(new Error('denied'), { code: 'EACCES' });
+    const { handler } = registerGitDirs({
+      '/workspace': [['link', 'symlink'], ['open', 'dir']],
+      '/workspace/open': [['.git', 'dir']],
+    }, {
+      stat: vi.fn(async (targetPath) => {
+        if (targetPath === '/workspace/link') {
+          throw deniedError;
+        }
+        return { isDirectory: () => true };
+      }),
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([{ path: '/workspace/open', name: 'open' }]);
+    expect(res.body.complete).toBe(false);
+  });
+
+  it('treats a dangling symlink as nothing to look at, not as an incomplete scan', async () => {
+    const missingError = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const { handler } = registerGitDirs({
+      '/workspace': [['dangling', 'symlink'], ['open', 'dir']],
+      '/workspace/open': [['.git', 'dir']],
+    }, {
+      stat: vi.fn(async (targetPath) => {
+        if (targetPath === '/workspace/dangling') {
+          throw missingError;
+        }
+        return { isDirectory: () => true };
+      }),
+    });
+
+    const res = await callGitDirs(handler, { path: '/workspace' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.repositories).toEqual([{ path: '/workspace/open', name: 'open' }]);
+    expect(res.body.complete).toBe(true);
   });
 });
 
@@ -2051,6 +2239,7 @@ describe('fs stat directory error handling', () => {
       await mkdir(path.join(directory, 'shared'));
       await copyFile(new URL('./routes.js', import.meta.url), path.join(directory, 'fs/routes.mjs'));
       await copyFile(new URL('./byte-range.js', import.meta.url), path.join(directory, 'fs/byte-range.js'));
+      await copyFile(new URL('./git-directories.js', import.meta.url), path.join(directory, 'fs/git-directories.js'));
       await copyFile(new URL('./workspace-file-names.js', import.meta.url), path.join(directory, 'fs/workspace-file-names.js'));
       await copyFile(new URL('./content-search.js', import.meta.url), path.join(directory, 'fs/content-search.js'));
       await copyFile(new URL('../path-realpath-cache.js', import.meta.url), path.join(directory, 'path-realpath-cache.js'));

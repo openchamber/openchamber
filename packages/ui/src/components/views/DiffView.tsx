@@ -1509,7 +1509,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const runtimeKey = useGitStore((state) => state.runtimeKey);
     // Diffs belong to the repository being diffed: when the root is not
     // itself a repository, operate on the resolved nested repository instead.
-    const { rootIsGitRepo, gitDirectory: nestedGitDirectory, nestedRepos: nestedRepoOptions } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
+    const { gitDirectory: nestedGitDirectory, repositoryOptions } = useNestedGitDirectory(rootDirectory ?? null, { enabled: visible, recheckOnOpen: true });
     const effectiveDirectory = nestedGitDirectory ?? rootDirectory;
     // The binding follows the repository actually being diffed.
     const binding = useRepositoryBinding(effectiveDirectory, sourceControl);
@@ -2786,9 +2786,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
         <div className="flex h-full flex-col overflow-hidden bg-background">
             <ContextPanelHeaderToolbar>
             <div ref={toolbarRef} className={cn('flex min-w-0 items-center gap-2', inPanelHeader ? 'flex-1 py-1 pe-1' : 'px-3 py-2 bg-background')}>
-                {rootIsGitRepo === false && Array.isArray(nestedRepoOptions) && nestedRepoOptions.length > 0 ? (
+                {repositoryOptions ? (
                     <NestedRepoPicker
-                        repositories={nestedRepoOptions}
+                        repositories={repositoryOptions}
                         selectedRepository={nestedGitDirectory ?? null}
                         onSelectRepository={(repository) => {
                             if (rootDirectory) selectNestedRepo(rootDirectory, repository);

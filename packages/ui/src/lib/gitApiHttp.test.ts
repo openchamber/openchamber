@@ -406,10 +406,30 @@ test('nested repository discovery scopes the workspace to the requested root', a
     if (url.searchParams.get('directory') !== root) {
       return Response.json({ error: 'Path is outside of active workspace' }, { status: 400 });
     }
-    return Response.json({ repositories: repositories.map((path) => ({ path })) });
+    return Response.json({ repositories: repositories.map((path) => ({ path })), complete: true });
   }, previousFetch);
   try {
-    expect(await listGitDirectories(root)).toEqual(repositories);
+    expect(await listGitDirectories(root)).toEqual({ repositories, complete: true });
+  } finally {
+    restoreMocks();
+  }
+});
+
+test('an unverifiable nested repository scan is never complete', async () => {
+  installWindowMock();
+  const root = '/projects/work';
+  const replies = [
+    { repositories: [{ path: `${root}/one` }], complete: true },
+    { repositories: [{ path: `${root}/two` }] },
+    { repositories: [], complete: false },
+  ];
+  let index = 0;
+  globalThis.fetch = Object.assign(async () => Response.json(replies[index++]), previousFetch);
+  try {
+    expect(await listGitDirectories(root)).toEqual({ repositories: [`${root}/one`], complete: true });
+    // A server that does not report completeness may have stopped early.
+    expect(await listGitDirectories(root)).toEqual({ repositories: [`${root}/two`], complete: false });
+    expect(await listGitDirectories(root)).toEqual({ repositories: [], complete: false });
   } finally {
     restoreMocks();
   }

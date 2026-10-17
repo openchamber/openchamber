@@ -10,7 +10,7 @@ import {
 import { useI18n } from '@/lib/i18n';
 
 type NestedRepoPickerProps = {
-  /** Discovered repository paths under the project root. */
+  /** Repository paths to choose from, the root itself included when it is one. */
   repositories: string[];
   /** Currently selected repository path (the operating directory). */
   selectedRepository: string | null;
@@ -20,8 +20,11 @@ type NestedRepoPickerProps = {
 };
 
 /**
- * Repository switcher shown on git surfaces when a project root is not itself
- * a git repository but nested repositories were discovered under it.
+ * Repository switcher shown on git surfaces when more than one repository is
+ * reachable from the project root: nested repositories under a
+ * non-repository root, or a root repository with no commits yet alongside the
+ * nested repositories below it. The root option gets a readable label; nested
+ * entries keep their relative paths.
  */
 export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
   repositories,
@@ -31,7 +34,10 @@ export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
 }) => {
   const { t } = useI18n();
 
-  const relativePath = (repository: string): string => {
+  const displayLabel = (repository: string): string => {
+    if (repositoryRoot && repository === repositoryRoot) {
+      return t('gitView.empty.repositoryRootLabel');
+    }
     const rootPrefix = `${repositoryRoot ?? ''}/`;
     return repository.startsWith(rootPrefix) ? repository.slice(rootPrefix.length) : repository;
   };
@@ -51,13 +57,13 @@ export const NestedRepoPicker: React.FC<NestedRepoPickerProps> = ({
       >
         <Icon name="folder-3" className="size-4 text-muted-foreground" />
         <span className="min-w-0 truncate font-medium text-start">
-          {selectedRepository ? relativePath(selectedRepository) : ''}
+          {selectedRepository ? displayLabel(selectedRepository) : ''}
         </span>
       </SelectTrigger>
       <SelectContent align="start">
         {repositories.map((repository) => (
           <SelectItem key={repository} value={repository}>
-            <span className="truncate">{relativePath(repository)}</span>
+            <span className="truncate">{displayLabel(repository)}</span>
           </SelectItem>
         ))}
       </SelectContent>

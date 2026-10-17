@@ -1025,7 +1025,18 @@ export class GitDirectoriesUnsupportedError extends Error {
   }
 }
 
-export async function listGitDirectories(root: string): Promise<string[]> {
+/**
+ * A nested git repository scan: the repositories found, and whether the walk
+ * could check every directory below the root. `complete: false` means the
+ * answer is partial (depth or visit caps, unreadable directories), so an empty
+ * `repositories` list is not proof that none exist.
+ */
+export type GitDirectoriesResult = {
+  repositories: string[];
+  complete: boolean;
+};
+
+export async function listGitDirectories(root: string): Promise<GitDirectoriesResult> {
   const response = await runtimeFetch('/api/fs/git-dirs', { query: { path: root, directory: root } });
   if (response.status === 501) {
     throw new GitDirectoriesUnsupportedError();
@@ -1035,16 +1046,21 @@ export async function listGitDirectories(root: string): Promise<string[]> {
   }
   // SAFETY: the route is ours (`GET /api/fs/git-dirs`) and answers this exact
   // shape on every 2xx; a malformed body fails the array check below.
-  const data = await response.json() as { repositories?: Array<{ path?: string | null }> };
+  const data = await response.json() as { repositories?: Array<{ path?: string | null }>; complete?: unknown };
   if (!Array.isArray(data?.repositories)) {
     throw new Error('Unexpected git directories response');
   }
   // The server joins paths with the platform separator; every other git
   // directory key in the UI is normalized, so match that here or a Windows
   // repository never equals its own selection or root prefix.
-  return data.repositories
-    .map((entry) => normalizePath(entry?.path ?? null))
-    .filter((path): path is string => path !== null);
+  return {
+    repositories: data.repositories
+      .map((entry) => normalizePath(entry?.path ?? null))
+      .filter((path): path is string => path !== null),
+    // A server that does not report completeness may have stopped early
+    // without saying so; an unverifiable scan is never treated as complete.
+    complete: data.complete === true,
+  };
 }
 
 export async function getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }): Promise<GitStatus> {

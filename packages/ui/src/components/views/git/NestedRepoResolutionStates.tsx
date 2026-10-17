@@ -33,7 +33,8 @@ type NestedRepoResolutionStatesProps = {
  *
  * A runtime without the discovery route (VS Code) reports "unsupported": the
  * honest state there is the plain not-a-repository empty state, without a
- * retry that can never succeed.
+ * retry that can never succeed. A scan that could not check everything says
+ * so, so an empty result is not read as proof that no repository exists.
  */
 export const NestedRepoResolutionStates: React.FC<NestedRepoResolutionStatesProps> = ({
   root,
@@ -73,7 +74,7 @@ export const NestedRepoResolutionStates: React.FC<NestedRepoResolutionStatesProp
     );
   }
 
-  if (nestedRepos === 'unsupported' || nestedRepos.length === 0) {
+  if (nestedRepos === 'unsupported' || nestedRepos.repositories.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-4 text-center">
         <Icon name="git-branch" className="mb-3 size-6 text-muted-foreground" />
@@ -83,6 +84,11 @@ export const NestedRepoResolutionStates: React.FC<NestedRepoResolutionStatesProp
         <p className="typography-meta mt-1 text-muted-foreground">
           {t('gitView.empty.notGitRepositoryDescription')}
         </p>
+        {nestedRepos !== 'unsupported' && !nestedRepos.complete ? (
+          <p className="typography-meta mt-1 text-muted-foreground">
+            {t('gitView.empty.incompleteRepositoryScan')}
+          </p>
+        ) : null}
         {root ? <InitializeGitButton directory={root} /> : null}
         {emptyStateFooter}
       </div>

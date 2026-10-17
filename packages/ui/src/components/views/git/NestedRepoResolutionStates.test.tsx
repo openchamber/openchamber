@@ -31,7 +31,7 @@ describe('NestedRepoResolutionStates', () => {
       ...baseProps,
       rootIsGitRepo: false,
       resolvedIsGitRepo: true,
-      nestedRepos: ['/root/one'],
+      nestedRepos: { repositories: ['/root/one'], complete: true },
     });
     expect(markup).toBe('');
   });
@@ -54,8 +54,25 @@ describe('NestedRepoResolutionStates', () => {
   });
 
   test('treats an empty discovery like the not-a-repository state', () => {
-    const markup = render({ ...baseProps, rootIsGitRepo: false, resolvedIsGitRepo: null, nestedRepos: [] });
+    const markup = render({
+      ...baseProps,
+      rootIsGitRepo: false,
+      resolvedIsGitRepo: null,
+      nestedRepos: { repositories: [], complete: true },
+    });
     expect(markup).toContain('This directory is not a Git repository');
+    expect(markup).not.toContain('Some folders could not be scanned');
+  });
+
+  test('says the scan was incomplete when an empty discovery could not check everything', () => {
+    const markup = render({
+      ...baseProps,
+      rootIsGitRepo: false,
+      resolvedIsGitRepo: null,
+      nestedRepos: { repositories: [], complete: false },
+    });
+    expect(markup).toContain('This directory is not a Git repository');
+    expect(markup).toContain('Some folders could not be scanned for Git repositories.');
   });
 
   test('holds a checking state while repositories are found but unresolved', () => {
@@ -63,7 +80,7 @@ describe('NestedRepoResolutionStates', () => {
       ...baseProps,
       rootIsGitRepo: false,
       resolvedIsGitRepo: null,
-      nestedRepos: ['/root/one', '/root/two'],
+      nestedRepos: { repositories: ['/root/one', '/root/two'], complete: true },
     });
     expect(markup).toContain('Checking repository...');
   });

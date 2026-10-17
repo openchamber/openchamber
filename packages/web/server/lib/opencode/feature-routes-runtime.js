@@ -395,7 +395,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isExactSemver,
     });
 
-    const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');
+    const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths, inspectRepositoryBoundary } = await import('../git/index.js');
 
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
@@ -726,6 +726,10 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       cloneRepository: networkOperations.cloneRepository,
       managedChatsRoot,
       environmentRuntime,
+      // Nested repository discovery needs to know whether the scanned root is
+      // a working repository; only Git can answer that, and the FS module
+      // never spawns Git itself.
+      inspectGitRepositoryBoundary: inspectRepositoryBoundary,
     });
     registerEnvironmentRoutes(app, { store: environmentStore, runtime: environmentRuntime, listProjects: listConfiguredProjects });
   };
