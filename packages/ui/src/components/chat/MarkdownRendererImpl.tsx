@@ -897,7 +897,7 @@ const cachedMermaidRender = (key: string, compute: () => MermaidRender): Mermaid
 const mermaidColorsFromTheme = (theme: Theme) => ({
   bg: theme.colors.surface.elevated,
   fg: theme.colors.surface.foreground,
-  line: theme.colors.interactive.border,
+  line: theme.colors.surface.mutedForeground,
   accent: theme.colors.primary.base,
   muted: theme.colors.surface.mutedForeground,
   surface: theme.colors.surface.muted,
