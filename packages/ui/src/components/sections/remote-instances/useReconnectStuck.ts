@@ -36,6 +36,9 @@ export const useReconnectStuck = (
       return;
     }
 
+    // We have a future deadline: reset the state to false and set a timer to true when it expires.
+    setReconnectAppearsStuck(false);
+
     const timer = window.setTimeout(() => setReconnectAppearsStuck(true), remaining);
     return () => {
       window.clearTimeout(timer);
