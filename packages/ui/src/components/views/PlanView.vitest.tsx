@@ -9,7 +9,8 @@ test('an open plan takes agent saves and file edits while clean and keeps unsave
   const originals = new Map<string, PropertyDescriptor | undefined>();
   for (const [name, value] of Object.entries({
     window: dom, document: dom.document, navigator: dom.navigator, location: dom.location, localStorage: dom.localStorage,
-    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
+    Element: dom.Element, HTMLElement: dom.HTMLElement, HTMLAnchorElement: dom.HTMLAnchorElement,
+    HTMLInputElement: dom.HTMLInputElement, Node: dom.Node,
     Document: dom.Document, Text: dom.Text, Range: dom.Range,
     customElements: dom.customElements, CSSStyleSheet: dom.CSSStyleSheet,
     Event: dom.Event, CustomEvent: dom.CustomEvent, KeyboardEvent: dom.KeyboardEvent, MouseEvent: dom.MouseEvent,
@@ -96,6 +97,13 @@ test('an open plan takes agent saves and file edits while clean and keeps unsave
     await wait(450);
     expect(writes).toEqual(['# Plan A\n\nAgent edit\nMine']);
     expect(stored).toBe('# Plan A\n\nAgent edit\nMine');
+
+    await agentWrites('# Plan A\n\n![HTTPS image](https://example.test/image.png)');
+    const previewButton = host.querySelector('button[aria-label="Switch to preview mode"]');
+    if (!(previewButton instanceof HTMLElement)) throw new Error('Preview button missing');
+    await act(async () => previewButton.click());
+    await wait(500);
+    expect(host.querySelector('img[alt="HTTPS image"]')?.getAttribute('src')).toBe('https://example.test/image.png');
   } finally {
     await act(async () => root.unmount());
     useProjectContextStore.getState().reset();

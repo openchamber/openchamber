@@ -83,6 +83,10 @@ limits must never truncate a writable draft or its dirty-comparison baseline.
 Large code previews render the current draft and hash its full content only
 while previewing, so same-length edits in the middle invalidate cached output.
 
+Markdown plan previews use the file preview's local-asset handling. Relative
+images resolve from the plan file's directory, including personal plans stored
+under the OpenChamber data directory and repository plans in a custom folder.
+
 ## JSON tree previews
 
 `FilesView` selects `JsonTreeView`'s JSONC format for `.jsonc` files. That format

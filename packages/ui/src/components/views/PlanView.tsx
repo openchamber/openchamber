@@ -46,6 +46,7 @@ import { useI18n } from '@/lib/i18n';
 import { ContextPanelHeaderToolbar } from '@/components/layout/contextPanelHeaderSlot';
 import { useInContextPanelHeader } from '@/components/layout/contextPanelHeaderSlotContext';
 import { cn } from '@/lib/utils';
+import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 
 type PlanViewProps = {
   /** False while the panel holding the view is closed: nothing to keep fresh. */
@@ -224,6 +225,24 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
   const editorViewRef = React.useRef<EditorView | null>(null);
   const editorWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const previewRef = React.useRef<HTMLDivElement | null>(null);
+  const [previewNode, setPreviewNode] = React.useState<HTMLDivElement | null>(null);
+  const setPreviewContainer = React.useCallback((node: HTMLDivElement | null) => {
+    previewRef.current = node;
+    setPreviewNode(node);
+  }, []);
+
+  const openLinkedFile = React.useCallback((absolutePath: string) => {
+    if (!savedPlanProjectRef?.path) return;
+    useUIStore.getState().openContextFile(savedPlanProjectRef.path, absolutePath);
+  }, [savedPlanProjectRef]);
+  useMarkdownLocalAssets({
+    container: previewNode,
+    filePath: loadedProjectPlanPath,
+    workspaceRoot: savedPlanProjectRef?.path ?? null,
+    onOpenFile: openLinkedFile,
+    enabled: mdViewMode === 'preview' && hasDocument,
+    colorScheme: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
+  });
 
   const MD_VIEWER_MODE_KEY = 'openchamber:plan:md-viewer-mode';
 
@@ -907,7 +926,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
             <div className="relative h-full">
               <div className="h-full">
                 {mdViewMode === 'preview' ? (
-                  <div className="h-full overflow-auto p-3" ref={previewRef}>
+                  <div className="h-full overflow-auto p-3" ref={setPreviewContainer}>
                     {/* Same comment-on-selection as a markdown file preview. */}
                     <FilePreviewCommentMenu
                       containerRef={previewRef}
@@ -924,7 +943,7 @@ export const PlanView: React.FC<PlanViewProps> = ({ visible = true, savedProject
                         </div>
                       }
                     >
-                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} />
+                      <SimpleMarkdownRenderer content={content} className="typography-markdown-body" frontmatter="properties" enableFileReferences={false} allowRawHtml />
                     </ErrorBoundary>
                   </div>
                 ) : (
