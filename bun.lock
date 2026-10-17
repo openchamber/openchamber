@@ -157,6 +157,13 @@
         "@openchamber/sdk": "workspace:*",
       },
     },
+    "packages/sdk/examples/disk-space-status": {
+      "name": "@openchamber/example-disk-space-status",
+      "version": "1.0.0",
+      "dependencies": {
+        "@openchamber/sdk": "workspace:*",
+      },
+    },
     "packages/sdk/examples/git-graph-status": {
       "name": "@openchamber/example-git-graph-status",
       "version": "1.0.0",
@@ -1051,6 +1058,8 @@
     "@openchamber/example-checklist-editor": ["@openchamber/example-checklist-editor@workspace:packages/sdk/examples/checklist-editor"],
 
     "@openchamber/example-config-editor": ["@openchamber/example-config-editor@workspace:packages/sdk/examples/config-editor"],
+
+    "@openchamber/example-disk-space-status": ["@openchamber/example-disk-space-status@workspace:packages/sdk/examples/disk-space-status"],
 
     "@openchamber/example-git-graph-status": ["@openchamber/example-git-graph-status@workspace:packages/sdk/examples/git-graph-status"],
 

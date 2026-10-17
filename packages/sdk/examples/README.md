@@ -1,6 +1,6 @@
 # Extension gallery
 
-Eight examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
+Nine examples to use, explore, and adapt. The five panel extensions also have full-screen pages. Their layouts respond to the iframe width, use the host's light/dark theme, and keep your input when the host updates its context.
 
 | Folder | In the app | Try this |
 | --- | --- | --- |
@@ -10,6 +10,7 @@ Eight examples to use, explore, and adapt. The five panel extensions also have f
 | `service-echo` | **Local Service Lab** | Send an echo request, inspect its response and round-trip time, and watch the service state. Try an invalid path to see the host refuse it. The optional system-information experiment requires `uname` on the server. |
 | `config-editor` | **Config Studio** | Browse and filter JSON keys, edit or format the raw file, then compare the on-disk content with your draft before saving. Reads only the declared `~/.config/opencode/opencode.json` path on the connected instance. |
 | `git-graph-status` | **Git Graph** | Open a chat in a git project and expand **Recent commits** in Work Status. It draws the project's history with the same lanes and curves as the Git view, branch, remote and tag badges, and a row for uncommitted changes. Switch between Auto (your branch and its upstream), All, and Manual (tick the branches you want). A supporting host places the range select and Refresh button in the section header; older hosts keep them in the body. Click a commit to see its details, copy its hash, open it on GitHub, or open its diff. It has no rail icon and no panel, only that section. Approve its local service at install; the service only reads git. See [its README](./git-graph-status/README.md). |
+| `disk-space-status` | **Disk Space** | Install and approve its read-only local service, then open a project to see used capacity and available space in Work Status. Refreshes from SDK session events are bounded to one per 30 seconds, with no idle polling. The body follows host themes and locales; the refresh button spins only while a read is pending. Hide or disable it with the existing controls. See [its README](./disk-space-status/README.md). |
 | `checklist-editor` | **Checklist** | Create a file named `todo.checklist.md` in a project and open it in Files: its `- [ ]` lines become a checklist you tick, edit, add to, and remove from, while every other line stays as written. Save with Cmd/Ctrl+S or let autosave do it, switch to the source view and back, or open it fullscreen. It has no rail icon and no panel, only the editor. OpenChamber keeps the file; the editor never reads or writes it. |
 | `tools-only` | **Tool Gallery** | Render review findings and project checks as tables inside chat. This extension has no panel. Its optional read-only MCP fixture makes the results reproducible; see [its README](./tools-only/README.md). |
 
@@ -55,6 +56,8 @@ bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/tasks-demo/panel/
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/tools-only/mcp.ts packages/sdk/examples/tools-only/mcp.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/git-graph-status/status/main.ts packages/sdk/examples/git-graph-status/status/main.js
 bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/git-graph-status/service/main.ts packages/sdk/examples/git-graph-status/service/main.js
+bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/disk-space-status/status/main.ts packages/sdk/examples/disk-space-status/status/main.js
+bun packages/sdk/scripts/bundle-guest.ts --node packages/sdk/examples/disk-space-status/service/main.ts packages/sdk/examples/disk-space-status/service/main.js
 bun packages/sdk/scripts/bundle-guest.ts packages/sdk/examples/checklist-editor/editor/main.ts packages/sdk/examples/checklist-editor/editor/main.js
 ```
 

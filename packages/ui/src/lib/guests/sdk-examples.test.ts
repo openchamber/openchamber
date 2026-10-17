@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, jest, spyOn, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { Window } from 'happy-dom';
@@ -19,6 +19,7 @@ const context: HostReadyContext = {
 };
 
 afterEach(async () => {
+  jest.useRealTimers();
   for (const window of windows.splice(0)) await window.happyDOM.close();
 });
 
@@ -56,13 +57,124 @@ const load = async (name: string, script = 'main', folder = 'panel') => {
   runInNewContext(await readFile(new URL(`${name}/${folder}/${script}.js`, examples), 'utf8'), {
     window, document: window.document, HTMLElement: window.HTMLElement, MessageEvent: window.MessageEvent, console,
     HTMLInputElement: window.HTMLInputElement, HTMLStyleElement: window.HTMLStyleElement, HTMLAnchorElement: window.HTMLAnchorElement,
-    TextEncoder, URL, crypto, performance, setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
+    Date, TextEncoder, URL, crypto, performance, setTimeout: window.setTimeout.bind(window), clearTimeout: window.clearTimeout.bind(window),
     ResizeObserver: window.ResizeObserver,
   });
   return { window, messages, send, ready, reply, request, button, update };
 };
 
 describe('checked-in SDK examples', () => {
+  test('disk-space status waits for a project, uses only serviceRequest and preserves readings while refreshing', async () => {
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status', directory: null });
+    expect(app.window.document.body.textContent).toContain('Open a project');
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(0);
+    app.ready({ ...context, surface: 'status' });
+    expect(app.request('service-request')).toMatchObject({ payload: { method: 'GET', path: '/disk-space', query: { directory: '/repo' } } });
+    app.reply(app.request('service-request'), { status: 200, body: JSON.stringify({ totalBytes: 128 * 1024 ** 3, availableBytes: 42 * 1024 ** 3 }) });
+    await tick();
+    expect(app.window.document.body.textContent).toContain('42 GB available · 128 GB total');
+    expect(app.window.document.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('67');
+    app.button('Refresh').click();
+    expect(app.window.document.querySelector('button')?.disabled).toBe(true);
+    expect(app.window.document.querySelector('.oc-sdk-spinner-ring')).not.toBeNull();
+    expect(app.window.document.body.textContent).toContain('42 GB available');
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":0}' });
+    await tick();
+    expect(app.window.document.body.textContent).toContain('0 B available');
+    expect(app.window.document.querySelector('.oc-sdk-spinner-ring')).toBeNull();
+  });
+
+  test('disk-space reports missing grants and malformed data without displaying a fake bar', async () => {
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status' });
+    const request = app.request('service-request');
+    if (!('id' in request)) throw new Error('Missing request ID');
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'result', id: request.id, ok: false, error: 'Not granted', code: 'NO_SERVICE' });
+    await tick();
+    expect(app.window.document.body.textContent).toContain('Allow the local service');
+    app.button('Refresh').click();
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":101}' });
+    await tick();
+    expect(app.window.document.body.textContent).toContain('Unavailable');
+    expect(app.window.document.querySelector('.oc-sdk-progress')?.hasAttribute('hidden')).toBe(true);
+    expect(app.window.document.querySelector('.oc-sdk-spinner-ring')).toBeNull();
+  });
+
+  test('disk-space ignores obsolete replies and serializes project changes', async () => {
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status' });
+    const old = app.request('service-request');
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'directory', payload: { directory: '/other' } });
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(1);
+    app.reply(old, { status: 200, body: '{"totalBytes":100,"availableBytes":90}' });
+    await tick();
+    expect(app.request('service-request')).toMatchObject({ payload: { query: { directory: '/other' } } });
+    expect(app.window.document.body.textContent).not.toContain('90 B');
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":20}' });
+    await tick();
+    expect(app.window.document.body.textContent).toContain('20 B available');
+  });
+
+  test('disk-space theme and locale snapshots retain controls and cause no capacity reads', async () => {
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status' });
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":20}' });
+    await tick();
+    const button = app.button('Refresh');
+    app.ready({ ...context, surface: 'status', locale: 'ar', theme: { ...context.theme, mode: 'dark', tokens: { ...context.theme.tokens, muted: '#654b91' } } });
+    expect(app.window.document.documentElement.dir).toBe('rtl');
+    expect(app.window.document.documentElement.style.getPropertyValue('--oc-muted')).toBe('#654b91');
+    expect(app.button('تحديث')).toBe(button);
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(1);
+    expect(app.window.document.body.textContent).toContain('متاح');
+  });
+
+  test('disk-space treats the initial idle session replay as a baseline, not activity', async () => {
+    jest.useFakeTimers();
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status', session: { id: 'session', title: 'Fixture', busy: false } });
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":20}' });
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(300_000);
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(1);
+  });
+
+  test('disk-space coalesces session events, performs no idle reads and cancels hidden activity', async () => {
+    jest.useFakeTimers();
+    const app = await load('disk-space-status', 'main', 'status');
+    app.ready({ ...context, surface: 'status' });
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":20}' });
+    await Promise.resolve();
+    await Promise.resolve();
+    for (let index = 0; index < 100; index += 1) {
+      app.send({ channel: 'openchamber.sdk', v: 1, type: 'session-lifecycle', payload: { sessionId: 'session', phase: index % 2 === 0 ? 'started' : 'completed' } });
+    }
+    jest.advanceTimersByTime(29_999);
+    await Promise.resolve();
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(1);
+    jest.advanceTimersByTime(1);
+    await Promise.resolve();
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(2);
+    app.reply(app.request('service-request'), { status: 200, body: '{"totalBytes":100,"availableBytes":20}' });
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(300_000);
+    await Promise.resolve();
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(2);
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'session-lifecycle', payload: { sessionId: 'session', phase: 'started' } });
+    Object.defineProperty(app.window.document, 'visibilityState', { value: 'hidden', configurable: true });
+    app.window.document.dispatchEvent(new app.window.Event('visibilitychange'));
+    jest.advanceTimersByTime(30_000);
+    await Promise.resolve();
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(2);
+    app.window.dispatchEvent(new app.window.Event('pagehide'));
+    app.send({ channel: 'openchamber.sdk', v: 1, type: 'session-lifecycle', payload: { sessionId: 'session', phase: 'completed' } });
+    jest.advanceTimersByTime(30_000);
+    expect(app.messages.filter((message) => message.type === 'service-request')).toHaveLength(2);
+  });
+
   test('the checklist file editor edits the file it was handed and keeps what it does not understand', async () => {
     const app = await load('checklist-editor', 'main', 'editor');
     const content = '# Launch\n- [ ] Write notes\n- [X] Ship\n';

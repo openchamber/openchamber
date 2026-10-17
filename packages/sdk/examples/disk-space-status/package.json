@@ -1,0 +1,22 @@
+{
+  "name": "@openchamber/example-disk-space-status",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": { "openchamber": ">=2.2.0" },
+    "contributes": {
+      "panel": { "id": "disk-space-status", "name": "Disk Space", "icon": "hard-drive-2" },
+      "statusSection": {
+        "entry": "status/index.html",
+        "title": "Disk space",
+        "height": 112,
+        "defaultExpanded": true,
+        "requiresProject": true
+      },
+      "service": { "entry": "service/main.js", "runtime": "host" }
+    }
+  },
+  "dependencies": { "@openchamber/sdk": "workspace:*" }
+}
